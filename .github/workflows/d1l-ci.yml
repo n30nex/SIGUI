@@ -43,6 +43,7 @@ jobs:
       - name: Build D1L firmware
         shell: bash
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . /opt/esp/idf/export.sh
           idf.py build
 

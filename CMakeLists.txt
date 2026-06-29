@@ -20,5 +20,8 @@ foreach(seeed_component IN ITEMS
     smtc_ral
 )
     idf_component_get_property(seeed_component_lib ${seeed_component} COMPONENT_LIB)
-    target_compile_options(${seeed_component_lib} PRIVATE "-Wno-error=format")
+    target_compile_options(${seeed_component_lib} PRIVATE
+        "-Wno-error=format"
+        "-Wno-error=maybe-uninitialized"
+    )
 endforeach()
