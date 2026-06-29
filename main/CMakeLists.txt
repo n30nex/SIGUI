@@ -32,6 +32,7 @@ idf_component_register(
         i2c_devices
         lora
         lvgl
+        mbedtls
         nvs_flash
 )
 

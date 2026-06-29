@@ -2,7 +2,7 @@
 
 MeshCore DeskOS D1L is a Seeed SenseCAP Indicator D1L firmware project for a touch-first MeshCore desk console. It targets the ESP32-S3 + RP2040 D1L with the 480x480 RGB touch display and SX1262 LoRa radio.
 
-Current status: Phase 1 bring-up scaffold plus Phase 2 foundation. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS settings scaffolding, MeshCore service status plumbing, strict serial smoke commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`.
+Current status: Phase 1 bring-up plus a validated Phase 2 Public RF slice. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS settings scaffolding, MeshCore Public group text TX/RX over the D1L SX1262, strict serial smoke commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`.
 
 The companion compatibility contract is documented in [docs/COMPANION_3BYTE_COMPATIBILITY.md](docs/COMPANION_3BYTE_COMPATIBILITY.md). Phase 1 includes the MeshCore 3-byte transport codec and status command; live binary companion bridging is scheduled after D1L board/radio bring-up.
 

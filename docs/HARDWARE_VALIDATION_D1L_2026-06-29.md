@@ -20,6 +20,15 @@ Do not use `COM11` or `COM29` for this D1L target.
 
 ## Passing Hardware Evidence
 
+- Post-change smoke after LCD direct-mode fix: `artifacts/smoke/d1l-smoke-public-rf-COM7-after-lcd-config.json`
+  - 15 commands passed
+  - `mesh status` reported `phase2_public_rf`, state `ready`, `radio_ready=true`
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, `ui_ready=true`
+- Controlled MeshCore Public RF test: `artifacts/smoke/d1l-public-test-rf-COM7.json`
+  - D1L sent exact Public text `test`
+  - Local Meshcorebot on `COM11` observed fresh counter movement: `rx_channel_total +4`, `relay_success_total +4`, `discord_send_success_total +4`
+  - D1L packet ring logged TX note `test`
+  - D1L packet ring decoded Public replies including `Krabs Node: Test OK CH0.`
 - Boot/idle log: `artifacts/logs/d1l-idle-github-28358816656-COM7-20260629T083219Z.log`
   - App version `f99defe`
   - Board initialized
@@ -43,6 +52,6 @@ Do not use `COM11` or `COM29` for this D1L target.
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
 - MeshCore C++ local identity generation/storage.
-- Applying saved radio settings to the live SX1262 runtime.
-- MeshCore advert TX/RX and public message TX/RX with a second known-good MeshCore node.
+- MeshCore advert TX/RX.
+- The validated Public message path is currently a serial-console RF slice, not the final touch UI workflow.
 - Flash backup was intentionally skipped per operator instruction.

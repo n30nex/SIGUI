@@ -543,9 +543,9 @@ Tasks:
 
 Acceptance:
 
-- D1L can hear at least one live MeshCore packet or controlled test packet.
+- D1L can hear at least one live MeshCore packet or controlled test packet. Status: validated on 2026-06-29 with Public replies from local bots.
 - D1L can transmit an advert on the Canada/USA preset.
-- D1L can send/receive a basic public message in controlled testing.
+- D1L can send/receive a basic public message in controlled testing. Status: serial-console Public `test` TX/RX validated on 2026-06-29; touch UI workflow still pending.
 
 ### Phase 3 — 480×480 dark UI shell
 

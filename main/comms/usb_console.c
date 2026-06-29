@@ -340,7 +340,7 @@ static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     ok_begin("mesh status");
-    printf(",\"phase\":\"phase2_foundation\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"note\":\"MeshCore C++ binding and RF RX/TX require Phase 2 hardware validation\"}\n",
+    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"note\":\"Public group text TX/RX enabled for local RF validation\"}\n",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
            status.path_hash_bytes, (unsigned long)status.rx_packets,
@@ -363,8 +363,11 @@ static void cmd_mesh_send_public(const char *line)
     const char *text = line + strlen("mesh send public ");
     esp_err_t ret = d1l_meshcore_service_send_public(text);
     if (ret != ESP_OK) {
-        err_result("mesh send public", ret == ESP_ERR_INVALID_ARG ? "EMPTY_MESSAGE" : "MESHCORE_RADIO_NOT_READY",
-                   "MeshCore radio binding is not enabled until Phase 2 RF validation");
+        err_result("mesh send public",
+                   ret == ESP_ERR_INVALID_ARG ? "EMPTY_MESSAGE" :
+                   ret == ESP_ERR_INVALID_STATE ? "MESHCORE_TX_BUSY_OR_RADIO_NOT_READY" :
+                   ret == ESP_ERR_NOT_SUPPORTED ? "UNSUPPORTED_RADIO_PROFILE" : "MESHCORE_SEND_FAILED",
+                   "verify radio profile is US/CAN 910.525 BW62.5 SF7 CR5 and try again");
         return;
     }
     ok_begin("mesh send public");
@@ -401,12 +404,12 @@ static void cmd_packets(void)
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_packet_log_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u}",
+        printf("%s{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u,\"note\":\"%s\"}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->uptime_ms,
                e->direction, e->kind, e->rssi_dbm, e->snr_tenths,
-               e->path_hash_bytes, e->path_hops, e->payload_len);
+               e->path_hash_bytes, e->path_hops, e->payload_len, e->note);
     }
-    printf("],\"note\":\"Phase 1 ring is ready; real packets require Phase 2 MeshCore radio integration\"}\n");
+    printf("],\"note\":\"Packet ring records MeshCore public RF TX/RX evidence\"}\n");
 }
 
 static void cmd_health(void)

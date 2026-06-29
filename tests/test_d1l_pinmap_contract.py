@@ -31,3 +31,12 @@ def test_phase1_lvgl_uses_basic_flush_path():
     assert "CONFIG_LCD_AVOID_TEAR=y" not in defaults
     assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" not in defaults
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
+
+
+def test_build_script_rewrites_stale_unsafe_lcd_config():
+    script = (ROOT / "scripts" / "build_d1l.ps1").read_text(encoding="utf-8")
+    assert "Set-D1lSafeSdkconfig" in script
+    assert "CONFIG_LCD_AVOID_TEAR=y" in script
+    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" in script
+    assert "# CONFIG_LCD_AVOID_TEAR is not set" in script
+    assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in script
