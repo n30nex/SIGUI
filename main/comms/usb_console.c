@@ -167,7 +167,7 @@ static void cmd_i2c(void)
     for (uint8_t i = 0; i < scan.i2c_count; ++i) {
         printf("%s\"0x%02X\"", i ? "," : "", scan.i2c_addresses[i]);
     }
-    printf("],\"expected\":[\"0x20\",\"0x38\"]}\n");
+    printf("],\"expected\":[\"0x20\",\"0x48\"]}\n");
 }
 
 static void cmd_display_test(void)
