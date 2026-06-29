@@ -28,6 +28,7 @@ SMOKE_COMMANDS = [
     "companion status",
     "rp2040 status",
     "packets",
+    "messages public",
     "health",
 ]
 

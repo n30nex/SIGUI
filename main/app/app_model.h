@@ -6,9 +6,11 @@
 
 #include "esp_err.h"
 
+#include "mesh/message_store.h"
 #include "mesh/packet_log.h"
 
 #define D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U
+#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U
 
 typedef struct {
     bool board_ready;
@@ -33,9 +35,13 @@ typedef struct {
     uint32_t rx_adverts;
     uint32_t tx_packets;
     uint32_t rejected_commands;
+    uint32_t message_total_written;
+    size_t message_count;
     uint32_t packet_total_written;
     size_t packet_count;
     uint8_t path_hash_bytes;
+    d1l_message_entry_t recent_messages[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW];
+    size_t recent_message_count;
     d1l_packet_log_entry_t recent_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
     size_t recent_packet_count;
 } d1l_app_snapshot_t;

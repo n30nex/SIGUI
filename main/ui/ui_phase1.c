@@ -205,9 +205,18 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     render_metric_card(s_content, 238, 136, "System", value, detail, 0xC4B5FD);
 }
 
-static bool packet_is_public(const d1l_packet_log_entry_t *entry)
+static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_t *entry)
 {
-    return entry && strcmp(entry->kind, "public_text") == 0;
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *author = create_label(row, entry->author, entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4);
+    lv_obj_align(author, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *state = create_label(row, entry->direction[0] == 't' ? "queued" : "received", 0x8EA0AE);
+    lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+    lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(text, 392);
+    lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
@@ -240,18 +249,13 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     create_button(header, "Test", 306, 10, 90, 44, public_test_event_cb, NULL);
 
-    int y = 100;
-    int shown = 0;
-    for (size_t i = 0; i < snapshot->recent_packet_count && shown < 4; ++i) {
-        const d1l_packet_log_entry_t *entry = &snapshot->recent_packets[i];
-        if (packet_is_public(entry)) {
-            render_packet_row(s_content, y, entry);
-            y += 56;
-            shown++;
-        }
+    int y = 98;
+    for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
+        render_message_row(s_content, y, &snapshot->recent_messages[i]);
+        y += 60;
     }
-    if (shown == 0) {
-        lv_obj_t *empty = create_label(s_content, "No public messages yet", 0x8EA0AE);
+    if (snapshot->recent_message_count == 0) {
+        lv_obj_t *empty = create_label(s_content, "No stored public messages", 0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 130);
     }
 }

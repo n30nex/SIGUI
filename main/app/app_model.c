@@ -43,6 +43,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
 
     const d1l_settings_t *settings = d1l_settings_current();
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
+    d1l_message_store_stats_t messages = d1l_message_store_stats();
     d1l_packet_log_stats_t packets = d1l_packet_log_stats();
     d1l_health_snapshot_t health = d1l_health_snapshot();
 
@@ -64,9 +65,13 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->rx_adverts = mesh.rx_adverts;
     snapshot->tx_packets = mesh.tx_packets;
     snapshot->rejected_commands = mesh.rejected_commands;
+    snapshot->message_total_written = messages.total_written;
+    snapshot->message_count = messages.count;
     snapshot->packet_total_written = packets.total_written;
     snapshot->packet_count = packets.count;
     snapshot->path_hash_bytes = mesh.path_hash_bytes;
+    snapshot->recent_message_count =
+        d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
     snapshot->recent_packet_count =
         d1l_packet_log_copy_recent(snapshot->recent_packets, D1L_APP_SNAPSHOT_PACKET_PREVIEW);
 }

@@ -22,6 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
+- Phase 4 Public message store contract and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -50,6 +51,18 @@ Expected commands:
 - `companion status`
 - `rp2040 status`
 - `packets`
+- `messages public`
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.
+
+## Message Store Persistence
+
+For Phase 4 Public message-store validation:
+
+1. Run `messages clear`.
+2. Run `mesh send public test`.
+3. Wait for a local MeshCore bot response.
+4. Verify `messages public` contains at least one TX row and one RX row.
+5. Reboot.
+6. Verify `messages public` retains the rows and `packets` starts over as the volatile RF log.

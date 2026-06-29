@@ -31,6 +31,17 @@
 - [ ] Manual visual review of the physical shell.
 - [ ] Full Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
 
+## Phase 4 Messaging And Stores
+
+- [x] Bounded NVS-backed Public message store implemented.
+- [x] Public TX/RX events append persisted recent message rows.
+- [x] `messages public` serial diagnostic added to smoke coverage.
+- [x] Messages tab reads persisted Public rows from the app snapshot.
+- [x] Public message store survives reboot on `COM7`.
+- [ ] Free-text Public composer.
+- [ ] DM store/workflow.
+- [ ] Persistent contacts, nodes, and routes.
+
 ## Major Version Release
 
 - [x] Private GitHub repo exists under the user's account.

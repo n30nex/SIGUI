@@ -575,11 +575,11 @@ Acceptance:
 
 Tasks:
 
-- Public chat screen.
-- DM screen.
-- Message compose with on-screen keyboard or large input flow.
-- Quick replies.
-- Message delivery states.
+- Public chat screen. Status: first touch Public screen is implemented with persisted recent message rows.
+- DM screen. Status: pending.
+- Message compose with on-screen keyboard or large input flow. Status: pending; fixed Public `test` quick action is implemented.
+- Quick replies. Status: first fixed Public `test` quick action is implemented.
+- Message delivery states. Status: persisted rows show queued TX and received RX state; ACK/delivery confirmation is still pending.
 - Unread/mute/favorite logic.
 - Heard nodes list with virtualization.
 - Contact detail cards.
@@ -587,9 +587,9 @@ Tasks:
 
 Acceptance:
 
-- User can send and receive public and DM messages from touch UI.
+- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; free-text Public composer and DMs are pending.
 - Node list does not crash or stutter with large simulated meshes.
-- Message store survives reboot.
+- Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset.
 
 ### Phase 5 — Companion modes and management
 

@@ -13,6 +13,7 @@
 #include "mbedtls/md.h"
 #include "ed_25519.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "mesh/message_store.h"
 #include "mesh/packet_log.h"
 #include "radio.h"
 #include "sx126x.h"
@@ -45,6 +46,8 @@ static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
+static bool s_pending_public_tx;
+static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
 extern SX126x_t SX126x;
 
 static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
@@ -114,6 +117,60 @@ static void append_packet_log(const char *direction, const char *kind, int rssi,
     strncpy(entry.kind, kind, sizeof(entry.kind) - 1U);
     sanitize_note(entry.note, sizeof(entry.note), note);
     d1l_packet_log_append(&entry);
+}
+
+static void append_public_message_store_rx(const char *message, int rssi, int snr_quarters,
+                                           uint8_t path_hash_bytes, uint8_t path_hops)
+{
+    char author[D1L_MESSAGE_AUTHOR_LEN] = "Public";
+    char body[D1L_MESSAGE_TEXT_LEN] = {0};
+    const char *body_src = message;
+    const char *colon = message ? strchr(message, ':') : NULL;
+    const size_t author_len = colon ? (size_t)(colon - message) : 0;
+    if (colon && author_len > 0 && author_len < sizeof(author)) {
+        const char *after = colon + 1;
+        if (*after == ' ') {
+            after++;
+        }
+        if (*after != '\0') {
+            memcpy(author, message, author_len);
+            author[author_len] = '\0';
+            body_src = after;
+        }
+    }
+    sanitize_note(body, sizeof(body), body_src);
+    esp_err_t ret = d1l_message_store_append_public("rx", author, body, rssi,
+                                                    (snr_quarters * 10) / 4,
+                                                    path_hash_bytes, path_hops, true);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "message store append rx failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void append_public_message_store_tx(const char *message)
+{
+    const d1l_settings_t *settings = d1l_settings_current();
+    esp_err_t ret = d1l_message_store_append_public("tx", settings->node_name, message, 0, 0,
+                                                    settings->path_hash_bytes, 0, false);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "message store append tx failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void remember_pending_public_tx(const char *message)
+{
+    sanitize_note(s_pending_public_text, sizeof(s_pending_public_text), message);
+    s_pending_public_tx = s_pending_public_text[0] != '\0';
+}
+
+static void flush_pending_public_tx(void)
+{
+    if (!s_pending_public_tx) {
+        return;
+    }
+    append_public_message_store_tx(s_pending_public_text);
+    s_pending_public_tx = false;
+    s_pending_public_text[0] = '\0';
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -443,6 +500,7 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
     s_status.rx_packets++;
     append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, message);
+    append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
 }
 
 static char advert_type_code(uint8_t flags)
@@ -638,6 +696,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
 
 static void on_tx_done(void)
 {
+    flush_pending_public_tx();
     s_tx_busy = false;
     s_status.tx_packets++;
     s_status.state = D1L_MESHCORE_SERVICE_READY;
@@ -646,6 +705,8 @@ static void on_tx_done(void)
 
 static void on_tx_timeout(void)
 {
+    s_pending_public_tx = false;
+    s_pending_public_text[0] = '\0';
     s_tx_busy = false;
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
     d1l_meshcore_start_rx();
@@ -765,6 +826,8 @@ void d1l_meshcore_service_init(void)
     s_status.companion_framing_ready = true;
     s_radio_started = false;
     s_tx_busy = false;
+    s_pending_public_tx = false;
+    s_pending_public_text[0] = '\0';
 }
 
 esp_err_t d1l_meshcore_service_ensure_identity(void)
@@ -890,6 +953,7 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
 
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    remember_pending_public_tx(text);
     Radio.Send(raw, raw_len);
     append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
     return ESP_OK;

@@ -8,7 +8,7 @@ As of the 2026-06-29 D1L hardware validation:
 - `identity status` now generates and reports an NVS-retained Ed25519 local identity fingerprint. This is a minimal firmware identity model, not the final full MeshCore C++ store integration.
 - MeshCore TX timestamps are retained monotonically in NVS to avoid duplicate filtering, but a real RTC/network time source is not wired yet.
 - MeshCore 3-byte companion framing is implemented and host-tested, but the live binary bridge to MeshCore protocol frames is not enabled in Phase 1.
-- Packet log storage is an in-memory bounded ring only. Persistent message/contact/route stores are still pending.
-- The Phase 3 touch shell is implemented with Home, Public `test` action, Nodes count view, Packet log, Settings, advert sheet, toasts, and lock overlay, but full Public composer/scrollback, DMs, persistent nodes, contacts, routes, packet stores, BLE companion, Wi-Fi management, OTA, and message/contact persistence are not implemented yet.
+- Packet log storage is an in-memory bounded ring only. The Public message store is NVS-backed, but persistent contacts, routes, packet stores, and DM stores are still pending.
+- The Phase 3 touch shell is implemented with Home, Public `test` action, persisted recent Public rows, Nodes count view, Packet log, Settings, advert sheet, toasts, and lock overlay, but full Public composer/scrollback, DMs, persistent nodes, contacts, routes, packet stores, BLE companion, Wi-Fi management, OTA, and contact/route persistence are not implemented yet.
 - The SX1262 Phase 1 probe intentionally avoids TCXO/DIO3 control. TCXO remains `NONE` by default.
 - Wi-Fi and BLE are reported disabled by the Phase 1 console.

@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 3 UI shell slice: `0x9baf0`, 39% free in the app partition
+- Latest local build size after the Phase 4 Public message-store slice: `0x9c450`, 39% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -66,9 +66,16 @@ Do not use `COM11` or `COM29` for this D1L target.
   - The Phase 3 shell build retained the controlled Public `test` RF path.
   - Local Meshcorebot observed fresh Public counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
   - D1L packet log decoded local bot replies including `Krabs Node: Test OK CH0.`
+- Phase 4 Public message store local smoke: `artifacts/smoke/d1l-smoke-phase4-message-store-local-COM7.json`
+  - 16 commands passed, including the new `messages public` diagnostic.
+  - `messages public` reported persisted Public TX/RX rows.
+- Phase 4 Public message store reboot persistence: `artifacts/smoke/d1l-message-store-persistence-local-COM7.json`
+  - D1L sent Public `test` and retained the TX row plus `Krabs Node: Test OK CH0.` RX row after reboot.
+  - Local Meshcorebot observed fresh Public counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
+  - Volatile `packets` reset from `count=2` before reboot to `count=0` after reboot, while `messages public` retained `count=2`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- The validated touch Public workflow is currently a fixed `test` action, not the final free-text composer or DM workflow.
+- The validated touch Public workflow is currently a fixed `test` action with persisted recent rows, not the final free-text composer or DM workflow.
 - Flash backup was intentionally skipped per operator instruction.
