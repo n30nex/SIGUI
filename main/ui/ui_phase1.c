@@ -28,13 +28,17 @@ static lv_obj_t *s_identity_label;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_sheet;
 static lv_obj_t *s_compose_sheet;
+static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
+static bool s_compose_dm;
+static d1l_contact_entry_t s_compose_contact;
 
 static void render_active_tab(void);
+static void open_dm_compose_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -157,6 +161,8 @@ static void hide_compose_sheet(void)
     if (s_compose_sheet) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_compose_dm = false;
+    memset(&s_compose_contact, 0, sizeof(s_compose_contact));
 }
 
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
@@ -295,15 +301,20 @@ static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
     lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(alias, 190);
+    lv_obj_set_width(alias, 166);
     lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
-    lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+    if (entry->public_key_hex[0] != '\0') {
+        create_button(row, "DM", 350, -1, 48, 34, open_dm_compose_event_cb, (void *)entry);
+    } else {
+        lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
+        lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+    }
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.8s  %s  rssi %d", entry->fingerprint,
-                  entry->public_key_hex[0] ? "key" : "no key", entry->last_rssi_dbm);
+    label_set_fmt(meta, "%.8s  %s  %s  rssi %d", entry->fingerprint,
+                  entry->public_key_hex[0] ? "key" : "no key",
+                  entry->out_path_valid ? "path" : "flood", entry->last_rssi_dbm);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
+    lv_obj_set_width(meta, 320);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
@@ -317,12 +328,44 @@ static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    s_compose_dm = false;
+    memset(&s_compose_contact, 0, sizeof(s_compose_contact));
+    if (s_compose_title) {
+        lv_label_set_text(s_compose_title, "Public");
+    }
     if (s_compose_sheet) {
         lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
+        lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
+        lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    }
+}
+
+static void open_dm_compose_event_cb(lv_event_t *event)
+{
+    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
+    if (!entry || entry->public_key_hex[0] == '\0') {
+        show_toast("DM", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    hide_sheet();
+    s_compose_dm = true;
+    s_compose_contact = *entry;
+    if (s_compose_title) {
+        char title[48];
+        snprintf(title, sizeof(title), "DM %.32s", entry->alias[0] ? entry->alias : entry->fingerprint);
+        lv_label_set_text(s_compose_title, title);
+    }
+    if (s_compose_sheet) {
+        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_compose_sheet);
+    }
+    if (s_compose_textarea && s_compose_keyboard) {
+        lv_textarea_set_text(s_compose_textarea, "");
+        lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
     }
 }
@@ -347,8 +390,10 @@ static void send_compose_text(void)
         return;
     }
     const char *text = lv_textarea_get_text(s_compose_textarea);
-    esp_err_t ret = d1l_app_model_send_public_text(text);
-    show_toast("Public message", ret);
+    esp_err_t ret = s_compose_dm ?
+                    d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text) :
+                    d1l_app_model_send_public_text(text);
+    show_toast(s_compose_dm ? "DM" : "Public message", ret);
     if (ret == ESP_OK) {
         lv_textarea_set_text(s_compose_textarea, "");
         hide_compose_sheet();
@@ -657,9 +702,11 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_compose_sheet, 12, 0);
     lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
+    s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
+    lv_obj_set_style_text_font(s_compose_title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(s_compose_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_compose_title, 204);
+    lv_obj_set_pos(s_compose_title, 8, 4);
 
     create_button(s_compose_sheet, "Send", 226, 0, 64, 40, send_compose_event_cb, NULL);
     create_button(s_compose_sheet, "Clear", 298, 0, 64, 40, clear_compose_event_cb, NULL);

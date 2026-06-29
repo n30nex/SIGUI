@@ -49,6 +49,7 @@ def test_touch_ui_actions_route_through_app_model():
     model = read("main/app/app_model.c")
     assert "d1l_app_model_send_public_test()" in source
     assert "d1l_app_model_send_public_text(text)" in source
+    assert "d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text)" in source
     assert "d1l_app_model_request_advert(false)" in source
     assert "d1l_app_model_request_advert(true)" in source
     assert "d1l_app_model_send_public_text" in header
@@ -73,6 +74,18 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source
     assert '"Test"' in source
+
+
+def test_dm_composer_opens_from_contact_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static bool s_compose_dm" in source
+    assert "static d1l_contact_entry_t s_compose_contact" in source
+    assert "open_dm_compose_event_cb" in source
+    assert 'create_button(row, "DM"' in source
+    assert "s_compose_contact = *entry" in source
+    assert 'lv_label_set_text(s_compose_title, title)' in source
+    assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
+    assert 'show_toast(s_compose_dm ? "DM" : "Public message", ret)' in source
 
 
 def test_nodes_screen_renders_heard_node_rows():

@@ -85,6 +85,17 @@ For Phase 4 direct-message store validation:
 8. Reboot.
 9. Verify `messages dm` retains the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
+## Touch DM Compose
+
+For Phase 4 touch direct-message compose validation:
+
+1. Verify `contacts` contains at least one contact with a full 64-hex `public_key`.
+2. Open the Nodes tab and verify the keyed contact row exposes a `DM` action.
+3. Tap `DM`, type a short message on the compose keyboard, and tap `Send`.
+4. Verify the toast reports the DM queued.
+5. Verify `messages dm` contains a TX row for the same contact and message text with a nonzero `ack_hash`.
+6. If physical touch cannot be observed in the current test session, run the backend precondition probe by sending the same target through `mesh send dm <fingerprint> <text>` and recording `contacts`, `messages dm`, and `health`.
+
 ## Heard Node Store
 
 For Phase 4 heard-node validation:
