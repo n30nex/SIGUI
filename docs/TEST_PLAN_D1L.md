@@ -7,6 +7,7 @@ Run:
 ```powershell
 python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1
 ```
 
 Coverage:
@@ -23,6 +24,7 @@ Coverage:
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
+- Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, and LVGL peak usage.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
@@ -66,6 +68,33 @@ Expected commands:
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.
+
+## Hardware Soak
+
+Use the soak runner for Phase 7 stability evidence after smoke passes. The runner writes a JSON artifact under `artifacts/soak` unless `--out` is supplied.
+
+Short active RF probe:
+
+```powershell
+$env:D1L_PORT = "COMx"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
+```
+
+Full idle/listening acceptance window:
+
+```powershell
+$env:D1L_PORT = "COMx"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COMx.json
+```
+
+Full active messaging acceptance window, assuming the local Public bots are available and respond to `test`:
+
+```powershell
+$env:D1L_PORT = "COMx"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-interval-sec 60 --active-public-text test --active-interval-sec 120 --require-rx-delta --min-tx-delta 1 --out artifacts\soak\d1l-soak-active-1h-COMx.json
+```
+
+Success requires every sampled command to return `ok=true`, no uptime rollback, `board_ready=true`, `ui_ready=true`, ready mesh state, nonzero task stack watermarks, and no required packet delta threshold failures. For active RF probes, `mesh_tx_packet_delta` must increase and `mesh_rx_packet_delta` must increase when `--require-rx-delta` is used.
 
 ## Message Store Persistence
 

@@ -643,7 +643,7 @@ Tasks:
 
 - Fix memory leaks.
 - Task watchdog tuning.
-- Long-run soak test.
+- Long-run soak test. Status: first `scripts/soak_d1l.py` harness is implemented for idle/listening and active Public `test` soak windows with heap/PSRAM, task-stack, LVGL, uptime, packet-counter, signal, unread, and crashlog sampling. A 3-minute active Public `test` hardware soak passed on `COM7`; long acceptance soaks are still pending.
 - Touch edge-case fixes.
 - Dark theme contrast pass.
 - UI animation performance pass.
@@ -652,9 +652,9 @@ Tasks:
 
 Acceptance:
 
-- 12-hour idle/listening soak without crash.
-- 1-hour active messaging test without UI freeze.
-- No steadily declining heap/PSRAM in normal use. Status: richer heap/PSRAM/LVGL/task stack telemetry is implemented and validated in smoke; long-run soak is pending.
+- 12-hour idle/listening soak without crash. Status: repeatable soak command exists; full-duration run is pending.
+- 1-hour active messaging test without UI freeze. Status: repeatable active Public `test` soak command exists and a 3-minute active hardware probe passed with `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=8`; full-duration run is pending.
+- No steadily declining heap/PSRAM in normal use. Status: richer heap/PSRAM/LVGL/task stack telemetry is implemented and validated in smoke; soak harness now records deltas/floors/peaks, but long-run soak is pending.
 
 ### Phase 8 — Release packaging and docs
 

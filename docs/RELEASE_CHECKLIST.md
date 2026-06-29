@@ -57,6 +57,15 @@
 - [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
 - [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, controlled inbound DM proof, and richer full-thread history.
 
+## Phase 7 Polish And Soak
+
+- [x] Crash ring and reset reason diagnostics implemented and hardware-smoke validated.
+- [x] Health telemetry reports heap/PSRAM, LVGL, reset reason, board/UI readiness, and task stack watermarks.
+- [x] Repeatable idle/active soak runner added with JSON artifact output.
+- [x] Short active Public `test` soak passed on `COM7`.
+- [ ] 12-hour idle/listening soak without crash.
+- [ ] 1-hour active Public messaging soak without UI freeze.
+
 ## Major Version Release
 
 - [x] Private GitHub repo exists under the user's account.

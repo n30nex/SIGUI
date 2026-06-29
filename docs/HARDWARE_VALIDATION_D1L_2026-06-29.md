@@ -262,6 +262,11 @@ Do not use `COM11` or `COM29` for this D1L target.
   - D1L queued Public `test`, added TX packet seq `13`, and decoded a fresh RX Public `test` packet seq `14` at RSSI `-40`, SNR `30`, and `path_hops=1`.
   - COM11 Meshcorebot counters moved `rx_channel_total +3`, `relay_success_total +3`, `discord_send_success_total +3`, `rx_log_total +6`, and `rx_duplicate_total +3`.
   - `signal`, `roomservers`, `repeaters`, and `health` remained healthy after the RF probe.
+- Phase 7 short active soak: `artifacts/soak/d1l-soak-active-short-local-COM7.json`
+  - `scripts/soak_d1l.py` sampled `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog` for 180 seconds while sending Public `test` every 60 seconds.
+  - The run passed with 6 samples, 3 queued Public TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=8`; the packet log moved `packet_total_written_delta=11`.
+  - Health remained ready with `heap_free_delta=0`, `psram_free_delta=0`, stack floors of `current=1120` and `ui=1352` words, and `lvgl_used_pct_peak=59`.
 
 ## Still Pending
 
