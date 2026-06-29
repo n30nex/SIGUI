@@ -37,4 +37,4 @@ An earlier full-32-row NVS blob build listed packets before reboot but reloaded 
 ## Still Pending
 
 - Manual touch review of tapping packet rows and closing the packet detail sheet on the physical screen.
-- Richer packet filtering/search and raw packet hex in developer mode.
+- Richer packet filtering/search and raw packet hex developer mode were implemented and validated later in `docs/PHASE6_PACKET_FILTER_CHECKPOINT.md`.

@@ -1,5 +1,6 @@
 #include "packet_log.h"
 
+#include <ctype.h>
 #include <string.h>
 
 #include "esp_timer.h"
@@ -7,7 +8,7 @@
 
 #define D1L_PACKET_LOG_NAMESPACE "d1l_packets"
 #define D1L_PACKET_LOG_KEY "ring"
-#define D1L_PACKET_LOG_SCHEMA 1U
+#define D1L_PACKET_LOG_SCHEMA 2U
 
 typedef struct {
     uint32_t schema;
@@ -42,6 +43,96 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
         dest[out++] = (char)c;
     }
     dest[out] = '\0';
+}
+
+static void raw_to_hex_preview(char *dest, size_t dest_size, const uint8_t *raw, size_t raw_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    size_t out = 0;
+    const size_t preview_len =
+        raw_len < D1L_PACKET_LOG_RAW_PREVIEW_BYTES ? raw_len : D1L_PACKET_LOG_RAW_PREVIEW_BYTES;
+    for (size_t i = 0; raw && i < preview_len && out + 2U < dest_size; ++i) {
+        dest[out++] = hex[(raw[i] >> 4) & 0x0fU];
+        dest[out++] = hex[raw[i] & 0x0fU];
+    }
+    dest[out] = '\0';
+}
+
+static int lower_ascii(int c)
+{
+    return isupper((unsigned char)c) ? tolower((unsigned char)c) : c;
+}
+
+static bool token_is_any(const char *token)
+{
+    return token == NULL || token[0] == '\0' ||
+           strcmp(token, "any") == 0 || strcmp(token, "*") == 0;
+}
+
+static bool equals_ignore_case(const char *left, const char *right)
+{
+    if (!left || !right) {
+        return false;
+    }
+    while (*left && *right) {
+        if (lower_ascii(*left++) != lower_ascii(*right++)) {
+            return false;
+        }
+    }
+    return *left == '\0' && *right == '\0';
+}
+
+static bool contains_ignore_case(const char *haystack, const char *needle)
+{
+    if (token_is_any(needle)) {
+        return true;
+    }
+    if (!haystack) {
+        return false;
+    }
+    for (const char *h = haystack; *h; ++h) {
+        const char *a = h;
+        const char *b = needle;
+        while (*a && *b && lower_ascii(*a) == lower_ascii(*b)) {
+            ++a;
+            ++b;
+        }
+        if (*b == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool packet_matches(const d1l_packet_log_entry_t *entry, const char *direction,
+                           const char *kind, const char *search_text)
+{
+    if (!entry) {
+        return false;
+    }
+    if (!token_is_any(direction) && !equals_ignore_case(entry->direction, direction)) {
+        return false;
+    }
+    if (!token_is_any(kind)) {
+        if (equals_ignore_case(kind, "text")) {
+            if (!contains_ignore_case(entry->kind, "text")) {
+                return false;
+            }
+        } else if (!equals_ignore_case(entry->kind, kind)) {
+            return false;
+        }
+    }
+    if (!token_is_any(search_text) &&
+        !contains_ignore_case(entry->kind, search_text) &&
+        !contains_ignore_case(entry->direction, search_text) &&
+        !contains_ignore_case(entry->note, search_text) &&
+        !contains_ignore_case(entry->raw_hex, search_text)) {
+        return false;
+    }
+    return true;
 }
 
 static void clear_ram(void)
@@ -163,6 +254,12 @@ esp_err_t d1l_packet_log_clear(void)
 
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
 {
+    return d1l_packet_log_append_raw(entry, NULL, 0);
+}
+
+bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
+                               size_t raw_len)
+{
     if (entry == NULL) {
         return false;
     }
@@ -178,11 +275,17 @@ bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
     sanitize_ascii(copy.direction, sizeof(copy.direction), entry->direction);
     sanitize_ascii(copy.kind, sizeof(copy.kind), entry->kind);
     sanitize_ascii(copy.note, sizeof(copy.note), entry->note);
+    sanitize_ascii(copy.raw_hex, sizeof(copy.raw_hex), entry->raw_hex);
     if (copy.direction[0] == '\0') {
         strncpy(copy.direction, "rx", sizeof(copy.direction) - 1U);
     }
     if (copy.kind[0] == '\0') {
         strncpy(copy.kind, "packet", sizeof(copy.kind) - 1U);
+    }
+    if (raw && raw_len > 0) {
+        copy.raw_len = raw_len > UINT16_MAX ? UINT16_MAX : (uint16_t)raw_len;
+        copy.raw_truncated = raw_len > D1L_PACKET_LOG_RAW_PREVIEW_BYTES;
+        raw_to_hex_preview(copy.raw_hex, sizeof(copy.raw_hex), raw, raw_len);
     }
 
     s_entries[s_head] = copy;
@@ -224,6 +327,34 @@ size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t ma
         out_entries[i] = s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
     }
     return n;
+}
+
+size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                            const char *direction, const char *kind, const char *search_text)
+{
+    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+        return 0;
+    }
+    if (!s_loaded && d1l_packet_log_init() != ESP_OK) {
+        return 0;
+    }
+
+    size_t copied = 0;
+    size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_packet_log_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+        if (!packet_matches(entry, direction, kind, search_text)) {
+            continue;
+        }
+        if (copied < max_entries) {
+            out_entries[copied++] = *entry;
+        } else {
+            memmove(out_entries, &out_entries[1], (max_entries - 1U) * sizeof(out_entries[0]));
+            out_entries[max_entries - 1U] = *entry;
+        }
+    }
+    return copied;
 }
 
 esp_err_t d1l_packet_log_find_by_seq(uint32_t seq, d1l_packet_log_entry_t *out_entry)

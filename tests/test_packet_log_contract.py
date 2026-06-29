@@ -24,20 +24,42 @@ def test_packet_log_is_bounded_and_nvs_backed():
     assert "D1L_PACKET_LOG_PERSIST_CAPACITY" in source
     assert "sanitize_ascii" in source
     assert "d1l_packet_log_find_by_seq" in header
+    assert "D1L_PACKET_LOG_RAW_PREVIEW_BYTES 32U" in header
+    assert "D1L_PACKET_LOG_RAW_HEX_LEN" in header
+    assert "raw_hex" in header
+    assert "raw_truncated" in header
+    assert "d1l_packet_log_append_raw" in header
+    assert "d1l_packet_log_query" in header
+    assert "raw_to_hex_preview" in source
+    assert "packet_matches" in source
+    assert "D1L_PACKET_LOG_SCHEMA 2U" in source
     assert "ESP_ERR_NOT_FOUND" in source
     assert "esp_err_t packet_log_ret = d1l_packet_log_init()" in app_main
 
 
 def test_console_exposes_packet_detail_and_clear():
     console = read("main/comms/usb_console.c")
-    assert 'ok_begin("packets")' in console
+    assert 'print_packet_entries_json("packets"' in console
+    assert 'print_packet_entries_json("packets filter"' in console
+    assert 'print_packet_entries_json("packets search"' in console
     assert 'ok_begin("packets detail")' in console
+    assert 'ok_begin("packets raw")' in console
     assert 'ok_begin("packets clear")' in console
     assert "d1l_packet_log_find_by_seq" in console
+    assert "d1l_packet_log_query" in console
     assert "d1l_packet_log_clear()" in console
+    assert 'strncmp(line, "packets filter ", 15)' in console
+    assert 'strncmp(line, "packets search ", 15)' in console
     assert 'strncmp(line, "packets detail ", 15)' in console
+    assert 'strncmp(line, "packets raw ", 12)' in console
     assert 'strcmp(line, "packets clear")' in console
+    assert "packets filter <any|rx|tx> <any|text|kind>" in console
+    assert "packets search <text>" in console
     assert "packets detail <seq>" in console
+    assert "packets raw <seq>" in console
     assert "packets clear" in console
     assert '\\"persisted\\":true' in console
+    assert '\\"raw_hex\\":\\"%s\\"' in console
     assert "packets" in SMOKE_COMMANDS
+    assert "packets filter any any" in SMOKE_COMMANDS
+    assert "packets search test" in SMOKE_COMMANDS

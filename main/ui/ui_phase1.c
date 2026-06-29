@@ -38,6 +38,9 @@ static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_packet_detail_sheet;
+static lv_obj_t *s_packet_search_sheet;
+static lv_obj_t *s_packet_search_textarea;
+static lv_obj_t *s_packet_search_keyboard;
 static lv_obj_t *s_mesh_roles_sheet;
 static lv_obj_t *s_lock_overlay;
 static lv_obj_t *s_onboarding_sheet;
@@ -50,8 +53,10 @@ static d1l_contact_entry_t s_compose_contact;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_packet_log_entry_t s_packet_detail_packet;
+static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
+static char s_packet_search_text[D1L_PACKET_LOG_QUERY_TEXT_LEN];
 static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 
@@ -61,6 +66,7 @@ static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
+static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
 
 typedef enum {
@@ -71,7 +77,15 @@ typedef enum {
     D1L_UI_TAB_SETTINGS,
 } d1l_ui_tab_t;
 
+typedef enum {
+    D1L_PACKET_FILTER_ALL = 0,
+    D1L_PACKET_FILTER_RX,
+    D1L_PACKET_FILTER_TX,
+    D1L_PACKET_FILTER_TEXT,
+} d1l_packet_filter_mode_t;
+
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
+static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 
 static void lv_tick_task(void *arg)
 {
@@ -219,6 +233,13 @@ static void hide_packet_detail_sheet(void)
         lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
     }
     memset(&s_packet_detail_packet, 0, sizeof(s_packet_detail_packet));
+}
+
+static void hide_packet_search_sheet(void)
+{
+    if (s_packet_search_sheet) {
+        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void hide_mesh_roles_sheet(void)
@@ -492,6 +513,7 @@ static void open_compose_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
@@ -521,6 +543,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_compose_dm = true;
     s_compose_contact = selected;
@@ -652,6 +675,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
@@ -740,6 +764,7 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_route_detail_sheet();
     if (s_route_detail_sheet) {
@@ -771,10 +796,10 @@ static void render_packet_detail_sheet(void)
     create_button(s_packet_detail_sheet, "Close", 316, 0, 76, 40, close_packet_detail_event_cb, NULL);
 
     lv_obj_t *meta = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "#%lu  %s  payload %u",
+    label_set_fmt(meta, "#%lu  %s  payload %u  raw %u",
                   (unsigned long)entry->seq,
                   entry->direction[0] ? entry->direction : "-",
-                  entry->payload_len);
+                  entry->payload_len, entry->raw_len);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
     lv_obj_set_pos(meta, 8, 50);
@@ -799,6 +824,14 @@ static void render_packet_detail_sheet(void)
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 392);
     lv_obj_set_pos(note, 8, 156);
+
+    lv_obj_t *raw_title = create_label(s_packet_detail_sheet, "Raw Hex", 0x5EEAD4);
+    lv_obj_set_pos(raw_title, 8, 190);
+
+    lv_obj_t *raw = create_label(s_packet_detail_sheet, entry->raw_hex[0] ? entry->raw_hex : "-", 0x93C5FD);
+    lv_label_set_long_mode(raw, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(raw, 392);
+    lv_obj_set_pos(raw, 8, 214);
 }
 
 static void open_packet_detail_event_cb(lv_event_t *event)
@@ -814,12 +847,81 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_packet_detail_sheet();
     if (s_packet_detail_sheet) {
         lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_packet_detail_sheet);
     }
+}
+
+static void packet_filter_event_cb(lv_event_t *event)
+{
+    s_packet_filter_mode = (d1l_packet_filter_mode_t)(uintptr_t)lv_event_get_user_data(event);
+    render_active_tab();
+}
+
+static void close_packet_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_packet_search_sheet();
+}
+
+static void clear_packet_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_packet_search_text[0] = '\0';
+    if (s_packet_search_textarea) {
+        lv_textarea_set_text(s_packet_search_textarea, "");
+    }
+    hide_packet_search_sheet();
+    render_active_tab();
+}
+
+static void apply_packet_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_packet_search_text[0] = '\0';
+    if (s_packet_search_textarea) {
+        const char *text = lv_textarea_get_text(s_packet_search_textarea);
+        if (text) {
+            snprintf(s_packet_search_text, sizeof(s_packet_search_text), "%s", text);
+        }
+    }
+    hide_packet_search_sheet();
+    render_active_tab();
+}
+
+static void packet_search_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        apply_packet_search_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        hide_packet_search_sheet();
+    }
+}
+
+static void open_packet_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!s_packet_search_sheet) {
+        return;
+    }
+    hide_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
+    hide_route_detail_sheet();
+    hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
+    if (s_packet_search_textarea && s_packet_search_keyboard) {
+        lv_textarea_set_text(s_packet_search_textarea, s_packet_search_text);
+        lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
+    }
+    lv_obj_clear_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_packet_search_sheet);
 }
 
 static void close_mesh_roles_event_cb(lv_event_t *event)
@@ -932,6 +1034,7 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     render_mesh_roles_sheet();
     if (s_mesh_roles_sheet) {
         lv_obj_clear_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -1124,6 +1227,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
@@ -1214,6 +1318,36 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
     }
 }
 
+static const char *packet_filter_direction(void)
+{
+    switch (s_packet_filter_mode) {
+    case D1L_PACKET_FILTER_RX:
+        return "rx";
+    case D1L_PACKET_FILTER_TX:
+        return "tx";
+    default:
+        return "any";
+    }
+}
+
+static const char *packet_filter_kind(void)
+{
+    return s_packet_filter_mode == D1L_PACKET_FILTER_TEXT ? "text" : "any";
+}
+
+static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label, int x,
+                                             d1l_packet_filter_mode_t mode)
+{
+    lv_obj_t *button = create_button(parent, label, x, 128, 58, 34, packet_filter_event_cb,
+                                     (void *)(uintptr_t)mode);
+    if (s_packet_filter_mode == mode) {
+        lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
+        lv_obj_set_style_border_color(button, lv_color_hex(0x5EEAD4), 0);
+        lv_obj_set_style_border_width(button, 1, 0);
+    }
+    return button;
+}
+
 static void render_packets(const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
@@ -1232,14 +1366,36 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
     lv_obj_add_flag(roles_card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(roles_card, open_mesh_roles_event_cb, LV_EVENT_CLICKED, NULL);
 
-    int y = 136;
-    size_t packet_rows = snapshot->recent_packet_count;
+    render_packet_filter_button(s_content, "All", 18, D1L_PACKET_FILTER_ALL);
+    render_packet_filter_button(s_content, "RX", 82, D1L_PACKET_FILTER_RX);
+    render_packet_filter_button(s_content, "TX", 146, D1L_PACKET_FILTER_TX);
+    render_packet_filter_button(s_content, "Text", 210, D1L_PACKET_FILTER_TEXT);
+    create_button(s_content, "Search", 286, 128, 74, 34, open_packet_search_event_cb, NULL);
+    if (s_packet_search_text[0]) {
+        lv_obj_t *search = create_label(s_content, "", 0xFBBF24);
+        label_set_fmt(search, "find %.18s", s_packet_search_text);
+        lv_label_set_long_mode(search, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(search, 84);
+        lv_obj_set_pos(search, 366, 135);
+    }
+
+    size_t packet_rows = d1l_packet_log_query(s_packet_filtered_packets,
+                                              D1L_APP_SNAPSHOT_PACKET_PREVIEW,
+                                              packet_filter_direction(),
+                                              packet_filter_kind(),
+                                              s_packet_search_text);
+    int y = 174;
     if (snapshot->recent_route_count > 0 && packet_rows > 3) {
         packet_rows = 2;
     }
-    for (size_t i = 0; i < packet_rows && y <= 248; ++i) {
-        render_packet_row(s_content, y, &snapshot->recent_packets[i]);
+    for (size_t i = 0; i < packet_rows && y <= 286; ++i) {
+        render_packet_row(s_content, y, &s_packet_filtered_packets[i]);
         y += 56;
+    }
+    if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
+        lv_obj_t *empty = create_label(s_content, "No packets match filter", 0x8EA0AE);
+        lv_obj_set_pos(empty, 26, y + 8);
+        y += 34;
     }
     if (snapshot->recent_route_count > 0) {
         lv_obj_t *routes = create_label(s_content, "Routes", 0x8EA0AE);
@@ -1278,6 +1434,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_contact_detail_sheet();
         hide_route_detail_sheet();
         hide_packet_detail_sheet();
+        hide_packet_search_sheet();
         hide_mesh_roles_sheet();
         lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1360,6 +1517,7 @@ static void dock_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_active_tab();
 }
@@ -1561,8 +1719,8 @@ static void create_route_detail_sheet(lv_obj_t *screen)
 static void create_packet_detail_sheet(lv_obj_t *screen)
 {
     s_packet_detail_sheet = lv_obj_create(screen);
-    lv_obj_set_size(s_packet_detail_sheet, 448, 240);
-    lv_obj_set_pos(s_packet_detail_sheet, 16, 142);
+    lv_obj_set_size(s_packet_detail_sheet, 448, 286);
+    lv_obj_set_pos(s_packet_detail_sheet, 16, 100);
     lv_obj_set_style_radius(s_packet_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_packet_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_packet_detail_sheet, lv_color_hex(0x334155), 0);
@@ -1570,6 +1728,48 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_packet_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_packet_search_sheet(lv_obj_t *screen)
+{
+    s_packet_search_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_packet_search_sheet, 448, 320);
+    lv_obj_set_pos(s_packet_search_sheet, 16, 82);
+    lv_obj_set_style_radius(s_packet_search_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_packet_search_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_packet_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_packet_search_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_packet_search_sheet, 12, 0);
+    lv_obj_clear_flag(s_packet_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(s_packet_search_sheet, "Packet Search", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_packet_search_sheet, "Apply", 212, 0, 66, 40, apply_packet_search_event_cb, NULL);
+    create_button(s_packet_search_sheet, "Clear", 286, 0, 64, 40, clear_packet_search_event_cb, NULL);
+    create_button(s_packet_search_sheet, "Close", 358, 0, 66, 40, close_packet_search_event_cb, NULL);
+
+    s_packet_search_textarea = lv_textarea_create(s_packet_search_sheet);
+    lv_obj_set_size(s_packet_search_textarea, 424, 48);
+    lv_obj_set_pos(s_packet_search_textarea, 0, 54);
+    lv_textarea_set_one_line(s_packet_search_textarea, true);
+    lv_textarea_set_max_length(s_packet_search_textarea, D1L_PACKET_LOG_QUERY_TEXT_LEN - 1U);
+    lv_textarea_set_placeholder_text(s_packet_search_textarea, "Search kind, note, raw hex");
+    lv_obj_set_style_radius(s_packet_search_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_packet_search_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_packet_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+
+    s_packet_search_keyboard = lv_keyboard_create(s_packet_search_sheet);
+    lv_obj_set_size(s_packet_search_keyboard, 424, 194);
+    lv_obj_set_pos(s_packet_search_keyboard, 0, 114);
+    lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
+    lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
+
+    lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_mesh_roles_sheet(lv_obj_t *screen)
@@ -1699,6 +1899,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_contact_detail_sheet(s_screen);
     create_route_detail_sheet(s_screen);
     create_packet_detail_sheet(s_screen);
+    create_packet_search_sheet(s_screen);
     create_mesh_roles_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);

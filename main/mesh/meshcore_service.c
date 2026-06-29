@@ -163,7 +163,7 @@ static bool hex_to_bytes(uint8_t *dest, size_t dest_len, const char *src_hex)
 
 static void append_packet_log(const char *direction, const char *kind, int rssi, int snr_quarters,
                               uint8_t path_hash_bytes, uint8_t path_hops, uint16_t payload_len,
-                              const char *note)
+                              const uint8_t *raw, size_t raw_len, const char *note)
 {
     d1l_packet_log_entry_t entry = {
         .rssi_dbm = rssi,
@@ -175,7 +175,7 @@ static void append_packet_log(const char *direction, const char *kind, int rssi,
     strncpy(entry.direction, direction, sizeof(entry.direction) - 1U);
     strncpy(entry.kind, kind, sizeof(entry.kind) - 1U);
     sanitize_note(entry.note, sizeof(entry.note), note);
-    d1l_packet_log_append(&entry);
+    d1l_packet_log_append_raw(&entry, raw, raw_len);
 }
 
 static void append_public_message_store_rx(const char *message, int rssi, int snr_quarters,
@@ -758,7 +758,7 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
         ESP_LOGW(TAG, "route store public rx failed: %s", esp_err_to_name(route_ret));
     }
     append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
-                      packet.path_hops, size, message);
+                      packet.path_hops, size, payload, size, message);
     append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
 }
 
@@ -824,13 +824,14 @@ static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, in
         char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
         snprintf(note, sizeof(note), "%.12s: %.24s", contact->alias, message);
         append_packet_log("rx", "dm_text", rssi, snr, packet.path_hash_bytes,
-                          packet.path_hops, size, note);
+                          packet.path_hops, size, payload, size, note);
         return;
     }
 }
 
 static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *packet,
-                          int16_t rssi, int8_t snr, uint16_t size, const char *source)
+                          int16_t rssi, int8_t snr, uint16_t size, const uint8_t *raw,
+                          size_t raw_len, const char *source)
 {
     d1l_dm_entry_t acked = {0};
     esp_err_t ret = d1l_dm_store_mark_acked(ack_hash, &acked);
@@ -847,12 +848,12 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
             ESP_LOGW(TAG, "route store DM ACK rx failed: %s", esp_err_to_name(route_ret));
         }
         append_packet_log("rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
-                          packet->path_hops, size, note);
+                          packet->path_hops, size, raw, raw_len, note);
     } else {
         snprintf(note, sizeof(note), "%s unmatched %lu", source ? source : "ack",
                  (unsigned long)ack_hash);
         append_packet_log("rx", "dm_ack_unmatched", rssi, snr, packet->path_hash_bytes,
-                          packet->path_hops, size, note);
+                          packet->path_hops, size, raw, raw_len, note);
     }
 }
 
@@ -877,7 +878,7 @@ static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, i
     }
 
     s_status.rx_packets++;
-    record_dm_ack(ack_hash, &packet, rssi, snr, size, source);
+    record_dm_ack(ack_hash, &packet, rssi, snr, size, payload, size, source);
 }
 
 static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
@@ -947,10 +948,11 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
         }
         char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
         snprintf(note, sizeof(note), "path %.12s hops=%u", contact->alias, out_hops);
-        append_packet_log("rx", "path_return", rssi, snr, out_hash_bytes, out_hops, size, note);
+        append_packet_log("rx", "path_return", rssi, snr, out_hash_bytes, out_hops, size,
+                          payload, size, note);
 
         if (extra_type == D1L_MESHCORE_PAYLOAD_ACK && extra_len >= 4U) {
-            record_dm_ack(read_le32(extra), &packet, rssi, snr, size, "path_ack");
+            record_dm_ack(read_le32(extra), &packet, rssi, snr, size, payload, size, "path_ack");
         }
         return;
     }
@@ -1127,7 +1129,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
         char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
         snprintf(note, sizeof(note), "bad_sig pub=%s", pub_prefix);
         append_packet_log("rx", "advert_bad_sig", rssi, snr, packet.path_hash_bytes,
-                          packet.path_hops, size, note);
+                          packet.path_hops, size, payload, size, note);
         return;
     }
 
@@ -1161,7 +1163,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
         ESP_LOGW(TAG, "route store advert rx failed: %s", esp_err_to_name(route_ret));
     }
     append_packet_log("rx", "advert", rssi, snr, packet.path_hash_bytes,
-                      packet.path_hops, size, note);
+                      packet.path_hops, size, payload, size, note);
 }
 
 static void on_tx_done(void)
@@ -1399,7 +1401,8 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store advert tx failed: %s", esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "advert", 0, 0, settings->path_hash_bytes, 0, raw_len, note);
+    append_packet_log("tx", "advert", 0, 0, settings->path_hash_bytes, 0, raw_len,
+                      raw, raw_len, note);
     return ESP_OK;
 }
 
@@ -1445,7 +1448,8 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store public tx failed: %s", esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
+    append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len,
+                      raw, raw_len, text);
     return ESP_OK;
 }
 
@@ -1512,7 +1516,7 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
         ESP_LOGW(TAG, "route store DM tx failed: %s", esp_err_to_name(route_ret));
     }
     append_packet_log("tx", "dm_text", 0, 0, route_path_hash_bytes, route_path_hops,
-                      raw_len, text);
+                      raw_len, raw, raw_len, text);
     return ESP_OK;
 }
 

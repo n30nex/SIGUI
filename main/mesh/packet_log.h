@@ -9,6 +9,9 @@
 #define D1L_PACKET_LOG_CAPACITY 32U
 #define D1L_PACKET_LOG_PERSIST_CAPACITY 8U
 #define D1L_PACKET_LOG_NOTE_LEN 48U
+#define D1L_PACKET_LOG_RAW_PREVIEW_BYTES 32U
+#define D1L_PACKET_LOG_RAW_HEX_LEN ((D1L_PACKET_LOG_RAW_PREVIEW_BYTES * 2U) + 1U)
+#define D1L_PACKET_LOG_QUERY_TEXT_LEN 32U
 
 typedef struct {
     uint32_t seq;
@@ -20,7 +23,10 @@ typedef struct {
     uint8_t path_hash_bytes;
     uint8_t path_hops;
     uint16_t payload_len;
+    uint16_t raw_len;
+    bool raw_truncated;
     char note[D1L_PACKET_LOG_NOTE_LEN];
+    char raw_hex[D1L_PACKET_LOG_RAW_HEX_LEN];
 } d1l_packet_log_entry_t;
 
 typedef struct {
@@ -34,6 +40,10 @@ typedef struct {
 esp_err_t d1l_packet_log_init(void);
 esp_err_t d1l_packet_log_clear(void);
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry);
+bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
+                               size_t raw_len);
 d1l_packet_log_stats_t d1l_packet_log_stats(void);
 size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t max_entries);
+size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                            const char *direction, const char *kind, const char *search_text);
 esp_err_t d1l_packet_log_find_by_seq(uint32_t seq, d1l_packet_log_entry_t *out_entry);

@@ -55,6 +55,7 @@ class Packet:
     direction: str
     meta: str
     note: str
+    raw_hex: str
 
 
 @dataclass(frozen=True)
@@ -108,13 +109,13 @@ def sample_snapshot() -> Snapshot:
             Message("D1L Desk", "desk check", "TX stored", True),
         ),
         packets=(
-            Packet("Public", "RX", "RSSI -41 SNR 30 hop 1", "YKF Corebot test reply"),
-            Packet("Advert", "RX", "RSSI -44 SNR 29 hop 0", "YKF Room signed advert"),
-            Packet("DM", "TX", "ack hash 9A2B direct", "YKF Corebot desk check"),
+            Packet("Public", "RX", "RSSI -41 SNR 30 hop 1", "YKF Corebot test reply", "80245100A62F34B9"),
+            Packet("Advert", "RX", "RSSI -44 SNR 29 hop 0", "YKF Room signed advert", "C0019880BF9B9B1DD605"),
+            Packet("DM", "TX", "ack hash 9A2B direct", "YKF Corebot desk check", "41000BF060B6ABA1"),
         ),
         routes=(
-            Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon"),
-            Packet("DM route", "TX", "target 0BF0A direct", "direct path retained"),
+            Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon", ""),
+            Packet("DM route", "TX", "target 0BF0A direct", "direct path retained", ""),
         ),
     )
 
@@ -362,18 +363,21 @@ def render_packets(s: Surface, snap: Snapshot):
     s.text("Packets", (16, 64, 150, 92), 22, TEXT, True)
     draw_metric(s, (16, 104, 230, 176), "Signal", snap.latest_signal, "3 recent packets", GREEN)
     draw_metric(s, (250, 104, 464, 176), "Mesh Roles", "1 room / 1 repeater", "tap for role browser", ACCENT)
-    s.round_rect((16, 188, 464, 284))
-    s.text("Routes", (28, 196, 180, 218), 14, MUTED, True)
-    y = 224
-    for route in snap.routes:
-        draw_row(s, (28, y, 452, y + 25), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
+    for i, label in enumerate(("All", "RX", "TX", "Text")):
+        draw_button(s, (16 + i * 64, 188, 72 + i * 64, 222), label, GREEN if label == "All" else ACCENT)
+    draw_button(s, (286, 188, 366, 222), "Search", BLUE)
+    s.text("find raw/test", (374, 194, 464, 216), 11, AMBER)
+    s.round_rect((16, 232, 464, 326))
+    s.text("Packet Feed", (28, 240, 180, 262), 14, MUTED, True)
+    y = 268
+    for packet in snap.packets[:2]:
+        draw_row(s, (28, y, 452, y + 25), f"{packet.kind} {packet.direction}", f"{packet.meta}  {packet.note}")
         y += 29
-    s.round_rect((16, 296, 464, 402))
-    s.text("Packet Feed", (28, 304, 180, 326), 14, MUTED, True)
-    y = 332
-    for packet in snap.packets:
-        draw_row(s, (28, y, 452, y + 22), f"{packet.kind} {packet.direction}", f"{packet.meta}  {packet.note}")
-        y += 24
+    s.round_rect((16, 336, 464, 402))
+    s.text("Routes", (28, 344, 180, 366), 14, MUTED, True)
+    y = 372
+    for route in snap.routes[:1]:
+        draw_row(s, (28, y, 452, y + 25), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
     draw_dock(s, "Packets")
 
 
@@ -455,7 +459,22 @@ def render_packet_detail_sheet(s: Surface, snap: Snapshot):
     s.text(packet.meta, (44, 232, 436, 256), 16, GREEN)
     s.text("Payload", (44, 270, 180, 290), 13, MUTED, True)
     s.text("parsed MeshCore text packet", (44, 292, 436, 316), 16, BLUE)
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED)
+    s.text("Raw Hex", (44, 324, 180, 344), 13, MUTED, True)
+    s.text(packet.raw_hex, (44, 346, 436, 368), 14, BLUE)
+    draw_button(s, (44, 374, 200, 402), "Close", MUTED)
+    draw_dock(s, "Packets")
+
+
+def render_packet_search_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Packet Search", "Filter kind, note, or raw hex")
+    s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
+    s.text("Search kind, note, raw hex", (56, 166, 424, 190), 13, MUTED, True)
+    s.text("test", (56, 188, 424, 206), 16, TEXT)
+    draw_button(s, (44, 228, 156, 278), "Apply", GREEN)
+    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT)
+    draw_button(s, (288, 228, 400, 278), "Close", MUTED)
+    s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
+    s.text("Keyboard opens for packet search", (56, 318, 424, 350), 13, MUTED, False, "center")
     draw_dock(s, "Packets")
 
 
@@ -513,6 +532,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
+    "packet_search_sheet": render_packet_search_sheet,
     "mesh_roles_sheet": render_mesh_roles_sheet,
     "lock_overlay": render_lock_overlay,
     "onboarding_sheet": render_onboarding_sheet,
@@ -522,13 +542,14 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": ("MeshCore DeskOS", "Home", "Radio", "US/CAN", "Mesh", "Identity", "Unread", "Send", "Advert"),
     "messages": ("Messages", "Read", "Compose", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
-    "packets": ("Packets", "Signal", "Mesh Roles", "Routes", "Packet Feed"),
+    "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Health", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Fav", "Mute", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
-    "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Close"),
+    "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Raw Hex", "Close"),
+    "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
     "onboarding_sheet": (

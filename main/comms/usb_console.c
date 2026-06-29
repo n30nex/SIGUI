@@ -530,10 +530,78 @@ static void cmd_rp2040_status(void)
 
 static void print_packet_entry_json(const d1l_packet_log_entry_t *e)
 {
-    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u,\"note\":\"%s\"}",
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u,\"raw_len\":%u,\"raw_truncated\":%s,\"note\":\"%s\",\"raw_hex\":\"%s\"}",
            (unsigned long)e->seq, (unsigned long)e->uptime_ms,
            e->direction, e->kind, e->rssi_dbm, e->snr_tenths,
-           e->path_hash_bytes, e->path_hops, e->payload_len, e->note);
+           e->path_hash_bytes, e->path_hops, e->payload_len, e->raw_len,
+           bool_json(e->raw_truncated), e->note, e->raw_hex);
+}
+
+static void print_packet_entries_json(const char *cmd, const char *direction, const char *kind,
+                                      const char *search_text,
+                                      const d1l_packet_log_entry_t *entries, size_t copied,
+                                      const d1l_packet_log_stats_t *stats)
+{
+    ok_begin(cmd);
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu",
+           (unsigned)stats->count, (unsigned)stats->capacity,
+           (unsigned long)stats->total_written, (unsigned long)stats->dropped_oldest);
+    if (direction || kind || search_text) {
+        printf(",\"filter\":{\"direction\":\"%s\",\"kind\":\"%s\",\"search\":\"%s\"}",
+               direction ? direction : "any", kind ? kind : "any", search_text ? search_text : "");
+    }
+    printf(",\"entries\":[");
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_packet_entry_json(&entries[i]);
+    }
+    printf("],\"persisted\":true,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n");
+}
+
+static bool read_packet_token(const char **cursor, char *dest, size_t dest_size)
+{
+    if (!cursor || !*cursor || !dest || dest_size == 0) {
+        return false;
+    }
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
+    size_t out = 0;
+    while (**cursor != '\0' && **cursor != ' ' && out + 1U < dest_size) {
+        unsigned char c = (unsigned char)**cursor;
+        if (c < 32 || c > 126 || c == '"' || c == '\\') {
+            c = '_';
+        }
+        dest[out++] = (char)c;
+        (*cursor)++;
+    }
+    dest[out] = '\0';
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
+    return out > 0;
+}
+
+static void copy_packet_search(char *dest, size_t dest_size, const char *src)
+{
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    size_t out = 0;
+    while (src && *src == ' ') {
+        src++;
+    }
+    while (src && src[0] && out + 1U < dest_size) {
+        unsigned char c = (unsigned char)*src++;
+        if (c < 32 || c > 126 || c == '"' || c == '\\') {
+            c = '_';
+        }
+        dest[out++] = (char)c;
+    }
+    while (out > 0 && dest[out - 1U] == ' ') {
+        out--;
+    }
+    dest[out] = '\0';
 }
 
 static void cmd_packets(void)
@@ -541,15 +609,40 @@ static void cmd_packets(void)
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
     static d1l_packet_log_entry_t entries[8];
     size_t copied = d1l_packet_log_copy_recent(entries, 8);
-    ok_begin("packets");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
-           (unsigned)stats.count, (unsigned)stats.capacity,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
-    for (size_t i = 0; i < copied; ++i) {
-        printf("%s", i ? "," : "");
-        print_packet_entry_json(&entries[i]);
+    print_packet_entries_json("packets", NULL, NULL, NULL, entries, copied, &stats);
+}
+
+static void cmd_packets_filter(const char *line)
+{
+    const char *arg = line + strlen("packets filter ");
+    char direction[8] = "any";
+    char kind[16] = "any";
+    if (!read_packet_token(&arg, direction, sizeof(direction)) ||
+        !read_packet_token(&arg, kind, sizeof(kind)) ||
+        arg[0] != '\0') {
+        err_result("packets filter", "INVALID_FILTER", "usage: packets filter <any|rx|tx> <any|text|kind>");
+        return;
     }
-    printf("],\"persisted\":true,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n");
+
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    static d1l_packet_log_entry_t entries[8];
+    size_t copied = d1l_packet_log_query(entries, 8, direction, kind, NULL);
+    print_packet_entries_json("packets filter", direction, kind, NULL, entries, copied, &stats);
+}
+
+static void cmd_packets_search(const char *line)
+{
+    char search[D1L_PACKET_LOG_QUERY_TEXT_LEN] = {0};
+    copy_packet_search(search, sizeof(search), line + strlen("packets search "));
+    if (search[0] == '\0') {
+        err_result("packets search", "INVALID_QUERY", "usage: packets search <text>");
+        return;
+    }
+
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    static d1l_packet_log_entry_t entries[8];
+    size_t copied = d1l_packet_log_query(entries, 8, "any", "any", search);
+    print_packet_entries_json("packets search", "any", "any", search, entries, copied, &stats);
 }
 
 static void cmd_packets_detail(const char *line)
@@ -577,6 +670,37 @@ static void cmd_packets_detail(const char *line)
 
     ok_begin("packets detail");
     printf(",\"entry\":");
+    print_packet_entry_json(&entry);
+    printf("}\n");
+}
+
+static void cmd_packets_raw(const char *line)
+{
+    const char *arg = line + strlen("packets raw ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char *end = NULL;
+    unsigned long seq = strtoul(arg, &end, 10);
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (arg[0] == '\0' || end == arg || (end && *end != '\0') || seq == 0 || seq > UINT32_MAX) {
+        err_result("packets raw", "INVALID_SEQ", "usage: packets raw <seq>");
+        return;
+    }
+
+    d1l_packet_log_entry_t entry = {0};
+    esp_err_t ret = d1l_packet_log_find_by_seq((uint32_t)seq, &entry);
+    if (ret != ESP_OK) {
+        err_result("packets raw", esp_err_to_name(ret), "packet sequence not found");
+        return;
+    }
+
+    ok_begin("packets raw");
+    printf(",\"seq\":%lu,\"raw_len\":%u,\"raw_preview_bytes\":%u,\"raw_truncated\":%s,\"raw_hex\":\"%s\",\"entry\":",
+           (unsigned long)entry.seq, entry.raw_len, D1L_PACKET_LOG_RAW_PREVIEW_BYTES,
+           bool_json(entry.raw_truncated), entry.raw_hex);
     print_packet_entry_json(&entry);
     printf("}\n");
 }
@@ -1216,7 +1340,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1275,8 +1399,14 @@ static void handle_line(const char *line)
         cmd_rp2040_status();
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
+    } else if (strncmp(line, "packets filter ", 15) == 0) {
+        cmd_packets_filter(line);
+    } else if (strncmp(line, "packets search ", 15) == 0) {
+        cmd_packets_search(line);
     } else if (strncmp(line, "packets detail ", 15) == 0) {
         cmd_packets_detail(line);
+    } else if (strncmp(line, "packets raw ", 12) == 0) {
+        cmd_packets_raw(line);
     } else if (strcmp(line, "packets clear") == 0) {
         cmd_packets_clear();
     } else if (strcmp(line, "messages public") == 0) {

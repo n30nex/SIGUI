@@ -52,6 +52,7 @@
 - [x] Public unread/read state persists across reboot and is exposed through serial diagnostics plus the Messages UI.
 - [x] Route detail diagnostics and first Packet-tab route detail sheet are implemented, built, flashed, and Public-RF probed on `COM7`.
 - [x] Packet log persists newest 8 rows across reboot and exposes serial/touch packet detail.
+- [x] Packet log filter/search/raw-hex developer mode implemented in serial diagnostics and Packet-tab UI.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.

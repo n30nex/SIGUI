@@ -29,6 +29,7 @@ Coverage:
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, sheets, first-boot onboarding, and fail on missing required labels or measured text overflow.
 - First-boot onboarding contract: settings schema v3 must persist `onboarding_complete`, migrate schema v2 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
+- Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
@@ -59,8 +60,13 @@ Expected commands:
 - `radio get`
 - `mesh status`
 - `companion status`
+- `wifi status`
+- `wifi scan`
+- `ble status`
 - `rp2040 status`
 - `packets`
+- `packets filter any any`
+- `packets search test`
 - `messages public`
 - `messages dm`
 - `messages unread`
@@ -70,6 +76,7 @@ Expected commands:
 - `signal`
 - `roomservers`
 - `repeaters`
+- `crashlog`
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.

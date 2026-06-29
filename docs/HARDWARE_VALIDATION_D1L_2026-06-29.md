@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 3 first-boot onboarding slice: `0xa5d00`, 35% free in the app partition
+- Latest local build size after the Phase 6 packet filter/raw-hex slice: `0xa6ae0`, 35% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -285,13 +285,28 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
   - Health remained ready with stack floors of `current=1128` and `ui=1300` words, `lvgl_used_pct_peak=69`, and no heap/PSRAM leak signal beyond normal small movement.
   - The first attempted migration exposed a same-size v2/v3 settings-layout edge case; the checked-in migration now keys v2 migration on the stored schema version before retaining defaults for truly corrupt blobs.
+- Phase 6 packet filter/raw-hex local smoke: `artifacts/smoke/d1l-smoke-packet-filter-rawhex-local-COM7.json`
+  - 31 commands passed after flashing the local packet filter/raw-hex build.
+  - Smoke included `packets`, `packets filter any any`, and `packets search test`; all returned machine-readable OK responses.
+  - Because the packet-log schema advanced to v2 for raw hex fields, the first smoke after flashing started with an empty packet ring, as expected.
+  - `health` reported `board_ready=true`, `ui_ready=true`, and `reset_reason=POWERON`.
+- Phase 6 packet filter/raw-hex targeted Public `test` probe: `artifacts/smoke/d1l-packet-filter-rawhex-public-test-local-COM7.json`
+  - `packets clear` reset the v2 packet ring, then `mesh send public test` created fresh packet rows.
+  - `packets filter tx text` found 1 TX text row; `packets filter rx text` found 1 RX text row.
+  - `packets search test` matched 2 rows, and `packets raw 2` returned a non-empty raw hex preview with `raw_hex_len=44` and `raw_truncated=false`.
+  - Final `health` reported `board_ready=true` and `ui_ready=true`.
+- Phase 6 packet filter/raw-hex active Public `test` RF regression: `artifacts/soak/d1l-soak-packet-filter-rawhex-active-local-COM7.json`
+  - The 90 second soak passed with 5 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=3`; the packet log moved `packet_total_written_delta=6`.
+  - Packet rows carried raw hex previews for both TX and RX Public text rows, including `Krabs Node: Test OK CH0.` RX rows with bounded/truncated raw previews.
+  - Health remained ready with stack floors of `current=1008` and `ui=1304` words, `lvgl_used_pct_peak=79`, `heap_free_delta=-144`, and `psram_free_delta=0`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, Messages `Read` action, and Mesh Roles browser open/scroll/close flow is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Richer contact edit actions, dedicated room-server/repeater list screens, packet filtering/search, raw packet hex developer mode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and a first packet detail sheet.
+- Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
 - Flash backup was intentionally skipped per operator instruction.
