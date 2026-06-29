@@ -581,14 +581,14 @@ Tasks:
 - Quick replies. Status: first fixed Public `test` quick action is implemented.
 - Message delivery states. Status: persisted rows show queued TX and received RX state; ACK/delivery confirmation is still pending.
 - Unread/mute/favorite logic.
-- Heard nodes list with virtualization.
+- Heard nodes list with virtualization. Status: first bounded persisted heard-node store and newest-node UI rows are implemented and validated on `COM7` with a signed `YKF 1W` advert; large-list virtualization and richer filters are pending.
 - Contact detail cards.
 - Node actions: DM, ping/trace if available, telemetry request if available.
 
 Acceptance:
 
 - User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented and the Public RF path still receives local bot replies, while manual touch entry review and DMs are pending.
-- Node list does not crash or stutter with large simulated meshes.
+- Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack; large simulated mesh stress is still pending.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset.
 
 ### Phase 5 — Companion modes and management

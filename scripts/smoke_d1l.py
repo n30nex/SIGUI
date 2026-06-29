@@ -29,6 +29,7 @@ SMOKE_COMMANDS = [
     "rp2040 status",
     "packets",
     "messages public",
+    "nodes",
     "health",
 ]
 

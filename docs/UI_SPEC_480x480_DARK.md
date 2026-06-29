@@ -14,7 +14,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Home dashboard cards for mesh readiness, identity, RF packet counters, and system memory.
 - Bottom dock navigation for Home, Messages, Nodes, Packets, and Settings.
 - Public message screen with persisted recent Public rows, a touch `test` send action, and a free-text composer sheet routed through the app model.
-- Nodes screen that reports live advert/RF counts while full contacts and routes remain pending.
+- Nodes screen that reports live advert/RF counts and renders newest persisted heard-node rows while full contacts and routes remain pending.
 - Packet log screen with bounded recent packet rows.
 - Settings screen with radio profile, identity, path-hash, and advert quick action.
 - Modal advert sheet for zero-hop/flood actions.
@@ -32,7 +32,7 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 
 - Deeper Public scrollback/search.
 - DMs.
-- Heard nodes and contacts with persistent storage.
+- Contact detail and route views.
 - Packet detail.
 - Radio settings editing from touch.
 - Diagnostics detail and reset/crash views.

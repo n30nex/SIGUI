@@ -9,6 +9,7 @@
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
 #include "mesh/message_store.h"
+#include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/meshcore_service.h"
 #include "ui/ui_phase1.h"
@@ -35,6 +36,10 @@ void app_main(void)
     esp_err_t message_store_ret = d1l_message_store_init();
     if (message_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "message store load failed: %s", esp_err_to_name(message_store_ret));
+    }
+    esp_err_t node_store_ret = d1l_node_store_init();
+    if (node_store_ret != ESP_OK) {
+        ESP_LOGW(TAG, "node store load failed: %s", esp_err_to_name(node_store_ret));
     }
     d1l_packet_log_init();
     d1l_meshcore_service_init();

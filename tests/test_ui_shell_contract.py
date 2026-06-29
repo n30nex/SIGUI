@@ -12,8 +12,11 @@ def test_app_model_exposes_bounded_ui_snapshot():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     assert "D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U" in header
+    assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "d1l_app_snapshot_t" in header
     assert "d1l_app_model_snapshot" in header
+    assert "static d1l_app_snapshot_t s_snapshot" in read("main/ui/ui_phase1.c")
+    assert "d1l_node_store_copy_recent" in source
     assert "d1l_packet_log_copy_recent" in source
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
@@ -62,3 +65,12 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source
     assert '"Test"' in source
+
+
+def test_nodes_screen_renders_heard_node_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "render_node_row" in source
+    assert "recent_node_count" in source
+    assert "recent_nodes" in source
+    assert "No heard nodes yet" in source
+    assert "node_total_written" in source

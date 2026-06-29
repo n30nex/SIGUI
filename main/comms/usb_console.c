@@ -20,6 +20,7 @@
 #include "hal/rp2040_bridge.h"
 #include "hal/sx1262_indicator.h"
 #include "mesh/message_store.h"
+#include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
@@ -470,6 +471,37 @@ static void cmd_messages_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static void cmd_nodes(void)
+{
+    d1l_node_store_stats_t stats = d1l_node_store_stats();
+    d1l_node_entry_t entries[8];
+    size_t copied = d1l_node_store_copy_recent(entries, 8);
+    ok_begin("nodes");
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+           (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+    for (size_t i = 0; i < copied; ++i) {
+        const d1l_node_entry_t *e = &entries[i];
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u}",
+               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
+               (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
+               (unsigned long)e->heard_count, e->fingerprint, e->name, e->type,
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+    }
+    printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store\"}\n");
+}
+
+static void cmd_nodes_clear(void)
+{
+    esp_err_t ret = d1l_node_store_clear();
+    if (ret != ESP_OK) {
+        err_result("nodes clear", esp_err_to_name(ret), "could not clear heard-node store");
+        return;
+    }
+    ok_begin("nodes clear");
+    printf(",\"persisted\":true,\"count\":0}\n");
+}
+
 static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
@@ -484,7 +516,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"messages public\",\"messages clear\",\"nodes\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"messages public\",\"messages clear\",\"nodes\",\"nodes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -541,6 +573,10 @@ static void handle_line(const char *line)
         cmd_messages_public();
     } else if (strcmp(line, "messages clear") == 0) {
         cmd_messages_clear();
+    } else if (strcmp(line, "nodes") == 0) {
+        cmd_nodes();
+    } else if (strcmp(line, "nodes clear") == 0) {
+        cmd_nodes_clear();
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
     } else if (strcmp(line, "wifi off") == 0) {
@@ -557,7 +593,7 @@ static void handle_line(const char *line)
         cmd_mesh_advert("mesh advert flood", true);
     } else if (strncmp(line, "mesh send public ", 17) == 0) {
         cmd_mesh_send_public(line);
-    } else if (strcmp(line, "nodes") == 0 || strcmp(line, "crashlog") == 0) {
+    } else if (strcmp(line, "crashlog") == 0) {
         err_result(line, "PHASE2_STUB", "MeshCore protocol and persistence commands are scheduled for Phase 2");
     } else if (strcmp(line, "reboot") == 0) {
         ok_begin("reboot");

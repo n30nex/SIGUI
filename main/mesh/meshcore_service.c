@@ -14,6 +14,7 @@
 #include "ed_25519.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/message_store.h"
+#include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "radio.h"
 #include "sx126x.h"
@@ -179,6 +180,14 @@ static void write_le32(uint8_t *dest, uint32_t value)
     dest[1] = (uint8_t)((value >> 8) & 0xffU);
     dest[2] = (uint8_t)((value >> 16) & 0xffU);
     dest[3] = (uint8_t)((value >> 24) & 0xffU);
+}
+
+static uint32_t read_le32(const uint8_t *src)
+{
+    return (uint32_t)src[0] |
+           ((uint32_t)src[1] << 8) |
+           ((uint32_t)src[2] << 16) |
+           ((uint32_t)src[3] << 24);
 }
 
 static bool path_len_valid(uint8_t path_len)
@@ -690,6 +699,13 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
     }
     s_status.rx_packets++;
     s_status.rx_adverts++;
+    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, name, type, rssi,
+                                                 (snr * 10) / 4,
+                                                 packet.path_hash_bytes, packet.path_hops,
+                                                 read_le32(timestamp));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
+    }
     append_packet_log("rx", "advert", rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, note);
 }

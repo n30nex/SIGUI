@@ -25,6 +25,7 @@ def test_meshcore_service_decodes_verified_adverts():
     assert "D1L_MESHCORE_PAYLOAD_ADVERT 0x04U" in source
     assert "D1L_MESHCORE_ADVERT_MIN_PAYLOAD" in source
     assert "ed25519_verify" in source
+    assert "d1l_node_store_upsert_advert" in source
     assert 'append_packet_log("rx", "advert"' in source
     assert "parse_rx_advert_packet(payload, size, rssi, snr)" in source
     assert "../third_party/MeshCore/lib/ed25519/verify.c" in cmake

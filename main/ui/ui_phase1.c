@@ -32,6 +32,7 @@ static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
+static d1l_app_snapshot_t s_snapshot;
 
 static void render_active_tab(void);
 
@@ -248,6 +249,26 @@ static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entr
     lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static void render_node_row(lv_obj_t *parent, int y, const d1l_node_entry_t *entry)
+{
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 56);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *name = create_label(row, entry->name, 0xF4F7FB);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(name, 190);
+    lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *type = create_label(row, entry->type, 0x5EEAD4);
+    lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
+    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
+    label_set_fmt(meta, "%.8s  rssi %d  snr %s%d.%d",
+                  entry->fingerprint, entry->rssi_dbm,
+                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
 static void public_test_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -337,19 +358,24 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[64];
-    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_adverts);
-    snprintf(detail, sizeof(detail), "valid adverts decoded this boot");
+    snprintf(value, sizeof(value), "%u", (unsigned)snapshot->node_count);
+    snprintf(detail, sizeof(detail), "heard nodes  adverts %lu",
+             (unsigned long)snapshot->rx_adverts);
     render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
-    snprintf(detail, sizeof(detail), "live RF packets in packet log");
+    snprintf(detail, sizeof(detail), "node writes %lu",
+             (unsigned long)snapshot->node_total_written);
     render_metric_card(s_content, 238, 16, "Live RF", value, detail, 0x93C5FD);
 
-    lv_obj_t *panel = create_panel(s_content, 18, 148, 424, 132);
-    create_label(panel, "Contacts", 0xD7E1EA);
-    lv_obj_t *routes = create_label(panel, "Routes", 0xD7E1EA);
-    lv_obj_align(routes, LV_ALIGN_TOP_LEFT, 0, 40);
-    lv_obj_t *small = create_label(panel, "No saved contact or route cache", 0x8EA0AE);
-    lv_obj_align(small, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    int y = 136;
+    for (size_t i = 0; i < snapshot->recent_node_count; ++i) {
+        render_node_row(s_content, y, &snapshot->recent_nodes[i]);
+        y += 62;
+    }
+    if (snapshot->recent_node_count == 0) {
+        lv_obj_t *empty = create_label(s_content, "No heard nodes yet", 0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
+    }
 }
 
 static void render_packets(const d1l_app_snapshot_t *snapshot)
@@ -417,25 +443,24 @@ static void render_active_tab(void)
     if (!s_content) {
         return;
     }
-    d1l_app_snapshot_t snapshot;
-    d1l_app_model_snapshot(&snapshot);
-    update_chrome(&snapshot);
+    d1l_app_model_snapshot(&s_snapshot);
+    update_chrome(&s_snapshot);
     lv_obj_clean(s_content);
     switch (s_active_tab) {
     case D1L_UI_TAB_HOME:
-        render_home(&snapshot);
+        render_home(&s_snapshot);
         break;
     case D1L_UI_TAB_MESSAGES:
-        render_messages(&snapshot);
+        render_messages(&s_snapshot);
         break;
     case D1L_UI_TAB_NODES:
-        render_nodes(&snapshot);
+        render_nodes(&s_snapshot);
         break;
     case D1L_UI_TAB_PACKETS:
-        render_packets(&snapshot);
+        render_packets(&s_snapshot);
         break;
     case D1L_UI_TAB_SETTINGS:
-        render_settings(&snapshot);
+        render_settings(&s_snapshot);
         break;
     }
 }
@@ -467,9 +492,8 @@ static void unlock_event_cb(lv_event_t *event)
 static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
-    d1l_app_snapshot_t snapshot;
-    d1l_app_model_snapshot(&snapshot);
-    update_chrome(&snapshot);
+    d1l_app_model_snapshot(&s_snapshot);
+    update_chrome(&s_snapshot);
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
         lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
         s_toast_until = 0;
