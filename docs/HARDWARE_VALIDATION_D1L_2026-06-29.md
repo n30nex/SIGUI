@@ -139,12 +139,24 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Phase 4 Public `test` response-window regression: `artifacts/smoke/d1l-public-test-response-window-local-COM7.json`
   - Three fresh `mesh send public test` commands reached the local COM11 bot: `rx_channel_total +3`, `relay_success_total +3`, and `discord_send_success_total +3`.
   - D1L did not hear a fresh `Test OK` Public reply during this latest window, so that listener-side reply check remains open even though D1L TX to the bot was verified.
+- Phase 4 DM ACK/path backend local smoke: `artifacts/smoke/d1l-smoke-dm-ack-path-local-COM7.json`
+  - 20 commands passed after flashing the local ACK/path build.
+  - `mesh status` reported `state=ready`, `identity_ready=true`, and `radio_ready=true`.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 ACK/path Public RF sanity: `artifacts/smoke/d1l-public-test-bot-counter-delta-local-COM7.json`
+  - D1L queued Public `test`; COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
+  - D1L decoded a fresh relayed Public `test` at RSSI `-43`, SNR `30`, and stayed up past 116 seconds with `board_ready=true` and `ui_ready=true`.
+- Phase 4 DM ACK/path/direct probe: `artifacts/smoke/d1l-dm-ack-path-direct-local-COM7.json`
+  - `contacts add 0BF0A701D5AE2DB6 YKF Corebot` promoted the fresh heard-node public key.
+  - `mesh send dm 0BF0A701D5AE2DB6 ack path smoke 1` queued a private text flood and wrote a DM TX row with ACK hash `1338111682`.
+  - COM11 Meshcorebot observed the DM contact packet: `rx_contact_total +1`, `relay_success_total +1`, `discord_send_success_total +1`, `rx_log_total +3`, and `rx_duplicate_total +1`.
+  - The local bot did not emit a MeshCore ACK/PATH return during this probe, so the expected unresolved fields remained `acked=false`, `out_path_known=false`, and no direct-route RF proof was produced.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
 - Manual physical touch entry on the Public composer keyboard is still pending.
-- Full DM workflow is still pending: touch compose/thread UI, ACK handling, direct-path routing, and a controlled inbound DM artifact.
+- Full DM workflow is still pending: touch compose/thread UI, controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation needs another response-window pass; the latest local window proved COM11 bot receipt/relay but not a fresh D1L-decoded `Test OK` reply.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
 - Contact detail/edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview and route count.

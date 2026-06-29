@@ -8,7 +8,8 @@
 #define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
 #define D1L_CONTACT_STORE_SCHEMA_V1 1U
-#define D1L_CONTACT_STORE_SCHEMA 2U
+#define D1L_CONTACT_STORE_SCHEMA_V2 2U
+#define D1L_CONTACT_STORE_SCHEMA 3U
 
 typedef struct {
     uint32_t seq;
@@ -34,6 +35,32 @@ typedef struct {
     uint32_t count;
     d1l_contact_entry_v1_t entries[D1L_CONTACT_STORE_CAPACITY];
 } d1l_contact_store_blob_v1_t;
+
+typedef struct {
+    uint32_t seq;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+    char alias[D1L_CONTACT_ALIAS_LEN];
+    char heard_name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool favorite;
+    bool muted;
+} d1l_contact_entry_v2_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_v2_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_v2_t;
 
 typedef struct {
     uint32_t schema;
@@ -121,6 +148,14 @@ static bool blob_v1_is_valid(const d1l_contact_store_blob_v1_t *blob, size_t len
            blob->next_seq > 0;
 }
 
+static bool blob_v2_is_valid(const d1l_contact_store_blob_v2_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA_V2 &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
 static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
 {
     clear_ram();
@@ -147,6 +182,34 @@ static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
     }
 }
 
+static void migrate_v2_blob(const d1l_contact_store_blob_v2_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0; i < s_count; ++i) {
+        s_entries[i].seq = old_blob->entries[i].seq;
+        s_entries[i].created_ms = old_blob->entries[i].created_ms;
+        s_entries[i].updated_ms = old_blob->entries[i].updated_ms;
+        memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
+               sizeof(s_entries[i].fingerprint));
+        memcpy(s_entries[i].public_key_hex, old_blob->entries[i].public_key_hex,
+               sizeof(s_entries[i].public_key_hex));
+        memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
+        memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
+               sizeof(s_entries[i].heard_name));
+        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        s_entries[i].last_rssi_dbm = old_blob->entries[i].last_rssi_dbm;
+        s_entries[i].last_snr_tenths = old_blob->entries[i].last_snr_tenths;
+        s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
+        s_entries[i].path_hops = old_blob->entries[i].path_hops;
+        s_entries[i].favorite = old_blob->entries[i].favorite;
+        s_entries[i].muted = old_blob->entries[i].muted;
+    }
+}
+
 static int find_index_by_fingerprint(const char *fingerprint)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
@@ -158,6 +221,20 @@ static int find_index_by_fingerprint(const char *fingerprint)
         }
     }
     return -1;
+}
+
+static bool contact_path_len_valid(uint8_t path_len)
+{
+    const uint8_t hash_count = path_len & 63U;
+    const uint8_t hash_size = (uint8_t)((path_len >> 6) + 1U);
+    return hash_size < 4U && (hash_count * hash_size) <= D1L_CONTACT_OUT_PATH_MAX;
+}
+
+static uint8_t contact_path_byte_len(uint8_t path_len)
+{
+    const uint8_t hash_count = path_len & 63U;
+    const uint8_t hash_size = (uint8_t)((path_len >> 6) + 1U);
+    return (uint8_t)(hash_count * hash_size);
 }
 
 static size_t oldest_index(void)
@@ -196,6 +273,10 @@ esp_err_t d1l_contact_store_init(void)
     } else if (ret == ESP_OK &&
                blob_v1_is_valid((const d1l_contact_store_blob_v1_t *)&s_blob_scratch, len)) {
         migrate_v1_blob((const d1l_contact_store_blob_v1_t *)&s_blob_scratch);
+        migrated = true;
+    } else if (ret == ESP_OK &&
+               blob_v2_is_valid((const d1l_contact_store_blob_v2_t *)&s_blob_scratch, len)) {
+        migrate_v2_blob((const d1l_contact_store_blob_v2_t *)&s_blob_scratch);
         migrated = true;
     } else if (ret == ESP_OK) {
         clear_ram();
@@ -305,6 +386,43 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
         sanitize_ascii(entry->type, sizeof(entry->type), "node");
     }
 
+    s_total_written++;
+    return persist_store();
+}
+
+esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
+                                        uint8_t path_len)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !contact_path_len_valid(path_len)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint8_t bytes = contact_path_byte_len(path_len);
+    if (bytes > 0 && path == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_contact_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    int existing = find_index_by_fingerprint(fingerprint);
+    if (existing < 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    entry->seq = s_next_seq++;
+    entry->updated_ms = now_ms;
+    entry->out_path_updated_ms = now_ms;
+    entry->out_path_valid = true;
+    entry->out_path_len = path_len;
+    memset(entry->out_path, 0, sizeof(entry->out_path));
+    if (bytes > 0) {
+        memcpy(entry->out_path, path, bytes);
+    }
     s_total_written++;
     return persist_store();
 }

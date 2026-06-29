@@ -195,6 +195,32 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
     return persist_store();
 }
 
+esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry)
+{
+    if (ack_hash == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_dm_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    for (size_t i = 0; i < s_count; ++i) {
+        d1l_dm_entry_t *entry = &s_entries[i];
+        if (entry->ack_hash == ack_hash && strncmp(entry->direction, "tx", sizeof(entry->direction)) == 0) {
+            entry->delivered = true;
+            entry->acked = true;
+            if (out_entry) {
+                *out_entry = *entry;
+            }
+            return persist_store();
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
 d1l_dm_store_stats_t d1l_dm_store_stats(void)
 {
     d1l_dm_store_stats_t stats = {

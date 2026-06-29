@@ -80,8 +80,10 @@ For Phase 4 direct-message store validation:
 3. Run `mesh send dm <fingerprint> <text>`.
 4. Verify `messages dm` contains a TX row with the contact fingerprint, alias, text, `direction="tx"`, `persisted=true`, and a nonzero `ack_hash`.
 5. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement.
-6. Reboot.
-7. Verify `messages dm` retains the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
+6. If the peer emits MeshCore ACK/PATH returns, verify `messages dm` marks the TX row `acked=true` and `contacts` shows `out_path_known=true`.
+7. Send a second DM to the same contact and verify `routes` records `kind="dm_text"`, `direction="tx"`, and `route="direct"`.
+8. Reboot.
+9. Verify `messages dm` retains the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
 ## Heard Node Store
 
@@ -102,7 +104,7 @@ For Phase 4 contact-store validation:
 3. Verify `nodes` contains a heard node with a 16-hex fingerprint.
 4. Run `contacts add <fingerprint>`.
 5. Verify `contacts add` reports `source="heard_node"`.
-6. Verify `contacts` contains the promoted alias, full 64-hex `public_key`, heard name, type, RSSI/SNR, path metadata, and `persisted=true`.
+6. Verify `contacts` contains the promoted alias, full 64-hex `public_key`, heard name, type, RSSI/SNR, path metadata, `out_path_known`, `out_path_len`, and `persisted=true`.
 7. Reboot.
 8. Verify `contacts` retains the row and its copied `public_key`.
 

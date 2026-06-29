@@ -572,12 +572,14 @@ static void cmd_contacts(void)
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_contact_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"favorite\":%s,\"muted\":%s}",
+        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"out_path_known\":%s,\"out_path_len\":%u,\"out_path_updated_ms\":%lu,\"favorite\":%s,\"muted\":%s}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->created_ms,
                (unsigned long)e->updated_ms, e->fingerprint, e->public_key_hex,
                e->alias, e->heard_name, e->type, e->last_rssi_dbm,
                e->last_snr_tenths, e->path_hash_bytes, e->path_hops,
-               bool_json(e->favorite), bool_json(e->muted));
+               bool_json(e->out_path_valid), e->out_path_len,
+               (unsigned long)e->out_path_updated_ms, bool_json(e->favorite),
+               bool_json(e->muted));
     }
     printf("],\"persisted\":true,\"note\":\"Contacts are promoted from heard nodes into a bounded NVS store\"}\n");
 }

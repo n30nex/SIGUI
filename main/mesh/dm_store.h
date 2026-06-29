@@ -44,5 +44,6 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
                               int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
                               uint8_t attempt, bool delivered, bool acked,
                               uint32_t ack_hash);
+esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
 size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries);

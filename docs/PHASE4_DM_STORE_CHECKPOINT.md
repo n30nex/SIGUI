@@ -11,6 +11,7 @@ Date: 2026-06-29
 - Added best-effort DM RX decode for known contacts with retained public keys.
 - Added recent DM rows to the app snapshot and Messages screen preview.
 - Added DM commands to the hardware smoke command list.
+- Follow-up ACK/path backend is covered in `PHASE4_DM_ACK_PATH_CHECKPOINT.md`.
 
 ## Results
 
@@ -25,7 +26,6 @@ Date: 2026-06-29
 ## Remaining Gaps
 
 - D1L did not hear a fresh local bot `Test OK` Public reply during the latest three-send response window, even though COM11 received and relayed all three Public `test` packets.
-- DM ACK handling is not implemented yet; TX rows keep the calculated ACK hash but remain `acked=false`.
-- Direct-path DM routing is not implemented yet; the current TX path uses MeshCore flood routing.
+- DM ACK/PATH receive parsing and direct-path TX selection are now implemented; controlled RF proof still needs a peer that emits ACK/PATH returns.
 - Touch DM composer, contact detail actions, unread state, retry/resend, and full thread UI are still pending.
 - RX DM decode is implemented for known retained public keys but still needs a controlled inbound DM artifact.

@@ -27,12 +27,17 @@
 #define D1L_MESHCORE_ROUTE_DIRECT 0x02U
 #define D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT 0x03U
 #define D1L_MESHCORE_PAYLOAD_TEXT 0x02U
+#define D1L_MESHCORE_PAYLOAD_ACK 0x03U
 #define D1L_MESHCORE_PAYLOAD_ADVERT 0x04U
 #define D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U
+#define D1L_MESHCORE_PAYLOAD_PATH 0x08U
+#define D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU
 #define D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD \
     ((uint8_t)((D1L_MESHCORE_PAYLOAD_GROUP_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
 #define D1L_MESHCORE_HEADER_DM_TEXT_FLOOD \
     ((uint8_t)((D1L_MESHCORE_PAYLOAD_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
+#define D1L_MESHCORE_HEADER_DM_TEXT_DIRECT \
+    ((uint8_t)((D1L_MESHCORE_PAYLOAD_TEXT << 2) | D1L_MESHCORE_ROUTE_DIRECT))
 #define D1L_MESHCORE_PUB_KEY_SIZE 32U
 #define D1L_MESHCORE_SIGNATURE_SIZE 64U
 #define D1L_MESHCORE_SEED_SIZE 32U
@@ -63,11 +68,13 @@ typedef struct {
     char alias[D1L_CONTACT_ALIAS_LEN];
     char text[D1L_MESSAGE_TEXT_LEN];
     uint8_t path_hash_bytes;
+    uint8_t path_hops;
     uint8_t attempt;
     uint32_t ack_hash;
 } d1l_pending_dm_tx_t;
 
 static d1l_pending_dm_tx_t s_pending_dm_tx;
+static d1l_contact_entry_t s_contact_scan[D1L_CONTACT_STORE_CAPACITY];
 extern SX126x_t SX126x;
 
 static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
@@ -88,6 +95,8 @@ typedef struct {
     uint8_t path_len;
     uint8_t path_hash_bytes;
     uint8_t path_hops;
+    const uint8_t *path;
+    uint8_t path_byte_len;
     const uint8_t *payload;
     uint16_t payload_len;
 } d1l_meshcore_wire_packet_t;
@@ -213,8 +222,9 @@ static void append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
         return;
     }
     esp_err_t ret = d1l_dm_store_append(pending->fingerprint, pending->alias, "tx",
-                                        pending->text, 0, 0, pending->path_hash_bytes, 0,
-                                        pending->attempt, false, false, pending->ack_hash);
+                                        pending->text, 0, 0, pending->path_hash_bytes,
+                                        pending->path_hops, pending->attempt, false, false,
+                                        pending->ack_hash);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "DM tx store append failed: %s", esp_err_to_name(ret));
     }
@@ -244,7 +254,7 @@ static void flush_pending_tx(void)
 }
 
 static void remember_pending_dm_tx(const d1l_contact_entry_t *contact, const char *text,
-                                   uint8_t path_hash_bytes, uint8_t attempt,
+                                   uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
                                    uint32_t ack_hash)
 {
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
@@ -258,6 +268,7 @@ static void remember_pending_dm_tx(const d1l_contact_entry_t *contact, const cha
                   contact->alias[0] ? contact->alias : contact->fingerprint);
     sanitize_note(s_pending_dm_tx.text, sizeof(s_pending_dm_tx.text), text);
     s_pending_dm_tx.path_hash_bytes = path_hash_bytes;
+    s_pending_dm_tx.path_hops = path_hops;
     s_pending_dm_tx.attempt = attempt;
     s_pending_dm_tx.ack_hash = ack_hash;
 }
@@ -342,6 +353,8 @@ static bool parse_wire_packet(const uint8_t *raw, uint16_t size, d1l_meshcore_wi
     if (i + path_bytes >= size) {
         return false;
     }
+    out->path = path_bytes > 0 ? &raw[i] : NULL;
+    out->path_byte_len = path_bytes;
     i += path_bytes;
     out->path_hash_bytes = path_hash_size(out->path_len);
     out->path_hops = path_hash_count(out->path_len);
@@ -635,7 +648,9 @@ static esp_err_t calc_dm_ack_hash(uint32_t *out_hash, const uint8_t *plain, size
 
 static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
                                       const d1l_contact_entry_t *contact,
-                                      const char *text, uint8_t path_hash_bytes,
+                                      const char *text, uint8_t flood_path_hash_bytes,
+                                      bool use_direct, const uint8_t *direct_path,
+                                      uint8_t direct_path_len,
                                       uint32_t tx_timestamp, uint8_t *raw,
                                       size_t raw_size, uint8_t *out_len,
                                       uint32_t *out_ack_hash)
@@ -644,8 +659,15 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
         !raw || !out_len || !out_ack_hash) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (path_hash_bytes < 1 || path_hash_bytes > 3 || contact->public_key_hex[0] == '\0') {
+    if (contact->public_key_hex[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (!use_direct && (flood_path_hash_bytes < 1 || flood_path_hash_bytes > 3)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (use_direct && (!path_len_valid(direct_path_len) ||
+                       (path_byte_len(direct_path_len) > 0 && direct_path == NULL))) {
+        return ESP_ERR_INVALID_ARG;
     }
 
     uint8_t dest_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
@@ -678,12 +700,17 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
         return ret;
     }
 
-    if (raw_size < 4U) {
+    const uint8_t direct_path_bytes = use_direct ? path_byte_len(direct_path_len) : 0U;
+    if (raw_size < (size_t)(4U + direct_path_bytes)) {
         return ESP_ERR_INVALID_SIZE;
     }
     size_t i = 0;
-    raw[i++] = D1L_MESHCORE_HEADER_DM_TEXT_FLOOD;
-    raw[i++] = (uint8_t)((path_hash_bytes - 1U) << 6);
+    raw[i++] = use_direct ? D1L_MESHCORE_HEADER_DM_TEXT_DIRECT : D1L_MESHCORE_HEADER_DM_TEXT_FLOOD;
+    raw[i++] = use_direct ? direct_path_len : (uint8_t)((flood_path_hash_bytes - 1U) << 6);
+    if (direct_path_bytes > 0) {
+        memcpy(&raw[i], direct_path, direct_path_bytes);
+        i += direct_path_bytes;
+    }
     raw[i++] = dest_pub[0];
     raw[i++] = settings->identity_public_key[0];
 
@@ -749,10 +776,9 @@ static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, in
         return;
     }
 
-    d1l_contact_entry_t contacts[D1L_CONTACT_STORE_CAPACITY];
-    size_t copied = d1l_contact_store_copy_recent(contacts, D1L_CONTACT_STORE_CAPACITY);
+    size_t copied = d1l_contact_store_copy_recent(s_contact_scan, D1L_CONTACT_STORE_CAPACITY);
     for (size_t i = 0; i < copied; ++i) {
-        d1l_contact_entry_t *contact = &contacts[i];
+        d1l_contact_entry_t *contact = &s_contact_scan[i];
         uint8_t sender_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
         if (contact->public_key_hex[0] == '\0' ||
             !hex_to_bytes(sender_pub, sizeof(sender_pub), contact->public_key_hex) ||
@@ -799,6 +825,133 @@ static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, in
         snprintf(note, sizeof(note), "%.12s: %.24s", contact->alias, message);
         append_packet_log("rx", "dm_text", rssi, snr, packet.path_hash_bytes,
                           packet.path_hops, size, note);
+        return;
+    }
+}
+
+static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *packet,
+                          int16_t rssi, int8_t snr, uint16_t size, const char *source)
+{
+    d1l_dm_entry_t acked = {0};
+    esp_err_t ret = d1l_dm_store_mark_acked(ack_hash, &acked);
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    if (ret == ESP_OK) {
+        snprintf(note, sizeof(note), "ack %lu %.12s", (unsigned long)ack_hash,
+                 acked.contact_alias);
+        esp_err_t route_ret =
+            d1l_route_store_upsert_observation(acked.contact_fingerprint, acked.contact_alias,
+                                               "dm_ack", route_name(packet->route), "rx", rssi,
+                                               (snr * 10) / 4, packet->path_hash_bytes,
+                                               packet->path_hops, size);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store DM ACK rx failed: %s", esp_err_to_name(route_ret));
+        }
+        append_packet_log("rx", "dm_ack", rssi, snr, packet->path_hash_bytes,
+                          packet->path_hops, size, note);
+    } else {
+        snprintf(note, sizeof(note), "%s unmatched %lu", source ? source : "ack",
+                 (unsigned long)ack_hash);
+        append_packet_log("rx", "dm_ack_unmatched", rssi, snr, packet->path_hash_bytes,
+                          packet->path_hops, size, note);
+    }
+}
+
+static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    d1l_meshcore_wire_packet_t packet;
+    if (!parse_wire_packet(payload, size, &packet)) {
+        return;
+    }
+
+    uint32_t ack_hash = 0;
+    const char *source = "ack";
+    if (packet.type == D1L_MESHCORE_PAYLOAD_ACK && packet.payload_len >= 4U) {
+        ack_hash = read_le32(packet.payload);
+    } else if (packet.type == D1L_MESHCORE_PAYLOAD_MULTIPART &&
+               packet.payload_len >= 5U &&
+               (packet.payload[0] & 0x0fU) == D1L_MESHCORE_PAYLOAD_ACK) {
+        ack_hash = read_le32(&packet.payload[1]);
+        source = "multi_ack";
+    } else {
+        return;
+    }
+
+    s_status.rx_packets++;
+    record_dm_ack(ack_hash, &packet, rssi, snr, size, source);
+}
+
+static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    d1l_meshcore_wire_packet_t packet;
+    if (!parse_wire_packet(payload, size, &packet) ||
+        packet.type != D1L_MESHCORE_PAYLOAD_PATH ||
+        packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
+        return;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    if (!settings->identity_ready || packet.payload[0] != settings->identity_public_key[0]) {
+        return;
+    }
+
+    const uint8_t src_hash = packet.payload[1];
+    size_t copied = d1l_contact_store_copy_recent(s_contact_scan, D1L_CONTACT_STORE_CAPACITY);
+    for (size_t i = 0; i < copied; ++i) {
+        d1l_contact_entry_t *contact = &s_contact_scan[i];
+        uint8_t sender_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+        if (contact->public_key_hex[0] == '\0' ||
+            !hex_to_bytes(sender_pub, sizeof(sender_pub), contact->public_key_hex) ||
+            sender_pub[0] != src_hash) {
+            continue;
+        }
+
+        uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+        ed25519_key_exchange(secret, sender_pub, settings->identity_private_key);
+        uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
+        const size_t plain_len =
+            meshcore_decrypt_after_mac(secret, plain, sizeof(plain) - 1U,
+                                       &packet.payload[2], packet.payload_len - 2U);
+        memset(secret, 0, sizeof(secret));
+        if (plain_len < 2U) {
+            continue;
+        }
+
+        const uint8_t out_path_len = plain[0];
+        if (!path_len_valid(out_path_len)) {
+            continue;
+        }
+        const uint8_t out_path_bytes = path_byte_len(out_path_len);
+        if ((size_t)(2U + out_path_bytes) > plain_len) {
+            continue;
+        }
+
+        const uint8_t *out_path = out_path_bytes > 0 ? &plain[1] : NULL;
+        const uint8_t extra_type = plain[1U + out_path_bytes];
+        const uint8_t *extra = &plain[2U + out_path_bytes];
+        const size_t extra_len = plain_len - (2U + out_path_bytes);
+        esp_err_t ret = d1l_contact_store_update_path(contact->fingerprint, out_path, out_path_len);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "contact path update failed: %s", esp_err_to_name(ret));
+            return;
+        }
+
+        const uint8_t out_hash_bytes = path_hash_size(out_path_len);
+        const uint8_t out_hops = path_hash_count(out_path_len);
+        s_status.rx_packets++;
+        esp_err_t route_ret =
+            d1l_route_store_upsert_observation(contact->fingerprint, contact->alias, "path_return",
+                                               route_name(packet.route), "rx", rssi,
+                                               (snr * 10) / 4, out_hash_bytes, out_hops, size);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store path rx failed: %s", esp_err_to_name(route_ret));
+        }
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "path %.12s hops=%u", contact->alias, out_hops);
+        append_packet_log("rx", "path_return", rssi, snr, out_hash_bytes, out_hops, size, note);
+
+        if (extra_type == D1L_MESHCORE_PAYLOAD_ACK && extra_len >= 4U) {
+            record_dm_ack(read_le32(extra), &packet, rssi, snr, size, "path_ack");
+        }
         return;
     }
 }
@@ -1034,6 +1187,8 @@ static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr
 {
     parse_rx_public_packet(payload, size, rssi, snr);
     parse_rx_dm_packet(payload, size, rssi, snr);
+    parse_rx_path_packet(payload, size, rssi, snr);
+    parse_rx_ack_packet(payload, size, rssi, snr);
     parse_rx_advert_packet(payload, size, rssi, snr);
     d1l_meshcore_start_rx();
 }
@@ -1325,6 +1480,10 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     uint8_t raw_len = 0;
     uint32_t ack_hash = 0;
     const d1l_settings_t *settings = d1l_settings_current();
+    const bool use_direct = contact.out_path_valid && path_len_valid(contact.out_path_len);
+    const uint8_t route_path_hash_bytes = use_direct ? path_hash_size(contact.out_path_len) :
+                                          settings->path_hash_bytes;
+    const uint8_t route_path_hops = use_direct ? path_hash_count(contact.out_path_len) : 0U;
     uint32_t tx_timestamp = 0;
     ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
     if (ret != ESP_OK) {
@@ -1332,6 +1491,7 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
         return ret;
     }
     ret = build_dm_text_packet(settings, &contact, text, settings->path_hash_bytes,
+                               use_direct, contact.out_path, contact.out_path_len,
                                tx_timestamp, raw, sizeof(raw), &raw_len, &ack_hash);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
@@ -1340,16 +1500,19 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
 
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
-    remember_pending_dm_tx(&contact, text, settings->path_hash_bytes, 0, ack_hash);
+    remember_pending_dm_tx(&contact, text, route_path_hash_bytes, route_path_hops, 0, ack_hash);
     Radio.Send(raw, raw_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",
-                                           route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx",
-                                           0, 0, settings->path_hash_bytes, 0, raw_len);
+                                           route_name(use_direct ? D1L_MESHCORE_ROUTE_DIRECT :
+                                                      D1L_MESHCORE_ROUTE_FLOOD),
+                                           "tx", 0, 0, route_path_hash_bytes, route_path_hops,
+                                           raw_len);
     if (route_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store DM tx failed: %s", esp_err_to_name(route_ret));
     }
-    append_packet_log("tx", "dm_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
+    append_packet_log("tx", "dm_text", 0, 0, route_path_hash_bytes, route_path_hops,
+                      raw_len, text);
     return ESP_OK;
 }
 

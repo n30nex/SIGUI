@@ -44,7 +44,8 @@
 - [x] Route store survives reboot on `COM7`.
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
-- [ ] Full DM workflow: touch compose/thread UI, ACK handling, direct-path routing, and controlled inbound DM proof.
+- [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
+- [ ] Full DM workflow: touch compose/thread UI, controlled ACK/PATH RF proof, direct-route RF proof, and controlled inbound DM proof.
 
 ## Major Version Release
 

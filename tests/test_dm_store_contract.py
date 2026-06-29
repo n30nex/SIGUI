@@ -18,10 +18,12 @@ def test_dm_store_is_bounded_and_nvs_backed():
     assert "D1L_DM_STORE_CAPACITY 16U" in header
     assert "contact_fingerprint" in header
     assert "ack_hash" in header
+    assert "d1l_dm_store_mark_acked" in header
     assert 'D1L_DM_STORE_NAMESPACE "d1l_dms"' in source
     assert 'D1L_DM_STORE_KEY "threads"' in source
     assert "nvs_get_blob" in source
     assert "nvs_set_blob" in source
+    assert "entry->acked = true" in source
     assert "static d1l_dm_store_blob_t s_blob_scratch" in source
     assert '"mesh/dm_store.c"' in cmake
     assert "d1l_dm_store_init()" in app_main
@@ -31,15 +33,27 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     source = read("main/mesh/meshcore_service.c")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_MESHCORE_PAYLOAD_TEXT 0x02U" in source
+    assert "D1L_MESHCORE_PAYLOAD_ACK 0x03U" in source
+    assert "D1L_MESHCORE_PAYLOAD_PATH 0x08U" in source
+    assert "D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU" in source
     assert "D1L_MESHCORE_HEADER_DM_TEXT_FLOOD" in source
+    assert "D1L_MESHCORE_HEADER_DM_TEXT_DIRECT" in source
     assert "ed25519_key_exchange(secret, dest_pub, settings->identity_private_key)" in source
     assert "ed25519_key_exchange(secret, sender_pub, settings->identity_private_key)" in source
     assert "build_dm_text_packet" in source
     assert "calc_dm_ack_hash" in source
+    assert "parse_rx_ack_packet" in source
+    assert "parse_rx_path_packet" in source
+    assert "record_dm_ack" in source
     assert "d1l_contact_store_find_by_fingerprint" in source
+    assert "d1l_contact_store_update_path" in source
     assert "d1l_dm_store_append" in source
+    assert "d1l_dm_store_mark_acked" in source
+    assert "contact.out_path_valid" in source
     assert 'append_packet_log("tx", "dm_text"' in source
     assert 'append_packet_log("rx", "dm_text"' in source
+    assert 'append_packet_log("rx", "dm_ack"' in source
+    assert 'append_packet_log("rx", "path_return"' in source
     assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake
 
 
