@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 contact-store slice: `0x9dce0`, 38% free in the app partition
+- Latest local build size after the Phase 4 route-store slice: `0x9e790`, 38% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -105,11 +105,22 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `artifacts/smoke/d1l-stability-phase4-contact-store-local-COM7.json` showed uptime increasing from `89402` to `134479` ms with the contact row retained.
   - `artifacts/smoke/d1l-public-rf-phase4-contact-store-local-COM7.json` kept the Public `test` path working with local Meshcorebot counter movement: `rx_channel_total +6`, `relay_success_total +6`, and `discord_send_success_total +6`.
   - D1L decoded local bot replies including `Krabs Node: Test OK CH0.`.
+- Phase 4 route-store local smoke: `artifacts/smoke/d1l-smoke-phase4-route-store-local-COM7.json`
+  - 19 commands passed, including the new `routes` diagnostic.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 route-store reboot persistence: `artifacts/smoke/d1l-route-store-persistence-window4-local-COM7.json`
+  - `routes clear` reset the store to `count=0`.
+  - Public `test` traffic created a TX route row and an RX route row with route `flood`, direction, path hash bytes, hops, confidence, RSSI/SNR, and payload length.
+  - After reboot, `routes` retained both Public TX and RX rows, `messages public` retained the local bot `Test OK` reply, and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 route-store stability and Public RF regression:
+  - `artifacts/smoke/d1l-stability-phase4-route-store-local-COM7.json` showed uptime increasing from `44852` to `90352` ms with route rows retained and `reset_reason=SW`.
+  - `artifacts/smoke/d1l-public-rf-phase4-route-store-local-COM7.json` kept the Public `test` path working with local Meshcorebot counter movement: `rx_channel_total +4`, `relay_success_total +4`, and `discord_send_success_total +4`.
+  - D1L decoded local bot replies including `Krabs Node: Test OK CH0.` and updated valid Public TX/RX route rows after the stack-pressure fix.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
 - Manual physical touch entry on the Public composer keyboard is still pending; DMs are not implemented yet.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Contact detail/edit actions and routes are still pending; the current UI renders a bounded newest-contact preview.
+- Contact detail/edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview and route count.
 - Flash backup was intentionally skipped per operator instruction.

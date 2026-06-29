@@ -14,10 +14,12 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
+    assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
     assert "d1l_app_snapshot_t" in header
     assert "d1l_app_model_snapshot" in header
     assert "static d1l_app_snapshot_t s_snapshot" in read("main/ui/ui_phase1.c")
     assert "d1l_contact_store_copy_recent" in source
+    assert "d1l_route_store_copy_recent" in source
     assert "d1l_node_store_copy_recent" in source
     assert "d1l_packet_log_copy_recent" in source
     assert "d1l_meshcore_service_status" in source
@@ -80,3 +82,4 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "No heard nodes yet" in source
     assert "node_total_written" in source
     assert "contact_total_written" in source
+    assert "route_count" in source

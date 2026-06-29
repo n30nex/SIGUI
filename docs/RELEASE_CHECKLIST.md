@@ -41,8 +41,8 @@
 - [x] Free-text Public composer implemented, built, flashed, and RF-regression tested.
 - [x] Heard-node store survives reboot on `COM7`.
 - [x] Contact store promotion from heard node survives reboot on `COM7`.
+- [x] Route store survives reboot on `COM7`.
 - [ ] DM store/workflow.
-- [ ] Persistent routes.
 
 ## Major Version Release
 

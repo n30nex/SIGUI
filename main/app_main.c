@@ -12,6 +12,7 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
+#include "mesh/route_store.h"
 #include "mesh/meshcore_service.h"
 #include "ui/ui_phase1.h"
 #include "comms/usb_console.h"
@@ -45,6 +46,10 @@ void app_main(void)
     esp_err_t contact_store_ret = d1l_contact_store_init();
     if (contact_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "contact store load failed: %s", esp_err_to_name(contact_store_ret));
+    }
+    esp_err_t route_store_ret = d1l_route_store_init();
+    if (route_store_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store load failed: %s", esp_err_to_name(route_store_ret));
     }
     d1l_packet_log_init();
     d1l_meshcore_service_init();

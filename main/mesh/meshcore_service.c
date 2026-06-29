@@ -16,6 +16,7 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
+#include "mesh/route_store.h"
 #include "radio.h"
 #include "sx126x.h"
 
@@ -210,6 +211,22 @@ static uint8_t path_hash_count(uint8_t path_len)
 static uint8_t path_byte_len(uint8_t path_len)
 {
     return (uint8_t)(path_hash_size(path_len) * path_hash_count(path_len));
+}
+
+static const char *route_name(uint8_t route)
+{
+    switch (route) {
+    case D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD:
+        return "transport_flood";
+    case D1L_MESHCORE_ROUTE_FLOOD:
+        return "flood";
+    case D1L_MESHCORE_ROUTE_DIRECT:
+        return "direct";
+    case D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT:
+        return "transport_direct";
+    default:
+        return "unknown";
+    }
 }
 
 static bool parse_wire_packet(const uint8_t *raw, uint16_t size, d1l_meshcore_wire_packet_t *out)
@@ -507,6 +524,14 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
     plain[plain_len] = '\0';
     const char *message = (const char *)&plain[5];
     s_status.rx_packets++;
+    esp_err_t route_ret = d1l_route_store_upsert_observation("public", "Public", "public_text",
+                                                             route_name(packet.route), "rx", rssi,
+                                                             (snr * 10) / 4,
+                                                             packet.path_hash_bytes,
+                                                             packet.path_hops, size);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store public rx failed: %s", esp_err_to_name(route_ret));
+    }
     append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, message);
     append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
@@ -705,6 +730,14 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
                                                  read_le32(timestamp));
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
+    }
+    esp_err_t route_ret =
+        d1l_route_store_upsert_observation(pub_prefix, name[0] ? name : pub_prefix, "advert",
+                                           route_name(packet.route), "rx", rssi,
+                                           (snr * 10) / 4, packet.path_hash_bytes,
+                                           packet.path_hops, size);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store advert rx failed: %s", esp_err_to_name(route_ret));
     }
     append_packet_log("rx", "advert", rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, note);
@@ -932,6 +965,14 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     Radio.Send(raw, raw_len);
+    esp_err_t route_ret =
+        d1l_route_store_upsert_observation(pub_prefix, settings->node_name, "advert",
+                                           route_name(flood ? D1L_MESHCORE_ROUTE_FLOOD :
+                                                      D1L_MESHCORE_ROUTE_DIRECT),
+                                           "tx", 0, 0, settings->path_hash_bytes, 0, raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store advert tx failed: %s", esp_err_to_name(route_ret));
+    }
     append_packet_log("tx", "advert", 0, 0, settings->path_hash_bytes, 0, raw_len, note);
     return ESP_OK;
 }
@@ -971,6 +1012,13 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     remember_pending_public_tx(text);
     Radio.Send(raw, raw_len);
+    esp_err_t route_ret =
+        d1l_route_store_upsert_observation("public", "Public", "public_text",
+                                           route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx",
+                                           0, 0, settings->path_hash_bytes, 0, raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store public tx failed: %s", esp_err_to_name(route_ret));
+    }
     append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
     return ESP_OK;
 }

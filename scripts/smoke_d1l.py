@@ -31,6 +31,7 @@ SMOKE_COMMANDS = [
     "messages public",
     "nodes",
     "contacts",
+    "routes",
     "health",
 ]
 

@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, heard-node store contract, contact store contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -54,6 +54,7 @@ Expected commands:
 - `messages public`
 - `nodes`
 - `contacts`
+- `routes`
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.
@@ -91,3 +92,15 @@ For Phase 4 contact-store validation:
 6. Verify `contacts` contains the promoted alias, heard name, type, RSSI/SNR, path metadata, and `persisted=true`.
 7. Reboot.
 8. Verify `contacts` retains the row.
+
+## Route Store
+
+For Phase 4 route-store validation:
+
+1. Run `routes clear`.
+2. Verify `routes` reports `count=0`.
+3. Run `mesh send public test`.
+4. Wait for a local MeshCore bot response.
+5. Verify `routes` contains Public TX and RX rows with route name, direction, path hash bytes, hops, confidence, RSSI/SNR, payload length, and `persisted=true`.
+6. Reboot.
+7. Verify `routes` retains the rows.

@@ -583,6 +583,7 @@ Tasks:
 - Unread/mute/favorite logic.
 - Heard nodes list with virtualization. Status: first bounded persisted heard-node store and newest-node UI rows are implemented and validated on `COM7` with signed local adverts; large-list virtualization and richer filters are pending.
 - Contact detail cards. Status: first bounded persisted contact store, `contacts` diagnostics, and heard-node promotion command are implemented and validated on `COM7` by promoting `Krabs Lagoon`; detail cards and edit actions are pending.
+- Route/path metadata. Status: first bounded persisted route store, `routes` diagnostics, and MeshCore Public/advert route observation wiring are implemented and locally validated on `COM7`; route detail views and trace/ping helpers are pending.
 - Node actions: DM, ping/trace if available, telemetry request if available.
 
 Acceptance:
@@ -591,6 +592,7 @@ Acceptance:
 - Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack; large simulated mesh stress is still pending.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset.
 - Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot.
+- Route store survives reboot. Status: bounded route store validated on `COM7` on 2026-06-29; Public TX/RX route rows survived reboot.
 
 ### Phase 5 — Companion modes and management
 
@@ -708,6 +710,8 @@ nodes clear
 contacts
 contacts add <fingerprint> [alias]
 contacts clear
+routes
+routes clear
 packets
 health
 crashlog

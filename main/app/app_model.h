@@ -10,11 +10,13 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
+#include "mesh/route_store.h"
 
 #define D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U
+#define D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U
 
 typedef struct {
     bool board_ready;
@@ -45,11 +47,15 @@ typedef struct {
     size_t node_count;
     uint32_t contact_total_written;
     size_t contact_count;
+    uint32_t route_total_written;
+    size_t route_count;
     uint32_t packet_total_written;
     size_t packet_count;
     uint8_t path_hash_bytes;
     d1l_contact_entry_t recent_contacts[D1L_APP_SNAPSHOT_CONTACT_PREVIEW];
     size_t recent_contact_count;
+    d1l_route_entry_t recent_routes[D1L_APP_SNAPSHOT_ROUTE_PREVIEW];
+    size_t recent_route_count;
     d1l_node_entry_t recent_nodes[D1L_APP_SNAPSHOT_NODE_PREVIEW];
     size_t recent_node_count;
     d1l_message_entry_t recent_messages[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW];

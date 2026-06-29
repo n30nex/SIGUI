@@ -208,8 +208,8 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                        snapshot->identity_ready ? 0xA7F3D0 : 0xFBBF24);
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
-    snprintf(detail, sizeof(detail), "adverts %lu  tx %lu",
-             (unsigned long)snapshot->rx_adverts, (unsigned long)snapshot->tx_packets);
+    snprintf(detail, sizeof(detail), "adverts %lu  routes %lu",
+             (unsigned long)snapshot->rx_adverts, (unsigned long)snapshot->route_count);
     render_metric_card(s_content, 18, 136, "RF Packets", value, detail, 0x93C5FD);
 
     snprintf(value, sizeof(value), "%luK", (unsigned long)(snapshot->heap_free / 1024U));
