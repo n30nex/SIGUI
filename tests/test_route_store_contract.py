@@ -25,6 +25,8 @@ def test_route_store_is_bounded_and_nvs_backed():
     assert "route_confidence" in source
     assert "now_ms < entry->first_seen_ms" in source
     assert "oldest_index" in source
+    assert "d1l_route_store_find_by_seq" in header
+    assert "ESP_ERR_NOT_FOUND" in source
     assert '"mesh/route_store.c"' in cmake
     assert "d1l_route_store_init()" in app_main
 
@@ -51,8 +53,12 @@ def test_ui_console_and_smoke_expose_routes():
     assert "d1l_route_store_copy_recent" in app_source
     assert "route_count" in ui
     assert 'ok_begin("routes")' in console
+    assert 'ok_begin("routes detail")' in console
+    assert "d1l_route_store_find_by_seq" in console
     assert 'strcmp(line, "routes")' in console
+    assert 'strncmp(line, "routes detail ", 14)' in console
     assert 'strcmp(line, "routes clear")' in console
+    assert "routes detail <seq>" in console
     assert "Routes are learned from MeshCore path metadata" in console
     assert "routes" in SMOKE_COMMANDS
     assert "routes clear" in roadmap

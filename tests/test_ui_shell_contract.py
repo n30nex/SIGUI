@@ -136,3 +136,18 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "s_contact_action_favorite" in source
     assert "s_contact_action_mute" in source
     assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source
+
+
+def test_route_detail_sheet_opens_from_route_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_route_detail_sheet" in source
+    assert "static d1l_route_entry_t s_route_detail_route" in source
+    assert "render_route_row" in source
+    assert "render_route_detail_sheet" in source
+    assert "open_route_detail_event_cb" in source
+    assert "create_route_detail_sheet" in source
+    assert "lv_obj_add_event_cb(row, open_route_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "recent_route_count" in source
+    assert "recent_routes" in source
+    assert '"Routes"' in source
+    assert "hide_route_detail_sheet()" in source

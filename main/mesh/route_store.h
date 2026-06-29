@@ -46,3 +46,4 @@ esp_err_t d1l_route_store_upsert_observation(const char *target, const char *lab
                                              uint8_t path_hops, uint16_t payload_len);
 d1l_route_store_stats_t d1l_route_store_stats(void);
 size_t d1l_route_store_copy_recent(d1l_route_entry_t *out_entries, size_t max_entries);
+esp_err_t d1l_route_store_find_by_seq(uint32_t seq, d1l_route_entry_t *out_entry);

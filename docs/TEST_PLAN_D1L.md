@@ -166,5 +166,8 @@ For Phase 4 route-store validation:
 3. Run `mesh send public test`.
 4. Wait for a local MeshCore bot response.
 5. Verify `routes` contains Public TX and RX rows with route name, direction, path hash bytes, hops, confidence, RSSI/SNR, payload length, and `persisted=true`.
-6. Reboot.
-7. Verify `routes` retains the rows.
+6. Pick a fresh route `seq` and run `routes detail <seq>`.
+7. Verify the detail response matches the selected route row, including target, kind, route, direction, path metadata, signal metadata, and payload length.
+8. Reboot.
+9. Verify `routes` retains the rows.
+10. For physical touch review, open the Packet tab, tap a route row, verify the route detail sheet opens with the same fields, and close it.

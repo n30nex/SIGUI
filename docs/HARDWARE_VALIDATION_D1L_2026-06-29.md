@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 unread-state slice: `0xa2290`, 37% free in the app partition
+- Latest local build size after the Phase 4 route-detail slice: `0xa2940`, 36% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -191,6 +191,16 @@ Do not use `COM11` or `COM29` for this D1L target.
   - A fresh `mesh send public test` produced two persisted RX rows: relayed Public `test` at RSSI `-43`/SNR `30` and `Krabs Node: Test OK CH0.` at RSSI `-42`/SNR `30`.
   - `messages unread` rose to `public_unread=2` with `newest_public_rx_seq=10`.
   - `messages read public` cleared Public unread to zero, and after reboot it stayed at `public_unread=0` with `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 route detail local smoke: `artifacts/smoke/d1l-smoke-route-detail-local-COM7.json`
+  - 21 commands passed after flashing the route-detail build, including `routes`.
+  - `routes` returned the bounded persisted route store payload.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 route detail Public `test` probe: `artifacts/smoke/d1l-route-detail-public-window2-local-COM7.json`
+  - D1L decoded a fresh relayed Public `test` RX message at RSSI `-44`, SNR `30`.
+  - Fresh route rows included Public TX seq `18` and Public RX seq `19`.
+  - `routes detail 19` matched the selected Public RX route row with `route="flood"`, `direction="rx"`, `path_hash_bytes=1`, `path_hops=1`, `confidence=80`, and `payload_len=22`.
+  - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
+  - `health` uptime increased from `143641` ms to `146448` ms with `board_ready=true` and `ui_ready=true`.
 
 ## Still Pending
 
@@ -199,5 +209,5 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Richer contact edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, and route count.
+- Richer contact edit actions and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, route rows, and a first route detail sheet.
 - Flash backup was intentionally skipped per operator instruction.

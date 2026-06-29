@@ -1,6 +1,7 @@
 #include "usb_console.h"
 
 #include <ctype.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -806,6 +807,16 @@ static void cmd_mesh_send_dm(const char *line)
     printf(",\"queued\":true,\"fingerprint\":\"%s\"}\n", fingerprint);
 }
 
+static void print_route_entry_json(const d1l_route_entry_t *e)
+{
+    printf("{\"seq\":%lu,\"first_seen_ms\":%lu,\"last_seen_ms\":%lu,\"seen_count\":%lu,\"target\":\"%s\",\"label\":\"%s\",\"kind\":\"%s\",\"route\":\"%s\",\"direction\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"confidence\":%u,\"payload_len\":%u}",
+           (unsigned long)e->seq, (unsigned long)e->first_seen_ms,
+           (unsigned long)e->last_seen_ms, (unsigned long)e->seen_count,
+           e->target, e->label, e->kind, e->route, e->direction,
+           e->last_rssi_dbm, e->last_snr_tenths, e->path_hash_bytes,
+           e->path_hops, e->confidence, e->payload_len);
+}
+
 static void cmd_routes(void)
 {
     d1l_route_store_stats_t stats = d1l_route_store_stats();
@@ -816,15 +827,39 @@ static void cmd_routes(void)
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
-        const d1l_route_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"first_seen_ms\":%lu,\"last_seen_ms\":%lu,\"seen_count\":%lu,\"target\":\"%s\",\"label\":\"%s\",\"kind\":\"%s\",\"route\":\"%s\",\"direction\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"confidence\":%u,\"payload_len\":%u}",
-               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_seen_ms,
-               (unsigned long)e->last_seen_ms, (unsigned long)e->seen_count,
-               e->target, e->label, e->kind, e->route, e->direction,
-               e->last_rssi_dbm, e->last_snr_tenths, e->path_hash_bytes,
-               e->path_hops, e->confidence, e->payload_len);
+        printf("%s", i ? "," : "");
+        print_route_entry_json(&entries[i]);
     }
     printf("],\"persisted\":true,\"note\":\"Routes are learned from MeshCore path metadata on Public and advert packets\"}\n");
+}
+
+static void cmd_routes_detail(const char *line)
+{
+    const char *arg = line + strlen("routes detail ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char *end = NULL;
+    unsigned long seq = strtoul(arg, &end, 10);
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (arg[0] == '\0' || end == arg || (end && *end != '\0') || seq == 0 || seq > UINT32_MAX) {
+        err_result("routes detail", "INVALID_SEQ", "usage: routes detail <seq>");
+        return;
+    }
+
+    d1l_route_entry_t entry = {0};
+    esp_err_t ret = d1l_route_store_find_by_seq((uint32_t)seq, &entry);
+    if (ret != ESP_OK) {
+        err_result("routes detail", esp_err_to_name(ret), "route sequence not found");
+        return;
+    }
+
+    ok_begin("routes detail");
+    printf(",\"entry\":");
+    print_route_entry_json(&entry);
+    printf("}\n");
 }
 
 static void cmd_routes_clear(void)
@@ -852,7 +887,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -931,6 +966,8 @@ static void handle_line(const char *line)
         cmd_contacts_set(line);
     } else if (strcmp(line, "routes") == 0) {
         cmd_routes();
+    } else if (strncmp(line, "routes detail ", 14) == 0) {
+        cmd_routes_detail(line);
     } else if (strcmp(line, "routes clear") == 0) {
         cmd_routes_clear();
     } else if (strcmp(line, "health") == 0) {

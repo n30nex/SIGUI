@@ -270,3 +270,24 @@ size_t d1l_route_store_copy_recent(d1l_route_entry_t *out_entries, size_t max_en
     }
     return n;
 }
+
+esp_err_t d1l_route_store_find_by_seq(uint32_t seq, d1l_route_entry_t *out_entry)
+{
+    if (seq == 0 || out_entry == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_route_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    for (size_t i = 0; i < s_count; ++i) {
+        if (s_entries[i].seq == seq) {
+            *out_entry = s_entries[i];
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_NOT_FOUND;
+}

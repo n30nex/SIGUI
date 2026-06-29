@@ -45,6 +45,7 @@
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
 - [x] Contact favorite/mute flags persist across reboot and are exposed through serial diagnostics plus the contact detail UI.
 - [x] Public unread/read state persists across reboot and is exposed through serial diagnostics plus the Messages UI.
+- [x] Route detail diagnostics and first Packet-tab route detail sheet are implemented, built, flashed, and Public-RF probed on `COM7`.
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.
