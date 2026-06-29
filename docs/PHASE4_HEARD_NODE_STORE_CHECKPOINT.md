@@ -41,4 +41,4 @@ python .\scripts\smoke_d1l.py --port COM7 --timeout 3 --out artifacts\smoke\d1l-
 ## Still Pending
 
 - Large simulated mesh stress and full list virtualization.
-- Contacts, routes, DMs, packet detail, touch radio editing, onboarding, and simulator/screenshot capture.
+- Contact detail/edit actions, routes, DMs, packet detail, touch radio editing, onboarding, and simulator/screenshot capture.

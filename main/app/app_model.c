@@ -45,6 +45,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     d1l_message_store_stats_t messages = d1l_message_store_stats();
     d1l_node_store_stats_t nodes = d1l_node_store_stats();
+    d1l_contact_store_stats_t contacts = d1l_contact_store_stats();
     d1l_packet_log_stats_t packets = d1l_packet_log_stats();
     d1l_health_snapshot_t health = d1l_health_snapshot();
 
@@ -70,9 +71,13 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->message_count = messages.count;
     snapshot->node_total_written = nodes.total_written;
     snapshot->node_count = nodes.count;
+    snapshot->contact_total_written = contacts.total_written;
+    snapshot->contact_count = contacts.count;
     snapshot->packet_total_written = packets.total_written;
     snapshot->packet_count = packets.count;
     snapshot->path_hash_bytes = mesh.path_hash_bytes;
+    snapshot->recent_contact_count =
+        d1l_contact_store_copy_recent(snapshot->recent_contacts, D1L_APP_SNAPSHOT_CONTACT_PREVIEW);
     snapshot->recent_node_count =
         d1l_node_store_copy_recent(snapshot->recent_nodes, D1L_APP_SNAPSHOT_NODE_PREVIEW);
     snapshot->recent_message_count =

@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 heard-node store slice: `0x9d050`, 39% free in the app partition
+- Latest local build size after the Phase 4 contact-store slice: `0x9dce0`, 38% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -93,10 +93,23 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Phase 4 heard-node stability and Public RF regression:
   - `artifacts/smoke/d1l-stability-phase4-heard-node-store-local-COM7.json` showed uptime increasing from `21667` to `66746` ms after reboot.
   - `artifacts/smoke/d1l-public-rf-phase4-heard-node-store-local-COM7.json` kept the Public `test` path working with local Meshcorebot counter movement: `rx_channel_total +6`, `relay_success_total +6`, and `discord_send_success_total +6`.
+- Phase 4 contact-store local smoke: `artifacts/smoke/d1l-smoke-phase4-contact-store-local-COM7.json`
+  - 18 commands passed, including the new `contacts` diagnostic.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+  - Existing persisted heard nodes included `Krabs Lagoon` fingerprint `937D290883817CBD` and `YKF 1W` fingerprint `9880BF9B9B1DD605`.
+- Phase 4 contact-store promotion and reboot persistence: `artifacts/smoke/d1l-contact-store-persistence-local-COM7.json`
+  - `contacts clear` reset the store to `count=0`.
+  - `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` with `source=heard_node`, type `observe`, RSSI `-36`, SNR `30`, and path metadata.
+  - After reboot, `contacts` retained the same row and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 contact-store stability and Public RF regression:
+  - `artifacts/smoke/d1l-stability-phase4-contact-store-local-COM7.json` showed uptime increasing from `89402` to `134479` ms with the contact row retained.
+  - `artifacts/smoke/d1l-public-rf-phase4-contact-store-local-COM7.json` kept the Public `test` path working with local Meshcorebot counter movement: `rx_channel_total +6`, `relay_success_total +6`, and `discord_send_success_total +6`.
+  - D1L decoded local bot replies including `Krabs Node: Test OK CH0.`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
 - Manual physical touch entry on the Public composer keyboard is still pending; DMs are not implemented yet.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
+- Contact detail/edit actions and routes are still pending; the current UI renders a bounded newest-contact preview.
 - Flash backup was intentionally skipped per operator instruction.

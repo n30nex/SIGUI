@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, heard-node store contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, heard-node store contract, contact store contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -53,6 +53,7 @@ Expected commands:
 - `packets`
 - `messages public`
 - `nodes`
+- `contacts`
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.
@@ -77,3 +78,16 @@ For Phase 4 heard-node validation:
 3. Verify `nodes` contains a row with fingerprint, name or fingerprint fallback, type, RSSI/SNR, path metadata, and `persisted=true`.
 4. Reboot.
 5. Verify `nodes` retains the row.
+
+## Contact Store
+
+For Phase 4 contact-store validation:
+
+1. Run `contacts clear`.
+2. Verify `contacts` reports `count=0`.
+3. Verify `nodes` contains a heard node with a 16-hex fingerprint.
+4. Run `contacts add <fingerprint>`.
+5. Verify `contacts add` reports `source="heard_node"`.
+6. Verify `contacts` contains the promoted alias, heard name, type, RSSI/SNR, path metadata, and `persisted=true`.
+7. Reboot.
+8. Verify `contacts` retains the row.

@@ -18,6 +18,7 @@ idf_component_register(
         "hal/indicator_pins.c"
         "hal/rp2040_bridge.c"
         "hal/sx1262_indicator.c"
+        "mesh/contact_store.c"
         "mesh/message_store.c"
         "mesh/node_store.c"
         "mesh/packet_log.c"

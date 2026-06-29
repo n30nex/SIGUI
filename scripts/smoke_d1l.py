@@ -30,6 +30,7 @@ SMOKE_COMMANDS = [
     "packets",
     "messages public",
     "nodes",
+    "contacts",
     "health",
 ]
 

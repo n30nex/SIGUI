@@ -35,6 +35,7 @@ def test_verified_adverts_upsert_heard_nodes():
     assert "d1l_node_store_upsert_advert(pub_prefix, name, type" in source
     assert "read_le32(timestamp)" in source
     assert "node store upsert failed" in source
+    assert "d1l_node_store_find_by_fingerprint" in read("main/mesh/node_store.h")
 
 
 def test_ui_console_and_smoke_expose_heard_nodes():

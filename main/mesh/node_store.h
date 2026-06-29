@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -40,4 +41,5 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *name
                                        uint8_t path_hash_bytes, uint8_t path_hops,
                                        uint32_t advert_timestamp);
 d1l_node_store_stats_t d1l_node_store_stats(void);
+bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_t *out_entry);
 size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries);

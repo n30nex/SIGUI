@@ -14,7 +14,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Home dashboard cards for mesh readiness, identity, RF packet counters, and system memory.
 - Bottom dock navigation for Home, Messages, Nodes, Packets, and Settings.
 - Public message screen with persisted recent Public rows, a touch `test` send action, and a free-text composer sheet routed through the app model.
-- Nodes screen that reports live advert/RF counts and renders newest persisted heard-node rows while full contacts and routes remain pending.
+- Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows while full detail cards and routes remain pending.
 - Packet log screen with bounded recent packet rows.
 - Settings screen with radio profile, identity, path-hash, and advert quick action.
 - Modal advert sheet for zero-hop/flood actions.

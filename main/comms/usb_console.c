@@ -19,6 +19,7 @@
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
 #include "hal/sx1262_indicator.h"
+#include "mesh/contact_store.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -47,6 +48,29 @@ static void err_result(const char *cmd, const char *code, const char *hint)
 static const char *bool_json(bool value)
 {
     return value ? "true" : "false";
+}
+
+static bool parse_fingerprint_token(const char *src, char *dest, size_t dest_size)
+{
+    if (!src || !dest || dest_size < D1L_NODE_FINGERPRINT_LEN) {
+        return false;
+    }
+    size_t len = 0;
+    while (src[len] != '\0' && !isspace((unsigned char)src[len])) {
+        len++;
+    }
+    if (len != D1L_NODE_FINGERPRINT_LEN - 1U) {
+        return false;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)src[i];
+        if (!isxdigit(c)) {
+            return false;
+        }
+        dest[i] = (char)toupper(c);
+    }
+    dest[len] = '\0';
+    return true;
 }
 
 static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
@@ -502,6 +526,69 @@ static void cmd_nodes_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static void cmd_contacts(void)
+{
+    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    static d1l_contact_entry_t entries[8];
+    size_t copied = d1l_contact_store_copy_recent(entries, 8);
+    ok_begin("contacts");
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+           (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+    for (size_t i = 0; i < copied; ++i) {
+        const d1l_contact_entry_t *e = &entries[i];
+        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"favorite\":%s,\"muted\":%s}",
+               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->created_ms,
+               (unsigned long)e->updated_ms, e->fingerprint, e->alias, e->heard_name,
+               e->type, e->last_rssi_dbm, e->last_snr_tenths, e->path_hash_bytes,
+               e->path_hops, bool_json(e->favorite), bool_json(e->muted));
+    }
+    printf("],\"persisted\":true,\"note\":\"Contacts are promoted from heard nodes into a bounded NVS store\"}\n");
+}
+
+static void cmd_contacts_clear(void)
+{
+    esp_err_t ret = d1l_contact_store_clear();
+    if (ret != ESP_OK) {
+        err_result("contacts clear", esp_err_to_name(ret), "could not clear contact store");
+        return;
+    }
+    ok_begin("contacts clear");
+    printf(",\"persisted\":true,\"count\":0}\n");
+}
+
+static void cmd_contacts_add(const char *line)
+{
+    const char *arg = line + strlen("contacts add ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("contacts add", "INVALID_FINGERPRINT", "usage: contacts add <16-hex-fingerprint> [alias]");
+        return;
+    }
+    const char *alias = arg + strlen(fingerprint);
+    while (*alias == ' ') {
+        alias++;
+    }
+
+    d1l_node_entry_t heard = {0};
+    bool heard_found = d1l_node_store_find_by_fingerprint(fingerprint, &heard);
+    esp_err_t ret = d1l_contact_store_upsert_from_node(fingerprint, alias, heard_found ? &heard : NULL);
+    if (ret != ESP_OK) {
+        err_result("contacts add", esp_err_to_name(ret), "could not persist contact");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
+    ok_begin("contacts add");
+    printf(",\"persisted\":true,\"source\":\"%s\",\"fingerprint\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\"}\n",
+           heard_found ? "heard_node" : "manual", contact.fingerprint, contact.alias,
+           contact.heard_name, contact.type);
+}
+
 static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
@@ -516,7 +603,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"messages public\",\"messages clear\",\"nodes\",\"nodes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"messages public\",\"messages clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -577,6 +664,12 @@ static void handle_line(const char *line)
         cmd_nodes();
     } else if (strcmp(line, "nodes clear") == 0) {
         cmd_nodes_clear();
+    } else if (strcmp(line, "contacts") == 0) {
+        cmd_contacts();
+    } else if (strcmp(line, "contacts clear") == 0) {
+        cmd_contacts_clear();
+    } else if (strncmp(line, "contacts add ", 13) == 0) {
+        cmd_contacts_add(line);
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
     } else if (strcmp(line, "wifi off") == 0) {

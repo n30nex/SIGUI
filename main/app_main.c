@@ -8,6 +8,7 @@
 #include "app/settings_model.h"
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
+#include "mesh/contact_store.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -40,6 +41,10 @@ void app_main(void)
     esp_err_t node_store_ret = d1l_node_store_init();
     if (node_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "node store load failed: %s", esp_err_to_name(node_store_ret));
+    }
+    esp_err_t contact_store_ret = d1l_contact_store_init();
+    if (contact_store_ret != ESP_OK) {
+        ESP_LOGW(TAG, "contact store load failed: %s", esp_err_to_name(contact_store_ret));
     }
     d1l_packet_log_init();
     d1l_meshcore_service_init();

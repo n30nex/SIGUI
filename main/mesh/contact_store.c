@@ -1,14 +1,13 @@
-#include "node_store.h"
+#include "contact_store.h"
 
-#include <stdbool.h>
 #include <string.h>
 
 #include "esp_timer.h"
 #include "nvs.h"
 
-#define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
-#define D1L_NODE_STORE_KEY "heard"
-#define D1L_NODE_STORE_SCHEMA 1U
+#define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
+#define D1L_CONTACT_STORE_KEY "contacts"
+#define D1L_CONTACT_STORE_SCHEMA 1U
 
 typedef struct {
     uint32_t schema;
@@ -16,16 +15,16 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_node_entry_t entries[D1L_NODE_STORE_CAPACITY];
-} d1l_node_store_blob_t;
+    d1l_contact_entry_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_t;
 
-static d1l_node_entry_t s_entries[D1L_NODE_STORE_CAPACITY];
+static d1l_contact_entry_t s_entries[D1L_CONTACT_STORE_CAPACITY];
 static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static bool s_loaded;
-static d1l_node_store_blob_t s_blob_scratch;
+static d1l_contact_store_blob_t s_blob_scratch;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -43,22 +42,6 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
     dest[out] = '\0';
 }
 
-static const char *type_name(char type_code)
-{
-    switch (type_code) {
-    case 'C':
-        return "chat";
-    case 'R':
-        return "room";
-    case 'O':
-        return "observer";
-    case 'S':
-        return "sensor";
-    default:
-        return "node";
-    }
-}
-
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
@@ -68,10 +51,10 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
 }
 
-static void fill_blob(d1l_node_store_blob_t *blob)
+static void fill_blob(d1l_contact_store_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
-    blob->schema = D1L_NODE_STORE_SCHEMA;
+    blob->schema = D1L_CONTACT_STORE_SCHEMA;
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
@@ -82,13 +65,13 @@ static void fill_blob(d1l_node_store_blob_t *blob)
 static esp_err_t persist_store(void)
 {
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
+    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         return ret;
     }
 
     fill_blob(&s_blob_scratch);
-    ret = nvs_set_blob(handle, D1L_NODE_STORE_KEY, &s_blob_scratch, sizeof(s_blob_scratch));
+    ret = nvs_set_blob(handle, D1L_CONTACT_STORE_KEY, &s_blob_scratch, sizeof(s_blob_scratch));
     if (ret == ESP_OK) {
         ret = nvs_commit(handle);
     }
@@ -96,15 +79,15 @@ static esp_err_t persist_store(void)
     return ret;
 }
 
-static bool blob_is_valid(const d1l_node_store_blob_t *blob, size_t len)
+static bool blob_is_valid(const d1l_contact_store_blob_t *blob, size_t len)
 {
     return blob && len == sizeof(*blob) &&
-           blob->schema == D1L_NODE_STORE_SCHEMA &&
-           blob->count <= D1L_NODE_STORE_CAPACITY &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
            blob->next_seq > 0;
 }
 
-static int find_by_fingerprint(const char *fingerprint)
+static int find_index_by_fingerprint(const char *fingerprint)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
         return -1;
@@ -128,19 +111,19 @@ static size_t oldest_index(void)
     return oldest;
 }
 
-esp_err_t d1l_node_store_init(void)
+esp_err_t d1l_contact_store_init(void)
 {
     clear_ram();
 
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
+    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         s_loaded = false;
         return ret;
     }
 
     size_t len = sizeof(s_blob_scratch);
-    ret = nvs_get_blob(handle, D1L_NODE_STORE_KEY, &s_blob_scratch, &len);
+    ret = nvs_get_blob(handle, D1L_CONTACT_STORE_KEY, &s_blob_scratch, &len);
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         ret = ESP_OK;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
@@ -151,7 +134,7 @@ esp_err_t d1l_node_store_init(void)
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
     } else if (ret == ESP_OK) {
         clear_ram();
-        ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
+        ret = nvs_erase_key(handle, D1L_CONTACT_STORE_KEY);
         if (ret == ESP_ERR_NVS_NOT_FOUND) {
             ret = ESP_OK;
         }
@@ -164,17 +147,17 @@ esp_err_t d1l_node_store_init(void)
     return ret;
 }
 
-esp_err_t d1l_node_store_clear(void)
+esp_err_t d1l_contact_store_clear(void)
 {
     clear_ram();
     s_loaded = true;
 
     nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
+    esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         return ret;
     }
-    ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
+    ret = nvs_erase_key(handle, D1L_CONTACT_STORE_KEY);
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         ret = ESP_OK;
     }
@@ -185,78 +168,93 @@ esp_err_t d1l_node_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *name,
-                                       char type_code, int rssi_dbm, int snr_tenths,
-                                       uint8_t path_hash_bytes, uint8_t path_hops,
-                                       uint32_t advert_timestamp)
+esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char *alias,
+                                             const d1l_node_entry_t *heard_node)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_loaded) {
-        esp_err_t ret = d1l_node_store_init();
+        esp_err_t ret = d1l_contact_store_init();
         if (ret != ESP_OK) {
             return ret;
         }
     }
 
-    int existing = find_by_fingerprint(fingerprint);
+    int existing = find_index_by_fingerprint(fingerprint);
     size_t index;
     bool is_new = existing < 0;
     if (!is_new) {
         index = (size_t)existing;
-    } else if (s_count < D1L_NODE_STORE_CAPACITY) {
+    } else if (s_count < D1L_CONTACT_STORE_CAPACITY) {
         index = s_count++;
     } else {
         index = oldest_index();
         s_dropped_oldest++;
     }
 
-    d1l_node_entry_t *entry = &s_entries[index];
+    d1l_contact_entry_t *entry = &s_entries[index];
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     if (is_new) {
         memset(entry, 0, sizeof(*entry));
-        entry->first_heard_ms = now_ms;
-        entry->heard_count = 0;
+        entry->created_ms = now_ms;
     }
     entry->seq = s_next_seq++;
-    entry->last_heard_ms = now_ms;
-    entry->advert_timestamp = advert_timestamp;
-    entry->heard_count++;
-    entry->rssi_dbm = rssi_dbm;
-    entry->snr_tenths = snr_tenths;
-    entry->path_hash_bytes = path_hash_bytes;
-    entry->path_hops = path_hops;
+    entry->updated_ms = now_ms;
     sanitize_ascii(entry->fingerprint, sizeof(entry->fingerprint), fingerprint);
-    if (name && name[0] != '\0') {
-        sanitize_ascii(entry->name, sizeof(entry->name), name);
+
+    if (heard_node) {
+        if (heard_node->name[0] != '\0') {
+            sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), heard_node->name);
+        }
+        if (heard_node->type[0] != '\0') {
+            sanitize_ascii(entry->type, sizeof(entry->type), heard_node->type);
+        }
+        entry->last_rssi_dbm = heard_node->rssi_dbm;
+        entry->last_snr_tenths = heard_node->snr_tenths;
+        entry->path_hash_bytes = heard_node->path_hash_bytes;
+        entry->path_hops = heard_node->path_hops;
     }
-    sanitize_ascii(entry->type, sizeof(entry->type), type_name(type_code));
-    if (entry->name[0] == '\0') {
-        sanitize_ascii(entry->name, sizeof(entry->name), entry->fingerprint);
+
+    if (alias && alias[0] != '\0') {
+        sanitize_ascii(entry->alias, sizeof(entry->alias), alias);
+    } else if (is_new || entry->alias[0] == '\0') {
+        if (heard_node && heard_node->name[0] != '\0') {
+            sanitize_ascii(entry->alias, sizeof(entry->alias), heard_node->name);
+        } else {
+            sanitize_ascii(entry->alias, sizeof(entry->alias), fingerprint);
+        }
     }
+
+    if (entry->heard_name[0] == '\0') {
+        sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), entry->alias);
+    }
+    if (entry->type[0] == '\0') {
+        sanitize_ascii(entry->type, sizeof(entry->type), "node");
+    }
+
     s_total_written++;
     return persist_store();
 }
 
-d1l_node_store_stats_t d1l_node_store_stats(void)
+d1l_contact_store_stats_t d1l_contact_store_stats(void)
 {
-    d1l_node_store_stats_t stats = {
+    d1l_contact_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
         .dropped_oldest = s_dropped_oldest,
         .count = s_count,
-        .capacity = D1L_NODE_STORE_CAPACITY,
+        .capacity = D1L_CONTACT_STORE_CAPACITY,
     };
     return stats;
 }
 
-bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_t *out_entry)
+bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_entry_t *out_entry)
 {
-    if (!s_loaded && d1l_node_store_init() != ESP_OK) {
+    if (!s_loaded && d1l_contact_store_init() != ESP_OK) {
         return false;
     }
-    int index = find_by_fingerprint(fingerprint);
+    int index = find_index_by_fingerprint(fingerprint);
     if (index < 0) {
         return false;
     }
@@ -266,14 +264,14 @@ bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_
     return true;
 }
 
-size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries)
+size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries)
 {
     if (out_entries == NULL || max_entries == 0 || s_count == 0) {
         return 0;
     }
 
     const size_t n = s_count < max_entries ? s_count : max_entries;
-    bool used[D1L_NODE_STORE_CAPACITY] = {0};
+    bool used[D1L_CONTACT_STORE_CAPACITY] = {0};
     for (size_t out = 0; out < n; ++out) {
         size_t best = 0;
         bool best_set = false;

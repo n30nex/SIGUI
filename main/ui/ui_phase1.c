@@ -269,6 +269,23 @@ static void render_node_row(lv_obj_t *parent, int y, const d1l_node_entry_t *ent
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_t *entry)
+{
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
+    lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(alias, 190);
+    lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
+    lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
+    label_set_fmt(meta, "%.8s  rssi %d", entry->fingerprint, entry->last_rssi_dbm);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
 static void public_test_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -359,16 +376,26 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
     char value[32];
     char detail[64];
     snprintf(value, sizeof(value), "%u", (unsigned)snapshot->node_count);
-    snprintf(detail, sizeof(detail), "heard nodes  adverts %lu",
-             (unsigned long)snapshot->rx_adverts);
-    render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
-    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
-    snprintf(detail, sizeof(detail), "node writes %lu",
+    snprintf(detail, sizeof(detail), "adverts %lu  writes %lu",
+             (unsigned long)snapshot->rx_adverts,
              (unsigned long)snapshot->node_total_written);
-    render_metric_card(s_content, 238, 16, "Live RF", value, detail, 0x93C5FD);
+    render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
+    snprintf(value, sizeof(value), "%u", (unsigned)snapshot->contact_count);
+    snprintf(detail, sizeof(detail), "contacts  writes %lu",
+             (unsigned long)snapshot->contact_total_written);
+    render_metric_card(s_content, 238, 16, "Contacts", value, detail, 0xA7F3D0);
 
     int y = 136;
-    for (size_t i = 0; i < snapshot->recent_node_count; ++i) {
+    if (snapshot->recent_contact_count > 0) {
+        for (size_t i = 0; i < snapshot->recent_contact_count && y <= 190; ++i) {
+            render_contact_row(s_content, y, &snapshot->recent_contacts[i]);
+            y += 54;
+        }
+        lv_obj_t *heard = create_label(s_content, "Heard", 0x8EA0AE);
+        lv_obj_set_pos(heard, 26, y + 4);
+        y += 28;
+    }
+    for (size_t i = 0; i < snapshot->recent_node_count && y <= 300; ++i) {
         render_node_row(s_content, y, &snapshot->recent_nodes[i]);
         y += 62;
     }
