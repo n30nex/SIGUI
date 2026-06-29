@@ -14,13 +14,16 @@ jobs:
           submodules: recursive
 
       - name: Set up Python
-        run: python -m pip install --upgrade pip pytest pyserial esptool
+        run: python -m pip install --upgrade pip pytest pyserial esptool Pillow
 
       - name: Host build path
         run: pwsh ./scripts/build_d1l.ps1
 
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
+
+      - name: UI simulator screenshots
+        run: python ./tools/ui_simulator.py --out artifacts/ui-sim
 
       - name: Verify checksums
         run: python ./scripts/verify_checksums.py artifacts

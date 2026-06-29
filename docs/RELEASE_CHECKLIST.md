@@ -30,6 +30,8 @@
 - [x] Phase 3 shell local Podman ESP-IDF build passes.
 - [x] Phase 3 shell flashed and smoke-tested on `COM7`.
 - [x] Controlled Public `test` RF regression still receives local bot replies.
+- [x] Simulator screenshots captured for the main shell views and current modal sheets.
+- [x] Simulator layout report passes required-label and text-overflow checks.
 - [ ] Manual visual review of the physical shell.
 - [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
 
@@ -77,6 +79,7 @@
 - [x] First developer guide added.
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
-- [ ] Screenshots/photos captured.
+- [x] Host simulator screenshots captured.
+- [ ] Physical screen photos captured.
 - [ ] Final full-duration soak evidence added.
 - [ ] Final manual touch review added.

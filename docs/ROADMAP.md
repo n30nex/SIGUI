@@ -560,7 +560,7 @@ Tasks:
 - Modal sheets/toasts. Status: implemented for advert actions and touch feedback.
 - Lock/standby screen. Status: implemented as a tap-to-unlock overlay.
 - Onboarding flow. Status: pending.
-- Simulator/screenshot target if feasible. Status: pending.
+- Simulator/screenshot target if feasible. Status: first deterministic host simulator is implemented in `tools/ui_simulator.py`; it renders the current 480x480 shell and sheet surfaces to PNG and emits `ui-sim-report.json` with required-label and text-overflow checks.
 
 Acceptance:
 
@@ -669,7 +669,7 @@ Tasks:
 - User guide. Status: first `docs/USER_GUIDE_D1L.md` added.
 - Developer guide. Status: first `docs/DEVELOPER_GUIDE_D1L.md` added.
 - Known limitations. Status: `docs/KNOWN_LIMITATIONS.md` is updated through the Phase 7 soak harness.
-- Screenshots/photos. Status: pending.
+- Screenshots/photos. Status: host simulator screenshots are generated locally and by GitHub Actions under `artifacts/ui-sim`; physical screen photos/manual visual review are still pending.
 - Final test report. Status: hardware validation notes are current through the short active soak, release package checkpoint, and release-package sanity smoke; final full-release report is pending long soaks and manual UI review.
 
 Acceptance:
@@ -756,7 +756,9 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/contact/DM/route/packet/mesh-role sheets, and lock overlay.
+- Assert required labels and button surfaces are present.
+- Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.
 - Test large node/message lists.
 
