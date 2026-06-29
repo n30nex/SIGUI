@@ -24,3 +24,10 @@ def test_phase1_smoke_covers_button_rp2040_and_packets():
     assert "button" in SMOKE_COMMANDS
     assert "rp2040 status" in SMOKE_COMMANDS
     assert "packets" in SMOKE_COMMANDS
+
+
+def test_phase1_lvgl_uses_basic_flush_path():
+    defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
+    assert "CONFIG_LCD_AVOID_TEAR=y" not in defaults
+    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" not in defaults
+    assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
