@@ -14,7 +14,8 @@
 - [x] `radiohw` reports SX1262 status or exact wiring failure.
 - [x] `radio get` reports US/CAN 910.525/BW62.5/SF7/CR5/20 dBm/TCXO NONE.
 - [x] NVS settings survive reboot on hardware.
-- [ ] MeshCore local identity is generated and retained.
+- [x] MeshCore local identity is generated and retained.
+- [x] Controlled MeshCore advert TX/RX validated with a local bot.
 - [x] Controlled MeshCore Public `test` TX/RX validated with a local bot.
 - [x] Smoke JSON and monitor logs archived.
 

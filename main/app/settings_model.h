@@ -6,8 +6,10 @@
 #include "esp_err.h"
 #include "mesh/meshcore_radio_profile.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 1U
+#define D1L_SETTINGS_SCHEMA_VERSION 2U
 #define D1L_NODE_NAME_LEN 32U
+#define D1L_IDENTITY_PUBLIC_KEY_LEN 32U
+#define D1L_IDENTITY_PRIVATE_KEY_LEN 64U
 
 typedef enum {
     D1L_ROLE_DESK_COMPANION = 0,
@@ -34,6 +36,9 @@ typedef struct {
     int8_t tx_power_dbm;
     bool rx_boost;
     uint8_t tcxo_mode;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
 } d1l_settings_t;
 
 void d1l_settings_defaults(d1l_settings_t *settings);

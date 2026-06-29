@@ -1,5 +1,12 @@
 idf_component_register(
     SRCS
+        "../third_party/MeshCore/lib/ed25519/fe.c"
+        "../third_party/MeshCore/lib/ed25519/ge.c"
+        "../third_party/MeshCore/lib/ed25519/keypair.c"
+        "../third_party/MeshCore/lib/ed25519/sc.c"
+        "../third_party/MeshCore/lib/ed25519/sha512.c"
+        "../third_party/MeshCore/lib/ed25519/sign.c"
+        "../third_party/MeshCore/lib/ed25519/verify.c"
         "app_main.c"
         "app/app_model.c"
         "app/settings_model.c"
@@ -22,6 +29,7 @@ idf_component_register(
         "diagnostics"
         "hal"
         "mesh"
+        "../third_party/MeshCore/lib/ed25519"
         "ui"
     REQUIRES
         bsp

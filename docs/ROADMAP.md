@@ -535,16 +535,16 @@ Tasks:
 - Integrate MeshCore library.
 - Create `MeshCoreService` event API.
 - Canada/USA preset defaults.
-- Identity generation/storage.
-- Advert receive/decode.
-- Advert transmit.
-- Public message send/receive with a second MeshCore device.
-- Packet counters and basic parse logs.
+- Identity generation/storage. Status: validated on 2026-06-29 with Ed25519 fingerprint retained across reboot.
+- Advert receive/decode. Status: validated on 2026-06-29 with signed local advert decode.
+- Advert transmit. Status: validated on 2026-06-29 with local Meshcorebot `rx_advert_total +1`.
+- Public message send/receive with a second MeshCore device. Status: serial-console Public `test` TX/RX validated on 2026-06-29; touch UI workflow still pending.
+- Packet counters and basic parse logs. Status: validated for Public text and advert entries.
 
 Acceptance:
 
 - D1L can hear at least one live MeshCore packet or controlled test packet. Status: validated on 2026-06-29 with Public replies from local bots.
-- D1L can transmit an advert on the Canada/USA preset.
+- D1L can transmit an advert on the Canada/USA preset. Status: validated on 2026-06-29 with two signed advert TX entries and local Meshcorebot advert RX counter movement.
 - D1L can send/receive a basic public message in controlled testing. Status: serial-console Public `test` TX/RX validated on 2026-06-29; touch UI workflow still pending.
 
 ### Phase 3 — 480×480 dark UI shell

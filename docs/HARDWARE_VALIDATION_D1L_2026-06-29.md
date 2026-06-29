@@ -17,6 +17,8 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Run URL: `https://github.com/n30nex/SIGUI/actions/runs/28358816656`
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
+- Latest local hardware image: `build/meshcore_deskos_d1l.bin`
+- Latest local build size: `0x9ab10`, 40% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -29,6 +31,16 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Local Meshcorebot on `COM11` observed fresh counter movement: `rx_channel_total +4`, `relay_success_total +4`, `discord_send_success_total +4`
   - D1L packet ring logged TX note `test`
   - D1L packet ring decoded Public replies including `Krabs Node: Test OK CH0.`
+- Identity, advert TX/RX, and Public RF regression: `artifacts/smoke/d1l-final-identity-advert-public-rf-COM7.json`
+  - Ed25519 identity fingerprint `0E1EE649EF5371E0` survived reboot.
+  - D1L packet ring logged two signed advert TX entries: `zero 0E1EE649` and `flood 0E1EE649`.
+  - D1L decoded a valid advert RX entry: `adv C D1L Desk 0E1EE649`.
+  - Local Meshcorebot on `COM11` observed fresh advert movement: `rx_advert_total +1`.
+  - Public `test` regression still passed with `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
+- Fresh hardware smoke after identity/advert image: `artifacts/smoke/d1l-smoke-final-identity-advert-tx-COM7.json`
+  - 15 commands passed
+  - `identity status` reported `stored_nvs_ed25519`, `public_key_ready=true`, fingerprint `0E1EE649EF5371E0`
+  - `mesh status` reported `identity_ready=true`, `radio_ready=true`, and `rx_adverts=0` after reboot
 - Boot/idle log: `artifacts/logs/d1l-idle-github-28358816656-COM7-20260629T083219Z.log`
   - App version `f99defe`
   - Board initialized
@@ -51,7 +63,5 @@ Do not use `COM11` or `COM29` for this D1L target.
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- MeshCore C++ local identity generation/storage.
-- MeshCore advert TX/RX.
 - The validated Public message path is currently a serial-console RF slice, not the final touch UI workflow.
 - Flash backup was intentionally skipped per operator instruction.

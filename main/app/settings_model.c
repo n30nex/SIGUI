@@ -40,6 +40,9 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->tx_power_dbm = D1L_RADIO_TX_POWER_DBM;
     settings->rx_boost = true;
     settings->tcxo_mode = D1L_TCXO_NONE;
+    settings->identity_ready = false;
+    memset(settings->identity_public_key, 0, sizeof(settings->identity_public_key));
+    memset(settings->identity_private_key, 0, sizeof(settings->identity_private_key));
 }
 
 void d1l_settings_sanitize(d1l_settings_t *settings)
@@ -86,6 +89,23 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         settings->tx_power_dbm = -9;
     }
     settings->tcxo_mode = D1L_TCXO_NONE;
+    if (settings->identity_ready) {
+        bool pub_all_zero = true;
+        bool prv_all_zero = true;
+        for (size_t i = 0; i < sizeof(settings->identity_public_key); ++i) {
+            pub_all_zero = pub_all_zero && settings->identity_public_key[i] == 0;
+        }
+        for (size_t i = 0; i < sizeof(settings->identity_private_key); ++i) {
+            prv_all_zero = prv_all_zero && settings->identity_private_key[i] == 0;
+        }
+        if (pub_all_zero || prv_all_zero ||
+            settings->identity_public_key[0] == 0x00 ||
+            settings->identity_public_key[0] == 0xff) {
+            settings->identity_ready = false;
+            memset(settings->identity_public_key, 0, sizeof(settings->identity_public_key));
+            memset(settings->identity_private_key, 0, sizeof(settings->identity_private_key));
+        }
+    }
 }
 
 esp_err_t d1l_settings_load(void)

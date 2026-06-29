@@ -7,21 +7,32 @@
 #include "app/settings_model.h"
 #include "bsp_sx126x.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
+#include "ed_25519.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/packet_log.h"
 #include "radio.h"
 #include "sx126x.h"
 
+#define D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD 0x00U
 #define D1L_MESHCORE_ROUTE_FLOOD 0x01U
+#define D1L_MESHCORE_ROUTE_DIRECT 0x02U
+#define D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT 0x03U
+#define D1L_MESHCORE_PAYLOAD_ADVERT 0x04U
 #define D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U
 #define D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD \
     ((uint8_t)((D1L_MESHCORE_PAYLOAD_GROUP_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
 #define D1L_MESHCORE_PUB_KEY_SIZE 32U
+#define D1L_MESHCORE_SIGNATURE_SIZE 64U
+#define D1L_MESHCORE_SEED_SIZE 32U
+#define D1L_MESHCORE_ADVERT_MIN_PAYLOAD \
+    (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
+#define D1L_MESHCORE_MAX_ADVERT_DATA 32U
 #define D1L_MESHCORE_CIPHER_BLOCK_SIZE 16U
 #define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
 #define D1L_MESHCORE_MAX_RAW_PACKET 255U
@@ -29,6 +40,8 @@
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
 #define D1L_MESHCORE_PREAMBLE_LOW_SF 32U
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
+#define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
+#define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -47,6 +60,17 @@ static uint8_t s_public_channel_hash;
 
 static void d1l_meshcore_start_rx(void);
 
+typedef struct {
+    uint8_t header;
+    uint8_t route;
+    uint8_t type;
+    uint8_t path_len;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    const uint8_t *payload;
+    uint16_t payload_len;
+} d1l_meshcore_wire_packet_t;
+
 static void sanitize_note(char *dest, size_t dest_size, const char *src)
 {
     if (dest_size == 0) {
@@ -59,6 +83,20 @@ static void sanitize_note(char *dest, size_t dest_size, const char *src)
             c = '_';
         }
         dest[out++] = (char)c;
+    }
+    dest[out] = '\0';
+}
+
+static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    size_t out = 0;
+    for (size_t i = 0; src && i < src_len && out + 2U < dest_size; ++i) {
+        dest[out++] = hex[(src[i] >> 4) & 0x0fU];
+        dest[out++] = hex[src[i] & 0x0fU];
     }
     dest[out] = '\0';
 }
@@ -117,6 +155,40 @@ static uint8_t path_hash_count(uint8_t path_len)
 static uint8_t path_byte_len(uint8_t path_len)
 {
     return (uint8_t)(path_hash_size(path_len) * path_hash_count(path_len));
+}
+
+static bool parse_wire_packet(const uint8_t *raw, uint16_t size, d1l_meshcore_wire_packet_t *out)
+{
+    if (!raw || !out || size < 3U) {
+        return false;
+    }
+
+    size_t i = 0;
+    memset(out, 0, sizeof(*out));
+    out->header = raw[i++];
+    out->route = out->header & 0x03U;
+    out->type = (out->header >> 2) & 0x0fU;
+    if (out->route == D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD ||
+        out->route == D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT) {
+        if (i + 4U >= size) {
+            return false;
+        }
+        i += 4U;
+    }
+    out->path_len = raw[i++];
+    if (!path_len_valid(out->path_len)) {
+        return false;
+    }
+    const uint8_t path_bytes = path_byte_len(out->path_len);
+    if (i + path_bytes >= size) {
+        return false;
+    }
+    i += path_bytes;
+    out->path_hash_bytes = path_hash_size(out->path_len);
+    out->path_hops = path_hash_count(out->path_len);
+    out->payload = &raw[i];
+    out->payload_len = (uint16_t)(size - i);
+    return true;
 }
 
 static bool bandwidth_to_driver_index(float bandwidth_khz, uint32_t *out_index,
@@ -361,49 +433,216 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
 
 static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
-    if (!payload || size < 5U) {
-        return;
-    }
-    const uint8_t header = payload[0];
-    const uint8_t route = header & 0x03U;
-    const uint8_t type = (header >> 2) & 0x0fU;
-    if (type != D1L_MESHCORE_PAYLOAD_GROUP_TEXT) {
-        return;
-    }
-
-    size_t i = 1;
-    if (route == 0U || route == 3U) {
-        if (size < 6U) {
-            return;
-        }
-        i += 4U;
-    }
-    if (i >= size) {
-        return;
-    }
-    const uint8_t path_len = payload[i++];
-    if (!path_len_valid(path_len)) {
-        return;
-    }
-    const uint8_t path_bytes = path_byte_len(path_len);
-    if (i + path_bytes >= size) {
-        return;
-    }
-    i += path_bytes;
-    if (payload[i++] != s_public_channel_hash) {
+    d1l_meshcore_wire_packet_t packet;
+    if (!parse_wire_packet(payload, size, &packet) ||
+        packet.type != D1L_MESHCORE_PAYLOAD_GROUP_TEXT ||
+        packet.payload_len < 3U ||
+        packet.payload[0] != s_public_channel_hash) {
         return;
     }
 
     uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
-    const size_t plain_len = meshcore_decrypt_after_mac(plain, sizeof(plain) - 1U, &payload[i], size - i);
+    const size_t plain_len = meshcore_decrypt_after_mac(plain, sizeof(plain) - 1U,
+                                                        &packet.payload[1],
+                                                        packet.payload_len - 1U);
     if (plain_len < 6U || (plain[4] >> 2) != 0) {
         return;
     }
     plain[plain_len] = '\0';
     const char *message = (const char *)&plain[5];
     s_status.rx_packets++;
-    append_packet_log("rx", "public_text", rssi, snr, path_hash_size(path_len),
-                      path_hash_count(path_len), size, message);
+    append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
+                      packet.path_hops, size, message);
+}
+
+static char advert_type_code(uint8_t flags)
+{
+    switch (flags & 0x0fU) {
+    case 1:
+        return 'C';
+    case 2:
+        return 'R';
+    case 3:
+        return 'O';
+    case 4:
+        return 'S';
+    default:
+        return 'N';
+    }
+}
+
+static bool parse_advert_name(const uint8_t *app_data, size_t app_data_len, char *name, size_t name_size)
+{
+    if (!name || name_size == 0) {
+        return false;
+    }
+    name[0] = '\0';
+    if (!app_data || app_data_len == 0) {
+        return true;
+    }
+
+    const uint8_t flags = app_data[0];
+    size_t i = 1;
+    if ((flags & 0x10U) != 0) {
+        i += 8U;
+    }
+    if ((flags & 0x20U) != 0) {
+        i += 2U;
+    }
+    if ((flags & 0x40U) != 0) {
+        i += 2U;
+    }
+    if (i > app_data_len) {
+        return false;
+    }
+    if ((flags & 0x80U) == 0 || i == app_data_len) {
+        return true;
+    }
+
+    char raw_name[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    size_t out = 0;
+    while (i < app_data_len && out + 1U < sizeof(raw_name)) {
+        raw_name[out++] = (char)app_data[i++];
+    }
+    raw_name[out] = '\0';
+    sanitize_note(name, name_size, raw_name);
+    return true;
+}
+
+static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *timestamp,
+                                    const uint8_t *signature, const uint8_t *app_data,
+                                    size_t app_data_len)
+{
+    if (!pub_key || !timestamp || !signature || app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
+        return false;
+    }
+    uint8_t message[D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_MAX_ADVERT_DATA];
+    size_t len = 0;
+    memcpy(&message[len], pub_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    len += D1L_MESHCORE_PUB_KEY_SIZE;
+    memcpy(&message[len], timestamp, 4U);
+    len += 4U;
+    if (app_data_len > 0) {
+        memcpy(&message[len], app_data, app_data_len);
+        len += app_data_len;
+    }
+    return ed25519_verify(signature, message, len, pub_key) == 1;
+}
+
+static uint8_t build_advert_app_data(const char *name, uint8_t *app_data, size_t app_data_size)
+{
+    if (!app_data || app_data_size == 0) {
+        return 0;
+    }
+    app_data[0] = D1L_MESHCORE_ADVERT_TYPE_CHAT;
+    uint8_t len = 1;
+    if (name && name[0] != '\0') {
+        app_data[0] |= D1L_MESHCORE_ADVERT_NAME_MASK;
+        while (name[0] && len < app_data_size && len < D1L_MESHCORE_MAX_ADVERT_DATA) {
+            unsigned char c = (unsigned char)*name++;
+            if (c < 32 || c > 126 || c == '"' || c == '\\') {
+                c = '_';
+            }
+            app_data[len++] = c;
+        }
+    }
+    return len;
+}
+
+static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
+                                     uint8_t *raw, size_t raw_size, uint8_t *out_len)
+{
+    if (!settings || !settings->identity_ready || !raw || !out_len || raw_size < 2U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (settings->path_hash_bytes < 1 || settings->path_hash_bytes > 3) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t app_data[D1L_MESHCORE_MAX_ADVERT_DATA] = {0};
+    const uint8_t app_data_len =
+        build_advert_app_data(settings->node_name, app_data, sizeof(app_data));
+    const size_t payload_len = D1L_MESHCORE_ADVERT_MIN_PAYLOAD + app_data_len;
+    const size_t raw_len = 2U + payload_len;
+    if (raw_len > raw_size || raw_len > UINT8_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    size_t i = 0;
+    raw[i++] = (uint8_t)((D1L_MESHCORE_PAYLOAD_ADVERT << 2) |
+                         (flood ? D1L_MESHCORE_ROUTE_FLOOD : D1L_MESHCORE_ROUTE_DIRECT));
+    raw[i++] = flood ? (uint8_t)((settings->path_hash_bytes - 1U) << 6) : 0;
+    memcpy(&raw[i], settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    i += D1L_MESHCORE_PUB_KEY_SIZE;
+    write_le32(&raw[i], meshcore_timestamp());
+    uint8_t *timestamp = &raw[i];
+    i += 4U;
+    uint8_t *signature = &raw[i];
+    i += D1L_MESHCORE_SIGNATURE_SIZE;
+    memcpy(&raw[i], app_data, app_data_len);
+    i += app_data_len;
+
+    uint8_t message[D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_MAX_ADVERT_DATA];
+    size_t msg_len = 0;
+    memcpy(&message[msg_len], settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    msg_len += D1L_MESHCORE_PUB_KEY_SIZE;
+    memcpy(&message[msg_len], timestamp, 4U);
+    msg_len += 4U;
+    memcpy(&message[msg_len], app_data, app_data_len);
+    msg_len += app_data_len;
+    ed25519_sign(signature, message, msg_len, settings->identity_public_key,
+                 settings->identity_private_key);
+
+    *out_len = (uint8_t)i;
+    return ESP_OK;
+}
+
+static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    d1l_meshcore_wire_packet_t packet;
+    if (!parse_wire_packet(payload, size, &packet) ||
+        packet.type != D1L_MESHCORE_PAYLOAD_ADVERT ||
+        packet.payload_len < D1L_MESHCORE_ADVERT_MIN_PAYLOAD) {
+        return;
+    }
+
+    const uint8_t *pub_key = &packet.payload[0];
+    const uint8_t *timestamp = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE];
+    const uint8_t *signature = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE + 4U];
+    const uint8_t *app_data = &packet.payload[D1L_MESHCORE_ADVERT_MIN_PAYLOAD];
+    size_t app_data_len = packet.payload_len - D1L_MESHCORE_ADVERT_MIN_PAYLOAD;
+    if (app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
+        app_data_len = D1L_MESHCORE_MAX_ADVERT_DATA;
+    }
+
+    char pub_prefix[17] = {0};
+    hex_prefix(pub_prefix, sizeof(pub_prefix), pub_key, 8U);
+    const bool valid_signature =
+        verify_advert_signature(pub_key, timestamp, signature, app_data, app_data_len);
+    if (!valid_signature) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "bad_sig pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_bad_sig", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, note);
+        return;
+    }
+
+    char name[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    bool app_data_valid = parse_advert_name(app_data, app_data_len, name, sizeof(name));
+    const char type = app_data_len > 0 ? advert_type_code(app_data[0]) : 'N';
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    if (name[0]) {
+        char short_name[13] = {0};
+        sanitize_note(short_name, sizeof(short_name), name);
+        snprintf(note, sizeof(note), "adv %c %s %.8s", type, short_name, pub_prefix);
+    } else {
+        snprintf(note, sizeof(note), "adv %c %.8s%s", type, pub_prefix,
+                 app_data_valid ? "" : " app_bad");
+    }
+    s_status.rx_packets++;
+    s_status.rx_adverts++;
+    append_packet_log("rx", "advert", rssi, snr, packet.path_hash_bytes,
+                      packet.path_hops, size, note);
 }
 
 static void on_tx_done(void)
@@ -424,6 +663,7 @@ static void on_tx_timeout(void)
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     parse_rx_public_packet(payload, size, rssi, snr);
+    parse_rx_advert_packet(payload, size, rssi, snr);
     d1l_meshcore_start_rx();
 }
 
@@ -529,16 +769,49 @@ void d1l_meshcore_service_init(void)
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO;
     s_status.path_hash_bytes = settings->path_hash_bytes;
-    s_status.identity_ready = false;
+    s_status.identity_ready = settings->identity_ready;
     s_status.radio_ready = false;
     s_status.companion_framing_ready = true;
     s_radio_started = false;
     s_tx_busy = false;
 }
 
+esp_err_t d1l_meshcore_service_ensure_identity(void)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    if (settings.identity_ready) {
+        s_status.identity_ready = true;
+        return ESP_OK;
+    }
+
+    uint8_t seed[D1L_MESHCORE_SEED_SIZE] = {0};
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        esp_fill_random(seed, sizeof(seed));
+        ed25519_create_keypair(settings.identity_public_key, settings.identity_private_key, seed);
+        if (settings.identity_public_key[0] != 0x00 && settings.identity_public_key[0] != 0xff) {
+            settings.identity_ready = true;
+            break;
+        }
+    }
+    memset(seed, 0, sizeof(seed));
+    if (!settings.identity_ready) {
+        s_status.identity_ready = false;
+        return ESP_FAIL;
+    }
+
+    esp_err_t ret = d1l_settings_save(&settings);
+    s_status.identity_ready = ret == ESP_OK;
+    return ret;
+}
+
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
+    if (!settings->identity_ready) {
+        (void)d1l_meshcore_service_ensure_identity();
+    } else {
+        s_status.identity_ready = true;
+    }
     if (!s_tx_busy) {
         esp_err_t ret = ensure_radio_started();
         if (ret == ESP_OK) {
@@ -551,9 +824,40 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)
 {
-    (void)flood;
-    s_status.rejected_commands++;
-    return ESP_ERR_INVALID_STATE;
+    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    if (s_tx_busy) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
+    uint8_t raw_len = 0;
+    const d1l_settings_t *settings = d1l_settings_current();
+    ret = build_advert_packet(settings, flood, raw, sizeof(raw), &raw_len);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+
+    char pub_prefix[17] = {0};
+    hex_prefix(pub_prefix, sizeof(pub_prefix), settings->identity_public_key, 8U);
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(note, sizeof(note), "%s %.8s", flood ? "flood" : "zero", pub_prefix);
+
+    s_tx_busy = true;
+    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    Radio.Send(raw, raw_len);
+    append_packet_log("tx", "advert", 0, 0, settings->path_hash_bytes, 0, raw_len, note);
+    return ESP_OK;
 }
 
 esp_err_t d1l_meshcore_service_send_public(const char *text)

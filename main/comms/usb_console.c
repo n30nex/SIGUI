@@ -47,6 +47,20 @@ static const char *bool_json(bool value)
     return value ? "true" : "false";
 }
 
+static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    size_t out = 0;
+    for (size_t i = 0; src && i < src_len && out + 2U < dest_size; ++i) {
+        dest[out++] = hex[(src[i] >> 4) & 0x0fU];
+        dest[out++] = hex[src[i] & 0x0fU];
+    }
+    dest[out] = '\0';
+}
+
 static void sanitize_node_name(char *name)
 {
     if (name == NULL) {
@@ -148,10 +162,18 @@ static void cmd_settings_set_pathhash(const char *line)
 
 static void cmd_identity_status(void)
 {
+    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        err_result("identity status", esp_err_to_name(ret), "could not generate or persist MeshCore local identity");
+        return;
+    }
     const d1l_settings_t *settings = d1l_settings_current();
+    char fingerprint[17] = {0};
+    hex_prefix(fingerprint, sizeof(fingerprint), settings->identity_public_key, 8U);
     ok_begin("identity status");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"pending_phase2_cpp_binding\",\"public_key_ready\":false,\"fingerprint\":null}\n",
-           settings->node_name, d1l_settings_role_name(settings->role));
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"meshcore_local_identity\":\"stored_nvs_ed25519\",\"public_key_ready\":%s,\"fingerprint\":\"%s\"}\n",
+           settings->node_name, d1l_settings_role_name(settings->role),
+           bool_json(settings->identity_ready), fingerprint);
 }
 
 static void cmd_i2c(void)
@@ -340,18 +362,23 @@ static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     ok_begin("mesh status");
-    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"note\":\"Public group text TX/RX enabled for local RF validation\"}\n",
+    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"note\":\"Public group text TX/RX and signed advert TX/RX enabled for local RF validation\"}\n",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
            status.path_hash_bytes, (unsigned long)status.rx_packets,
-           (unsigned long)status.tx_packets, (unsigned long)status.rejected_commands);
+           (unsigned long)status.rx_adverts, (unsigned long)status.tx_packets,
+           (unsigned long)status.rejected_commands);
 }
 
 static void cmd_mesh_advert(const char *cmd, bool flood)
 {
     esp_err_t ret = d1l_meshcore_service_request_advert(flood);
     if (ret != ESP_OK) {
-        err_result(cmd, "MESHCORE_RADIO_NOT_READY", "MeshCore radio binding is not enabled until Phase 2 RF validation");
+        err_result(cmd,
+                   ret == ESP_ERR_INVALID_STATE ? "MESHCORE_TX_BUSY_OR_RADIO_NOT_READY" :
+                   ret == ESP_ERR_NOT_SUPPORTED ? "UNSUPPORTED_RADIO_PROFILE" :
+                   "MESHCORE_ADVERT_FAILED",
+                   "verify identity, radio profile, and TX state before retrying");
         return;
     }
     ok_begin(cmd);
