@@ -553,21 +553,21 @@ Acceptance:
 
 Tasks:
 
-- Dark mobile theme.
-- Top status bar.
-- Home dashboard cards.
-- Bottom dock/primary navigation.
-- Modal sheets/toasts.
-- Lock/standby screen.
-- Onboarding flow.
-- Simulator/screenshot target if feasible.
+- Dark mobile theme. Status: first desk-console shell slice implemented.
+- Top status bar. Status: implemented with MeshCore state, counters, identity, and lock action.
+- Home dashboard cards. Status: implemented from the app snapshot model.
+- Bottom dock/primary navigation. Status: implemented for Home, Messages, Nodes, Packets, and Settings.
+- Modal sheets/toasts. Status: implemented for advert actions and touch feedback.
+- Lock/standby screen. Status: implemented as a tap-to-unlock overlay.
+- Onboarding flow. Status: pending.
+- Simulator/screenshot target if feasible. Status: pending.
 
 Acceptance:
 
-- UI is readable from desk distance.
-- Home screen updates from simulated and real mesh events.
-- No full-screen flicker during updates.
-- Touch navigation is reliable.
+- UI is readable from desk distance. Status: shell layout is implemented; manual visual confirmation on the physical screen is still pending.
+- Home screen updates from simulated and real mesh events. Status: host contract tests cover snapshot wiring, and COM7 hardware smoke plus controlled Public `test` RF validation passed on 2026-06-29.
+- No full-screen flicker during updates. Status: no boot-loop or panic observed in hardware smoke; visual flicker review is still pending.
+- Touch navigation is reliable. Status: touch actions are routed through the app model and hardware smoke passes; manual navigation review is still pending.
 
 ### Phase 4 — Messaging, nodes, contacts
 

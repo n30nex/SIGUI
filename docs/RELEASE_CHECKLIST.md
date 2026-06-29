@@ -19,6 +19,18 @@
 - [x] Controlled MeshCore Public `test` TX/RX validated with a local bot.
 - [x] Smoke JSON and monitor logs archived.
 
+## Phase 3 UI Shell
+
+- [x] 480x480 dark shell replaces the bring-up tile home.
+- [x] Top status, home dashboard, bottom dock, packet view, settings view, advert sheet, toast, and lock overlay implemented.
+- [x] Touch Public `test` action routes through the app model.
+- [x] Phase 3 shell host contract tests pass.
+- [x] Phase 3 shell local Podman ESP-IDF build passes.
+- [x] Phase 3 shell flashed and smoke-tested on `COM7`.
+- [x] Controlled Public `test` RF regression still receives local bot replies.
+- [ ] Manual visual review of the physical shell.
+- [ ] Full Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
+
 ## Major Version Release
 
 - [x] Private GitHub repo exists under the user's account.

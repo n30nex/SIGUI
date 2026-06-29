@@ -1,5 +1,9 @@
 #include "ui_phase1.h"
 
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include "esp_heap_caps.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -17,6 +21,24 @@ static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
 static bool s_started = false;
+static lv_obj_t *s_screen;
+static lv_obj_t *s_content;
+static lv_obj_t *s_status_label;
+static lv_obj_t *s_identity_label;
+static lv_obj_t *s_toast;
+static lv_obj_t *s_sheet;
+static lv_obj_t *s_lock_overlay;
+static uint32_t s_toast_until;
+
+typedef enum {
+    D1L_UI_TAB_HOME = 0,
+    D1L_UI_TAB_MESSAGES,
+    D1L_UI_TAB_NODES,
+    D1L_UI_TAB_PACKETS,
+    D1L_UI_TAB_SETTINGS,
+} d1l_ui_tab_t;
+
+static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 
 static void lv_tick_task(void *arg)
 {
@@ -46,6 +68,433 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     }
 }
 
+static void label_set_fmt(lv_obj_t *label, const char *fmt, ...)
+{
+    char text[128];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(text, sizeof(text), fmt, args);
+    va_end(args);
+    lv_label_set_text(label, text);
+}
+
+static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    return label;
+}
+
+static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y, int w, int h)
+{
+    lv_obj_t *panel = lv_obj_create(parent);
+    lv_obj_set_size(panel, w, h);
+    lv_obj_set_pos(panel, x, y);
+    lv_obj_set_style_radius(panel, 8, 0);
+    lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_border_width(panel, 1, 0);
+    lv_obj_set_style_pad_all(panel, 12, 0);
+    lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+    return panel;
+}
+
+static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y, int w, int h,
+                               lv_event_cb_t cb, void *user_data)
+{
+    lv_obj_t *button = lv_btn_create(parent);
+    lv_obj_set_size(button, w, h);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_style_radius(button, 8, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_t *label = lv_label_create(button);
+    lv_label_set_text(label, text);
+    lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_center(label);
+    if (cb) {
+        lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, user_data);
+    }
+    return button;
+}
+
+static void show_toast(const char *action, esp_err_t ret)
+{
+    if (!s_toast) {
+        return;
+    }
+    if (ret == ESP_OK) {
+        label_set_fmt(s_toast, "%s queued", action);
+        lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x12362F), 0);
+        lv_obj_set_style_border_color(s_toast, lv_color_hex(0x5EEAD4), 0);
+    } else {
+        label_set_fmt(s_toast, "%s: %s", action, esp_err_to_name(ret));
+        lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x3A1720), 0);
+        lv_obj_set_style_border_color(s_toast, lv_color_hex(0xF87171), 0);
+    }
+    lv_obj_clear_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+    s_toast_until = lv_tick_get() + 3000U;
+}
+
+static void hide_sheet(void)
+{
+    if (s_sheet) {
+        lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void update_chrome(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot || !s_status_label || !s_identity_label) {
+        return;
+    }
+    label_set_fmt(s_status_label, "%s  RX:%lu TX:%lu",
+                  snapshot->mesh_state,
+                  (unsigned long)snapshot->rx_packets,
+                  (unsigned long)snapshot->tx_packets);
+    label_set_fmt(s_identity_label, "%s %.8s",
+                  snapshot->identity_ready ? "ID" : "NO-ID",
+                  snapshot->identity_fingerprint[0] ? snapshot->identity_fingerprint : "--------");
+}
+
+static void render_metric_card(lv_obj_t *parent, int x, int y, const char *title,
+                               const char *value, const char *detail, uint32_t accent)
+{
+    lv_obj_t *card = create_panel(parent, x, y, 204, 104);
+    lv_obj_t *title_label = create_label(card, title, 0x8EA0AE);
+    lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    lv_obj_t *value_label = create_label(card, value, accent);
+    lv_obj_set_style_text_font(value_label, &lv_font_montserrat_24, 0);
+    lv_obj_align(value_label, LV_ALIGN_TOP_LEFT, 0, 26);
+
+    lv_obj_t *detail_label = create_label(card, detail, 0xD7E1EA);
+    lv_label_set_long_mode(detail_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(detail_label, 176);
+    lv_obj_align(detail_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void render_home(const d1l_app_snapshot_t *snapshot)
+{
+    char value[32];
+    char detail[64];
+
+    snprintf(value, sizeof(value), "%s", snapshot->radio_ready ? "Ready" : "Starting");
+    snprintf(detail, sizeof(detail), "path %u byte  packets %lu",
+             snapshot->path_hash_bytes, (unsigned long)snapshot->packet_total_written);
+    render_metric_card(s_content, 18, 16, "Mesh", value, detail,
+                       snapshot->radio_ready ? 0x5EEAD4 : 0xFBBF24);
+
+    snprintf(value, sizeof(value), "%s", snapshot->identity_ready ? "Stored" : "Needed");
+    snprintf(detail, sizeof(detail), "%.16s", snapshot->identity_fingerprint[0] ?
+             snapshot->identity_fingerprint : "not generated");
+    render_metric_card(s_content, 238, 16, "Identity", value, detail,
+                       snapshot->identity_ready ? 0xA7F3D0 : 0xFBBF24);
+
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
+    snprintf(detail, sizeof(detail), "adverts %lu  tx %lu",
+             (unsigned long)snapshot->rx_adverts, (unsigned long)snapshot->tx_packets);
+    render_metric_card(s_content, 18, 136, "RF Packets", value, detail, 0x93C5FD);
+
+    snprintf(value, sizeof(value), "%luK", (unsigned long)(snapshot->heap_free / 1024U));
+    snprintf(detail, sizeof(detail), "psram %luK  uptime %lum",
+             (unsigned long)(snapshot->psram_free / 1024U),
+             (unsigned long)(snapshot->uptime_ms / 60000U));
+    render_metric_card(s_content, 238, 136, "System", value, detail, 0xC4B5FD);
+}
+
+static bool packet_is_public(const d1l_packet_log_entry_t *entry)
+{
+    return entry && strcmp(entry->kind, "public_text") == 0;
+}
+
+static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
+{
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *kind = create_label(row, entry->kind, 0x5EEAD4);
+    lv_obj_align(kind, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
+    label_set_fmt(meta, "#%lu %s rssi %d", (unsigned long)entry->seq,
+                  entry->direction, entry->rssi_dbm);
+    lv_obj_align(meta, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *note = create_label(row, entry->note[0] ? entry->note : "-", 0xE5EDF5);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(note, 392);
+    lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void public_test_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_toast("Public test", d1l_app_model_send_public_test());
+}
+
+static void render_messages(const d1l_app_snapshot_t *snapshot)
+{
+    lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
+    lv_obj_t *title = create_label(header, "Public", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    create_button(header, "Test", 306, 10, 90, 44, public_test_event_cb, NULL);
+
+    int y = 100;
+    int shown = 0;
+    for (size_t i = 0; i < snapshot->recent_packet_count && shown < 4; ++i) {
+        const d1l_packet_log_entry_t *entry = &snapshot->recent_packets[i];
+        if (packet_is_public(entry)) {
+            render_packet_row(s_content, y, entry);
+            y += 56;
+            shown++;
+        }
+    }
+    if (shown == 0) {
+        lv_obj_t *empty = create_label(s_content, "No public messages yet", 0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 130);
+    }
+}
+
+static void render_nodes(const d1l_app_snapshot_t *snapshot)
+{
+    char value[32];
+    char detail[64];
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_adverts);
+    snprintf(detail, sizeof(detail), "valid adverts decoded this boot");
+    render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
+    snprintf(detail, sizeof(detail), "live RF packets in packet log");
+    render_metric_card(s_content, 238, 16, "Live RF", value, detail, 0x93C5FD);
+
+    lv_obj_t *panel = create_panel(s_content, 18, 148, 424, 132);
+    create_label(panel, "Contacts", 0xD7E1EA);
+    lv_obj_t *routes = create_label(panel, "Routes", 0xD7E1EA);
+    lv_obj_align(routes, LV_ALIGN_TOP_LEFT, 0, 40);
+    lv_obj_t *small = create_label(panel, "No saved contact or route cache", 0x8EA0AE);
+    lv_obj_align(small, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void render_packets(const d1l_app_snapshot_t *snapshot)
+{
+    int y = 16;
+    for (size_t i = 0; i < snapshot->recent_packet_count; ++i) {
+        render_packet_row(s_content, y, &snapshot->recent_packets[i]);
+        y += 56;
+    }
+    if (snapshot->recent_packet_count == 0) {
+        lv_obj_t *empty = create_label(s_content, "Packet log is empty", 0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, -20);
+    }
+}
+
+static void advert_zero_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+    show_toast("Zero advert", d1l_app_model_request_advert(false));
+}
+
+static void advert_flood_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+    show_toast("Flood advert", d1l_app_model_request_advert(true));
+}
+
+static void open_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_sheet) {
+        lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void close_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+}
+
+static void render_settings(const d1l_app_snapshot_t *snapshot)
+{
+    lv_obj_t *radio = create_panel(s_content, 18, 16, 424, 82);
+    create_label(radio, "Canada/USA 910.525  BW62.5  SF7  CR5", 0xF4F7FB);
+    lv_obj_t *path = create_label(radio, "", 0x8EA0AE);
+    label_set_fmt(path, "path hash %u byte  companion %s",
+                  snapshot->path_hash_bytes, snapshot->companion_ready ? "ready" : "waiting");
+    lv_obj_align(path, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    lv_obj_t *identity = create_panel(s_content, 18, 114, 424, 82);
+    create_label(identity, snapshot->node_name, 0xF4F7FB);
+    lv_obj_t *id = create_label(identity, "", 0x8EA0AE);
+    label_set_fmt(id, "identity %.16s", snapshot->identity_fingerprint[0] ?
+                  snapshot->identity_fingerprint : "not generated");
+    lv_obj_align(id, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    create_button(s_content, "Advert", 18, 218, 130, 52, open_sheet_event_cb, NULL);
+}
+
+static void render_active_tab(void)
+{
+    if (!s_content) {
+        return;
+    }
+    d1l_app_snapshot_t snapshot;
+    d1l_app_model_snapshot(&snapshot);
+    update_chrome(&snapshot);
+    lv_obj_clean(s_content);
+    switch (s_active_tab) {
+    case D1L_UI_TAB_HOME:
+        render_home(&snapshot);
+        break;
+    case D1L_UI_TAB_MESSAGES:
+        render_messages(&snapshot);
+        break;
+    case D1L_UI_TAB_NODES:
+        render_nodes(&snapshot);
+        break;
+    case D1L_UI_TAB_PACKETS:
+        render_packets(&snapshot);
+        break;
+    case D1L_UI_TAB_SETTINGS:
+        render_settings(&snapshot);
+        break;
+    }
+}
+
+static void dock_event_cb(lv_event_t *event)
+{
+    s_active_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
+    hide_sheet();
+    render_active_tab();
+}
+
+static void lock_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_lock_overlay) {
+        lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void unlock_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_lock_overlay) {
+        lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void refresh_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    d1l_app_snapshot_t snapshot;
+    d1l_app_model_snapshot(&snapshot);
+    update_chrome(&snapshot);
+    if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
+        lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+        s_toast_until = 0;
+    }
+}
+
+static void create_top_bar(lv_obj_t *screen)
+{
+    lv_obj_t *bar = lv_obj_create(screen);
+    lv_obj_set_size(bar, 480, 56);
+    lv_obj_set_pos(bar, 0, 0);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 8, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(bar, "MeshCore DeskOS", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
+
+    s_status_label = create_label(bar, "starting", 0x5EEAD4);
+    lv_label_set_long_mode(s_status_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_status_label, 150);
+    lv_obj_align(s_status_label, LV_ALIGN_TOP_RIGHT, -48, 1);
+
+    s_identity_label = create_label(bar, "ID --------", 0x8EA0AE);
+    lv_label_set_long_mode(s_identity_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_identity_label, 150);
+    lv_obj_align(s_identity_label, LV_ALIGN_BOTTOM_RIGHT, -48, -1);
+
+    create_button(bar, "Lock", 404, 6, 64, 40, lock_event_cb, NULL);
+}
+
+static void create_dock(lv_obj_t *screen)
+{
+    lv_obj_t *dock = lv_obj_create(screen);
+    lv_obj_set_size(dock, 480, 62);
+    lv_obj_set_pos(dock, 0, 418);
+    lv_obj_set_style_bg_color(dock, lv_color_hex(0x09131D), 0);
+    lv_obj_set_style_border_width(dock, 0, 0);
+    lv_obj_set_style_pad_all(dock, 5, 0);
+    lv_obj_clear_flag(dock, LV_OBJ_FLAG_SCROLLABLE);
+
+    const char *labels[] = {"Home", "Msg", "Nodes", "Pkts", "Set"};
+    for (int i = 0; i < 5; ++i) {
+        create_button(dock, labels[i], 8 + i * 94, 5, 88, 50, dock_event_cb,
+                      (void *)(uintptr_t)i);
+    }
+}
+
+static void create_toast(lv_obj_t *screen)
+{
+    s_toast = lv_label_create(screen);
+    lv_obj_set_size(s_toast, 420, 42);
+    lv_obj_set_pos(s_toast, 30, 366);
+    lv_obj_set_style_radius(s_toast, 8, 0);
+    lv_obj_set_style_bg_opa(s_toast, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(s_toast, lv_color_hex(0x12362F), 0);
+    lv_obj_set_style_border_width(s_toast, 1, 0);
+    lv_obj_set_style_border_color(s_toast, lv_color_hex(0x5EEAD4), 0);
+    lv_obj_set_style_pad_all(s_toast, 11, 0);
+    lv_obj_set_style_text_color(s_toast, lv_color_hex(0xF4F7FB), 0);
+    lv_label_set_text(s_toast, "");
+    lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_sheet(lv_obj_t *screen)
+{
+    s_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_sheet, 440, 160);
+    lv_obj_set_pos(s_sheet, 20, 250);
+    lv_obj_set_style_radius(s_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_sheet, 14, 0);
+    lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    create_label(s_sheet, "Advert", 0xF4F7FB);
+    create_button(s_sheet, "Zero Hop", 16, 52, 118, 52, advert_zero_event_cb, NULL);
+    create_button(s_sheet, "Flood", 156, 52, 118, 52, advert_flood_event_cb, NULL);
+    create_button(s_sheet, "Close", 296, 52, 96, 52, close_sheet_event_cb, NULL);
+    lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_lock_overlay(lv_obj_t *screen)
+{
+    s_lock_overlay = lv_obj_create(screen);
+    lv_obj_set_size(s_lock_overlay, 480, 480);
+    lv_obj_set_pos(s_lock_overlay, 0, 0);
+    lv_obj_set_style_bg_color(s_lock_overlay, lv_color_hex(0x02060A), 0);
+    lv_obj_set_style_border_width(s_lock_overlay, 0, 0);
+    lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_lock_overlay, unlock_event_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *title = create_label(s_lock_overlay, "MeshCore DeskOS", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -24);
+    lv_obj_t *hint = create_label(s_lock_overlay, "Tap to unlock", 0x5EEAD4);
+    lv_obj_align(hint, LV_ALIGN_CENTER, 0, 24);
+    lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void ui_task(void *arg)
 {
     (void)arg;
@@ -57,45 +506,29 @@ static void ui_task(void *arg)
 
 esp_err_t d1l_ui_phase1_show_home(void)
 {
-    lv_obj_t *screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_pad_all(screen, 0, 0);
+    s_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_screen, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_pad_all(s_screen, 0, 0);
+    lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = lv_label_create(screen);
-    lv_label_set_text(title, "MeshCore DeskOS D1L");
-    lv_obj_set_style_text_color(title, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 24);
+    create_top_bar(s_screen);
 
-    lv_obj_t *profile = lv_label_create(screen);
-    lv_label_set_text(profile, "US/CAN 910.525  BW62.5  SF7  CR5");
-    lv_obj_set_style_text_color(profile, lv_color_hex(0x5EEAD4), 0);
-    lv_obj_align(profile, LV_ALIGN_TOP_MID, 0, 64);
+    s_content = lv_obj_create(s_screen);
+    lv_obj_set_size(s_content, 480, 362);
+    lv_obj_set_pos(s_content, 0, 56);
+    lv_obj_set_style_bg_color(s_content, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_width(s_content, 0, 0);
+    lv_obj_set_style_pad_all(s_content, 0, 0);
+    lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE);
 
-    const char *tiles[] = {"Display", "Touch", "Radio", "Packets", "Nodes", "Settings"};
-    for (int i = 0; i < 6; ++i) {
-        int row = i / 2;
-        int col = i % 2;
-        lv_obj_t *tile = lv_obj_create(screen);
-        lv_obj_set_size(tile, 196, 82);
-        lv_obj_set_style_radius(tile, 8, 0);
-        lv_obj_set_style_bg_color(tile, lv_color_hex(0x121B24), 0);
-        lv_obj_set_style_border_color(tile, lv_color_hex(0x263241), 0);
-        lv_obj_set_style_border_width(tile, 1, 0);
-        lv_obj_align(tile, LV_ALIGN_TOP_LEFT, 34 + col * 216, 118 + row * 100);
+    create_dock(s_screen);
+    create_sheet(s_screen);
+    create_toast(s_screen);
+    create_lock_overlay(s_screen);
 
-        lv_obj_t *label = lv_label_create(tile);
-        lv_label_set_text(label, tiles[i]);
-        lv_obj_set_style_text_color(label, lv_color_hex(0xE5EDF5), 0);
-        lv_obj_center(label);
-    }
-
-    lv_obj_t *footer = lv_label_create(screen);
-    lv_label_set_text(footer, "Phase 1 hardware bring-up");
-    lv_obj_set_style_text_color(footer, lv_color_hex(0x8EA0AE), 0);
-    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -24);
-
-    lv_scr_load(screen);
+    render_active_tab();
+    lv_timer_create(refresh_timer_cb, 2000, NULL);
+    lv_scr_load(s_screen);
     return ESP_OK;
 }
 
