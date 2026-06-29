@@ -2,13 +2,11 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include "app/settings_model.h"
 #include "bsp_sx126x.h"
 #include "esp_log.h"
 #include "esp_random.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/aes.h"
@@ -116,15 +114,6 @@ static void append_packet_log(const char *direction, const char *kind, int rssi,
     strncpy(entry.kind, kind, sizeof(entry.kind) - 1U);
     sanitize_note(entry.note, sizeof(entry.note), note);
     d1l_packet_log_append(&entry);
-}
-
-static uint32_t meshcore_timestamp(void)
-{
-    time_t now = time(NULL);
-    if (now > 1600000000) {
-        return (uint32_t)now;
-    }
-    return (uint32_t)(esp_timer_get_time() / 1000000ULL);
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -385,7 +374,8 @@ static size_t meshcore_decrypt_after_mac(uint8_t *dest, size_t dest_size, const 
     return enc_len;
 }
 
-static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_bytes, uint8_t *raw,
+static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_bytes,
+                                          uint32_t tx_timestamp, uint8_t *raw,
                                           size_t raw_size, uint8_t *out_len)
 {
     if (!text || !raw || !out_len || text[0] == '\0') {
@@ -396,7 +386,7 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
     }
 
     uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES];
-    write_le32(plain, meshcore_timestamp());
+    write_le32(plain, tx_timestamp);
     plain[4] = 0;
 
     int written = snprintf((char *)&plain[5], sizeof(plain) - 5U, "%s", text);
@@ -550,6 +540,7 @@ static uint8_t build_advert_app_data(const char *name, uint8_t *app_data, size_t
 }
 
 static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
+                                     uint32_t tx_timestamp,
                                      uint8_t *raw, size_t raw_size, uint8_t *out_len)
 {
     if (!settings || !settings->identity_ready || !raw || !out_len || raw_size < 2U) {
@@ -574,7 +565,7 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
     raw[i++] = flood ? (uint8_t)((settings->path_hash_bytes - 1U) << 6) : 0;
     memcpy(&raw[i], settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE);
     i += D1L_MESHCORE_PUB_KEY_SIZE;
-    write_le32(&raw[i], meshcore_timestamp());
+    write_le32(&raw[i], tx_timestamp);
     uint8_t *timestamp = &raw[i];
     i += 4U;
     uint8_t *signature = &raw[i];
@@ -842,7 +833,13 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len = 0;
     const d1l_settings_t *settings = d1l_settings_current();
-    ret = build_advert_packet(settings, flood, raw, sizeof(raw), &raw_len);
+    uint32_t tx_timestamp = 0;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    ret = build_advert_packet(settings, flood, tx_timestamp, raw, sizeof(raw), &raw_len);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
@@ -878,7 +875,14 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len = 0;
     const d1l_settings_t *settings = d1l_settings_current();
-    ret = build_public_text_packet(text, settings->path_hash_bytes, raw, sizeof(raw), &raw_len);
+    uint32_t tx_timestamp = 0;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    ret = build_public_text_packet(text, settings->path_hash_bytes, tx_timestamp,
+                                   raw, sizeof(raw), &raw_len);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;

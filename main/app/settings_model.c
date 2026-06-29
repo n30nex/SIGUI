@@ -9,6 +9,8 @@
 
 #define D1L_SETTINGS_NAMESPACE "d1l_settings"
 #define D1L_SETTINGS_KEY "settings"
+#define D1L_SETTINGS_MESH_TIMESTAMP_KEY "mesh_ts"
+#define D1L_SETTINGS_MESH_TIMESTAMP_BASE 1767225600UL
 
 static d1l_settings_t s_current;
 static bool s_loaded;
@@ -166,6 +168,43 @@ esp_err_t d1l_settings_reset(void)
     d1l_settings_t defaults;
     d1l_settings_defaults(&defaults);
     return d1l_settings_save(&defaults);
+}
+
+esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)
+{
+    if (timestamp == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    uint32_t next = D1L_SETTINGS_MESH_TIMESTAMP_BASE;
+    uint32_t stored = 0;
+    ret = nvs_get_u32(handle, D1L_SETTINGS_MESH_TIMESTAMP_KEY, &stored);
+    if (ret == ESP_OK && stored >= D1L_SETTINGS_MESH_TIMESTAMP_BASE && stored < UINT32_MAX) {
+        next = stored + 1U;
+    } else if (ret == ESP_ERR_NVS_NOT_FOUND ||
+               (ret == ESP_OK && stored < D1L_SETTINGS_MESH_TIMESTAMP_BASE)) {
+        next = D1L_SETTINGS_MESH_TIMESTAMP_BASE + 1U;
+        ret = ESP_OK;
+    }
+
+    if (ret == ESP_OK) {
+        ret = nvs_set_u32(handle, D1L_SETTINGS_MESH_TIMESTAMP_KEY, next);
+    }
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+
+    if (ret == ESP_OK) {
+        *timestamp = next;
+    }
+    return ret;
 }
 
 const d1l_settings_t *d1l_settings_current(void)

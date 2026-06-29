@@ -46,6 +46,7 @@ void d1l_settings_sanitize(d1l_settings_t *settings);
 esp_err_t d1l_settings_load(void);
 esp_err_t d1l_settings_save(const d1l_settings_t *settings);
 esp_err_t d1l_settings_reset(void);
+esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp);
 const d1l_settings_t *d1l_settings_current(void);
 d1l_radio_profile_t d1l_settings_radio_profile(const d1l_settings_t *settings);
 const char *d1l_settings_role_name(uint8_t role);

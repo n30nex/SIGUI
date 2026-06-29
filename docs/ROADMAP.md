@@ -539,7 +539,7 @@ Tasks:
 - Advert receive/decode. Status: validated on 2026-06-29 with signed local advert decode.
 - Advert transmit. Status: validated on 2026-06-29 with local Meshcorebot `rx_advert_total +1`.
 - Public message send/receive with a second MeshCore device. Status: serial-console Public `test` TX/RX validated on 2026-06-29; touch UI workflow still pending.
-- Packet counters and basic parse logs. Status: validated for Public text and advert entries.
+- Packet counters and basic parse logs. Status: validated for Public text and advert entries; TX timestamps are retained in NVS to avoid duplicate filtering across reboots.
 
 Acceptance:
 

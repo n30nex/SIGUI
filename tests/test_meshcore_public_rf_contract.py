@@ -37,6 +37,7 @@ def test_meshcore_service_generates_identity_and_signed_adverts():
     assert "ed25519_create_keypair" in source
     assert "ed25519_sign" in source
     assert "esp_fill_random" in source
+    assert "d1l_settings_next_mesh_timestamp" in source
     assert "build_advert_packet" in source
     assert 'append_packet_log("tx", "advert"' in source
     assert "../third_party/MeshCore/lib/ed25519/keypair.c" in cmake

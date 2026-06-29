@@ -16,8 +16,10 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "D1L_SETTINGS_SCHEMA_VERSION 2U" in header
     assert "identity_public_key" in header
     assert "identity_private_key" in header
+    assert "d1l_settings_next_mesh_timestamp" in header
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
     assert 'D1L_SETTINGS_KEY "settings"' in source
+    assert 'D1L_SETTINGS_MESH_TIMESTAMP_KEY "mesh_ts"' in source
     assert 'snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk")' in source
     assert "settings->wifi_enabled = false" in source
     assert "settings->ble_companion_enabled = false" in source

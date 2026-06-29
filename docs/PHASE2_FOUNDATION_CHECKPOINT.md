@@ -11,6 +11,7 @@ Date: 2026-06-29
 - Added a `meshcore_service` foundation with state, counters, path-hash mode, companion framing readiness, Public RF TX/RX, and signed advert TX/RX.
 - Added a narrow MeshCore Public group text TX/RX path using the D1L SX1262 on the Canada/USA preset.
 - Added MeshCore-compatible node advert packet build/parse support using Ed25519 signatures over public key, timestamp, and app data.
+- Added a retained NVS MeshCore TX timestamp so repeated adverts/messages are not duplicate-filtered after reboot.
 - Added Public packet evidence to `packets`, including TX/RX direction, RSSI/SNR, path hash size, hop count, payload length, and sanitized message notes.
 - Implemented serial handlers for `radio set freq`, `radio set bw`, `radio set sf`, and `radio set cr`.
 - Added `mesh advert flood` handling alongside `mesh advert zero`.
@@ -31,10 +32,10 @@ python .\scripts\smoke_d1l.py --port COM7 --timeout 8 --out artifacts\smoke\d1l-
 - Host tests: 28 passed.
 - Smoke dry run: passed and now includes `settings get` and `identity status`.
 - Hardware persistence smoke: passed on `COM7`; evidence is archived at `artifacts/smoke/d1l-smoke-persistence-COM7.json`.
-- Clean Podman ESP-IDF build: passed; `build/meshcore_deskos_d1l.bin` size `0x9ab10`, 40% free in the app partition.
+- Clean Podman ESP-IDF build: passed; `build/meshcore_deskos_d1l.bin` size `0x9abf0`, 40% free in the app partition.
 - Hardware smoke after fixing the tracked LCD direct-mode config: passed on `COM7`; evidence is archived at `artifacts/smoke/d1l-smoke-public-rf-COM7-after-lcd-config.json`.
 - Controlled Public RF test: passed on `COM7`; D1L sent exact Public text `test`, local Meshcorebot counters moved by `rx_channel_total +4`, `relay_success_total +4`, `discord_send_success_total +4`, and the D1L decoded Public replies including `Krabs Node: Test OK CH0.` Evidence is archived at `artifacts/smoke/d1l-public-test-rf-COM7.json`.
-- Identity + advert RF test: passed on `COM7`; fingerprint `0E1EE649EF5371E0` survived reboot in the full probe, two signed adverts were queued, D1L decoded a valid advert note `adv C D1L Desk 0E1EE649`, Meshcorebot saw `rx_advert_total +1`, and the final-image Public `test` regression still moved `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`. Evidence is archived at `artifacts/smoke/d1l-final-identity-advert-public-rf-COM7.json`.
+- Identity + advert RF test: passed on `COM7`; fingerprint `0E1EE649EF5371E0` survived reboot in the full probe, the retained TX timestamp avoided repeated-boot duplicate filtering, Meshcorebot saw `rx_advert_total +1`, and the Public `test` regression still moved `rx_channel_total +3`, `relay_success_total +3`, and `discord_send_success_total +3`. Evidence is archived at `artifacts/smoke/d1l-advert-public-rf-mesh-ts-COM7.json`.
 
 ## Not Yet Validated
 
