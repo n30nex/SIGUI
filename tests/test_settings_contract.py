@@ -47,6 +47,7 @@ def test_console_exposes_phase2_foundation_commands():
     assert "bool prompt_pending = true" in console
     assert "clearerr(stdin)" in console
     assert "vTaskDelay(pdMS_TO_TICKS(20))" in console
+    assert 'printf("\\n");\n        handle_line(line);' in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

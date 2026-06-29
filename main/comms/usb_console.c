@@ -527,6 +527,7 @@ void d1l_usb_console_run(void)
             prompt_pending = true;
             continue;
         }
+        printf("\n");
         handle_line(line);
         prompt_pending = true;
     }
