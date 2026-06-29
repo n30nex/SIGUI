@@ -106,8 +106,13 @@ static void cmd_settings_set_name(const char *line)
         err_result("settings set name", "INVALID_NAME", "usage: settings set name <1-31 chars>");
         return;
     }
+    size_t arg_len = strlen(arg);
+    if (arg_len >= D1L_NODE_NAME_LEN) {
+        err_result("settings set name", "INVALID_NAME", "usage: settings set name <1-31 chars>");
+        return;
+    }
     d1l_settings_t settings = *d1l_settings_current();
-    snprintf(settings.node_name, sizeof(settings.node_name), "%s", arg);
+    memcpy(settings.node_name, arg, arg_len + 1U);
     sanitize_node_name(settings.node_name);
     esp_err_t ret = d1l_settings_save(&settings);
     if (ret != ESP_OK) {
@@ -469,6 +474,8 @@ static void handle_line(const char *line)
         cmd_rp2040_status();
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
+    } else if (strcmp(line, "health") == 0) {
+        cmd_health();
     } else if (strcmp(line, "wifi off") == 0) {
         ok_begin("wifi off");
         printf(",\"wifi\":\"off\",\"persisted\":true}\n");

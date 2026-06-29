@@ -38,8 +38,12 @@ def test_console_exposes_phase2_foundation_commands():
         "radio set sf",
         "radio set cr",
         "mesh advert flood",
+        'strcmp(line, "health")',
     ]:
         assert command in console
+
+    assert "arg_len >= D1L_NODE_NAME_LEN" in console
+    assert "memcpy(settings.node_name, arg, arg_len + 1U)" in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():
