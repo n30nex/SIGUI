@@ -7,6 +7,8 @@
 
 #include "esp_err.h"
 #include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "d1l_config.h"
 #include "app/app_model.h"
@@ -508,16 +510,24 @@ void d1l_usb_console_run(void)
 {
     char line[256];
     cmd_help();
+    bool prompt_pending = true;
     while (true) {
-        printf(D1L_USB_CONSOLE_PROMPT);
-        fflush(stdout);
+        if (prompt_pending) {
+            printf(D1L_USB_CONSOLE_PROMPT);
+            fflush(stdout);
+            prompt_pending = false;
+        }
         if (!fgets(line, sizeof(line), stdin)) {
+            clearerr(stdin);
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
         trim_line(line);
         if (line[0] == '\0') {
+            prompt_pending = true;
             continue;
         }
         handle_line(line);
+        prompt_pending = true;
     }
 }
