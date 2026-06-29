@@ -233,6 +233,25 @@ static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_
     lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry)
+{
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *alias = create_label(row, entry->contact_alias,
+                                   entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0);
+    lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(alias, 190);
+    lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *state = create_label(row, entry->acked ? "acked" :
+                                   (entry->direction[0] == 't' ? "sent" : "received"),
+                                   0x8EA0AE);
+    lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+    lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(text, 392);
+    lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
@@ -356,19 +375,37 @@ static void compose_keyboard_event_cb(lv_event_t *event)
 static void render_messages(const d1l_app_snapshot_t *snapshot)
 {
     lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
-    lv_obj_t *title = create_label(header, "Public", 0xF4F7FB);
+    lv_obj_t *title = create_label(header, "Messages", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *meta = create_label(header, "", 0x8EA0AE);
+    label_set_fmt(meta, "public %u  dm %u", (unsigned)snapshot->message_count,
+                  (unsigned)snapshot->dm_count);
+    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 2, 0);
     create_button(header, "Compose", 214, 10, 88, 44, open_compose_event_cb, NULL);
     create_button(header, "Test", 312, 10, 84, 44, public_test_event_cb, NULL);
 
     int y = 98;
-    for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
+    if (snapshot->recent_message_count > 0) {
+        lv_obj_t *public_label = create_label(s_content, "Public", 0x8EA0AE);
+        lv_obj_set_pos(public_label, 26, y);
+        y += 22;
+    }
+    for (size_t i = 0; i < snapshot->recent_message_count && y <= 188; ++i) {
         render_message_row(s_content, y, &snapshot->recent_messages[i]);
         y += 60;
     }
-    if (snapshot->recent_message_count == 0) {
-        lv_obj_t *empty = create_label(s_content, "No stored public messages", 0x8EA0AE);
+    if (snapshot->recent_dm_count > 0) {
+        lv_obj_t *dm_label = create_label(s_content, "DM", 0x8EA0AE);
+        lv_obj_set_pos(dm_label, 26, y + 2);
+        y += 26;
+    }
+    for (size_t i = 0; i < snapshot->recent_dm_count && y <= 302; ++i) {
+        render_dm_row(s_content, y, &snapshot->recent_dms[i]);
+        y += 60;
+    }
+    if (snapshot->recent_message_count == 0 && snapshot->recent_dm_count == 0) {
+        lv_obj_t *empty = create_label(s_content, "No stored messages", 0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 130);
     }
 }

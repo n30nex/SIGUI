@@ -12,6 +12,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     assert "D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U" in header
+    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 3U" in header
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
@@ -22,6 +23,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_route_store_copy_recent" in source
     assert "d1l_node_store_copy_recent" in source
     assert "d1l_packet_log_copy_recent" in source
+    assert "d1l_dm_store_copy_recent" in source
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
 
@@ -50,8 +52,10 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_request_advert(false)" in source
     assert "d1l_app_model_request_advert(true)" in source
     assert "d1l_app_model_send_public_text" in header
+    assert "d1l_app_model_send_dm_text" in header
     assert 'd1l_meshcore_service_send_public("test")' in model
     assert "d1l_meshcore_service_send_public(text)" in model
+    assert "d1l_meshcore_service_send_dm(fingerprint, text)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
 
 

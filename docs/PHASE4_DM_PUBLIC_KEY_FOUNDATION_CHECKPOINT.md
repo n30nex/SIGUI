@@ -23,5 +23,5 @@ Date: 2026-06-29
 
 ## Still Pending
 
-- GitHub Actions artifact build/flash/revalidation.
-- Real MeshCore direct-message TX/RX, ACK/path handling, DM store, and DM touch workflow.
+- GitHub Actions artifact build/flash/revalidation for the next DM-store slice.
+- Real MeshCore DM ACK/path handling, controlled inbound DM proof, and DM touch workflow. Serial DM flood TX and the bounded DM store are covered by `PHASE4_DM_STORE_CHECKPOINT.md`.

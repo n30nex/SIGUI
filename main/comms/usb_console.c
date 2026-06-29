@@ -20,6 +20,7 @@
 #include "hal/rp2040_bridge.h"
 #include "hal/sx1262_indicator.h"
 #include "mesh/contact_store.h"
+#include "mesh/dm_store.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -496,6 +497,38 @@ static void cmd_messages_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static void cmd_messages_dm(void)
+{
+    d1l_dm_store_stats_t stats = d1l_dm_store_stats();
+    static d1l_dm_entry_t entries[8];
+    size_t copied = d1l_dm_store_copy_recent(entries, 8);
+    ok_begin("messages dm");
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+           (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+    for (size_t i = 0; i < copied; ++i) {
+        const d1l_dm_entry_t *e = &entries[i];
+        printf("%s{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu}",
+               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->uptime_ms,
+               e->contact_fingerprint, e->contact_alias, e->direction, e->text,
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
+               e->attempt, bool_json(e->delivered), bool_json(e->acked),
+               (unsigned long)e->ack_hash);
+    }
+    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in a bounded NVS store\"}\n");
+}
+
+static void cmd_messages_dm_clear(void)
+{
+    esp_err_t ret = d1l_dm_store_clear();
+    if (ret != ESP_OK) {
+        err_result("messages dm clear", esp_err_to_name(ret), "could not clear DM store");
+        return;
+    }
+    ok_begin("messages dm clear");
+    printf(",\"persisted\":true,\"count\":0}\n");
+}
+
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
@@ -592,6 +625,34 @@ static void cmd_contacts_add(const char *line)
            contact.public_key_hex, contact.alias, contact.heard_name, contact.type);
 }
 
+static void cmd_mesh_send_dm(const char *line)
+{
+    const char *arg = line + strlen("mesh send dm ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("mesh send dm", "INVALID_FINGERPRINT", "usage: mesh send dm <16-hex-fingerprint> <text>");
+        return;
+    }
+    const char *text = arg + strlen(fingerprint);
+    while (*text == ' ') {
+        text++;
+    }
+    if (text[0] == '\0') {
+        err_result("mesh send dm", "EMPTY_MESSAGE", "usage: mesh send dm <16-hex-fingerprint> <text>");
+        return;
+    }
+    esp_err_t ret = d1l_meshcore_service_send_dm(fingerprint, text);
+    if (ret != ESP_OK) {
+        err_result("mesh send dm", esp_err_to_name(ret), "DM requires a promoted contact with a retained public key");
+        return;
+    }
+    ok_begin("mesh send dm");
+    printf(",\"queued\":true,\"fingerprint\":\"%s\"}\n", fingerprint);
+}
+
 static void cmd_routes(void)
 {
     d1l_route_store_stats_t stats = d1l_route_store_stats();
@@ -638,7 +699,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"messages public\",\"messages clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -693,8 +754,12 @@ static void handle_line(const char *line)
         cmd_packets();
     } else if (strcmp(line, "messages public") == 0) {
         cmd_messages_public();
+    } else if (strcmp(line, "messages dm") == 0) {
+        cmd_messages_dm();
     } else if (strcmp(line, "messages clear") == 0) {
         cmd_messages_clear();
+    } else if (strcmp(line, "messages dm clear") == 0) {
+        cmd_messages_dm_clear();
     } else if (strcmp(line, "nodes") == 0) {
         cmd_nodes();
     } else if (strcmp(line, "nodes clear") == 0) {
@@ -725,6 +790,8 @@ static void handle_line(const char *line)
         cmd_mesh_advert("mesh advert flood", true);
     } else if (strncmp(line, "mesh send public ", 17) == 0) {
         cmd_mesh_send_public(line);
+    } else if (strncmp(line, "mesh send dm ", 13) == 0) {
+        cmd_mesh_send_dm(line);
     } else if (strcmp(line, "crashlog") == 0) {
         err_result(line, "PHASE2_STUB", "MeshCore protocol and persistence commands are scheduled for Phase 2");
     } else if (strcmp(line, "reboot") == 0) {

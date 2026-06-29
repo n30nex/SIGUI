@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, DM store contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -52,6 +52,7 @@ Expected commands:
 - `rp2040 status`
 - `packets`
 - `messages public`
+- `messages dm`
 - `nodes`
 - `contacts`
 - `routes`
@@ -69,6 +70,18 @@ For Phase 4 Public message-store validation:
 4. Verify `messages public` contains at least one TX row and one RX row.
 5. Reboot.
 6. Verify `messages public` retains the rows and `packets` starts over as the volatile RF log.
+
+## DM Store And Serial TX
+
+For Phase 4 direct-message store validation:
+
+1. Verify `contacts` contains a promoted contact with a full 64-hex `public_key`.
+2. Run `messages dm clear`.
+3. Run `mesh send dm <fingerprint> <text>`.
+4. Verify `messages dm` contains a TX row with the contact fingerprint, alias, text, `direction="tx"`, `persisted=true`, and a nonzero `ack_hash`.
+5. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement.
+6. Reboot.
+7. Verify `messages dm` retains the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
 ## Heard Node Store
 

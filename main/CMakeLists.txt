@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "../third_party/MeshCore/lib/ed25519/fe.c"
         "../third_party/MeshCore/lib/ed25519/ge.c"
+        "../third_party/MeshCore/lib/ed25519/key_exchange.c"
         "../third_party/MeshCore/lib/ed25519/keypair.c"
         "../third_party/MeshCore/lib/ed25519/sc.c"
         "../third_party/MeshCore/lib/ed25519/sha512.c"
@@ -19,6 +20,7 @@ idf_component_register(
         "hal/rp2040_bridge.c"
         "hal/sx1262_indicator.c"
         "mesh/contact_store.c"
+        "mesh/dm_store.c"
         "mesh/message_store.c"
         "mesh/node_store.c"
         "mesh/packet_log.c"

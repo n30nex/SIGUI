@@ -1,0 +1,68 @@
+from pathlib import Path
+
+from scripts.smoke_d1l import SMOKE_COMMANDS
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read(rel: str) -> str:
+    return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def test_dm_store_is_bounded_and_nvs_backed():
+    header = read("main/mesh/dm_store.h")
+    source = read("main/mesh/dm_store.c")
+    cmake = read("main/CMakeLists.txt")
+    app_main = read("main/app_main.c")
+    assert "D1L_DM_STORE_CAPACITY 16U" in header
+    assert "contact_fingerprint" in header
+    assert "ack_hash" in header
+    assert 'D1L_DM_STORE_NAMESPACE "d1l_dms"' in source
+    assert 'D1L_DM_STORE_KEY "threads"' in source
+    assert "nvs_get_blob" in source
+    assert "nvs_set_blob" in source
+    assert "static d1l_dm_store_blob_t s_blob_scratch" in source
+    assert '"mesh/dm_store.c"' in cmake
+    assert "d1l_dm_store_init()" in app_main
+
+
+def test_meshcore_service_builds_private_text_packets_from_contacts():
+    source = read("main/mesh/meshcore_service.c")
+    cmake = read("main/CMakeLists.txt")
+    assert "D1L_MESHCORE_PAYLOAD_TEXT 0x02U" in source
+    assert "D1L_MESHCORE_HEADER_DM_TEXT_FLOOD" in source
+    assert "ed25519_key_exchange(secret, dest_pub, settings->identity_private_key)" in source
+    assert "ed25519_key_exchange(secret, sender_pub, settings->identity_private_key)" in source
+    assert "build_dm_text_packet" in source
+    assert "calc_dm_ack_hash" in source
+    assert "d1l_contact_store_find_by_fingerprint" in source
+    assert "d1l_dm_store_append" in source
+    assert 'append_packet_log("tx", "dm_text"' in source
+    assert 'append_packet_log("rx", "dm_text"' in source
+    assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake
+
+
+def test_console_and_smoke_expose_dm_workflow():
+    console = read("main/comms/usb_console.c")
+    assert 'ok_begin("messages dm")' in console
+    assert 'strcmp(line, "messages dm")' in console
+    assert 'strcmp(line, "messages dm clear")' in console
+    assert 'strncmp(line, "mesh send dm ", 13)' in console
+    assert "d1l_meshcore_service_send_dm(fingerprint, text)" in console
+    assert "MeshCore direct-message rows are kept in a bounded NVS store" in console
+    assert "messages dm" in SMOKE_COMMANDS
+
+
+def test_app_model_and_ui_preview_recent_dms():
+    header = read("main/app/app_model.h")
+    source = read("main/app/app_model.c")
+    ui = read("main/ui/ui_phase1.c")
+    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 3U" in header
+    assert "recent_dms" in header
+    assert "dm_total_written" in header
+    assert "d1l_dm_store_copy_recent" in source
+    assert "d1l_app_model_send_dm_text" in source
+    assert "render_dm_row" in ui
+    assert '"DM"' in ui
+    assert "No stored messages" in ui

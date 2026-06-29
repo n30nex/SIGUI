@@ -30,4 +30,5 @@ esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_public(const char *text);
+esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text);
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);

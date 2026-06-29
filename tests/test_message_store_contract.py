@@ -42,7 +42,7 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "recent_messages" in app_header
     assert "d1l_message_store_copy_recent" in app_source
     assert "render_message_row" in ui
-    assert "No stored public messages" in ui
+    assert "No stored messages" in ui
     assert 'ok_begin("messages public")' in console
     assert 'strcmp(line, "messages public")' in console
     assert "messages public" in SMOKE_COMMANDS

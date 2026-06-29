@@ -12,6 +12,8 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "ed_25519.h"
+#include "mesh/contact_store.h"
+#include "mesh/dm_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
@@ -24,10 +26,13 @@
 #define D1L_MESHCORE_ROUTE_FLOOD 0x01U
 #define D1L_MESHCORE_ROUTE_DIRECT 0x02U
 #define D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT 0x03U
+#define D1L_MESHCORE_PAYLOAD_TEXT 0x02U
 #define D1L_MESHCORE_PAYLOAD_ADVERT 0x04U
 #define D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U
 #define D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD \
     ((uint8_t)((D1L_MESHCORE_PAYLOAD_GROUP_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
+#define D1L_MESHCORE_HEADER_DM_TEXT_FLOOD \
+    ((uint8_t)((D1L_MESHCORE_PAYLOAD_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
 #define D1L_MESHCORE_PUB_KEY_SIZE 32U
 #define D1L_MESHCORE_SIGNATURE_SIZE 64U
 #define D1L_MESHCORE_SEED_SIZE 32U
@@ -43,6 +48,7 @@
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
+#define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -50,6 +56,18 @@ static bool s_radio_started;
 static volatile bool s_tx_busy;
 static bool s_pending_public_tx;
 static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
+
+typedef struct {
+    bool active;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char alias[D1L_CONTACT_ALIAS_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    uint8_t path_hash_bytes;
+    uint8_t attempt;
+    uint32_t ack_hash;
+} d1l_pending_dm_tx_t;
+
+static d1l_pending_dm_tx_t s_pending_dm_tx;
 extern SX126x_t SX126x;
 
 static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
@@ -102,6 +120,36 @@ static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t 
         dest[out++] = hex[src[i] & 0x0fU];
     }
     dest[out] = '\0';
+}
+
+static int hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    return -1;
+}
+
+static bool hex_to_bytes(uint8_t *dest, size_t dest_len, const char *src_hex)
+{
+    if (!dest || !src_hex) {
+        return false;
+    }
+    for (size_t i = 0; i < dest_len; ++i) {
+        int hi = hex_nibble(src_hex[i * 2U]);
+        int lo = hex_nibble(src_hex[i * 2U + 1U]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        dest[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return src_hex[dest_len * 2U] == '\0';
 }
 
 static void append_packet_log(const char *direction, const char *kind, int rssi, int snr_quarters,
@@ -159,6 +207,19 @@ static void append_public_message_store_tx(const char *message)
     }
 }
 
+static void append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
+{
+    if (!pending || !pending->active) {
+        return;
+    }
+    esp_err_t ret = d1l_dm_store_append(pending->fingerprint, pending->alias, "tx",
+                                        pending->text, 0, 0, pending->path_hash_bytes, 0,
+                                        pending->attempt, false, false, pending->ack_hash);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "DM tx store append failed: %s", esp_err_to_name(ret));
+    }
+}
+
 static void remember_pending_public_tx(const char *message)
 {
     sanitize_note(s_pending_public_text, sizeof(s_pending_public_text), message);
@@ -173,6 +234,32 @@ static void flush_pending_public_tx(void)
     append_public_message_store_tx(s_pending_public_text);
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
+}
+
+static void flush_pending_tx(void)
+{
+    flush_pending_public_tx();
+    append_dm_store_tx(&s_pending_dm_tx);
+    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+}
+
+static void remember_pending_dm_tx(const d1l_contact_entry_t *contact, const char *text,
+                                   uint8_t path_hash_bytes, uint8_t attempt,
+                                   uint32_t ack_hash)
+{
+    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    if (!contact || !text || text[0] == '\0') {
+        return;
+    }
+    s_pending_dm_tx.active = true;
+    sanitize_note(s_pending_dm_tx.fingerprint, sizeof(s_pending_dm_tx.fingerprint),
+                  contact->fingerprint);
+    sanitize_note(s_pending_dm_tx.alias, sizeof(s_pending_dm_tx.alias),
+                  contact->alias[0] ? contact->alias : contact->fingerprint);
+    sanitize_note(s_pending_dm_tx.text, sizeof(s_pending_dm_tx.text), text);
+    s_pending_dm_tx.path_hash_bytes = path_hash_bytes;
+    s_pending_dm_tx.attempt = attempt;
+    s_pending_dm_tx.ack_hash = ack_hash;
 }
 
 static void write_le32(uint8_t *dest, uint32_t value)
@@ -368,10 +455,10 @@ static void apply_sx1262_lora_params(const d1l_radio_profile_t *profile, RadioLo
     }
 }
 
-static esp_err_t meshcore_encrypt_then_mac(uint8_t *dest, size_t dest_size, const uint8_t *src,
-                                           size_t src_len, size_t *out_len)
+static esp_err_t meshcore_encrypt_then_mac(const uint8_t *secret, uint8_t *dest, size_t dest_size,
+                                           const uint8_t *src, size_t src_len, size_t *out_len)
 {
-    if (!dest || !src || !out_len || src_len == 0) {
+    if (!secret || !dest || !src || !out_len || src_len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
     const size_t enc_len = ((src_len + D1L_MESHCORE_CIPHER_BLOCK_SIZE - 1U) /
@@ -383,7 +470,7 @@ static esp_err_t meshcore_encrypt_then_mac(uint8_t *dest, size_t dest_size, cons
 
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    int ret = mbedtls_aes_setkey_enc(&aes, s_public_secret, 128);
+    int ret = mbedtls_aes_setkey_enc(&aes, secret, 128);
     if (ret != 0) {
         mbedtls_aes_free(&aes);
         return ESP_FAIL;
@@ -409,8 +496,11 @@ static esp_err_t meshcore_encrypt_then_mac(uint8_t *dest, size_t dest_size, cons
     mbedtls_aes_free(&aes);
 
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (md == NULL) {
+        return ESP_FAIL;
+    }
     uint8_t hmac[32];
-    ret = mbedtls_md_hmac(md, s_public_secret, sizeof(s_public_secret), ciphertext, enc_len, hmac);
+    ret = mbedtls_md_hmac(md, secret, D1L_MESHCORE_PUB_KEY_SIZE, ciphertext, enc_len, hmac);
     if (ret != 0) {
         return ESP_FAIL;
     }
@@ -419,9 +509,10 @@ static esp_err_t meshcore_encrypt_then_mac(uint8_t *dest, size_t dest_size, cons
     return ESP_OK;
 }
 
-static size_t meshcore_decrypt_after_mac(uint8_t *dest, size_t dest_size, const uint8_t *src, size_t src_len)
+static size_t meshcore_decrypt_after_mac(const uint8_t *secret, uint8_t *dest, size_t dest_size,
+                                         const uint8_t *src, size_t src_len)
 {
-    if (!dest || !src || src_len <= D1L_MESHCORE_CIPHER_MAC_SIZE) {
+    if (!secret || !dest || !src || src_len <= D1L_MESHCORE_CIPHER_MAC_SIZE) {
         return 0;
     }
     const size_t enc_len = src_len - D1L_MESHCORE_CIPHER_MAC_SIZE;
@@ -430,8 +521,11 @@ static size_t meshcore_decrypt_after_mac(uint8_t *dest, size_t dest_size, const 
     }
 
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (md == NULL) {
+        return 0;
+    }
     uint8_t hmac[32];
-    int ret = mbedtls_md_hmac(md, s_public_secret, sizeof(s_public_secret),
+    int ret = mbedtls_md_hmac(md, secret, D1L_MESHCORE_PUB_KEY_SIZE,
                               src + D1L_MESHCORE_CIPHER_MAC_SIZE, enc_len, hmac);
     if (ret != 0 || memcmp(hmac, src, D1L_MESHCORE_CIPHER_MAC_SIZE) != 0) {
         return 0;
@@ -439,7 +533,7 @@ static size_t meshcore_decrypt_after_mac(uint8_t *dest, size_t dest_size, const 
 
     mbedtls_aes_context aes;
     mbedtls_aes_init(&aes);
-    ret = mbedtls_aes_setkey_dec(&aes, s_public_secret, 128);
+    ret = mbedtls_aes_setkey_dec(&aes, secret, 128);
     if (ret != 0) {
         mbedtls_aes_free(&aes);
         return 0;
@@ -492,7 +586,111 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
     raw[i++] = s_public_channel_hash;
 
     size_t mac_cipher_len = 0;
-    esp_err_t ret = meshcore_encrypt_then_mac(&raw[i], raw_size - i, plain, plain_len, &mac_cipher_len);
+    esp_err_t ret = meshcore_encrypt_then_mac(s_public_secret, &raw[i], raw_size - i,
+                                              plain, plain_len, &mac_cipher_len);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    i += mac_cipher_len;
+    if (i > UINT8_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    *out_len = (uint8_t)i;
+    return ESP_OK;
+}
+
+static esp_err_t calc_dm_ack_hash(uint32_t *out_hash, const uint8_t *plain, size_t plain_len,
+                                  const uint8_t *sender_pub_key)
+{
+    if (!out_hash || !plain || !sender_pub_key) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    if (md == NULL) {
+        return ESP_FAIL;
+    }
+    uint8_t hash[32] = {0};
+    mbedtls_md_context_t ctx;
+    mbedtls_md_init(&ctx);
+    int ret = mbedtls_md_setup(&ctx, md, 0);
+    if (ret == 0) {
+        ret = mbedtls_md_starts(&ctx);
+    }
+    if (ret == 0) {
+        ret = mbedtls_md_update(&ctx, plain, plain_len);
+    }
+    if (ret == 0) {
+        ret = mbedtls_md_update(&ctx, sender_pub_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    }
+    if (ret == 0) {
+        ret = mbedtls_md_finish(&ctx, hash);
+    }
+    mbedtls_md_free(&ctx);
+    if (ret != 0) {
+        return ESP_FAIL;
+    }
+    memcpy(out_hash, hash, sizeof(*out_hash));
+    return ESP_OK;
+}
+
+static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
+                                      const d1l_contact_entry_t *contact,
+                                      const char *text, uint8_t path_hash_bytes,
+                                      uint32_t tx_timestamp, uint8_t *raw,
+                                      size_t raw_size, uint8_t *out_len,
+                                      uint32_t *out_ack_hash)
+{
+    if (!settings || !settings->identity_ready || !contact || !text || text[0] == '\0' ||
+        !raw || !out_len || !out_ack_hash) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (path_hash_bytes < 1 || path_hash_bytes > 3 || contact->public_key_hex[0] == '\0') {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t dest_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+    if (!hex_to_bytes(dest_pub, sizeof(dest_pub), contact->public_key_hex)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+    ed25519_key_exchange(secret, dest_pub, settings->identity_private_key);
+
+    uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
+    write_le32(plain, tx_timestamp);
+    const uint8_t attempt = 0;
+    plain[4] = (uint8_t)((D1L_MESHCORE_TXT_TYPE_PLAIN << 2) | attempt);
+
+    int written = snprintf((char *)&plain[5], sizeof(plain) - 5U, "%s", text);
+    if (written < 0) {
+        return ESP_FAIL;
+    }
+    const size_t max_message_len = sizeof(plain) - 5U - 1U;
+    size_t message_len = (size_t)written;
+    if (message_len > max_message_len) {
+        message_len = max_message_len;
+    }
+    const size_t plain_len = 5U + message_len;
+
+    esp_err_t ret = calc_dm_ack_hash(out_ack_hash, plain, plain_len,
+                                     settings->identity_public_key);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    if (raw_size < 4U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    size_t i = 0;
+    raw[i++] = D1L_MESHCORE_HEADER_DM_TEXT_FLOOD;
+    raw[i++] = (uint8_t)((path_hash_bytes - 1U) << 6);
+    raw[i++] = dest_pub[0];
+    raw[i++] = settings->identity_public_key[0];
+
+    size_t mac_cipher_len = 0;
+    ret = meshcore_encrypt_then_mac(secret, &raw[i], raw_size - i,
+                                    plain, plain_len, &mac_cipher_len);
+    memset(secret, 0, sizeof(secret));
     if (ret != ESP_OK) {
         return ret;
     }
@@ -515,7 +713,7 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
     }
 
     uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
-    const size_t plain_len = meshcore_decrypt_after_mac(plain, sizeof(plain) - 1U,
+    const size_t plain_len = meshcore_decrypt_after_mac(s_public_secret, plain, sizeof(plain) - 1U,
                                                         &packet.payload[1],
                                                         packet.payload_len - 1U);
     if (plain_len < 6U || (plain[4] >> 2) != 0) {
@@ -535,6 +733,74 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
     append_packet_log("rx", "public_text", rssi, snr, packet.path_hash_bytes,
                       packet.path_hops, size, message);
     append_public_message_store_rx(message, rssi, snr, packet.path_hash_bytes, packet.path_hops);
+}
+
+static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
+{
+    d1l_meshcore_wire_packet_t packet;
+    if (!parse_wire_packet(payload, size, &packet) ||
+        packet.type != D1L_MESHCORE_PAYLOAD_TEXT ||
+        packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
+        return;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    if (!settings->identity_ready || packet.payload[0] != settings->identity_public_key[0]) {
+        return;
+    }
+
+    d1l_contact_entry_t contacts[D1L_CONTACT_STORE_CAPACITY];
+    size_t copied = d1l_contact_store_copy_recent(contacts, D1L_CONTACT_STORE_CAPACITY);
+    for (size_t i = 0; i < copied; ++i) {
+        d1l_contact_entry_t *contact = &contacts[i];
+        uint8_t sender_pub[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+        if (contact->public_key_hex[0] == '\0' ||
+            !hex_to_bytes(sender_pub, sizeof(sender_pub), contact->public_key_hex) ||
+            sender_pub[0] != packet.payload[1]) {
+            continue;
+        }
+
+        uint8_t secret[D1L_MESHCORE_PUB_KEY_SIZE] = {0};
+        ed25519_key_exchange(secret, sender_pub, settings->identity_private_key);
+        uint8_t plain[D1L_MESHCORE_MAX_RAW_PACKET + 1U] = {0};
+        const size_t plain_len =
+            meshcore_decrypt_after_mac(secret, plain, sizeof(plain) - 1U,
+                                       &packet.payload[2], packet.payload_len - 2U);
+        memset(secret, 0, sizeof(secret));
+        if (plain_len < 6U) {
+            continue;
+        }
+
+        const uint8_t txt_type = plain[4] >> 2;
+        if (txt_type != D1L_MESHCORE_TXT_TYPE_PLAIN) {
+            continue;
+        }
+        plain[plain_len] = '\0';
+        const char *message = (const char *)&plain[5];
+        uint32_t ack_hash = 0;
+        (void)calc_dm_ack_hash(&ack_hash, plain, 5U + strlen(message), sender_pub);
+        s_status.rx_packets++;
+        esp_err_t store_ret = d1l_dm_store_append(contact->fingerprint, contact->alias, "rx",
+                                                  message, rssi, (snr * 10) / 4,
+                                                  packet.path_hash_bytes, packet.path_hops,
+                                                  plain[4] & 0x03U, true, false, ack_hash);
+        if (store_ret != ESP_OK) {
+            ESP_LOGW(TAG, "DM rx store append failed: %s", esp_err_to_name(store_ret));
+        }
+        esp_err_t route_ret =
+            d1l_route_store_upsert_observation(contact->fingerprint, contact->alias, "dm_text",
+                                               route_name(packet.route), "rx", rssi,
+                                               (snr * 10) / 4, packet.path_hash_bytes,
+                                               packet.path_hops, size);
+        if (route_ret != ESP_OK) {
+            ESP_LOGW(TAG, "route store DM rx failed: %s", esp_err_to_name(route_ret));
+        }
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "%.12s: %.24s", contact->alias, message);
+        append_packet_log("rx", "dm_text", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, note);
+        return;
+    }
 }
 
 static char advert_type_code(uint8_t flags)
@@ -747,7 +1013,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
 
 static void on_tx_done(void)
 {
-    flush_pending_public_tx();
+    flush_pending_tx();
     s_tx_busy = false;
     s_status.tx_packets++;
     s_status.state = D1L_MESHCORE_SERVICE_READY;
@@ -758,6 +1024,7 @@ static void on_tx_timeout(void)
 {
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
+    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     s_tx_busy = false;
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
     d1l_meshcore_start_rx();
@@ -766,6 +1033,7 @@ static void on_tx_timeout(void)
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     parse_rx_public_packet(payload, size, rssi, snr);
+    parse_rx_dm_packet(payload, size, rssi, snr);
     parse_rx_advert_packet(payload, size, rssi, snr);
     d1l_meshcore_start_rx();
 }
@@ -879,6 +1147,7 @@ void d1l_meshcore_service_init(void)
     s_tx_busy = false;
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
+    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
 }
 
 esp_err_t d1l_meshcore_service_ensure_identity(void)
@@ -1022,6 +1291,65 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
         ESP_LOGW(TAG, "route store public tx failed: %s", esp_err_to_name(route_ret));
     }
     append_packet_log("tx", "public_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
+    return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !text || text[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    if (s_tx_busy) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
+        contact.public_key_hex[0] == '\0') {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
+    uint8_t raw_len = 0;
+    uint32_t ack_hash = 0;
+    const d1l_settings_t *settings = d1l_settings_current();
+    uint32_t tx_timestamp = 0;
+    ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+    ret = build_dm_text_packet(settings, &contact, text, settings->path_hash_bytes,
+                               tx_timestamp, raw, sizeof(raw), &raw_len, &ack_hash);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
+
+    s_tx_busy = true;
+    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    remember_pending_dm_tx(&contact, text, settings->path_hash_bytes, 0, ack_hash);
+    Radio.Send(raw, raw_len);
+    esp_err_t route_ret =
+        d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",
+                                           route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx",
+                                           0, 0, settings->path_hash_bytes, 0, raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store DM tx failed: %s", esp_err_to_name(route_ret));
+    }
+    append_packet_log("tx", "dm_text", 0, 0, settings->path_hash_bytes, 0, raw_len, text);
     return ESP_OK;
 }
 

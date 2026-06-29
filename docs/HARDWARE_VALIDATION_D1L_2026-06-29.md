@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 route-store slice: `0x9e790`, 38% free in the app partition
+- Latest local build size after the Phase 4 DM-store slice: `0xa03f0`, 37% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -126,11 +126,26 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `contacts add 0BF0A701D5AE2DB6` copied the same full public key into the promoted contact row.
   - After reboot, both `nodes` and `contacts` retained the same public key and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
   - Public `test` RF regression still passed after the bot restart with local Meshcorebot counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
+- Phase 4 DM store final local smoke: `artifacts/smoke/d1l-smoke-phase4-dm-store-final-local-COM7.json`
+  - 20 commands passed after flashing the final local DM-store build, including `messages dm`.
+  - `messages dm` returned the bounded persisted DM store payload.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 DM TX/store reboot persistence: `artifacts/smoke/d1l-dm-store-tx-persistence-local-COM7.json`
+  - `messages dm clear` reset the store to `count=0`.
+  - `mesh send dm 0BF0A701D5AE2DB6 d1l dm store pass` queued a MeshCore private text flood to `YKF Corebot`.
+  - `messages dm` stored a TX row with fingerprint `0BF0A701D5AE2DB6`, alias `YKF Corebot`, text `d1l dm store pass`, and nonzero ACK hash `2069692642`.
+  - Local Meshcorebot on `COM11` observed fresh contact movement: `rx_contact_total +1`, `relay_success_total +1`, and `discord_send_success_total +1`.
+  - After reboot, `messages dm` retained the TX row and `health` showed uptime increasing from `4563` to `9593` ms with `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 Public `test` response-window regression: `artifacts/smoke/d1l-public-test-response-window-local-COM7.json`
+  - Three fresh `mesh send public test` commands reached the local COM11 bot: `rx_channel_total +3`, `relay_success_total +3`, and `discord_send_success_total +3`.
+  - D1L did not hear a fresh `Test OK` Public reply during this latest window, so that listener-side reply check remains open even though D1L TX to the bot was verified.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public composer keyboard is still pending; DMs are not implemented yet.
+- Manual physical touch entry on the Public composer keyboard is still pending.
+- Full DM workflow is still pending: touch compose/thread UI, ACK handling, direct-path routing, and a controlled inbound DM artifact.
+- D1L-heard Public bot reply validation needs another response-window pass; the latest local window proved COM11 bot receipt/relay but not a fresh D1L-decoded `Test OK` reply.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
 - Contact detail/edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview and route count.
 - Flash backup was intentionally skipped per operator instruction.

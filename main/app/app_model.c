@@ -44,6 +44,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     const d1l_settings_t *settings = d1l_settings_current();
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     d1l_message_store_stats_t messages = d1l_message_store_stats();
+    d1l_dm_store_stats_t dms = d1l_dm_store_stats();
     d1l_node_store_stats_t nodes = d1l_node_store_stats();
     d1l_contact_store_stats_t contacts = d1l_contact_store_stats();
     d1l_route_store_stats_t routes = d1l_route_store_stats();
@@ -70,6 +71,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->rejected_commands = mesh.rejected_commands;
     snapshot->message_total_written = messages.total_written;
     snapshot->message_count = messages.count;
+    snapshot->dm_total_written = dms.total_written;
+    snapshot->dm_count = dms.count;
     snapshot->node_total_written = nodes.total_written;
     snapshot->node_count = nodes.count;
     snapshot->contact_total_written = contacts.total_written;
@@ -87,6 +90,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         d1l_node_store_copy_recent(snapshot->recent_nodes, D1L_APP_SNAPSHOT_NODE_PREVIEW);
     snapshot->recent_message_count =
         d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
+    snapshot->recent_dm_count =
+        d1l_dm_store_copy_recent(snapshot->recent_dms, D1L_APP_SNAPSHOT_DM_PREVIEW);
     snapshot->recent_packet_count =
         d1l_packet_log_copy_recent(snapshot->recent_packets, D1L_APP_SNAPSHOT_PACKET_PREVIEW);
 }
@@ -99,6 +104,11 @@ esp_err_t d1l_app_model_send_public_test(void)
 esp_err_t d1l_app_model_send_public_text(const char *text)
 {
     return d1l_meshcore_service_send_public(text);
+}
+
+esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
+{
+    return d1l_meshcore_service_send_dm(fingerprint, text);
 }
 
 esp_err_t d1l_app_model_request_advert(bool flood)

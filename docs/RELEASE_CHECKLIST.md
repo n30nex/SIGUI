@@ -43,7 +43,8 @@
 - [x] Contact store promotion from heard node survives reboot on `COM7`.
 - [x] Route store survives reboot on `COM7`.
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
-- [ ] DM store/workflow.
+- [x] DM store and serial flood-TX path survive reboot on `COM7`.
+- [ ] Full DM workflow: touch compose/thread UI, ACK handling, direct-path routing, and controlled inbound DM proof.
 
 ## Major Version Release
 
