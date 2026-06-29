@@ -5,12 +5,26 @@
 #include "driver/spi_master.h"
 #include "esp_rom_sys.h"
 #include "bsp_sx126x.h"
+#include "sdkconfig.h"
+#include "tca9535.h"
 
 static void fill_failure(d1l_radiohw_status_t *status, const char *code)
 {
     memset(status, 0, sizeof(*status));
     status->tcxo_default = "NONE";
     status->failure_code = code;
+}
+
+static esp_err_t read_radio_pins(uint16_t *pins)
+{
+#if CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L
+    return tca9535_read_input_pins(pins);
+#else
+    uint8_t pins8 = 0;
+    esp_err_t ret = indicator_io_expander->read_input_pins(&pins8);
+    *pins = pins8;
+    return ret;
+#endif
 }
 
 esp_err_t d1l_sx1262_probe(d1l_radiohw_status_t *status)
@@ -26,7 +40,7 @@ esp_err_t d1l_sx1262_probe(d1l_radiohw_status_t *status)
     }
 
     uint16_t pins = 0;
-    esp_err_t ret = indicator_io_expander->read_input_pins(&pins);
+    esp_err_t ret = read_radio_pins(&pins);
     if (ret != ESP_OK) {
         fill_failure(status, "EXPANDER_READ_FAILED");
         return ret;
@@ -45,7 +59,7 @@ esp_err_t d1l_sx1262_probe(d1l_radiohw_status_t *status)
     }
 
     for (int i = 0; i < 50; ++i) {
-        ret = indicator_io_expander->read_input_pins(&pins);
+        ret = read_radio_pins(&pins);
         if (ret != ESP_OK) {
             status->failure_code = "EXPANDER_READ_FAILED";
             return ret;

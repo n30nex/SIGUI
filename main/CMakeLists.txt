@@ -29,6 +29,7 @@ idf_component_register(
         esp_timer
         esp_system
         heap
+        i2c_devices
         lora
         lvgl
         nvs_flash
