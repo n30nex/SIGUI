@@ -120,6 +120,12 @@ esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_
            ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
+esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
+                                          d1l_contact_entry_t *out_contact)
+{
+    return d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact);
+}
+
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);

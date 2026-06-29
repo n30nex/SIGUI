@@ -128,6 +128,17 @@ For Phase 4 contact-store validation:
 7. Reboot.
 8. Verify `contacts` retains the row and its copied `public_key`.
 
+For Phase 4 contact detail and favorite/mute validation:
+
+1. Verify `contacts` contains at least one promoted contact.
+2. Run `contacts set <fingerprint> favorite 1`.
+3. Run `contacts set <fingerprint> mute 1`.
+4. Verify `contacts` shows `favorite=true` and `muted=true`.
+5. Reboot and verify both flags are still true.
+6. Run `contacts set <fingerprint> favorite 0` and `contacts set <fingerprint> mute 0`.
+7. Verify `contacts` shows both flags false.
+8. For physical touch review, open the Nodes tab, tap the contact row, verify the detail sheet shows signal/key/path metadata, and verify `Fav`, `Mute`, `DM`, and `Close` actions respond.
+
 ## Route Store
 
 For Phase 4 route-store validation:

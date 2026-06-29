@@ -55,10 +55,12 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_send_public_text" in header
     assert "d1l_app_model_send_dm_text" in header
     assert "d1l_app_model_find_contact" in header
+    assert "d1l_app_model_set_contact_flags" in header
     assert 'd1l_meshcore_service_send_public("test")' in model
     assert "d1l_meshcore_service_send_public(text)" in model
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in model
     assert "d1l_contact_store_find_by_fingerprint(fingerprint, out_contact)" in model
+    assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
 
 
@@ -84,7 +86,8 @@ def test_dm_composer_opens_from_contact_rows():
     assert "static d1l_contact_entry_t s_compose_contact" in source
     assert "open_dm_compose_event_cb" in source
     assert 'create_button(row, "DM"' in source
-    assert "s_compose_contact = *entry" in source
+    assert "d1l_contact_entry_t selected = *entry" in source
+    assert "s_compose_contact = selected" in source
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
     assert 'show_toast(s_compose_dm ? "DM" : "Public message", ret)' in source
@@ -118,3 +121,18 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "node_total_written" in source
     assert "contact_total_written" in source
     assert "route_count" in source
+
+
+def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_contact_detail_sheet" in source
+    assert "static d1l_contact_entry_t s_contact_detail_contact" in source
+    assert "open_contact_detail_event_cb" in source
+    assert "create_contact_detail_sheet" in source
+    assert "render_contact_detail_sheet" in source
+    assert "contact_detail_dm_event_cb" in source
+    assert "lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint" in source
+    assert "s_contact_action_favorite" in source
+    assert "s_contact_action_mute" in source
+    assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source

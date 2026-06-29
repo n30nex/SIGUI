@@ -75,6 +75,22 @@ static bool parse_fingerprint_token(const char *src, char *dest, size_t dest_siz
     return true;
 }
 
+static bool parse_bool_token(const char *src, bool *out_value)
+{
+    if (!src || !out_value) {
+        return false;
+    }
+    if (strcmp(src, "1") == 0 || strcmp(src, "true") == 0 || strcmp(src, "on") == 0) {
+        *out_value = true;
+        return true;
+    }
+    if (strcmp(src, "0") == 0 || strcmp(src, "false") == 0 || strcmp(src, "off") == 0) {
+        *out_value = false;
+        return true;
+    }
+    return false;
+}
+
 static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -627,6 +643,78 @@ static void cmd_contacts_add(const char *line)
            contact.public_key_hex, contact.alias, contact.heard_name, contact.type);
 }
 
+static void cmd_contacts_set(const char *line)
+{
+    const char *arg = line + strlen("contacts set ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("contacts set", "INVALID_FINGERPRINT",
+                   "usage: contacts set <fingerprint> <favorite|mute> <0|1>");
+        return;
+    }
+    arg += strlen(fingerprint);
+    while (*arg == ' ') {
+        arg++;
+    }
+
+    char field[12] = {0};
+    size_t field_len = 0;
+    while (arg[field_len] != '\0' && !isspace((unsigned char)arg[field_len]) &&
+           field_len + 1U < sizeof(field)) {
+        field[field_len] = (char)tolower((unsigned char)arg[field_len]);
+        field_len++;
+    }
+    field[field_len] = '\0';
+    arg += field_len;
+    while (*arg == ' ') {
+        arg++;
+    }
+
+    char value_text[8] = {0};
+    size_t value_len = 0;
+    while (arg[value_len] != '\0' && !isspace((unsigned char)arg[value_len]) &&
+           value_len + 1U < sizeof(value_text)) {
+        value_text[value_len] = (char)tolower((unsigned char)arg[value_len]);
+        value_len++;
+    }
+    value_text[value_len] = '\0';
+
+    bool value = false;
+    if (!parse_bool_token(value_text, &value)) {
+        err_result("contacts set", "INVALID_VALUE",
+                   "usage: contacts set <fingerprint> <favorite|mute> <0|1>");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact)) {
+        err_result("contacts set", "ESP_ERR_NOT_FOUND", "contact is not promoted");
+        return;
+    }
+    if (strcmp(field, "favorite") == 0 || strcmp(field, "fav") == 0) {
+        contact.favorite = value;
+    } else if (strcmp(field, "mute") == 0 || strcmp(field, "muted") == 0) {
+        contact.muted = value;
+    } else {
+        err_result("contacts set", "INVALID_FIELD",
+                   "usage: contacts set <fingerprint> <favorite|mute> <0|1>");
+        return;
+    }
+
+    esp_err_t ret = d1l_contact_store_set_flags(fingerprint, contact.favorite, contact.muted, &contact);
+    if (ret != ESP_OK) {
+        err_result("contacts set", esp_err_to_name(ret), "could not persist contact flags");
+        return;
+    }
+
+    ok_begin("contacts set");
+    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"favorite\":%s,\"muted\":%s}\n",
+           contact.fingerprint, bool_json(contact.favorite), bool_json(contact.muted));
+}
+
 static void cmd_mesh_send_dm(const char *line)
 {
     const char *arg = line + strlen("mesh send dm ");
@@ -701,7 +789,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -772,6 +860,8 @@ static void handle_line(const char *line)
         cmd_contacts_clear();
     } else if (strncmp(line, "contacts add ", 13) == 0) {
         cmd_contacts_add(line);
+    } else if (strncmp(line, "contacts set ", 13) == 0) {
+        cmd_contacts_set(line);
     } else if (strcmp(line, "routes") == 0) {
         cmd_routes();
     } else if (strcmp(line, "routes clear") == 0) {

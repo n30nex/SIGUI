@@ -32,17 +32,22 @@ static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_dm_thread_sheet;
+static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static d1l_contact_entry_t s_compose_contact;
+static d1l_contact_entry_t s_contact_detail_contact;
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
+static const char s_contact_action_favorite[] = "favorite";
+static const char s_contact_action_mute[] = "mute";
 
 static void render_active_tab(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
+static void open_contact_detail_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -176,6 +181,14 @@ static void hide_dm_thread_sheet(void)
     }
     s_dm_thread_fingerprint[0] = '\0';
     s_dm_thread_alias[0] = '\0';
+}
+
+static void hide_contact_detail_sheet(void)
+{
+    if (s_contact_detail_sheet) {
+        lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+    memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
 }
 
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
@@ -313,6 +326,8 @@ static void render_node_row(lv_obj_t *parent, int y, const d1l_node_entry_t *ent
 static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_t *entry)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
     lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
@@ -344,6 +359,7 @@ static void open_compose_event_cb(lv_event_t *event)
     (void)event;
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
@@ -366,13 +382,16 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         show_toast("DM", ESP_ERR_INVALID_STATE);
         return;
     }
+    d1l_contact_entry_t selected = *entry;
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
     s_compose_dm = true;
-    s_compose_contact = *entry;
+    s_compose_contact = selected;
     if (s_compose_title) {
         char title[48];
-        snprintf(title, sizeof(title), "DM %.32s", entry->alias[0] ? entry->alias : entry->fingerprint);
+        snprintf(title, sizeof(title), "DM %.32s",
+                 selected.alias[0] ? selected.alias : selected.fingerprint);
         lv_label_set_text(s_compose_title, title);
     }
     if (s_compose_sheet) {
@@ -390,6 +409,116 @@ static void open_dm_compose_event_cb(lv_event_t *event)
 {
     const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
     open_dm_compose_for_contact(entry);
+}
+
+static void close_contact_detail_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_contact_detail_sheet();
+}
+
+static void contact_detail_dm_event_cb(lv_event_t *event)
+{
+    (void)event;
+    open_dm_compose_for_contact(&s_contact_detail_contact);
+}
+
+static void render_contact_detail_sheet(void)
+{
+    if (!s_contact_detail_sheet) {
+        return;
+    }
+    lv_obj_clean(s_contact_detail_sheet);
+
+    const d1l_contact_entry_t *entry = &s_contact_detail_contact;
+    lv_obj_t *title = create_label(s_contact_detail_sheet,
+                                   entry->alias[0] ? entry->alias : entry->fingerprint,
+                                   0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 250);
+    lv_obj_set_pos(title, 8, 4);
+
+    lv_obj_t *flags = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(flags, "%s  %s  %s", entry->type[0] ? entry->type : "node",
+                  entry->favorite ? "favorite" : "normal",
+                  entry->muted ? "muted" : "audible");
+    lv_obj_set_pos(flags, 8, 42);
+
+    lv_obj_t *fingerprint = create_label(s_contact_detail_sheet, "", 0xE5EDF5);
+    label_set_fmt(fingerprint, "fp %.16s", entry->fingerprint);
+    lv_obj_set_pos(fingerprint, 8, 78);
+
+    lv_obj_t *key = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(key, "%s  route %s  hops %u",
+                  entry->public_key_hex[0] ? "public key retained" : "no public key",
+                  entry->out_path_valid ? "direct" : "flood",
+                  entry->out_path_valid ? entry->path_hops : 0);
+    lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(key, 392);
+    lv_obj_set_pos(key, 8, 112);
+
+    const int snr_abs = entry->last_snr_tenths < 0 ? -entry->last_snr_tenths : entry->last_snr_tenths;
+    lv_obj_t *signal = create_label(s_contact_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(signal, "rssi %d  snr %s%d.%d  heard %.18s",
+                  entry->last_rssi_dbm,
+                  entry->last_snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
+                  entry->heard_name[0] ? entry->heard_name : "-");
+    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(signal, 392);
+    lv_obj_set_pos(signal, 8, 146);
+
+    create_button(s_contact_detail_sheet, "DM", 8, 198, 58, 42, contact_detail_dm_event_cb, NULL);
+    create_button(s_contact_detail_sheet, entry->favorite ? "Unfav" : "Fav", 78, 198, 74, 42,
+                  open_contact_detail_event_cb, (void *)s_contact_action_favorite);
+    create_button(s_contact_detail_sheet, entry->muted ? "Unmute" : "Mute", 164, 198, 82, 42,
+                  open_contact_detail_event_cb, (void *)s_contact_action_mute);
+    create_button(s_contact_detail_sheet, "Close", 316, 198, 76, 42, close_contact_detail_event_cb, NULL);
+}
+
+static void update_contact_detail_flags(bool favorite, bool muted)
+{
+    d1l_contact_entry_t updated = {0};
+    esp_err_t ret = d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint,
+                                                    favorite, muted, &updated);
+    if (ret == ESP_OK) {
+        s_contact_detail_contact = updated;
+        render_active_tab();
+        render_contact_detail_sheet();
+        if (s_contact_detail_sheet) {
+            lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_contact_detail_sheet);
+        }
+    }
+    show_toast("Contact", ret);
+}
+
+static void open_contact_detail_event_cb(lv_event_t *event)
+{
+    const void *user_data = lv_event_get_user_data(event);
+    if (user_data == s_contact_action_favorite) {
+        update_contact_detail_flags(!s_contact_detail_contact.favorite, s_contact_detail_contact.muted);
+        return;
+    }
+    if (user_data == s_contact_action_mute) {
+        update_contact_detail_flags(s_contact_detail_contact.favorite, !s_contact_detail_contact.muted);
+        return;
+    }
+
+    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)user_data;
+    if (!entry || entry->fingerprint[0] == '\0') {
+        show_toast("Contact", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    s_contact_detail_contact = *entry;
+    hide_sheet();
+    hide_dm_thread_sheet();
+    hide_compose_sheet();
+    render_contact_detail_sheet();
+    if (s_contact_detail_sheet) {
+        lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_contact_detail_sheet);
+    }
 }
 
 static void close_compose_event_cb(lv_event_t *event)
@@ -532,6 +661,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
              entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
     hide_sheet();
     hide_compose_sheet();
+    hide_contact_detail_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
         lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -643,6 +773,7 @@ static void open_sheet_event_cb(lv_event_t *event)
     (void)event;
     if (s_sheet) {
         hide_dm_thread_sheet();
+        hide_contact_detail_sheet();
         lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -705,6 +836,7 @@ static void dock_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
     render_active_tab();
 }
 
@@ -873,6 +1005,20 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_contact_detail_sheet(lv_obj_t *screen)
+{
+    s_contact_detail_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_contact_detail_sheet, 448, 276);
+    lv_obj_set_pos(s_contact_detail_sheet, 16, 116);
+    lv_obj_set_style_radius(s_contact_detail_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_contact_detail_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_contact_detail_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_contact_detail_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_contact_detail_sheet, 12, 0);
+    lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -921,6 +1067,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_sheet(s_screen);
     create_compose_sheet(s_screen);
     create_dm_thread_sheet(s_screen);
+    create_contact_detail_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
 

@@ -33,6 +33,7 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "find_index_by_fingerprint" in source
     assert "oldest_index" in source
     assert "d1l_contact_store_update_path" in source
+    assert "d1l_contact_store_set_flags" in source
     assert '"mesh/contact_store.c"' in cmake
     assert "d1l_contact_store_init()" in app_main
 
@@ -52,6 +53,9 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert 'strcmp(line, "contacts")' in console
     assert 'strcmp(line, "contacts clear")' in console
     assert 'strncmp(line, "contacts add ", 13)' in console
+    assert 'strncmp(line, "contacts set ", 13)' in console
+    assert "d1l_contact_store_set_flags(fingerprint, contact.favorite, contact.muted, &contact)" in console
+    assert 'contacts set <fingerprint> <favorite|mute> <0|1>' in console
 
 
 def test_ui_console_and_smoke_expose_contacts():
@@ -62,8 +66,15 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "recent_contacts" in app_header
     assert "contact_total_written" in app_header
     assert "d1l_contact_store_copy_recent" in app_source
+    assert "d1l_app_model_set_contact_flags" in app_header
+    assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in app_source
     assert "render_contact_row" in ui
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
+    assert "create_contact_detail_sheet" in ui
+    assert "render_contact_detail_sheet" in ui
+    assert "update_contact_detail_flags" in ui
+    assert "s_contact_action_favorite" in ui
+    assert "s_contact_action_mute" in ui
     assert '"Contacts"' in ui
     assert 'ok_begin("contacts")' in console
     assert '\\"out_path_known\\"' in console

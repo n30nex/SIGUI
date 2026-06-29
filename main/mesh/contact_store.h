@@ -47,6 +47,8 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
                                              const d1l_node_entry_t *heard_node);
 esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
                                         uint8_t path_len);
+esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
+                                      d1l_contact_entry_t *out_entry);
 d1l_contact_store_stats_t d1l_contact_store_stats(void);
 bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_entry_t *out_entry);
 size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries);

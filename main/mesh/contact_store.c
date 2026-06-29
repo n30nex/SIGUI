@@ -427,6 +427,43 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
     return persist_store();
 }
 
+esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
+                                      d1l_contact_entry_t *out_entry)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_contact_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    int existing = find_index_by_fingerprint(fingerprint);
+    if (existing < 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
+    if (entry->favorite != favorite || entry->muted != muted) {
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        entry->seq = s_next_seq++;
+        entry->updated_ms = now_ms;
+        entry->favorite = favorite;
+        entry->muted = muted;
+        s_total_written++;
+        esp_err_t ret = persist_store();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (out_entry) {
+        *out_entry = *entry;
+    }
+    return ESP_OK;
+}
+
 d1l_contact_store_stats_t d1l_contact_store_stats(void)
 {
     d1l_contact_store_stats_t stats = {

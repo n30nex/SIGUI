@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 DM-thread slice: `0xa10d0`, 37% free in the app partition
+- Latest local build size after the Phase 4 contact-detail slice: `0xa1a50`, 37% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -172,13 +172,24 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Phase 4 DM thread Public `test` RF regression: `artifacts/smoke/d1l-public-test-after-dm-thread-local-COM7.json`
   - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
   - D1L packet log retained the earlier local bot `Krabs Node: Test OK CH0.` decode and fresh relayed Public `test` traffic while staying up past 162 seconds.
+- Phase 4 contact detail local smoke: `artifacts/smoke/d1l-smoke-contact-detail-local-COM7.json`
+  - 20 commands passed after flashing the contact detail/favorite/mute build.
+  - `contacts` showed `YKF Corebot` with full public key, `favorite=false`, and `muted=false`.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 contact favorite/mute persistence: `artifacts/smoke/d1l-contact-detail-flags-local-COM7.json`
+  - `contacts set 0BF0A701D5AE2DB6 favorite 1` and `contacts set 0BF0A701D5AE2DB6 mute 1` persisted successfully.
+  - `contacts` showed both flags true before reboot and after reboot.
+  - The probe then toggled both flags back off and ended with `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 contact detail Public `test` RF regression: `artifacts/smoke/d1l-public-test-contact-detail-rx-window-local-COM7.json`
+  - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
+  - D1L persisted a fresh relayed Public `test` RX row at RSSI `-39`, SNR `30`, and stayed up past 71 seconds.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard and DM thread/reply sheet is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, and DM thread/reply sheet is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed earlier in the post-NVS window with `Krabs Node: Test OK CH0.`; the latest DM-thread RF regression proved COM11 bot receipt/relay and fresh D1L-decoded relayed `test` traffic.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Contact detail/edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview and route count.
+- Richer contact edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, and route count.
 - Flash backup was intentionally skipped per operator instruction.
