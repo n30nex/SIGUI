@@ -1,0 +1,40 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "app/app_model.c"
+        "app/settings_model.c"
+        "comms/companion_3byte.c"
+        "comms/usb_console.c"
+        "diagnostics/health_monitor.c"
+        "hal/backlight.c"
+        "hal/indicator_board.c"
+        "hal/indicator_pins.c"
+        "hal/rp2040_bridge.c"
+        "hal/sx1262_indicator.c"
+        "mesh/packet_log.c"
+        "mesh/meshcore_service.c"
+        "mesh/meshcore_radio_profile.c"
+        "ui/ui_phase1.c"
+    INCLUDE_DIRS
+        "."
+        "app"
+        "comms"
+        "diagnostics"
+        "hal"
+        "mesh"
+        "ui"
+    REQUIRES
+        bsp
+        driver
+        esp_timer
+        esp_system
+        heap
+        lora
+        lvgl
+        nvs_flash
+)
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    MESHCORE_CA_DESK_MODE=1
+    D1L_PHASE1_BRINGUP=1
+)

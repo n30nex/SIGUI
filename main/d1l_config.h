@@ -1,0 +1,20 @@
+#pragma once
+
+#define D1L_FIRMWARE_NAME "MeshCore DeskOS D1L"
+#define D1L_FIRMWARE_VERSION "0.1.0-phase1"
+#define D1L_CONSOLE_SCHEMA 1
+
+#define D1L_DISPLAY_WIDTH 480
+#define D1L_DISPLAY_HEIGHT 480
+
+#define D1L_RADIO_REGION_LABEL "Canada/USA"
+#define D1L_RADIO_PROFILE_ID "uscan-meshcore-default"
+#define D1L_RADIO_FREQ_HZ 910525000ULL
+#define D1L_RADIO_FREQ_MHZ 910.525f
+#define D1L_RADIO_BW_KHZ 62.5f
+#define D1L_RADIO_SF 7
+#define D1L_RADIO_CR 5
+#define D1L_RADIO_TX_POWER_DBM 20
+#define D1L_RADIO_TCXO "NONE"
+
+#define D1L_USB_CONSOLE_PROMPT "d1l> "

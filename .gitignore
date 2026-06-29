@@ -1,0 +1,16 @@
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# ESP-IDF / firmware build outputs
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+
+# Local artifacts; scripts recreate these.
+artifacts/
+
+# Local editor state
+.vscode/
+.idea/

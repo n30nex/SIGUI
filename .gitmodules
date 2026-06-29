@@ -1,0 +1,6 @@
+[submodule "third_party/MeshCore"]
+	path = third_party/MeshCore
+	url = https://github.com/meshcore-dev/MeshCore.git
+[submodule "third_party/sensecap_indicator_esp32"]
+	path = third_party/sensecap_indicator_esp32
+	url = https://github.com/Seeed-Solution/sensecap_indicator_esp32.git

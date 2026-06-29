@@ -1,0 +1,47 @@
+{
+  "board": "Seeed SenseCAP Indicator D1L",
+  "display": {
+    "width": 480,
+    "height": 480,
+    "controller": "ST7701S-style RGB panel",
+    "hsync_gpio": 16,
+    "vsync_gpio": 17,
+    "de_gpio": 18,
+    "pclk_gpio": 21,
+    "data_gpio_nums": [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+    "backlight_gpio": 45,
+    "expander_cs": 4,
+    "expander_reset": 5
+  },
+  "i2c": {
+    "sda_gpio": 39,
+    "scl_gpio": 40,
+    "io_expander_address": "0x20",
+    "fallback_expander_address": "0x39"
+  },
+  "touch": {
+    "controller": "FT5x06-class or Seeed-supported touch controller",
+    "expander_int": 6,
+    "expander_reset": 7
+  },
+  "button": {
+    "user_gpio": 38,
+    "active_level": 0
+  },
+  "rp2040_bridge": {
+    "esp_rx_gpio": 20,
+    "esp_tx_gpio": 19,
+    "expander_reset": 8
+  },
+  "sx1262": {
+    "spi_sclk_gpio": 41,
+    "spi_mosi_gpio": 48,
+    "spi_miso_gpio": 47,
+    "expander_cs": 0,
+    "expander_reset": 1,
+    "expander_busy": 2,
+    "expander_dio1": 3,
+    "expander_ver": 11,
+    "tcxo_default": "NONE"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "profile_id": "uscan-meshcore-default",
+  "region_label": "Canada/USA",
+  "frequency_hz": 910525000,
+  "frequency_mhz": 910.525,
+  "bandwidth_khz": 62.5,
+  "spreading_factor": 7,
+  "coding_rate": 5,
+  "tx_power_dbm": 20,
+  "tcxo": "NONE",
+  "rx_boost": true,
+  "persistent_on_first_boot": true
+}

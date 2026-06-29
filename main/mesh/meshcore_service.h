@@ -1,0 +1,28 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "esp_err.h"
+
+typedef enum {
+    D1L_MESHCORE_SERVICE_PHASE1_STUB = 0,
+    D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO,
+} d1l_meshcore_service_state_t;
+
+typedef struct {
+    d1l_meshcore_service_state_t state;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
+    uint32_t rejected_commands;
+    uint8_t path_hash_bytes;
+    bool identity_ready;
+    bool radio_ready;
+    bool companion_framing_ready;
+} d1l_meshcore_service_status_t;
+
+void d1l_meshcore_service_init(void);
+d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
+esp_err_t d1l_meshcore_service_request_advert(bool flood);
+esp_err_t d1l_meshcore_service_send_public(const char *text);
+const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);
