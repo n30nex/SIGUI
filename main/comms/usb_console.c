@@ -507,11 +507,12 @@ static void cmd_nodes(void)
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_node_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u}",
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
                (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
-               (unsigned long)e->heard_count, e->fingerprint, e->name, e->type,
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+               (unsigned long)e->heard_count, e->fingerprint, e->public_key_hex,
+               e->name, e->type, e->rssi_dbm, e->snr_tenths, e->path_hash_bytes,
+               e->path_hops);
     }
     printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store\"}\n");
 }
@@ -538,11 +539,12 @@ static void cmd_contacts(void)
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_contact_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"favorite\":%s,\"muted\":%s}",
+        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"favorite\":%s,\"muted\":%s}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->created_ms,
-               (unsigned long)e->updated_ms, e->fingerprint, e->alias, e->heard_name,
-               e->type, e->last_rssi_dbm, e->last_snr_tenths, e->path_hash_bytes,
-               e->path_hops, bool_json(e->favorite), bool_json(e->muted));
+               (unsigned long)e->updated_ms, e->fingerprint, e->public_key_hex,
+               e->alias, e->heard_name, e->type, e->last_rssi_dbm,
+               e->last_snr_tenths, e->path_hash_bytes, e->path_hops,
+               bool_json(e->favorite), bool_json(e->muted));
     }
     printf("],\"persisted\":true,\"note\":\"Contacts are promoted from heard nodes into a bounded NVS store\"}\n");
 }
@@ -585,9 +587,9 @@ static void cmd_contacts_add(const char *line)
     d1l_contact_entry_t contact = {0};
     d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
     ok_begin("contacts add");
-    printf(",\"persisted\":true,\"source\":\"%s\",\"fingerprint\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\"}\n",
-           heard_found ? "heard_node" : "manual", contact.fingerprint, contact.alias,
-           contact.heard_name, contact.type);
+    printf(",\"persisted\":true,\"source\":\"%s\",\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\"}\n",
+           heard_found ? "heard_node" : "manual", contact.fingerprint,
+           contact.public_key_hex, contact.alias, contact.heard_name, contact.type);
 }
 
 static void cmd_routes(void)

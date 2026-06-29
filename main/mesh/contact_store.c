@@ -7,7 +7,33 @@
 
 #define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
-#define D1L_CONTACT_STORE_SCHEMA 1U
+#define D1L_CONTACT_STORE_SCHEMA_V1 1U
+#define D1L_CONTACT_STORE_SCHEMA 2U
+
+typedef struct {
+    uint32_t seq;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char alias[D1L_CONTACT_ALIAS_LEN];
+    char heard_name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool favorite;
+    bool muted;
+} d1l_contact_entry_v1_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_v1_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_v1_t;
 
 typedef struct {
     uint32_t schema;
@@ -87,6 +113,40 @@ static bool blob_is_valid(const d1l_contact_store_blob_t *blob, size_t len)
            blob->next_seq > 0;
 }
 
+static bool blob_v1_is_valid(const d1l_contact_store_blob_v1_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA_V1 &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
+static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0; i < s_count; ++i) {
+        s_entries[i].seq = old_blob->entries[i].seq;
+        s_entries[i].created_ms = old_blob->entries[i].created_ms;
+        s_entries[i].updated_ms = old_blob->entries[i].updated_ms;
+        memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
+               sizeof(s_entries[i].fingerprint));
+        memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
+        memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
+               sizeof(s_entries[i].heard_name));
+        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        s_entries[i].last_rssi_dbm = old_blob->entries[i].last_rssi_dbm;
+        s_entries[i].last_snr_tenths = old_blob->entries[i].last_snr_tenths;
+        s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
+        s_entries[i].path_hops = old_blob->entries[i].path_hops;
+        s_entries[i].favorite = old_blob->entries[i].favorite;
+        s_entries[i].muted = old_blob->entries[i].muted;
+    }
+}
+
 static int find_index_by_fingerprint(const char *fingerprint)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
@@ -114,6 +174,7 @@ static size_t oldest_index(void)
 esp_err_t d1l_contact_store_init(void)
 {
     clear_ram();
+    bool migrated = false;
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
@@ -132,6 +193,10 @@ esp_err_t d1l_contact_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK &&
+               blob_v1_is_valid((const d1l_contact_store_blob_v1_t *)&s_blob_scratch, len)) {
+        migrate_v1_blob((const d1l_contact_store_blob_v1_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK) {
         clear_ram();
         ret = nvs_erase_key(handle, D1L_CONTACT_STORE_KEY);
@@ -143,6 +208,9 @@ esp_err_t d1l_contact_store_init(void)
         }
     }
     nvs_close(handle);
+    if (ret == ESP_OK && migrated) {
+        ret = persist_store();
+    }
     s_loaded = (ret == ESP_OK);
     return ret;
 }
@@ -204,6 +272,10 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     sanitize_ascii(entry->fingerprint, sizeof(entry->fingerprint), fingerprint);
 
     if (heard_node) {
+        if (heard_node->public_key_hex[0] != '\0') {
+            sanitize_ascii(entry->public_key_hex, sizeof(entry->public_key_hex),
+                           heard_node->public_key_hex);
+        }
         if (heard_node->name[0] != '\0') {
             sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), heard_node->name);
         }

@@ -16,7 +16,11 @@ def test_heard_node_store_is_bounded_and_nvs_backed():
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     assert "D1L_NODE_STORE_CAPACITY 16U" in header
+    assert "D1L_NODE_PUBLIC_KEY_HEX_LEN 65U" in header
     assert "D1L_HEARD_NODE_NAME_LEN 24U" in header
+    assert "D1L_NODE_STORE_SCHEMA 2U" in source
+    assert "d1l_node_store_blob_v1_t" in source
+    assert "migrate_v1_blob" in source
     assert 'D1L_NODE_STORE_NAMESPACE "d1l_nodes"' in source
     assert 'D1L_NODE_STORE_KEY "heard"' in source
     assert "nvs_get_blob" in source
@@ -32,7 +36,9 @@ def test_verified_adverts_upsert_heard_nodes():
     source = read("main/mesh/meshcore_service.c")
     assert '#include "mesh/node_store.h"' in source
     assert "verify_advert_signature" in source
-    assert "d1l_node_store_upsert_advert(pub_prefix, name, type" in source
+    assert "D1L_NODE_PUBLIC_KEY_HEX_LEN" in source
+    assert "hex_prefix(pub_key_hex" in source
+    assert "d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, name, type" in source
     assert "read_le32(timestamp)" in source
     assert "node store upsert failed" in source
     assert "d1l_node_store_find_by_fingerprint" in read("main/mesh/node_store.h")
@@ -50,5 +56,7 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert 'ok_begin("nodes")' in console
     assert 'strcmp(line, "nodes")' in console
     assert 'strcmp(line, "nodes clear")' in console
+    assert '\\"public_key\\"' in console
+    assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
     assert "Verified MeshCore adverts populate this bounded heard-node store" in console
     assert "nodes" in SMOKE_COMMANDS

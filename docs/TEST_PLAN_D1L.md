@@ -76,9 +76,9 @@ For Phase 4 heard-node validation:
 
 1. Run `nodes clear`.
 2. Wait for or trigger a signed MeshCore advert from a local node.
-3. Verify `nodes` contains a row with fingerprint, name or fingerprint fallback, type, RSSI/SNR, path metadata, and `persisted=true`.
+3. Verify `nodes` contains a row with fingerprint, full 64-hex `public_key`, name or fingerprint fallback, type, RSSI/SNR, path metadata, and `persisted=true`.
 4. Reboot.
-5. Verify `nodes` retains the row.
+5. Verify `nodes` retains the row and its `public_key`.
 
 ## Contact Store
 
@@ -89,9 +89,9 @@ For Phase 4 contact-store validation:
 3. Verify `nodes` contains a heard node with a 16-hex fingerprint.
 4. Run `contacts add <fingerprint>`.
 5. Verify `contacts add` reports `source="heard_node"`.
-6. Verify `contacts` contains the promoted alias, heard name, type, RSSI/SNR, path metadata, and `persisted=true`.
+6. Verify `contacts` contains the promoted alias, full 64-hex `public_key`, heard name, type, RSSI/SNR, path metadata, and `persisted=true`.
 7. Reboot.
-8. Verify `contacts` retains the row.
+8. Verify `contacts` retains the row and its copied `public_key`.
 
 ## Route Store
 

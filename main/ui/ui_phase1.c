@@ -261,8 +261,9 @@ static void render_node_row(lv_obj_t *parent, int y, const d1l_node_entry_t *ent
     lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
     const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    label_set_fmt(meta, "%.8s  rssi %d  snr %s%d.%d",
-                  entry->fingerprint, entry->rssi_dbm,
+    label_set_fmt(meta, "%.8s  %s  rssi %d  snr %s%d.%d",
+                  entry->fingerprint, entry->public_key_hex[0] ? "key" : "no key",
+                  entry->rssi_dbm,
                   entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
@@ -280,7 +281,8 @@ static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_
     lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
     lv_obj_align(type, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.8s  rssi %d", entry->fingerprint, entry->last_rssi_dbm);
+    label_set_fmt(meta, "%.8s  %s  rssi %d", entry->fingerprint,
+                  entry->public_key_hex[0] ? "key" : "no key", entry->last_rssi_dbm);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);

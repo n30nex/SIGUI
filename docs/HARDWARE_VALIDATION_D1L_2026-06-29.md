@@ -116,6 +116,16 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `artifacts/smoke/d1l-stability-phase4-route-store-local-COM7.json` showed uptime increasing from `44852` to `90352` ms with route rows retained and `reset_reason=SW`.
   - `artifacts/smoke/d1l-public-rf-phase4-route-store-local-COM7.json` kept the Public `test` path working with local Meshcorebot counter movement: `rx_channel_total +4`, `relay_success_total +4`, and `discord_send_success_total +4`.
   - D1L decoded local bot replies including `Krabs Node: Test OK CH0.` and updated valid Public TX/RX route rows after the stack-pressure fix.
+- Phase 4 DM public-key foundation local smoke: `artifacts/smoke/d1l-smoke-phase4-dm-public-key-foundation-local-COM7.json`
+  - 19 commands passed after flashing the local public-key foundation build.
+  - `health` reported `board_ready=true` and `ui_ready=true`.
+  - Existing v1 heard-node/contact NVS rows migrated without a crash; old rows naturally had empty `public_key` until a fresh signed advert arrived.
+- Phase 4 DM public-key foundation signed-advert persistence: `artifacts/smoke/d1l-public-key-foundation-local-COM7.json`
+  - Restarted the local Meshcorebot on `COM11`, which is configured to send a startup advert.
+  - D1L stored the signed `YKF Corebot` advert with fingerprint `0BF0A701D5AE2DB6`, type `chat`, RSSI `-31`, SNR `30`, path hash bytes `1`, path hops `0`, and full public key `0BF0A701D5AE2DB679C641EE999A70D4B55B61A2B77C47337CE35C16C9C19193`.
+  - `contacts add 0BF0A701D5AE2DB6` copied the same full public key into the promoted contact row.
+  - After reboot, both `nodes` and `contacts` retained the same public key and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+  - Public `test` RF regression still passed after the bot restart with local Meshcorebot counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
 
 ## Still Pending
 

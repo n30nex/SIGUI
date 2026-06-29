@@ -8,7 +8,32 @@
 
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
 #define D1L_NODE_STORE_KEY "heard"
-#define D1L_NODE_STORE_SCHEMA 1U
+#define D1L_NODE_STORE_SCHEMA_V1 1U
+#define D1L_NODE_STORE_SCHEMA 2U
+
+typedef struct {
+    uint32_t seq;
+    uint32_t first_heard_ms;
+    uint32_t last_heard_ms;
+    uint32_t advert_timestamp;
+    uint32_t heard_count;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+} d1l_node_entry_v1_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_node_entry_v1_t entries[D1L_NODE_STORE_CAPACITY];
+} d1l_node_store_blob_v1_t;
 
 typedef struct {
     uint32_t schema;
@@ -104,6 +129,38 @@ static bool blob_is_valid(const d1l_node_store_blob_t *blob, size_t len)
            blob->next_seq > 0;
 }
 
+static bool blob_v1_is_valid(const d1l_node_store_blob_v1_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_NODE_STORE_SCHEMA_V1 &&
+           blob->count <= D1L_NODE_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
+static void migrate_v1_blob(const d1l_node_store_blob_v1_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0; i < s_count; ++i) {
+        s_entries[i].seq = old_blob->entries[i].seq;
+        s_entries[i].first_heard_ms = old_blob->entries[i].first_heard_ms;
+        s_entries[i].last_heard_ms = old_blob->entries[i].last_heard_ms;
+        s_entries[i].advert_timestamp = old_blob->entries[i].advert_timestamp;
+        s_entries[i].heard_count = old_blob->entries[i].heard_count;
+        memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
+               sizeof(s_entries[i].fingerprint));
+        memcpy(s_entries[i].name, old_blob->entries[i].name, sizeof(s_entries[i].name));
+        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        s_entries[i].rssi_dbm = old_blob->entries[i].rssi_dbm;
+        s_entries[i].snr_tenths = old_blob->entries[i].snr_tenths;
+        s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
+        s_entries[i].path_hops = old_blob->entries[i].path_hops;
+    }
+}
+
 static int find_by_fingerprint(const char *fingerprint)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
@@ -131,6 +188,7 @@ static size_t oldest_index(void)
 esp_err_t d1l_node_store_init(void)
 {
     clear_ram();
+    bool migrated = false;
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
@@ -149,6 +207,10 @@ esp_err_t d1l_node_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK &&
+               blob_v1_is_valid((const d1l_node_store_blob_v1_t *)&s_blob_scratch, len)) {
+        migrate_v1_blob((const d1l_node_store_blob_v1_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK) {
         clear_ram();
         ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
@@ -160,6 +222,9 @@ esp_err_t d1l_node_store_init(void)
         }
     }
     nvs_close(handle);
+    if (ret == ESP_OK && migrated) {
+        ret = persist_store();
+    }
     s_loaded = (ret == ESP_OK);
     return ret;
 }
@@ -185,10 +250,10 @@ esp_err_t d1l_node_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *name,
-                                       char type_code, int rssi_dbm, int snr_tenths,
-                                       uint8_t path_hash_bytes, uint8_t path_hops,
-                                       uint32_t advert_timestamp)
+esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *public_key_hex,
+                                       const char *name, char type_code, int rssi_dbm,
+                                       int snr_tenths, uint8_t path_hash_bytes,
+                                       uint8_t path_hops, uint32_t advert_timestamp)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -228,6 +293,9 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *name
     entry->path_hash_bytes = path_hash_bytes;
     entry->path_hops = path_hops;
     sanitize_ascii(entry->fingerprint, sizeof(entry->fingerprint), fingerprint);
+    if (public_key_hex && public_key_hex[0] != '\0') {
+        sanitize_ascii(entry->public_key_hex, sizeof(entry->public_key_hex), public_key_hex);
+    }
     if (name && name[0] != '\0') {
         sanitize_ascii(entry->name, sizeof(entry->name), name);
     }

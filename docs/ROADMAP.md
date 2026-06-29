@@ -576,22 +576,22 @@ Acceptance:
 Tasks:
 
 - Public chat screen. Status: first touch Public screen is implemented with persisted recent message rows.
-- DM screen. Status: pending.
+- DM screen. Status: pending; the prerequisite full public-key retention from signed adverts into heard nodes and promoted contacts is implemented and validated on `COM7` for future direct-message targeting.
 - Message compose with on-screen keyboard or large input flow. Status: first Public free-text composer is implemented beside the fixed `test` quick action and was built/flashed on `COM7`; manual touch entry review and DM composer are pending.
 - Quick replies. Status: first fixed Public `test` quick action is implemented.
 - Message delivery states. Status: persisted rows show queued TX and received RX state; ACK/delivery confirmation is still pending.
 - Unread/mute/favorite logic.
 - Heard nodes list with virtualization. Status: first bounded persisted heard-node store and newest-node UI rows are implemented and validated on `COM7` with signed local adverts; large-list virtualization and richer filters are pending.
-- Contact detail cards. Status: first bounded persisted contact store, `contacts` diagnostics, and heard-node promotion command are implemented and validated on `COM7` by promoting `Krabs Lagoon`; detail cards and edit actions are pending.
+- Contact detail cards. Status: first bounded persisted contact store, `contacts` diagnostics, heard-node promotion command, and full advertised public-key retention are implemented and validated on `COM7`; detail cards and edit actions are pending.
 - Route/path metadata. Status: first bounded persisted route store, `routes` diagnostics, and MeshCore Public/advert route observation wiring are implemented and locally validated on `COM7`; route detail views and trace/ping helpers are pending.
 - Node actions: DM, ping/trace if available, telemetry request if available.
 
 Acceptance:
 
-- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented and the Public RF path still receives local bot replies, while manual touch entry review and DMs are pending.
+- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented and the Public RF path still receives local bot replies, while manual touch entry review and real DM TX/RX are pending. Heard nodes and promoted contacts now retain full advertised public keys for future DM targeting.
 - Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack; large simulated mesh stress is still pending.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset.
-- Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot.
+- Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot. Full public-key retention was validated on `COM7` with `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`; the heard-node and promoted contact public key survived reboot.
 - Route store survives reboot. Status: bounded route store validated on `COM7` on 2026-06-29; Public TX/RX route rows survived reboot.
 
 ### Phase 5 — Companion modes and management

@@ -700,6 +700,8 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
 
     char pub_prefix[17] = {0};
     hex_prefix(pub_prefix, sizeof(pub_prefix), pub_key, 8U);
+    char pub_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    hex_prefix(pub_key_hex, sizeof(pub_key_hex), pub_key, D1L_MESHCORE_PUB_KEY_SIZE);
     const bool valid_signature =
         verify_advert_signature(pub_key, timestamp, signature, app_data, app_data_len);
     if (!valid_signature) {
@@ -724,7 +726,7 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
     }
     s_status.rx_packets++;
     s_status.rx_adverts++;
-    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, name, type, rssi,
+    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, name, type, rssi,
                                                  (snr * 10) / 4,
                                                  packet.path_hash_bytes, packet.path_hops,
                                                  read_le32(timestamp));

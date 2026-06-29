@@ -17,6 +17,10 @@ def test_contact_store_is_bounded_and_nvs_backed():
     app_main = read("main/app_main.c")
     assert "D1L_CONTACT_STORE_CAPACITY 16U" in header
     assert "D1L_CONTACT_ALIAS_LEN 24U" in header
+    assert "public_key_hex" in header
+    assert "D1L_CONTACT_STORE_SCHEMA 2U" in source
+    assert "d1l_contact_store_blob_v1_t" in source
+    assert "migrate_v1_blob" in source
     assert 'D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"' in source
     assert 'D1L_CONTACT_STORE_KEY "contacts"' in source
     assert "nvs_get_blob" in source
@@ -37,7 +41,9 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert "parse_fingerprint_token" in console
     assert "d1l_node_store_find_by_fingerprint(fingerprint, &heard)" in console
     assert "d1l_contact_store_upsert_from_node(fingerprint, alias" in console
+    assert "heard_node->public_key_hex" in read("main/mesh/contact_store.c")
     assert 'ok_begin("contacts add")' in console
+    assert '\\"public_key\\"' in console
     assert 'strcmp(line, "contacts")' in console
     assert 'strcmp(line, "contacts clear")' in console
     assert 'strncmp(line, "contacts add ", 13)' in console
@@ -52,6 +58,7 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "contact_total_written" in app_header
     assert "d1l_contact_store_copy_recent" in app_source
     assert "render_contact_row" in ui
+    assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
     assert '"Contacts"' in ui
     assert 'ok_begin("contacts")' in console
     assert "Contacts are promoted from heard nodes into a bounded NVS store" in console

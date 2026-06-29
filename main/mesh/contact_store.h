@@ -16,6 +16,7 @@ typedef struct {
     uint32_t created_ms;
     uint32_t updated_ms;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
     char alias[D1L_CONTACT_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
     char type[D1L_NODE_TYPE_LEN];
