@@ -142,8 +142,9 @@ static void cmd_settings_get(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
     ok_begin("settings get");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u}\n",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u}\n",
            settings->node_name, d1l_settings_role_name(settings->role),
+           bool_json(settings->onboarding_complete),
            bool_json(settings->wifi_enabled), bool_json(settings->ble_companion_enabled),
            bool_json(settings->observer_enabled), bool_json(settings->high_contrast),
            bool_json(settings->night_mode), settings->path_hash_bytes);
@@ -159,6 +160,57 @@ static void cmd_settings_reset(void)
     d1l_meshcore_service_init();
     ok_begin("settings reset");
     printf(",\"persisted\":true,\"node_name\":\"%s\"}\n", d1l_settings_current()->node_name);
+}
+
+static void cmd_settings_onboarding_status(void)
+{
+    const d1l_settings_t *settings = d1l_settings_current();
+    ok_begin("settings onboarding status");
+    printf(",\"complete\":%s,\"node_name\":\"%s\",\"role\":\"%s\",\"region\":\"Canada/USA\",\"radio_profile\":\"uscan-meshcore-default\",\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s}\n",
+           bool_json(settings->onboarding_complete), settings->node_name,
+           d1l_settings_role_name(settings->role), bool_json(settings->wifi_enabled),
+           bool_json(settings->ble_companion_enabled), bool_json(settings->observer_enabled));
+}
+
+static void cmd_settings_onboarding_reset(void)
+{
+    esp_err_t ret = d1l_settings_reset_onboarding();
+    if (ret != ESP_OK) {
+        err_result("settings onboarding reset", esp_err_to_name(ret), "could not reset onboarding state");
+        return;
+    }
+    ok_begin("settings onboarding reset");
+    printf(",\"complete\":false,\"persisted\":true}\n");
+}
+
+static void cmd_settings_onboarding_complete(const char *line)
+{
+    const char *arg = line + strlen("settings onboarding complete ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    if (*arg == '\0') {
+        arg = "D1L Desk";
+    }
+    size_t arg_len = strlen(arg);
+    if (arg_len >= D1L_NODE_NAME_LEN) {
+        err_result("settings onboarding complete", "INVALID_NAME", "usage: settings onboarding complete <1-31 chars>");
+        return;
+    }
+    esp_err_t ret = d1l_settings_complete_onboarding(arg, false, false, false);
+    if (ret == ESP_OK) {
+        d1l_meshcore_service_init();
+        ret = d1l_meshcore_service_ensure_identity();
+    }
+    if (ret != ESP_OK) {
+        err_result("settings onboarding complete", esp_err_to_name(ret), "could not persist onboarding choices");
+        return;
+    }
+    const d1l_settings_t *settings = d1l_settings_current();
+    ok_begin("settings onboarding complete");
+    printf(",\"complete\":true,\"persisted\":true,\"node_name\":\"%s\",\"role\":\"%s\",\"wifi_enabled\":false,\"ble_companion_enabled\":false,\"observer_enabled\":false,\"identity_ready\":%s}\n",
+           settings->node_name, d1l_settings_role_name(settings->role),
+           bool_json(settings->identity_ready));
 }
 
 static void cmd_settings_set_name(const char *line)
@@ -1164,7 +1216,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1183,6 +1235,12 @@ static void handle_line(const char *line)
         cmd_settings_set_name(line);
     } else if (strncmp(line, "settings set pathhash ", 22) == 0) {
         cmd_settings_set_pathhash(line);
+    } else if (strcmp(line, "settings onboarding status") == 0) {
+        cmd_settings_onboarding_status();
+    } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {
+        cmd_settings_onboarding_complete(line);
+    } else if (strcmp(line, "settings onboarding reset") == 0) {
+        cmd_settings_onboarding_reset();
     } else if (strcmp(line, "identity status") == 0) {
         cmd_identity_status();
     } else if (strcmp(line, "i2c") == 0) {

@@ -13,6 +13,7 @@
 #include "lvgl.h"
 
 #include "app/app_model.h"
+#include "app/settings_model.h"
 #include "bsp_lcd.h"
 #include "diagnostics/health_monitor.h"
 #include "indev/indev.h"
@@ -39,6 +40,9 @@ static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_packet_detail_sheet;
 static lv_obj_t *s_mesh_roles_sheet;
 static lv_obj_t *s_lock_overlay;
+static lv_obj_t *s_onboarding_sheet;
+static lv_obj_t *s_onboarding_name_textarea;
+static lv_obj_t *s_onboarding_keyboard;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
@@ -222,6 +226,26 @@ static void hide_mesh_roles_sheet(void)
     if (s_mesh_roles_sheet) {
         lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static void hide_onboarding_sheet(void)
+{
+    if (s_onboarding_sheet) {
+        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot || !s_onboarding_sheet) {
+        return;
+    }
+    if (snapshot->onboarding_complete) {
+        hide_onboarding_sheet();
+        return;
+    }
+    lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_onboarding_sheet);
 }
 
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
@@ -962,6 +986,48 @@ static void compose_keyboard_event_cb(lv_event_t *event)
     }
 }
 
+static void complete_onboarding_from_ui(const char *fallback_name)
+{
+    const char *name = fallback_name;
+    if (s_onboarding_name_textarea) {
+        const char *entered = lv_textarea_get_text(s_onboarding_name_textarea);
+        if (entered && entered[0] != '\0') {
+            name = entered;
+        }
+    }
+    if (!name || name[0] == '\0') {
+        name = "D1L Desk";
+    }
+    esp_err_t ret = d1l_app_model_complete_onboarding(name);
+    if (ret == ESP_OK) {
+        hide_onboarding_sheet();
+        render_active_tab();
+    }
+    show_toast("Onboarding", ret);
+}
+
+static void onboarding_start_event_cb(lv_event_t *event)
+{
+    (void)event;
+    complete_onboarding_from_ui("D1L Desk");
+}
+
+static void onboarding_defaults_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_onboarding_name_textarea) {
+        lv_textarea_set_text(s_onboarding_name_textarea, "D1L Desk");
+    }
+    complete_onboarding_from_ui("D1L Desk");
+}
+
+static void onboarding_keyboard_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_READY) {
+        complete_onboarding_from_ui("D1L Desk");
+    }
+}
+
 static const char *dm_row_state(const d1l_dm_entry_t *entry)
 {
     if (entry->acked) {
@@ -1282,6 +1348,7 @@ static void render_active_tab(void)
         render_settings(&s_snapshot);
         break;
     }
+    update_onboarding_visibility(&s_snapshot);
 }
 
 static void dock_event_cb(lv_event_t *event)
@@ -1318,6 +1385,7 @@ static void refresh_timer_cb(lv_timer_t *timer)
     (void)timer;
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
+    update_onboarding_visibility(&s_snapshot);
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
         lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
         s_toast_until = 0;
@@ -1518,6 +1586,68 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_onboarding_sheet(lv_obj_t *screen)
+{
+    s_onboarding_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_onboarding_sheet, 456, 430);
+    lv_obj_set_pos(s_onboarding_sheet, 12, 25);
+    lv_obj_set_style_radius(s_onboarding_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_onboarding_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_onboarding_sheet, lv_color_hex(0x5EEAD4), 0);
+    lv_obj_set_style_border_width(s_onboarding_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_onboarding_sheet, 12, 0);
+    lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(s_onboarding_sheet, "MeshCore DeskOS D1L", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    lv_obj_t *subtitle = create_label(s_onboarding_sheet, "First boot setup", 0x5EEAD4);
+    lv_obj_set_pos(subtitle, 8, 38);
+
+    lv_obj_t *name_label = create_label(s_onboarding_sheet, "Node name", 0x8EA0AE);
+    lv_obj_set_pos(name_label, 8, 68);
+
+    s_onboarding_name_textarea = lv_textarea_create(s_onboarding_sheet);
+    lv_obj_set_size(s_onboarding_name_textarea, 424, 48);
+    lv_obj_set_pos(s_onboarding_name_textarea, 8, 92);
+    lv_textarea_set_one_line(s_onboarding_name_textarea, true);
+    lv_textarea_set_max_length(s_onboarding_name_textarea, D1L_NODE_NAME_LEN - 1U);
+    lv_textarea_set_text(s_onboarding_name_textarea, d1l_settings_current()->node_name);
+    lv_obj_set_style_radius(s_onboarding_name_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_onboarding_name_textarea, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_onboarding_name_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_onboarding_name_textarea, lv_color_hex(0xF4F7FB), 0);
+
+    lv_obj_t *preset = create_label(s_onboarding_sheet,
+                                    "Canada/USA preset confirmed  910.525 BW62.5 SF7 CR5",
+                                    0xE5EDF5);
+    lv_label_set_long_mode(preset, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(preset, 424);
+    lv_obj_set_pos(preset, 8, 152);
+
+    lv_obj_t *role = create_label(s_onboarding_sheet,
+                                  "Role Desk Companion  Wi-Fi off  BLE off  Observer off",
+                                  0x8EA0AE);
+    lv_label_set_long_mode(role, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(role, 424);
+    lv_obj_set_pos(role, 8, 180);
+
+    create_button(s_onboarding_sheet, "Start", 8, 210, 116, 40, onboarding_start_event_cb, NULL);
+    create_button(s_onboarding_sheet, "Use Defaults", 136, 210, 146, 40,
+                  onboarding_defaults_event_cb, NULL);
+
+    s_onboarding_keyboard = lv_keyboard_create(s_onboarding_sheet);
+    lv_obj_set_size(s_onboarding_keyboard, 424, 160);
+    lv_obj_set_pos(s_onboarding_keyboard, 8, 258);
+    lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea);
+    lv_obj_add_event_cb(s_onboarding_keyboard, onboarding_keyboard_event_cb, LV_EVENT_READY, NULL);
+
+    if (d1l_settings_current()->onboarding_complete) {
+        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -1572,6 +1702,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_mesh_roles_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
+    create_onboarding_sheet(s_screen);
 
     render_active_tab();
     lv_timer_create(refresh_timer_cb, 2000, NULL);

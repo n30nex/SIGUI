@@ -17,6 +17,7 @@ SMOKE_COMMANDS = [
     "version",
     "board",
     "settings get",
+    "settings onboarding status",
     "identity status",
     "i2c",
     "display test",
@@ -91,6 +92,7 @@ def expected_command_name(command: str) -> str:
     for prefix in [
         "settings set name ",
         "settings set pathhash ",
+        "settings onboarding complete ",
         "radio set freq ",
         "radio set bw ",
         "radio set sf ",

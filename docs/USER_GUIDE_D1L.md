@@ -9,7 +9,8 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
-- 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, and lock overlay.
+- First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
+- 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Mesh visibility summaries for signal, room servers, and repeater candidates.
 - USB serial diagnostics, smoke test, and soak test tooling.
 
@@ -51,6 +52,9 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Useful Serial Commands
 
 - `version`
+- `settings get`
+- `settings onboarding status`
+- `settings onboarding complete <name>`
 - `health`
 - `crashlog`
 - `mesh status`

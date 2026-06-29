@@ -39,6 +39,7 @@ typedef struct {
     bool wifi_enabled;
     bool ble_companion_enabled;
     bool observer_enabled;
+    bool onboarding_complete;
     bool wifi_build_enabled;
     bool ble_build_enabled;
     const char *wifi_state;
@@ -111,3 +112,5 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
                                           d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_mark_messages_read(void);
 esp_err_t d1l_app_model_request_advert(bool flood);
+esp_err_t d1l_app_model_complete_onboarding(const char *node_name);
+esp_err_t d1l_app_model_reset_onboarding(void);

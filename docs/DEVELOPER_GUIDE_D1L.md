@@ -15,6 +15,7 @@
 
 ```powershell
 python -m pytest -q
+python .\tools\ui_simulator.py --out artifacts\ui-sim
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1
 ```
@@ -74,6 +75,8 @@ The `d1l-ci` workflow runs host checks on Windows and firmware build/package gen
 - `d1l-host-artifacts`
 - `d1l-firmware-artifacts`
 - `d1l-release-package`
+
+`d1l-host-artifacts` includes `ui-sim/` screenshots and `ui-sim-report.json`, including the first-boot onboarding surface.
 
 Download with:
 

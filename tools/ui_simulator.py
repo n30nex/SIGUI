@@ -484,6 +484,24 @@ def render_lock_overlay(s: Surface, snap: Snapshot):
     s.text("Tap to unlock", (40, 392, 440, 426), 20, ACCENT, True, "center")
 
 
+def render_onboarding_sheet(s: Surface, snap: Snapshot):
+    s.rect((0, 0, WIDTH, HEIGHT), BG)
+    s.round_rect((12, 25, 468, 455), (7, 16, 24), (94, 234, 212), 8)
+    s.text("MeshCore DeskOS D1L", (32, 40, 430, 70), 24, TEXT, True)
+    s.text("First boot setup", (32, 74, 430, 96), 14, ACCENT, True)
+    s.text("Node name", (32, 112, 200, 134), 13, MUTED, True)
+    s.round_rect((32, 140, 448, 190), SURFACE_2, BORDER, 8)
+    s.text(snap.node_name, (46, 152, 430, 180), 18, TEXT)
+    s.text("Canada/USA preset confirmed", (32, 204, 430, 226), 14, TEXT, True)
+    s.text("910.525 BW62.5 SF7 CR5", (32, 228, 430, 250), 13, MUTED)
+    s.text("Role Desk Companion", (32, 260, 430, 282), 14, TEXT, True)
+    s.text("Wi-Fi off  BLE off  Observer off", (32, 284, 430, 306), 13, MUTED)
+    draw_button(s, (32, 324, 148, 374), "Start", GREEN)
+    draw_button(s, (164, 324, 310, 374), "Use Defaults", ACCENT)
+    s.round_rect((32, 392, 448, 432), SURFACE, BORDER, 8)
+    s.text("Keyboard opens for name editing", (44, 400, 436, 424), 13, MUTED, False, "center")
+
+
 RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
@@ -497,6 +515,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "packet_detail_sheet": render_packet_detail_sheet,
     "mesh_roles_sheet": render_mesh_roles_sheet,
     "lock_overlay": render_lock_overlay,
+    "onboarding_sheet": render_onboarding_sheet,
 }
 
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
@@ -512,6 +531,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
+    "onboarding_sheet": (
+        "MeshCore DeskOS D1L",
+        "First boot setup",
+        "Node name",
+        "Canada/USA preset confirmed",
+        "Role Desk Companion",
+        "Wi-Fi off  BLE off  Observer off",
+        "Start",
+        "Use Defaults",
+    ),
 }
 
 

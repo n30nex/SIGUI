@@ -6,7 +6,7 @@
 #include "esp_err.h"
 #include "mesh/meshcore_radio_profile.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 2U
+#define D1L_SETTINGS_SCHEMA_VERSION 3U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_IDENTITY_PUBLIC_KEY_LEN 32U
 #define D1L_IDENTITY_PRIVATE_KEY_LEN 64U
@@ -28,6 +28,7 @@ typedef struct {
     bool observer_enabled;
     bool high_contrast;
     bool night_mode;
+    bool onboarding_complete;
     uint8_t path_hash_bytes;
     uint32_t frequency_hz;
     uint16_t bandwidth_tenths_khz;
@@ -46,6 +47,9 @@ void d1l_settings_sanitize(d1l_settings_t *settings);
 esp_err_t d1l_settings_load(void);
 esp_err_t d1l_settings_save(const d1l_settings_t *settings);
 esp_err_t d1l_settings_reset(void);
+esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
+                                           bool ble_companion_enabled, bool observer_enabled);
+esp_err_t d1l_settings_reset_onboarding(void);
 esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp);
 const d1l_settings_t *d1l_settings_current(void);
 d1l_radio_profile_t d1l_settings_radio_profile(const d1l_settings_t *settings);

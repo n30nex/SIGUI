@@ -46,6 +46,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Contact Detail", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"DM Thread", "Reply"} <= labels_by_view["dm_thread_sheet"]
     assert {"Route Detail", "Packet Detail"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
+    assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
 
 def test_ui_simulator_is_documented_and_run_in_ci():

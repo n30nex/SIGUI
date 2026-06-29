@@ -13,10 +13,17 @@ def read(rel: str) -> str:
 def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 2U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 3U" in header
     assert "identity_public_key" in header
     assert "identity_private_key" in header
+    assert "onboarding_complete" in header
+    assert "d1l_settings_complete_onboarding" in header
+    assert "d1l_settings_reset_onboarding" in header
     assert "d1l_settings_next_mesh_timestamp" in header
+    assert "d1l_settings_v2_t" in source
+    assert "migrate_v2_settings" in source
+    assert "if (loaded_schema == 2U)" in source
+    assert "dest->onboarding_complete = true" in source
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
     assert 'D1L_SETTINGS_KEY "settings"' in source
     assert 'D1L_SETTINGS_MESH_TIMESTAMP_KEY "mesh_ts"' in source
@@ -24,6 +31,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->wifi_enabled = false" in source
     assert "settings->ble_companion_enabled = false" in source
     assert "settings->observer_enabled = false" in source
+    assert "settings->onboarding_complete = false" in source
     assert "settings->path_hash_bytes = 1" in source
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
@@ -37,6 +45,9 @@ def test_console_exposes_phase2_foundation_commands():
         "settings reset",
         "settings set name",
         "settings set pathhash",
+        "settings onboarding status",
+        "settings onboarding complete",
+        "settings onboarding reset",
         "identity status",
         "radio set freq",
         "radio set bw",
@@ -53,6 +64,8 @@ def test_console_exposes_phase2_foundation_commands():
 
     assert "arg_len >= D1L_NODE_NAME_LEN" in console
     assert "memcpy(settings.node_name, arg, arg_len + 1U)" in console
+    assert '\\"onboarding_complete\\":%s' in console
+    assert "d1l_settings_complete_onboarding(arg, false, false, false)" in console
     assert "bool prompt_pending = true" in console
     assert "clearerr(stdin)" in console
     assert "vTaskDelay(pdMS_TO_TICKS(20))" in console
@@ -68,6 +81,7 @@ def test_smoke_includes_settings_identity_and_mesh_status():
     assert "settings get" in SMOKE_COMMANDS
     assert "identity status" in SMOKE_COMMANDS
     assert "mesh status" in SMOKE_COMMANDS
+    assert "settings onboarding status" in SMOKE_COMMANDS
     assert "wifi status" in SMOKE_COMMANDS
     assert "wifi scan" in SMOKE_COMMANDS
     assert "ble status" in SMOKE_COMMANDS

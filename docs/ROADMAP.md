@@ -559,7 +559,7 @@ Tasks:
 - Bottom dock/primary navigation. Status: implemented for Home, Messages, Nodes, Packets, and Settings.
 - Modal sheets/toasts. Status: implemented for advert actions and touch feedback.
 - Lock/standby screen. Status: implemented as a tap-to-unlock overlay.
-- Onboarding flow. Status: pending.
+- Onboarding flow. Status: first persisted first-boot setup sheet is implemented with node-name entry, Canada/USA preset confirmation, Desk Companion/offline-radio defaults, identity generation, serial onboarding diagnostics, simulator coverage, and NVS migration from the previous settings schema; richer optional-radio choices are pending live Wi-Fi/BLE runtime support.
 - Simulator/screenshot target if feasible. Status: first deterministic host simulator is implemented in `tools/ui_simulator.py`; it renders the current 480x480 shell and sheet surfaces to PNG and emits `ui-sim-report.json` with required-label and text-overflow checks.
 
 Acceptance:
@@ -756,7 +756,7 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/contact/DM/route/packet/mesh-role sheets, and lock overlay.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding.
 - Assert required labels and button surfaces are present.
 - Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.

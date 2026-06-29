@@ -64,6 +64,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
     snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
+    snapshot->onboarding_complete = settings->onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
     snapshot->wifi_state = connectivity.wifi_state;
@@ -168,4 +169,19 @@ esp_err_t d1l_app_model_mark_messages_read(void)
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);
+}
+
+esp_err_t d1l_app_model_complete_onboarding(const char *node_name)
+{
+    esp_err_t ret = d1l_settings_complete_onboarding(node_name, false, false, false);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_meshcore_service_init();
+    return d1l_meshcore_service_ensure_identity();
+}
+
+esp_err_t d1l_app_model_reset_onboarding(void)
+{
+    return d1l_settings_reset_onboarding();
 }

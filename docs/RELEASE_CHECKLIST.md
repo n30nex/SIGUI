@@ -25,6 +25,7 @@
 
 - [x] 480x480 dark shell replaces the bring-up tile home.
 - [x] Top status, home dashboard, bottom dock, packet view, settings view, advert sheet, toast, and lock overlay implemented.
+- [x] First persisted onboarding sheet implemented with node name, Canada/USA preset, Desk Companion role, offline radio defaults, and identity generation.
 - [x] Touch Public `test` action routes through the app model.
 - [x] Phase 3 shell host contract tests pass.
 - [x] Phase 3 shell local Podman ESP-IDF build passes.

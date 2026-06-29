@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 6 mesh-role-browser slice: `0xa5440`, 35% free in the app partition
+- Latest local build size after the Phase 3 first-boot onboarding slice: `0xa5d00`, 35% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -272,6 +272,19 @@ Do not use `COM11` or `COM29` for this D1L target.
   - 28 commands passed, including `wifi status`, safe `wifi scan`, `ble status`, `crashlog`, `health`, `signal`, `roomservers`, and `repeaters`.
   - `companion status` reported USB console ready, MeshCore 3-byte framing ready, Wi-Fi setting off/build available/runtime off, BLE setting off/build disabled/runtime off, and policy `offline_first_one_companion_radio`.
   - `health` reported `reset_reason=POWERON`, `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, `ui_task_stack_free_words=1352`, and `lvgl_used_pct=62`.
+- Phase 3 first-boot onboarding local smoke: `artifacts/smoke/d1l-smoke-onboarding-complete-local-COM7.json`
+  - 29 commands passed after flashing the local onboarding build.
+  - `settings get` reported `onboarding_complete=true`; `settings onboarding status` reported node `D1L Desk`, role `desk_companion`, Canada/USA preset, Wi-Fi off, BLE off, and observer off.
+  - `identity status` reported `stored_nvs_ed25519`, `public_key_ready=true`, and current fingerprint `BA14729E8588E30B`.
+  - `health` reported `board_ready=true` and `ui_ready=true`.
+- Phase 3 first-boot onboarding reboot persistence: `artifacts/smoke/d1l-onboarding-reboot-persistence-local-COM7.json`
+  - After a serial `reboot`, `settings onboarding status` still reported `complete=true` and node `D1L Desk`.
+  - Post-reboot `health` reported `reset_reason=SW`, `board_ready=true`, `ui_ready=true`, and uptime about 4 seconds.
+- Phase 3 first-boot onboarding active Public `test` RF regression: `artifacts/soak/d1l-soak-onboarding-active-local-COM7.json`
+  - The 90 second soak passed with 5 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
+  - Health remained ready with stack floors of `current=1128` and `ui=1300` words, `lvgl_used_pct_peak=69`, and no heap/PSRAM leak signal beyond normal small movement.
+  - The first attempted migration exposed a same-size v2/v3 settings-layout edge case; the checked-in migration now keys v2 migration on the stored schema version before retaining defaults for truly corrupt blobs.
 
 ## Still Pending
 

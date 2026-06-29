@@ -15,6 +15,28 @@
 static d1l_settings_t s_current;
 static bool s_loaded;
 
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    uint8_t path_hash_bytes;
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} d1l_settings_v2_t;
+
 static uint16_t bandwidth_to_tenths(float khz)
 {
     return (uint16_t)((khz * 10.0f) + 0.5f);
@@ -34,6 +56,7 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->observer_enabled = false;
     settings->high_contrast = false;
     settings->night_mode = false;
+    settings->onboarding_complete = false;
     settings->path_hash_bytes = 1;
     settings->frequency_hz = D1L_RADIO_FREQ_HZ;
     settings->bandwidth_tenths_khz = bandwidth_to_tenths(D1L_RADIO_BW_KHZ);
@@ -69,6 +92,7 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
     if (settings->role != D1L_ROLE_DESK_COMPANION) {
         settings->role = D1L_ROLE_DESK_COMPANION;
     }
+    settings->onboarding_complete = settings->onboarding_complete ? true : false;
     if (settings->path_hash_bytes < 1 || settings->path_hash_bytes > 3) {
         settings->path_hash_bytes = 1;
     }
@@ -110,6 +134,39 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
     }
 }
 
+static void migrate_v2_settings(d1l_settings_t *dest, const d1l_settings_v2_t *src)
+{
+    if (!dest) {
+        return;
+    }
+    d1l_settings_defaults(dest);
+    if (!src || src->schema_version != 2U) {
+        return;
+    }
+    memcpy(dest->node_name, src->node_name, sizeof(dest->node_name));
+    dest->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
+    dest->role = src->role;
+    dest->wifi_enabled = src->wifi_enabled;
+    dest->ble_companion_enabled = src->ble_companion_enabled;
+    dest->observer_enabled = src->observer_enabled;
+    dest->high_contrast = src->high_contrast;
+    dest->night_mode = src->night_mode;
+    dest->onboarding_complete = true;
+    dest->path_hash_bytes = src->path_hash_bytes;
+    dest->frequency_hz = src->frequency_hz;
+    dest->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    dest->spreading_factor = src->spreading_factor;
+    dest->coding_rate = src->coding_rate;
+    dest->tx_power_dbm = src->tx_power_dbm;
+    dest->rx_boost = src->rx_boost;
+    dest->tcxo_mode = src->tcxo_mode;
+    dest->identity_ready = src->identity_ready;
+    memcpy(dest->identity_public_key, src->identity_public_key, sizeof(dest->identity_public_key));
+    memcpy(dest->identity_private_key, src->identity_private_key, sizeof(dest->identity_private_key));
+    dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
+    d1l_settings_sanitize(dest);
+}
+
 esp_err_t d1l_settings_load(void)
 {
     d1l_settings_defaults(&s_current);
@@ -121,16 +178,43 @@ esp_err_t d1l_settings_load(void)
         return ret;
     }
 
-    size_t len = sizeof(s_current);
-    ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &s_current, &len);
-    if (ret == ESP_ERR_NVS_NOT_FOUND || len != sizeof(s_current)) {
+    size_t len = 0;
+    ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, NULL, &len);
+    bool should_save = false;
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
         d1l_settings_defaults(&s_current);
+        should_save = true;
+        ret = ESP_OK;
+    } else if (ret == ESP_OK && len == sizeof(s_current)) {
+        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &s_current, &len);
+        if (ret == ESP_OK) {
+            const uint32_t loaded_schema = s_current.schema_version;
+            if (loaded_schema == 2U) {
+                d1l_settings_v2_t old_settings = {0};
+                memcpy(&old_settings, &s_current, sizeof(old_settings));
+                migrate_v2_settings(&s_current, &old_settings);
+                should_save = true;
+            } else {
+                d1l_settings_sanitize(&s_current);
+                should_save = loaded_schema != D1L_SETTINGS_SCHEMA_VERSION;
+            }
+        }
+    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v2_t)) {
+        d1l_settings_v2_t old_settings = {0};
+        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
+        if (ret == ESP_OK) {
+            migrate_v2_settings(&s_current, &old_settings);
+            should_save = true;
+        }
+    } else if (ret == ESP_OK) {
+        d1l_settings_defaults(&s_current);
+        should_save = true;
+    }
+    if (ret == ESP_OK && should_save) {
         ret = nvs_set_blob(handle, D1L_SETTINGS_KEY, &s_current, sizeof(s_current));
         if (ret == ESP_OK) {
             ret = nvs_commit(handle);
         }
-    } else if (ret == ESP_OK) {
-        d1l_settings_sanitize(&s_current);
     }
     nvs_close(handle);
     s_loaded = (ret == ESP_OK);
@@ -168,6 +252,28 @@ esp_err_t d1l_settings_reset(void)
     d1l_settings_t defaults;
     d1l_settings_defaults(&defaults);
     return d1l_settings_save(&defaults);
+}
+
+esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
+                                           bool ble_companion_enabled, bool observer_enabled)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    if (node_name && node_name[0] != '\0') {
+        snprintf(settings.node_name, sizeof(settings.node_name), "%s", node_name);
+    }
+    settings.role = D1L_ROLE_DESK_COMPANION;
+    settings.wifi_enabled = wifi_enabled;
+    settings.ble_companion_enabled = wifi_enabled ? false : ble_companion_enabled;
+    settings.observer_enabled = observer_enabled;
+    settings.onboarding_complete = true;
+    return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_settings_reset_onboarding(void)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.onboarding_complete = false;
+    return d1l_settings_save(&settings);
 }
 
 esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)

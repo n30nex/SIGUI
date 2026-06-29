@@ -31,6 +31,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_connectivity_status" in source
     assert "d1l_mesh_inspector_signal_summary" in source
     assert "reset_reason" in header
+    assert "onboarding_complete" in header
     assert "ui_task_stack_free_words" in header
     assert "lvgl_used_pct" in header
 
@@ -47,6 +48,7 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_sheet" in source
     assert "create_toast" in source
     assert "create_lock_overlay" in source
+    assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
 
 
@@ -59,8 +61,10 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_send_dm_text(s_compose_contact.fingerprint, text)" in source
     assert "d1l_app_model_request_advert(false)" in source
     assert "d1l_app_model_request_advert(true)" in source
+    assert "d1l_app_model_complete_onboarding(name)" in source
     assert "d1l_app_model_send_public_text" in header
     assert "d1l_app_model_send_dm_text" in header
+    assert "d1l_app_model_complete_onboarding" in header
     assert "d1l_app_model_find_contact" in header
     assert "d1l_app_model_set_contact_flags" in header
     assert 'd1l_meshcore_service_send_public("test")' in model
@@ -69,6 +73,27 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_contact_store_find_by_fingerprint(fingerprint, out_contact)" in model
     assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
+    assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
+    assert "d1l_meshcore_service_ensure_identity()" in model
+
+
+def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_onboarding_sheet" in source
+    assert "static lv_obj_t *s_onboarding_name_textarea" in source
+    assert "create_onboarding_sheet" in source
+    assert "update_onboarding_visibility" in source
+    assert "complete_onboarding_from_ui" in source
+    assert '"MeshCore DeskOS D1L"' in source
+    assert '"First boot setup"' in source
+    assert '"Node name"' in source
+    assert '"Canada/USA preset confirmed  910.525 BW62.5 SF7 CR5"' in source
+    assert '"Role Desk Companion  Wi-Fi off  BLE off  Observer off"' in source
+    assert 'create_button(s_onboarding_sheet, "Start"' in source
+    assert 'create_button(s_onboarding_sheet, "Use Defaults"' in source
+    assert "lv_textarea_set_max_length(s_onboarding_name_textarea, D1L_NODE_NAME_LEN - 1U)" in source
+    assert "lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea)" in source
+    assert "snapshot->onboarding_complete" in source
 
 
 def test_public_composer_uses_lvgl_textarea_keyboard():
