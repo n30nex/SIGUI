@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 DM-store slice: `0xa03f0`, 37% free in the app partition
+- Latest local build size after the Phase 4 DM-thread slice: `0xa10d0`, 37% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -159,13 +159,26 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Verified the same keyed contact precondition and queued `mesh send dm 0BF0A701D5AE2DB6 touch dm compose backend`.
   - `messages dm` persisted a new TX row for `touch dm compose backend` with ACK hash `2588389861`.
   - `health` showed uptime increasing from `28865` ms to `36358` ms with `board_ready=true` and `ui_ready=true`.
+- Phase 4 DM thread local smoke: `artifacts/smoke/d1l-smoke-dm-thread-local-COM7.json`
+  - 20 commands passed after flashing the bounded DM thread/detail build.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 DM thread NVS cleanup smoke: `artifacts/smoke/d1l-smoke-dm-thread-after-nvs-erase-local-COM7.json`
+  - The long validation session filled the 24 KB NVS region. Only the NVS partition at `0x9000`/`0x6000` was erased, with no flash backup, then smoke passed again.
+  - The post-erase identity fingerprint regenerated as `1ACEAF535034A953`; stores restarted empty and healthy.
+- Phase 4 DM thread backend precondition: `artifacts/smoke/d1l-dm-thread-ui-backend-local-COM7.json`
+  - Restarting the local COM11 Meshcorebot triggered signed startup adverts; D1L captured `YKF Corebot` as a heard node and promoted contact with full public key `0BF0A701D5AE2DB679C641EE999A70D4B55B61A2B77C47337CE35C16C9C19193`.
+  - `messages dm` persisted a TX row for `thread ui local` with ACK hash `558288271`.
+  - `health` showed uptime past 134 seconds with `board_ready=true` and `ui_ready=true`.
+- Phase 4 DM thread Public `test` RF regression: `artifacts/smoke/d1l-public-test-after-dm-thread-local-COM7.json`
+  - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
+  - D1L packet log retained the earlier local bot `Krabs Node: Test OK CH0.` decode and fresh relayed Public `test` traffic while staying up past 162 seconds.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard is still pending.
-- Full DM workflow is still pending: threaded DM detail UI, controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
-- D1L-heard Public bot reply validation needs another response-window pass; the latest local window proved COM11 bot receipt/relay but not a fresh D1L-decoded `Test OK` reply.
+- Manual physical touch entry on the Public/DM composer keyboard and DM thread/reply sheet is still pending.
+- Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
+- D1L-heard Public bot reply validation passed earlier in the post-NVS window with `Krabs Node: Test OK CH0.`; the latest DM-thread RF regression proved COM11 bot receipt/relay and fresh D1L-decoded relayed `test` traffic.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
 - Contact detail/edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview and route count.
 - Flash backup was intentionally skipped per operator instruction.

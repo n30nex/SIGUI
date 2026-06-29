@@ -96,6 +96,15 @@ For Phase 4 touch direct-message compose validation:
 5. Verify `messages dm` contains a TX row for the same contact and message text with a nonzero `ack_hash`.
 6. If physical touch cannot be observed in the current test session, run the backend precondition probe by sending the same target through `mesh send dm <fingerprint> <text>` and recording `contacts`, `messages dm`, and `health`.
 
+For Phase 4 touch direct-message thread validation:
+
+1. Verify `messages dm` contains at least one row for a contact with a full public key.
+2. Open the Messages tab and tap the DM preview row.
+3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, recent rows for the same fingerprint, and `Reply`/`Close` actions.
+4. Tap `Reply`, type a short message, and tap `Send`.
+5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
+6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.
+
 ## Heard Node Store
 
 For Phase 4 heard-node validation:

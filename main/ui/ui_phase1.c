@@ -31,14 +31,18 @@ static lv_obj_t *s_compose_sheet;
 static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
+static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static d1l_contact_entry_t s_compose_contact;
+static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 
 static void render_active_tab(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
+static void open_dm_thread_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -165,6 +169,15 @@ static void hide_compose_sheet(void)
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
 }
 
+static void hide_dm_thread_sheet(void)
+{
+    if (s_dm_thread_sheet) {
+        lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_dm_thread_fingerprint[0] = '\0';
+    s_dm_thread_alias[0] = '\0';
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot || !s_status_label || !s_identity_label) {
@@ -242,6 +255,8 @@ static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_
 static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *alias = create_label(row, entry->contact_alias,
                                    entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0);
@@ -328,6 +343,7 @@ static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    hide_dm_thread_sheet();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
@@ -344,14 +360,14 @@ static void open_compose_event_cb(lv_event_t *event)
     }
 }
 
-static void open_dm_compose_event_cb(lv_event_t *event)
+static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
 {
-    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
     if (!entry || entry->public_key_hex[0] == '\0') {
         show_toast("DM", ESP_ERR_INVALID_STATE);
         return;
     }
     hide_sheet();
+    hide_dm_thread_sheet();
     s_compose_dm = true;
     s_compose_contact = *entry;
     if (s_compose_title) {
@@ -368,6 +384,12 @@ static void open_dm_compose_event_cb(lv_event_t *event)
         lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
     }
+}
+
+static void open_dm_compose_event_cb(lv_event_t *event)
+{
+    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
+    open_dm_compose_for_contact(entry);
 }
 
 static void close_compose_event_cb(lv_event_t *event)
@@ -414,6 +436,106 @@ static void compose_keyboard_event_cb(lv_event_t *event)
         send_compose_text();
     } else if (code == LV_EVENT_CANCEL) {
         hide_compose_sheet();
+    }
+}
+
+static const char *dm_row_state(const d1l_dm_entry_t *entry)
+{
+    if (entry->acked) {
+        return "acked";
+    }
+    return entry->direction[0] == 't' ? "sent" : "received";
+}
+
+static void close_dm_thread_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_dm_thread_sheet();
+}
+
+static void reply_dm_thread_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact);
+    if (ret != ESP_OK) {
+        show_toast("DM", ret);
+        return;
+    }
+    open_dm_compose_for_contact(&contact);
+}
+
+static void render_dm_thread_sheet(void)
+{
+    if (!s_dm_thread_sheet) {
+        return;
+    }
+    d1l_app_model_snapshot(&s_snapshot);
+    update_chrome(&s_snapshot);
+    lv_obj_clean(s_dm_thread_sheet);
+
+    const char *alias = s_dm_thread_alias[0] ? s_dm_thread_alias : s_dm_thread_fingerprint;
+    lv_obj_t *title = create_label(s_dm_thread_sheet, alias, 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 206);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_dm_thread_sheet, "Reply", 228, 0, 64, 40, reply_dm_thread_event_cb, NULL);
+    create_button(s_dm_thread_sheet, "Close", 316, 0, 76, 40, close_dm_thread_event_cb, NULL);
+
+    lv_obj_t *meta = create_label(s_dm_thread_sheet, "", 0x8EA0AE);
+    label_set_fmt(meta, "%.16s  stored %u", s_dm_thread_fingerprint, (unsigned)s_snapshot.dm_count);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_set_pos(meta, 8, 42);
+
+    int y = 68;
+    size_t matches = 0;
+    for (size_t i = 0; i < s_snapshot.recent_dm_count && y <= 246; ++i) {
+        const d1l_dm_entry_t *entry = &s_snapshot.recent_dms[i];
+        if (strcmp(entry->contact_fingerprint, s_dm_thread_fingerprint) != 0) {
+            continue;
+        }
+        lv_obj_t *row = create_panel(s_dm_thread_sheet, 0, y, 424, 48);
+        lv_obj_set_style_pad_all(row, 8, 0);
+        const char *who = entry->direction[0] == 't' ? "You" : alias;
+        lv_obj_t *sender = create_label(row, who, entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0);
+        lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(sender, 190);
+        lv_obj_align(sender, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_t *state = create_label(row, dm_row_state(entry), 0x8EA0AE);
+        lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+        lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(text, 392);
+        lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        y += 54;
+        ++matches;
+    }
+    if (matches == 0) {
+        lv_obj_t *empty = create_label(s_dm_thread_sheet, "No recent rows for this contact", 0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 10);
+    }
+}
+
+static void open_dm_thread_event_cb(lv_event_t *event)
+{
+    const d1l_dm_entry_t *entry = (const d1l_dm_entry_t *)lv_event_get_user_data(event);
+    if (!entry || entry->contact_fingerprint[0] == '\0') {
+        show_toast("DM", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    snprintf(s_dm_thread_fingerprint, sizeof(s_dm_thread_fingerprint), "%s",
+             entry->contact_fingerprint);
+    snprintf(s_dm_thread_alias, sizeof(s_dm_thread_alias), "%s",
+             entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
+    hide_sheet();
+    hide_compose_sheet();
+    render_dm_thread_sheet();
+    if (s_dm_thread_sheet) {
+        lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_dm_thread_sheet);
     }
 }
 
@@ -520,6 +642,7 @@ static void open_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_sheet) {
+        hide_dm_thread_sheet();
         lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -581,6 +704,7 @@ static void dock_event_cb(lv_event_t *event)
     s_active_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
     hide_sheet();
     hide_compose_sheet();
+    hide_dm_thread_sheet();
     render_active_tab();
 }
 
@@ -735,6 +859,20 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_dm_thread_sheet(lv_obj_t *screen)
+{
+    s_dm_thread_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_dm_thread_sheet, 448, 300);
+    lv_obj_set_pos(s_dm_thread_sheet, 16, 92);
+    lv_obj_set_style_radius(s_dm_thread_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_dm_thread_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_dm_thread_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_dm_thread_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_dm_thread_sheet, 12, 0);
+    lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -782,6 +920,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_dock(s_screen);
     create_sheet(s_screen);
     create_compose_sheet(s_screen);
+    create_dm_thread_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
 

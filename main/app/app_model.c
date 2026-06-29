@@ -111,6 +111,15 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
     return d1l_meshcore_service_send_dm(fingerprint, text);
 }
 
+esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !out_contact) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return d1l_contact_store_find_by_fingerprint(fingerprint, out_contact) ?
+           ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);

@@ -72,7 +72,7 @@ def test_app_model_and_ui_preview_recent_dms():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
-    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 3U" in header
+    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "recent_dms" in header
     assert "dm_total_written" in header
     assert "d1l_dm_store_copy_recent" in source

@@ -46,7 +46,8 @@
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.
-- [ ] Full DM workflow: threaded DM detail UI, manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, and controlled inbound DM proof.
+- [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
+- [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, controlled inbound DM proof, and richer full-thread history.
 
 ## Major Version Release
 

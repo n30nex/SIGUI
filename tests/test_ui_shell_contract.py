@@ -12,7 +12,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     assert "D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U" in header
-    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 3U" in header
+    assert "D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
@@ -54,9 +54,11 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_request_advert(true)" in source
     assert "d1l_app_model_send_public_text" in header
     assert "d1l_app_model_send_dm_text" in header
+    assert "d1l_app_model_find_contact" in header
     assert 'd1l_meshcore_service_send_public("test")' in model
     assert "d1l_meshcore_service_send_public(text)" in model
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in model
+    assert "d1l_contact_store_find_by_fingerprint(fingerprint, out_contact)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
 
 
@@ -86,6 +88,22 @@ def test_dm_composer_opens_from_contact_rows():
     assert 'lv_label_set_text(s_compose_title, title)' in source
     assert 'lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message")' in source
     assert 'show_toast(s_compose_dm ? "DM" : "Public message", ret)' in source
+
+
+def test_dm_thread_sheet_opens_from_recent_dm_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_dm_thread_sheet" in source
+    assert "static char s_dm_thread_fingerprint" in source
+    assert "create_dm_thread_sheet" in source
+    assert "render_dm_thread_sheet" in source
+    assert "open_dm_thread_event_cb" in source
+    assert "reply_dm_thread_event_cb" in source
+    assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in source
+    assert "lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED" in source
+    assert "d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact)" in source
+    assert "open_dm_compose_for_contact(&contact)" in source
+    assert 'create_button(s_dm_thread_sheet, "Reply"' in source
+    assert "hide_dm_thread_sheet()" in source
 
 
 def test_nodes_screen_renders_heard_node_rows():

@@ -15,7 +15,7 @@
 
 #define D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U
-#define D1L_APP_SNAPSHOT_DM_PREVIEW 3U
+#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U
 #define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U
 #define D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U
@@ -75,4 +75,5 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_test(void);
 esp_err_t d1l_app_model_send_public_text(const char *text);
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
+esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_request_advert(bool flood);
