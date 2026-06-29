@@ -44,14 +44,16 @@ def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
     ser = FakeSerial(
         [
             '{"schema":1,"ok":true,"cmd":"settings reset"}\n',
+            '{"schema":1,"ok":true,"cmd":"wifi off","setting_enabled":false}\n',
+            '{"schema":1,"ok":true,"cmd":"ble off","setting_enabled":false}\n',
             '{"schema":1,"ok":true,"cmd":"settings set name","node_name":"D1L Smoke Persist"}\n',
             '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":3}\n',
-            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3,"wifi_enabled":false,"ble_companion_enabled":false}\n',
             '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
-            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3,"wifi_enabled":false,"ble_companion_enabled":false}\n',
             '{"schema":1,"ok":true,"cmd":"settings reset","node_name":"D1L Desk"}\n',
             '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
-            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Desk","path_hash_bytes":1}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Desk","path_hash_bytes":1,"wifi_enabled":false,"ble_companion_enabled":false}\n',
         ]
     )
 
@@ -62,6 +64,8 @@ def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
     assert report["cleanup_ok"] is True
     assert ser.writes == [
         "settings reset\n",
+        "wifi off\n",
+        "ble off\n",
         "settings set name D1L Smoke Persist\n",
         "settings set pathhash 3\n",
         "settings get\n",

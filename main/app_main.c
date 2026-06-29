@@ -17,6 +17,7 @@
 #include "mesh/route_store.h"
 #include "mesh/meshcore_service.h"
 #include "ui/ui_phase1.h"
+#include "comms/connectivity_manager.h"
 #include "comms/usb_console.h"
 
 static const char *TAG = "d1l_main";
@@ -64,6 +65,10 @@ void app_main(void)
     esp_err_t packet_log_ret = d1l_packet_log_init();
     if (packet_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
+    }
+    esp_err_t connectivity_ret = d1l_connectivity_init();
+    if (connectivity_ret != ESP_OK) {
+        ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));
     }
     d1l_meshcore_service_init();
 

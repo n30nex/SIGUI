@@ -43,6 +43,9 @@ def test_console_exposes_phase2_foundation_commands():
         "radio set sf",
         "radio set cr",
         "mesh advert flood",
+        "wifi status",
+        "wifi off",
+        "ble status",
         'strcmp(line, "health")',
     ]:
         assert command in console
@@ -55,9 +58,15 @@ def test_console_exposes_phase2_foundation_commands():
     assert 'printf("\\n");\n        handle_line(line);' in console
     assert '\\"expected\\":[\\"0x20\\",\\"0x48\\"]' in console
     assert "stored_nvs_ed25519" in console
+    assert "d1l_connectivity_set_wifi_enabled(false)" in console
+    assert "d1l_connectivity_set_ble_enabled(false)" in console
+    assert "disabled_by_setting" in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():
     assert "settings get" in SMOKE_COMMANDS
     assert "identity status" in SMOKE_COMMANDS
     assert "mesh status" in SMOKE_COMMANDS
+    assert "wifi status" in SMOKE_COMMANDS
+    assert "wifi scan" in SMOKE_COMMANDS
+    assert "ble status" in SMOKE_COMMANDS

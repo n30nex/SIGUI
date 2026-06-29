@@ -600,18 +600,18 @@ Acceptance:
 
 Tasks:
 
-- USB serial console commands.
-- BLE companion bridge if supported.
-- Wi-Fi scan/connect screen.
+- USB serial console commands. Status: implemented for hardware smoke and management diagnostics.
+- BLE companion bridge if supported. Status: Phase 5 status/persistence foundation added; BLE runtime stack remains build-disabled until heap/coexistence testing.
+- Wi-Fi scan/connect screen. Status: Phase 5 status/persistence foundation added; `wifi status`, safe `wifi scan`, `wifi off`, and Settings-tab companion state are implemented, but DeskOS does not start the Wi-Fi runtime yet.
 - Wi-Fi OTA/local management page if feasible.
 - Time sync over Wi-Fi if enabled.
-- Safe Wi-Fi/BLE coexistence policy.
+- Safe Wi-Fi/BLE coexistence policy. Status: first offline-first one-companion-radio policy is reported by serial and UI.
 
 Acceptance:
 
-- USB console can run hardware smoke tests.
-- BLE or Wi-Fi companion mode is documented with exact supported clients.
-- Wi-Fi can be disabled and remains disabled across reboot if user chooses.
+- USB console can run hardware smoke tests. Status: implemented and used throughout D1L validation.
+- BLE or Wi-Fi companion mode is documented with exact supported clients. Status: pending live BLE/Wi-Fi runtime enablement; current build documents runtime-pending/build-disabled state.
+- Wi-Fi can be disabled and remains disabled across reboot if user chooses. Status: `wifi off` persists disabled state through the settings model and was validated on `COM7` with the Phase 5 smoke persistence test.
 
 ### Phase 6 — Advanced MeshCore tools
 

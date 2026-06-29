@@ -26,6 +26,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_dm_store_copy_recent" in source
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
+    assert "d1l_connectivity_status" in source
 
 
 def test_phase3_shell_replaces_diagnostic_tile_home():
@@ -164,3 +165,14 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "recent_packet_count" in source
     assert "recent_packets" in source
     assert "hide_packet_detail_sheet()" in source
+
+
+def test_settings_screen_reports_companion_wireless_state():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
+    assert "wifi_state" in header
+    assert "ble_state" in header
+    assert "coexistence_policy" in header
+    assert '"Companion"' in source
+    assert '"Wi-Fi %s  BLE %s"' in source
+    assert '"USB ready  %s"' in source

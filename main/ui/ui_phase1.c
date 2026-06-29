@@ -1062,7 +1062,21 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
                   snapshot->identity_fingerprint : "not generated");
     lv_obj_align(id, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
-    create_button(s_content, "Advert", 18, 218, 130, 52, open_sheet_event_cb, NULL);
+    lv_obj_t *companion = create_panel(s_content, 18, 212, 424, 104);
+    create_label(companion, "Companion", 0xF4F7FB);
+    lv_obj_t *wireless = create_label(companion, "", 0x8EA0AE);
+    label_set_fmt(wireless, "Wi-Fi %s  BLE %s",
+                  snapshot->wifi_state ? snapshot->wifi_state : "off",
+                  snapshot->ble_state ? snapshot->ble_state : "off");
+    lv_obj_set_pos(wireless, 0, 30);
+    lv_obj_t *policy = create_label(companion, "", 0x8EA0AE);
+    label_set_fmt(policy, "USB ready  %s",
+                  snapshot->coexistence_policy ? snapshot->coexistence_policy : "offline first");
+    lv_label_set_long_mode(policy, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(policy, 390);
+    lv_obj_align(policy, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+
+    create_button(s_content, "Advert", 18, 332, 130, 48, open_sheet_event_cb, NULL);
 }
 
 static void render_active_tab(void)

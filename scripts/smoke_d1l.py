@@ -26,6 +26,9 @@ SMOKE_COMMANDS = [
     "radio get",
     "mesh status",
     "companion status",
+    "wifi status",
+    "wifi scan",
+    "ble status",
     "rp2040 status",
     "packets",
     "messages public",
@@ -112,6 +115,8 @@ def run_persistence_check(ser, timeout: float) -> dict:
 
     for command in [
         "settings reset",
+        "wifi off",
+        "ble off",
         f"settings set name {test_name}",
         "settings set pathhash 3",
     ]:
@@ -139,9 +144,24 @@ def run_persistence_check(ser, timeout: float) -> dict:
     cleanup = send_console_command(ser, "settings get", timeout)
     steps.append(cleanup)
 
-    before_ok = before.get("node_name") == test_name and before.get("path_hash_bytes") == 3
-    after_ok = after.get("node_name") == test_name and after.get("path_hash_bytes") == 3
-    cleanup_ok = cleanup.get("node_name") == "D1L Desk" and cleanup.get("path_hash_bytes") == 1
+    before_ok = (
+        before.get("node_name") == test_name
+        and before.get("path_hash_bytes") == 3
+        and before.get("wifi_enabled") is False
+        and before.get("ble_companion_enabled") is False
+    )
+    after_ok = (
+        after.get("node_name") == test_name
+        and after.get("path_hash_bytes") == 3
+        and after.get("wifi_enabled") is False
+        and after.get("ble_companion_enabled") is False
+    )
+    cleanup_ok = (
+        cleanup.get("node_name") == "D1L Desk"
+        and cleanup.get("path_hash_bytes") == 1
+        and cleanup.get("wifi_enabled") is False
+        and cleanup.get("ble_companion_enabled") is False
+    )
 
     return {
         "schema": 1,

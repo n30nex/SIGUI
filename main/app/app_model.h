@@ -33,6 +33,14 @@ typedef struct {
     bool identity_ready;
     bool radio_ready;
     bool companion_ready;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool wifi_build_enabled;
+    bool ble_build_enabled;
+    const char *wifi_state;
+    const char *ble_state;
+    const char *coexistence_policy;
     char node_name[32];
     char identity_fingerprint[17];
     const char *mesh_state;

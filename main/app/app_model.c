@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "app/settings_model.h"
+#include "comms/connectivity_manager.h"
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
@@ -52,12 +53,22 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     d1l_route_store_stats_t routes = d1l_route_store_stats();
     d1l_packet_log_stats_t packets = d1l_packet_log_stats();
     d1l_health_snapshot_t health = d1l_health_snapshot();
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
     snapshot->identity_ready = settings->identity_ready || mesh.identity_ready;
     snapshot->radio_ready = mesh.radio_ready;
     snapshot->companion_ready = mesh.companion_framing_ready;
+    snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
+    snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
+    snapshot->observer_enabled = connectivity.observer_enabled_setting;
+    snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
+    snapshot->ble_build_enabled = connectivity.ble_build_enabled;
+    snapshot->wifi_state = connectivity.wifi_state;
+    snapshot->ble_state = connectivity.ble_state;
+    snapshot->coexistence_policy = connectivity.coexistence_policy;
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
     if (settings->identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),

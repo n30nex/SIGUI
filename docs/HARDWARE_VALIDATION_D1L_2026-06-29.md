@@ -212,6 +212,17 @@ Do not use `COM11` or `COM29` for this D1L target.
   - After `reboot`, `packets` retained all three rows and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
   - COM11 Meshcorebot counters moved `rx_channel_total +4`, `relay_success_total +4`, `discord_send_success_total +4`, `rx_log_total +6`, and `rx_duplicate_total +4`.
   - The live packet ring remains 32 rows; the persisted NVS packet evidence window is the newest 8 rows to fit the current NVS budget.
+- Phase 5 connectivity foundation local smoke: `artifacts/smoke/d1l-smoke-connectivity-foundation-final-local-COM7.json`
+  - 24 commands passed after flashing the connectivity foundation build, including `wifi status`, safe `wifi scan`, and `ble status`.
+  - `companion status` reported USB console ready, MeshCore 3-byte framing ready, Wi-Fi setting off/build available/runtime off, BLE setting off/build disabled/runtime off, and policy `offline_first_one_companion_radio`.
+  - `wifi scan` returned `scan_started=false`, `networks=[]`, and reason `disabled_by_setting`.
+  - The smoke persistence path verified `wifi_enabled=false` and `ble_companion_enabled=false` before reboot, after reboot, and after cleanup reset.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 5 connectivity enable guard probe: `artifacts/smoke/d1l-connectivity-on-guard-final-local-COM7.json`
+  - `wifi on` returned `WIFI_RUNTIME_PENDING` and left `wifi_enabled=false`.
+  - `ble on` returned `BLE_BUILD_DISABLED` and left `ble_companion_enabled=false`.
+  - `wifi status` and `ble status` still reported setting disabled after the rejected enable commands.
+  - Final `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
 
 ## Still Pending
 

@@ -21,6 +21,7 @@ Coverage:
 - Checksum verifier.
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
+- Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -122,6 +123,7 @@ For Phase 4 touch direct-message thread validation:
 4. Tap `Reply`, type a short message, and tap `Send`.
 5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
 6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.
+7. For Phase 5 connectivity validation, run smoke with `--persistence-test` and verify `settings get`, `wifi status`, `wifi scan`, and `ble status` report Wi-Fi/BLE disabled after reboot.
 
 ## Heard Node Store
 

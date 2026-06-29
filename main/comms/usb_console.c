@@ -14,6 +14,7 @@
 #include "d1l_config.h"
 #include "app/app_model.h"
 #include "app/settings_model.h"
+#include "comms/connectivity_manager.h"
 #include "comms/companion_3byte.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/backlight.h"
@@ -449,10 +450,17 @@ static void cmd_mesh_send_public(const char *line)
 
 static void cmd_companion_status(void)
 {
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
     ok_begin("companion status");
-    printf(",\"framing\":\"meshcore-3byte\",\"header_bytes\":%u,\"app_to_radio\":\"%c\",\"radio_to_app\":\"%c\",\"length\":\"uint16_le\",\"max_payload_bytes\":%u,\"transport_codec\":\"ready\",\"meshcore_bridge\":\"phase2_stub\",\"path_hash_bytes_supported\":[1,2,3],\"default_path_hash_bytes\":1}\n",
+    printf(",\"usb_console\":\"ready\",\"framing\":\"meshcore-3byte\",\"header_bytes\":%u,\"app_to_radio\":\"%c\",\"radio_to_app\":\"%c\",\"length\":\"uint16_le\",\"max_payload_bytes\":%u,\"transport_codec\":\"ready\",\"meshcore_bridge\":\"phase2_stub\",\"wifi\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"ble\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"coexistence_policy\":\"%s\",\"path_hash_bytes_supported\":[1,2,3],\"default_path_hash_bytes\":1}\n",
            D1L_COMPANION3_HEADER_SIZE, D1L_COMPANION3_APP_TO_RADIO,
-           D1L_COMPANION3_RADIO_TO_APP, D1L_COMPANION3_MAX_FRAME_SIZE);
+           D1L_COMPANION3_RADIO_TO_APP, D1L_COMPANION3_MAX_FRAME_SIZE,
+           bool_json(connectivity.wifi_enabled_setting),
+           bool_json(connectivity.wifi_build_enabled), connectivity.wifi_state,
+           bool_json(connectivity.ble_companion_enabled_setting),
+           bool_json(connectivity.ble_build_enabled), connectivity.ble_state,
+           connectivity.coexistence_policy);
 }
 
 static void cmd_rp2040_status(void)
@@ -929,10 +937,114 @@ static void cmd_health(void)
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
 
+static const char *wifi_scan_reason(const d1l_connectivity_status_t *status)
+{
+    if (!status->wifi_enabled_setting) {
+        return "disabled_by_setting";
+    }
+    if (!status->wifi_build_enabled) {
+        return "build_disabled";
+    }
+    return "scan_stack_pending";
+}
+
+static void cmd_wifi_status(void)
+{
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi status");
+    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"scan_supported\":%s,\"state\":\"%s\",\"policy\":\"%s\"}\n",
+           bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
+           bool_json(status.wifi_stack_active), bool_json(status.wifi_scan_supported),
+           status.wifi_state, status.coexistence_policy);
+}
+
+static void cmd_wifi_off(void)
+{
+    esp_err_t ret = d1l_connectivity_set_wifi_enabled(false);
+    if (ret != ESP_OK) {
+        err_result("wifi off", esp_err_to_name(ret), "could not persist Wi-Fi disabled setting");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi off");
+    printf(",\"persisted\":true,\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"}\n",
+           bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
+           status.wifi_state);
+}
+
+static void cmd_wifi_on(void)
+{
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    esp_err_t ret = d1l_connectivity_set_wifi_enabled(true);
+    if (ret != ESP_OK) {
+        err_result("wifi on",
+                   ret == ESP_ERR_NOT_SUPPORTED ?
+                   (status.wifi_build_enabled ? "WIFI_RUNTIME_PENDING" : "WIFI_BUILD_DISABLED") :
+                   esp_err_to_name(ret),
+                   "Wi-Fi enable/start is pending a later measured connectivity build");
+        return;
+    }
+    cmd_wifi_status();
+}
+
+static void cmd_wifi_scan(void)
+{
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi scan");
+    printf(",\"scan_started\":false,\"networks\":[],\"setting_enabled\":%s,\"build_enabled\":%s,\"scan_supported\":%s,\"state\":\"%s\",\"reason\":\"%s\"}\n",
+           bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
+           bool_json(status.wifi_scan_supported), status.wifi_state, wifi_scan_reason(&status));
+}
+
+static void cmd_ble_status(void)
+{
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("ble status");
+    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"state\":\"%s\",\"policy\":\"%s\"}\n",
+           bool_json(status.ble_companion_enabled_setting), bool_json(status.ble_build_enabled),
+           bool_json(status.ble_stack_active), status.ble_state, status.coexistence_policy);
+}
+
+static void cmd_ble_off(void)
+{
+    esp_err_t ret = d1l_connectivity_set_ble_enabled(false);
+    if (ret != ESP_OK) {
+        err_result("ble off", esp_err_to_name(ret), "could not persist BLE disabled setting");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("ble off");
+    printf(",\"persisted\":true,\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"}\n",
+           bool_json(status.ble_companion_enabled_setting), bool_json(status.ble_build_enabled),
+           status.ble_state);
+}
+
+static void cmd_ble_on(void)
+{
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    esp_err_t ret = d1l_connectivity_set_ble_enabled(true);
+    if (ret != ESP_OK) {
+        err_result("ble on",
+                   ret == ESP_ERR_NOT_SUPPORTED ?
+                   (status.ble_build_enabled ? "BLE_RUNTIME_PENDING" : "BLE_BUILD_DISABLED") :
+                   esp_err_to_name(ret),
+                   "BLE enable/start is pending a later measured connectivity build");
+        return;
+    }
+    cmd_ble_status();
+}
+
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1021,14 +1133,20 @@ static void handle_line(const char *line)
         cmd_routes_clear();
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
+    } else if (strcmp(line, "wifi status") == 0) {
+        cmd_wifi_status();
     } else if (strcmp(line, "wifi off") == 0) {
-        ok_begin("wifi off");
-        printf(",\"wifi\":\"off\",\"persisted\":true}\n");
+        cmd_wifi_off();
+    } else if (strcmp(line, "wifi on") == 0) {
+        cmd_wifi_on();
     } else if (strcmp(line, "wifi scan") == 0) {
-        err_result("wifi scan", "WIFI_DISABLED_PHASE1", "Wi-Fi defaults off during Phase 1; enable in later connectivity phase");
+        cmd_wifi_scan();
     } else if (strcmp(line, "ble status") == 0) {
-        ok_begin("ble status");
-        printf(",\"ble\":\"off\",\"reason\":\"Phase 1 keeps BLE disabled until radio/UI heap headroom is measured\"}\n");
+        cmd_ble_status();
+    } else if (strcmp(line, "ble off") == 0) {
+        cmd_ble_off();
+    } else if (strcmp(line, "ble on") == 0) {
+        cmd_ble_on();
     } else if (strcmp(line, "mesh advert zero") == 0) {
         cmd_mesh_advert("mesh advert zero", false);
     } else if (strcmp(line, "mesh advert flood") == 0) {

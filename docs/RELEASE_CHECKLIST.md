@@ -9,6 +9,7 @@
 - [x] Boot banner includes firmware name/version/schema.
 - [x] `i2c` detects D1L expander/touch.
 - [ ] `display test` shows stable bars. Command passed on hardware; manual visual confirmation is still pending.
+- [ ] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
 - [x] `touch test` reports coordinates.
 - [x] `backlight <0-100>` accepts dim/restore commands.
 - [x] `radiohw` reports SX1262 status or exact wiring failure.
