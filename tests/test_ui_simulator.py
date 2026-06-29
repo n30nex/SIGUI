@@ -44,7 +44,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
-    assert {"Contact Detail", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
+    assert {"Contact Detail", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
+    assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
     assert {"DM Thread", "Reply"} <= labels_by_view["dm_thread_sheet"]
     assert {"Route Detail", "Packet Detail", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]

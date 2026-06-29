@@ -31,6 +31,7 @@ Coverage:
 - First-boot onboarding contract: settings schema v3 must persist `onboarding_complete`, migrate schema v2 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
+- Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -72,6 +73,7 @@ Expected commands:
 - `messages unread`
 - `nodes`
 - `contacts`
+- `contacts export`
 - `routes`
 - `signal`
 - `roomservers`
@@ -222,6 +224,15 @@ For Phase 4 contact detail and favorite/mute validation:
 6. Run `contacts set <fingerprint> favorite 0` and `contacts set <fingerprint> mute 0`.
 7. Verify `contacts` shows both flags false.
 8. For physical touch review, open the Nodes tab, tap the contact row, verify the detail sheet shows signal/key/path metadata, and verify `Fav`, `Mute`, `DM`, and `Close` actions respond.
+
+For Phase 6 contact export validation:
+
+1. Verify `contacts` contains at least one promoted contact with a full 64-hex `public_key`.
+2. Run `contacts export` and verify it returns `ok=true`, `format="meshcore://contact/add"`, and a list of entries whose `shareable` field reflects public-key availability.
+3. Run `contacts export <fingerprint>` for the keyed contact.
+4. Verify `meshcore_uri` starts with `meshcore://contact/add?`, includes URL-encoded `name`, the 64-hex `public_key`, and the correct numeric MeshCore `type`.
+5. Open the contact detail sheet, tap `Export`, and verify the Contact Export sheet shows a MeshCore QR plus URI metadata without crashing or hiding the UI.
+6. If a MeshCore phone/client is available, scan the QR and verify it imports the same contact name/public key/type.
 
 ## Route Store
 

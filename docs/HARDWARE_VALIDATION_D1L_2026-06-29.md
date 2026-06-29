@@ -300,13 +300,27 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=3`; the packet log moved `packet_total_written_delta=6`.
   - Packet rows carried raw hex previews for both TX and RX Public text rows, including `Krabs Node: Test OK CH0.` RX rows with bounded/truncated raw previews.
   - Health remained ready with stack floors of `current=1008` and `ui=1304` words, `lvgl_used_pct_peak=79`, `heap_free_delta=-144`, and `psram_free_delta=0`.
+- Phase 6 contact export local smoke: `artifacts/smoke/d1l-smoke-contact-export-local-COM7.json`
+  - Built in a fresh Podman ESP-IDF directory with `CONFIG_LV_USE_QRCODE=y`; `lv_qrcode.c` and `qrcodegen.c` compiled.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - 32 smoke commands passed, including `contacts export`.
+  - `contacts export` returned a shareable `YKF Corebot` entry with fingerprint `0BF0A701D5AE2DB6`, 64-hex public key, `type_id=1`, and a `meshcore://contact/add?...` URI.
+  - `health` reported `board_ready=true`, `ui_ready=true`, `reset_reason=POWERON`, `current_task_stack_free_words=1128`, `ui_task_stack_free_words=1344`, and `lvgl_used_pct=79`.
+- Phase 6 contact export targeted serial proof: `artifacts/smoke/d1l-contact-export-target-local-COM7.json`
+  - `contacts export 0BF0A701D5AE2DB6` passed for `YKF Corebot`.
+  - URI checks passed for prefix, URL-encoded name, public key, type, 64-hex key length, and URI length `122`.
+  - Final `health` stayed `board_ready=true` and `ui_ready=true`.
+- Phase 6 contact export active Public `test` RF regression: `artifacts/soak/d1l-soak-contact-export-active-local-COM7.json`
+  - The 90 second active soak passed with 5 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=2`; the packet log moved `packet_total_written_delta=5`.
+  - Health remained ready with stack floors of `current=1016` and `ui=1248` words, `lvgl_used_pct_peak=79`, `heap_free_delta=-16`, and `psram_free_delta=0`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
+- Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, QR scan/import proof, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, contact export sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
 - Flash backup was intentionally skipped per operator instruction.

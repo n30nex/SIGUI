@@ -161,6 +161,18 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
     return d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact);
 }
 
+esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !dest || dest_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact)) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    return d1l_contact_store_export_uri(&contact, dest, dest_size);
+}
+
 esp_err_t d1l_app_model_mark_messages_read(void)
 {
     return d1l_read_state_mark_all_read();

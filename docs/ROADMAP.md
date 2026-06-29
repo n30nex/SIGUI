@@ -626,13 +626,14 @@ Tasks:
 - Packet log with parsed detail. Status: first NVS-backed packet evidence store, `packets detail <seq>`, `packets filter <any|rx|tx> <any|text|kind>`, `packets search <text>`, `packets raw <seq>`, `packets clear`, raw hex previews, touchable filtered Packet-tab rows, touch packet search, and a first packet detail sheet are implemented; live ring keeps 32 rows and NVS persists the newest 8 rows.
 - Telemetry history.
 - Neighbor/repeater scan helper.
-- QR contact/export.
+- QR contact/export. Status: first MeshCore-compatible contact export URI (`meshcore://contact/add?...`) is implemented through `contacts export [fingerprint]`, Contact Detail now has an `Export` action, LVGL QR rendering is enabled in defaults, the host simulator covers the Contact Export sheet, and COM7 flash/smoke/targeted export/active Public `test` RF regression passed; manual touch review and scan/import proof are pending.
 - Optional manual location/map view.
 
 Acceptance:
 
 - User can inspect how the mesh is behaving without using serial logs. Status: first Home/Packet-tab signal, room-server, and repeater-candidate summaries are validated on `COM7`; richer full-list screens are pending.
 - Packet detail screen is useful for debugging real mesh traffic. Status: first detail sheet, serial `packets detail <seq>`, packet filtering/search, and raw hex developer mode are implemented, flashed, smoke-tested, targeted with a fresh Public `test` raw-hex probe, and RF-regression tested on `COM7`.
+- Contact export is compatible with MeshCore clients. Status: export payloads now follow MeshCore's documented `meshcore://contact/add?name=<name>&public_key=<public_key>&type=<type>` format and can render as a touch QR sheet when a promoted contact has a retained 64-hex public key; `contacts export 0BF0A701D5AE2DB6` passed on `COM7` with a 64-hex `YKF Corebot` key and `type_id=1`. Manual scan/import proof with a MeshCore client is pending.
 - Advanced/admin actions are gated and cannot be triggered accidentally.
 
 ### Phase 7 — Polish, performance, soak

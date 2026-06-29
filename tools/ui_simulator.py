@@ -30,6 +30,7 @@ AMBER = (251, 191, 36)
 RED = (248, 113, 113)
 BLUE = (147, 197, 253)
 DIM = (5, 8, 13)
+SAMPLE_PUBLIC_KEY = "0BF0A701D5AE2DB660B6ABA17831F883937D290883817CBD1122334455667788"
 
 
 @dataclass(frozen=True)
@@ -279,6 +280,32 @@ def draw_button(s: Surface, box: tuple[int, int, int, int], label: str, color: t
     s.text(label, (box[0] + 8, box[1] + 8, box[2] - 8, box[3] - 8), 14, color, True, "center")
 
 
+def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
+    x0, y0, x1, y1 = box
+    s.rect(box, (248, 250, 252), (248, 250, 252))
+    modules = 25
+    cell = max(1, (x1 - x0) // modules)
+    used = cell * modules
+    ox = x0 + ((x1 - x0) - used) // 2
+    oy = y0 + ((y1 - y0) - used) // 2
+
+    def finder(cx: int, cy: int):
+        s.rect((ox + cx * cell, oy + cy * cell, ox + (cx + 7) * cell, oy + (cy + 7) * cell), (2, 6, 10))
+        s.rect((ox + (cx + 1) * cell, oy + (cy + 1) * cell, ox + (cx + 6) * cell, oy + (cy + 6) * cell), (248, 250, 252))
+        s.rect((ox + (cx + 2) * cell, oy + (cy + 2) * cell, ox + (cx + 5) * cell, oy + (cy + 5) * cell), (2, 6, 10))
+
+    finder(1, 1)
+    finder(17, 1)
+    finder(1, 17)
+    for y in range(1, modules - 1):
+        for x in range(1, modules - 1):
+            in_finder = (x < 8 and y < 8) or (x >= 17 and y < 8) or (x < 8 and y >= 17)
+            if in_finder:
+                continue
+            if ((x * 7 + y * 11 + x * y) % 5) in (0, 2):
+                s.rect((ox + x * cell, oy + y * cell, ox + (x + 1) * cell, oy + (y + 1) * cell), (2, 6, 10))
+
+
 def draw_row(s: Surface, box: tuple[int, int, int, int], title: str, detail: str, badge: str | None = None):
     x0, y0, x1, y1 = box
     s.round_rect(box, SURFACE_2, BORDER, 8)
@@ -420,9 +447,24 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.text(contact.fingerprint, (44, 176, 436, 200), 17, TEXT)
     s.text("Signal", (44, 210, 180, 230), 13, MUTED, True)
     s.text(f"{contact.signal}  {contact.meta}", (44, 232, 436, 254), 14, GREEN)
-    for i, label in enumerate(("DM", "Fav", "Mute")):
-        draw_button(s, (44 + i * 132, 278, 164 + i * 132, 330), label, GREEN if label == "DM" else ACCENT)
+    for i, label in enumerate(("DM", "Export", "Fav", "Mute")):
+        draw_button(s, (44 + i * 96, 278, 132 + i * 96, 330), label, GREEN if label == "DM" else ACCENT)
     draw_button(s, (44, 346, 200, 378), "Close", MUTED)
+    draw_dock(s, "Nodes")
+
+
+def render_contact_export_sheet(s: Surface, snap: Snapshot):
+    contact = snap.contacts[0]
+    draw_sheet_frame(s, "Contact Export", "MeshCore QR for YKF Corebot")
+    draw_fake_qr(s, (52, 154, 214, 316))
+    s.text("MeshCore QR", (234, 154, 436, 178), 15, GREEN, True)
+    s.text("Fingerprint", (234, 190, 436, 210), 13, MUTED, True)
+    s.text(contact.fingerprint, (234, 212, 436, 236), 15, TEXT)
+    s.text("URI", (234, 250, 436, 270), 13, MUTED, True)
+    s.text("meshcore://contact/add", (234, 272, 436, 288), 10, BLUE)
+    s.text("name=YKF+Corebot  type=1", (234, 288, 436, 304), 10, MUTED)
+    s.text(f"key {SAMPLE_PUBLIC_KEY[:12]}...{SAMPLE_PUBLIC_KEY[-8:]}", (234, 304, 436, 320), 10, BLUE)
+    draw_button(s, (44, 340, 200, 374), "Close", MUTED)
     draw_dock(s, "Nodes")
 
 
@@ -529,6 +571,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
+    "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
@@ -545,7 +588,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Health", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
-    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Fav", "Mute", "Close"),
+    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Export", "Fav", "Mute", "Close"),
+    "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Raw Hex", "Close"),

@@ -1,5 +1,6 @@
 #include "contact_store.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_timer.h"
@@ -228,6 +229,45 @@ static bool contact_path_len_valid(uint8_t path_len)
     const uint8_t hash_count = path_len & 63U;
     const uint8_t hash_size = (uint8_t)((path_len >> 6) + 1U);
     return hash_size < 4U && (hash_count * hash_size) <= D1L_CONTACT_OUT_PATH_MAX;
+}
+
+static bool is_hex_char(char c)
+{
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+           (c >= 'A' && c <= 'F');
+}
+
+static size_t url_encode_component(char *dest, size_t dest_size, const char *src)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    if (!dest || dest_size == 0) {
+        return 0;
+    }
+    size_t out = 0;
+    while (src && *src) {
+        const unsigned char c = (unsigned char)*src++;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+            if (out + 1U >= dest_size) {
+                break;
+            }
+            dest[out++] = (char)c;
+        } else if (c == ' ') {
+            if (out + 1U >= dest_size) {
+                break;
+            }
+            dest[out++] = '+';
+        } else {
+            if (out + 3U >= dest_size) {
+                break;
+            }
+            dest[out++] = '%';
+            dest[out++] = hex[(c >> 4) & 0x0fU];
+            dest[out++] = hex[c & 0x0fU];
+        }
+    }
+    dest[out] = '\0';
+    return out;
 }
 
 static uint8_t contact_path_byte_len(uint8_t path_len)
@@ -460,6 +500,66 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
     }
     if (out_entry) {
         *out_entry = *entry;
+    }
+    return ESP_OK;
+}
+
+uint8_t d1l_contact_store_meshcore_type_id(const char *type)
+{
+    if (!type) {
+        return 1U;
+    }
+    if (strcmp(type, "repeater") == 0) {
+        return 2U;
+    }
+    if (strcmp(type, "room") == 0) {
+        return 3U;
+    }
+    if (strcmp(type, "sensor") == 0) {
+        return 4U;
+    }
+    return 1U;
+}
+
+bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry)
+{
+    if (!entry) {
+        return false;
+    }
+    for (size_t i = 0; i < D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U; ++i) {
+        if (!is_hex_char(entry->public_key_hex[i])) {
+            return false;
+        }
+    }
+    return entry->public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U] == '\0';
+}
+
+esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *dest,
+                                       size_t dest_size)
+{
+    if (!entry || !dest || dest_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    dest[0] = '\0';
+    if (!d1l_contact_store_has_export_key(entry)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const char *name = entry->alias[0] ? entry->alias :
+                       (entry->heard_name[0] ? entry->heard_name : entry->fingerprint);
+    char encoded_name[D1L_CONTACT_ALIAS_LEN * 3U] = {0};
+    url_encode_component(encoded_name, sizeof(encoded_name), name);
+    if (encoded_name[0] == '\0') {
+        url_encode_component(encoded_name, sizeof(encoded_name), entry->fingerprint);
+    }
+
+    int written = snprintf(dest, dest_size,
+                           "meshcore://contact/add?name=%s&public_key=%s&type=%u",
+                           encoded_name, entry->public_key_hex,
+                           (unsigned)d1l_contact_store_meshcore_type_id(entry->type));
+    if (written < 0 || (size_t)written >= dest_size) {
+        dest[0] = '\0';
+        return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
 }

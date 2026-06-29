@@ -55,6 +55,8 @@
 - [x] Packet log filter/search/raw-hex developer mode implemented in serial diagnostics and Packet-tab UI.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
+- [x] Contact export QR-compatible serial command and touch sheet are implemented, host/simulator tested, flashed, smoke-tested, and targeted with a keyed contact on `COM7`.
+- [ ] Manual contact-export QR scan/import proof with a MeshCore client.
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.

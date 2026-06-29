@@ -895,6 +895,65 @@ static void cmd_contacts(void)
     printf("],\"persisted\":true,\"note\":\"Contacts are promoted from heard nodes into a bounded NVS store\"}\n");
 }
 
+static void print_contact_export_json(const d1l_contact_entry_t *e, bool leading_comma)
+{
+    char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    esp_err_t ret = d1l_contact_store_export_uri(e, uri, sizeof(uri));
+    printf("%s{\"seq\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"type\":\"%s\",\"type_id\":%u,\"public_key\":\"%s\",\"shareable\":%s,\"meshcore_uri\":\"%s\"}",
+           leading_comma ? "," : "", (unsigned long)e->seq, e->fingerprint, e->alias,
+           e->type, (unsigned)d1l_contact_store_meshcore_type_id(e->type),
+           e->public_key_hex, bool_json(ret == ESP_OK), ret == ESP_OK ? uri : "");
+}
+
+static void cmd_contacts_export(const char *line)
+{
+    const char *arg = line + strlen("contacts export");
+    while (*arg == ' ') {
+        arg++;
+    }
+
+    if (*arg == '\0') {
+        d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+        static d1l_contact_entry_t entries[8];
+        size_t copied = d1l_contact_store_copy_recent(entries, 8);
+        ok_begin("contacts export");
+        printf(",\"count\":%u,\"capacity\":%u,\"entries\":[",
+               (unsigned)stats.count, (unsigned)stats.capacity);
+        for (size_t i = 0; i < copied; ++i) {
+            print_contact_export_json(&entries[i], i > 0);
+        }
+        printf("],\"format\":\"meshcore://contact/add\",\"note\":\"QR-compatible contact export requires a retained 64-hex public key\"}\n");
+        return;
+    }
+
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("contacts export", "INVALID_FINGERPRINT",
+                   "usage: contacts export [16-hex-fingerprint]");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact)) {
+        err_result("contacts export", "ESP_ERR_NOT_FOUND", "contact is not promoted");
+        return;
+    }
+
+    char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
+    esp_err_t ret = d1l_contact_store_export_uri(&contact, uri, sizeof(uri));
+    if (ret != ESP_OK) {
+        err_result("contacts export", "NO_PUBLIC_KEY",
+                   "contact export requires a retained 64-hex public key from a signed advert");
+        return;
+    }
+
+    ok_begin("contacts export");
+    printf(",\"fingerprint\":\"%s\",\"alias\":\"%s\",\"type\":\"%s\",\"type_id\":%u,\"public_key\":\"%s\",\"meshcore_uri\":\"%s\",\"format\":\"meshcore://contact/add\",\"qr_compatible\":true}\n",
+           contact.fingerprint, contact.alias, contact.type,
+           (unsigned)d1l_contact_store_meshcore_type_id(contact.type),
+           contact.public_key_hex, uri);
+}
+
 static void cmd_contacts_clear(void)
 {
     esp_err_t ret = d1l_contact_store_clear();
@@ -1340,7 +1399,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1427,6 +1486,9 @@ static void handle_line(const char *line)
         cmd_nodes_clear();
     } else if (strcmp(line, "contacts") == 0) {
         cmd_contacts();
+    } else if (strcmp(line, "contacts export") == 0 ||
+               strncmp(line, "contacts export ", 16) == 0) {
+        cmd_contacts_export(line);
     } else if (strcmp(line, "contacts clear") == 0) {
         cmd_contacts_clear();
     } else if (strncmp(line, "contacts add ", 13) == 0) {

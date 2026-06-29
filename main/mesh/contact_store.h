@@ -11,6 +11,7 @@
 #define D1L_CONTACT_STORE_CAPACITY 16U
 #define D1L_CONTACT_ALIAS_LEN 24U
 #define D1L_CONTACT_OUT_PATH_MAX 64U
+#define D1L_CONTACT_EXPORT_URI_LEN 224U
 
 typedef struct {
     uint32_t seq;
@@ -49,6 +50,10 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
                                         uint8_t path_len);
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
                                       d1l_contact_entry_t *out_entry);
+uint8_t d1l_contact_store_meshcore_type_id(const char *type);
+bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry);
+esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *dest,
+                                       size_t dest_size);
 d1l_contact_store_stats_t d1l_contact_store_stats(void);
 bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_entry_t *out_entry);
 size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries);
