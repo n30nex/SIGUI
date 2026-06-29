@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 route-detail slice: `0xa2940`, 36% free in the app partition
+- Latest local build size after the Phase 6 packet-detail slice: `0xa3100`, 36% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -201,6 +201,17 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `routes detail 19` matched the selected Public RX route row with `route="flood"`, `direction="rx"`, `path_hash_bytes=1`, `path_hops=1`, `confidence=80`, and `payload_len=22`.
   - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
   - `health` uptime increased from `143641` ms to `146448` ms with `board_ready=true` and `ui_ready=true`.
+- Phase 6 packet detail local smoke: `artifacts/smoke/d1l-smoke-packet-detail-final-local-COM7.json`
+  - 21 commands passed after flashing the packet-detail build.
+  - `packets` reported `persisted=true` and `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+  - The live listener also stored a Public RX from `neodriver` during the smoke window, showing the RF path stayed active after the packet-store change.
+- Phase 6 packet detail/reboot proof: `artifacts/smoke/d1l-packet-detail-persistence-final-local-COM7.json`
+  - `packets clear` reset the packet log to `count=0`.
+  - Fresh Public `test` traffic produced packet rows for TX seq `1`, TX seq `2`, and RX seq `3`.
+  - `packets detail 3` matched the selected RX row with RSSI `-44`, SNR `30`, `path_hash_bytes=1`, `path_hops=1`, and `payload_len=22`.
+  - After `reboot`, `packets` retained all three rows and `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+  - COM11 Meshcorebot counters moved `rx_channel_total +4`, `relay_success_total +4`, `discord_send_success_total +4`, `rx_log_total +6`, and `rx_duplicate_total +4`.
+  - The live packet ring remains 32 rows; the persisted NVS packet evidence window is the newest 8 rows to fit the current NVS budget.
 
 ## Still Pending
 
@@ -209,5 +220,5 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Richer contact edit actions and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, route rows, and a first route detail sheet.
+- Richer contact edit actions, packet filtering/search, raw packet hex developer mode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, route rows, a first route detail sheet, and a first packet detail sheet.
 - Flash backup was intentionally skipped per operator instruction.

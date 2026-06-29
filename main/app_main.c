@@ -61,7 +61,10 @@ void app_main(void)
     if (route_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store load failed: %s", esp_err_to_name(route_store_ret));
     }
-    d1l_packet_log_init();
+    esp_err_t packet_log_ret = d1l_packet_log_init();
+    if (packet_log_ret != ESP_OK) {
+        ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
+    }
     d1l_meshcore_service_init();
 
     esp_err_t board_ret = d1l_board_init();

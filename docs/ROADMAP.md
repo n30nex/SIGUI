@@ -590,7 +590,7 @@ Acceptance:
 
 - User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented; first contact-row touch DM composer is implemented and routes through the same DM backend as serial; first bounded DM thread/detail sheet with `Reply` is implemented; serial DM flood TX/store/reboot persistence is validated with `YKF Corebot`; DM ACK/PATH receive parsing and direct-route TX selection are implemented. First Public unread/read behavior is validated on `COM7`: after `messages read all`, a fresh Public `test` produced two RX rows, raised `public_unread=2`, cleared with `messages read public`, and stayed cleared after reboot. Manual physical touch entry/thread/reply/read review, inbound DM proof, controlled ACK/PATH RF proof, and direct-route RF proof are pending.
 - Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack; large simulated mesh stress is still pending.
-- Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset. Bounded DM store TX persistence was validated on `COM7` with `YKF Corebot`; `messages dm` retained the TX row after reboot. Public read state also survived reboot with `last_public_read_seq=10` and `public_unread=0`.
+- Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot. Bounded DM store TX persistence was validated on `COM7` with `YKF Corebot`; `messages dm` retained the TX row after reboot. Public read state also survived reboot with `last_public_read_seq=10` and `public_unread=0`. Packet evidence now also persists the newest 8 rows across reboot.
 - Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot. Full public-key retention was validated on `COM7` with `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`; the heard-node and promoted contact public key survived reboot. Favorite/mute contact flags were toggled on, survived reboot, and were toggled off again on `COM7`.
 - Route store survives reboot. Status: bounded route store validated on `COM7` on 2026-06-29; Public TX/RX route rows survived reboot, and `routes detail <seq>` matched a fresh Public RX route row after a local Public `test` window.
 
@@ -623,7 +623,7 @@ Tasks:
 - Room servers screen.
 - Routes/path screen.
 - Signal/SNR screen.
-- Packet log with parsed detail.
+- Packet log with parsed detail. Status: first NVS-backed packet evidence store, `packets detail <seq>`, `packets clear`, touchable Packet-tab rows, and a first packet detail sheet are implemented, built, flashed, and validated on `COM7`; live ring keeps 32 rows and NVS persists the newest 8 rows.
 - Telemetry history.
 - Neighbor/repeater scan helper.
 - QR contact/export.
@@ -632,7 +632,7 @@ Tasks:
 Acceptance:
 
 - User can inspect how the mesh is behaving without using serial logs.
-- Packet detail screen is useful for debugging real mesh traffic.
+- Packet detail screen is useful for debugging real mesh traffic. Status: first detail sheet and serial `packets detail <seq>` are validated with fresh Public TX/RX packet rows; richer filtering/search and raw hex developer mode are pending.
 - Advanced/admin actions are gated and cannot be triggered accidentally.
 
 ### Phase 7 — Polish, performance, soak
@@ -716,8 +716,11 @@ contacts
 contacts add <fingerprint> [alias]
 contacts clear
 routes
+routes detail <seq>
 routes clear
 packets
+packets detail <seq>
+packets clear
 health
 crashlog
 wifi scan

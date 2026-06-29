@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -70,7 +70,7 @@ For Phase 4 Public message-store validation:
 3. Wait for a local MeshCore bot response.
 4. Verify `messages public` contains at least one TX row and one RX row.
 5. Reboot.
-6. Verify `messages public` retains the rows and `packets` starts over as the volatile RF log.
+6. Verify `messages public` retains the rows and `packets` either retains the newest packet evidence rows or starts a new evidence window if `packets clear` was run for the packet-log test.
 
 ## Unread State
 
@@ -171,3 +171,18 @@ For Phase 4 route-store validation:
 8. Reboot.
 9. Verify `routes` retains the rows.
 10. For physical touch review, open the Packet tab, tap a route row, verify the route detail sheet opens with the same fields, and close it.
+
+## Packet Log
+
+For Phase 6 packet-log validation:
+
+1. Run `packets clear`.
+2. Verify `packets` reports `count=0` and `persisted=true`.
+3. Run `mesh send public test`.
+4. Wait for a local MeshCore bot response or relayed Public echo.
+5. Verify `packets` contains TX and RX rows with direction, kind, RSSI/SNR, path hash bytes, hops, payload length, and note text.
+6. Pick a fresh packet `seq` and run `packets detail <seq>`.
+7. Verify the detail response matches the selected packet row.
+8. Reboot.
+9. Verify `packets` retains the selected row. The RAM ring keeps 32 rows; NVS persists the newest 8 rows.
+10. For physical touch review, open the Packet tab, tap a packet row, verify the packet detail sheet opens with the same fields, and close it.

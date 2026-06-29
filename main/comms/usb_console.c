@@ -466,6 +466,14 @@ static void cmd_rp2040_status(void)
            (unsigned long)status.buffered_bytes);
 }
 
+static void print_packet_entry_json(const d1l_packet_log_entry_t *e)
+{
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u,\"note\":\"%s\"}",
+           (unsigned long)e->seq, (unsigned long)e->uptime_ms,
+           e->direction, e->kind, e->rssi_dbm, e->snr_tenths,
+           e->path_hash_bytes, e->path_hops, e->payload_len, e->note);
+}
+
 static void cmd_packets(void)
 {
     d1l_packet_log_stats_t stats = d1l_packet_log_stats();
@@ -476,13 +484,50 @@ static void cmd_packets(void)
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
-        const d1l_packet_log_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"uptime_ms\":%lu,\"direction\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"payload_len\":%u,\"note\":\"%s\"}",
-               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->uptime_ms,
-               e->direction, e->kind, e->rssi_dbm, e->snr_tenths,
-               e->path_hash_bytes, e->path_hops, e->payload_len, e->note);
+        printf("%s", i ? "," : "");
+        print_packet_entry_json(&entries[i]);
     }
-    printf("],\"note\":\"Packet ring records MeshCore public RF TX/RX evidence\"}\n");
+    printf("],\"persisted\":true,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n");
+}
+
+static void cmd_packets_detail(const char *line)
+{
+    const char *arg = line + strlen("packets detail ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char *end = NULL;
+    unsigned long seq = strtoul(arg, &end, 10);
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (arg[0] == '\0' || end == arg || (end && *end != '\0') || seq == 0 || seq > UINT32_MAX) {
+        err_result("packets detail", "INVALID_SEQ", "usage: packets detail <seq>");
+        return;
+    }
+
+    d1l_packet_log_entry_t entry = {0};
+    esp_err_t ret = d1l_packet_log_find_by_seq((uint32_t)seq, &entry);
+    if (ret != ESP_OK) {
+        err_result("packets detail", esp_err_to_name(ret), "packet sequence not found");
+        return;
+    }
+
+    ok_begin("packets detail");
+    printf(",\"entry\":");
+    print_packet_entry_json(&entry);
+    printf("}\n");
+}
+
+static void cmd_packets_clear(void)
+{
+    esp_err_t ret = d1l_packet_log_clear();
+    if (ret != ESP_OK) {
+        err_result("packets clear", esp_err_to_name(ret), "could not clear packet log");
+        return;
+    }
+    ok_begin("packets clear");
+    printf(",\"persisted\":true,\"count\":0}\n");
 }
 
 static void cmd_messages_public(void)
@@ -887,7 +932,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -940,6 +985,10 @@ static void handle_line(const char *line)
         cmd_rp2040_status();
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
+    } else if (strncmp(line, "packets detail ", 15) == 0) {
+        cmd_packets_detail(line);
+    } else if (strcmp(line, "packets clear") == 0) {
+        cmd_packets_clear();
     } else if (strcmp(line, "messages public") == 0) {
         cmd_messages_public();
     } else if (strcmp(line, "messages dm") == 0) {

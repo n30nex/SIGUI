@@ -34,6 +34,7 @@ static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
+static lv_obj_t *s_packet_detail_sheet;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
@@ -41,6 +42,7 @@ static bool s_compose_dm;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_route_entry_t s_route_detail_route;
+static d1l_packet_log_entry_t s_packet_detail_packet;
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 static const char s_contact_action_favorite[] = "favorite";
@@ -51,6 +53,7 @@ static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
+static void open_packet_detail_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -202,6 +205,14 @@ static void hide_route_detail_sheet(void)
     memset(&s_route_detail_route, 0, sizeof(s_route_detail_route));
 }
 
+static void hide_packet_detail_sheet(void)
+{
+    if (s_packet_detail_sheet) {
+        lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+    memset(&s_packet_detail_packet, 0, sizeof(s_packet_detail_packet));
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot || !s_status_label || !s_identity_label) {
@@ -310,6 +321,8 @@ static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry)
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *kind = create_label(row, entry->kind, 0x5EEAD4);
     lv_obj_align(kind, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -418,6 +431,7 @@ static void open_compose_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_packet_detail_sheet();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
@@ -445,6 +459,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_packet_detail_sheet();
     s_compose_dm = true;
     s_compose_contact = selected;
     if (s_compose_title) {
@@ -574,6 +589,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_compose_sheet();
     hide_route_detail_sheet();
+    hide_packet_detail_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
         lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -660,10 +676,84 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
+    hide_packet_detail_sheet();
     render_route_detail_sheet();
     if (s_route_detail_sheet) {
         lv_obj_clear_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_route_detail_sheet);
+    }
+}
+
+static void close_packet_detail_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_packet_detail_sheet();
+}
+
+static void render_packet_detail_sheet(void)
+{
+    if (!s_packet_detail_sheet) {
+        return;
+    }
+    lv_obj_clean(s_packet_detail_sheet);
+
+    const d1l_packet_log_entry_t *entry = &s_packet_detail_packet;
+    lv_obj_t *title = create_label(s_packet_detail_sheet, entry->kind[0] ? entry->kind : "packet", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 260);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_packet_detail_sheet, "Close", 316, 0, 76, 40, close_packet_detail_event_cb, NULL);
+
+    lv_obj_t *meta = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(meta, "#%lu  %s  payload %u",
+                  (unsigned long)entry->seq,
+                  entry->direction[0] ? entry->direction : "-",
+                  entry->payload_len);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_set_pos(meta, 8, 50);
+
+    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
+    lv_obj_t *signal = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(signal, "rssi %d  snr %s%d.%d",
+                  entry->rssi_dbm,
+                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(signal, 392);
+    lv_obj_set_pos(signal, 8, 84);
+
+    lv_obj_t *path = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(path, "hash %u byte  hops %u  uptime %lums",
+                  entry->path_hash_bytes, entry->path_hops, (unsigned long)entry->uptime_ms);
+    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(path, 392);
+    lv_obj_set_pos(path, 8, 118);
+
+    lv_obj_t *note = create_label(s_packet_detail_sheet, entry->note[0] ? entry->note : "-", 0xE5EDF5);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, 392);
+    lv_obj_set_pos(note, 8, 156);
+}
+
+static void open_packet_detail_event_cb(lv_event_t *event)
+{
+    const d1l_packet_log_entry_t *entry = (const d1l_packet_log_entry_t *)lv_event_get_user_data(event);
+    if (!entry || entry->seq == 0) {
+        show_toast("Packet", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    s_packet_detail_packet = *entry;
+    hide_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
+    hide_route_detail_sheet();
+    render_packet_detail_sheet();
+    if (s_packet_detail_sheet) {
+        lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_packet_detail_sheet);
     }
 }
 
@@ -809,6 +899,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_packet_detail_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
         lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -944,6 +1035,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_dm_thread_sheet();
         hide_contact_detail_sheet();
         hide_route_detail_sheet();
+        hide_packet_detail_sheet();
         lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -1008,6 +1100,7 @@ static void dock_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_packet_detail_sheet();
     render_active_tab();
 }
 
@@ -1204,6 +1297,20 @@ static void create_route_detail_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_packet_detail_sheet(lv_obj_t *screen)
+{
+    s_packet_detail_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_packet_detail_sheet, 448, 240);
+    lv_obj_set_pos(s_packet_detail_sheet, 16, 142);
+    lv_obj_set_style_radius(s_packet_detail_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_packet_detail_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_packet_detail_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_packet_detail_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_packet_detail_sheet, 12, 0);
+    lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -1254,6 +1361,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_dm_thread_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_route_detail_sheet(s_screen);
+    create_packet_detail_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
 

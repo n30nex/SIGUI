@@ -151,3 +151,16 @@ def test_route_detail_sheet_opens_from_route_rows():
     assert "recent_routes" in source
     assert '"Routes"' in source
     assert "hide_route_detail_sheet()" in source
+
+
+def test_packet_detail_sheet_opens_from_packet_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_packet_detail_sheet" in source
+    assert "static d1l_packet_log_entry_t s_packet_detail_packet" in source
+    assert "render_packet_detail_sheet" in source
+    assert "open_packet_detail_event_cb" in source
+    assert "create_packet_detail_sheet" in source
+    assert "lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert "recent_packet_count" in source
+    assert "recent_packets" in source
+    assert "hide_packet_detail_sheet()" in source
