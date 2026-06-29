@@ -37,6 +37,9 @@ SMOKE_COMMANDS = [
     "nodes",
     "contacts",
     "routes",
+    "signal",
+    "roomservers",
+    "repeaters",
     "crashlog",
     "health",
 ]

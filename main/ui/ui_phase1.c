@@ -246,10 +246,18 @@ static void render_metric_card(lv_obj_t *parent, int x, int y, const char *title
     lv_obj_align(detail_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
+{
+    const int snr_abs = snr_tenths < 0 ? -snr_tenths : snr_tenths;
+    snprintf(dest, dest_size, "%s%d.%d", snr_tenths < 0 ? "-" : "",
+             snr_abs / 10, snr_abs % 10);
+}
+
 static void render_home(const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[64];
+    char snr[16];
 
     snprintf(value, sizeof(value), "%s", snapshot->radio_ready ? "Ready" : "Starting");
     snprintf(detail, sizeof(detail), "path %u byte  packets %lu",
@@ -264,8 +272,10 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                        snapshot->identity_ready ? 0xA7F3D0 : 0xFBBF24);
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->rx_packets);
-    snprintf(detail, sizeof(detail), "adverts %lu  routes %lu",
-             (unsigned long)snapshot->rx_adverts, (unsigned long)snapshot->route_count);
+    format_snr_tenths(snr, sizeof(snr), snapshot->signal_summary.latest_snr_tenths);
+    snprintf(detail, sizeof(detail), "rssi %d snr %s rooms %lu",
+             snapshot->signal_summary.latest_rssi_dbm, snr,
+             (unsigned long)snapshot->signal_summary.room_server_count);
     render_metric_card(s_content, 18, 136, "RF Packets", value, detail, 0x93C5FD);
 
     snprintf(value, sizeof(value), "%luK", (unsigned long)(snapshot->heap_free / 1024U));
@@ -975,8 +985,9 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
     char value[32];
     char detail[64];
     snprintf(value, sizeof(value), "%u", (unsigned)snapshot->node_count);
-    snprintf(detail, sizeof(detail), "adverts %lu  writes %lu",
-             (unsigned long)snapshot->rx_adverts,
+    snprintf(detail, sizeof(detail), "rooms %lu  rpt %lu  writes %lu",
+             (unsigned long)snapshot->signal_summary.room_server_count,
+             (unsigned long)snapshot->signal_summary.repeater_candidate_count,
              (unsigned long)snapshot->node_total_written);
     render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
     snprintf(value, sizeof(value), "%u", (unsigned)snapshot->contact_count);
@@ -1006,12 +1017,26 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
 
 static void render_packets(const d1l_app_snapshot_t *snapshot)
 {
-    int y = 16;
+    char value[32];
+    char detail[64];
+    char snr[16];
+    snprintf(value, sizeof(value), "%d", snapshot->signal_summary.latest_rssi_dbm);
+    format_snr_tenths(snr, sizeof(snr), snapshot->signal_summary.latest_snr_tenths);
+    snprintf(detail, sizeof(detail), "snr %s avg %d", snr,
+             snapshot->signal_summary.avg_rssi_dbm);
+    render_metric_card(s_content, 18, 16, "Signal", value, detail, 0x93C5FD);
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->signal_summary.room_server_count);
+    snprintf(detail, sizeof(detail), "repeaters %lu samples %lu",
+             (unsigned long)snapshot->signal_summary.repeater_candidate_count,
+             (unsigned long)snapshot->signal_summary.sample_count);
+    render_metric_card(s_content, 238, 16, "Mesh Roles", value, detail, 0xA7F3D0);
+
+    int y = 136;
     size_t packet_rows = snapshot->recent_packet_count;
     if (snapshot->recent_route_count > 0 && packet_rows > 3) {
-        packet_rows = 3;
+        packet_rows = 2;
     }
-    for (size_t i = 0; i < packet_rows; ++i) {
+    for (size_t i = 0; i < packet_rows && y <= 248; ++i) {
         render_packet_row(s_content, y, &snapshot->recent_packets[i]);
         y += 56;
     }

@@ -23,6 +23,7 @@ Coverage:
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
+- Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -59,6 +60,9 @@ Expected commands:
 - `nodes`
 - `contacts`
 - `routes`
+- `signal`
+- `roomservers`
+- `repeaters`
 - `health`
 
 Hardware success must include manual confirmation for the display/touch test until automated screen capture exists.
@@ -190,3 +194,13 @@ For Phase 6 packet-log validation:
 8. Reboot.
 9. Verify `packets` retains the selected row. The RAM ring keeps 32 rows; NVS persists the newest 8 rows.
 10. For physical touch review, open the Packet tab, tap a packet row, verify the packet detail sheet opens with the same fields, and close it.
+
+## Mesh Visibility
+
+For Phase 6 signal/room-server/repeater validation:
+
+1. Run `signal` and verify `sample_count` is nonzero after live RX, `latest.rssi_dbm` is nonzero, and RSSI/SNR values reflect recent packet, route, or heard-node evidence.
+2. Run `roomservers` and verify `total_known` and `entries` reflect signed heard-node adverts whose stored role is `room`.
+3. Run `repeaters` and verify entries are inferred only from nonzero path-hop route or heard-node evidence; Public route rows should not by themselves become repeater candidates.
+4. Run `mesh send public test`, wait for local MeshCore bot replies, and verify D1L packet count increases while the COM11 bot status counters show fresh Public movement.
+5. Verify `health` remains `board_ready=true`, `ui_ready=true`, and reports nonzero task stack watermarks after the probe.

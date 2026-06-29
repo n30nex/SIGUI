@@ -24,6 +24,7 @@
 #include "hal/sx1262_indicator.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
+#include "mesh/mesh_inspector.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -927,6 +928,80 @@ static void cmd_routes_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static void print_snr_json(int snr_tenths)
+{
+    const int snr_abs = snr_tenths < 0 ? -snr_tenths : snr_tenths;
+    printf("%s%d.%d", snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+}
+
+static void print_room_server_json(const d1l_mesh_room_server_t *e)
+{
+    printf("{\"fingerprint\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hops\":%u,\"heard_count\":%lu,\"last_heard_ms\":%lu}",
+           e->fingerprint, e->name, e->type, e->rssi_dbm, e->snr_tenths,
+           e->path_hops, (unsigned long)e->heard_count, (unsigned long)e->last_heard_ms);
+}
+
+static void print_repeater_candidate_json(const d1l_mesh_repeater_candidate_t *e)
+{
+    printf("{\"target\":\"%s\",\"label\":\"%s\",\"kind\":\"%s\",\"route\":\"%s\",\"source\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hops\":%u,\"confidence\":%u,\"seen_count\":%lu,\"last_seen_ms\":%lu}",
+           e->target, e->label, e->kind, e->route, e->source, e->rssi_dbm,
+           e->snr_tenths, e->path_hops, e->confidence,
+           (unsigned long)e->seen_count, (unsigned long)e->last_seen_ms);
+}
+
+static void cmd_signal(void)
+{
+    d1l_mesh_signal_summary_t summary = {0};
+    d1l_mesh_inspector_signal_summary(&summary);
+    ok_begin("signal");
+    printf(",\"sample_count\":%lu,\"rx_packet_samples\":%lu,\"route_samples\":%lu,\"node_samples\":%lu,\"room_server_count\":%lu,\"repeater_candidate_count\":%lu",
+           (unsigned long)summary.sample_count, (unsigned long)summary.rx_packet_samples,
+           (unsigned long)summary.route_samples, (unsigned long)summary.node_samples,
+           (unsigned long)summary.room_server_count,
+           (unsigned long)summary.repeater_candidate_count);
+    printf(",\"latest\":{\"label\":\"%s\",\"kind\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"snr_db\":",
+           summary.latest_label, summary.latest_kind,
+           summary.latest_rssi_dbm, summary.latest_snr_tenths);
+    print_snr_json(summary.latest_snr_tenths);
+    printf(",\"path_hops\":%u}", summary.latest_path_hops);
+    printf(",\"strongest_rssi_dbm\":%d,\"weakest_rssi_dbm\":%d,\"best_snr_tenths\":%d,\"worst_snr_tenths\":%d,\"avg_rssi_dbm\":%d,\"avg_snr_tenths\":%d,\"note\":\"Signal is derived from recent packet, route, and heard-node evidence\"}\n",
+           summary.strongest_rssi_dbm, summary.weakest_rssi_dbm,
+           summary.best_snr_tenths, summary.worst_snr_tenths,
+           summary.avg_rssi_dbm, summary.avg_snr_tenths);
+}
+
+static void cmd_roomservers(void)
+{
+    d1l_mesh_signal_summary_t summary = {0};
+    d1l_mesh_inspector_signal_summary(&summary);
+    static d1l_mesh_room_server_t entries[8];
+    size_t copied = d1l_mesh_inspector_copy_room_servers(entries, 8);
+    ok_begin("roomservers");
+    printf(",\"count\":%u,\"total_known\":%lu,\"entries\":[", (unsigned)copied,
+           (unsigned long)summary.room_server_count);
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_room_server_json(&entries[i]);
+    }
+    printf("],\"persisted\":true,\"note\":\"Room servers are derived from signed heard-node adverts with room role\"}\n");
+}
+
+static void cmd_repeaters(void)
+{
+    d1l_mesh_signal_summary_t summary = {0};
+    d1l_mesh_inspector_signal_summary(&summary);
+    static d1l_mesh_repeater_candidate_t entries[8];
+    size_t copied = d1l_mesh_inspector_copy_repeater_candidates(entries, 8);
+    ok_begin("repeaters");
+    printf(",\"count\":%u,\"total_known\":%lu,\"entries\":[", (unsigned)copied,
+           (unsigned long)summary.repeater_candidate_count);
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_repeater_candidate_json(&entries[i]);
+    }
+    printf("],\"persisted\":true,\"note\":\"Repeater candidates are inferred from nonzero path-hop route and heard-node evidence\"}\n");
+}
+
 static void print_crash_log_entry_json(const d1l_crash_log_entry_t *e)
 {
     printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"reset_reason\":\"%s\",\"reset_reason_code\":%u,\"crash_like\":%s,\"heap_free\":%lu,\"heap_min_free\":%lu,\"psram_free\":%lu}",
@@ -1089,7 +1164,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1176,6 +1251,12 @@ static void handle_line(const char *line)
         cmd_routes_detail(line);
     } else if (strcmp(line, "routes clear") == 0) {
         cmd_routes_clear();
+    } else if (strcmp(line, "signal") == 0) {
+        cmd_signal();
+    } else if (strcmp(line, "roomservers") == 0) {
+        cmd_roomservers();
+    } else if (strcmp(line, "repeaters") == 0) {
+        cmd_repeaters();
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
     } else if (strcmp(line, "crashlog") == 0) {

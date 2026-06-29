@@ -9,6 +9,7 @@
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
+#include "mesh/mesh_inspector.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
 #include "mesh/route_store.h"
@@ -19,6 +20,8 @@
 #define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U
 #define D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U
+#define D1L_APP_SNAPSHOT_ROOM_PREVIEW 2U
+#define D1L_APP_SNAPSHOT_REPEATER_PREVIEW 2U
 
 typedef struct {
     bool board_ready;
@@ -78,6 +81,11 @@ typedef struct {
     size_t route_count;
     uint32_t packet_total_written;
     size_t packet_count;
+    d1l_mesh_signal_summary_t signal_summary;
+    d1l_mesh_room_server_t recent_rooms[D1L_APP_SNAPSHOT_ROOM_PREVIEW];
+    size_t recent_room_count;
+    d1l_mesh_repeater_candidate_t recent_repeaters[D1L_APP_SNAPSHOT_REPEATER_PREVIEW];
+    size_t recent_repeater_count;
     uint8_t path_hash_bytes;
     d1l_contact_entry_t recent_contacts[D1L_APP_SNAPSHOT_CONTACT_PREVIEW];
     size_t recent_contact_count;

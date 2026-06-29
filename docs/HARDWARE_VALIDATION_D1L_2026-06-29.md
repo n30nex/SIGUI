@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 6 packet-detail slice: `0xa3100`, 36% free in the app partition
+- Latest local build size after the Phase 6 mesh-visibility slice: `0xa4ff0`, 36% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -235,6 +235,20 @@ Do not use `COM11` or `COM29` for this D1L target.
   - D1L queued a fresh Public `test` and added a new TX `public_text` packet row.
   - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +2`, and `rx_duplicate_total +2`.
   - Final `health` stayed at `reset_reason=SW`, `board_ready=true`, `ui_ready=true`, and nonzero stack watermarks.
+- Phase 6 mesh visibility local smoke: `artifacts/smoke/d1l-smoke-mesh-visibility-local-COM7.json`
+  - 28 commands passed after flashing the mesh-visibility build, including `signal`, `roomservers`, and `repeaters`.
+  - `signal` reported `sample_count=17`, `room_server_count=4`, `repeater_candidate_count=6`, latest RSSI `-45`, and latest SNR `30`.
+  - `roomservers` reported four signed heard-node room adverts: `YKF 1W`, `YKF_Moe`, `QueenN1WSlkyTech`, and `MansionSlkyTech`.
+  - `repeaters` reported six inferred nonzero path-hop route/heard-node candidates.
+  - `health` reported `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, and `ui_task_stack_free_words=1148`.
+- Phase 6 boot-loop regression proof: `artifacts/smoke/d1l-mesh-visibility-crashlog-clear-reboot-local-COM7.json`
+  - An initial local build boot-looped with a FreeRTOS notify assert during first UI creation; the inspector scratch arrays were moved off the caller stack before final validation.
+  - After the fixed build, `crashlog clear` plus `reboot` produced exactly one `SW` reset entry with `crash_like=false`.
+  - Post-reboot `health` reported `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, and `ui_task_stack_free_words=1256`.
+- Phase 6 mesh visibility Public `test` RF regression: `artifacts/smoke/d1l-mesh-visibility-public-test-regression-local-COM7.json`
+  - D1L queued Public `test`, added TX packet seq `11`, and decoded a fresh RX Public `test` packet seq `12` at RSSI `-41`, SNR `30`, and `path_hops=1`.
+  - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
+  - `signal`, `roomservers`, `repeaters`, and `health` remained healthy after the RF probe.
 
 ## Still Pending
 
@@ -243,5 +257,5 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
-- Richer contact edit actions, packet filtering/search, raw packet hex developer mode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, route rows, a first route detail sheet, and a first packet detail sheet.
+- Richer contact edit actions, dedicated room-server/repeater list screens, packet filtering/search, raw packet hex developer mode, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and a first packet detail sheet.
 - Flash backup was intentionally skipped per operator instruction.

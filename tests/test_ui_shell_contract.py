@@ -16,6 +16,8 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
+    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW 2U" in header
+    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW 2U" in header
     assert "d1l_app_snapshot_t" in header
     assert "d1l_app_model_snapshot" in header
     assert "static d1l_app_snapshot_t s_snapshot" in read("main/ui/ui_phase1.c")
@@ -27,6 +29,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
     assert "d1l_connectivity_status" in source
+    assert "d1l_mesh_inspector_signal_summary" in source
     assert "reset_reason" in header
     assert "ui_task_stack_free_words" in header
     assert "lvgl_used_pct" in header

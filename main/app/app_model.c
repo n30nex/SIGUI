@@ -109,6 +109,12 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->route_count = routes.count;
     snapshot->packet_total_written = packets.total_written;
     snapshot->packet_count = packets.count;
+    d1l_mesh_inspector_signal_summary(&snapshot->signal_summary);
+    snapshot->recent_room_count =
+        d1l_mesh_inspector_copy_room_servers(snapshot->recent_rooms, D1L_APP_SNAPSHOT_ROOM_PREVIEW);
+    snapshot->recent_repeater_count =
+        d1l_mesh_inspector_copy_repeater_candidates(snapshot->recent_repeaters,
+                                                    D1L_APP_SNAPSHOT_REPEATER_PREVIEW);
     snapshot->path_hash_bytes = mesh.path_hash_bytes;
     snapshot->recent_contact_count =
         d1l_contact_store_copy_recent(snapshot->recent_contacts, D1L_APP_SNAPSHOT_CONTACT_PREVIEW);

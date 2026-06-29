@@ -619,10 +619,10 @@ Acceptance:
 
 Tasks:
 
-- Repeaters screen.
-- Room servers screen.
+- Repeaters screen. Status: first read-only serial and Packet-tab visibility is implemented and validated on `COM7` through inferred nonzero path-hop route/heard-node candidates; dedicated full list UI and trace/ping actions are pending later UX expansion.
+- Room servers screen. Status: first read-only serial and dashboard visibility is implemented and validated on `COM7` from signed heard-node adverts with role `room`; dedicated full list UI is pending later UX expansion.
 - Routes/path screen.
-- Signal/SNR screen.
+- Signal/SNR screen. Status: first `signal` diagnostic plus Home/Packet-tab signal summary cards are implemented, built, flashed, and validated on `COM7` from recent packet, route, and heard-node evidence.
 - Packet log with parsed detail. Status: first NVS-backed packet evidence store, `packets detail <seq>`, `packets clear`, touchable Packet-tab rows, and a first packet detail sheet are implemented, built, flashed, and validated on `COM7`; live ring keeps 32 rows and NVS persists the newest 8 rows.
 - Telemetry history.
 - Neighbor/repeater scan helper.
@@ -631,7 +631,7 @@ Tasks:
 
 Acceptance:
 
-- User can inspect how the mesh is behaving without using serial logs.
+- User can inspect how the mesh is behaving without using serial logs. Status: first Home/Packet-tab signal, room-server, and repeater-candidate summaries are validated on `COM7`; richer full-list screens are pending.
 - Packet detail screen is useful for debugging real mesh traffic. Status: first detail sheet and serial `packets detail <seq>` are validated with fresh Public TX/RX packet rows; richer filtering/search and raw hex developer mode are pending.
 - Advanced/admin actions are gated and cannot be triggered accidentally.
 

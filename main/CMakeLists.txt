@@ -23,6 +23,7 @@ idf_component_register(
         "hal/sx1262_indicator.c"
         "mesh/contact_store.c"
         "mesh/dm_store.c"
+        "mesh/mesh_inspector.c"
         "mesh/message_store.c"
         "mesh/node_store.c"
         "mesh/packet_log.c"
