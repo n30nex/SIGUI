@@ -1,0 +1,77 @@
+# MeshCore DeskOS D1L User Guide
+
+This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk console for a local MeshCore mesh.
+
+## What Works Now
+
+- Canada/USA MeshCore radio profile: 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, TCXO NONE.
+- Local MeshCore identity stored in D1L NVS.
+- Public MeshCore `test` send/receive against local bots.
+- Signed advert receive/transmit.
+- Persisted recent Public messages, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
+- 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, and lock overlay.
+- Mesh visibility summaries for signal, room servers, and repeater candidates.
+- USB serial diagnostics, smoke test, and soak test tooling.
+
+## Release Package Flashing
+
+Use a release package from GitHub Actions or `artifacts/release`.
+
+Normal project flash writes the bootloader, partition table, and app image at ESP-IDF offsets while preserving unrelated flash regions.
+
+```powershell
+$env:D1L_PORT = "COMx"
+.\flash_project.ps1 -Port $env:D1L_PORT
+```
+
+Do not use COM11 or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In this validation setup, COM7 has been the D1L and COM11 has been a local MeshCore bot.
+
+The full 8MB image is for factory/recovery workflows and can overwrite persisted settings, contacts, messages, and logs. It requires typed confirmation:
+
+```powershell
+$env:D1L_PORT = "COMx"
+.\flash_full_8mb.ps1 -Port $env:D1L_PORT
+```
+
+## After Flash
+
+Run smoke from the repo checkout:
+
+```powershell
+$env:D1L_PORT = "COMx"
+python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
+```
+
+For a short active stability probe with local Public bots that respond to `test`:
+
+```powershell
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
+```
+
+## Useful Serial Commands
+
+- `version`
+- `health`
+- `crashlog`
+- `mesh status`
+- `mesh send public test`
+- `messages public`
+- `messages unread`
+- `nodes`
+- `contacts`
+- `routes`
+- `packets`
+- `signal`
+- `roomservers`
+- `repeaters`
+- `wifi status`
+- `wifi scan`
+- `ble status`
+
+## Current Limits
+
+- Manual physical review of the touch UI is still pending.
+- Full DM RF proof is still pending.
+- Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
+- Full 12-hour idle/listening soak and 1-hour active messaging soak are still pending.
+- Flash backup was intentionally skipped during current bring-up when the operator requested it.

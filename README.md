@@ -17,6 +17,12 @@ python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 ```
 
+Package an existing firmware build:
+
+```powershell
+python .\scripts\package_release_d1l.py --build-dir build --out-dir artifacts\release
+```
+
 Hardware flow, once the user supplies the D1L port:
 
 ```powershell
@@ -32,3 +38,5 @@ Do not use COM11 or COM29 for D1L flashing/testing.
 ## Roadmap
 
 The implementation follows [docs/ROADMAP.md](docs/ROADMAP.md). The framework decision is recorded in [docs/D1L_BUILD_DECISION.md](docs/D1L_BUILD_DECISION.md).
+
+For handoff docs, see [docs/USER_GUIDE_D1L.md](docs/USER_GUIDE_D1L.md) and [docs/DEVELOPER_GUIDE_D1L.md](docs/DEVELOPER_GUIDE_D1L.md).

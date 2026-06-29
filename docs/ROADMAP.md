@@ -662,21 +662,21 @@ Acceptance:
 
 Tasks:
 
-- Build artifacts: full flash image and update image if applicable.
-- Checksums.
-- Flash instructions.
-- Recovery instructions.
-- User guide.
-- Developer guide.
-- Known limitations.
-- Screenshots/photos.
-- Final test report.
+- Build artifacts: full flash image and update image if applicable. Status: `scripts/package_release_d1l.py` packages the ESP-IDF flash set, app update image, and padded 8MB full-flash image; GitHub Actions uploads `d1l-release-package`.
+- Checksums. Status: release packages include `SHA256SUMS.txt` plus per-file hashes in `manifest.json`.
+- Flash instructions. Status: package README, generated `flash_project.ps1`, generated `flash_project.sh`, and `docs/USER_GUIDE_D1L.md` document explicit-port normal flashing.
+- Recovery instructions. Status: generated `flash_full_8mb.ps1` requires typed confirmation and `docs/FLASH_RECOVERY_D1L.md` documents backup/erase recovery flow.
+- User guide. Status: first `docs/USER_GUIDE_D1L.md` added.
+- Developer guide. Status: first `docs/DEVELOPER_GUIDE_D1L.md` added.
+- Known limitations. Status: `docs/KNOWN_LIMITATIONS.md` is updated through the Phase 7 soak harness.
+- Screenshots/photos. Status: pending.
+- Final test report. Status: hardware validation notes are current through the short active soak, release package checkpoint, and release-package sanity smoke; final full-release report is pending long soaks and manual UI review.
 
 Acceptance:
 
-- A new user can flash using documented steps and a specified COM port.
-- A developer can rebuild from clean checkout.
-- Final docs match actual behavior.
+- A new user can flash using documented steps and a specified COM port. Status: generated package scripts and user guide are in place; final release dry-run from CI artifact is pending.
+- A developer can rebuild from clean checkout. Status: CI builds firmware and packages release artifacts from checkout.
+- Final docs match actual behavior. Status: docs are updated through this packaging slice; final audit remains pending.
 
 ---
 

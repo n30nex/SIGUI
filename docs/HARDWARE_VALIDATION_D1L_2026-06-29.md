@@ -267,6 +267,11 @@ Do not use `COM11` or `COM29` for this D1L target.
   - The run passed with 6 samples, 3 queued Public TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=8`; the packet log moved `packet_total_written_delta=11`.
   - Health remained ready with `heap_free_delta=0`, `psram_free_delta=0`, stack floors of `current=1120` and `ui=1352` words, and `lvgl_used_pct_peak=59`.
+- Phase 8 release package sanity smoke: `artifacts/smoke/d1l-smoke-release-package-sanity-local-COM7.json`
+  - Ran the standard smoke script on the already-flashed D1L after adding release packaging tooling; no backup or reflash was performed.
+  - 28 commands passed, including `wifi status`, safe `wifi scan`, `ble status`, `crashlog`, `health`, `signal`, `roomservers`, and `repeaters`.
+  - `companion status` reported USB console ready, MeshCore 3-byte framing ready, Wi-Fi setting off/build available/runtime off, BLE setting off/build disabled/runtime off, and policy `offline_first_one_companion_radio`.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, `ui_task_stack_free_words=1352`, and `lvgl_used_pct=62`.
 
 ## Still Pending
 

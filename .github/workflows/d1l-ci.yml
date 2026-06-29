@@ -54,9 +54,21 @@ jobs:
           find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" -o -name "flasher_args.json" \) -print -exec cp --parents {} artifacts/firmware/ \;
           (cd artifacts/firmware && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
+      - name: Package D1L release
+        shell: bash
+        run: |
+          python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}"
+
       - uses: actions/upload-artifact@v7
         with:
           name: d1l-firmware-artifacts
           path: artifacts/firmware/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: d1l-release-package
+          path: artifacts/release/**
           if-no-files-found: error
           retention-days: 14

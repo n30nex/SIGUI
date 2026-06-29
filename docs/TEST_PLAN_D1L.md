@@ -25,6 +25,7 @@ Coverage:
 - Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, and LVGL peak usage.
+- Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
@@ -95,6 +96,23 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-i
 ```
 
 Success requires every sampled command to return `ok=true`, no uptime rollback, `board_ready=true`, `ui_ready=true`, ready mesh state, nonzero task stack watermarks, and no required packet delta threshold failures. For active RF probes, `mesh_tx_packet_delta` must increase and `mesh_rx_packet_delta` must increase when `--require-rx-delta` is used.
+
+## Release Package
+
+After firmware build:
+
+```powershell
+python .\scripts\package_release_d1l.py --build-dir build --out-dir artifacts\release --package-name d1l-release-local-smoke
+```
+
+Verify:
+
+1. `manifest.json` lists bootloader offset `0x0`, partition offset `0x8000`, and app offset `0x10000`.
+2. `firmware/meshcore_deskos_d1l.bin` and `update/meshcore_deskos_d1l-app.bin` have matching SHA256 hashes.
+3. `full-flash/meshcore_deskos_d1l-full-8mb.bin` is exactly 8MB.
+4. `SHA256SUMS.txt` includes every package file except itself.
+5. `flash_project.ps1`, `flash_project.sh`, and `flash_full_8mb.ps1` require an explicit D1L port.
+6. `flash_full_8mb.ps1` requires typed confirmation.
 
 ## Message Store Persistence
 

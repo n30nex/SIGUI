@@ -9,8 +9,8 @@
 - [x] Boot banner includes firmware name/version/schema.
 - [x] `i2c` detects D1L expander/touch.
 - [ ] `display test` shows stable bars. Command passed on hardware; manual visual confirmation is still pending.
-- [ ] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
-- [ ] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
+- [x] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
+- [x] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
 - [x] `touch test` reports coordinates.
 - [x] `backlight <0-100>` accepts dim/restore commands.
 - [x] `radiohw` reports SX1262 status or exact wiring failure.
@@ -71,5 +71,12 @@
 - [x] Private GitHub repo exists under the user's account.
 - [x] CI artifacts produced.
 - [x] Firmware binaries and SHA256 checksums attached.
+- [x] Release package artifact generation added to GitHub Actions.
+- [x] Release package includes normal flash set, app update image, full 8MB image, manifest, checksums, and explicit-port flash helpers.
+- [x] First user guide added.
+- [x] First developer guide added.
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
+- [ ] Screenshots/photos captured.
+- [ ] Final full-duration soak evidence added.
+- [ ] Final manual touch review added.
