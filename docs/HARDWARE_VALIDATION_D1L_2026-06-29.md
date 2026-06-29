@@ -314,11 +314,27 @@ Do not use `COM11` or `COM29` for this D1L target.
   - The 90 second active soak passed with 5 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=2`; the packet log moved `packet_total_written_delta=5`.
   - Health remained ready with stack floors of `current=1016` and `ui=1248` words, `lvgl_used_pct_peak=79`, `heap_free_delta=-16`, and `psram_free_delta=0`.
+- Phase 6 radio settings local smoke: `artifacts/smoke/d1l-smoke-radio-settings-local-COM7.json`
+  - Built in fresh Podman ESP-IDF output `build/radio-settings`; app size was `696384` bytes and app SHA256 was `00752E6B570C6030DFB79A8C02E93D97F44AC7308AB59EDB785D94A9178DF5A0`.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - Standard smoke passed with 32 commands.
+  - `settings get` reported the nested default radio profile: 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, RX boost enabled, TCXO NONE, and `applied_to_radio=false`.
+  - `health` reported `board_ready=true`, `ui_ready=true`, `reset_reason=POWERON`, current stack `1112` words, UI stack `1252` words, and `lvgl_used_pct=80`.
+- Phase 6 radio settings targeted serial proof: `artifacts/smoke/d1l-radio-settings-target-local-COM7.json`
+  - `radio set txpower 19` persisted `tx_power_dbm=19` with `applied_to_radio=false`.
+  - `radio set rxboost 0` persisted `radio.rx_boost=false` in `settings get`.
+  - `radio set preset uscan` restored 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, and RX boost enabled.
+  - Final `health` stayed `board_ready=true` and `ui_ready=true`.
+- Phase 6 radio settings active Public `test` RF regression: `artifacts/soak/d1l-soak-radio-settings-active-local-COM7.json`
+  - The 90 second active soak passed with 5 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
+  - Health remained ready with stack floors of `current=1032` and `ui=1204` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
+  - The local release package `artifacts/release/d1l-release-radio-settings-local` passed `scripts/verify_checksums.py`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, Radio Settings sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.

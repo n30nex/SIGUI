@@ -104,6 +104,8 @@ def expected_command_name(command: str) -> str:
         "radio set bw ",
         "radio set sf ",
         "radio set cr ",
+        "radio set txpower ",
+        "radio set rxboost ",
         "backlight ",
         "mesh send public ",
     ]:

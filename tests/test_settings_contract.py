@@ -53,6 +53,8 @@ def test_console_exposes_phase2_foundation_commands():
         "radio set bw",
         "radio set sf",
         "radio set cr",
+        "radio set txpower",
+        "radio set rxboost",
         "mesh advert flood",
         "wifi status",
         "wifi off",
@@ -75,6 +77,11 @@ def test_console_exposes_phase2_foundation_commands():
     assert "d1l_connectivity_set_wifi_enabled(false)" in console
     assert "d1l_connectivity_set_ble_enabled(false)" in console
     assert "disabled_by_setting" in console
+    assert '\\"radio\\":{\\"frequency_hz\\":%lu' in console
+    assert "cmd_radio_set_txpower" in console
+    assert "cmd_radio_set_rxboost" in console
+    assert "settings.tx_power_dbm = (int8_t)tx_power" in console
+    assert "settings.rx_boost = enabled" in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

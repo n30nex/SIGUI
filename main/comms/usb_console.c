@@ -142,12 +142,16 @@ static void cmd_settings_get(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
     ok_begin("settings get");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u}\n",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
            settings->node_name, d1l_settings_role_name(settings->role),
            bool_json(settings->onboarding_complete),
            bool_json(settings->wifi_enabled), bool_json(settings->ble_companion_enabled),
            bool_json(settings->observer_enabled), bool_json(settings->high_contrast),
-           bool_json(settings->night_mode), settings->path_hash_bytes);
+           bool_json(settings->night_mode), settings->path_hash_bytes,
+           (unsigned long)settings->frequency_hz,
+           ((float)settings->bandwidth_tenths_khz) / 10.0f,
+           settings->spreading_factor, settings->coding_rate, settings->tx_power_dbm,
+           bool_json(settings->rx_boost), d1l_settings_tcxo_name(settings->tcxo_mode));
 }
 
 static void cmd_settings_reset(void)
@@ -457,6 +461,48 @@ static void cmd_radio_set_cr(const char *line)
         return;
     }
     print_radio_profile_result("radio set cr");
+}
+
+static void cmd_radio_set_txpower(const char *line)
+{
+    int tx_power = atoi(line + strlen("radio set txpower "));
+    if (tx_power < -9 || tx_power > D1L_RADIO_TX_POWER_DBM) {
+        err_result("radio set txpower", "INVALID_TX_POWER", "usage: radio set txpower <-9-20>");
+        return;
+    }
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.tx_power_dbm = (int8_t)tx_power;
+    esp_err_t ret = d1l_settings_save(&settings);
+    if (ret != ESP_OK) {
+        err_result("radio set txpower", esp_err_to_name(ret), "could not persist TX power");
+        return;
+    }
+    print_radio_profile_result("radio set txpower");
+}
+
+static void cmd_radio_set_rxboost(const char *line)
+{
+    const char *arg = line + strlen("radio set rxboost ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    bool enabled = false;
+    if (strcmp(arg, "1") == 0 || strcmp(arg, "on") == 0 || strcmp(arg, "true") == 0) {
+        enabled = true;
+    } else if (strcmp(arg, "0") == 0 || strcmp(arg, "off") == 0 || strcmp(arg, "false") == 0) {
+        enabled = false;
+    } else {
+        err_result("radio set rxboost", "INVALID_RX_BOOST", "usage: radio set rxboost <0|1>");
+        return;
+    }
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.rx_boost = enabled;
+    esp_err_t ret = d1l_settings_save(&settings);
+    if (ret != ESP_OK) {
+        err_result("radio set rxboost", esp_err_to_name(ret), "could not persist RX boost");
+        return;
+    }
+    print_radio_profile_result("radio set rxboost");
 }
 
 static void cmd_mesh_status(void)
@@ -1399,7 +1445,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1450,6 +1496,10 @@ static void handle_line(const char *line)
         cmd_radio_set_sf(line);
     } else if (strncmp(line, "radio set cr ", 13) == 0) {
         cmd_radio_set_cr(line);
+    } else if (strncmp(line, "radio set txpower ", 18) == 0) {
+        cmd_radio_set_txpower(line);
+    } else if (strncmp(line, "radio set rxboost ", 18) == 0) {
+        cmd_radio_set_rxboost(line);
     } else if (strcmp(line, "mesh status") == 0) {
         cmd_mesh_status();
     } else if (strcmp(line, "companion status") == 0) {

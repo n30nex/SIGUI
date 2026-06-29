@@ -627,6 +627,7 @@ Tasks:
 - Telemetry history.
 - Neighbor/repeater scan helper.
 - QR contact/export. Status: first MeshCore-compatible contact export URI (`meshcore://contact/add?...`) is implemented through `contacts export [fingerprint]`, Contact Detail now has an `Export` action, LVGL QR rendering is enabled in defaults, the host simulator covers the Contact Export sheet, and COM7 flash/smoke/targeted export/active Public `test` RF regression passed; manual touch review and scan/import proof are pending.
+- Radio settings editor. Status: first touch Radio Settings sheet is implemented from the Settings tab with staged frequency/BW/SF/CR/TX power/RX boost controls, a US/CAN defaults action, explicit Save, reboot/apply warning, app-model validation, and serial `radio set txpower`/`radio set rxboost` coverage; host simulator, contract tests, Podman build, COM7 flash, standard smoke, targeted serial radio proof, and active Public `test` RF regression pass. Manual touch review is pending.
 - Optional manual location/map view.
 
 Acceptance:
@@ -757,7 +758,7 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding.
 - Assert required labels and button surfaces are present.
 - Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.

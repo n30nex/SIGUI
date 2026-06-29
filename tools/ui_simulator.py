@@ -415,7 +415,8 @@ def render_settings(s: Surface, snap: Snapshot):
     draw_metric(s, (16, 176, 464, 238), "Identity", snap.node_name, snap.fingerprint, BLUE)
     draw_metric(s, (16, 248, 464, 310), "Companion", "USB ready", "Wi-Fi off, BLE off, offline-first", GREEN)
     draw_metric(s, (16, 320, 230, 394), "Health", "heap 246K", "ui stack 3268, reset SW", AMBER)
-    draw_button(s, (250, 320, 464, 394), "Advert", ACCENT)
+    draw_button(s, (250, 320, 354, 394), "Radio", ACCENT)
+    draw_button(s, (364, 320, 464, 394), "Advert", ACCENT)
     draw_dock(s, "Settings")
 
 
@@ -451,6 +452,29 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
         draw_button(s, (44 + i * 96, 278, 132 + i * 96, 330), label, GREEN if label == "DM" else ACCENT)
     draw_button(s, (44, 346, 200, 378), "Close", MUTED)
     draw_dock(s, "Nodes")
+
+
+def render_radio_settings_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Radio Settings", "Saved profile applies after reboot")
+    s.text(snap.radio_profile, (44, 154, 436, 178), 14, GREEN, True)
+    s.text("Freq 910.525 MHz", (44, 190, 220, 212), 13, TEXT, True)
+    draw_button(s, (244, 184, 316, 220), "-25k", ACCENT)
+    draw_button(s, (324, 184, 396, 220), "+25k", ACCENT)
+    s.text("BW 62.5 kHz", (44, 232, 220, 254), 13, TEXT, True)
+    draw_button(s, (244, 226, 396, 262), "Cycle BW", ACCENT)
+    s.text("SF 7", (44, 274, 98, 296), 13, TEXT, True)
+    draw_button(s, (106, 268, 166, 304), "SF-", ACCENT)
+    draw_button(s, (174, 268, 234, 304), "SF+", ACCENT)
+    s.text("CR 5", (250, 274, 304, 296), 13, TEXT, True)
+    draw_button(s, (312, 268, 396, 304), "Cycle", ACCENT)
+    s.text("TX 20 dBm", (44, 318, 136, 340), 13, TEXT, True)
+    draw_button(s, (146, 312, 206, 348), "TX-", ACCENT)
+    draw_button(s, (214, 312, 274, 348), "TX+", ACCENT)
+    draw_button(s, (282, 312, 416, 348), "RX Boost On", GREEN)
+    draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE)
+    draw_button(s, (146, 356, 238, 386), "Save", GREEN)
+    draw_button(s, (248, 356, 340, 386), "Close", MUTED)
+    draw_dock(s, "Settings")
 
 
 def render_contact_export_sheet(s: Surface, snap: Snapshot):
@@ -570,6 +594,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "packets": render_packets,
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
+    "radio_settings_sheet": render_radio_settings_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
@@ -588,6 +613,22 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Health", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
+    "radio_settings_sheet": (
+        "Radio Settings",
+        "Freq 910.525 MHz",
+        "-25k",
+        "+25k",
+        "Cycle BW",
+        "SF-",
+        "SF+",
+        "Cycle",
+        "TX-",
+        "TX+",
+        "RX Boost On",
+        "US/CAN",
+        "Save",
+        "Close",
+    ),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Export", "Fav", "Mute", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Close"),

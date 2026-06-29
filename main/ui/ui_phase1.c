@@ -15,6 +15,7 @@
 #include "app/app_model.h"
 #include "app/settings_model.h"
 #include "bsp_lcd.h"
+#include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "indev/indev.h"
 
@@ -35,6 +36,7 @@ static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_dm_thread_sheet;
+static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_contact_export_sheet;
 static lv_obj_t *s_route_detail_sheet;
@@ -51,6 +53,7 @@ static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static d1l_contact_entry_t s_compose_contact;
+static d1l_app_radio_profile_edit_t s_radio_edit;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
 static d1l_route_entry_t s_route_detail_route;
@@ -71,6 +74,7 @@ static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
+static void open_radio_settings_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -87,8 +91,22 @@ typedef enum {
     D1L_PACKET_FILTER_TEXT,
 } d1l_packet_filter_mode_t;
 
+typedef enum {
+    D1L_RADIO_EDIT_FREQ_DOWN = 0,
+    D1L_RADIO_EDIT_FREQ_UP,
+    D1L_RADIO_EDIT_BW,
+    D1L_RADIO_EDIT_SF_DOWN,
+    D1L_RADIO_EDIT_SF_UP,
+    D1L_RADIO_EDIT_CR,
+    D1L_RADIO_EDIT_TX_DOWN,
+    D1L_RADIO_EDIT_TX_UP,
+    D1L_RADIO_EDIT_RX_BOOST,
+} d1l_radio_edit_action_t;
+
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
+
+static void render_radio_settings_sheet(void);
 
 static void lv_tick_task(void *arg)
 {
@@ -189,6 +207,19 @@ static void show_toast(const char *action, esp_err_t ret)
     s_toast_until = lv_tick_get() + 3000U;
 }
 
+static void show_toast_text(const char *text, bool ok)
+{
+    if (!s_toast) {
+        return;
+    }
+    lv_label_set_text(s_toast, text);
+    lv_obj_set_style_bg_color(s_toast, lv_color_hex(ok ? 0x12362F : 0x3A1720), 0);
+    lv_obj_set_style_border_color(s_toast, lv_color_hex(ok ? 0x5EEAD4 : 0xF87171), 0);
+    lv_obj_clear_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_toast);
+    s_toast_until = lv_tick_get() + 3000U;
+}
+
 static void hide_sheet(void)
 {
     if (s_sheet) {
@@ -212,6 +243,13 @@ static void hide_dm_thread_sheet(void)
     }
     s_dm_thread_fingerprint[0] = '\0';
     s_dm_thread_alias[0] = '\0';
+}
+
+static void hide_radio_settings_sheet(void)
+{
+    if (s_radio_settings_sheet) {
+        lv_obj_add_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void hide_contact_detail_sheet(void)
@@ -318,6 +356,32 @@ static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
     const int snr_abs = snr_tenths < 0 ? -snr_tenths : snr_tenths;
     snprintf(dest, dest_size, "%s%d.%d", snr_tenths < 0 ? "-" : "",
              snr_abs / 10, snr_abs % 10);
+}
+
+static void format_radio_profile_line(char *dest, size_t dest_size,
+                                      const d1l_app_radio_profile_edit_t *profile)
+{
+    if (!dest || dest_size == 0 || !profile) {
+        return;
+    }
+    snprintf(dest, dest_size, "US/CAN %.3f  BW%.1f  SF%u  CR%u",
+             ((double)profile->frequency_hz) / 1000000.0,
+             ((double)profile->bandwidth_tenths_khz) / 10.0,
+             profile->spreading_factor, profile->coding_rate);
+}
+
+static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        d1l_app_model_current_radio_profile(&s_radio_edit);
+        return;
+    }
+    s_radio_edit.frequency_hz = snapshot->radio_frequency_hz;
+    s_radio_edit.bandwidth_tenths_khz = snapshot->radio_bandwidth_tenths_khz;
+    s_radio_edit.spreading_factor = snapshot->radio_spreading_factor;
+    s_radio_edit.coding_rate = snapshot->radio_coding_rate;
+    s_radio_edit.tx_power_dbm = snapshot->radio_tx_power_dbm;
+    s_radio_edit.rx_boost = snapshot->radio_rx_boost;
 }
 
 static void render_home(const d1l_app_snapshot_t *snapshot)
@@ -522,6 +586,7 @@ static void open_compose_event_cb(lv_event_t *event)
     (void)event;
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -553,6 +618,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     d1l_contact_entry_t selected = *entry;
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -685,6 +751,7 @@ static void contact_detail_export_event_cb(lv_event_t *event)
     }
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_compose_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
@@ -789,6 +856,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     s_contact_detail_contact = *entry;
     hide_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_compose_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
@@ -880,6 +948,7 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_packet_detail_sheet();
@@ -964,6 +1033,7 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1032,6 +1102,7 @@ static void open_packet_search_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1152,6 +1223,7 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1346,6 +1418,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
              entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
     hide_sheet();
     hide_compose_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1535,6 +1608,193 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
     }
 }
 
+static uint16_t next_radio_bandwidth(uint16_t current)
+{
+    static const uint16_t bandwidths[] = {625U, 1250U, 2500U, 5000U};
+    for (size_t i = 0; i < sizeof(bandwidths) / sizeof(bandwidths[0]); ++i) {
+        if (current < bandwidths[i]) {
+            return bandwidths[i];
+        }
+    }
+    return bandwidths[0];
+}
+
+static void radio_edit_adjust_event_cb(lv_event_t *event)
+{
+    d1l_radio_edit_action_t action =
+        (d1l_radio_edit_action_t)(uintptr_t)lv_event_get_user_data(event);
+    switch (action) {
+    case D1L_RADIO_EDIT_FREQ_DOWN:
+        if (s_radio_edit.frequency_hz >= 902025000UL) {
+            s_radio_edit.frequency_hz -= 25000UL;
+        }
+        break;
+    case D1L_RADIO_EDIT_FREQ_UP:
+        if (s_radio_edit.frequency_hz <= 927975000UL) {
+            s_radio_edit.frequency_hz += 25000UL;
+        }
+        break;
+    case D1L_RADIO_EDIT_BW:
+        s_radio_edit.bandwidth_tenths_khz =
+            next_radio_bandwidth(s_radio_edit.bandwidth_tenths_khz);
+        break;
+    case D1L_RADIO_EDIT_SF_DOWN:
+        if (s_radio_edit.spreading_factor > 5U) {
+            s_radio_edit.spreading_factor--;
+        }
+        break;
+    case D1L_RADIO_EDIT_SF_UP:
+        if (s_radio_edit.spreading_factor < 12U) {
+            s_radio_edit.spreading_factor++;
+        }
+        break;
+    case D1L_RADIO_EDIT_CR:
+        s_radio_edit.coding_rate =
+            s_radio_edit.coding_rate >= 8U ? 5U : (uint8_t)(s_radio_edit.coding_rate + 1U);
+        break;
+    case D1L_RADIO_EDIT_TX_DOWN:
+        if (s_radio_edit.tx_power_dbm > -9) {
+            s_radio_edit.tx_power_dbm--;
+        }
+        break;
+    case D1L_RADIO_EDIT_TX_UP:
+        if (s_radio_edit.tx_power_dbm < D1L_RADIO_TX_POWER_DBM) {
+            s_radio_edit.tx_power_dbm++;
+        }
+        break;
+    case D1L_RADIO_EDIT_RX_BOOST:
+        s_radio_edit.rx_boost = !s_radio_edit.rx_boost;
+        break;
+    }
+    render_radio_settings_sheet();
+}
+
+static void radio_defaults_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_default_radio_profile(&s_radio_edit);
+    render_radio_settings_sheet();
+}
+
+static void radio_save_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_save_radio_profile(&s_radio_edit);
+    if (ret == ESP_OK) {
+        d1l_app_model_snapshot(&s_snapshot);
+        render_active_tab();
+        render_radio_settings_sheet();
+        if (s_radio_settings_sheet) {
+            lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_radio_settings_sheet);
+        }
+        show_toast_text("Radio saved - reboot/apply required", true);
+    } else {
+        show_toast_text("Radio profile rejected", false);
+    }
+}
+
+static void close_radio_settings_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_radio_settings_sheet();
+}
+
+static void render_radio_settings_sheet(void)
+{
+    if (!s_radio_settings_sheet) {
+        return;
+    }
+    lv_obj_clean(s_radio_settings_sheet);
+
+    char profile[80];
+    char line[96];
+    format_radio_profile_line(profile, sizeof(profile), &s_radio_edit);
+
+    lv_obj_t *title = create_label(s_radio_settings_sheet, "Radio Settings", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_radio_settings_sheet, "Close", 340, 0, 76, 40,
+                  close_radio_settings_event_cb, NULL);
+
+    lv_obj_t *summary = create_label(s_radio_settings_sheet, profile, 0x5EEAD4);
+    lv_label_set_long_mode(summary, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(summary, 408);
+    lv_obj_set_pos(summary, 8, 44);
+
+    lv_obj_t *warning = create_label(s_radio_settings_sheet,
+                                     "Saved profile applies after reboot; live RF unchanged",
+                                     0xFBBF24);
+    lv_label_set_long_mode(warning, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(warning, 408);
+    lv_obj_set_pos(warning, 8, 68);
+
+    lv_obj_t *freq = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
+    label_set_fmt(freq, "Freq %.3f MHz", ((double)s_radio_edit.frequency_hz) / 1000000.0);
+    lv_obj_set_pos(freq, 8, 102);
+    create_button(s_radio_settings_sheet, "-25k", 226, 92, 72, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_FREQ_DOWN);
+    create_button(s_radio_settings_sheet, "+25k", 306, 92, 72, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_FREQ_UP);
+
+    snprintf(line, sizeof(line), "BW %.1f kHz", ((double)s_radio_edit.bandwidth_tenths_khz) / 10.0);
+    lv_obj_t *bw = create_label(s_radio_settings_sheet, line, 0xE5EDF5);
+    lv_obj_set_pos(bw, 8, 142);
+    create_button(s_radio_settings_sheet, "Cycle BW", 226, 132, 152, 36,
+                  radio_edit_adjust_event_cb, (void *)(uintptr_t)D1L_RADIO_EDIT_BW);
+
+    lv_obj_t *sf = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
+    label_set_fmt(sf, "SF %u", s_radio_edit.spreading_factor);
+    lv_obj_set_pos(sf, 8, 182);
+    create_button(s_radio_settings_sheet, "SF-", 92, 172, 62, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_SF_DOWN);
+    create_button(s_radio_settings_sheet, "SF+", 162, 172, 62, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_SF_UP);
+    lv_obj_t *cr = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
+    label_set_fmt(cr, "CR %u", s_radio_edit.coding_rate);
+    lv_obj_set_pos(cr, 244, 182);
+    create_button(s_radio_settings_sheet, "Cycle", 306, 172, 72, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_CR);
+
+    lv_obj_t *tx = create_label(s_radio_settings_sheet, "", 0xE5EDF5);
+    label_set_fmt(tx, "TX %d dBm", s_radio_edit.tx_power_dbm);
+    lv_obj_set_pos(tx, 8, 222);
+    create_button(s_radio_settings_sheet, "TX-", 106, 212, 62, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_TX_DOWN);
+    create_button(s_radio_settings_sheet, "TX+", 176, 212, 62, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_TX_UP);
+    create_button(s_radio_settings_sheet, s_radio_edit.rx_boost ? "RX Boost On" : "RX Boost Off",
+                  250, 212, 128, 36, radio_edit_adjust_event_cb,
+                  (void *)(uintptr_t)D1L_RADIO_EDIT_RX_BOOST);
+
+    create_button(s_radio_settings_sheet, "US/CAN", 8, 266, 104, 40, radio_defaults_event_cb, NULL);
+    create_button(s_radio_settings_sheet, "Save", 124, 266, 104, 40, radio_save_event_cb, NULL);
+    create_button(s_radio_settings_sheet, "Close", 240, 266, 104, 40,
+                  close_radio_settings_event_cb, NULL);
+}
+
+static void open_radio_settings_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    radio_edit_from_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_radio_settings_sheet();
+    if (s_radio_settings_sheet) {
+        lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_radio_settings_sheet);
+    }
+}
+
 static void advert_zero_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -1554,6 +1814,7 @@ static void open_sheet_event_cb(lv_event_t *event)
     (void)event;
     if (s_sheet) {
         hide_dm_thread_sheet();
+        hide_radio_settings_sheet();
         hide_contact_detail_sheet();
         hide_contact_export_sheet();
         hide_route_detail_sheet();
@@ -1572,11 +1833,24 @@ static void close_sheet_event_cb(lv_event_t *event)
 
 static void render_settings(const d1l_app_snapshot_t *snapshot)
 {
+    d1l_app_radio_profile_edit_t profile = {
+        .frequency_hz = snapshot->radio_frequency_hz,
+        .bandwidth_tenths_khz = snapshot->radio_bandwidth_tenths_khz,
+        .spreading_factor = snapshot->radio_spreading_factor,
+        .coding_rate = snapshot->radio_coding_rate,
+        .tx_power_dbm = snapshot->radio_tx_power_dbm,
+        .rx_boost = snapshot->radio_rx_boost,
+    };
+    char profile_line[80];
+    format_radio_profile_line(profile_line, sizeof(profile_line), &profile);
+
     lv_obj_t *radio = create_panel(s_content, 18, 16, 424, 82);
-    create_label(radio, "Canada/USA 910.525  BW62.5  SF7  CR5", 0xF4F7FB);
+    create_label(radio, profile_line, 0xF4F7FB);
     lv_obj_t *path = create_label(radio, "", 0x8EA0AE);
-    label_set_fmt(path, "path hash %u byte  companion %s",
-                  snapshot->path_hash_bytes, snapshot->companion_ready ? "ready" : "waiting");
+    label_set_fmt(path, "TX %d dBm  RX boost %s  TCXO %s",
+                  snapshot->radio_tx_power_dbm,
+                  snapshot->radio_rx_boost ? "on" : "off",
+                  snapshot->radio_tcxo ? snapshot->radio_tcxo : "NONE");
     lv_obj_align(path, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 
     lv_obj_t *identity = create_panel(s_content, 18, 114, 424, 82);
@@ -1601,7 +1875,8 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     lv_obj_set_pos(policy, 0, 54);
     render_health_line(companion, 76, snapshot);
 
-    create_button(s_content, "Advert", 18, 332, 130, 48, open_sheet_event_cb, NULL);
+    create_button(s_content, "Radio", 18, 332, 130, 48, open_radio_settings_event_cb, NULL);
+    create_button(s_content, "Advert", 160, 332, 130, 48, open_sheet_event_cb, NULL);
 }
 
 static void render_active_tab(void)
@@ -1638,6 +1913,7 @@ static void dock_event_cb(lv_event_t *event)
     hide_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1811,6 +2087,20 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_dm_thread_sheet, 12, 0);
     lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_radio_settings_sheet(lv_obj_t *screen)
+{
+    s_radio_settings_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_radio_settings_sheet, 448, 320);
+    lv_obj_set_pos(s_radio_settings_sheet, 16, 82);
+    lv_obj_set_style_radius(s_radio_settings_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_radio_settings_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_radio_settings_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_radio_settings_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_radio_settings_sheet, 12, 0);
+    lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_contact_detail_sheet(lv_obj_t *screen)
@@ -2035,6 +2325,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_sheet(s_screen);
     create_compose_sheet(s_screen);
     create_dm_thread_sheet(s_screen);
+    create_radio_settings_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_contact_export_sheet(s_screen);
     create_route_detail_sheet(s_screen);

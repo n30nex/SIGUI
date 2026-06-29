@@ -17,7 +17,8 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows.
 - Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
-- Settings screen with radio profile, identity, path-hash, and advert quick action.
+- Settings screen with live persisted radio profile, identity, companion status, health, radio editor entry point, and advert quick action.
+- Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Modal advert sheet for zero-hop/flood actions.
 - Toast feedback for touch actions.
 - Lock/standby overlay with tap-to-unlock behavior.
@@ -35,5 +36,4 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 - DMs.
 - Richer contact editing, contact scan/import proof, and route trace/ping helpers.
 - Packet filtering/search and raw packet hex in developer mode.
-- Radio settings editing from touch.
 - Diagnostics detail and reset/crash views.

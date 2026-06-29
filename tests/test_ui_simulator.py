@@ -42,6 +42,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Messages", "Read", "Compose", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
+    assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Contact Detail", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]

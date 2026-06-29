@@ -11,6 +11,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Persisted recent Public messages, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
+- Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
 - Mesh visibility summaries for signal, room servers, and repeater candidates.
 - Contact export for promoted contacts with retained public keys, using MeshCore-compatible `meshcore://contact/add?...` serial output and a touch QR sheet.
 - USB serial diagnostics, smoke test, and soak test tooling.
@@ -60,6 +61,10 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `crashlog`
 - `mesh status`
 - `mesh send public test`
+- `radio get`
+- `radio set preset uscan`
+- `radio set txpower 20`
+- `radio set rxboost <0|1>`
 - `messages public`
 - `messages unread`
 - `nodes`
@@ -78,6 +83,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Current Limits
 
 - Manual physical review of the touch UI is still pending.
+- Manual touch review of the Radio Settings sheet is still pending.
 - Full DM RF proof is still pending.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.

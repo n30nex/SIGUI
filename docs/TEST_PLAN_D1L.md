@@ -32,6 +32,7 @@ Coverage:
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
+- Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -233,6 +234,17 @@ For Phase 6 contact export validation:
 4. Verify `meshcore_uri` starts with `meshcore://contact/add?`, includes URL-encoded `name`, the 64-hex `public_key`, and the correct numeric MeshCore `type`.
 5. Open the contact detail sheet, tap `Export`, and verify the Contact Export sheet shows a MeshCore QR plus URI metadata without crashing or hiding the UI.
 6. If a MeshCore phone/client is available, scan the QR and verify it imports the same contact name/public key/type.
+
+## Radio Settings
+
+For Phase 6 radio settings validation:
+
+1. Run `radio get` and verify the default Canada/USA profile reports 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, RX boost enabled, TCXO `NONE`, and `applied_to_radio=false`.
+2. Run `radio set txpower 19`, then `radio get`, and verify `tx_power_dbm=19` with `persisted=true` and `applied_to_radio=false`.
+3. Run `radio set rxboost 0`, then `settings get`, and verify the nested `radio.rx_boost=false` field is present.
+4. Run `radio set preset uscan`, then `radio get`, and verify the US/CAN defaults are restored before any RF regression.
+5. Open Settings, tap `Radio`, change at least one staged value, tap `US/CAN`, tap `Save`, and verify the Radio Settings sheet stays readable and reports that reboot/apply is required.
+6. Verify `health` remains `board_ready=true` and `ui_ready=true`.
 
 ## Route Store
 

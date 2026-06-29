@@ -34,6 +34,18 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "onboarding_complete" in header
     assert "ui_task_stack_free_words" in header
     assert "lvgl_used_pct" in header
+    assert "d1l_app_radio_profile_edit_t" in header
+    assert "radio_frequency_hz" in header
+    assert "radio_bandwidth_tenths_khz" in header
+    assert "radio_spreading_factor" in header
+    assert "radio_coding_rate" in header
+    assert "radio_tx_power_dbm" in header
+    assert "radio_rx_boost" in header
+    assert "radio_tcxo" in header
+    assert "d1l_app_model_save_radio_profile" in header
+    assert "d1l_app_model_default_radio_profile" in header
+    assert "d1l_app_model_current_radio_profile" in header
+    assert "valid_radio_edit" in source
 
 
 def test_phase3_shell_replaces_diagnostic_tile_home():
@@ -237,3 +249,34 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"USB ready  %s"' in source
     assert "render_health_line" in source
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in source
+
+
+def test_settings_screen_has_safe_touch_radio_editor():
+    source = read("main/ui/ui_phase1.c")
+    model = read("main/app/app_model.c")
+
+    assert "static lv_obj_t *s_radio_settings_sheet" in source
+    assert "static d1l_app_radio_profile_edit_t s_radio_edit" in source
+    assert "create_radio_settings_sheet" in source
+    assert "render_radio_settings_sheet" in source
+    assert "open_radio_settings_event_cb" in source
+    assert "radio_edit_adjust_event_cb" in source
+    assert "radio_save_event_cb" in source
+    assert "radio_defaults_event_cb" in source
+    assert "radio_edit_from_snapshot" in source
+    assert "format_radio_profile_line" in source
+    assert 'create_button(s_content, "Radio"' in source
+    assert '"Radio Settings"' in source
+    assert '"Saved profile applies after reboot; live RF unchanged"' in source
+    assert '"US/CAN"' in source
+    assert '"Save"' in source
+    assert '"RX Boost On"' in source
+    assert "D1L_RADIO_EDIT_FREQ_DOWN" in source
+    assert "s_radio_edit.frequency_hz -= 25000UL" in source
+    assert "s_radio_edit.frequency_hz += 25000UL" in source
+    assert "next_radio_bandwidth" in source
+    assert "s_radio_edit.rx_boost = !s_radio_edit.rx_boost" in source
+    assert "d1l_app_model_save_radio_profile(&s_radio_edit)" in source
+    assert "d1l_app_model_default_radio_profile(&s_radio_edit)" in source
+    assert "d1l_settings_save(&settings)" in model
+    assert "settings.tcxo_mode = D1L_TCXO_NONE" in model

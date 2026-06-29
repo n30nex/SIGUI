@@ -5,6 +5,7 @@
 
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
+#include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
@@ -28,6 +29,38 @@ static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t 
         dest[out++] = hex[src[i] & 0x0fU];
     }
     dest[out] = '\0';
+}
+
+static bool valid_radio_edit(const d1l_app_radio_profile_edit_t *profile)
+{
+    if (!profile) {
+        return false;
+    }
+    return profile->frequency_hz >= 902000000UL &&
+           profile->frequency_hz <= 928000000UL &&
+           profile->bandwidth_tenths_khz >= 78U &&
+           profile->bandwidth_tenths_khz <= 5000U &&
+           profile->spreading_factor >= 5U &&
+           profile->spreading_factor <= 12U &&
+           profile->coding_rate >= 5U &&
+           profile->coding_rate <= 8U &&
+           profile->tx_power_dbm >= -9 &&
+           profile->tx_power_dbm <= D1L_RADIO_TX_POWER_DBM;
+}
+
+static void radio_edit_from_settings(const d1l_settings_t *settings,
+                                     d1l_app_radio_profile_edit_t *profile)
+{
+    if (!profile) {
+        return;
+    }
+    const d1l_settings_t *src = settings ? settings : d1l_settings_current();
+    profile->frequency_hz = src->frequency_hz;
+    profile->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    profile->spreading_factor = src->spreading_factor;
+    profile->coding_rate = src->coding_rate;
+    profile->tx_power_dbm = src->tx_power_dbm;
+    profile->rx_boost = src->rx_boost;
 }
 
 d1l_app_model_t *d1l_app_model_get(void)
@@ -61,6 +94,13 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->identity_ready = settings->identity_ready || mesh.identity_ready;
     snapshot->radio_ready = mesh.radio_ready;
     snapshot->companion_ready = mesh.companion_framing_ready;
+    snapshot->radio_frequency_hz = settings->frequency_hz;
+    snapshot->radio_bandwidth_tenths_khz = settings->bandwidth_tenths_khz;
+    snapshot->radio_spreading_factor = settings->spreading_factor;
+    snapshot->radio_coding_rate = settings->coding_rate;
+    snapshot->radio_tx_power_dbm = settings->tx_power_dbm;
+    snapshot->radio_rx_boost = settings->rx_boost;
+    snapshot->radio_tcxo = d1l_settings_tcxo_name(settings->tcxo_mode);
     snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
     snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
@@ -181,6 +221,42 @@ esp_err_t d1l_app_model_mark_messages_read(void)
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);
+}
+
+void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile)
+{
+    radio_edit_from_settings(d1l_settings_current(), profile);
+}
+
+void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile)
+{
+    if (!profile) {
+        return;
+    }
+    const d1l_radio_profile_t *defaults = d1l_radio_profile_uscan_default();
+    profile->frequency_hz = defaults->frequency_hz;
+    profile->bandwidth_tenths_khz = (uint16_t)((defaults->bandwidth_khz * 10.0f) + 0.5f);
+    profile->spreading_factor = defaults->spreading_factor;
+    profile->coding_rate = defaults->coding_rate;
+    profile->tx_power_dbm = defaults->tx_power_dbm;
+    profile->rx_boost = defaults->rx_boost;
+}
+
+esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *profile)
+{
+    if (!valid_radio_edit(profile)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.frequency_hz = profile->frequency_hz;
+    settings.bandwidth_tenths_khz = profile->bandwidth_tenths_khz;
+    settings.spreading_factor = profile->spreading_factor;
+    settings.coding_rate = profile->coding_rate;
+    settings.tx_power_dbm = profile->tx_power_dbm;
+    settings.rx_boost = profile->rx_boost;
+    settings.tcxo_mode = D1L_TCXO_NONE;
+    return d1l_settings_save(&settings);
 }
 
 esp_err_t d1l_app_model_complete_onboarding(const char *node_name)

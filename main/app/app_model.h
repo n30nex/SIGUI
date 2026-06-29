@@ -31,6 +31,15 @@ typedef struct {
 } d1l_app_model_t;
 
 typedef struct {
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+} d1l_app_radio_profile_edit_t;
+
+typedef struct {
     bool board_ready;
     bool ui_ready;
     bool identity_ready;
@@ -49,6 +58,13 @@ typedef struct {
     char identity_fingerprint[17];
     const char *reset_reason;
     const char *mesh_state;
+    uint32_t radio_frequency_hz;
+    uint16_t radio_bandwidth_tenths_khz;
+    uint8_t radio_spreading_factor;
+    uint8_t radio_coding_rate;
+    int8_t radio_tx_power_dbm;
+    bool radio_rx_boost;
+    const char *radio_tcxo;
     uint32_t uptime_ms;
     uint32_t heap_free;
     uint32_t heap_min_free;
@@ -113,5 +129,8 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size);
 esp_err_t d1l_app_model_mark_messages_read(void);
 esp_err_t d1l_app_model_request_advert(bool flood);
+void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile);
+void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile);
+esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *profile);
 esp_err_t d1l_app_model_complete_onboarding(const char *node_name);
 esp_err_t d1l_app_model_reset_onboarding(void);
