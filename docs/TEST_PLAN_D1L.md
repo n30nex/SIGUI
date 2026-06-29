@@ -204,3 +204,4 @@ For Phase 6 signal/room-server/repeater validation:
 3. Run `repeaters` and verify entries are inferred only from nonzero path-hop route or heard-node evidence; Public route rows should not by themselves become repeater candidates.
 4. Run `mesh send public test`, wait for local MeshCore bot replies, and verify D1L packet count increases while the COM11 bot status counters show fresh Public movement.
 5. Verify `health` remains `board_ready=true`, `ui_ready=true`, and reports nonzero task stack watermarks after the probe.
+6. For physical touch review, open the Packet tab, tap the `Mesh Roles` card, verify the role browser sheet lists room servers and repeater candidates, scroll if the list exceeds the sheet, then close it.

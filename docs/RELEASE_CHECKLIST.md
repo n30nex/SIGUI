@@ -50,6 +50,7 @@
 - [x] Route detail diagnostics and first Packet-tab route detail sheet are implemented, built, flashed, and Public-RF probed on `COM7`.
 - [x] Packet log persists newest 8 rows across reboot and exposes serial/touch packet detail.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
+- [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.

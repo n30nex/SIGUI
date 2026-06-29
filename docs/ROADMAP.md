@@ -619,8 +619,8 @@ Acceptance:
 
 Tasks:
 
-- Repeaters screen. Status: first read-only serial and Packet-tab visibility is implemented and validated on `COM7` through inferred nonzero path-hop route/heard-node candidates; dedicated full list UI and trace/ping actions are pending later UX expansion.
-- Room servers screen. Status: first read-only serial and dashboard visibility is implemented and validated on `COM7` from signed heard-node adverts with role `room`; dedicated full list UI is pending later UX expansion.
+- Repeaters screen. Status: first read-only serial visibility and a first touch Mesh Roles browser sheet are implemented, built, flashed, smoke-tested, reboot-checked, and Public `test` RF-regression tested on `COM7`; trace/ping actions are pending later UX expansion.
+- Room servers screen. Status: first read-only serial/dashboard visibility and a first touch Mesh Roles browser sheet are implemented, built, flashed, smoke-tested, reboot-checked, and Public `test` RF-regression tested on `COM7` from signed heard-node adverts with role `room`.
 - Routes/path screen.
 - Signal/SNR screen. Status: first `signal` diagnostic plus Home/Packet-tab signal summary cards are implemented, built, flashed, and validated on `COM7` from recent packet, route, and heard-node evidence.
 - Packet log with parsed detail. Status: first NVS-backed packet evidence store, `packets detail <seq>`, `packets clear`, touchable Packet-tab rows, and a first packet detail sheet are implemented, built, flashed, and validated on `COM7`; live ring keeps 32 rows and NVS persists the newest 8 rows.

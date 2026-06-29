@@ -37,6 +37,7 @@ static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_packet_detail_sheet;
+static lv_obj_t *s_mesh_roles_sheet;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
@@ -56,6 +57,7 @@ static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
+static void open_mesh_roles_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -215,6 +217,13 @@ static void hide_packet_detail_sheet(void)
     memset(&s_packet_detail_packet, 0, sizeof(s_packet_detail_packet));
 }
 
+static void hide_mesh_roles_sheet(void)
+{
+    if (s_mesh_roles_sheet) {
+        lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot || !s_status_label || !s_identity_label) {
@@ -229,8 +238,8 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
                   snapshot->identity_fingerprint[0] ? snapshot->identity_fingerprint : "--------");
 }
 
-static void render_metric_card(lv_obj_t *parent, int x, int y, const char *title,
-                               const char *value, const char *detail, uint32_t accent)
+static lv_obj_t *render_metric_card(lv_obj_t *parent, int x, int y, const char *title,
+                                    const char *value, const char *detail, uint32_t accent)
 {
     lv_obj_t *card = create_panel(parent, x, y, 204, 104);
     lv_obj_t *title_label = create_label(card, title, 0x8EA0AE);
@@ -244,6 +253,7 @@ static void render_metric_card(lv_obj_t *parent, int x, int y, const char *title
     lv_label_set_long_mode(detail_label, LV_LABEL_LONG_DOT);
     lv_obj_set_width(detail_label, 176);
     lv_obj_align(detail_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    return card;
 }
 
 static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
@@ -458,6 +468,7 @@ static void open_compose_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
@@ -486,6 +497,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     s_compose_dm = true;
     s_compose_contact = selected;
     if (s_compose_title) {
@@ -616,6 +628,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
         lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -703,6 +716,7 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     render_route_detail_sheet();
     if (s_route_detail_sheet) {
         lv_obj_clear_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -776,10 +790,128 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
+    hide_mesh_roles_sheet();
     render_packet_detail_sheet();
     if (s_packet_detail_sheet) {
         lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_packet_detail_sheet);
+    }
+}
+
+static void close_mesh_roles_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_mesh_roles_sheet();
+}
+
+static void render_room_server_role_row(lv_obj_t *parent, int y, const d1l_mesh_room_server_t *entry)
+{
+    char snr[16];
+    lv_obj_t *row = create_panel(parent, 0, y, 424, 44);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *name = create_label(row, entry->name[0] ? entry->name : entry->fingerprint, 0xA7F3D0);
+    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(name, 180);
+    lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *role = create_label(row, entry->type[0] ? entry->type : "room", 0x8EA0AE);
+    lv_obj_align(role, LV_ALIGN_TOP_RIGHT, 0, 0);
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
+    lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
+    label_set_fmt(meta, "%.8s  rssi %d  snr %s  hops %u  heard %lu",
+                  entry->fingerprint, entry->rssi_dbm, snr, entry->path_hops,
+                  (unsigned long)entry->heard_count);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void render_repeater_role_row(lv_obj_t *parent, int y,
+                                     const d1l_mesh_repeater_candidate_t *entry)
+{
+    lv_obj_t *row = create_panel(parent, 0, y, 424, 44);
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *label = create_label(row, entry->label[0] ? entry->label : entry->target, 0xFBBF24);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(label, 180);
+    lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *source = create_label(row, entry->source[0] ? entry->source : "path", 0x8EA0AE);
+    lv_obj_align(source, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
+    label_set_fmt(meta, "%s  %s  hops %u  conf %u  rssi %d",
+                  entry->kind[0] ? entry->kind : "mesh",
+                  entry->route[0] ? entry->route : "unknown",
+                  entry->path_hops, entry->confidence, entry->rssi_dbm);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void render_mesh_roles_sheet(void)
+{
+    if (!s_mesh_roles_sheet) {
+        return;
+    }
+    d1l_app_model_snapshot(&s_snapshot);
+    update_chrome(&s_snapshot);
+    lv_obj_clean(s_mesh_roles_sheet);
+
+    lv_obj_t *title = create_label(s_mesh_roles_sheet, "Mesh Roles", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 210);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_mesh_roles_sheet, "Close", 316, 0, 76, 40, close_mesh_roles_event_cb, NULL);
+
+    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
+    label_set_fmt(meta, "rooms %lu  repeaters %lu  samples %lu",
+                  (unsigned long)s_snapshot.signal_summary.room_server_count,
+                  (unsigned long)s_snapshot.signal_summary.repeater_candidate_count,
+                  (unsigned long)s_snapshot.signal_summary.sample_count);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_set_pos(meta, 8, 44);
+
+    int y = 78;
+    lv_obj_t *rooms = create_label(s_mesh_roles_sheet, "Room Servers", 0x8EA0AE);
+    lv_obj_set_pos(rooms, 8, y);
+    y += 24;
+    for (size_t i = 0; i < s_snapshot.recent_room_count; ++i) {
+        render_room_server_role_row(s_mesh_roles_sheet, y, &s_snapshot.recent_rooms[i]);
+        y += 50;
+    }
+    if (s_snapshot.recent_room_count == 0) {
+        lv_obj_t *empty = create_label(s_mesh_roles_sheet, "No room servers heard", 0x8EA0AE);
+        lv_obj_set_pos(empty, 8, y);
+        y += 28;
+    }
+
+    y += 8;
+    lv_obj_t *repeaters = create_label(s_mesh_roles_sheet, "Repeater Candidates", 0x8EA0AE);
+    lv_obj_set_pos(repeaters, 8, y);
+    y += 24;
+    for (size_t i = 0; i < s_snapshot.recent_repeater_count; ++i) {
+        render_repeater_role_row(s_mesh_roles_sheet, y, &s_snapshot.recent_repeaters[i]);
+        y += 50;
+    }
+    if (s_snapshot.recent_repeater_count == 0) {
+        lv_obj_t *empty = create_label(s_mesh_roles_sheet, "No path-hop candidates", 0x8EA0AE);
+        lv_obj_set_pos(empty, 8, y);
+    }
+}
+
+static void open_mesh_roles_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_contact_detail_sheet();
+    hide_route_detail_sheet();
+    hide_packet_detail_sheet();
+    render_mesh_roles_sheet();
+    if (s_mesh_roles_sheet) {
+        lv_obj_clear_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_mesh_roles_sheet);
     }
 }
 
@@ -926,6 +1058,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
         lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -1029,7 +1162,9 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
     snprintf(detail, sizeof(detail), "repeaters %lu samples %lu",
              (unsigned long)snapshot->signal_summary.repeater_candidate_count,
              (unsigned long)snapshot->signal_summary.sample_count);
-    render_metric_card(s_content, 238, 16, "Mesh Roles", value, detail, 0xA7F3D0);
+    lv_obj_t *roles_card = render_metric_card(s_content, 238, 16, "Mesh Roles", value, detail, 0xA7F3D0);
+    lv_obj_add_flag(roles_card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(roles_card, open_mesh_roles_event_cb, LV_EVENT_CLICKED, NULL);
 
     int y = 136;
     size_t packet_rows = snapshot->recent_packet_count;
@@ -1077,6 +1212,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_contact_detail_sheet();
         hide_route_detail_sheet();
         hide_packet_detail_sheet();
+        hide_mesh_roles_sheet();
         lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -1157,6 +1293,7 @@ static void dock_event_cb(lv_event_t *event)
     hide_contact_detail_sheet();
     hide_route_detail_sheet();
     hide_packet_detail_sheet();
+    hide_mesh_roles_sheet();
     render_active_tab();
 }
 
@@ -1367,6 +1504,20 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_mesh_roles_sheet(lv_obj_t *screen)
+{
+    s_mesh_roles_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_mesh_roles_sheet, 448, 320);
+    lv_obj_set_pos(s_mesh_roles_sheet, 16, 82);
+    lv_obj_set_style_radius(s_mesh_roles_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_mesh_roles_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_mesh_roles_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_mesh_roles_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_mesh_roles_sheet, 12, 0);
+    lv_obj_set_scrollbar_mode(s_mesh_roles_sheet, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -1418,6 +1569,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_contact_detail_sheet(s_screen);
     create_route_detail_sheet(s_screen);
     create_packet_detail_sheet(s_screen);
+    create_mesh_roles_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
 

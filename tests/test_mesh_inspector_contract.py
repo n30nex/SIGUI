@@ -52,8 +52,8 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
-    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW 2U" in header
-    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW 2U" in header
+    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW 4U" in header
+    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW 4U" in header
     assert "signal_summary" in header
     assert "recent_rooms" in header
     assert "recent_repeaters" in header
@@ -62,5 +62,13 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     assert "d1l_mesh_inspector_copy_repeater_candidates" in source
     assert '"Signal"' in ui
     assert '"Mesh Roles"' in ui
+    assert "static lv_obj_t *s_mesh_roles_sheet" in ui
+    assert "render_mesh_roles_sheet" in ui
+    assert "render_room_server_role_row" in ui
+    assert "render_repeater_role_row" in ui
+    assert "open_mesh_roles_event_cb" in ui
+    assert "lv_obj_add_event_cb(roles_card, open_mesh_roles_event_cb, LV_EVENT_CLICKED, NULL)" in ui
+    assert "create_mesh_roles_sheet(s_screen)" in ui
+    assert "LV_SCROLLBAR_MODE_AUTO" in ui
     assert '"rooms %lu  rpt %lu  writes %lu"' in ui
     assert "format_snr_tenths" in ui

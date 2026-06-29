@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 6 mesh-visibility slice: `0xa4ff0`, 36% free in the app partition
+- Latest local build size after the Phase 6 mesh-role-browser slice: `0xa5440`, 35% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -249,11 +249,24 @@ Do not use `COM11` or `COM29` for this D1L target.
   - D1L queued Public `test`, added TX packet seq `11`, and decoded a fresh RX Public `test` packet seq `12` at RSSI `-41`, SNR `30`, and `path_hops=1`.
   - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
   - `signal`, `roomservers`, `repeaters`, and `health` remained healthy after the RF probe.
+- Phase 6 mesh role browser local smoke: `artifacts/smoke/d1l-smoke-mesh-role-browser-local-COM7.json`
+  - 28 commands passed after flashing the first touch Mesh Roles browser build.
+  - `signal` reported `sample_count=16`, `room_server_count=4`, and `repeater_candidate_count=6`.
+  - `roomservers` still reported four signed heard-node room adverts.
+  - `repeaters` still reported six inferred nonzero path-hop route/heard-node candidates.
+  - `health` reported `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, and `ui_task_stack_free_words=1356`.
+- Phase 6 mesh role browser boot-loop regression proof: `artifacts/smoke/d1l-mesh-role-browser-crashlog-clear-reboot-local-COM7.json`
+  - After `crashlog clear` plus `reboot`, `crashlog` contained exactly one `SW` reset entry with `crash_like=false`.
+  - Post-reboot `health` reported `board_ready=true`, `ui_ready=true`, `current_task_stack_free_words=1120`, and `ui_task_stack_free_words=1288`.
+- Phase 6 mesh role browser Public `test` RF regression: `artifacts/smoke/d1l-mesh-role-browser-public-test-regression-local-COM7.json`
+  - D1L queued Public `test`, added TX packet seq `13`, and decoded a fresh RX Public `test` packet seq `14` at RSSI `-40`, SNR `30`, and `path_hops=1`.
+  - COM11 Meshcorebot counters moved `rx_channel_total +3`, `relay_success_total +3`, `discord_send_success_total +3`, `rx_log_total +6`, and `rx_duplicate_total +3`.
+  - `signal`, `roomservers`, `repeaters`, and `health` remained healthy after the RF probe.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, and Messages `Read` action is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, Messages `Read` action, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
