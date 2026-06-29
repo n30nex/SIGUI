@@ -37,6 +37,7 @@ SMOKE_COMMANDS = [
     "nodes",
     "contacts",
     "routes",
+    "crashlog",
     "health",
 ]
 

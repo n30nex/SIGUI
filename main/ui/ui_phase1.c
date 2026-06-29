@@ -14,12 +14,14 @@
 
 #include "app/app_model.h"
 #include "bsp_lcd.h"
+#include "diagnostics/health_monitor.h"
 #include "indev/indev.h"
 
 static const char *TAG = "d1l_ui";
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
+static TaskHandle_t s_ui_task_handle;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_content;
@@ -267,10 +269,24 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     render_metric_card(s_content, 18, 136, "RF Packets", value, detail, 0x93C5FD);
 
     snprintf(value, sizeof(value), "%luK", (unsigned long)(snapshot->heap_free / 1024U));
-    snprintf(detail, sizeof(detail), "psram %luK  uptime %lum",
-             (unsigned long)(snapshot->psram_free / 1024U),
+    snprintf(detail, sizeof(detail), "%s  stk %lu  up %lum",
+             snapshot->reset_reason ? snapshot->reset_reason : "reset",
+             (unsigned long)snapshot->ui_task_stack_free_words,
              (unsigned long)(snapshot->uptime_ms / 60000U));
     render_metric_card(s_content, 238, 136, "System", value, detail, 0xC4B5FD);
+}
+
+static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
+{
+    lv_obj_t *line = create_label(parent, "", 0x8EA0AE);
+    label_set_fmt(line, "reset %s  heap %luK/%luK  ui stk %lu",
+                  snapshot->reset_reason ? snapshot->reset_reason : "UNKNOWN",
+                  (unsigned long)(snapshot->heap_free / 1024U),
+                  (unsigned long)(snapshot->heap_min_free / 1024U),
+                  (unsigned long)snapshot->ui_task_stack_free_words);
+    lv_label_set_long_mode(line, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(line, 390);
+    lv_obj_set_pos(line, 0, y);
 }
 
 static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_t *entry)
@@ -1074,7 +1090,8 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
                   snapshot->coexistence_policy ? snapshot->coexistence_policy : "offline first");
     lv_label_set_long_mode(policy, LV_LABEL_LONG_DOT);
     lv_obj_set_width(policy, 390);
-    lv_obj_align(policy, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_pos(policy, 0, 54);
+    render_health_line(companion, 76, snapshot);
 
     create_button(s_content, "Advert", 18, 332, 130, 48, open_sheet_event_cb, NULL);
 }
@@ -1392,6 +1409,7 @@ esp_err_t d1l_ui_phase1_start(void)
     }
 
     lv_init();
+    d1l_health_monitor_set_lvgl_ready(true);
     const size_t buffer_pixels = 480 * 40;
     s_buf1 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     s_buf2 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -1428,7 +1446,8 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    xTaskCreate(ui_task, "d1l_ui", 4096, NULL, 5, NULL);
+    xTaskCreate(ui_task, "d1l_ui", 4096, NULL, 5, &s_ui_task_handle);
+    d1l_health_monitor_register_ui_task(s_ui_task_handle);
     d1l_app_model_get()->ui_ready = true;
     s_started = true;
     return ESP_OK;

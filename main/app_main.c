@@ -6,6 +6,7 @@
 
 #include "d1l_config.h"
 #include "app/settings_model.h"
+#include "diagnostics/crash_log.h"
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
 #include "mesh/contact_store.h"
@@ -33,6 +34,11 @@ void app_main(void)
 
     printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\"}\n",
            D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION);
+
+    esp_err_t crash_log_ret = d1l_crash_log_init();
+    if (crash_log_ret != ESP_OK) {
+        ESP_LOGW(TAG, "crash/reset log init failed: %s", esp_err_to_name(crash_log_ret));
+    }
 
     esp_err_t settings_ret = d1l_settings_load();
     if (settings_ret != ESP_OK) {

@@ -16,6 +16,7 @@
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
 #include "comms/companion_3byte.h"
+#include "diagnostics/crash_log.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/backlight.h"
 #include "hal/indicator_board.h"
@@ -926,13 +927,57 @@ static void cmd_routes_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
+static void print_crash_log_entry_json(const d1l_crash_log_entry_t *e)
+{
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"reset_reason\":\"%s\",\"reset_reason_code\":%u,\"crash_like\":%s,\"heap_free\":%lu,\"heap_min_free\":%lu,\"psram_free\":%lu}",
+           (unsigned long)e->seq, (unsigned long)e->uptime_ms, e->reset_reason,
+           e->reset_reason_code, bool_json(e->crash_like),
+           (unsigned long)e->heap_free, (unsigned long)e->heap_min_free,
+           (unsigned long)e->psram_free);
+}
+
+static void cmd_crashlog(void)
+{
+    d1l_crash_log_stats_t stats = d1l_crash_log_stats();
+    static d1l_crash_log_entry_t entries[D1L_CRASH_LOG_CAPACITY];
+    size_t copied = d1l_crash_log_copy_recent(entries, D1L_CRASH_LOG_CAPACITY);
+    ok_begin("crashlog");
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+           (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_crash_log_entry_json(&entries[i]);
+    }
+    printf("],\"persisted\":true,\"note\":\"Crashlog records recent boot reset reasons and early memory watermarks\"}\n");
+}
+
+static void cmd_crashlog_clear(void)
+{
+    esp_err_t ret = d1l_crash_log_clear();
+    if (ret != ESP_OK) {
+        err_result("crashlog clear", esp_err_to_name(ret), "could not clear crash/reset log");
+        return;
+    }
+    ok_begin("crashlog clear");
+    printf(",\"persisted\":true,\"count\":0}\n");
+}
+
 static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"psram_free\":%lu,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
-           (unsigned long)h.uptime_ms, (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
-           (unsigned long)h.psram_free, h.reset_reason,
+    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+           (unsigned long)h.uptime_ms,
+           (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
+           (unsigned long)h.heap_largest_free,
+           (unsigned long)h.psram_free, (unsigned long)h.psram_min_free,
+           (unsigned long)h.psram_largest_free,
+           (unsigned long)h.current_task_stack_free_words,
+           (unsigned long)h.ui_task_stack_free_words,
+           (unsigned long)h.lvgl_free_bytes,
+           (unsigned long)h.lvgl_largest_free_bytes,
+           h.lvgl_used_pct, h.reset_reason,
            d1l_app_model_get()->board_ready ? "true" : "false",
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
@@ -1044,7 +1089,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets detail <seq>\",\"packets clear\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1133,6 +1178,10 @@ static void handle_line(const char *line)
         cmd_routes_clear();
     } else if (strcmp(line, "health") == 0) {
         cmd_health();
+    } else if (strcmp(line, "crashlog") == 0) {
+        cmd_crashlog();
+    } else if (strcmp(line, "crashlog clear") == 0) {
+        cmd_crashlog_clear();
     } else if (strcmp(line, "wifi status") == 0) {
         cmd_wifi_status();
     } else if (strcmp(line, "wifi off") == 0) {
@@ -1155,8 +1204,6 @@ static void handle_line(const char *line)
         cmd_mesh_send_public(line);
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
-    } else if (strcmp(line, "crashlog") == 0) {
-        err_result(line, "PHASE2_STUB", "MeshCore protocol and persistence commands are scheduled for Phase 2");
     } else if (strcmp(line, "reboot") == 0) {
         ok_begin("reboot");
         printf(",\"rebooting\":true}\n");

@@ -223,6 +223,18 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `ble on` returned `BLE_BUILD_DISABLED` and left `ble_companion_enabled=false`.
   - `wifi status` and `ble status` still reported setting disabled after the rejected enable commands.
   - Final `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+- Phase 7 diagnostics local smoke: `artifacts/smoke/d1l-smoke-diagnostics-local-COM7.json`
+  - 25 commands passed after flashing the diagnostics build, including the new `crashlog` command.
+  - `crashlog` returned two persisted `POWERON` reset entries after flash/reset.
+  - `health` reported `heap_largest_free=7208960`, `current_task_stack_free_words=1136`, `ui_task_stack_free_words=1292`, `lvgl_used_pct=58`, `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 7 crashlog reboot proof: `artifacts/smoke/d1l-diagnostics-crashlog-reboot-local-COM7.json`
+  - `crashlog clear` cleared the persisted reset ring to `count=0`.
+  - After `reboot`, `crashlog` contained a fresh `SW` reset entry with `crash_like=false`.
+  - Post-reboot `health` reported `reset_reason=SW`, nonzero console/UI task stack watermarks, `board_ready=true`, and `ui_ready=true`.
+- Phase 7 Public `test` RF regression: `artifacts/smoke/d1l-diagnostics-public-test-regression-final-local-COM7.json`
+  - D1L queued a fresh Public `test` and added a new TX `public_text` packet row.
+  - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +2`, and `rx_duplicate_total +2`.
+  - Final `health` stayed at `reset_reason=SW`, `board_ready=true`, `ui_ready=true`, and nonzero stack watermarks.
 
 ## Still Pending
 

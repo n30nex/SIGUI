@@ -647,14 +647,14 @@ Tasks:
 - Touch edge-case fixes.
 - Dark theme contrast pass.
 - UI animation performance pass.
-- Crash ring and reset reason display.
+- Crash ring and reset reason display. Status: first NVS-backed reset ring, `crashlog`, `crashlog clear`, richer `health`, and Settings/Home reset/stack display are implemented, built, flashed, and validated on `COM7`.
 - Error copy that is understandable to non-developers.
 
 Acceptance:
 
 - 12-hour idle/listening soak without crash.
 - 1-hour active messaging test without UI freeze.
-- No steadily declining heap/PSRAM in normal use.
+- No steadily declining heap/PSRAM in normal use. Status: richer heap/PSRAM/LVGL/task stack telemetry is implemented and validated in smoke; long-run soak is pending.
 
 ### Phase 8 — Release packaging and docs
 

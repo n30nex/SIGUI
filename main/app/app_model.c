@@ -75,9 +75,19 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
                    settings->identity_public_key, 8U);
     }
     snapshot->mesh_state = d1l_meshcore_service_state_name(mesh.state);
+    snapshot->reset_reason = health.reset_reason;
     snapshot->uptime_ms = health.uptime_ms;
     snapshot->heap_free = health.heap_free;
+    snapshot->heap_min_free = health.heap_min_free;
+    snapshot->heap_largest_free = health.heap_largest_free;
     snapshot->psram_free = health.psram_free;
+    snapshot->psram_min_free = health.psram_min_free;
+    snapshot->psram_largest_free = health.psram_largest_free;
+    snapshot->current_task_stack_free_words = health.current_task_stack_free_words;
+    snapshot->ui_task_stack_free_words = health.ui_task_stack_free_words;
+    snapshot->lvgl_free_bytes = health.lvgl_free_bytes;
+    snapshot->lvgl_largest_free_bytes = health.lvgl_largest_free_bytes;
+    snapshot->lvgl_used_pct = health.lvgl_used_pct;
     snapshot->rx_packets = mesh.rx_packets;
     snapshot->rx_adverts = mesh.rx_adverts;
     snapshot->tx_packets = mesh.tx_packets;

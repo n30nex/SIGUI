@@ -27,6 +27,9 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
     assert "d1l_connectivity_status" in source
+    assert "reset_reason" in header
+    assert "ui_task_stack_free_words" in header
+    assert "lvgl_used_pct" in header
 
 
 def test_phase3_shell_replaces_diagnostic_tile_home():
@@ -176,3 +179,5 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Companion"' in source
     assert '"Wi-Fi %s  BLE %s"' in source
     assert '"USB ready  %s"' in source
+    assert "render_health_line" in source
+    assert '"reset %s  heap %luK/%luK  ui stk %lu"' in source

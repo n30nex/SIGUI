@@ -14,6 +14,7 @@ idf_component_register(
         "comms/connectivity_manager.c"
         "comms/companion_3byte.c"
         "comms/usb_console.c"
+        "diagnostics/crash_log.c"
         "diagnostics/health_monitor.c"
         "hal/backlight.c"
         "hal/indicator_board.c"

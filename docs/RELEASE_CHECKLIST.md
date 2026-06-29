@@ -10,6 +10,7 @@
 - [x] `i2c` detects D1L expander/touch.
 - [ ] `display test` shows stable bars. Command passed on hardware; manual visual confirmation is still pending.
 - [ ] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
+- [ ] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
 - [x] `touch test` reports coordinates.
 - [x] `backlight <0-100>` accepts dim/restore commands.
 - [x] `radiohw` reports SX1262 status or exact wiring failure.

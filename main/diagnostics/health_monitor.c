@@ -3,8 +3,12 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "lvgl.h"
 
-static const char *reset_reason_name(esp_reset_reason_t reason)
+static TaskHandle_t s_ui_task;
+static bool s_lvgl_ready;
+
+const char *d1l_health_reset_reason_name(int reason)
 {
     switch (reason) {
     case ESP_RST_POWERON: return "POWERON";
@@ -21,14 +25,36 @@ static const char *reset_reason_name(esp_reset_reason_t reason)
     }
 }
 
+void d1l_health_monitor_register_ui_task(TaskHandle_t task)
+{
+    s_ui_task = task;
+}
+
+void d1l_health_monitor_set_lvgl_ready(bool ready)
+{
+    s_lvgl_ready = ready;
+}
+
 d1l_health_snapshot_t d1l_health_snapshot(void)
 {
     d1l_health_snapshot_t snapshot = {
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
         .heap_free = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_8BIT),
         .heap_min_free = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT),
+        .heap_largest_free = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
         .psram_free = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-        .reset_reason = reset_reason_name(esp_reset_reason()),
+        .psram_min_free = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM),
+        .psram_largest_free = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+        .current_task_stack_free_words = (uint32_t)uxTaskGetStackHighWaterMark(NULL),
+        .ui_task_stack_free_words = s_ui_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_ui_task) : 0U,
+        .reset_reason = d1l_health_reset_reason_name(esp_reset_reason()),
     };
+    if (s_lvgl_ready) {
+        lv_mem_monitor_t monitor;
+        lv_mem_monitor(&monitor);
+        snapshot.lvgl_free_bytes = (uint32_t)monitor.free_size;
+        snapshot.lvgl_largest_free_bytes = (uint32_t)monitor.free_biggest_size;
+        snapshot.lvgl_used_pct = monitor.used_pct;
+    }
     return snapshot;
 }

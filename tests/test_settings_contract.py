@@ -45,6 +45,7 @@ def test_console_exposes_phase2_foundation_commands():
         "mesh advert flood",
         "wifi status",
         "wifi off",
+        "crashlog",
         "ble status",
         'strcmp(line, "health")',
     ]:
