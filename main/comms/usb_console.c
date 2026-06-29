@@ -24,6 +24,7 @@
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
+#include "mesh/read_state.h"
 #include "mesh/route_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
@@ -509,6 +510,11 @@ static void cmd_messages_clear(void)
         err_result("messages clear", esp_err_to_name(ret), "could not clear public message store");
         return;
     }
+    ret = d1l_read_state_mark_public_read();
+    if (ret != ESP_OK) {
+        err_result("messages clear", esp_err_to_name(ret), "public messages cleared but read state did not persist");
+        return;
+    }
     ok_begin("messages clear");
     printf(",\"persisted\":true,\"count\":0}\n");
 }
@@ -541,8 +547,65 @@ static void cmd_messages_dm_clear(void)
         err_result("messages dm clear", esp_err_to_name(ret), "could not clear DM store");
         return;
     }
+    ret = d1l_read_state_mark_dm_read();
+    if (ret != ESP_OK) {
+        err_result("messages dm clear", esp_err_to_name(ret), "DM rows cleared but read state did not persist");
+        return;
+    }
     ok_begin("messages dm clear");
     printf(",\"persisted\":true,\"count\":0}\n");
+}
+
+static void cmd_messages_unread(void)
+{
+    d1l_read_state_stats_t stats = d1l_read_state_stats();
+    ok_begin("messages unread");
+    printf(",\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,\"persisted\":true,\"note\":\"Unread counters are derived from persisted RX rows; muted DM rows are counted separately\"}\n",
+           (unsigned long)stats.public_unread_count,
+           (unsigned long)stats.dm_unread_count,
+           (unsigned long)stats.muted_dm_unread_count,
+           (unsigned long)stats.last_public_read_seq,
+           (unsigned long)stats.last_dm_read_seq,
+           (unsigned long)stats.newest_public_rx_seq,
+           (unsigned long)stats.newest_dm_rx_seq,
+           (unsigned long)stats.mark_read_count);
+}
+
+static void cmd_messages_read(const char *line)
+{
+    const char *arg = line + strlen("messages read ");
+    while (*arg == ' ') {
+        arg++;
+    }
+
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    const char *target = "invalid";
+    if (strcmp(arg, "public") == 0) {
+        target = "public";
+        ret = d1l_read_state_mark_public_read();
+    } else if (strcmp(arg, "dm") == 0) {
+        target = "dm";
+        ret = d1l_read_state_mark_dm_read();
+    } else if (strcmp(arg, "all") == 0) {
+        target = "all";
+        ret = d1l_read_state_mark_all_read();
+    }
+    if (ret != ESP_OK) {
+        err_result("messages read",
+                   ret == ESP_ERR_INVALID_ARG ? "INVALID_TARGET" : esp_err_to_name(ret),
+                   "usage: messages read <public|dm|all>");
+        return;
+    }
+
+    d1l_read_state_stats_t stats = d1l_read_state_stats();
+    ok_begin("messages read");
+    printf(",\"target\":\"%s\",\"persisted\":true,\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu}\n",
+           target,
+           (unsigned long)stats.public_unread_count,
+           (unsigned long)stats.dm_unread_count,
+           (unsigned long)stats.muted_dm_unread_count,
+           (unsigned long)stats.last_public_read_seq,
+           (unsigned long)stats.last_dm_read_seq);
 }
 
 static void cmd_nodes(void)
@@ -789,7 +852,7 @@ static void cmd_health(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes clear\",\"packets\",\"health\",\"crashlog\",\"wifi scan\",\"wifi off\",\"ble status\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -846,6 +909,10 @@ static void handle_line(const char *line)
         cmd_messages_public();
     } else if (strcmp(line, "messages dm") == 0) {
         cmd_messages_dm();
+    } else if (strcmp(line, "messages unread") == 0) {
+        cmd_messages_unread();
+    } else if (strncmp(line, "messages read ", 14) == 0) {
+        cmd_messages_read(line);
     } else if (strcmp(line, "messages clear") == 0) {
         cmd_messages_clear();
     } else if (strcmp(line, "messages dm clear") == 0) {

@@ -255,9 +255,15 @@ static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
     lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *author = create_label(row, entry->author, entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4);
+    const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq;
+    lv_obj_t *author = create_label(row, entry->author,
+                                    unread ? 0xFBBF24 :
+                                    (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
     lv_obj_align(author, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *state = create_label(row, entry->direction[0] == 't' ? "queued" : "received", 0x8EA0AE);
+    lv_obj_t *state = create_label(row,
+                                   unread ? "new" :
+                                   (entry->direction[0] == 't' ? "queued" : "received"),
+                                   0x8EA0AE);
     lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
     lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
@@ -271,13 +277,17 @@ static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry)
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
+    const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_dm_read_seq;
     lv_obj_t *alias = create_label(row, entry->contact_alias,
-                                   entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0);
+                                   unread ? 0xFBBF24 :
+                                   (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
     lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
     lv_obj_set_width(alias, 190);
     lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *state = create_label(row, entry->acked ? "acked" :
-                                   (entry->direction[0] == 't' ? "sent" : "received"),
+    lv_obj_t *state = create_label(row,
+                                   unread ? "new" :
+                                   (entry->acked ? "acked" :
+                                    (entry->direction[0] == 't' ? "sent" : "received")),
                                    0x8EA0AE);
     lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
@@ -352,6 +362,16 @@ static void public_test_event_cb(lv_event_t *event)
 {
     (void)event;
     show_toast("Public test", d1l_app_model_send_public_test());
+}
+
+static void mark_messages_read_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_mark_messages_read();
+    show_toast("Read", ret);
+    if (ret == ESP_OK) {
+        render_active_tab();
+    }
 }
 
 static void open_compose_event_cb(lv_event_t *event)
@@ -674,13 +694,22 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
     lv_obj_t *title = create_label(header, "Messages", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 144);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_t *meta = create_label(header, "", 0x8EA0AE);
-    label_set_fmt(meta, "public %u  dm %u", (unsigned)snapshot->message_count,
-                  (unsigned)snapshot->dm_count);
+    label_set_fmt(meta, "public %u new %lu  dm %u new %lu muted %lu",
+                  (unsigned)snapshot->message_count,
+                  (unsigned long)snapshot->public_unread_count,
+                  (unsigned)snapshot->dm_count,
+                  (unsigned long)snapshot->dm_unread_count,
+                  (unsigned long)snapshot->muted_dm_unread_count);
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 2, 0);
-    create_button(header, "Compose", 214, 10, 88, 44, open_compose_event_cb, NULL);
-    create_button(header, "Test", 312, 10, 84, 44, public_test_event_cb, NULL);
+    create_button(header, "Read", 154, 10, 56, 44, mark_messages_read_event_cb, NULL);
+    create_button(header, "Compose", 218, 10, 88, 44, open_compose_event_cb, NULL);
+    create_button(header, "Test", 314, 10, 82, 44, public_test_event_cb, NULL);
 
     int y = 98;
     if (snapshot->recent_message_count > 0) {

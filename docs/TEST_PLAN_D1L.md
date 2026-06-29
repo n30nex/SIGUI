@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, DM store contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -53,6 +53,7 @@ Expected commands:
 - `packets`
 - `messages public`
 - `messages dm`
+- `messages unread`
 - `nodes`
 - `contacts`
 - `routes`
@@ -70,6 +71,23 @@ For Phase 4 Public message-store validation:
 4. Verify `messages public` contains at least one TX row and one RX row.
 5. Reboot.
 6. Verify `messages public` retains the rows and `packets` starts over as the volatile RF log.
+
+## Unread State
+
+For Phase 4 unread/read-state validation:
+
+1. Run `messages read all`.
+2. Verify `messages unread` reports `public_unread=0`, `dm_unread=0`, and `muted_dm_unread=0`.
+3. Run `mesh send public test`.
+4. Wait for a local MeshCore bot response.
+5. Verify `messages public` contains fresh RX rows with seq values greater than the baseline `newest_public_rx_seq`.
+6. Verify `messages unread` reports `public_unread` greater than zero and advances `newest_public_rx_seq`.
+7. Run `messages read public`.
+8. Verify `messages unread` reports `public_unread=0`.
+9. Reboot.
+10. Verify `messages unread` still reports `public_unread=0` and `health` reports `board_ready=true` and `ui_ready=true`.
+11. For physical touch review, open the Messages tab, verify new RX rows are highlighted as `new`, tap `Read`, and verify the unread count clears.
+12. For muted DM behavior when an inbound DM source is available, mute that contact, receive a DM, and verify the unread row is counted under `muted_dm_unread` rather than audible `dm_unread`.
 
 ## DM Store And Serial TX
 

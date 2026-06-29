@@ -6,6 +6,7 @@
 #include "app/settings_model.h"
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
+#include "mesh/read_state.h"
 
 static d1l_app_model_t s_model = {
     .board_ready = false,
@@ -45,6 +46,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     d1l_message_store_stats_t messages = d1l_message_store_stats();
     d1l_dm_store_stats_t dms = d1l_dm_store_stats();
+    d1l_read_state_stats_t read_state = d1l_read_state_stats();
     d1l_node_store_stats_t nodes = d1l_node_store_stats();
     d1l_contact_store_stats_t contacts = d1l_contact_store_stats();
     d1l_route_store_stats_t routes = d1l_route_store_stats();
@@ -73,6 +75,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->message_count = messages.count;
     snapshot->dm_total_written = dms.total_written;
     snapshot->dm_count = dms.count;
+    snapshot->public_unread_count = read_state.public_unread_count;
+    snapshot->dm_unread_count = read_state.dm_unread_count;
+    snapshot->muted_dm_unread_count = read_state.muted_dm_unread_count;
+    snapshot->last_public_read_seq = read_state.last_public_read_seq;
+    snapshot->last_dm_read_seq = read_state.last_dm_read_seq;
     snapshot->node_total_written = nodes.total_written;
     snapshot->node_count = nodes.count;
     snapshot->contact_total_written = contacts.total_written;
@@ -124,6 +131,11 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
                                           d1l_contact_entry_t *out_contact)
 {
     return d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact);
+}
+
+esp_err_t d1l_app_model_mark_messages_read(void)
+{
+    return d1l_read_state_mark_all_read();
 }
 
 esp_err_t d1l_app_model_request_advert(bool flood)

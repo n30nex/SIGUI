@@ -30,6 +30,7 @@ SMOKE_COMMANDS = [
     "packets",
     "messages public",
     "messages dm",
+    "messages unread",
     "nodes",
     "contacts",
     "routes",

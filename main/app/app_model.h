@@ -47,6 +47,11 @@ typedef struct {
     size_t message_count;
     uint32_t dm_total_written;
     size_t dm_count;
+    uint32_t public_unread_count;
+    uint32_t dm_unread_count;
+    uint32_t muted_dm_unread_count;
+    uint32_t last_public_read_seq;
+    uint32_t last_dm_read_seq;
     uint32_t node_total_written;
     size_t node_count;
     uint32_t contact_total_written;
@@ -78,4 +83,5 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
                                           d1l_contact_entry_t *out_contact);
+esp_err_t d1l_app_model_mark_messages_read(void);
 esp_err_t d1l_app_model_request_advert(bool flood);

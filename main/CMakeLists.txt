@@ -24,6 +24,7 @@ idf_component_register(
         "mesh/message_store.c"
         "mesh/node_store.c"
         "mesh/packet_log.c"
+        "mesh/read_state.c"
         "mesh/route_store.c"
         "mesh/meshcore_service.c"
         "mesh/meshcore_radio_profile.c"

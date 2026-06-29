@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 contact-detail slice: `0xa1a50`, 37% free in the app partition
+- Latest local build size after the Phase 4 unread-state slice: `0xa2290`, 37% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -183,13 +183,21 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Phase 4 contact detail Public `test` RF regression: `artifacts/smoke/d1l-public-test-contact-detail-rx-window-local-COM7.json`
   - COM11 Meshcorebot counters moved `rx_channel_total +2`, `relay_success_total +2`, `discord_send_success_total +2`, `rx_log_total +4`, and `rx_duplicate_total +2`.
   - D1L persisted a fresh relayed Public `test` RX row at RSSI `-39`, SNR `30`, and stayed up past 71 seconds.
+- Phase 4 unread-state local smoke: `artifacts/smoke/d1l-smoke-unread-local-COM7.json`
+  - 21 commands passed after flashing the unread-state build, including `messages unread`.
+  - `messages unread` reported persisted Public unread state from prior RX rows and `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+- Phase 4 Public unread/read reboot proof: `artifacts/smoke/d1l-unread-public-local-COM7.json`
+  - `messages read all` baselined unread counts to zero with `last_public_read_seq=7`.
+  - A fresh `mesh send public test` produced two persisted RX rows: relayed Public `test` at RSSI `-43`/SNR `30` and `Krabs Node: Test OK CH0.` at RSSI `-42`/SNR `30`.
+  - `messages unread` rose to `public_unread=2` with `newest_public_rx_seq=10`.
+  - `messages read public` cleared Public unread to zero, and after reboot it stayed at `public_unread=0` with `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, and DM thread/reply sheet is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, DM thread/reply sheet, and Messages `Read` action is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
-- D1L-heard Public bot reply validation passed earlier in the post-NVS window with `Krabs Node: Test OK CH0.`; the latest DM-thread RF regression proved COM11 bot receipt/relay and fresh D1L-decoded relayed `test` traffic.
+- D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
 - Richer contact edit actions and route detail views are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, and route count.
 - Flash backup was intentionally skipped per operator instruction.
