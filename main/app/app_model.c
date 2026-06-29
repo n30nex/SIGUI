@@ -81,6 +81,11 @@ esp_err_t d1l_app_model_send_public_test(void)
     return d1l_meshcore_service_send_public("test");
 }
 
+esp_err_t d1l_app_model_send_public_text(const char *text)
+{
+    return d1l_meshcore_service_send_public(text);
+}
+
 esp_err_t d1l_app_model_request_advert(bool flood)
 {
     return d1l_meshcore_service_request_advert(flood);

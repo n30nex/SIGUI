@@ -18,7 +18,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 4 Public message-store slice: `0x9c450`, 39% free in the app partition
+- Latest local build size after the Phase 4 Public composer slice: `0x9c7b0`, 39% free in the app partition
 
 ## Passing Hardware Evidence
 
@@ -73,9 +73,16 @@ Do not use `COM11` or `COM29` for this D1L target.
   - D1L sent Public `test` and retained the TX row plus `Krabs Node: Test OK CH0.` RX row after reboot.
   - Local Meshcorebot observed fresh Public counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
   - Volatile `packets` reset from `count=2` before reboot to `count=0` after reboot, while `messages public` retained `count=2`.
+- Phase 4 Public composer local smoke: `artifacts/smoke/d1l-smoke-phase4-public-composer-local-COM7.json`
+  - 16 commands passed after flashing the local composer build.
+  - `health` reported `reset_reason=POWERON`, `board_ready=true`, and `ui_ready=true`.
+  - `mesh status` reported `state=ready`, `identity_ready=true`, and `radio_ready=true`.
+- Phase 4 Public composer RF regression: `artifacts/smoke/d1l-public-composer-rf-local-COM7.json`
+  - D1L cleared persisted Public rows, sent exact Public text `test`, and stored the TX row plus RX rows including `Krabs Node: Test OK CH0.`.
+  - Local Meshcorebot on `COM11` stayed connected and observed fresh Public counter movement: `rx_channel_total +2`, `relay_success_total +2`, and `discord_send_success_total +2`.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- The validated touch Public workflow is currently a fixed `test` action with persisted recent rows, not the final free-text composer or DM workflow.
+- Manual physical touch entry on the Public composer keyboard is still pending; DMs are not implemented yet.
 - Flash backup was intentionally skipped per operator instruction.

@@ -27,8 +27,13 @@ static lv_obj_t *s_status_label;
 static lv_obj_t *s_identity_label;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_sheet;
+static lv_obj_t *s_compose_sheet;
+static lv_obj_t *s_compose_textarea;
+static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_lock_overlay;
 static uint32_t s_toast_until;
+
+static void render_active_tab(void);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -135,6 +140,7 @@ static void show_toast(const char *action, esp_err_t ret)
         lv_obj_set_style_border_color(s_toast, lv_color_hex(0xF87171), 0);
     }
     lv_obj_clear_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_toast);
     s_toast_until = lv_tick_get() + 3000U;
 }
 
@@ -142,6 +148,13 @@ static void hide_sheet(void)
 {
     if (s_sheet) {
         lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_compose_sheet(void)
+{
+    if (s_compose_sheet) {
+        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -241,13 +254,73 @@ static void public_test_event_cb(lv_event_t *event)
     show_toast("Public test", d1l_app_model_send_public_test());
 }
 
+static void open_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+    if (s_compose_sheet) {
+        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_compose_sheet);
+    }
+    if (s_compose_textarea && s_compose_keyboard) {
+        lv_textarea_set_text(s_compose_textarea, "");
+        lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    }
+}
+
+static void close_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_compose_sheet();
+}
+
+static void clear_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_compose_textarea) {
+        lv_textarea_set_text(s_compose_textarea, "");
+    }
+}
+
+static void send_compose_text(void)
+{
+    if (!s_compose_textarea) {
+        return;
+    }
+    const char *text = lv_textarea_get_text(s_compose_textarea);
+    esp_err_t ret = d1l_app_model_send_public_text(text);
+    show_toast("Public message", ret);
+    if (ret == ESP_OK) {
+        lv_textarea_set_text(s_compose_textarea, "");
+        hide_compose_sheet();
+        render_active_tab();
+    }
+}
+
+static void send_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    send_compose_text();
+}
+
+static void compose_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        send_compose_text();
+    } else if (code == LV_EVENT_CANCEL) {
+        hide_compose_sheet();
+    }
+}
+
 static void render_messages(const d1l_app_snapshot_t *snapshot)
 {
     lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
     lv_obj_t *title = create_label(header, "Public", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
-    create_button(header, "Test", 306, 10, 90, 44, public_test_event_cb, NULL);
+    create_button(header, "Compose", 214, 10, 88, 44, open_compose_event_cb, NULL);
+    create_button(header, "Test", 312, 10, 84, 44, public_test_event_cb, NULL);
 
     int y = 98;
     for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
@@ -371,6 +444,7 @@ static void dock_event_cb(lv_event_t *event)
 {
     s_active_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
     hide_sheet();
+    hide_compose_sheet();
     render_active_tab();
 }
 
@@ -481,6 +555,49 @@ static void create_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_compose_sheet(lv_obj_t *screen)
+{
+    s_compose_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_compose_sheet, 448, 344);
+    lv_obj_set_pos(s_compose_sheet, 16, 64);
+    lv_obj_set_style_radius(s_compose_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_compose_sheet, 12, 0);
+    lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_compose_sheet, "Send", 226, 0, 64, 40, send_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Clear", 298, 0, 64, 40, clear_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Close", 370, 0, 58, 40, close_compose_event_cb, NULL);
+
+    s_compose_textarea = lv_textarea_create(s_compose_sheet);
+    lv_obj_set_size(s_compose_textarea, 424, 68);
+    lv_obj_set_pos(s_compose_textarea, 0, 50);
+    lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
+    lv_textarea_set_max_length(s_compose_textarea, 80);
+    lv_textarea_set_one_line(s_compose_textarea, false);
+    lv_textarea_set_text(s_compose_textarea, "");
+    lv_obj_set_style_radius(s_compose_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_compose_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_compose_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+
+    s_compose_keyboard = lv_keyboard_create(s_compose_sheet);
+    lv_obj_set_size(s_compose_keyboard, 424, 202);
+    lv_obj_set_pos(s_compose_keyboard, 0, 128);
+    lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
+
+    lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_lock_overlay(lv_obj_t *screen)
 {
     s_lock_overlay = lv_obj_create(screen);
@@ -527,6 +644,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
 
     create_dock(s_screen);
     create_sheet(s_screen);
+    create_compose_sheet(s_screen);
     create_toast(s_screen);
     create_lock_overlay(s_screen);
 

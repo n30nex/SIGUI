@@ -22,7 +22,7 @@ Coverage:
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract and serial diagnostics.
+- Phase 4 Public message store contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 

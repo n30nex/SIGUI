@@ -577,7 +577,7 @@ Tasks:
 
 - Public chat screen. Status: first touch Public screen is implemented with persisted recent message rows.
 - DM screen. Status: pending.
-- Message compose with on-screen keyboard or large input flow. Status: pending; fixed Public `test` quick action is implemented.
+- Message compose with on-screen keyboard or large input flow. Status: first Public free-text composer is implemented beside the fixed `test` quick action and was built/flashed on `COM7`; manual touch entry review and DM composer are pending.
 - Quick replies. Status: first fixed Public `test` quick action is implemented.
 - Message delivery states. Status: persisted rows show queued TX and received RX state; ACK/delivery confirmation is still pending.
 - Unread/mute/favorite logic.
@@ -587,7 +587,7 @@ Tasks:
 
 Acceptance:
 
-- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; free-text Public composer and DMs are pending.
+- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented and the Public RF path still receives local bot replies, while manual touch entry review and DMs are pending.
 - Node list does not crash or stutter with large simulated meshes.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot while the volatile packet log reset.
 

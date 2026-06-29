@@ -29,7 +29,7 @@
 - [x] Phase 3 shell flashed and smoke-tested on `COM7`.
 - [x] Controlled Public `test` RF regression still receives local bot replies.
 - [ ] Manual visual review of the physical shell.
-- [ ] Full Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
+- [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
 
 ## Phase 4 Messaging And Stores
 
@@ -38,7 +38,7 @@
 - [x] `messages public` serial diagnostic added to smoke coverage.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
 - [x] Public message store survives reboot on `COM7`.
-- [ ] Free-text Public composer.
+- [x] Free-text Public composer implemented, built, flashed, and RF-regression tested.
 - [ ] DM store/workflow.
 - [ ] Persistent contacts, nodes, and routes.
 

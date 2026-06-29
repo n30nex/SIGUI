@@ -49,4 +49,5 @@ typedef struct {
 d1l_app_model_t *d1l_app_model_get(void);
 void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_test(void);
+esp_err_t d1l_app_model_send_public_text(const char *text);
 esp_err_t d1l_app_model_request_advert(bool flood);
