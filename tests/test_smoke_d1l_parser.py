@@ -1,6 +1,23 @@
 import json
 
+from scripts import smoke_d1l
 from scripts.smoke_d1l import SMOKE_COMMANDS, dry_run_report, parse_jsonl
+
+
+class FakeSerial:
+    def __init__(self, responses):
+        self.responses = [line.encode("utf-8") for line in responses]
+        self.writes = []
+        self.reset_count = 0
+
+    def write(self, data):
+        self.writes.append(data.decode("utf-8"))
+
+    def readline(self):
+        return self.responses.pop(0) if self.responses else b""
+
+    def reset_input_buffer(self):
+        self.reset_count += 1
 
 
 def test_parse_jsonl_ignores_logs():
@@ -20,3 +37,38 @@ def test_dry_run_lists_phase1_commands():
     assert "radiohw" in report["commands"]
     assert "touch test" in report["commands"]
     assert report["commands"] == SMOKE_COMMANDS
+
+
+def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
+    monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"settings reset"}\n',
+            '{"schema":1,"ok":true,"cmd":"settings set name","node_name":"D1L Smoke Persist"}\n',
+            '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":3}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3}\n',
+            '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3}\n',
+            '{"schema":1,"ok":true,"cmd":"settings reset","node_name":"D1L Desk"}\n',
+            '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
+            '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Desk","path_hash_bytes":1}\n',
+        ]
+    )
+
+    report = smoke_d1l.run_persistence_check(ser, timeout=1)
+
+    assert report["ok"] is True
+    assert report["after_reboot_ok"] is True
+    assert report["cleanup_ok"] is True
+    assert ser.writes == [
+        "settings reset\n",
+        "settings set name D1L Smoke Persist\n",
+        "settings set pathhash 3\n",
+        "settings get\n",
+        "reboot\n",
+        "settings get\n",
+        "settings reset\n",
+        "reboot\n",
+        "settings get\n",
+    ]
+    assert ser.reset_count == 2

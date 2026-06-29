@@ -39,4 +39,6 @@ Important defaults:
 
 ## Hardware Validation Status
 
-No D1L hardware was connected during this phase. Scripts intentionally stop before flashing unless `D1L_PORT` or `--port` is supplied.
+COM7 D1L hardware validation was completed on 2026-06-29. See [HARDWARE_VALIDATION_D1L_2026-06-29.md](HARDWARE_VALIDATION_D1L_2026-06-29.md) for exact port, board, GitHub Actions artifact, smoke JSON, and boot log evidence.
+
+Scripts still intentionally stop before flashing unless `D1L_PORT` or `--port` is supplied.

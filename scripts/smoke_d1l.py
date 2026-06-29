@@ -59,7 +59,97 @@ def dry_run_report() -> dict:
     }
 
 
-def run_serial_smoke(port: str, baud: int, timeout: float, manual_touch: bool) -> dict:
+def read_command_result(ser, command: str, timeout: float) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        raw = ser.readline().decode("utf-8", errors="replace")
+        parsed = parse_jsonl_line(raw)
+        if parsed and parsed.get("cmd") == command:
+            return parsed
+    return {
+        "schema": 1,
+        "ok": False,
+        "cmd": command,
+        "code": "TIMEOUT",
+    }
+
+
+def expected_command_name(command: str) -> str:
+    for prefix in [
+        "settings set name ",
+        "settings set pathhash ",
+        "radio set freq ",
+        "radio set bw ",
+        "radio set sf ",
+        "radio set cr ",
+        "backlight ",
+        "mesh send public ",
+    ]:
+        if command.startswith(prefix):
+            return prefix.strip()
+    return command
+
+
+def send_console_command(ser, command: str, timeout: float) -> dict:
+    ser.write((command + "\n").encode("utf-8"))
+    return read_command_result(ser, expected_command_name(command), timeout)
+
+
+def wait_after_reboot(ser, settle_seconds: float) -> None:
+    time.sleep(settle_seconds)
+    ser.reset_input_buffer()
+
+
+def run_persistence_check(ser, timeout: float) -> dict:
+    test_name = "D1L Smoke Persist"
+    steps: list[dict] = []
+
+    for command in [
+        "settings reset",
+        f"settings set name {test_name}",
+        "settings set pathhash 3",
+    ]:
+        steps.append(send_console_command(ser, command, timeout))
+
+    before = send_console_command(ser, "settings get", timeout)
+    steps.append(before)
+
+    reboot = send_console_command(ser, "reboot", timeout)
+    steps.append(reboot)
+    if reboot.get("ok"):
+        wait_after_reboot(ser, max(2.5, timeout / 2.0))
+
+    after = send_console_command(ser, "settings get", timeout)
+    steps.append(after)
+
+    reset = send_console_command(ser, "settings reset", timeout)
+    steps.append(reset)
+
+    cleanup_reboot = send_console_command(ser, "reboot", timeout)
+    steps.append(cleanup_reboot)
+    if cleanup_reboot.get("ok"):
+        wait_after_reboot(ser, max(2.5, timeout / 2.0))
+
+    cleanup = send_console_command(ser, "settings get", timeout)
+    steps.append(cleanup)
+
+    before_ok = before.get("node_name") == test_name and before.get("path_hash_bytes") == 3
+    after_ok = after.get("node_name") == test_name and after.get("path_hash_bytes") == 3
+    cleanup_ok = cleanup.get("node_name") == "D1L Desk" and cleanup.get("path_hash_bytes") == 1
+
+    return {
+        "schema": 1,
+        "ok": all(step.get("ok") for step in steps) and before_ok and after_ok and cleanup_ok,
+        "test": "settings_persistence_reboot",
+        "temporary_node_name": test_name,
+        "before_reboot_ok": before_ok,
+        "after_reboot_ok": after_ok,
+        "cleanup_ok": cleanup_ok,
+        "steps": steps,
+    }
+
+
+def run_serial_smoke(port: str, baud: int, timeout: float, manual_touch: bool, persistence_test: bool) -> dict:
     try:
         import serial
     except ImportError as exc:
@@ -70,28 +160,13 @@ def run_serial_smoke(port: str, baud: int, timeout: float, manual_touch: bool) -
         time.sleep(1.0)
         ser.reset_input_buffer()
         for command in SMOKE_COMMANDS:
-            ser.write((command + "\n").encode("utf-8"))
-            deadline = time.time() + timeout
-            command_result = None
-            while time.time() < deadline:
-                raw = ser.readline().decode("utf-8", errors="replace")
-                parsed = parse_jsonl_line(raw)
-                if parsed and parsed.get("cmd") == command:
-                    command_result = parsed
-                    break
-            if command_result is None:
-                command_result = {
-                    "schema": 1,
-                    "ok": False,
-                    "cmd": command,
-                    "code": "TIMEOUT",
-                }
-            results.append(command_result)
+            results.append(send_console_command(ser, command, timeout))
+        persistence = run_persistence_check(ser, timeout) if persistence_test else None
 
     if manual_touch:
         print("Manual check: confirm the display showed color bars and touch coordinates changed.")
 
-    return {
+    report = {
         "schema": 1,
         "mode": "hardware",
         "port": port,
@@ -99,6 +174,10 @@ def run_serial_smoke(port: str, baud: int, timeout: float, manual_touch: bool) -
         "ok": all(item.get("ok") for item in results if item.get("cmd") != "touch test"),
         "results": results,
     }
+    if persistence is not None:
+        report["persistence"] = persistence
+        report["ok"] = report["ok"] and persistence.get("ok", False)
+    return report
 
 
 def main() -> int:
@@ -109,6 +188,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
     parser.add_argument("--manual-touch", action="store_true")
+    parser.add_argument("--persistence-test", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
@@ -122,7 +202,7 @@ def main() -> int:
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = run_serial_smoke(args.port, args.baud, args.timeout, args.manual_touch)
+        report = run_serial_smoke(args.port, args.baud, args.timeout, args.manual_touch, args.persistence_test)
 
     root = Path(__file__).resolve().parents[1]
     if args.out:
