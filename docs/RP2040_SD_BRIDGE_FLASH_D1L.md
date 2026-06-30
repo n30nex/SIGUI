@@ -19,6 +19,7 @@ ESP32-S3 DeskOS firmware flash path.
 python .\scripts\verify_checksums.py artifacts\github\<run-id>\rp2040-sd-bridge-firmware
 Get-FileHash artifacts\github\<run-id>\rp2040-sd-bridge-firmware\deskos_sd_bridge.ino.uf2 -Algorithm SHA256
 python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --list-volumes
+python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
 ```
 
 The UF2 from Actions run `28445509629` was previously verified as:
@@ -26,6 +27,13 @@ The UF2 from Actions run `28445509629` was previously verified as:
 ```text
 689F85820F118C8F6EA06F0E13ED469D18391231D689720AB8625AD228298AEF
 ```
+
+The preflight command is non-destructive. It verifies the RP2040 artifact when
+provided, lists UF2 bootloader volumes, queries only the selected D1L serial
+port with `rp2040 status`, `storage status`, and `health`, and reports the next
+safe action as JSON. If it reports `state="rp2040_protocol_pending"` and no UF2
+volume is available, put the RP2040 into UF2/BOOTSEL mode before running the
+copy helper.
 
 ## Flash
 
@@ -55,6 +63,7 @@ step; those are ESP32-S3 paths.
 Run these from the repo root after the RP2040 reboots:
 
 ```powershell
+python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-postflash-COM12.json
 python .\scripts\smoke_d1l.py --port COM12 --out artifacts\smoke\d1l-smoke-rp2040-sd-bridge-COM12.json
 python .\scripts\sd_file_canary_d1l.py --port COM12 --out artifacts\sd-canary\d1l-sd-file-canary-COM12.json
 python .\scripts\sd_export_canary_d1l.py --port COM12 --token export1 --out artifacts\sd-export-canary\d1l-sd-export-canary-COM12.json
