@@ -24,6 +24,11 @@ from tools.rp2040_sd_protocol import (
     encode_path,
     EXPORT_CANARY_DEFAULT_TOKEN,
     EXPORT_CANARY_START_ID,
+    DIAGNOSTIC_EXPORT_DEFAULT_TOKEN,
+    DIAGNOSTIC_EXPORT_START_ID,
+    diagnostic_export_paths,
+    diagnostic_export_payload,
+    diagnostic_export_transcript,
     export_canary_paths,
     export_canary_payload,
     export_canary_transcript,
@@ -326,6 +331,103 @@ def test_export_canary_transcript_fails_safely_without_ready_card():
         "root-missing": "not_ready",
     }.items():
         transcript = export_canary_transcript(SCENARIOS[scenario_name], "ex1")
+        replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+        assert {reply["ok"] for reply in replies} == {"0"}
+        assert {reply["err"] for reply in replies} == {expected_error}
+
+
+def test_diagnostic_export_transcript_chunks_and_commits_without_delete():
+    token = DIAGNOSTIC_EXPORT_DEFAULT_TOKEN
+    transcript = diagnostic_export_transcript(SCENARIOS["ready"], token)
+    requests = [exchange["request"] for exchange in transcript]
+    replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+    tmp_path, final_path = diagnostic_export_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = diagnostic_export_payload(token)
+    chunk_count = (len(payload) + MAX_FILE_CHUNK_BYTES - 1) // MAX_FILE_CHUNK_BYTES
+
+    assert len(payload) > MAX_FILE_CHUNK_BYTES
+    assert len(transcript) == 3 + (chunk_count * 3)
+    assert requests[0] == file_request(DIAGNOSTIC_EXPORT_START_ID, "delete", path=tmp)
+    assert replies[0]["ok"] == "0"
+    assert replies[0]["err"] == "not_found"
+
+    write_requests = requests[1 : 1 + chunk_count]
+    write_replies = replies[1 : 1 + chunk_count]
+    for index, (request, reply) in enumerate(zip(write_requests, write_replies)):
+        offset = index * MAX_FILE_CHUNK_BYTES
+        chunk = payload[offset : offset + MAX_FILE_CHUNK_BYTES]
+        assert request == file_request(
+            DIAGNOSTIC_EXPORT_START_ID + 1 + index,
+            "write",
+            path=tmp,
+            off=offset,
+            len=len(chunk),
+            trunc=1 if index == 0 else 0,
+            data=b64url(chunk),
+            crc=crc32_hex(chunk),
+        )
+        assert reply["ok"] == "1"
+
+    tmp_read_start = 1 + chunk_count
+    tmp_read_requests = requests[tmp_read_start : tmp_read_start + chunk_count]
+    tmp_read_replies = replies[tmp_read_start : tmp_read_start + chunk_count]
+    for index, (request, reply) in enumerate(zip(tmp_read_requests, tmp_read_replies)):
+        offset = index * MAX_FILE_CHUNK_BYTES
+        chunk = payload[offset : offset + MAX_FILE_CHUNK_BYTES]
+        assert request == file_request(
+            DIAGNOSTIC_EXPORT_START_ID + 1 + chunk_count + index,
+            "read",
+            path=tmp,
+            off=offset,
+            len=len(chunk),
+        )
+        assert reply["data"] == b64url(chunk)
+
+    rename_index = 1 + (chunk_count * 2)
+    assert requests[rename_index] == file_request(
+        DIAGNOSTIC_EXPORT_START_ID + 1 + (chunk_count * 2),
+        "rename",
+        path=tmp,
+        to=final,
+        replace=1,
+    )
+    assert replies[rename_index]["ok"] == "1"
+    assert requests[rename_index + 1] == file_request(
+        DIAGNOSTIC_EXPORT_START_ID + 2 + (chunk_count * 2),
+        "stat",
+        path=final,
+    )
+    assert replies[rename_index + 1]["exists"] == "1"
+    assert replies[rename_index + 1]["size"] == str(len(payload))
+
+    final_read_requests = requests[rename_index + 2 :]
+    final_read_replies = replies[rename_index + 2 :]
+    for index, (request, reply) in enumerate(zip(final_read_requests, final_read_replies)):
+        offset = index * MAX_FILE_CHUNK_BYTES
+        chunk = payload[offset : offset + MAX_FILE_CHUNK_BYTES]
+        assert request == file_request(
+            DIAGNOSTIC_EXPORT_START_ID + 3 + (chunk_count * 2) + index,
+            "read",
+            path=final,
+            off=offset,
+            len=len(chunk),
+        )
+        assert reply["data"] == b64url(chunk)
+    assert not any(" op=delete " in request and final in request for request in requests)
+    assert b'"kind":"diagnostic_export"' in payload
+    assert b'"limits"' in payload
+    assert b'"map_tiles":{"exported":false,"reason":"pending"}' in payload
+
+
+def test_diagnostic_export_transcript_fails_safely_without_ready_card():
+    for scenario_name, expected_error in {
+        "no-card": "no_card",
+        "format-required": "not_ready",
+        "root-missing": "not_ready",
+    }.items():
+        transcript = diagnostic_export_transcript(SCENARIOS[scenario_name], "diag1")
         replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
         assert {reply["ok"] for reply in replies} == {"0"}
         assert {reply["err"] for reply in replies} == {expected_error}

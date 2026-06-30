@@ -34,7 +34,8 @@ static void set_store_backends(d1l_storage_status_t *status)
     status->route_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES);
     status->map_tile_backend = "unavailable";
-    status->export_backend = d1l_export_store_sd_ready(status) ? "sd_canary_ready" : "serial";
+    status->export_backend = d1l_export_store_sd_ready(status) ?
+        "sd_diagnostic_exports_ready" : "serial";
     status->data_enabled = any_retained_sd;
 }
 

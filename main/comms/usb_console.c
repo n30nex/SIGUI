@@ -1,6 +1,7 @@
 #include "usb_console.h"
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -920,13 +921,16 @@ static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *
     return out > 0 && *src == '\0';
 }
 
-static void print_storage_export_canary_error(const char *step,
-                                              esp_err_t ret,
-                                              const d1l_storage_status_t *status,
-                                              const d1l_export_canary_result_t *canary)
+static void print_storage_export_error(const char *cmd,
+                                       const char *step,
+                                       esp_err_t ret,
+                                       const d1l_storage_status_t *status,
+                                       const d1l_export_canary_result_t *canary,
+                                       const char *hint)
 {
-    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage export-canary\",\"code\":\"%s\",\"step\":",
-           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":", D1L_CONSOLE_SCHEMA);
+    print_json_string(cmd ? cmd : "storage export");
+    printf(",\"code\":\"%s\",\"step\":", esp_err_to_name(ret));
     print_json_string(step ? step : "unknown");
     printf(",\"sd_state\":");
     print_json_string(status && status->sd_state ? status->sd_state : "unknown");
@@ -940,7 +944,9 @@ static void print_storage_export_canary_error(const char *step,
     print_json_string(canary && canary->file.op[0] ? canary->file.op : "");
     printf(",\"file_error\":");
     print_json_string(canary && canary->file.err[0] ? canary->file.err : "");
-    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":\"requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used\"}\n");
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":");
+    print_json_string(hint ? hint : "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
+    printf("}\n");
 }
 
 static void cmd_storage_export_canary(const char *line)
@@ -961,7 +967,9 @@ static void cmd_storage_export_canary(const char *line)
     d1l_export_canary_result_t canary = {0};
     esp_err_t ret = d1l_export_store_write_canary(token, &status, &canary);
     if (ret != ESP_OK) {
-        print_storage_export_canary_error(canary.step, ret, &status, &canary);
+        print_storage_export_error("storage export-canary", canary.step, ret, &status,
+                                   &canary,
+                                   "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
         return;
     }
 
@@ -982,6 +990,186 @@ static void cmd_storage_export_canary(const char *line)
            bool_json(canary.read_final));
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"note\":\"Diagnostic export SD canary committed by temp write and atomic rename; no Public RF or format command was used\"}\n");
+}
+
+static bool append_export_json(char *dest, size_t dest_size, size_t *used,
+                               const char *fmt, ...)
+{
+    if (!dest || !used || !fmt || *used >= dest_size) {
+        return false;
+    }
+    va_list args;
+    va_start(args, fmt);
+    const int ret = vsnprintf(dest + *used, dest_size - *used, fmt, args);
+    va_end(args);
+    if (ret < 0 || (size_t)ret >= dest_size - *used) {
+        return false;
+    }
+    *used += (size_t)ret;
+    return true;
+}
+
+static bool build_diagnostic_export_payload(const char *token,
+                                            const d1l_storage_status_t *status,
+                                            char *dest,
+                                            size_t dest_size,
+                                            size_t *out_len)
+{
+    if (!token || !status || !dest || !out_len || dest_size == 0) {
+        return false;
+    }
+    size_t used = 0;
+    d1l_health_snapshot_t h = d1l_health_snapshot();
+    d1l_crash_log_stats_t crash_stats = d1l_crash_log_stats();
+    d1l_crash_log_entry_t crash_entries[D1L_CRASH_LOG_CAPACITY];
+    const size_t copied = d1l_crash_log_copy_recent(crash_entries, D1L_CRASH_LOG_CAPACITY);
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "{\"schema\":1,\"kind\":\"diagnostic_export\",\"token\":\"%s\","
+                            "\"public_rf_tx\":false,\"formats_sd\":false,"
+                            "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
+                            "\"export_backend\":\"%s\",\"message_store_backend\":\"%s\","
+                            "\"dm_store_backend\":\"%s\",\"route_store_backend\":\"%s\","
+                            "\"packet_log_backend\":\"%s\",\"map_tile_backend\":\"%s\","
+                            "\"file_ops\":%s,\"atomic_rename\":%s},",
+                            token,
+                            status->sd_state ? status->sd_state : "unknown",
+                            status->data_backend ? status->data_backend : "nvs",
+                            status->export_backend ? status->export_backend : "serial",
+                            status->message_store_backend ? status->message_store_backend : "nvs",
+                            status->dm_store_backend ? status->dm_store_backend : "nvs",
+                            status->route_store_backend ? status->route_store_backend : "nvs",
+                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->map_tile_backend ? status->map_tile_backend : "unavailable",
+                            bool_json(status->file_ops_supported),
+                            bool_json(status->atomic_rename_supported))) {
+        return false;
+    }
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"health\":{\"uptime_ms\":%lu,\"heap_free\":%lu,"
+                            "\"heap_min_free\":%lu,\"heap_largest_free\":%lu,"
+                            "\"psram_free\":%lu,\"psram_min_free\":%lu,"
+                            "\"psram_largest_free\":%lu,"
+                            "\"current_task_stack_free_words\":%lu,"
+                            "\"ui_task_stack_free_words\":%lu,"
+                            "\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,"
+                            "\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\"},",
+                            (unsigned long)h.uptime_ms,
+                            (unsigned long)h.heap_free,
+                            (unsigned long)h.heap_min_free,
+                            (unsigned long)h.heap_largest_free,
+                            (unsigned long)h.psram_free,
+                            (unsigned long)h.psram_min_free,
+                            (unsigned long)h.psram_largest_free,
+                            (unsigned long)h.current_task_stack_free_words,
+                            (unsigned long)h.ui_task_stack_free_words,
+                            (unsigned long)h.lvgl_free_bytes,
+                            (unsigned long)h.lvgl_largest_free_bytes,
+                            h.lvgl_used_pct,
+                            h.reset_reason ? h.reset_reason : "UNKNOWN")) {
+        return false;
+    }
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"limits\":{\"payload_max\":%u,\"file_chunk_max\":%u,"
+                            "\"crashlog_capacity\":%u,\"sampled\":true},"
+                            "\"map_tiles\":{\"exported\":false,\"reason\":\"pending\"},"
+                            "\"crashlog\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+                            (unsigned)D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX,
+                            (unsigned)D1L_RP2040_FILE_CHUNK_MAX,
+                            (unsigned)D1L_CRASH_LOG_CAPACITY,
+                            (unsigned)crash_stats.count,
+                            (unsigned)crash_stats.capacity,
+                            (unsigned long)crash_stats.total_written,
+                            (unsigned long)crash_stats.dropped_oldest)) {
+        return false;
+    }
+    for (size_t i = 0; i < copied; ++i) {
+        const d1l_crash_log_entry_t *e = &crash_entries[i];
+        if (!append_export_json(dest, dest_size, &used,
+                                "%s{\"seq\":%lu,\"uptime_ms\":%lu,"
+                                "\"reset_reason\":\"%s\",\"reset_reason_code\":%u,"
+                                "\"crash_like\":%s,\"heap_free\":%lu,"
+                                "\"heap_min_free\":%lu,\"psram_free\":%lu}",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->uptime_ms,
+                                e->reset_reason,
+                                e->reset_reason_code,
+                                bool_json(e->crash_like),
+                                (unsigned long)e->heap_free,
+                                (unsigned long)e->heap_min_free,
+                                (unsigned long)e->psram_free)) {
+            return false;
+        }
+    }
+    if (!append_export_json(dest, dest_size, &used, "]}}\n")) {
+        return false;
+    }
+    *out_len = used;
+    return true;
+}
+
+static void cmd_storage_export_diagnostics(const char *line)
+{
+    static const char prefix[] = "storage export-diagnostics ";
+    char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("storage export-diagnostics", "INVALID_TOKEN",
+                   "usage: storage export-diagnostics <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(1000U);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    static char payload[D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX];
+    size_t payload_len = 0;
+    if (!build_diagnostic_export_payload(token, &status, payload, sizeof(payload),
+                                         &payload_len)) {
+        d1l_export_canary_result_t failed = {0};
+        print_storage_export_error(
+            "storage export-diagnostics", "payload", ESP_ERR_INVALID_SIZE,
+            &status, &failed,
+            "diagnostic export payload exceeded its bounded buffer; no SD write was attempted");
+        return;
+    }
+
+    d1l_export_canary_result_t export_result = {0};
+    esp_err_t ret = d1l_export_store_write_diagnostics(
+        token, (const uint8_t *)payload, payload_len, &status, &export_result);
+    if (ret != ESP_OK) {
+        print_storage_export_error(
+            "storage export-diagnostics", export_result.step, ret, &status,
+            &export_result,
+            "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
+        return;
+    }
+
+    d1l_storage_status(&status);
+    ok_begin("storage export-diagnostics");
+    printf(",\"token\":");
+    print_json_string(export_result.token);
+    printf(",\"kind\":\"diagnostic_export\",\"path\":");
+    print_json_string(export_result.path);
+    printf(",\"tmp_path\":");
+    print_json_string(export_result.tmp_path);
+    printf(",\"bytes\":%u,\"chunks_written\":%lu,\"chunks_verified_tmp\":%lu,\"chunks_verified_final\":%lu,\"tmp_verified_bytes\":%u,\"final_verified_bytes\":%u,\"write_tmp\":%s,\"read_tmp\":%s,\"rename_replace\":%s,\"stat_final\":%s,\"read_final\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"export_backend\":",
+           (unsigned)export_result.bytes,
+           (unsigned long)export_result.chunks_written,
+           (unsigned long)export_result.chunks_verified_tmp,
+           (unsigned long)export_result.chunks_verified_final,
+           (unsigned)export_result.tmp_verified_bytes,
+           (unsigned)export_result.final_verified_bytes,
+           bool_json(export_result.write_tmp),
+           bool_json(export_result.read_tmp),
+           bool_json(export_result.rename_replace),
+           bool_json(export_result.stat_final),
+           bool_json(export_result.read_final));
+    print_json_string(status.export_backend ? status.export_backend : "serial");
+    printf(",\"note\":\"Diagnostic export JSON committed to SD by chunked temp write and atomic rename; no Public RF or format command was used\"}\n");
 }
 
 static uint32_t retained_canary_hash(const char *token)
@@ -2225,7 +2413,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage export-canary <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -2295,6 +2483,8 @@ static void handle_line(const char *line)
         cmd_storage_filecanary();
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
+    } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {
+        cmd_storage_export_diagnostics(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
     } else if (strcmp(line, "packets") == 0) {

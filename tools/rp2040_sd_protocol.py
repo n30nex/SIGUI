@@ -27,6 +27,8 @@ FILE_CANARY_PAYLOAD = b"DeskOS SD file canary v1"
 FILE_CANARY_START_ID = 1
 EXPORT_CANARY_START_ID = 20
 EXPORT_CANARY_DEFAULT_TOKEN = "export1"
+DIAGNOSTIC_EXPORT_START_ID = 40
+DIAGNOSTIC_EXPORT_DEFAULT_TOKEN = "diag1"
 STATUS_FIELDS = (
     "state",
     "present",
@@ -580,14 +582,97 @@ def export_canary_transcript(
     return transcript
 
 
+def diagnostic_export_paths(token: str) -> tuple[str, str]:
+    return (
+        f"exports/diagnostics/diagnostic-export-{token}.tmp",
+        f"exports/diagnostics/diagnostic-export-{token}.json",
+    )
+
+
+def diagnostic_export_payload(token: str) -> bytes:
+    return (
+        f'{{"schema":1,"kind":"diagnostic_export","token":"{token}",'
+        '"public_rf_tx":false,"formats_sd":false,'
+        '"storage":{"sd_state":"ready","data_backend":"mixed","export_backend":"sd_diagnostic_exports_ready"},'
+        '"health":{"uptime_ms":123456,"heap_free":100000,"heap_min_free":99000,'
+        '"heap_largest_free":50000,"psram_free":200000,"psram_min_free":199000,'
+        '"psram_largest_free":150000,"current_task_stack_free_words":1200,'
+        '"ui_task_stack_free_words":1300,"lvgl_used_pct":42,"reset_reason":"SW"},'
+        '"limits":{"payload_max":4096,"file_chunk_max":192,"crashlog_capacity":8,"sampled":true},'
+        '"map_tiles":{"exported":false,"reason":"pending"},'
+        '"crashlog":{"count":1,"capacity":8,"total_written":3,"dropped_oldest":0,'
+        '"entries":[{"seq":3,"uptime_ms":50,"reset_reason":"SW","reset_reason_code":3,'
+        '"crash_like":false,"heap_free":100000,"heap_min_free":99000,"psram_free":200000}]}}\n'
+    ).encode("ascii")
+
+
+def chunk_ranges(total_len: int, chunk_len: int = MAX_FILE_CHUNK_BYTES) -> list[tuple[int, int]]:
+    return [
+        (offset, min(chunk_len, total_len - offset))
+        for offset in range(0, total_len, chunk_len)
+    ]
+
+
+def diagnostic_export_requests(
+    token: str,
+    request_id_start: int = DIAGNOSTIC_EXPORT_START_ID,
+) -> list[str]:
+    tmp_path, final_path = diagnostic_export_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = diagnostic_export_payload(token)
+    request_id = request_id_start
+    requests = [file_request_line(request_id, "delete", path=tmp)]
+    request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        chunk = payload[offset : offset + chunk_len]
+        requests.append(
+            file_request_line(
+                request_id,
+                "write",
+                path=tmp,
+                off=offset,
+                len=chunk_len,
+                trunc=1 if offset == 0 else 0,
+                data=b64url(chunk),
+                crc=crc32_hex(chunk),
+            )
+        )
+        request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        requests.append(file_request_line(request_id, "read", path=tmp, off=offset, len=chunk_len))
+        request_id += 1
+    requests.append(file_request_line(request_id, "rename", path=tmp, to=final, replace=1))
+    request_id += 1
+    requests.append(file_request_line(request_id, "stat", path=final))
+    request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        requests.append(file_request_line(request_id, "read", path=final, off=offset, len=chunk_len))
+        request_id += 1
+    return requests
+
+
+def diagnostic_export_transcript(
+    scenario: SdScenario,
+    token: str = DIAGNOSTIC_EXPORT_DEFAULT_TOKEN,
+    request_id_start: int = DIAGNOSTIC_EXPORT_START_ID,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    transcript = []
+    for request in diagnostic_export_requests(token, request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="ready")
     parser.add_argument("--request", default=STATUS_REQUEST)
     parser.add_argument("--file-canary-transcript", action="store_true")
     parser.add_argument("--export-canary-transcript", action="store_true")
+    parser.add_argument("--diagnostic-export-transcript", action="store_true")
     parser.add_argument("--request-id-start", type=int)
-    parser.add_argument("--token", default=EXPORT_CANARY_DEFAULT_TOKEN)
+    parser.add_argument("--token")
     parser.add_argument("--list-scenarios", action="store_true")
     args = parser.parse_args()
 
@@ -609,7 +694,18 @@ def main() -> int:
         request_id_start = (
             EXPORT_CANARY_START_ID if args.request_id_start is None else args.request_id_start
         )
-        for exchange in export_canary_transcript(SCENARIOS[args.scenario], args.token, request_id_start):
+        token = args.token or EXPORT_CANARY_DEFAULT_TOKEN
+        for exchange in export_canary_transcript(SCENARIOS[args.scenario], token, request_id_start):
+            print(f"> {exchange['request']}")
+            print(f"< {exchange['reply']}")
+        return 0
+
+    if args.diagnostic_export_transcript:
+        request_id_start = (
+            DIAGNOSTIC_EXPORT_START_ID if args.request_id_start is None else args.request_id_start
+        )
+        token = args.token or DIAGNOSTIC_EXPORT_DEFAULT_TOKEN
+        for exchange in diagnostic_export_transcript(SCENARIOS[args.scenario], token, request_id_start):
             print(f"> {exchange['request']}")
             print(f"< {exchange['reply']}")
         return 0

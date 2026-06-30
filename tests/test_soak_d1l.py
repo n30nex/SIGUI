@@ -102,7 +102,7 @@ def storage_status(
         "packet_log_backend": packet_log_backend,
         "route_store_backend": route_store_backend,
         "map_tile_backend": "sd_pending_store_migration" if file_ops else "unavailable",
-        "export_backend": "sd_canary_ready" if file_ops else "serial",
+        "export_backend": "sd_diagnostic_exports_ready" if file_ops else "serial",
         "stores": {
             "settings": "nvs",
             "identity": "nvs",
@@ -114,7 +114,7 @@ def storage_status(
             "read_state": "nvs",
             "crashlog": "nvs",
             "map_tiles": "sd_pending_store_migration" if file_ops else "unavailable",
-            "exports": "sd_canary_ready" if file_ops else "serial",
+            "exports": "sd_diagnostic_exports_ready" if file_ops else "serial",
         },
     }
 
@@ -400,7 +400,7 @@ def test_summarize_soak_tracks_stable_sd_file_op_gate_and_store_backends():
     assert summary["storage_file_capability_ready_all"] is True
     assert summary["storage_file_ops_ready_all"] is True
     assert summary["storage_store_backends"]["packets"] == ["sd"]
-    assert summary["storage_store_backends"]["exports"] == ["sd_canary_ready"]
+    assert summary["storage_store_backends"]["exports"] == ["sd_diagnostic_exports_ready"]
     assert summary["storage_store_backend_stable_all"] is True
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serial-only SD diagnostic export canary for MeshCore DeskOS D1L."""
+"""Serial-only SD diagnostic export runner for MeshCore DeskOS D1L."""
 
 from __future__ import annotations
 
@@ -23,9 +23,10 @@ READY_EXPORT_BACKENDS = {"sd_canary_ready", "sd_diagnostic_exports_ready"}
 def command_plan(token: str) -> list[str]:
     return [
         "storage status",
-        f"storage export-canary {token}",
+        f"storage export-diagnostics {token}",
         "storage status",
         "health",
+        "crashlog",
     ]
 
 
@@ -64,31 +65,44 @@ def export_backend_ready(storage_status: dict) -> bool:
     )
 
 
-def export_canary_passed(canary: dict, token: str) -> bool:
+def diagnostic_export_passed(result: dict, token: str) -> bool:
+    bytes_written = result.get("bytes")
+    chunks_written = result.get("chunks_written")
+    final_verified = result.get("final_verified_bytes")
+    try:
+        bytes_ok = int(bytes_written) > 192
+        chunks_ok = int(chunks_written) >= 2
+        final_bytes_ok = int(final_verified) == int(bytes_written)
+    except (TypeError, ValueError):
+        bytes_ok = chunks_ok = final_bytes_ok = False
     return (
-        canary.get("ok") is True
-        and canary.get("cmd") == "storage export-canary"
-        and canary.get("token") == token
-        and canary.get("write_tmp") is True
-        and canary.get("read_tmp") is True
-        and canary.get("rename_replace") is True
-        and canary.get("stat_final") is True
-        and canary.get("read_final") is True
-        and canary.get("public_rf_tx") is False
-        and canary.get("formats_sd") is False
-        and f"export-canary-{token}.json" in str(canary.get("path", ""))
-        and f"export-canary-{token}.tmp" in str(canary.get("tmp_path", ""))
+        result.get("ok") is True
+        and result.get("cmd") == "storage export-diagnostics"
+        and result.get("kind") == "diagnostic_export"
+        and result.get("token") == token
+        and result.get("write_tmp") is True
+        and result.get("read_tmp") is True
+        and result.get("rename_replace") is True
+        and result.get("stat_final") is True
+        and result.get("read_final") is True
+        and result.get("public_rf_tx") is False
+        and result.get("formats_sd") is False
+        and bytes_ok
+        and chunks_ok
+        and final_bytes_ok
+        and f"diagnostic-export-{token}.json" in str(result.get("path", ""))
+        and f"diagnostic-export-{token}.tmp" in str(result.get("tmp_path", ""))
     )
 
 
-def export_canary_unavailable(canary: dict) -> bool:
+def diagnostic_export_unavailable(result: dict) -> bool:
     return (
-        canary.get("cmd") == "storage export-canary"
-        and canary.get("ok") is False
-        and canary.get("code") == "ESP_ERR_NOT_SUPPORTED"
-        and canary.get("step") == "preflight"
-        and canary.get("public_rf_tx") is False
-        and canary.get("formats_sd") is False
+        result.get("cmd") == "storage export-diagnostics"
+        and result.get("ok") is False
+        and result.get("code") == "ESP_ERR_NOT_SUPPORTED"
+        and result.get("step") == "preflight"
+        and result.get("public_rf_tx") is False
+        and result.get("formats_sd") is False
     )
 
 
@@ -105,7 +119,7 @@ def dry_run_report(token: str) -> dict:
     }
 
 
-def run_canary(port: str, baud: int, timeout: float, token: str, allow_unavailable: bool) -> dict:
+def run_export(port: str, baud: int, timeout: float, token: str, allow_unavailable: bool) -> dict:
     try:
         import serial
     except ImportError as exc:
@@ -119,15 +133,16 @@ def run_canary(port: str, baud: int, timeout: float, token: str, allow_unavailab
             results.append(send_console_command(ser, command, timeout))
 
     before = results[0]
-    canary = results[1]
+    export_result = results[1]
     after = results[2]
     health = results[3]
+    crashlog = results[4]
     gate_ready_before = storage_file_gate_ready(before)
     gate_ready_after = storage_file_gate_ready(after)
     export_backend_ready_before = export_backend_ready(before)
     export_backend_ready_after = export_backend_ready(after)
-    canary_ok = export_canary_passed(canary, token)
-    unavailable_ok = allow_unavailable and export_canary_unavailable(canary)
+    export_ok = diagnostic_export_passed(export_result, token)
+    unavailable_ok = allow_unavailable and diagnostic_export_unavailable(export_result)
 
     return {
         "schema": 1,
@@ -143,9 +158,10 @@ def run_canary(port: str, baud: int, timeout: float, token: str, allow_unavailab
             before.get("ok", False)
             and after.get("ok", False)
             and health.get("ok", False)
+            and crashlog.get("ok", False)
             and (
                 (
-                    canary_ok
+                    export_ok
                     and gate_ready_before
                     and gate_ready_after
                     and export_backend_ready_before
@@ -154,16 +170,17 @@ def run_canary(port: str, baud: int, timeout: float, token: str, allow_unavailab
                 or unavailable_ok
             )
         ),
-        "canary_passed": canary_ok,
-        "canary_unavailable_ok": unavailable_ok,
+        "diagnostic_export_passed": export_ok,
+        "diagnostic_export_unavailable_ok": unavailable_ok,
         "storage_file_gate_ready_before": gate_ready_before,
         "storage_file_gate_ready_after": gate_ready_after,
         "export_backend_ready_before": export_backend_ready_before,
         "export_backend_ready_after": export_backend_ready_after,
         "storage_before": before,
         "storage_after": after,
-        "canary": canary,
+        "export": export_result,
         "health": health,
+        "crashlog": crashlog,
         "results": results,
     }
 
@@ -173,7 +190,7 @@ def main() -> int:
     parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
-    parser.add_argument("--token", default=datetime.now(timezone.utc).strftime("ex%Y%m%d%H%M%S"))
+    parser.add_argument("--token", default=datetime.now(timezone.utc).strftime("diag%Y%m%d%H%M%S"))
     parser.add_argument("--allow-unavailable", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
@@ -193,7 +210,7 @@ def main() -> int:
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = run_canary(args.port, args.baud, args.timeout, args.token, args.allow_unavailable)
+        report = run_export(args.port, args.baud, args.timeout, args.token, args.allow_unavailable)
 
     root = Path(__file__).resolve().parents[1]
     if args.out:
@@ -202,7 +219,7 @@ def main() -> int:
             out_path = root / out_path
     else:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        out_path = root / "artifacts" / "sd-export-canary" / f"d1l-sd-export-canary-{stamp}.json"
+        out_path = root / "artifacts" / "sd-diagnostic-export" / f"d1l-sd-diagnostic-export-{stamp}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="ascii")
     print(json.dumps(report))

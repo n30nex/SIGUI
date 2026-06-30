@@ -10,6 +10,7 @@
 #include "storage/storage_status.h"
 
 #define D1L_EXPORT_CANARY_TOKEN_MAX 31U
+#define D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX 4096U
 
 typedef struct {
     char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U];
@@ -24,6 +25,11 @@ typedef struct {
     bool read_final;
     bool public_rf_tx;
     bool formats_sd;
+    uint32_t chunks_written;
+    uint32_t chunks_verified_tmp;
+    uint32_t chunks_verified_final;
+    size_t tmp_verified_bytes;
+    size_t final_verified_bytes;
     esp_err_t last_error;
     d1l_rp2040_file_result_t file;
 } d1l_export_canary_result_t;
@@ -33,3 +39,8 @@ bool d1l_export_store_sd_ready(const d1l_storage_status_t *status);
 esp_err_t d1l_export_store_write_canary(const char *token,
                                         const d1l_storage_status_t *status,
                                         d1l_export_canary_result_t *out_result);
+esp_err_t d1l_export_store_write_diagnostics(const char *token,
+                                             const uint8_t *payload,
+                                             size_t payload_len,
+                                             const d1l_storage_status_t *status,
+                                             d1l_export_canary_result_t *out_result);

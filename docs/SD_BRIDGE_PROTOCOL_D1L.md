@@ -192,6 +192,26 @@ Canonical ready-card transcript with request IDs starting at `20`:
 The first temp cleanup delete may return `not_found`; that is acceptable. The
 final JSON is intentionally left present for inspection.
 
+## Storage Diagnostic-Export Transcript
+
+The serial `storage export-diagnostics <token>` command uses the same file
+protocol to commit a bounded diagnostic JSON bundle under:
+
+- Temp path: `exports/diagnostics/diagnostic-export-<token>.tmp`
+- Final path: `exports/diagnostics/diagnostic-export-<token>.json`
+
+The bundle includes storage, health, crashlog, limits, and a
+`map_tiles.exported=false` marker. It is chunked into 192-byte-or-smaller writes,
+then read back from the temp path, committed with `rename replace=1`, statted,
+and read back from the final path. The final JSON is intentionally left present
+for inspection.
+
+The host simulator prints the deterministic request/reply shape:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --diagnostic-export-transcript --token diag1
+```
+
 ## Safety Rules
 
 - No automatic format on boot.
@@ -200,4 +220,4 @@ final JSON is intentionally left present for inspection.
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; the export canary can prove one diagnostic export file commit path; full export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; general non-diagnostic export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.
