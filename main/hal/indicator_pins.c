@@ -32,8 +32,8 @@ static const d1l_rp2040_pins_t s_rp2040 = {
     .esp_rx_gpio = 20,
     .esp_tx_gpio = 19,
     .expander_reset = 8,
-    .uart_port = 1,
-    .baud_rate = 115200,
+    .uart_port = 2,
+    .baud_rate = 921600,
 };
 
 const d1l_display_pins_t *d1l_display_pins(void)
