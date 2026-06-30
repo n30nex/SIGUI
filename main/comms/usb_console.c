@@ -1138,7 +1138,7 @@ static void cmd_messages_public(const char *line)
         printf("%s", i ? "," : "");
         print_public_message_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Public messages are kept in a bounded NVS store; optional search filters retained rows\"}\n");
+    printf("],\"persisted\":true,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows\"}\n");
 }
 
 static void cmd_messages_clear(void)
@@ -1209,7 +1209,7 @@ static void cmd_messages_dm(const char *line)
         printf("%s", i ? "," : "");
         print_dm_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in a bounded NVS store; optional fingerprint filters one retained thread\"}\n");
+    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread\"}\n");
 }
 
 static void cmd_messages_dm_clear(void)

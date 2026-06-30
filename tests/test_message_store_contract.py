@@ -69,6 +69,8 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert 'strncmp(line, "messages public search "' in console
     assert "messages public [search <text>]" in console
     assert "optional search filters retained rows" in console
+    assert "Public messages are kept in bounded retained storage" in console
+    assert "Public messages are kept in a bounded NVS store" not in console
     assert "d1l_message_store_query(entries, D1L_MESSAGE_STORE_CAPACITY, search)" in console
     assert "messages public" in SMOKE_COMMANDS
     assert "messages public search test" in SMOKE_COMMANDS

@@ -80,6 +80,8 @@ def test_console_and_smoke_expose_dm_workflow():
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in console
     assert "messages dm [fingerprint]" in console
     assert "optional fingerprint filters one retained thread" in console
+    assert "MeshCore direct-message rows are kept in bounded retained storage" in console
+    assert "MeshCore direct-message rows are kept in a bounded NVS store" not in console
     assert "messages dm" in SMOKE_COMMANDS
 
 
