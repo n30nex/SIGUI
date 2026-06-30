@@ -107,7 +107,11 @@ Standard error codes are `bad_request`, `bad_value`, `unsupported_op`,
 `io_error`, and `timeout`.
 
 For compacted stores and map tiles, write chunks to a temporary path, then use
-`rename replace=1` as the commit step. Do not blindly retry `append` after a
+`rename replace=1` as the commit step. The first ESP32-side canary is packet-log
+blob storage at `stores/packet_log/ring.bin`, written through
+`stores/packet_log/ring.tmp` and committed with `rename replace=1`. During this
+canary phase, ESP32 keeps an onboard NVS mirror so removing or timing out the SD
+card does not strand packet evidence. Do not blindly retry `append` after a
 timeout unless the higher-level record format has its own idempotency key.
 
 ## Safety Rules
@@ -117,5 +121,5 @@ timeout unless the higher-level record format has its own idempotency key.
 - No format when no card is present.
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
-- Until SD-backed stores are implemented, valid SD cards are reported as `store_migration_pending` and retained stores remain on NVS.
-- The RP2040 bridge may create `/deskos` on a mounted card and now exposes bounded file operations, but message, packet, route, export, and map-tile stores remain on onboard NVS until the SD-backed store migration lands.
+- Until SD-backed stores are implemented, valid SD cards are reported as `store_migration_pending` unless the packet-log canary is enabled.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Packet-log can use SD as the first canary when ready; message, route, export, and map-tile stores remain onboard/fallback-backed until their migrations land.

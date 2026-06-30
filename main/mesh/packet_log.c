@@ -185,6 +185,30 @@ static bool blob_is_valid(const d1l_packet_log_blob_t *blob, size_t len)
            blob->next_seq > 0;
 }
 
+static esp_err_t try_load_blob_from_fallback(void)
+{
+    size_t len = sizeof(s_blob_scratch);
+    esp_err_t ret = d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                                          D1L_PACKET_LOG_KEY,
+                                                          &s_blob_scratch,
+                                                          &len);
+    if (ret != ESP_OK || !blob_is_valid(&s_blob_scratch, len)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    return ESP_OK;
+}
+
+static void load_valid_blob_into_ram(void)
+{
+    memcpy(s_entries, s_blob_scratch.entries,
+           s_blob_scratch.count * sizeof(s_blob_scratch.entries[0]));
+    s_head = s_blob_scratch.count % D1L_PACKET_LOG_CAPACITY;
+    s_count = s_blob_scratch.count;
+    s_next_seq = s_blob_scratch.next_seq;
+    s_total_written = s_blob_scratch.total_written;
+    s_dropped_oldest = s_blob_scratch.dropped_oldest;
+}
+
 esp_err_t d1l_packet_log_init(void)
 {
     clear_ram();
@@ -197,17 +221,17 @@ esp_err_t d1l_packet_log_init(void)
     if (ret == ESP_ERR_NOT_FOUND) {
         ret = ESP_OK;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
-        memcpy(s_entries, s_blob_scratch.entries,
-               s_blob_scratch.count * sizeof(s_blob_scratch.entries[0]));
-        s_head = s_blob_scratch.count % D1L_PACKET_LOG_CAPACITY;
-        s_count = s_blob_scratch.count;
-        s_next_seq = s_blob_scratch.next_seq;
-        s_total_written = s_blob_scratch.total_written;
-        s_dropped_oldest = s_blob_scratch.dropped_oldest;
+        load_valid_blob_into_ram();
     } else if (ret == ESP_OK) {
-        clear_ram();
-        ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
-                                            D1L_PACKET_LOG_KEY);
+        if (d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG) &&
+            try_load_blob_from_fallback() == ESP_OK) {
+            load_valid_blob_into_ram();
+            ret = persist_store();
+        } else {
+            clear_ram();
+            ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                                D1L_PACKET_LOG_KEY);
+        }
     }
     s_loaded = (ret == ESP_OK);
     return ret;

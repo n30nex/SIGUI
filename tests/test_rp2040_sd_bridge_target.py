@@ -108,6 +108,7 @@ def test_rp2040_docs_mark_ci_build_and_store_migration_pending():
     assert "GitHub Actions" in readme
     assert "rp2040:rp2040:seeed_indicator_rp2040" in readme
     assert "Do not use the Windows host for firmware compilation" in readme
-    assert "Retained DeskOS stores still remain on ESP32 onboard NVS" in readme
+    assert "Packet-log can use the SD file protocol as the first retained-store canary" in readme
+    assert "keeps an onboard NVS mirror during the canary" in readme
     assert "DESKOS_SD_FILE" in readme
     assert "192-byte chunks" in readme

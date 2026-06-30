@@ -9,9 +9,11 @@
 
 static d1l_storage_status_t s_status;
 
-static void set_nvs_fallback_backends(d1l_storage_status_t *status)
+static void set_store_backends(d1l_storage_status_t *status)
 {
-    status->data_backend = "nvs";
+    const bool packet_log_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    status->data_backend = packet_log_on_sd ? "mixed" : "nvs";
     status->message_store_backend = "nvs";
     status->dm_store_backend = "nvs";
     status->packet_log_backend =
@@ -19,6 +21,7 @@ static void set_nvs_fallback_backends(d1l_storage_status_t *status)
     status->route_store_backend = "nvs";
     status->map_tile_backend = "unavailable";
     status->export_backend = "serial";
+    status->data_enabled = packet_log_on_sd;
 }
 
 static void set_default_actions(d1l_storage_status_t *status)
@@ -93,7 +96,13 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     s_status.last_error = sd->last_error;
     s_status.sd_state = stable_sd_state(sd->state);
     s_status.sd_filesystem = stable_filesystem(sd->filesystem);
-    s_status.data_enabled = false;
+    d1l_retained_blob_store_note_sd_backend(sd->data_ready,
+                                            sd->file_ops_supported,
+                                            sd->atomic_rename_supported,
+                                            sd->file_line_max,
+                                            sd->file_chunk_max,
+                                            sd->path_max);
+    set_store_backends(&s_status);
 
     if (!sd->bridge_ready) {
         s_status.setup_action = "bridge_unavailable";
@@ -114,9 +123,13 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.note =
             "SD card is present but not ready for DeskOS data; setup must be explicitly confirmed before any format";
     } else {
-        s_status.setup_action = "store_migration_pending";
+        const bool packet_log_on_sd =
+            d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+        s_status.setup_action = packet_log_on_sd ? "packet_log_canary_enabled" :
+                                "store_migration_pending";
         s_status.format_action = "not_needed";
-        s_status.note =
+        s_status.note = packet_log_on_sd ?
+            "SD card is valid; packet-log canary uses SD while other retained stores remain on onboard NVS" :
             "SD card is valid, but retained stores remain on onboard NVS until SD-backed store migration is enabled";
         s_status.map_tile_backend = "sd_pending_store_migration";
     }
@@ -147,7 +160,8 @@ esp_err_t d1l_storage_status_init(void)
     s_status.note = "SD data storage is not enabled for this board profile";
 #endif
 
-    set_nvs_fallback_backends(&s_status);
+    d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
+    set_store_backends(&s_status);
     set_default_actions(&s_status);
     return ESP_OK;
 }
@@ -159,12 +173,16 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
     }
     s_status.rp2040_bridge_ready = (rp2040_init_result == ESP_OK);
     if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready) {
+        d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
+        set_store_backends(&s_status);
         s_status.sd_state = "rp2040_unavailable";
         s_status.last_error = rp2040_init_result;
         s_status.setup_action = "bridge_unavailable";
         s_status.format_action = "not_available";
         s_status.note = "RP2040 bridge is not ready; SD data storage remains on onboard fallback";
     } else if (s_status.rp2040_bridge_required) {
+        d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
+        set_store_backends(&s_status);
         s_status.sd_state = "protocol_pending";
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
         s_status.setup_action = "bridge_protocol_pending";
@@ -187,7 +205,6 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_probe_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    set_nvs_fallback_backends(&s_status);
     if (ret == ESP_OK && sd.protocol_supported && sd.data_ready) {
         s_status.map_tile_backend = "sd_pending_store_migration";
     }
@@ -224,7 +241,6 @@ esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t tim
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    set_nvs_fallback_backends(&s_status);
     if (ret == ESP_OK && sd.protocol_supported && sd.data_ready) {
         s_status.map_tile_backend = "sd_pending_store_migration";
     }

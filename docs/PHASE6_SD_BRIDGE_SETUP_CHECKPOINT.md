@@ -14,8 +14,9 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Added `firmware/rp2040_sd_bridge/deskos_sd_bridge` as an original Arduino RP2040 SD bridge target for the D1L internal UART and SD pins.
 - Added a GitHub Actions-only RP2040 bridge build job that compiles with Arduino CLI and uploads checksummed `rp2040-sd-bridge-firmware` artifacts.
 - Added bounded generic `DESKOS_SD_FILE v=1` file operations to the simulator, RP2040 bridge target, and ESP32 bridge API: `stat`, `read`, `write`, `append`, `delete`, and `rename` with sanitized relative paths, base64url payloads, CRC32 checks, 512-byte lines, and 192-byte decoded chunks.
-- Added an NVS-only retained blob-store abstraction and routed packet-log persistence through it using the existing `d1l_packets` namespace and `ring` key. This is a behavior-preserving canary boundary; it does not enable SD-backed packet logs yet.
-- Kept all retained stores on onboard NVS; no SD-backed store migration is claimed in this slice.
+- Added an SD-capable retained blob-store provider for the packet-log canary. It enables SD only when the RP2040 reports ready data, file operations, matching line/path/chunk limits, and atomic rename; writes use `stores/packet_log/ring.tmp` plus `rename replace=1` to commit `stores/packet_log/ring.bin`.
+- Kept an onboard NVS mirror for the packet-log canary and retained NVS fallback on no-card, timeout, missing file support, missing atomic rename, insufficient limits, and invalid SD blob cases.
+- Kept messages, routes, settings, identity, contacts, read-state, diagnostics, exports, and map tiles on onboard/fallback storage; no broad SD-backed store migration is claimed in this slice.
 
 ## Validation Rules
 
@@ -26,6 +27,6 @@ This checkpoint advances optional SD-card data storage without making boot or re
 ## Remaining SD Work
 
 - Validate the RP2040 SD bridge artifact on hardware after a safe RP2040 flashing procedure is documented and the correct RP2040 programming path is identified.
-- Add the RP2040 SD provider to the retained blob-store abstraction and use packet-log storage as the first low-risk SD-backed canary when configured.
+- Safely flash and validate the RP2040 SD bridge artifact on hardware so the packet-log SD canary can be proven against a real card.
 - Move larger retained stores to SD when configured: Public/DM history, route history, exports, and future map tiles.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.

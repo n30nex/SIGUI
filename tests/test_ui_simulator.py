@@ -106,6 +106,7 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         "storage-format-required": ("format_confirmation_required", "confirm_required"),
         "storage-root-missing": ("manual_format_required", "not_available"),
         "storage-ready-pending-migration": ("store_migration_pending", "not_needed"),
+        "storage-ready-packet-log-sd": ("packet_log_canary_enabled", "not_needed"),
     }
 
     for scenario, (setup_action, format_action) in scenarios.items():
@@ -124,6 +125,11 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
             f"format {format_action}",
             "No automatic format. Confirmation required before SD setup.",
         } <= labels_by_view["storage_setup_sheet"]
+        if scenario == "storage-ready-packet-log-sd":
+            assert "Mixed storage" in labels_by_view["settings"]
+            assert "messages NVS / packets SD / routes NVS" in labels_by_view["storage_setup_sheet"]
+        else:
+            assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]
         assert storage_view["overflow"] == []
 
 

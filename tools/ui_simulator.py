@@ -81,6 +81,7 @@ class Snapshot:
     storage_state: str
     storage_backend: str
     storage_detail: str
+    storage_stores: str
     storage_setup_action: str
     storage_format_action: str
 
@@ -126,6 +127,7 @@ def sample_snapshot() -> Snapshot:
         storage_state="pending bridge",
         storage_backend="NVS fallback",
         storage_detail="RP2040 SD bridge pending",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
         storage_format_action="not_available",
     )
@@ -214,6 +216,7 @@ def large_mesh_snapshot() -> Snapshot:
         storage_state="pending bridge",
         storage_backend="NVS fallback",
         storage_detail="RP2040 SD bridge pending",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
         storage_format_action="not_available",
     )
@@ -225,6 +228,7 @@ def storage_no_card_snapshot() -> Snapshot:
         storage_state="no card",
         storage_backend="NVS fallback",
         storage_detail="No SD card reported",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="insert_card",
         storage_format_action="not_available",
     )
@@ -236,6 +240,7 @@ def storage_format_required_snapshot() -> Snapshot:
         storage_state="setup required",
         storage_backend="NVS fallback",
         storage_detail="Card needs confirmed setup",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="format_confirmation_required",
         storage_format_action="confirm_required",
     )
@@ -247,6 +252,7 @@ def storage_root_missing_snapshot() -> Snapshot:
         storage_state="root missing",
         storage_backend="NVS fallback",
         storage_detail="DeskOS root missing",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="manual_format_required",
         storage_format_action="not_available",
     )
@@ -258,7 +264,20 @@ def storage_ready_pending_migration_snapshot() -> Snapshot:
         storage_state="ready",
         storage_backend="NVS fallback",
         storage_detail="SD valid, stores pending",
+        storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="store_migration_pending",
+        storage_format_action="not_needed",
+    )
+
+
+def storage_ready_packet_log_sd_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="ready",
+        storage_backend="Mixed storage",
+        storage_detail="SD packet-log canary",
+        storage_stores="messages NVS / packets SD / routes NVS",
+        storage_setup_action="packet_log_canary_enabled",
         storage_format_action="not_needed",
     )
 
@@ -270,6 +289,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-format-required": storage_format_required_snapshot,
     "storage-root-missing": storage_root_missing_snapshot,
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
+    "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
 }
 
 
@@ -705,7 +725,7 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Storage Setup", "Optional SD data storage")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED)
     draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
-    draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, "messages NVS / packets NVS / routes NVS", BLUE)
+    draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
     s.text(f"format {snap.storage_format_action}", (44, 328, 436, 350), 13, MUTED)
     s.text("No automatic format. Confirmation required before SD setup.", (44, 358, 436, 380), 12, AMBER)

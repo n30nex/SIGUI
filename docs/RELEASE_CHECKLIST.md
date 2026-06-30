@@ -62,7 +62,7 @@
 - [x] ESP32 confirmed-format request guard implemented: `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` can only be sent after exact confirmation plus bridge-reported card presence, format support, and setup-required state.
 - [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS` and guarded `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`.
 - [x] Generic RP2040 SD file-operation protocol foundation added for future SD-backed stores: bounded `DESKOS_SD_FILE v=1` stat/read/write/append/delete/rename with path validation, base64url payloads, CRC32 checks, and simulator coverage.
-- [x] NVS-only retained blob-store abstraction added and packet-log persistence routed through it without changing the existing `d1l_packets`/`ring` data location.
+- [x] Retained blob-store abstraction can use the RP2040 SD file protocol for the packet-log canary when a ready card reports file operations and atomic rename; NVS remains mirrored as fallback.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.

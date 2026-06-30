@@ -42,5 +42,7 @@ Do not use the Windows host for firmware compilation.
   192-byte chunks so each newline-delimited request remains under the 512-byte
   line cap.
 - No formatting happens at boot or during status checks.
-- Retained DeskOS stores still remain on ESP32 onboard NVS until the SD-backed
-  store migration lands.
+- Packet-log can use the SD file protocol as the first retained-store canary
+  once the ESP32 sees a ready card, file operations, and atomic rename. The ESP32
+  keeps an onboard NVS mirror during the canary. Other retained DeskOS stores
+  still remain onboard-backed until their SD migrations land.

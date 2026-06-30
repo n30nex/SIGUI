@@ -29,6 +29,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"storage"' in cmake
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("d1l_storage_status_refresh(120U)") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
     assert 's_status.sd_interface = "rp2040"' in source
@@ -41,7 +43,12 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"format_confirmation_required"' in source
     assert '"store_migration_pending"' in source
     assert 'status->message_store_backend = "nvs"' in source
+    assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
+    assert "sd->file_ops_supported" in source
+    assert "sd->atomic_rename_supported" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
+    assert "d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
+    assert 'status->data_backend = packet_log_on_sd ? "mixed" : "nvs"' in source
     assert 'status->route_store_backend = "nvs"' in source
     assert 'status->map_tile_backend = "unavailable"' in source
     assert "bsp_sdcard_init" not in source
@@ -61,9 +68,10 @@ def test_storage_format_request_is_guarded_before_bridge_command():
 
     positions = [source.index(token) for token in guard_order]
     assert positions == sorted(positions)
-    assert source.count("set_nvs_fallback_backends(&s_status)") >= 3
-    assert "s_status.data_enabled = false" in source
+    assert source.count("set_store_backends(&s_status)") >= 3
+    assert "status->data_enabled = packet_log_on_sd" in source
     assert 's_status.map_tile_backend = "sd_pending_store_migration"' in source
+    assert '"packet_log_canary_enabled"' in source
 
 
 def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
@@ -186,5 +194,5 @@ def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
 
     assert "SD-backed message/packet/route/export/map-tile stores" in checklist
     assert "- [ ] Optional SD-card data storage implemented" in checklist
-    assert "keeps retained stores on onboard flash/NVS" in user_guide
-    assert "retained stores still remain NVS" in readme
+    assert "packet-log canary" in user_guide
+    assert "packet-log canary" in readme

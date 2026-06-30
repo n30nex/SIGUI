@@ -10,7 +10,7 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_packet_log_is_bounded_and_nvs_backed():
+def test_packet_log_is_bounded_and_retained_blob_store_backed():
     header = read("main/mesh/packet_log.h")
     source = read("main/mesh/packet_log.c")
     app_main = read("main/app_main.c")
@@ -19,15 +19,20 @@ def test_packet_log_is_bounded_and_nvs_backed():
     assert "D1L_PACKET_LOG_CAPACITY 32U" in header
     assert "D1L_PACKET_LOG_PERSIST_CAPACITY 8U" in header
     assert 'D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"' in blob_store
+    assert 'D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"' in blob_store
     assert 'D1L_PACKET_LOG_KEY "ring"' in source
     assert "nvs_get_blob" in blob_store
     assert "nvs_set_blob" in blob_store
+    assert "d1l_rp2040_bridge_file_write" in blob_store
+    assert "d1l_rp2040_bridge_file_rename" in blob_store
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert '#include "storage/retained_blob_store.h"' in source
     assert "d1l_retained_blob_store_read" in source
+    assert "d1l_retained_blob_store_read_fallback" in source
     assert "d1l_retained_blob_store_write" in source
     assert "d1l_retained_blob_store_erase" in source
+    assert "d1l_retained_blob_store_uses_sd" in source
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
     assert '"storage/retained_blob_store.c"' in cmake
     assert "static d1l_packet_log_blob_t s_blob_scratch" in source
@@ -44,6 +49,7 @@ def test_packet_log_is_bounded_and_nvs_backed():
     assert "packet_matches" in source
     assert "D1L_PACKET_LOG_SCHEMA 2U" in source
     assert "ESP_ERR_NOT_FOUND" in source
+    assert "try_load_blob_from_fallback" in source
     assert '\\"packet_log_backend\\"' in read("main/comms/usb_console.c")
     assert "esp_err_t packet_log_ret = d1l_packet_log_init()" in app_main
 

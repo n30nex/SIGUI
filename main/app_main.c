@@ -40,6 +40,16 @@ void app_main(void)
     if (storage_ret != ESP_OK) {
         ESP_LOGW(TAG, "storage status init failed: %s", esp_err_to_name(storage_ret));
     }
+    esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
+    d1l_storage_status_note_rp2040(rp2040_ret);
+    if (rp2040_ret == ESP_OK) {
+        esp_err_t sd_probe_ret = d1l_storage_status_refresh(120U);
+        if (sd_probe_ret != ESP_OK && sd_probe_ret != ESP_ERR_TIMEOUT) {
+            ESP_LOGW(TAG, "boot SD status probe failed: %s", esp_err_to_name(sd_probe_ret));
+        }
+    } else {
+        ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s", esp_err_to_name(rp2040_ret));
+    }
 
     esp_err_t crash_log_ret = d1l_crash_log_init();
     if (crash_log_ret != ESP_OK) {
@@ -85,11 +95,6 @@ void app_main(void)
     d1l_meshcore_service_init();
 
     esp_err_t board_ret = d1l_board_init();
-    esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
-    d1l_storage_status_note_rp2040(rp2040_ret);
-    if (rp2040_ret != ESP_OK) {
-        ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s", esp_err_to_name(rp2040_ret));
-    }
 
     if (board_ret == ESP_OK) {
         ESP_LOGI(TAG, "D1L board initialized");
