@@ -220,6 +220,10 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "create_contact_edit_sheet" in source
     assert "create_contact_export_sheet" in source
     assert "create_route_trace_sheet" in source
+    startup = source.split("esp_err_t d1l_ui_phase1_show_home(void)", 1)[1].split(
+        "esp_err_t d1l_ui_phase1_start(void)", 1
+    )[0]
+    assert "create_contact_edit_sheet(s_screen)" not in startup
     assert "render_contact_detail_sheet" in source
     assert "open_contact_edit_event_cb" in source
     assert "render_contact_export_sheet" in source

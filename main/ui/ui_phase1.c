@@ -132,6 +132,7 @@ static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
 static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
+static void create_contact_edit_sheet(lv_obj_t *screen);
 
 static void lv_tick_task(void *arg)
 {
@@ -173,7 +174,14 @@ static void label_set_fmt(lv_obj_t *label, const char *fmt, ...)
 
 static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
+    if (!parent || !text) {
+        return NULL;
+    }
     lv_obj_t *label = lv_label_create(parent);
+    if (!label) {
+        ESP_LOGE(TAG, "label allocation failed");
+        return NULL;
+    }
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
     return label;
@@ -181,7 +189,14 @@ static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color
 
 static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y, int w, int h)
 {
+    if (!parent) {
+        return NULL;
+    }
     lv_obj_t *panel = lv_obj_create(parent);
+    if (!panel) {
+        ESP_LOGE(TAG, "panel allocation failed");
+        return NULL;
+    }
     lv_obj_set_size(panel, w, h);
     lv_obj_set_pos(panel, x, y);
     lv_obj_set_style_radius(panel, 8, 0);
@@ -196,7 +211,14 @@ static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y, int w, int h)
 static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y, int w, int h,
                                lv_event_cb_t cb, void *user_data)
 {
+    if (!parent || !text) {
+        return NULL;
+    }
     lv_obj_t *button = lv_btn_create(parent);
+    if (!button) {
+        ESP_LOGE(TAG, "button allocation failed");
+        return NULL;
+    }
     lv_obj_set_size(button, w, h);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_radius(button, 8, 0);
@@ -204,9 +226,13 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y,
     lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
     lv_obj_t *label = lv_label_create(button);
-    lv_label_set_text(label, text);
-    lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), 0);
-    lv_obj_center(label);
+    if (label) {
+        lv_label_set_text(label, text);
+        lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), 0);
+        lv_obj_center(label);
+    } else {
+        ESP_LOGE(TAG, "button label allocation failed");
+    }
     if (cb) {
         lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, user_data);
     }
@@ -917,8 +943,15 @@ static void contact_edit_keyboard_event_cb(lv_event_t *event)
 static void open_contact_edit_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_contact_detail_contact.fingerprint[0] == '\0' || !s_contact_edit_sheet) {
+    if (s_contact_detail_contact.fingerprint[0] == '\0') {
         show_toast("Contact", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    if (!s_contact_edit_sheet) {
+        create_contact_edit_sheet(s_screen);
+    }
+    if (!s_contact_edit_sheet || !s_contact_edit_textarea || !s_contact_edit_keyboard) {
+        show_toast("Contact", ESP_ERR_NO_MEM);
         return;
     }
     hide_sheet();
@@ -2896,7 +2929,14 @@ static void create_contact_detail_sheet(lv_obj_t *screen)
 
 static void create_contact_edit_sheet(lv_obj_t *screen)
 {
+    if (!screen || s_contact_edit_sheet) {
+        return;
+    }
     s_contact_edit_sheet = lv_obj_create(screen);
+    if (!s_contact_edit_sheet) {
+        ESP_LOGE(TAG, "contact edit sheet allocation failed");
+        return;
+    }
     lv_obj_set_size(s_contact_edit_sheet, 448, 320);
     lv_obj_set_pos(s_contact_edit_sheet, 16, 82);
     lv_obj_set_style_radius(s_contact_edit_sheet, 8, 0);
@@ -2907,6 +2947,9 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     lv_obj_clear_flag(s_contact_edit_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
     s_contact_edit_title = create_label(s_contact_edit_sheet, "Edit Contact", 0xF4F7FB);
+    if (!s_contact_edit_title) {
+        goto fail;
+    }
     lv_obj_set_style_text_font(s_contact_edit_title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(s_contact_edit_title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_contact_edit_title, 194);
@@ -2920,9 +2963,16 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
 
     lv_obj_t *meta = create_label(s_contact_edit_sheet,
                                   "Alias only; retained history remains", 0x8EA0AE);
+    if (!meta) {
+        goto fail;
+    }
     lv_obj_set_pos(meta, 8, 46);
 
     s_contact_edit_textarea = lv_textarea_create(s_contact_edit_sheet);
+    if (!s_contact_edit_textarea) {
+        ESP_LOGE(TAG, "contact edit textarea allocation failed");
+        goto fail;
+    }
     lv_obj_set_size(s_contact_edit_textarea, 424, 48);
     lv_obj_set_pos(s_contact_edit_textarea, 0, 78);
     lv_textarea_set_one_line(s_contact_edit_textarea, true);
@@ -2936,6 +2986,10 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
                                 LV_PART_TEXTAREA_PLACEHOLDER);
 
     s_contact_edit_keyboard = lv_keyboard_create(s_contact_edit_sheet);
+    if (!s_contact_edit_keyboard) {
+        ESP_LOGE(TAG, "contact edit keyboard allocation failed");
+        goto fail;
+    }
     lv_obj_set_size(s_contact_edit_keyboard, 424, 178);
     lv_obj_set_pos(s_contact_edit_keyboard, 0, 138);
     lv_keyboard_set_textarea(s_contact_edit_keyboard, s_contact_edit_textarea);
@@ -2945,6 +2999,16 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
                         LV_EVENT_CANCEL, NULL);
 
     lv_obj_add_flag(s_contact_edit_sheet, LV_OBJ_FLAG_HIDDEN);
+    return;
+
+fail:
+    if (s_contact_edit_sheet) {
+        lv_obj_del(s_contact_edit_sheet);
+    }
+    s_contact_edit_sheet = NULL;
+    s_contact_edit_title = NULL;
+    s_contact_edit_textarea = NULL;
+    s_contact_edit_keyboard = NULL;
 }
 
 static void create_contact_export_sheet(lv_obj_t *screen)
@@ -3174,7 +3238,6 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_radio_settings_sheet(s_screen);
     create_storage_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
-    create_contact_edit_sheet(s_screen);
     create_contact_export_sheet(s_screen);
     create_route_detail_sheet(s_screen);
     create_route_trace_sheet(s_screen);
