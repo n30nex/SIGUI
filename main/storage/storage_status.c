@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 
 #include "hal/rp2040_bridge.h"
+#include "storage/retained_blob_store.h"
 
 static d1l_storage_status_t s_status;
 
@@ -13,7 +14,8 @@ static void set_nvs_fallback_backends(d1l_storage_status_t *status)
     status->data_backend = "nvs";
     status->message_store_backend = "nvs";
     status->dm_store_backend = "nvs";
-    status->packet_log_backend = "nvs";
+    status->packet_log_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
     status->route_store_backend = "nvs";
     status->map_tile_backend = "unavailable";
     status->export_backend = "serial";

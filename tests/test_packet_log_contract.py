@@ -14,12 +14,22 @@ def test_packet_log_is_bounded_and_nvs_backed():
     header = read("main/mesh/packet_log.h")
     source = read("main/mesh/packet_log.c")
     app_main = read("main/app_main.c")
+    blob_store = read("main/storage/retained_blob_store.c")
+    cmake = read("main/CMakeLists.txt")
     assert "D1L_PACKET_LOG_CAPACITY 32U" in header
     assert "D1L_PACKET_LOG_PERSIST_CAPACITY 8U" in header
-    assert 'D1L_PACKET_LOG_NAMESPACE "d1l_packets"' in source
+    assert 'D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"' in blob_store
     assert 'D1L_PACKET_LOG_KEY "ring"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert "nvs_get_blob" in blob_store
+    assert "nvs_set_blob" in blob_store
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "d1l_retained_blob_store_read" in source
+    assert "d1l_retained_blob_store_write" in source
+    assert "d1l_retained_blob_store_erase" in source
+    assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
+    assert '"storage/retained_blob_store.c"' in cmake
     assert "static d1l_packet_log_blob_t s_blob_scratch" in source
     assert "D1L_PACKET_LOG_PERSIST_CAPACITY" in source
     assert "sanitize_ascii" in source

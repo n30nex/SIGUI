@@ -41,7 +41,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"format_confirmation_required"' in source
     assert '"store_migration_pending"' in source
     assert 'status->message_store_backend = "nvs"' in source
-    assert 'status->packet_log_backend = "nvs"' in source
+    assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
     assert 'status->route_store_backend = "nvs"' in source
     assert 'status->map_tile_backend = "unavailable"' in source
     assert "bsp_sdcard_init" not in source

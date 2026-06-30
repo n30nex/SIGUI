@@ -318,10 +318,11 @@ Important pending production feature:
 8. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
 9. Confirm format requires explicit user confirmation, bridge-reported `format_supported=true`, and setup-required state, and does not run from incidental boot/touch events.
 10. Use `tools/rp2040_sd_protocol.py` to verify the reference status, format, and file-operation line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing retained-store migration.
-11. When configured, verify the packet-log canary can use SD through a retained blob-store abstraction and fall back to NVS on SD absence, timeout, or corrupt blobs.
-12. When configured, verify Public/DM message history, route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
-13. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
-14. Verify the `rp2040-sd-bridge-firmware` artifact checksum manifest before any RP2040 hardware flash attempt.
+11. Before enabling any SD provider, verify packet-log persistence still uses the NVS-only retained blob-store backend and survives reboot with the existing `d1l_packets`/`ring` data location.
+12. When configured, verify the packet-log canary can use SD through a retained blob-store abstraction and fall back to NVS on SD absence, timeout, or corrupt blobs.
+13. When configured, verify Public/DM message history, route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
+14. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
+15. Verify the `rp2040-sd-bridge-firmware` artifact checksum manifest before any RP2040 hardware flash attempt.
 
 ## Mesh Visibility
 

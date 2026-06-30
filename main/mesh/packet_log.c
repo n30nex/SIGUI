@@ -4,9 +4,9 @@
 #include <string.h>
 
 #include "esp_timer.h"
-#include "nvs.h"
 
-#define D1L_PACKET_LOG_NAMESPACE "d1l_packets"
+#include "storage/retained_blob_store.h"
+
 #define D1L_PACKET_LOG_KEY "ring"
 #define D1L_PACKET_LOG_SCHEMA 2U
 
@@ -169,19 +169,11 @@ static void fill_blob(d1l_packet_log_blob_t *blob)
 
 static esp_err_t persist_store(void)
 {
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_PACKET_LOG_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
     fill_blob(&s_blob_scratch);
-    ret = nvs_set_blob(handle, D1L_PACKET_LOG_KEY, &s_blob_scratch, sizeof(s_blob_scratch));
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
-    nvs_close(handle);
-    return ret;
+    return d1l_retained_blob_store_write(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                         D1L_PACKET_LOG_KEY,
+                                         &s_blob_scratch,
+                                         sizeof(s_blob_scratch));
 }
 
 static bool blob_is_valid(const d1l_packet_log_blob_t *blob, size_t len)
@@ -197,16 +189,12 @@ esp_err_t d1l_packet_log_init(void)
 {
     clear_ram();
 
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_PACKET_LOG_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        s_loaded = false;
-        return ret;
-    }
-
     size_t len = sizeof(s_blob_scratch);
-    ret = nvs_get_blob(handle, D1L_PACKET_LOG_KEY, &s_blob_scratch, &len);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+    esp_err_t ret = d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                                 D1L_PACKET_LOG_KEY,
+                                                 &s_blob_scratch,
+                                                 &len);
+    if (ret == ESP_ERR_NOT_FOUND) {
         ret = ESP_OK;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
         memcpy(s_entries, s_blob_scratch.entries,
@@ -218,15 +206,9 @@ esp_err_t d1l_packet_log_init(void)
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
     } else if (ret == ESP_OK) {
         clear_ram();
-        ret = nvs_erase_key(handle, D1L_PACKET_LOG_KEY);
-        if (ret == ESP_ERR_NVS_NOT_FOUND) {
-            ret = ESP_OK;
-        }
-        if (ret == ESP_OK) {
-            ret = nvs_commit(handle);
-        }
+        ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                            D1L_PACKET_LOG_KEY);
     }
-    nvs_close(handle);
     s_loaded = (ret == ESP_OK);
     return ret;
 }
@@ -236,20 +218,8 @@ esp_err_t d1l_packet_log_clear(void)
     clear_ram();
     s_loaded = true;
 
-    nvs_handle_t handle;
-    esp_err_t ret = nvs_open(D1L_PACKET_LOG_NAMESPACE, NVS_READWRITE, &handle);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    ret = nvs_erase_key(handle, D1L_PACKET_LOG_KEY);
-    if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        ret = ESP_OK;
-    }
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
-    }
-    nvs_close(handle);
-    return ret;
+    return d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                         D1L_PACKET_LOG_KEY);
 }
 
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
