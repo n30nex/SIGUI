@@ -234,6 +234,12 @@ esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, 
     return d1l_contact_store_export_uri(&contact, dest, dest_size);
 }
 
+size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t *out_entries,
+                                      size_t max_entries)
+{
+    return d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries);
+}
+
 esp_err_t d1l_app_model_mark_messages_read(void)
 {
     return d1l_read_state_mark_all_read();

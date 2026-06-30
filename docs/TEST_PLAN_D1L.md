@@ -9,6 +9,7 @@ python -m pytest tests
 python .\tools\ui_simulator.py --out artifacts\ui-sim
 python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
 python .\scripts\smoke_d1l.py --dry-run
+python .\scripts\probe_d1l_dm.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
 ```
 
@@ -19,6 +20,7 @@ Coverage:
 - RP2040 bridge pin contract.
 - No hardcoded executable COM ports.
 - Smoke JSONL parser.
+- Targeted DM-only hardware probe for COM7 to COM11 validation without Public-channel RF.
 - Flash/monitor scripts require an explicit port.
 - Backup command builder.
 - Checksum verifier.
@@ -78,6 +80,7 @@ Expected commands:
 - `contacts`
 - `contacts export`
 - `routes`
+- `routes trace 0BF0A701D5AE2DB6`
 - `signal`
 - `roomservers`
 - `repeaters`
@@ -175,6 +178,15 @@ For Phase 4 direct-message store validation:
 9. Reboot.
 10. Verify `messages dm` and `messages dm <fingerprint>` retain the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
+Repeatable local COM11 DM proof:
+
+```powershell
+$env:D1L_PORT = "COM7"
+python .\scripts\probe_d1l_dm.py --port $env:D1L_PORT --bot-status F:\Meshcorebot\logs\meshcorebot.status.json --bot-port COM11 --out artifacts\smoke\d1l-dm-probe-COM7-COM11.json
+```
+
+Success requires `public_rf_transmit=false`, no command beginning with `mesh send public`, `mesh send dm` returning `ok=true`, `messages dm <fingerprint>` and `packets search <token>` retaining the token, `routes trace <fingerprint>` matching the target, `health` ready, and the COM11 Meshcorebot status showing at least `rx_contact_total +1`.
+
 ## Touch DM Compose
 
 For Phase 4 touch direct-message compose validation:
@@ -265,6 +277,14 @@ For Phase 4 route-store validation:
 8. Reboot.
 9. Verify `routes` retains the rows.
 10. For physical touch review, open the Packet tab, tap a route row, verify the route detail sheet opens with the same fields, and close it.
+
+For Phase 6 retained route trace validation:
+
+1. Verify `contacts` contains a promoted contact or use a known 16-hex fingerprint.
+2. Run `routes trace <fingerprint>`.
+3. Verify the response returns `cmd="routes trace"`, the requested `fingerprint`, `known_contact`, `contact_route`, `route_count`, `best_route`, `best_confidence`, and an `entries` array filtered to that target.
+4. Verify `active_probe_supported=false`; this helper summarizes local retained evidence and does not transmit RF.
+5. For physical touch review, open the contact detail sheet, tap `Trace`, verify the Route Trace sheet opens with contact path, best evidence, retained route rows, and the active-ping pending note, then close it.
 
 ## Packet Log
 

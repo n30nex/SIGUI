@@ -64,6 +64,8 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     dm_thread = views["dm_thread_sheet"]["metrics"]
     assert dm_thread["dm_thread_source_count"] == 32
     assert dm_thread["dm_thread_rendered_count"] <= 3
+    trace = views["route_trace_sheet"]["metrics"]
+    assert trace["route_trace_rendered_count"] <= 2
 
     public_history = views["public_history_sheet"]["metrics"]
     assert public_history["public_history_source_count"] == 48
@@ -82,9 +84,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
-    assert {"Contact Detail", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
+    assert {"Contact Detail", "Trace", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
     assert {"DM Thread", "Thread 2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
+    assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 

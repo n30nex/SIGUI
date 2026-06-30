@@ -44,12 +44,14 @@
 - [x] `messages public` serial diagnostic added to smoke coverage.
 - [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
 - [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
+- [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
 - [x] Public message store survives reboot on `COM7`.
 - [x] Free-text Public composer implemented, built, flashed, and RF-regression tested.
 - [x] Heard-node store survives reboot on `COM7`.
 - [x] Contact store promotion from heard node survives reboot on `COM7`.
 - [x] Route store survives reboot on `COM7`.
+- [x] Read-only `routes trace <fingerprint>` diagnostic and contact-detail Route Trace sheet implemented with retained route/contact evidence.
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
 - [x] Contact favorite/mute flags persist across reboot and are exposed through serial diagnostics plus the contact detail UI.
 - [x] Public unread/read state persists across reboot and is exposed through serial diagnostics plus the Messages UI.

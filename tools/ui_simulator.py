@@ -607,8 +607,9 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.text(contact.fingerprint, (44, 176, 436, 200), 17, TEXT)
     s.text("Signal", (44, 210, 180, 230), 13, MUTED, True)
     s.text(f"{contact.signal}  {contact.meta}", (44, 232, 436, 254), 14, GREEN)
-    for i, label in enumerate(("DM", "Export", "Fav", "Mute")):
-        draw_button(s, (44 + i * 96, 278, 132 + i * 96, 330), label, GREEN if label == "DM" else ACCENT)
+    buttons = (("DM", GREEN), ("Trace", BLUE), ("Export", ACCENT), ("Fav", ACCENT), ("Mute", ACCENT))
+    for i, (label, color) in enumerate(buttons):
+        draw_button(s, (44 + i * 76, 278, 112 + i * 76, 330), label, color)
     draw_button(s, (44, 346, 200, 378), "Close", MUTED)
     draw_dock(s, "Nodes")
 
@@ -682,6 +683,33 @@ def render_route_detail_sheet(s: Surface, snap: Snapshot):
     s.text("recent live packet evidence", (44, 292, 436, 316), 16, GREEN)
     draw_button(s, (44, 340, 200, 374), "Close", MUTED)
     draw_dock(s, "Packets")
+
+
+def render_route_trace_sheet(s: Surface, snap: Snapshot):
+    contact = snap.contacts[0]
+    contact_routes = tuple(route for route in snap.routes if contact.fingerprint[:4] in route.meta or "direct" in route.note)
+    draw_sheet_frame(s, "Route Trace", contact.name)
+    s.text("Trace", (44, 154, 160, 174), 13, MUTED, True)
+    s.text(contact.fingerprint, (44, 176, 436, 198), 16, TEXT)
+    s.text("Contact Path", (44, 210, 180, 230), 13, MUTED, True)
+    s.text("key retained  path known  hops 0", (44, 232, 436, 254), 15, GREEN)
+    s.text("Best Evidence", (44, 266, 180, 286), 13, MUTED, True)
+    s.text("direct seq 42 confidence 100", (44, 288, 436, 310), 15, ACCENT)
+    y = 320
+    rendered = 0
+    for route in contact_routes[:2]:
+        draw_row(s, (44, y, 436, y + 30), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
+        y += 34
+        rendered += 1
+    draw_button(s, (316, 94, 436, 134), "Close", MUTED)
+    s.text("Local evidence only", (44, 390, 300, 408), 11, MUTED)
+    draw_dock(s, "Nodes")
+    s.metrics.update(
+        {
+            "route_trace_source_count": len(contact_routes),
+            "route_trace_rendered_count": rendered,
+        }
+    )
 
 
 def render_packet_detail_sheet(s: Surface, snap: Snapshot):
@@ -769,6 +797,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
+    "route_trace_sheet": render_route_trace_sheet,
     "packet_detail_sheet": render_packet_detail_sheet,
     "packet_search_sheet": render_packet_search_sheet,
     "mesh_roles_sheet": render_mesh_roles_sheet,
@@ -801,10 +830,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Save",
         "Close",
     ),
-    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Export", "Fav", "Mute", "Close"),
+    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Export", "Fav", "Mute", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
+    "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),

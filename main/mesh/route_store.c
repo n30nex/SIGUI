@@ -271,6 +271,37 @@ size_t d1l_route_store_copy_recent(d1l_route_entry_t *out_entries, size_t max_en
     return n;
 }
 
+size_t d1l_route_store_copy_for_target(const char *target, d1l_route_entry_t *out_entries,
+                                       size_t max_entries)
+{
+    if (!target || target[0] == '\0' || out_entries == NULL || max_entries == 0 || s_count == 0) {
+        return 0;
+    }
+
+    size_t copied = 0;
+    bool used[D1L_ROUTE_STORE_CAPACITY] = {0};
+    while (copied < max_entries) {
+        size_t best = 0;
+        bool best_set = false;
+        for (size_t i = 0; i < s_count; ++i) {
+            if (used[i] ||
+                strncmp(s_entries[i].target, target, sizeof(s_entries[i].target)) != 0) {
+                continue;
+            }
+            if (!best_set || s_entries[i].seq > s_entries[best].seq) {
+                best = i;
+                best_set = true;
+            }
+        }
+        if (!best_set) {
+            break;
+        }
+        used[best] = true;
+        out_entries[copied++] = s_entries[best];
+    }
+    return copied;
+}
+
 esp_err_t d1l_route_store_find_by_seq(uint32_t seq, d1l_route_entry_t *out_entry)
 {
     if (seq == 0 || out_entry == NULL) {

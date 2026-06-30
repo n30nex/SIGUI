@@ -18,8 +18,8 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Public History/Search slice: `0xa93e0` (`693216` bytes), 34% free in the app partition
-- Latest local app SHA256: `77e495fec80dc749c4359562a62474b6efd42b7efa05e023349245373bbf63a2`
+- Latest local build size after the Route Trace slice: `0xa9de0` (`695776` bytes), 34% free in the app partition
+- Latest local app SHA256: `c1377a300fc6bcf4cd00f6b7f0f87e469eec8048349e3628a178d07d694e6117`
 
 ## Passing Hardware Evidence
 
@@ -372,6 +372,17 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Targeted hardware DM proof passed in `artifacts/smoke/d1l-dm-public-history-target-pass-local-COM7-COM11.json`: D1L sent a direct message token to `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`, `messages dm 0BF0A701D5AE2DB6` retained the exact TX token, and `packets search <token>` found the matching TX `dm_text` packet row.
   - The local Meshcorebot status surface at `F:\Meshcorebot\logs\meshcorebot.status.json` reported active port `COM11`, `meshcore_connected=true`, and fresh `rx_contact_total +1` / `rx_log_total +3` movement during the targeted DM proof.
   - Public-channel RF testing was intentionally not run for this checkpoint; the hardware regression used COM11 direct-message receive counters instead.
+- Phase 6 retained Route Trace local smoke:
+  - Local Podman ESP-IDF build passed; app size was `0xa9de0` (`695776` bytes), leaving 34% free in the smallest app partition.
+  - Local app SHA256 was `c1377a300fc6bcf4cd00f6b7f0f87e469eec8048349e3628a178d07d694e6117`.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - Standard smoke passed in `artifacts/smoke/d1l-smoke-route-trace-local-COM7.json` with 34 commands, including read-only `routes trace 0BF0A701D5AE2DB6`.
+  - `routes trace 0BF0A701D5AE2DB6` returned `known_contact=true`, alias `YKF Corebot`, `route_count=2`, best retained route seq `291`, confidence `100`, and `active_probe_supported=false`.
+  - No Public-channel RF command was sent in this smoke.
+  - Targeted DM-only proof passed in `artifacts/smoke/d1l-dm-probe-route-trace-pass-local-COM7-COM11.json`: D1L sent token `d1l_dm_probe_20260630_081602` with `mesh send dm`, retained it in `messages dm 0BF0A701D5AE2DB6`, found the matching TX `dm_text` row through `packets search`, and `routes trace` showed fresh `dm_text`, `path_return`, and `dm_ack` evidence.
+  - The COM11 Meshcorebot status remained on active port `COM11` with `meshcore_connected=true`; counters moved `rx_contact_total +1`, `rx_log_total +3`, `relay_success_total +1`, and `discord_send_success_total +1`.
+  - The repeatable DM proof used `public_rf_transmit=false` and sent no `mesh send public` command.
+  - The local release package `artifacts/release/d1l-release-route-trace-local` passed `scripts/verify_checksums.py`.
 
 ## Still Pending
 
@@ -380,6 +391,6 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Physical large-mesh RF stress is still pending; host `large-mesh` simulator stress now covers oversized node/message stores while the current UI renders bounded previews.
-- Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, QR scan/import proof, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, contact export sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
+- Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, QR scan/import proof, and active route ping/trace helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, read-only Route Trace sheet, contact export sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
 - Full 12-hour idle/listening soak is still pending.
 - Flash backup was intentionally skipped per operator instruction.

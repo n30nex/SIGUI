@@ -42,6 +42,7 @@ SMOKE_COMMANDS = [
     "contacts",
     "contacts export",
     "routes",
+    "routes trace 0BF0A701D5AE2DB6",
     "signal",
     "roomservers",
     "repeaters",
@@ -95,11 +96,15 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
 def expected_command_name(command: str) -> str:
     if command.startswith("messages public search "):
         return "messages public"
+    if command == "messages dm clear":
+        return command
     for prefix in [
         "settings set name ",
         "settings set pathhash ",
         "settings onboarding complete ",
         "contacts export ",
+        "messages dm ",
+        "routes trace ",
         "packets filter ",
         "packets search ",
         "packets raw ",
@@ -111,6 +116,7 @@ def expected_command_name(command: str) -> str:
         "radio set rxboost ",
         "backlight ",
         "mesh send public ",
+        "mesh send dm ",
     ]:
         if command.startswith(prefix):
             return prefix.strip()

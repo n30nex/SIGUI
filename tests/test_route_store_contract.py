@@ -26,6 +26,8 @@ def test_route_store_is_bounded_and_nvs_backed():
     assert "now_ms < entry->first_seen_ms" in source
     assert "oldest_index" in source
     assert "d1l_route_store_find_by_seq" in header
+    assert "d1l_route_store_copy_for_target" in header
+    assert "strncmp(s_entries[i].target, target" in source
     assert "ESP_ERR_NOT_FOUND" in source
     assert '"mesh/route_store.c"' in cmake
     assert "d1l_route_store_init()" in app_main
@@ -51,16 +53,23 @@ def test_ui_console_and_smoke_expose_routes():
     assert "recent_routes" in app_header
     assert "route_total_written" in app_header
     assert "d1l_route_store_copy_recent" in app_source
+    assert "d1l_app_model_copy_route_trace" in app_header
+    assert "d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries)" in app_source
     assert "route_count" in ui
     assert 'ok_begin("routes")' in console
     assert 'ok_begin("routes detail")' in console
+    assert 'ok_begin("routes trace")' in console
     assert "d1l_route_store_find_by_seq" in console
+    assert "d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY)" in console
     assert 'strcmp(line, "routes")' in console
     assert 'strncmp(line, "routes detail ", 14)' in console
+    assert 'strncmp(line, "routes trace ", 13)' in console
     assert 'strcmp(line, "routes clear")' in console
     assert "routes detail <seq>" in console
+    assert "routes trace <fingerprint>" in console
     assert "Routes are learned from MeshCore path metadata" in console
     assert "routes" in SMOKE_COMMANDS
+    assert "routes trace 0BF0A701D5AE2DB6" in SMOKE_COMMANDS
     assert "routes clear" in roadmap
 
 
@@ -71,4 +80,5 @@ def test_usb_console_keeps_large_preview_buffers_off_main_stack():
     assert "static d1l_node_entry_t entries[8]" in console
     assert "static d1l_contact_entry_t entries[8]" in console
     assert "static d1l_route_entry_t entries[8]" in console
+    assert "static d1l_route_entry_t entries[D1L_ROUTE_STORE_CAPACITY]" in console
     assert "static char line[256]" in console

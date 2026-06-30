@@ -82,12 +82,14 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_find_contact" in header
     assert "d1l_app_model_set_contact_flags" in header
     assert "d1l_app_model_export_contact_uri" in header
+    assert "d1l_app_model_copy_route_trace" in header
     assert 'd1l_meshcore_service_send_public("test")' in model
     assert "d1l_meshcore_service_send_public(text)" in model
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in model
     assert "d1l_contact_store_find_by_fingerprint(fingerprint, out_contact)" in model
     assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in model
     assert "d1l_contact_store_export_uri(&contact, dest, dest_size)" in model
+    assert "d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
     assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
     assert "d1l_meshcore_service_ensure_identity()" in model
@@ -206,13 +208,19 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     source = read("main/ui/ui_phase1.c")
     assert "static lv_obj_t *s_contact_detail_sheet" in source
     assert "static lv_obj_t *s_contact_export_sheet" in source
+    assert "static lv_obj_t *s_route_trace_sheet" in source
     assert "static d1l_contact_entry_t s_contact_detail_contact" in source
     assert "static d1l_contact_entry_t s_contact_export_contact" in source
+    assert "static d1l_contact_entry_t s_route_trace_contact" in source
+    assert "static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]" in source
     assert "open_contact_detail_event_cb" in source
+    assert "open_route_trace_event_cb" in source
     assert "create_contact_detail_sheet" in source
     assert "create_contact_export_sheet" in source
+    assert "create_route_trace_sheet" in source
     assert "render_contact_detail_sheet" in source
     assert "render_contact_export_sheet" in source
+    assert "render_route_trace_sheet" in source
     assert "contact_detail_dm_event_cb" in source
     assert "contact_detail_export_event_cb" in source
     assert "lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED" in source
@@ -221,6 +229,9 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "s_contact_action_favorite" in source
     assert "s_contact_action_mute" in source
     assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source
+    assert "d1l_app_model_copy_route_trace(contact->fingerprint, s_route_trace_entries" in source
+    assert 'create_button(s_contact_detail_sheet, "Trace"' in source
+    assert '"Local evidence only; active RF ping/trace is pending"' in source
     assert '"Contact Export"' in source
     assert '"MeshCore QR  %.16s  type %u"' in source
     assert "lv_qrcode_create" in source

@@ -1335,6 +1335,80 @@ static void cmd_routes_detail(const char *line)
     printf("}\n");
 }
 
+static bool route_trace_is_direct(const d1l_route_entry_t *entry)
+{
+    return entry && (entry->path_hops == 0 ||
+                     strcmp(entry->route, "direct") == 0);
+}
+
+static size_t route_trace_best_index(const d1l_route_entry_t *entries, size_t count)
+{
+    size_t best = 0;
+    bool best_set = false;
+    for (size_t i = 0; i < count; ++i) {
+        const bool candidate_direct = route_trace_is_direct(&entries[i]);
+        const bool best_direct = best_set && route_trace_is_direct(&entries[best]);
+        if (!best_set ||
+            (candidate_direct && !best_direct) ||
+            (candidate_direct == best_direct && entries[i].confidence > entries[best].confidence) ||
+            (candidate_direct == best_direct && entries[i].confidence == entries[best].confidence &&
+             entries[i].seq > entries[best].seq)) {
+            best = i;
+            best_set = true;
+        }
+    }
+    return best;
+}
+
+static void cmd_routes_trace(const char *line)
+{
+    const char *arg = line + strlen("routes trace ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("routes trace", "INVALID_FINGERPRINT", "usage: routes trace <16-hex-fingerprint>");
+        return;
+    }
+    const char *tail = arg + strlen(fingerprint);
+    while (*tail == ' ') {
+        tail++;
+    }
+    if (*tail != '\0') {
+        err_result("routes trace", "INVALID_FINGERPRINT", "usage: routes trace <16-hex-fingerprint>");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    const bool known_contact = d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
+    static d1l_route_entry_t entries[D1L_ROUTE_STORE_CAPACITY];
+    size_t copied = d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY);
+    const size_t best = copied ? route_trace_best_index(entries, copied) : 0;
+
+    ok_begin("routes trace");
+    printf(",\"fingerprint\":\"%s\",\"known_contact\":%s,\"alias\":",
+           fingerprint, bool_json(known_contact));
+    print_json_string(known_contact && contact.alias[0] ? contact.alias : "");
+    printf(",\"public_key_ready\":%s,\"contact_route\":{\"out_path_known\":%s,\"path_hops\":%u,\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d}",
+           bool_json(known_contact && contact.public_key_hex[0]),
+           bool_json(known_contact && contact.out_path_valid),
+           known_contact && contact.out_path_valid ? contact.path_hops : 0,
+           known_contact ? contact.last_rssi_dbm : 0,
+           known_contact ? contact.last_snr_tenths : 0);
+    printf(",\"route_count\":%u,\"best_route\":\"%s\",\"best_seq\":%lu,\"best_confidence\":%u,\"best_hops\":%u,\"entries\":[",
+           (unsigned)copied,
+           copied ? entries[best].route : "unknown",
+           copied ? (unsigned long)entries[best].seq : 0UL,
+           copied ? entries[best].confidence : 0,
+           copied ? entries[best].path_hops : 0);
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_route_entry_json(&entries[i]);
+    }
+    printf("],\"active_probe_supported\":false,\"note\":\"Trace is local retained route/contact evidence; active RF ping/trace helper is pending\"}\n");
+}
+
 static void cmd_routes_clear(void)
 {
     esp_err_t ret = d1l_route_store_clear();
@@ -1582,7 +1656,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1690,6 +1764,8 @@ static void handle_line(const char *line)
         cmd_routes();
     } else if (strncmp(line, "routes detail ", 14) == 0) {
         cmd_routes_detail(line);
+    } else if (strncmp(line, "routes trace ", 13) == 0) {
+        cmd_routes_trace(line);
     } else if (strcmp(line, "routes clear") == 0) {
         cmd_routes_clear();
     } else if (strcmp(line, "signal") == 0) {

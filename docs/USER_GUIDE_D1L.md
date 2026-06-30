@@ -14,6 +14,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
 - Mesh visibility summaries for signal, room servers, and repeater candidates.
+- Read-only route trace helper for promoted contacts or known fingerprints, backed by retained route/contact evidence.
 - Contact export for promoted contacts with retained public keys, using MeshCore-compatible `meshcore://contact/add?...` serial output and a touch QR sheet.
 - USB serial diagnostics, smoke test, and soak test tooling.
 
@@ -74,6 +75,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `contacts export`
 - `contacts export <fingerprint>`
 - `routes`
+- `routes trace <fingerprint>`
 - `packets`
 - `signal`
 - `roomservers`
@@ -87,6 +89,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - Manual physical review of the touch UI is still pending.
 - Manual touch review of the Radio Settings sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.
+- Route Trace is retained local evidence only; active RF ping/trace commands are not enabled yet.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
 - Full 12-hour idle/listening soak is still pending; the 1-hour active Public `test` soak has passed.
