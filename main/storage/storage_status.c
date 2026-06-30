@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 
 #include "hal/rp2040_bridge.h"
+#include "storage/export_store.h"
 #include "storage/retained_blob_store.h"
 
 static d1l_storage_status_t s_status;
@@ -33,7 +34,7 @@ static void set_store_backends(d1l_storage_status_t *status)
     status->route_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES);
     status->map_tile_backend = "unavailable";
-    status->export_backend = "serial";
+    status->export_backend = d1l_export_store_sd_ready(status) ? "sd_canary_ready" : "serial";
     status->data_enabled = any_retained_sd;
 }
 
@@ -47,6 +48,27 @@ static void set_default_actions(d1l_storage_status_t *status)
     status->file_line_max = 0;
     status->file_chunk_max = 0;
     status->path_max = 0;
+}
+
+static void clear_sd_runtime_fields(d1l_storage_status_t *status)
+{
+    status->rp2040_sd_protocol_supported = false;
+    status->sd_present = false;
+    status->sd_mounted = false;
+    status->sd_data_root_ready = false;
+    status->format_required = false;
+    status->format_supported = false;
+    status->setup_required = false;
+    status->setup_supported = false;
+    status->file_ops_supported = false;
+    status->atomic_rename_supported = false;
+    status->response_truncated = false;
+    status->capacity_kb = 0;
+    status->free_kb = 0;
+    status->file_line_max = 0;
+    status->file_chunk_max = 0;
+    status->path_max = 0;
+    status->sd_filesystem = "unknown";
 }
 
 static const char *stable_sd_state(const char *state)
@@ -194,26 +216,18 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
     }
     s_status.rp2040_bridge_ready = (rp2040_init_result == ESP_OK);
     if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready) {
+        clear_sd_runtime_fields(&s_status);
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
-        s_status.file_ops_supported = false;
-        s_status.atomic_rename_supported = false;
-        s_status.file_line_max = 0;
-        s_status.file_chunk_max = 0;
-        s_status.path_max = 0;
         s_status.sd_state = "rp2040_unavailable";
         s_status.last_error = rp2040_init_result;
         s_status.setup_action = "bridge_unavailable";
         s_status.format_action = "not_available";
         s_status.note = "RP2040 bridge is not ready; SD data storage remains on onboard fallback";
     } else if (s_status.rp2040_bridge_required) {
+        clear_sd_runtime_fields(&s_status);
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
-        s_status.file_ops_supported = false;
-        s_status.atomic_rename_supported = false;
-        s_status.file_line_max = 0;
-        s_status.file_chunk_max = 0;
-        s_status.path_max = 0;
         s_status.sd_state = "protocol_pending";
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
         s_status.setup_action = "bridge_protocol_pending";

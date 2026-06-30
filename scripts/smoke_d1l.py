@@ -121,6 +121,7 @@ def expected_command_name(command: str) -> str:
         "radio set cr ",
         "radio set txpower ",
         "radio set rxboost ",
+        "storage export-canary ",
         "storage retained-canary ",
         "backlight ",
         "mesh send public ",

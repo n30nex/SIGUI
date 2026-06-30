@@ -32,6 +32,7 @@ idf_component_register(
         "mesh/meshcore_service.c"
         "mesh/meshcore_radio_profile.c"
         "storage/retained_blob_store.c"
+        "storage/export_store.c"
         "storage/storage_status.c"
         "ui/ui_phase1.c"
     INCLUDE_DIRS

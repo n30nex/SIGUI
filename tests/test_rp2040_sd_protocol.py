@@ -22,6 +22,11 @@ from tools.rp2040_sd_protocol import (
     b64url,
     crc32_hex,
     encode_path,
+    EXPORT_CANARY_DEFAULT_TOKEN,
+    EXPORT_CANARY_START_ID,
+    export_canary_paths,
+    export_canary_payload,
+    export_canary_transcript,
     file_canary_transcript,
     reply_for_request,
     validate_relative_path,
@@ -250,6 +255,77 @@ def test_filecanary_transcript_fails_safely_without_ready_card():
         "root-missing": "not_ready",
     }.items():
         transcript = file_canary_transcript(SCENARIOS[scenario_name])
+        replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+        assert {reply["ok"] for reply in replies} == {"0"}
+        assert {reply["err"] for reply in replies} == {expected_error}
+
+
+def test_export_canary_transcript_commits_diagnostic_export_without_delete():
+    token = EXPORT_CANARY_DEFAULT_TOKEN
+    transcript = export_canary_transcript(SCENARIOS["ready"], token)
+    requests = [exchange["request"] for exchange in transcript]
+    replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+    tmp_path, final_path = export_canary_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = export_canary_payload(token)
+    payload64 = b64url(payload)
+    payload_crc = crc32_hex(payload)
+
+    assert len(transcript) == 6
+    assert requests[0] == file_request(EXPORT_CANARY_START_ID, "delete", path=tmp)
+    assert replies[0]["ok"] == "0"
+    assert replies[0]["err"] == "not_found"
+    assert requests[1] == file_request(
+        EXPORT_CANARY_START_ID + 1,
+        "write",
+        path=tmp,
+        off=0,
+        len=len(payload),
+        trunc=1,
+        data=payload64,
+        crc=payload_crc,
+    )
+    assert replies[1]["ok"] == "1"
+    assert requests[2] == file_request(
+        EXPORT_CANARY_START_ID + 2,
+        "read",
+        path=tmp,
+        off=0,
+        len=len(payload),
+    )
+    assert replies[2]["data"] == payload64
+    assert requests[3] == file_request(
+        EXPORT_CANARY_START_ID + 3,
+        "rename",
+        path=tmp,
+        to=final,
+        replace=1,
+    )
+    assert replies[3]["ok"] == "1"
+    assert requests[4] == file_request(EXPORT_CANARY_START_ID + 4, "stat", path=final)
+    assert replies[4]["exists"] == "1"
+    assert replies[4]["kind"] == "file"
+    assert requests[5] == file_request(
+        EXPORT_CANARY_START_ID + 5,
+        "read",
+        path=final,
+        off=0,
+        len=len(payload),
+    )
+    assert replies[5]["data"] == payload64
+    assert not any(" op=delete " in request and final in request for request in requests[1:])
+    assert b'"public_rf_tx":false' in payload
+    assert b'"formats_sd":false' in payload
+
+
+def test_export_canary_transcript_fails_safely_without_ready_card():
+    for scenario_name, expected_error in {
+        "no-card": "no_card",
+        "format-required": "not_ready",
+        "root-missing": "not_ready",
+    }.items():
+        transcript = export_canary_transcript(SCENARIOS[scenario_name], "ex1")
         replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
         assert {reply["ok"] for reply in replies} == {"0"}
         assert {reply["err"] for reply in replies} == {expected_error}

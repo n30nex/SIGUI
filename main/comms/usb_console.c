@@ -32,6 +32,7 @@
 #include "mesh/route_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
+#include "storage/export_store.h"
 #include "storage/storage_status.h"
 
 static void trim_line(char *line)
@@ -661,6 +662,8 @@ static void cmd_storage_status(void)
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
     printf(",\"map_tile_backend\":");
     print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"export_backend\":");
+    print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
     print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
     printf(",\"dm\":");
@@ -894,7 +897,7 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
-static bool copy_retained_canary_token(char *dest, size_t dest_size, const char *src)
+static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *src)
 {
     if (!dest || dest_size == 0 || !src) {
         return false;
@@ -915,6 +918,70 @@ static bool copy_retained_canary_token(char *dest, size_t dest_size, const char 
     }
     dest[out] = '\0';
     return out > 0 && *src == '\0';
+}
+
+static void print_storage_export_canary_error(const char *step,
+                                              esp_err_t ret,
+                                              const d1l_storage_status_t *status,
+                                              const d1l_export_canary_result_t *canary)
+{
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage export-canary\",\"code\":\"%s\",\"step\":",
+           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    print_json_string(step ? step : "unknown");
+    printf(",\"sd_state\":");
+    print_json_string(status && status->sd_state ? status->sd_state : "unknown");
+    printf(",\"export_backend\":");
+    print_json_string(status && status->export_backend ? status->export_backend : "serial");
+    printf(",\"path\":");
+    print_json_string(canary ? canary->path : "");
+    printf(",\"tmp_path\":");
+    print_json_string(canary ? canary->tmp_path : "");
+    printf(",\"file_op\":");
+    print_json_string(canary && canary->file.op[0] ? canary->file.op : "");
+    printf(",\"file_error\":");
+    print_json_string(canary && canary->file.err[0] ? canary->file.err : "");
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":\"requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used\"}\n");
+}
+
+static void cmd_storage_export_canary(const char *line)
+{
+    static const char prefix[] = "storage export-canary ";
+    char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("storage export-canary", "INVALID_TOKEN",
+                   "usage: storage export-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(1000U);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    d1l_export_canary_result_t canary = {0};
+    esp_err_t ret = d1l_export_store_write_canary(token, &status, &canary);
+    if (ret != ESP_OK) {
+        print_storage_export_canary_error(canary.step, ret, &status, &canary);
+        return;
+    }
+
+    d1l_storage_status(&status);
+    ok_begin("storage export-canary");
+    printf(",\"token\":");
+    print_json_string(canary.token);
+    printf(",\"path\":");
+    print_json_string(canary.path);
+    printf(",\"tmp_path\":");
+    print_json_string(canary.tmp_path);
+    printf(",\"bytes\":%u,\"write_tmp\":%s,\"read_tmp\":%s,\"rename_replace\":%s,\"stat_final\":%s,\"read_final\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"export_backend\":",
+           (unsigned)canary.bytes,
+           bool_json(canary.write_tmp),
+           bool_json(canary.read_tmp),
+           bool_json(canary.rename_replace),
+           bool_json(canary.stat_final),
+           bool_json(canary.read_final));
+    print_json_string(status.export_backend ? status.export_backend : "serial");
+    printf(",\"note\":\"Diagnostic export SD canary committed by temp write and atomic rename; no Public RF or format command was used\"}\n");
 }
 
 static uint32_t retained_canary_hash(const char *token)
@@ -942,7 +1009,7 @@ static void cmd_storage_retained_canary(const char *line)
     static const char prefix[] = "storage retained-canary ";
     char token[32] = {0};
     if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !copy_retained_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
         err_result("storage retained-canary", "INVALID_TOKEN",
                    "usage: storage retained-canary <token-with-a-z-0-9-dot-dash-underscore>");
         return;
@@ -2158,7 +2225,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage export-canary <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -2226,6 +2293,8 @@ static void handle_line(const char *line)
         cmd_storage_setup(line);
     } else if (strcmp(line, "storage filecanary") == 0) {
         cmd_storage_filecanary();
+    } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
+        cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
     } else if (strcmp(line, "packets") == 0) {

@@ -28,6 +28,9 @@ jobs:
       - name: SD retained history acceptance dry run
         run: python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run
 
+      - name: SD export canary dry run
+        run: python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run
+
       - name: UI simulator screenshots
         run: |
           python ./tools/ui_simulator.py --out artifacts/ui-sim

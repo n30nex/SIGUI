@@ -156,6 +156,42 @@ Canonical ready-card transcript with request IDs starting at `1`:
 The first two cleanup deletes may return `not_found`; that is acceptable. Live
 ESP32 request IDs are process-global, so hardware captures may not start at `1`.
 
+## Storage Export-Canary Transcript
+
+The serial `storage export-canary <token>` command uses the generic file
+protocol to prove one diagnostic export commit path. It is not a full export
+store migration. With token `export1`, it writes:
+
+- Temp path: `exports/diagnostics/export-canary-export1.tmp`
+- Final path: `exports/diagnostics/export-canary-export1.json`
+- Payload: `{"schema":1,"kind":"diagnostic_export_canary","token":"export1","public_rf_tx":false,"formats_sd":false}`
+
+The host simulator prints this request/reply shape:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --export-canary-transcript --token export1
+```
+
+Canonical ready-card transcript with request IDs starting at `20`:
+
+```text
+> DESKOS_SD_FILE v=1 id=20 op=delete path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEudG1w
+< DESKOS_SD_FILE v=1 id=20 ok=0 op=delete err=not_found note=not_found
+> DESKOS_SD_FILE v=1 id=21 op=write path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEudG1w off=0 len=105 trunc=1 data=eyJzY2hlbWEiOjEsImtpbmQiOiJkaWFnbm9zdGljX2V4cG9ydF9jYW5hcnkiLCJ0b2tlbiI6ImV4cG9ydDEiLCJwdWJsaWNfcmZfdHgiOmZhbHNlLCJmb3JtYXRzX3NkIjpmYWxzZX0K crc=976E78C5
+< DESKOS_SD_FILE v=1 id=21 ok=1 op=write off=0 len=105 size=105 note=ok
+> DESKOS_SD_FILE v=1 id=22 op=read path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEudG1w off=0 len=105
+< DESKOS_SD_FILE v=1 id=22 ok=1 op=read off=0 len=105 eof=1 data=eyJzY2hlbWEiOjEsImtpbmQiOiJkaWFnbm9zdGljX2V4cG9ydF9jYW5hcnkiLCJ0b2tlbiI6ImV4cG9ydDEiLCJwdWJsaWNfcmZfdHgiOmZhbHNlLCJmb3JtYXRzX3NkIjpmYWxzZX0K crc=976E78C5 note=ok
+> DESKOS_SD_FILE v=1 id=23 op=rename path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEudG1w to=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEuanNvbg replace=1
+< DESKOS_SD_FILE v=1 id=23 ok=1 op=rename note=ok
+> DESKOS_SD_FILE v=1 id=24 op=stat path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEuanNvbg
+< DESKOS_SD_FILE v=1 id=24 ok=1 op=stat exists=1 kind=file size=105 note=ok
+> DESKOS_SD_FILE v=1 id=25 op=read path=ZXhwb3J0cy9kaWFnbm9zdGljcy9leHBvcnQtY2FuYXJ5LWV4cG9ydDEuanNvbg off=0 len=105
+< DESKOS_SD_FILE v=1 id=25 ok=1 op=read off=0 len=105 eof=1 data=eyJzY2hlbWEiOjEsImtpbmQiOiJkaWFnbm9zdGljX2V4cG9ydF9jYW5hcnkiLCJ0b2tlbiI6ImV4cG9ydDEiLCJwdWJsaWNfcmZfdHgiOmZhbHNlLCJmb3JtYXRzX3NkIjpmYWxzZX0K crc=976E78C5 note=ok
+```
+
+The first temp cleanup delete may return `not_found`; that is acceptable. The
+final JSON is intentionally left present for inspection.
+
 ## Safety Rules
 
 - No automatic format on boot.
@@ -164,4 +200,4 @@ ESP32 request IDs are process-global, so hardware captures may not start at `1`.
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; the export canary can prove one diagnostic export file commit path; full export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.

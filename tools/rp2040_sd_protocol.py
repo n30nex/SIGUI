@@ -25,6 +25,8 @@ FILE_CANARY_TMP_PATH = "canary/filecanary.tmp"
 FILE_CANARY_FINAL_PATH = "canary/filecanary.bin"
 FILE_CANARY_PAYLOAD = b"DeskOS SD file canary v1"
 FILE_CANARY_START_ID = 1
+EXPORT_CANARY_START_ID = 20
+EXPORT_CANARY_DEFAULT_TOKEN = "export1"
 STATUS_FIELDS = (
     "state",
     "present",
@@ -525,12 +527,67 @@ def file_canary_transcript(
     return transcript
 
 
+def export_canary_paths(token: str) -> tuple[str, str]:
+    return (
+        f"exports/diagnostics/export-canary-{token}.tmp",
+        f"exports/diagnostics/export-canary-{token}.json",
+    )
+
+
+def export_canary_payload(token: str) -> bytes:
+    return (
+        f'{{"schema":1,"kind":"diagnostic_export_canary","token":"{token}",'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    ).encode("ascii")
+
+
+def export_canary_requests(token: str, request_id_start: int = EXPORT_CANARY_START_ID) -> list[str]:
+    tmp_path, final_path = export_canary_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = export_canary_payload(token)
+    payload64 = b64url(payload)
+    payload_crc = crc32_hex(payload)
+    request_id = request_id_start
+    return [
+        file_request_line(request_id, "delete", path=tmp),
+        file_request_line(
+            request_id + 1,
+            "write",
+            path=tmp,
+            off=0,
+            len=len(payload),
+            trunc=1,
+            data=payload64,
+            crc=payload_crc,
+        ),
+        file_request_line(request_id + 2, "read", path=tmp, off=0, len=len(payload)),
+        file_request_line(request_id + 3, "rename", path=tmp, to=final, replace=1),
+        file_request_line(request_id + 4, "stat", path=final),
+        file_request_line(request_id + 5, "read", path=final, off=0, len=len(payload)),
+    ]
+
+
+def export_canary_transcript(
+    scenario: SdScenario,
+    token: str = EXPORT_CANARY_DEFAULT_TOKEN,
+    request_id_start: int = EXPORT_CANARY_START_ID,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    transcript = []
+    for request in export_canary_requests(token, request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="ready")
     parser.add_argument("--request", default=STATUS_REQUEST)
     parser.add_argument("--file-canary-transcript", action="store_true")
-    parser.add_argument("--request-id-start", type=int, default=FILE_CANARY_START_ID)
+    parser.add_argument("--export-canary-transcript", action="store_true")
+    parser.add_argument("--request-id-start", type=int)
+    parser.add_argument("--token", default=EXPORT_CANARY_DEFAULT_TOKEN)
     parser.add_argument("--list-scenarios", action="store_true")
     args = parser.parse_args()
 
@@ -540,7 +597,19 @@ def main() -> int:
         return 0
 
     if args.file_canary_transcript:
-        for exchange in file_canary_transcript(SCENARIOS[args.scenario], args.request_id_start):
+        request_id_start = (
+            FILE_CANARY_START_ID if args.request_id_start is None else args.request_id_start
+        )
+        for exchange in file_canary_transcript(SCENARIOS[args.scenario], request_id_start):
+            print(f"> {exchange['request']}")
+            print(f"< {exchange['reply']}")
+        return 0
+
+    if args.export_canary_transcript:
+        request_id_start = (
+            EXPORT_CANARY_START_ID if args.request_id_start is None else args.request_id_start
+        )
+        for exchange in export_canary_transcript(SCENARIOS[args.scenario], args.token, request_id_start):
             print(f"> {exchange['request']}")
             print(f"< {exchange['reply']}")
         return 0

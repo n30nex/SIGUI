@@ -57,6 +57,7 @@ Run these from the repo root after the RP2040 reboots:
 ```powershell
 python .\scripts\smoke_d1l.py --port COM12 --out artifacts\smoke\d1l-smoke-rp2040-sd-bridge-COM12.json
 python .\scripts\sd_file_canary_d1l.py --port COM12 --out artifacts\sd-canary\d1l-sd-file-canary-COM12.json
+python .\scripts\sd_export_canary_d1l.py --port COM12 --token export1 --out artifacts\sd-export-canary\d1l-sd-export-canary-COM12.json
 python .\scripts\sd_retained_history_acceptance_d1l.py --port COM12 --out artifacts\sd-retained-history\d1l-sd-retained-history-COM12.json
 python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary --out artifacts\soak\d1l-passive-soak-rp2040-sd-bridge-COM12.json
 ```
@@ -71,6 +72,10 @@ Expected proof with a ready card:
   `data_backend="mixed"`, and `setup_action="retained_history_sd_enabled"`.
 - `storage filecanary` returns `ok=true`, `rename_replace=true`,
   `read_final=true`, `delete_final=true`, and `stat_deleted=true`.
+- `storage export-canary <token>` returns `ok=true`, `write_tmp=true`,
+  `read_tmp=true`, `rename_replace=true`, `stat_final=true`, `read_final=true`,
+  leaves `exports/diagnostics/export-canary-<token>.json` present, and reports
+  `public_rf_tx=false` plus `formats_sd=false`.
 - `storage retained-canary <token>` returns `ok=true`, appends synthetic Public,
   DM, route, and packet rows without Public RF or formatting, and
   `sd_retained_history_acceptance_d1l.py` proves those rows are readable before
