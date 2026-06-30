@@ -39,6 +39,13 @@ Required tokens:
 
 Values must not contain spaces. Use underscores in `note`.
 
+On the D1L RP2040 bridge, a failed FAT mount is followed by a raw SdFat card
+probe on `SPI1`. If no card responds, the bridge reports `state=no_card` and
+`format_supported=0`. If a card responds but the filesystem is unusable, the
+bridge reports `state=setup_required present=1 mounted=0 format_required=1
+format_supported=1 note=format_required`; the ESP32 may then show the guarded
+format confirmation path.
+
 ## Confirmed Format Request
 
 Formatting is never sent during boot, `storage status`, or plain `storage setup`. It is sent only after the user enters the exact confirmation phrase and only if the latest status reported `present=1`, `format_supported=1`, and setup is required.

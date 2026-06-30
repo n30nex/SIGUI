@@ -23,6 +23,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     readme = README.read_text(encoding="utf-8")
 
     assert '#include <SD.h>' in sketch
+    assert '#include <SdFat.h>' in sketch
     assert '#include <SDFS.h>' in sketch
     assert '#include <SPI.h>' in sketch
     assert "Serial1.setRX(RP2040_ESP32_RX_PIN)" in sketch
@@ -40,7 +41,13 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
-    assert "SDFS.format()" in sketch
+    assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
+    assert "SdCardFactory card_factory" in sketch
+    assert "card_factory.newCard(sd_spi_config(SHARED_SPI))" in sketch
+    assert "card_factory.newCard(sd_spi_config(DEDICATED_SPI))" in sketch
+    assert "FatFormatter fat_formatter" in sketch
+    assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
+    assert "SDFS.format()" not in sketch
     assert "/deskos" in sketch
 
     for token in [STATUS_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, FILE_REQUEST]:
@@ -67,6 +74,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "no_card",
         "ready",
         "deskos_root_missing",
+        "format_required",
         "format_complete",
         "confirmation_required",
         "format_failed",

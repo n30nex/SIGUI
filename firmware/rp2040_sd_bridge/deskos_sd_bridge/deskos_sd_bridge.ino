@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <SD.h>
+#include <SdFat.h>
 #include <SDFS.h>
 #include <SPI.h>
 
@@ -49,6 +50,11 @@ struct SdSnapshot {
     const char *note;
 };
 
+struct CardProbe {
+    bool present;
+    uint32_t capacity_kb;
+};
+
 char rx_line[RX_LINE_MAX];
 size_t rx_len = 0;
 bool drop_until_newline = false;
@@ -70,6 +76,24 @@ bool mount_sd() {
     configure_sd_bus();
     SD.end(false);
     return SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+}
+
+SdSpiConfig sd_spi_config(uint8_t options) {
+    return SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1);
+}
+
+CardProbe probe_card() {
+    CardProbe probe = {false, 0};
+    configure_sd_bus();
+    SdCardFactory card_factory;
+    SdCard *card = card_factory.newCard(sd_spi_config(SHARED_SPI));
+    if (!card || card->errorCode()) {
+        return probe;
+    }
+
+    probe.present = true;
+    probe.capacity_kb = clamp_kb(static_cast<uint64_t>(card->sectorCount()) * 512ULL);
+    return probe;
 }
 
 const char *fat_label() {
@@ -113,6 +137,16 @@ SdSnapshot current_status() {
     };
 
     if (!mount_sd()) {
+        const CardProbe probe = probe_card();
+        if (probe.present) {
+            snapshot.state = "setup_required";
+            snapshot.present = true;
+            snapshot.fs = "unknown";
+            snapshot.format_required = true;
+            snapshot.format_supported = true;
+            snapshot.capacity_kb = probe.capacity_kb;
+            snapshot.note = "format_required";
+        }
         return snapshot;
     }
 
@@ -141,9 +175,15 @@ SdSnapshot current_status() {
 bool format_card() {
     configure_sd_bus();
     SD.end(false);
-    SDFS.setConfig(SDFSConfig(SD_CS_PIN, SD_SPI_HZ, SPI1));
-    const bool formatted = SDFS.format();
-    SDFS.end();
+    SdCardFactory card_factory;
+    SdCard *card = card_factory.newCard(sd_spi_config(DEDICATED_SPI));
+    if (!card || card->errorCode()) {
+        return false;
+    }
+
+    FatFormatter fat_formatter;
+    uint8_t sector_buffer[512];
+    const bool formatted = fat_formatter.format(card, sector_buffer, nullptr);
     if (!formatted) {
         return false;
     }

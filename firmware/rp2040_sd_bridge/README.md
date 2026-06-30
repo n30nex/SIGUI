@@ -73,9 +73,14 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_STATUS` mounts the card if possible and creates `/deskos` when the
   filesystem is usable. Ready cards also advertise `file_ops=1`,
   `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
-  `atomic_rename=1`. If the bridge cannot mount the SD path, it reports a safe
-  no-card/unavailable state instead of enabling the format path.
+  `atomic_rename=1`. If the FAT mount fails, the bridge probes the raw card on
+  `SPI1`: no electrical card still reports `no_card`, while an inserted card
+  with an unusable filesystem reports `setup_required`, `format_required=1`,
+  and `format_supported=1`.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
+  Formatting uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
+  wrapper is avoided because that wrapper does not preserve the configured SPI
+  object on this board.
 - `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under
   `/deskos`: `stat`, `read`, `write`, `append`, `delete`, and `rename`. Payloads
   use base64url without padding, CRC32 checks, sanitized relative paths, and
