@@ -619,7 +619,7 @@ static void cmd_rp2040_status(void)
 
 static void cmd_storage_status(void)
 {
-    (void)d1l_storage_status_refresh(120U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     ok_begin("storage status");
@@ -765,7 +765,7 @@ static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_resul
 
 static void cmd_storage_filecanary(void)
 {
-    (void)d1l_storage_status_refresh(1000U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
@@ -960,7 +960,7 @@ static void cmd_storage_export_canary(const char *line)
         return;
     }
 
-    (void)d1l_storage_status_refresh(1000U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
@@ -1121,7 +1121,7 @@ static void cmd_storage_export_diagnostics(const char *line)
         return;
     }
 
-    (void)d1l_storage_status_refresh(1000U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
@@ -1203,7 +1203,7 @@ static void cmd_storage_retained_canary(const char *line)
         return;
     }
 
-    (void)d1l_storage_status_refresh(1000U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     if (!storage_retained_history_sd_ready(&status)) {
@@ -1284,7 +1284,7 @@ static void cmd_storage_retained_canary(const char *line)
 
 static void cmd_storage_setup(const char *line)
 {
-    (void)d1l_storage_status_refresh(250U);
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 

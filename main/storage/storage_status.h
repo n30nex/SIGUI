@@ -7,6 +7,8 @@
 
 #define D1L_STORAGE_SD_MOUNT_POINT "/sdcard"
 #define D1L_STORAGE_SD_DATA_ROOT "/sdcard/deskos"
+#define D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 3000U
+#define D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U
 
 typedef struct {
     bool initialized;

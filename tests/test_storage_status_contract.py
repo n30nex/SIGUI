@@ -18,6 +18,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
 
     assert "D1L_STORAGE_SD_MOUNT_POINT \"/sdcard\"" in header
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
+    assert "D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 3000U" in header
+    assert "D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U" in header
     assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
@@ -31,7 +33,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
-    assert app_main.index("d1l_storage_status_refresh(120U)") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
     assert 's_status.sd_interface = "rp2040"' in source
@@ -122,7 +124,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
 
     assert '#include "storage/storage_status.h"' in console
     assert 'ok_begin("storage status")' in console
-    assert "d1l_storage_status_refresh(120U)" in console
+    assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
     assert 'ok_begin("storage export-canary")' in console
@@ -196,7 +198,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
 
     assert "cmd_storage_filecanary" in console
-    assert "d1l_storage_status_refresh(1000U)" in console
+    assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_rp2040_bridge_file_write(tmp_path, 0U, payload" in console
     assert "d1l_rp2040_bridge_file_read(tmp_path" in console
     assert "d1l_rp2040_bridge_file_rename(tmp_path, final_path, true" in console
