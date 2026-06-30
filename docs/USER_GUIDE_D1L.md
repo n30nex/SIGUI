@@ -87,5 +87,5 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - Full DM RF proof is still pending.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
-- Full 12-hour idle/listening soak and 1-hour active messaging soak are still pending.
+- Full 12-hour idle/listening soak is still pending; the 1-hour active Public `test` soak has passed.
 - Flash backup was intentionally skipped during current bring-up when the operator requested it.

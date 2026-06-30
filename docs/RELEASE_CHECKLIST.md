@@ -71,7 +71,7 @@
 - [x] Repeatable idle/active soak runner added with JSON artifact output.
 - [x] Short active Public `test` soak passed on `COM7`.
 - [ ] 12-hour idle/listening soak without crash.
-- [ ] 1-hour active Public messaging soak without UI freeze.
+- [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
 
 ## Major Version Release
 

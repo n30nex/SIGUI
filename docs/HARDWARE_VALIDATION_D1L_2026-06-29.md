@@ -330,6 +330,18 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
   - Health remained ready with stack floors of `current=1032` and `ui=1204` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
   - The local release package `artifacts/release/d1l-release-radio-settings-local` passed `scripts/verify_checksums.py`.
+- Phase 7 1-hour active Public `test` soak, first attempt: `artifacts/soak/d1l-soak-active-1h-crashguard-local-COM7-20260629T192241.json`
+  - This attempt was not accepted because one `health` command timed out at sample 59.
+  - It still provided useful no-boot-loop evidence: 62 samples, 30 active Public `test` TX events, monotonic uptime, `mesh_tx_packet_delta=30`, `mesh_rx_packet_delta=43`, `packet_total_written_delta=73`, and `crashlog_count_peak=0` after start clear.
+  - Post-attempt smoke passed in `artifacts/smoke/d1l-smoke-post-failed-1h-soak-local-COM7.json`, confirming the device was responsive after the transient timeout.
+- Phase 7 retry-aware 1-hour active Public `test` soak: `artifacts/soak/d1l-soak-active-1h-crashguard-retry-local-COM7-20260629T202558.json`
+  - The 1-hour active soak passed from `2026-06-30T00:25:58Z` to `2026-06-30T01:26:00Z`.
+  - 62 samples, 30 active Public `test` TX events, 0 command failures, 0 threshold failures, 0 retries needed, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=30` and `mesh_rx_packet_delta=37`; the packet log moved `packet_total_written_delta=67`.
+  - `board_ready_all=true`, `ui_ready_all=true`, and `mesh_ready_all=true`.
+  - `crashlog_total_written_delta=0`, `crashlog_count_peak=0`, and `crashlog_crash_like_count=0` after start clear.
+  - Health remained ready with stack floors of `current=1000` and `ui=1204` words, `lvgl_used_pct_peak=80`, `heap_free_delta=0`, and `psram_free_delta=0`.
+  - Post-soak hardware smoke passed in `artifacts/smoke/d1l-smoke-post-active-1h-crashguard-retry-local-COM7.json`; `mesh status` still reported ready with `rx_packets=87`, `tx_packets=63`, `crashlog` was empty after the start clear, and `health` still reported `board_ready=true` and `ui_ready=true`.
 
 ## Still Pending
 
@@ -339,4 +351,5 @@ Do not use `COM11` or `COM29` for this D1L target.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
 - Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, QR scan/import proof, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, contact export sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
+- Full 12-hour idle/listening soak is still pending.
 - Flash backup was intentionally skipped per operator instruction.

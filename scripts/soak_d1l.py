@@ -48,6 +48,15 @@ def numeric_values(rows: Iterable[dict], field: str) -> list[int]:
     return [value for row in rows if (value := number_or_none(row.get(field))) is not None]
 
 
+def crashlog_entries(rows: Iterable[dict]) -> list[dict]:
+    entries: list[dict] = []
+    for row in rows:
+        row_entries = row.get("entries")
+        if isinstance(row_entries, list):
+            entries.extend(entry for entry in row_entries if isinstance(entry, dict))
+    return entries
+
+
 def first_last_delta(rows: list[dict], field: str) -> int | None:
     values = numeric_values(rows, field)
     if len(values) < 2:
@@ -59,8 +68,40 @@ def monotonic_non_decreasing(values: list[int]) -> bool:
     return all(curr >= prev for prev, curr in zip(values, values[1:]))
 
 
-def collect_sample(ser, timeout: float, label: str, elapsed_sec: float) -> dict:
-    results = [send_console_command(ser, command, timeout) for command in SOAK_COMMANDS]
+def send_soak_command(ser, command: str, timeout: float, retries: int, retry_delay_sec: float) -> dict:
+    attempts = []
+    for attempt in range(max(0, retries) + 1):
+        result = send_console_command(ser, command, timeout)
+        attempts.append(result)
+        if result.get("ok"):
+            if attempt:
+                result = dict(result)
+                result["attempts"] = attempt + 1
+                result["recovered_after_retry"] = True
+                result["retry_failures"] = attempts[:-1]
+            return result
+        if attempt < retries:
+            time.sleep(retry_delay_sec)
+
+    result = dict(attempts[-1])
+    result["attempts"] = len(attempts)
+    result["recovered_after_retry"] = False
+    result["retry_failures"] = attempts[:-1]
+    return result
+
+
+def collect_sample(
+    ser,
+    timeout: float,
+    label: str,
+    elapsed_sec: float,
+    command_retries: int,
+    retry_delay_sec: float,
+) -> dict:
+    results = [
+        send_soak_command(ser, command, timeout, command_retries, retry_delay_sec)
+        for command in SOAK_COMMANDS
+    ]
     return {
         "label": label,
         "elapsed_sec": round(elapsed_sec, 3),
@@ -80,6 +121,7 @@ def summarize_soak(
     mesh = command_results(samples, "mesh status")
     signal = command_results(samples, "signal")
     packet_rows = command_results(samples, "packets")
+    crashlog = command_results(samples, "crashlog")
 
     failures = []
     for sample in samples:
@@ -118,6 +160,22 @@ def summarize_soak(
     heap_min = numeric_values(health, "heap_min_free")
     psram_min = numeric_values(health, "psram_min_free")
     signal_samples = numeric_values(signal, "sample_count")
+    crashlog_total_delta = first_last_delta(crashlog, "total_written")
+    crash_entries = crashlog_entries(crashlog)
+    crash_like_count = sum(1 for entry in crash_entries if entry.get("crash_like") is True)
+    crashlog_count_values = numeric_values(crashlog, "count")
+    retry_rows = [
+        result
+        for sample in samples
+        for result in sample.get("results", [])
+        if number_or_none(result.get("attempts")) is not None and result.get("attempts") > 1
+    ]
+    retry_rows.extend(
+        event.get("result", {})
+        for event in active_events
+        if number_or_none(event.get("result", {}).get("attempts")) is not None
+        and event.get("result", {}).get("attempts") > 1
+    )
 
     board_ready_all = bool(health) and all(row.get("board_ready") is True for row in health)
     ui_ready_all = bool(health) and all(row.get("ui_ready") is True for row in health)
@@ -145,6 +203,8 @@ def summarize_soak(
         threshold_failures.append("ui_task_stack_watermark_zero")
     if active_events and not active_tx_ok:
         threshold_failures.append("active_public_tx_failed")
+    if crash_like_count > 0:
+        threshold_failures.append("crash_like_reset_seen")
     if min_tx_delta > 0 and (tx_delta is None or tx_delta < min_tx_delta):
         threshold_failures.append("tx_delta_below_minimum")
     if require_rx_delta and (rx_delta is None or rx_delta < min_rx_delta):
@@ -174,6 +234,16 @@ def summarize_soak(
         "ui_task_stack_free_words_floor": min(ui_stack) if ui_stack else None,
         "lvgl_used_pct_peak": max(lvgl_used) if lvgl_used else None,
         "signal_sample_count_peak": max(signal_samples) if signal_samples else None,
+        "crashlog_total_written_delta": crashlog_total_delta,
+        "crashlog_count_peak": max(crashlog_count_values) if crashlog_count_values else None,
+        "crashlog_crash_like_count": crash_like_count,
+        "command_retry_count": len(retry_rows),
+        "command_recovered_after_retry_count": sum(
+            1 for row in retry_rows if row.get("recovered_after_retry") is True
+        ),
+        "command_retry_failure_count": sum(
+            1 for row in retry_rows if row.get("recovered_after_retry") is False
+        ),
     }
 
 
@@ -186,6 +256,9 @@ def dry_run_report(
     require_rx_delta: bool,
     min_rx_delta: int,
     min_tx_delta: int,
+    clear_crashlog_before_start: bool,
+    command_retries: int,
+    retry_delay_sec: float,
 ) -> dict:
     return {
         "schema": 1,
@@ -200,6 +273,9 @@ def dry_run_report(
         "require_rx_delta": require_rx_delta,
         "min_rx_delta": min_rx_delta,
         "min_tx_delta": min_tx_delta,
+        "clear_crashlog_before_start": clear_crashlog_before_start,
+        "command_retries": command_retries,
+        "retry_delay_sec": retry_delay_sec,
     }
 
 
@@ -216,6 +292,9 @@ def run_serial_soak(
     require_rx_delta: bool,
     min_rx_delta: int,
     min_tx_delta: int,
+    clear_crashlog_before_start: bool,
+    command_retries: int,
+    retry_delay_sec: float,
 ) -> dict:
     try:
         import serial
@@ -231,11 +310,23 @@ def run_serial_soak(
 
     samples: list[dict] = []
     active_events: list[dict] = []
+    setup_events: list[dict] = []
     started_at = datetime.now(timezone.utc)
 
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(startup_settle_sec)
         ser.reset_input_buffer()
+
+        if clear_crashlog_before_start:
+            setup_events.append(
+                {
+                    "elapsed_sec": 0.0,
+                    "cmd": "crashlog clear",
+                    "result": send_soak_command(
+                        ser, "crashlog clear", timeout, command_retries, retry_delay_sec
+                    ),
+                }
+            )
 
         start = time.monotonic()
         deadline = start + duration_sec
@@ -249,14 +340,24 @@ def run_serial_soak(
 
             if now >= next_sample:
                 label = "start" if sample_index == 0 else f"sample-{sample_index}"
-                samples.append(collect_sample(ser, timeout, label, elapsed))
+                samples.append(
+                    collect_sample(
+                        ser, timeout, label, elapsed, command_retries, retry_delay_sec
+                    )
+                )
                 sample_index += 1
                 next_sample += sample_interval_sec
 
             now = time.monotonic()
             elapsed = now - start
             if active_public_text and now >= next_active and now < deadline:
-                result = send_console_command(ser, f"mesh send public {active_public_text}", timeout)
+                result = send_soak_command(
+                    ser,
+                    f"mesh send public {active_public_text}",
+                    timeout,
+                    command_retries,
+                    retry_delay_sec,
+                )
                 active_events.append(
                     {
                         "elapsed_sec": round(elapsed, 3),
@@ -273,7 +374,11 @@ def run_serial_soak(
             time.sleep(max(0.1, min(sleep_for, 1.0)))
 
         final_elapsed = time.monotonic() - start
-        samples.append(collect_sample(ser, timeout, "final", final_elapsed))
+        samples.append(
+            collect_sample(
+                ser, timeout, "final", final_elapsed, command_retries, retry_delay_sec
+            )
+        )
 
     ended_at = datetime.now(timezone.utc)
     summary = summarize_soak(
@@ -283,6 +388,20 @@ def run_serial_soak(
         min_rx_delta=min_rx_delta,
         min_tx_delta=min_tx_delta,
     )
+    setup_failures = [
+        {
+            "sample": "setup",
+            "elapsed_sec": event.get("elapsed_sec"),
+            "cmd": event.get("cmd"),
+            "code": event.get("result", {}).get("code"),
+        }
+        for event in setup_events
+        if not event.get("result", {}).get("ok")
+    ]
+    if setup_failures:
+        summary["command_failures"].extend(setup_failures)
+        summary["command_failure_count"] = len(summary["command_failures"])
+        summary["ok"] = False
 
     return {
         "schema": 1,
@@ -298,8 +417,12 @@ def run_serial_soak(
         "require_rx_delta": require_rx_delta,
         "min_rx_delta": min_rx_delta,
         "min_tx_delta": min_tx_delta,
+        "clear_crashlog_before_start": clear_crashlog_before_start,
+        "command_retries": command_retries,
+        "retry_delay_sec": retry_delay_sec,
         "ok": summary["ok"],
         "summary": summary,
+        "setup_events": setup_events,
         "active_events": active_events,
         "samples": samples,
     }
@@ -328,6 +451,9 @@ def main() -> int:
     parser.add_argument("--require-rx-delta", action="store_true")
     parser.add_argument("--min-rx-delta", type=int, default=1)
     parser.add_argument("--min-tx-delta", type=int, default=0)
+    parser.add_argument("--clear-crashlog-before-start", action="store_true")
+    parser.add_argument("--command-retries", type=int, default=1)
+    parser.add_argument("--retry-delay-sec", type=float, default=0.5)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -341,6 +467,9 @@ def main() -> int:
             require_rx_delta=args.require_rx_delta,
             min_rx_delta=args.min_rx_delta,
             min_tx_delta=args.min_tx_delta,
+            clear_crashlog_before_start=args.clear_crashlog_before_start,
+            command_retries=args.command_retries,
+            retry_delay_sec=args.retry_delay_sec,
         )
         mode = "dry-run"
     else:
@@ -359,6 +488,9 @@ def main() -> int:
                 require_rx_delta=args.require_rx_delta,
                 min_rx_delta=args.min_rx_delta,
                 min_tx_delta=args.min_tx_delta,
+                clear_crashlog_before_start=args.clear_crashlog_before_start,
+                command_retries=args.command_retries,
+                retry_delay_sec=args.retry_delay_sec,
             )
         except ValueError as exc:
             parser.error(str(exc))

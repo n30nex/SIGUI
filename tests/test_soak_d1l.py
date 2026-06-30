@@ -58,12 +58,17 @@ def test_dry_run_reports_soak_commands():
         require_rx_delta=True,
         min_rx_delta=1,
         min_tx_delta=1,
+        clear_crashlog_before_start=True,
+        command_retries=1,
+        retry_delay_sec=0.5,
     )
 
     assert report["ok"] is True
     assert report["commands"] == soak_d1l.SOAK_COMMANDS
     assert report["active_public_text"] == "test"
     assert report["require_rx_delta"] is True
+    assert report["clear_crashlog_before_start"] is True
+    assert report["command_retries"] == 1
 
 
 def test_summarize_soak_tracks_deltas_and_watermarks():
@@ -127,6 +132,7 @@ def test_summarize_soak_tracks_deltas_and_watermarks():
     assert summary["current_task_stack_free_words_floor"] == 1180
     assert summary["lvgl_used_pct_peak"] == 54
     assert summary["signal_sample_count_peak"] == 6
+    assert summary["command_retry_count"] == 0
 
 
 def test_summarize_soak_detects_reboot_and_missing_rx_delta():
@@ -174,3 +180,78 @@ def test_summarize_soak_detects_reboot_and_missing_rx_delta():
     assert summary["ok"] is False
     assert "uptime_reset_or_reboot_seen" in summary["threshold_failures"]
     assert "rx_delta_below_minimum" in summary["threshold_failures"]
+
+
+def test_summarize_soak_detects_crash_like_reset_entries():
+    row = sample(
+        "start",
+        0,
+        {
+            "uptime_ms": 1000,
+            "heap_free": 100000,
+            "heap_min_free": 99000,
+            "psram_free": 200000,
+            "psram_min_free": 199000,
+            "current_task_stack_free_words": 1200,
+            "ui_task_stack_free_words": 1300,
+            "lvgl_used_pct": 50,
+        },
+        {"rx_packets": 5, "tx_packets": 7},
+    )
+    row["results"][-1] = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "count": 1,
+        "total_written": 1,
+        "entries": [{"seq": 1, "reset_reason": "PANIC", "crash_like": True}],
+    }
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+    )
+
+    assert summary["ok"] is False
+    assert summary["crashlog_crash_like_count"] == 1
+    assert summary["crashlog_count_peak"] == 1
+    assert "crash_like_reset_seen" in summary["threshold_failures"]
+
+
+def test_summarize_soak_counts_recovered_command_retries():
+    row = sample(
+        "start",
+        0,
+        {
+            "uptime_ms": 1000,
+            "heap_free": 100000,
+            "heap_min_free": 99000,
+            "psram_free": 200000,
+            "psram_min_free": 199000,
+            "current_task_stack_free_words": 1200,
+            "ui_task_stack_free_words": 1300,
+            "lvgl_used_pct": 50,
+        },
+        {"rx_packets": 5, "tx_packets": 7},
+    )
+    row["results"][0]["attempts"] = 2
+    row["results"][0]["recovered_after_retry"] = True
+    row["results"][0]["retry_failures"] = [
+        {"schema": 1, "ok": False, "cmd": "health", "code": "TIMEOUT"}
+    ]
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+    )
+
+    assert summary["ok"] is True
+    assert summary["command_retry_count"] == 1
+    assert summary["command_recovered_after_retry_count"] == 1
+    assert summary["command_retry_failure_count"] == 0

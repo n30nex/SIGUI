@@ -645,7 +645,7 @@ Tasks:
 
 - Fix memory leaks.
 - Task watchdog tuning.
-- Long-run soak test. Status: first `scripts/soak_d1l.py` harness is implemented for idle/listening and active Public `test` soak windows with heap/PSRAM, task-stack, LVGL, uptime, packet-counter, signal, unread, and crashlog sampling. A 3-minute active Public `test` hardware soak passed on `COM7`; long acceptance soaks are still pending.
+- Long-run soak test. Status: `scripts/soak_d1l.py` is implemented for idle/listening and active Public `test` soak windows with heap/PSRAM, task-stack, LVGL, uptime, packet-counter, signal, unread, command-retry, and crashlog/crash-like reset sampling. A retry-aware 1-hour active Public `test` hardware soak passed on `COM7`; the 12-hour idle/listening acceptance soak is still pending.
 - Touch edge-case fixes.
 - Dark theme contrast pass.
 - UI animation performance pass.
@@ -655,8 +655,8 @@ Tasks:
 Acceptance:
 
 - 12-hour idle/listening soak without crash. Status: repeatable soak command exists; full-duration run is pending.
-- 1-hour active messaging test without UI freeze. Status: repeatable active Public `test` soak command exists and a 3-minute active hardware probe passed with `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=8`; full-duration run is pending.
-- No steadily declining heap/PSRAM in normal use. Status: richer heap/PSRAM/LVGL/task stack telemetry is implemented and validated in smoke; soak harness now records deltas/floors/peaks, but long-run soak is pending.
+- 1-hour active messaging test without UI freeze. Status: passed on `COM7` with 62 samples, 30 active Public `test` TX events, `mesh_tx_packet_delta=30`, `mesh_rx_packet_delta=37`, 0 command failures, 0 threshold failures, monotonic uptime, and no crashlog entries after start clear.
+- No steadily declining heap/PSRAM in normal use. Status: richer heap/PSRAM/LVGL/task stack telemetry is implemented and validated in smoke; the 1-hour active soak held `heap_free_delta=0` and `psram_free_delta=0`, and the 12-hour idle/listening soak is pending.
 
 ### Phase 8 — Release packaging and docs
 
@@ -672,7 +672,7 @@ Tasks:
 - Developer guide. Status: first `docs/DEVELOPER_GUIDE_D1L.md` added.
 - Known limitations. Status: `docs/KNOWN_LIMITATIONS.md` is updated through the Phase 7 soak harness.
 - Screenshots/photos. Status: host simulator screenshots are generated locally and by GitHub Actions under `artifacts/ui-sim`; physical screen photos/manual visual review are still pending.
-- Final test report. Status: hardware validation notes are current through the short active soak, release package checkpoint, and release-package sanity smoke; final full-release report is pending long soaks and manual UI review.
+- Final test report. Status: hardware validation notes are current through the 1-hour active Public soak, release package checkpoint, and release-package sanity smoke; final full-release report is pending the 12-hour idle/listening soak and manual UI review.
 
 Acceptance:
 
