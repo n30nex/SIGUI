@@ -18,8 +18,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
 
     assert "D1L_STORAGE_SD_MOUNT_POINT \"/sdcard\"" in header
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
-    assert "D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 3000U" in header
+    assert "D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 10000U" in header
     assert "D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U" in header
+    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 30000U" in header
     assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
@@ -182,7 +183,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage_format_hint" in console
     assert "format_requested" in console
     assert "format_performed" in console
-    assert "d1l_storage_format_sd_confirmed(phrase, 3000U)" in console
+    assert "d1l_storage_format_sd_confirmed(" in console
+    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS" in console
     assert '\\"file_ops\\":%s' in console
     assert '\\"file_line_max\\":%lu' in console
     assert '\\"file_chunk_max\\":%lu' in console

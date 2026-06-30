@@ -1296,7 +1296,8 @@ static void cmd_storage_setup(const char *line)
                        "type storage setup confirm FORMAT-DESKOS-SD to request SD format after the bridge supports it");
             return;
         }
-        esp_err_t ret = d1l_storage_format_sd_confirmed(phrase, 3000U);
+        esp_err_t ret = d1l_storage_format_sd_confirmed(
+            phrase, D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS);
         d1l_storage_status(&status);
         if (ret != ESP_OK) {
             err_result("storage setup", esp_err_to_name(ret), storage_format_hint(ret, &status));
