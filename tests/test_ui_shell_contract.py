@@ -26,6 +26,8 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_node_store_copy_recent" in source
     assert "d1l_packet_log_copy_recent" in source
     assert "d1l_dm_store_copy_recent" in source
+    assert "d1l_app_model_copy_dm_thread" in header
+    assert "d1l_dm_store_copy_thread(fingerprint, out_entries, max_entries)" in source
     assert "d1l_meshcore_service_status" in source
     assert "d1l_health_snapshot" in source
     assert "d1l_connectivity_status" in source
@@ -147,6 +149,11 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "render_dm_thread_sheet" in source
     assert "open_dm_thread_event_cb" in source
     assert "reply_dm_thread_event_cb" in source
+    assert "static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in source
+    assert "static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY]" in source
+    assert "d1l_app_model_copy_dm_thread(s_dm_thread_fingerprint" in source
+    assert "lv_obj_set_scroll_dir(list, LV_DIR_VER)" in source
+    assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in source
     assert "lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact)" in source

@@ -189,6 +189,18 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
     return d1l_meshcore_service_send_dm(fingerprint, text);
 }
 
+size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
+                                    bool *out_unread, size_t max_entries)
+{
+    const size_t copied = d1l_dm_store_copy_thread(fingerprint, out_entries, max_entries);
+    if (out_unread) {
+        for (size_t i = 0; i < copied; ++i) {
+            out_unread[i] = d1l_read_state_dm_entry_is_unread(&out_entries[i]);
+        }
+    }
+    return copied;
+}
+
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact)
 {
     if (!fingerprint || fingerprint[0] == '\0' || !out_contact) {

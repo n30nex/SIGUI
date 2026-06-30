@@ -250,3 +250,31 @@ size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries)
     }
     return n;
 }
+
+size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
+                                size_t max_entries)
+{
+    if (!contact_fingerprint || contact_fingerprint[0] == '\0' ||
+        out_entries == NULL || max_entries == 0 || s_count == 0) {
+        return 0;
+    }
+
+    size_t matches = 0;
+    size_t oldest = (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry = &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (strncmp(entry->contact_fingerprint, contact_fingerprint,
+                    sizeof(entry->contact_fingerprint)) != 0) {
+            continue;
+        }
+        if (matches < max_entries) {
+            out_entries[matches] = *entry;
+        } else {
+            memmove(out_entries, out_entries + 1U, sizeof(out_entries[0]) * (max_entries - 1U));
+            out_entries[max_entries - 1U] = *entry;
+        }
+        matches++;
+    }
+
+    return matches < max_entries ? matches : max_entries;
+}

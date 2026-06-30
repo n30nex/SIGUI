@@ -59,6 +59,8 @@ static d1l_contact_entry_t s_contact_export_contact;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
+static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
+static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
@@ -1389,41 +1391,53 @@ static void render_dm_thread_sheet(void)
     create_button(s_dm_thread_sheet, "Read", 270, 0, 56, 40, read_dm_thread_event_cb, NULL);
     create_button(s_dm_thread_sheet, "Close", 334, 0, 76, 40, close_dm_thread_event_cb, NULL);
 
+    const size_t thread_count =
+        d1l_app_model_copy_dm_thread(s_dm_thread_fingerprint, s_dm_thread_entries,
+                                     s_dm_thread_unread, D1L_DM_STORE_CAPACITY);
+
     lv_obj_t *meta = create_label(s_dm_thread_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.16s  stored %u", s_dm_thread_fingerprint, (unsigned)s_snapshot.dm_count);
+    label_set_fmt(meta, "%.16s  thread %u/%u stored", s_dm_thread_fingerprint,
+                  (unsigned)thread_count, (unsigned)s_snapshot.dm_count);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
     lv_obj_set_pos(meta, 8, 42);
 
-    int y = 68;
-    size_t matches = 0;
-    for (size_t i = 0; i < s_snapshot.recent_dm_count && y <= 246; ++i) {
-        const d1l_dm_entry_t *entry = &s_snapshot.recent_dms[i];
-        if (strcmp(entry->contact_fingerprint, s_dm_thread_fingerprint) != 0) {
-            continue;
-        }
-        const bool unread = s_snapshot.recent_dm_unread[i];
-        lv_obj_t *row = create_panel(s_dm_thread_sheet, 0, y, 424, 48);
+    lv_obj_t *list = lv_obj_create(s_dm_thread_sheet);
+    lv_obj_set_size(list, 424, 196);
+    lv_obj_set_pos(list, 0, 68);
+    lv_obj_set_style_radius(list, 6, 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+
+    int y = 0;
+    for (size_t i = 0; i < thread_count; ++i) {
+        const d1l_dm_entry_t *entry = &s_dm_thread_entries[i];
+        const bool unread = s_dm_thread_unread[i];
+        lv_obj_t *row = create_panel(list, 0, y, 404, 48);
         lv_obj_set_style_pad_all(row, 8, 0);
         const char *who = entry->direction[0] == 't' ? "You" : alias;
         lv_obj_t *sender = create_label(row, who,
                                         unread ? 0xFBBF24 :
                                         (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
         lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(sender, 190);
+        lv_obj_set_width(sender, 160);
         lv_obj_align(sender, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *state = create_label(row, dm_row_state(entry, unread), 0x8EA0AE);
+        lv_obj_t *state = create_label(row, "", 0x8EA0AE);
+        label_set_fmt(state, "#%lu %s", (unsigned long)entry->seq, dm_row_state(entry, unread));
         lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
         lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
         lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(text, 392);
+        lv_obj_set_width(text, 372);
         lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         y += 54;
-        ++matches;
     }
-    if (matches == 0) {
-        lv_obj_t *empty = create_label(s_dm_thread_sheet, "No recent rows for this contact", 0x8EA0AE);
-        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 10);
+    if (thread_count == 0) {
+        lv_obj_t *empty = create_label(list, "No retained rows for this contact", 0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
+    } else {
+        lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
     }
 }
 

@@ -64,7 +64,8 @@
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.
 - [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
 - [x] Per-thread DM read cursors are persisted, exposed through serial diagnostics, and surfaced in the DM thread sheet.
-- [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, controlled inbound DM proof, and richer full-thread history.
+- [x] DM thread sheet renders bounded scrollable retained history and `messages dm <fingerprint>` filters one retained thread; host/simulator, COM7 smoke, targeted serial, and active Public RF regression pass.
+- [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, and controlled inbound DM proof.
 
 ## Phase 7 Polish And Soak
 

@@ -35,7 +35,7 @@ Coverage:
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, DM store contract, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -71,7 +71,7 @@ Expected commands:
 - `packets filter any any`
 - `packets search test`
 - `messages public`
-- `messages dm`
+- `messages dm [fingerprint]`
 - `messages unread`
 - `nodes`
 - `contacts`
@@ -166,11 +166,12 @@ For Phase 4 direct-message store validation:
 2. Run `messages dm clear`.
 3. Run `mesh send dm <fingerprint> <text>`.
 4. Verify `messages dm` contains a TX row with the contact fingerprint, alias, text, `direction="tx"`, `persisted=true`, and a nonzero `ack_hash`.
-5. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement.
-6. If the peer emits MeshCore ACK/PATH returns, verify `messages dm` marks the TX row `acked=true` and `contacts` shows `out_path_known=true`.
-7. Send a second DM to the same contact and verify `routes` records `kind="dm_text"`, `direction="tx"`, and `route="direct"`.
-8. Reboot.
-9. Verify `messages dm` retains the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
+5. Verify `messages dm <fingerprint>` returns `filtered=true`, the same fingerprint, and only rows for that retained thread.
+6. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement.
+7. If the peer emits MeshCore ACK/PATH returns, verify `messages dm` marks the TX row `acked=true` and `contacts` shows `out_path_known=true`.
+8. Send a second DM to the same contact and verify `routes` records `kind="dm_text"`, `direction="tx"`, and `route="direct"`.
+9. Reboot.
+10. Verify `messages dm` and `messages dm <fingerprint>` retain the TX row and `health` reports `board_ready=true`, `ui_ready=true`, and increasing uptime.
 
 ## Touch DM Compose
 
@@ -187,7 +188,7 @@ For Phase 4 touch direct-message thread validation:
 
 1. Verify `messages dm` contains at least one row for a contact with a full public key.
 2. Open the Messages tab and tap the DM preview row.
-3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, recent rows for the same fingerprint, and `Reply`/`Read`/`Close` actions.
+3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, retained rows for the same fingerprint, and `Reply`/`Read`/`Close` actions.
 4. Tap `Reply`, type a short message, and tap `Send`.
 5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
 6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.

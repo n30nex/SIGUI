@@ -797,25 +797,59 @@ static void cmd_messages_clear(void)
     printf(",\"persisted\":true,\"count\":0}\n");
 }
 
-static void cmd_messages_dm(void)
+static void print_dm_entry_json(const d1l_dm_entry_t *e)
+{
+    printf("{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu}",
+           (unsigned long)e->seq, (unsigned long)e->uptime_ms,
+           e->contact_fingerprint, e->contact_alias, e->direction, e->text,
+           e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
+           e->attempt, bool_json(e->delivered), bool_json(e->acked),
+           (unsigned long)e->ack_hash);
+}
+
+static void cmd_messages_dm(const char *line)
 {
     d1l_dm_store_stats_t stats = d1l_dm_store_stats();
-    static d1l_dm_entry_t entries[8];
-    size_t copied = d1l_dm_store_copy_recent(entries, 8);
-    ok_begin("messages dm");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
-           (unsigned)stats.count, (unsigned)stats.capacity,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
-    for (size_t i = 0; i < copied; ++i) {
-        const d1l_dm_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"uptime_ms\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"direction\":\"%s\",\"text\":\"%s\",\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"attempt\":%u,\"delivered\":%s,\"acked\":%s,\"ack_hash\":%lu}",
-               i ? "," : "", (unsigned long)e->seq, (unsigned long)e->uptime_ms,
-               e->contact_fingerprint, e->contact_alias, e->direction, e->text,
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
-               e->attempt, bool_json(e->delivered), bool_json(e->acked),
-               (unsigned long)e->ack_hash);
+    static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
+    char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    bool filtered = false;
+    size_t copied = 0;
+
+    if (strcmp(line, "messages dm") == 0) {
+        copied = d1l_dm_store_copy_recent(entries, 8);
+    } else if (strncmp(line, "messages dm ", 12) == 0) {
+        const char *fingerprint = line + 12;
+        while (*fingerprint == ' ') {
+            fingerprint++;
+        }
+        if (!parse_fingerprint_token(fingerprint, thread_fingerprint,
+                                     sizeof(thread_fingerprint))) {
+            err_result("messages dm", "INVALID_FINGERPRINT",
+                       "usage: messages dm [fingerprint]");
+            return;
+        }
+        filtered = true;
+        copied = d1l_dm_store_copy_thread(thread_fingerprint, entries, D1L_DM_STORE_CAPACITY);
+    } else {
+        err_result("messages dm", "INVALID_TARGET", "usage: messages dm [fingerprint]");
+        return;
     }
-    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in a bounded NVS store\"}\n");
+
+    ok_begin("messages dm");
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s",
+           (unsigned)stats.count, (unsigned)stats.capacity,
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           bool_json(filtered));
+    if (filtered) {
+        printf(",\"fingerprint\":\"%s\",\"thread_count\":%u",
+               thread_fingerprint, (unsigned)copied);
+    }
+    printf(",\"entries\":[");
+    for (size_t i = 0; i < copied; ++i) {
+        printf("%s", i ? "," : "");
+        print_dm_entry_json(&entries[i]);
+    }
+    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in a bounded NVS store; optional fingerprint filters one retained thread\"}\n");
 }
 
 static void cmd_messages_dm_clear(void)
@@ -1472,7 +1506,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1547,16 +1581,19 @@ static void handle_line(const char *line)
         cmd_packets_clear();
     } else if (strcmp(line, "messages public") == 0) {
         cmd_messages_public();
-    } else if (strcmp(line, "messages dm") == 0) {
-        cmd_messages_dm();
+    } else if (strcmp(line, "messages dm") == 0 ||
+               strncmp(line, "messages dm ", 12) == 0) {
+        if (strcmp(line, "messages dm clear") == 0) {
+            cmd_messages_dm_clear();
+        } else {
+            cmd_messages_dm(line);
+        }
     } else if (strcmp(line, "messages unread") == 0) {
         cmd_messages_unread();
     } else if (strncmp(line, "messages read ", 14) == 0) {
         cmd_messages_read(line);
     } else if (strcmp(line, "messages clear") == 0) {
         cmd_messages_clear();
-    } else if (strcmp(line, "messages dm clear") == 0) {
-        cmd_messages_dm_clear();
     } else if (strcmp(line, "nodes") == 0) {
         cmd_nodes();
     } else if (strcmp(line, "nodes clear") == 0) {

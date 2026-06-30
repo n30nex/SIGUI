@@ -47,3 +47,5 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
 size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries);
+size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
+                                size_t max_entries);

@@ -576,7 +576,7 @@ Acceptance:
 Tasks:
 
 - Public chat screen. Status: first touch Public screen is implemented with persisted recent message rows.
-- DM screen. Status: first persisted DM preview is implemented in the Messages screen, prerequisite full public-key retention from signed adverts into heard nodes and promoted contacts is implemented and validated on `COM7`, a first contact-row touch DM compose flow is implemented/built/flashed, and a first bounded DM thread/detail sheet opens from recent DM rows with `Reply` and per-thread `Read` actions; manual touch review and richer full-thread history are still pending.
+- DM screen. Status: first persisted DM preview is implemented in the Messages screen, prerequisite full public-key retention from signed adverts into heard nodes and promoted contacts is implemented and validated on `COM7`, a first contact-row touch DM compose flow is implemented/built/flashed, and a bounded DM thread/detail sheet opens from recent DM rows with `Reply`, per-thread `Read`, and scrollable retained thread history; manual touch review is still pending.
 - Message compose with on-screen keyboard or large input flow. Status: first Public free-text composer and contact-row DM composer are implemented beside the fixed `test` quick action and were built/flashed on `COM7`; manual physical touch entry review is pending.
 - Quick replies. Status: first fixed Public `test` quick action is implemented.
 - Message delivery states. Status: persisted rows show queued TX, received RX, and DM TX ACK hash fields; MeshCore ACK RX parsing can mark persisted TX rows acked, but controlled ACK RF proof is still pending.
@@ -588,7 +588,7 @@ Tasks:
 
 Acceptance:
 
-- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented; first contact-row touch DM composer is implemented and routes through the same DM backend as serial; first bounded DM thread/detail sheet with `Reply` and per-thread `Read` is implemented; serial DM flood TX/store/reboot persistence is validated with `YKF Corebot`; DM ACK/PATH receive parsing and direct-route TX selection are implemented. First Public unread/read behavior is validated on `COM7`: after `messages read all`, a fresh Public `test` produced two RX rows, raised `public_unread=2`, cleared with `messages read public`, and stayed cleared after reboot. Manual physical touch entry/thread/reply/read review, inbound DM proof, controlled ACK/PATH RF proof, and direct-route RF proof are pending.
+- User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented; first contact-row touch DM composer is implemented and routes through the same DM backend as serial; bounded DM thread/detail history with `Reply` and per-thread `Read` is implemented; serial DM flood TX/store/reboot persistence is validated with `YKF Corebot`; DM ACK/PATH receive parsing and direct-route TX selection are implemented. First Public unread/read behavior is validated on `COM7`: after `messages read all`, a fresh Public `test` produced two RX rows, raised `public_unread=2`, cleared with `messages read public`, and stayed cleared after reboot. Manual physical touch entry/thread/reply/read review, inbound DM proof, controlled ACK/PATH RF proof, and direct-route RF proof are pending.
 - Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack. Host simulator large-mesh stress now feeds 96 heard nodes, 18 contacts, 48 Public messages, and 32 DM messages while asserting bounded visible rows and no text overflow; live RF stress with a genuinely large hardware mesh is still pending.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot. Bounded DM store TX persistence was validated on `COM7` with `YKF Corebot`; `messages dm` retained the TX row after reboot. Public read state also survived reboot with `last_public_read_seq=10` and `public_unread=0`. Packet evidence now also persists the newest 8 rows across reboot.
 - Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot. Full public-key retention was validated on `COM7` with `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`; the heard-node and promoted contact public key survived reboot. Favorite/mute contact flags were toggled on, survived reboot, and were toggled off again on `COM7`.
@@ -707,7 +707,7 @@ mesh advert flood
 mesh send public <text>
 mesh send dm <fingerprint> <text>
 messages public
-messages dm
+messages dm [fingerprint]
 messages unread
 messages read <public|dm|dm <fingerprint>|all>
 messages clear

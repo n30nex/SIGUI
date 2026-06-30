@@ -353,11 +353,22 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
   - Health remained ready with stack floors of `current=1000` and `ui=1344` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
   - `crashlog_count_peak=0` and `crashlog_crash_like_count=0` after start clear.
+- Phase 4 DM thread retained-history local smoke: `artifacts/smoke/d1l-smoke-dm-thread-history-local-COM7.json`
+  - Local Podman ESP-IDF build passed; `meshcore_deskos_d1l.bin` size was `0xa88d0`, leaving 34% free in the smallest app partition.
+  - Local app SHA256 was `81EEE3D06D3C2D3E83FDDE4A23EB11E3689000B42A655EC05DB692FE45E96569`.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - Standard smoke passed. `messages dm` returned `filtered=false`, retained the existing YKF Corebot TX row, and `health` reported `board_ready=true` and `ui_ready=true`.
+  - Targeted serial proof passed: `messages dm 0BF0A701D5AE2DB6` returned `filtered=true`, `thread_count=1`, and only the retained YKF Corebot row; `help` advertised `messages dm [fingerprint]`.
+- Phase 4 DM thread retained-history active Public `test` RF regression: `artifacts/soak/d1l-soak-dm-thread-history-rf-local-COM7.json`
+  - The 3-minute active soak passed with 8 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, 0 retries, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=2`; the packet log moved `packet_total_written_delta=5`.
+  - Health remained ready with stack floors of `current=1032` and `ui=1264` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
+  - `crashlog_count_peak=0` and `crashlog_crash_like_count=0` after start clear.
 
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.
-- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, Radio Settings sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
+- Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, Radio Settings sheet, DM thread/reply/history sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
 - Physical large-mesh RF stress is still pending; host `large-mesh` simulator stress now covers oversized node/message stores while the current UI renders bounded previews.

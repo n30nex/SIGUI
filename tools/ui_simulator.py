@@ -617,14 +617,22 @@ def render_contact_export_sheet(s: Surface, snap: Snapshot):
 
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "DM Thread", "YKF Corebot")
+    s.text(f"Thread {len(snap.dm_messages)} rows", (44, 132, 436, 150), 12, MUTED)
+    visible_messages = snap.dm_messages[-3:]
     y = 154
-    for msg in snap.dm_messages:
+    for msg in visible_messages:
         draw_row(s, (44, y, 436, y + 42), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 50
     draw_button(s, (44, 304, 160, 356), "Reply", GREEN)
     draw_button(s, (174, 304, 290, 356), "Read", ACCENT)
     draw_button(s, (304, 304, 420, 356), "Close", MUTED)
     draw_dock(s, "Messages")
+    s.metrics.update(
+        {
+            "dm_thread_source_count": len(snap.dm_messages),
+            "dm_thread_rendered_count": len(visible_messages),
+        }
+    )
 
 
 def render_route_detail_sheet(s: Surface, snap: Snapshot):

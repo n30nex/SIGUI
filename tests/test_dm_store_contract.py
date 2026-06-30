@@ -19,11 +19,14 @@ def test_dm_store_is_bounded_and_nvs_backed():
     assert "contact_fingerprint" in header
     assert "ack_hash" in header
     assert "d1l_dm_store_mark_acked" in header
+    assert "d1l_dm_store_copy_thread" in header
     assert 'D1L_DM_STORE_NAMESPACE "d1l_dms"' in source
     assert 'D1L_DM_STORE_KEY "threads"' in source
     assert "nvs_get_blob" in source
     assert "nvs_set_blob" in source
     assert "entry->acked = true" in source
+    assert "d1l_dm_store_copy_thread" in source
+    assert "strncmp(entry->contact_fingerprint, contact_fingerprint" in source
     assert "static d1l_dm_store_blob_t s_blob_scratch" in source
     assert '"mesh/dm_store.c"' in cmake
     assert "d1l_dm_store_init()" in app_main
@@ -61,10 +64,13 @@ def test_console_and_smoke_expose_dm_workflow():
     console = read("main/comms/usb_console.c")
     assert 'ok_begin("messages dm")' in console
     assert 'strcmp(line, "messages dm")' in console
+    assert 'strncmp(line, "messages dm ", 12)' in console
+    assert "d1l_dm_store_copy_thread(thread_fingerprint, entries, D1L_DM_STORE_CAPACITY)" in console
     assert 'strcmp(line, "messages dm clear")' in console
     assert 'strncmp(line, "mesh send dm ", 13)' in console
     assert "d1l_meshcore_service_send_dm(fingerprint, text)" in console
-    assert "MeshCore direct-message rows are kept in a bounded NVS store" in console
+    assert "messages dm [fingerprint]" in console
+    assert "optional fingerprint filters one retained thread" in console
     assert "messages dm" in SMOKE_COMMANDS
 
 
@@ -76,7 +82,13 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "recent_dms" in header
     assert "dm_total_written" in header
     assert "d1l_dm_store_copy_recent" in source
+    assert "d1l_app_model_copy_dm_thread" in header
+    assert "d1l_dm_store_copy_thread(fingerprint, out_entries, max_entries)" in source
+    assert "d1l_read_state_dm_entry_is_unread(&out_entries[i])" in source
     assert "d1l_app_model_send_dm_text" in source
     assert "render_dm_row" in ui
+    assert "d1l_app_model_copy_dm_thread(s_dm_thread_fingerprint" in ui
+    assert "s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in ui
+    assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in ui
     assert '"DM"' in ui
     assert "No stored messages" in ui

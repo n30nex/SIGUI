@@ -124,6 +124,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_test(void);
 esp_err_t d1l_app_model_send_public_text(const char *text);
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
+size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
+                                    bool *out_unread, size_t max_entries);
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
                                           d1l_contact_entry_t *out_contact);

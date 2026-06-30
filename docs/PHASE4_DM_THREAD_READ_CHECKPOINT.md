@@ -40,4 +40,4 @@ Result:
 
 - Controlled inbound DM proof on real RF.
 - Manual physical touch review of the DM thread `Read` action.
-- Richer full-thread history beyond the bounded recent preview.
+- Bounded retained-history rendering for DM threads is addressed in `docs/PHASE4_DM_THREAD_HISTORY_CHECKPOINT.md`.
