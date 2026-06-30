@@ -35,18 +35,23 @@ Verify the GitHub Actions artifact checksum before any RP2040 flash attempt:
 
 ```powershell
 python .\scripts\verify_checksums.py artifacts\github\<run-id>\rp2040-sd-bridge-firmware
+python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --list-volumes
 ```
 
 The current ESP32 release flashing scripts are not RP2040 UF2 flashing tools.
 Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode before
-copying `deskos_sd_bridge.ino.uf2`. Use an empty or sacrificial SD card first:
-`DESKOS_SD_STATUS` is non-formatting, but a mounted usable filesystem may get a
-`/deskos` directory.
+copying `deskos_sd_bridge.ino.uf2`. Use
+`scripts/flash_rp2040_sd_bridge_uf2.py --volume <RP2040_UF2_DRIVE>:` first as a
+dry run, then add `--copy` only after it verifies the artifact checksum and UF2
+bootloader metadata. Use an empty or sacrificial SD card first: `DESKOS_SD_STATUS`
+is non-formatting, but a mounted usable filesystem may get a `/deskos`
+directory.
 
 After flashing the RP2040 bridge, validate through the ESP32 console on COM12:
 
 ```powershell
 python .\scripts\sd_file_canary_d1l.py --port COM12
+python .\scripts\sd_retained_history_acceptance_d1l.py --port COM12
 python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary
 python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
 ```
@@ -54,7 +59,9 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
 The canary sends `storage status`, `storage filecanary`, `storage status`,
 `packets`, and `health`. It does not send Public RF and does not issue
 `DESKOS_SD_FORMAT`. The SD-aware soak repeats `storage status` and
-`storage filecanary` during a passive stability window. The protocol transcript
+`storage filecanary` during a passive stability window. The retained-history
+acceptance runner seeds synthetic Public/DM/route/packet rows without Public RF,
+reboots, and verifies those rows are still readable. The protocol transcript
 command is host-only and prints the deterministic `DESKOS_SD_FILE v=1` request
 sequence that mirrors the ESP32 `storage filecanary` path.
 

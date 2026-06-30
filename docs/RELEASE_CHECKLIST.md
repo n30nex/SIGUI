@@ -64,6 +64,7 @@
 - [x] Generic RP2040 SD file-operation protocol foundation added for future SD-backed stores: bounded `DESKOS_SD_FILE v=1` stat/read/write/append/delete/rename with path validation, base64url payloads, CRC32 checks, and simulator coverage.
 - [x] Retained blob-store abstraction can use the RP2040 SD file protocol for retained Public/DM message history, route history, and packet history when a ready card reports file operations and atomic rename; NVS remains mirrored as fallback.
 - [x] Serial-only SD file-operation proof command added: `storage filecanary` performs guarded temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification without Public RF or formatting.
+- [x] Serial-only retained-history SD acceptance command added: `storage retained-canary <token>` appends synthetic Public/DM/route/packet rows only after all retained-history stores report SD backends, and `scripts/sd_retained_history_acceptance_d1l.py` proves readback before and after reboot without Public RF or formatting.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.

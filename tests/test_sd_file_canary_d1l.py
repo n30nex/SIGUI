@@ -1,6 +1,28 @@
 from scripts import sd_file_canary_d1l
 
 
+def ready_storage_status() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"ready","present":true,"mounted":true,'
+        '"data_root_ready":true,"rp2040_protocol_supported":true,'
+        '"file_ops":true,"atomic_rename":true,'
+        '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
+        '"data_enabled":true,"data_backend":"mixed",'
+        '"message_store_backend":"sd","dm_store_backend":"sd",'
+        '"route_store_backend":"sd","packet_log_backend":"sd",'
+        '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
+    )
+
+
+def canary_success() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage filecanary",'
+        '"rename_replace":true,"read_final":true,'
+        '"delete_final":true,"stat_deleted":true}\n'
+    )
+
+
 class FakeSerial:
     def __init__(self, responses):
         self.responses = [line.encode("utf-8") for line in responses]
@@ -75,9 +97,9 @@ def test_sd_file_canary_allows_pre_flash_unavailable_state(monkeypatch):
 def test_sd_file_canary_success_requires_canary_ok(monkeypatch):
     ser = FakeSerial(
         [
-            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready","file_ops":true,"atomic_rename":true},"data_backend":"mixed","packet_log_backend":"sd"}\n',
-            '{"schema":1,"ok":true,"cmd":"storage filecanary","rename_replace":true,"delete_final":true}\n',
-            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready","file_ops":true,"atomic_rename":true},"data_backend":"mixed","packet_log_backend":"sd"}\n',
+            ready_storage_status(),
+            canary_success(),
+            ready_storage_status(),
             '{"schema":1,"ok":true,"cmd":"packets","count":1,"persisted":true}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
@@ -92,3 +114,31 @@ def test_sd_file_canary_success_requires_canary_ok(monkeypatch):
     assert report["ok"] is True
     assert report["canary_passed"] is True
     assert report["canary_unavailable_ok"] is False
+    assert report["storage_file_gate_ready_before"] is True
+    assert report["storage_file_gate_ready_after"] is True
+    assert report["retained_history_sd_ready_before"] is True
+    assert report["retained_history_sd_ready_after"] is True
+
+
+def test_sd_file_canary_success_requires_retained_history_sd_backends(monkeypatch):
+    partial_status = ready_storage_status().replace('"dm_store_backend":"sd"', '"dm_store_backend":"nvs"')
+    ser = FakeSerial(
+        [
+            partial_status,
+            canary_success(),
+            partial_status,
+            '{"schema":1,"ok":true,"cmd":"packets","count":1,"persisted":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = sd_file_canary_d1l.run_canary("COM12", 115200, 1.0, allow_unavailable=False)
+
+    assert report["ok"] is False
+    assert report["canary_passed"] is True
+    assert report["retained_history_sd_ready_before"] is False
+    assert report["retained_history_sd_ready_after"] is False

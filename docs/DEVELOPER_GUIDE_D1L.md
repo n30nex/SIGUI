@@ -84,6 +84,16 @@ Download with:
 gh run download <run-id> -D artifacts\github\<run-id>
 ```
 
+RP2040 SD bridge UF2 flashing is not an ESP32 `esptool` path. After putting the
+D1L RP2040 into UF2/BOOTSEL mass-storage mode, use the guarded helper so the
+artifact checksum and target UF2 metadata are verified before any copy:
+
+```powershell
+python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --list-volumes
+python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>:
+python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>: --copy
+```
+
 ## Release Rules
 
 - Keep flash commands explicit-port only.

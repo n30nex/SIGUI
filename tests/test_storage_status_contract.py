@@ -182,6 +182,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
 def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     console = read("main/comms/usb_console.c")
     runner = read("scripts/sd_file_canary_d1l.py")
+    retained_runner = read("scripts/sd_retained_history_acceptance_d1l.py")
     docs = read("docs/TEST_PLAN_D1L.md")
     runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
 
@@ -198,16 +199,37 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_RP2040_FILE_CHUNK_MAX" in console
     assert "D1L_RP2040_FILE_PATH_MAX" in console
     assert "no Public RF or format command was used" in console
+    assert "cmd_storage_retained_canary" in console
+    assert "storage_retained_history_sd_ready" in console
+    assert "d1l_message_store_append_public" in console
+    assert "d1l_dm_store_append" in console
+    assert "d1l_route_store_upsert_observation" in console
+    assert "d1l_packet_log_append_raw" in console
+    assert "storage retained-canary <token>" in console
     assert "cmd_storage_setup" in console
     assert "storage filecanary" in runner
     assert "mesh send public" not in runner
     assert "FORMAT-DESKOS-SD" not in runner
+    assert "retained_history_backends_ready" in runner
+    assert '"message_store_backend"' in runner
+    assert '"dm_store_backend"' in runner
+    assert '"route_store_backend"' in runner
+    assert '"packet_log_backend"' in runner
+    assert "storage retained-canary" in retained_runner
+    assert "mesh send public" not in retained_runner
+    assert "FORMAT-DESKOS-SD" not in retained_runner
+    assert "COM11" not in retained_runner
+    assert "COM29" not in retained_runner
     assert "storage filecanary" in docs
+    assert "sd_retained_history_acceptance_d1l.py" in docs
     assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
     assert "COM12" in runbook
     assert "Do not use COM11 or COM29" in runbook
     assert "Do not send Public RF" in runbook
     assert "flash_d1l.ps1" in runbook
+    assert "flash_rp2040_sd_bridge_uf2.py" in runbook
+    assert "sd_retained_history_acceptance_d1l.py" in runbook
+    assert "--copy" in runbook
     assert "deskos_sd_bridge.ino.uf2" in runbook
 
 

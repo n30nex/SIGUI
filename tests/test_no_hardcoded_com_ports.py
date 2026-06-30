@@ -14,7 +14,7 @@ def test_no_executable_hardcoded_com_ports():
         if not path.exists():
             continue
         for file in path.rglob("*"):
-            if file.is_file() and file.suffix.lower() not in {".png", ".bin", ".elf"}:
+            if file.is_file() and file.suffix.lower() not in {".png", ".bin", ".elf", ".pyc", ".pyo"}:
                 text = file.read_text(encoding="utf-8", errors="ignore")
                 if COM_PATTERN.search(text):
                     offenders.append(str(file.relative_to(ROOT)))

@@ -14,6 +14,7 @@ No hardware required. These commands do not build firmware:
 python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\sd_file_canary_d1l.py --dry-run
+python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
@@ -28,6 +29,7 @@ python .\scripts\backup_flash_d1l.py --port $env:D1L_PORT --size 8MB
 .\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\sd_file_canary_d1l.py --port $env:D1L_PORT --allow-unavailable
+python .\scripts\sd_retained_history_acceptance_d1l.py --port $env:D1L_PORT --allow-unavailable --token prebridge
 python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
