@@ -14,10 +14,10 @@ jobs:
           submodules: recursive
 
       - name: Set up Python
-        run: python -m pip install --upgrade pip pytest pyserial esptool Pillow
+        run: python -m pip install --upgrade pip pytest pyserial Pillow
 
-      - name: Host build path
-        run: pwsh ./scripts/build_d1l.ps1
+      - name: Host tests
+        run: python -m pytest tests -q
 
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
@@ -34,6 +34,39 @@ jobs:
         with:
           name: d1l-host-artifacts
           path: artifacts/**
+          if-no-files-found: error
+          retention-days: 14
+
+  rp2040-sd-bridge-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          version: 1.x
+
+      - name: Install RP2040 Arduino core
+        shell: bash
+        run: |
+          arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          arduino-cli core update-index
+          arduino-cli core install rp2040:rp2040
+
+      - name: Build RP2040 SD bridge
+        shell: bash
+        run: |
+          mkdir -p artifacts/rp2040-sd-bridge
+          arduino-cli compile --fqbn rp2040:rp2040:seeed_indicator_rp2040 --output-dir artifacts/rp2040-sd-bridge firmware/rp2040_sd_bridge/deskos_sd_bridge
+          (cd artifacts/rp2040-sd-bridge && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+
+      - name: Verify RP2040 checksums
+        run: python ./scripts/verify_checksums.py artifacts/rp2040-sd-bridge
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rp2040-sd-bridge-firmware
+          path: artifacts/rp2040-sd-bridge/**
           if-no-files-found: error
           retention-days: 14
 

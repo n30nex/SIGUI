@@ -33,10 +33,13 @@ def test_phase1_lvgl_uses_basic_flush_path():
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
 
 
-def test_build_script_rewrites_stale_unsafe_lcd_config():
+def test_build_script_is_host_only_and_rewrites_stale_unsafe_lcd_config():
     script = (ROOT / "scripts" / "build_d1l.ps1").read_text(encoding="utf-8")
     assert "Set-D1lSafeSdkconfig" in script
     assert "CONFIG_LCD_AVOID_TEAR=y" in script
     assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" in script
     assert "# CONFIG_LCD_AVOID_TEAR is not set" in script
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in script
+    assert "disabled_local_github_actions_only" in script
+    assert "Use GitHub Actions d1l-ci firmware-build" in script
+    assert "& idf.py build" not in script

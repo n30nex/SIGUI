@@ -60,6 +60,7 @@
 - [x] Packet log filter/search/raw-hex developer mode implemented in serial diagnostics and Packet-tab UI.
 - [x] First `storage status`/`storage setup` fallback surface implemented: probes the RP2040 SD status protocol, reports protocol/card/root/setup state, never auto-formats, keeps onboard NVS store backends, and has Settings/simulator visibility.
 - [x] ESP32 confirmed-format request guard implemented: `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` can only be sent after exact confirmation plus bridge-reported card presence, format support, and setup-required state.
+- [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS` and guarded `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
@@ -89,6 +90,7 @@
 - [x] CI artifacts produced.
 - [x] Firmware binaries and SHA256 checksums attached.
 - [x] Release package artifact generation added to GitHub Actions.
+- [x] RP2040 SD bridge artifact generation added to GitHub Actions.
 - [x] Release package includes normal flash set, app update image, full 8MB image, manifest, checksums, and explicit-port flash helpers.
 - [x] First user guide added.
 - [x] First developer guide added.

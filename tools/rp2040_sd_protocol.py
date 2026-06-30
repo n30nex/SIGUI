@@ -12,6 +12,18 @@ STATUS_REPLY = "DESKOS_SD_STATUS"
 FORMAT_REQUEST = "DESKOS_SD_FORMAT"
 FORMAT_REPLY = "DESKOS_SD_FORMAT"
 FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD"
+STATUS_FIELDS = (
+    "state",
+    "present",
+    "mounted",
+    "deskos",
+    "fs",
+    "format_required",
+    "format_supported",
+    "capacity_kb",
+    "free_kb",
+    "note",
+)
 
 
 @dataclass(frozen=True)

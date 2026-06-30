@@ -20,7 +20,7 @@ Coverage:
 - RP2040 bridge pin contract.
 - No hardcoded executable COM ports.
 - Smoke JSONL parser.
-- Targeted DM-only hardware probe for COM7 to COM11 validation without Public-channel RF.
+- Targeted DM-only hardware probe can validate D1L-to-bot DM paths without Public-channel RF when the operator assigns both ports.
 - Flash/monitor scripts require an explicit port.
 - Backup command builder.
 - Checksum verifier.
@@ -121,7 +121,7 @@ Success requires every sampled command to return `ok=true` after bounded retries
 
 ## Release Package
 
-After firmware build:
+After the GitHub Actions ESP32 firmware build:
 
 ```powershell
 python .\scripts\package_release_d1l.py --build-dir build --out-dir artifacts\release --package-name d1l-release-local-smoke
@@ -310,15 +310,16 @@ Important pending production feature:
 
 1. On the current D1L build, run `storage status` and verify `sd.interface="rp2040"`, `sd.direct_supported=false`, `sd.rp2040_protocol_supported` reflects whether the RP2040 bridge answered `DESKOS_SD_STATUS`, `data_backend="nvs"`, `setup_action` is machine-readable, and store backends keep settings, identity, messages, packets, routes, contacts, read-state, and crashlog on onboard storage.
 2. Run `storage setup` and verify it reports `will_format=false`, `fallback="nvs"`, `confirmation_phrase="FORMAT-DESKOS-SD"`, and the same setup/format action without modifying onboard data.
-3. Run `storage setup confirm FORMAT-DESKOS-SD` on the current bridge and verify it returns `ESP_ERR_NOT_SUPPORTED` while the bridge does not advertise format support; no format is performed.
+3. Run `storage setup confirm FORMAT-DESKOS-SD` before the RP2040 bridge advertises a present setup-required card and verify it returns a machine-readable refusal; no format is performed.
 4. Verify the Settings screen, Storage Setup sheet, and UI simulator expose the same storage fallback/setup state without hiding the Radio and Advert actions.
 5. Boot with no card and verify firmware continues with onboard storage defaults.
-6. After the RP2040 SD protocol exists, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness while retained stores still remain NVS until the store migration lands.
+6. After the RP2040 SD bridge firmware is flashed through a documented RP2040 path, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness while retained stores still remain NVS until the store migration lands.
 7. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
 8. Confirm format requires explicit user confirmation, bridge-reported `format_supported=true`, and setup-required state, and does not run from incidental boot/touch events.
 9. Use `tools/rp2040_sd_protocol.py` to verify the reference status and format line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing RP2040 firmware.
 10. When configured, verify Public/DM message history, packet/route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
 11. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
+12. Verify the `rp2040-sd-bridge-firmware` artifact checksum manifest before any RP2040 hardware flash attempt.
 
 ## Mesh Visibility
 

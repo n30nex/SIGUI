@@ -38,6 +38,16 @@ This project uses references for architecture and feature parity, but Phase 1 so
   - Use: Planning/scaffold reference only.
   - Risk: Experimental scaffold, not a production base.
 
+- Seeed SenseCAP Indicator RP2040 examples: https://github.com/Seeed-Solution/SenseCAP_Indicator_RP2040
+  - License: GPL-3.0.
+  - Use: Hardware reference only for RP2040 SD SPI pins and ESP32/RP2040 UART pins.
+  - Risk: Do not copy/vendor sketches wholesale unless the project intentionally accepts GPL obligations. The DeskOS RP2040 SD bridge is an original minimal implementation that uses the documented Arduino APIs and pin facts.
+
+- Earle Philhower Arduino-Pico core: https://github.com/earlephilhower/arduino-pico
+  - License: LGPL-2.1-or-later core/library components plus bundled third-party licenses.
+  - Use: GitHub Actions build target for the Seeed Indicator RP2040 board package and Arduino SD/SDFS APIs.
+  - Risk: Keep distributed binary/source notices accurate if RP2040 bridge binaries ship with releases.
+
 ## Attribution Policy
 
 Keep third-party code in submodules or clearly attributed components. New MeshCore DeskOS files should use original implementations and avoid proprietary icons, Apple assets, copied SigurdOS GPL code, and unlicensed LimitlezzOS source.

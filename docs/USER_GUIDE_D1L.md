@@ -9,7 +9,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
-- Targeted outbound DM to the local COM11 Meshcorebot has been verified through hardware counters and D1L packet/message logs.
+- Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
@@ -29,7 +29,7 @@ $env:D1L_PORT = "COMx"
 .\flash_project.ps1 -Port $env:D1L_PORT
 ```
 
-Do not use COM11 or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In this validation setup, COM7 has been the D1L and COM11 has been a local MeshCore bot.
+Do not use COM11 or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
 
 The full 8MB image is for factory/recovery workflows and can overwrite persisted settings, contacts, messages, and logs. It requires typed confirmation:
 
@@ -94,6 +94,6 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - Route Trace is retained local evidence only; active RF ping/trace commands are not enabled yet.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
-- Optional SD-card data storage is staged but not fully implemented yet. Current builds expose `storage status` and non-destructive `storage setup`, probe the RP2040 SD status protocol when available, keep retained stores on onboard flash/NVS, and do not run boot-time formatting. The confirmation phrase path is guarded and refuses unless the RP2040 bridge first reports a present card, format support, and setup-required state.
+- Optional SD-card data storage is staged but not fully implemented yet. Current builds expose `storage status` and non-destructive `storage setup`, include a GitHub Actions-built RP2040 SD bridge target, keeps retained stores on onboard flash/NVS, and do not run boot-time formatting. The confirmation phrase path is guarded and refuses unless the RP2040 bridge first reports a present card, format support, and setup-required state.
 - Full 12-hour idle/listening soak is still pending; the 1-hour active Public `test` soak has passed.
 - Flash backup was intentionally skipped during current bring-up when the operator requested it.

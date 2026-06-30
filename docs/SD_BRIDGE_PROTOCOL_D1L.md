@@ -2,7 +2,7 @@
 
 This is the DeskOS line protocol expected on the ESP32-S3 to RP2040 UART for optional D1L SD-card data storage.
 
-The ESP32 side uses raw newline-delimited ASCII at the board UART pin contract documented in `boards/seeed_indicator_d1l/pinmap.json`: ESP32 TX GPIO19, ESP32 RX GPIO20, 115200 baud. The current repository does not include a buildable D1L RP2040 firmware target; `tools/rp2040_sd_protocol.py` is the host reference simulator for this contract.
+The ESP32 side uses raw newline-delimited ASCII at the board UART pin contract documented in `boards/seeed_indicator_d1l/pinmap.json`: ESP32 TX GPIO19, ESP32 RX GPIO20, 115200 baud. The RP2040-side Arduino target lives at `firmware/rp2040_sd_bridge/deskos_sd_bridge`, and `tools/rp2040_sd_protocol.py` is the host reference simulator for this contract.
 
 ## Status Request
 
@@ -57,3 +57,4 @@ The ESP32 parser also accepts a `DESKOS_SD_STATUS ...` line after a format reque
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed stores are implemented, valid SD cards are reported as `store_migration_pending` and retained stores remain on NVS.
+- The RP2040 bridge may create `/deskos` on a mounted card, but message, packet, route, export, and map-tile stores remain on onboard NVS until the SD-backed store migration lands.

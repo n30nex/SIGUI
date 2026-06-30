@@ -150,4 +150,26 @@ def test_sd_checkpoint_validation_does_not_require_public_rf_or_reserved_ports()
     assert "mesh send public" not in validation
     assert "COM11" not in validation
     assert "COM29" not in validation
+    assert "COM7" not in validation
+    assert "flash_d1l" not in validation
+    assert "monitor_d1l" not in validation
+    assert "backup_flash" not in validation
+    assert "soak_d1l.py --active-public-text" not in validation
+    assert "probe_d1l_dm.py --bot-port" not in validation
     assert "COM12" in validation
+
+
+def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
+    readme = read("README.md")
+    user_guide = read("docs/USER_GUIDE_D1L.md")
+    limitations = read("docs/KNOWN_LIMITATIONS.md")
+    checklist = read("docs/RELEASE_CHECKLIST.md")
+
+    for doc in [readme, user_guide, limitations, checklist]:
+        assert "retained stores" in doc or "Retained DeskOS stores" in doc or "Optional SD-card" in doc
+        assert "pending" in doc.lower() or "fallback" in doc.lower()
+
+    assert "SD-backed message/packet/route/export/map-tile stores" in checklist
+    assert "- [ ] Optional SD-card data storage implemented" in checklist
+    assert "keeps retained stores on onboard flash/NVS" in user_guide
+    assert "retained stores still remain NVS" in readme

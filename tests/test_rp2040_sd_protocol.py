@@ -4,6 +4,7 @@ from tools.rp2040_sd_protocol import (
     FORMAT_CONFIRMATION,
     FORMAT_REQUEST,
     FORMAT_REPLY,
+    STATUS_FIELDS,
     SCENARIOS,
     STATUS_REPLY,
     STATUS_REQUEST,
@@ -73,9 +74,17 @@ def test_storage_edge_scenarios_and_constants_match_c_contract():
 
     c_header = (ROOT / "main/hal/rp2040_bridge.h").read_text(encoding="utf-8")
     c_source = (ROOT / "main/hal/rp2040_bridge.c").read_text(encoding="utf-8")
+    rp2040_sketch = (
+        ROOT / "firmware/rp2040_sd_bridge/deskos_sd_bridge/deskos_sd_bridge.ino"
+    ).read_text(encoding="utf-8")
     assert STATUS_REQUEST in c_source
     assert FORMAT_REQUEST in c_source
     assert FORMAT_CONFIRMATION in c_header
+    assert STATUS_REQUEST in rp2040_sketch
+    assert FORMAT_REQUEST in rp2040_sketch
+    assert FORMAT_CONFIRMATION in rp2040_sketch
+    for field in STATUS_FIELDS:
+        assert f"{field}=" in rp2040_sketch
 
 
 def test_unknown_request_is_rejected():

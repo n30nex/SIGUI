@@ -33,3 +33,19 @@ def test_verify_sha256sums_manifest(tmp_path: Path):
     )
 
     assert verify_sha256_manifest(manifest)
+
+
+def test_verify_sha256_manifest_rejects_missing_file(tmp_path: Path):
+    manifest = tmp_path / "SHA256SUMS.txt"
+    manifest.write_text(f"{hashlib.sha256(b'missing').hexdigest()}  ./missing.bin\n", encoding="ascii")
+
+    assert not verify_sha256_manifest(manifest)
+
+
+def test_verify_sha256_manifest_rejects_bad_digest(tmp_path: Path):
+    artifact = tmp_path / "firmware.bin"
+    artifact.write_bytes(b"actual")
+    manifest = tmp_path / "SHA256SUMS.txt"
+    manifest.write_text(f"{hashlib.sha256(b'other').hexdigest()}  ./firmware.bin\n", encoding="ascii")
+
+    assert not verify_sha256_manifest(manifest)

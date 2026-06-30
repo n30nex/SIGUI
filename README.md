@@ -2,26 +2,21 @@
 
 MeshCore DeskOS D1L is a Seeed SenseCAP Indicator D1L firmware project for a touch-first MeshCore desk console. It targets the ESP32-S3 + RP2040 D1L with the 480x480 RGB touch display and SX1262 LoRa radio.
 
-Current status: staged D1L hardware validation through the Phase 7 diagnostics and soak-readiness slices. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS-backed settings/identity/message/contact/route/packet/read-state storage, MeshCore Public group text TX/RX over the D1L SX1262, first DM TX/ACK/PATH plumbing, a 480x480 touch shell, mesh visibility diagnostics, strict serial smoke/soak commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`.
+Current status: staged D1L hardware validation through the Phase 7 diagnostics and soak-readiness slices. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS-backed settings/identity/message/contact/route/packet/read-state storage, MeshCore Public group text TX/RX over the D1L SX1262, first DM TX/ACK/PATH plumbing, a 480x480 touch shell, mesh visibility diagnostics, strict serial smoke/soak commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`. Optional SD-card work now includes a CI-buildable RP2040 SD bridge target, but retained stores still remain NVS-backed until the pending SD store migration is implemented and hardware-proven.
 
 The companion compatibility contract is documented in [docs/COMPANION_3BYTE_COMPATIBILITY.md](docs/COMPANION_3BYTE_COMPATIBILITY.md). Phase 1 includes the MeshCore 3-byte transport codec and status command; live binary companion bridging is scheduled after D1L board/radio bring-up.
 
-## Build
+## Host Checks
 
-No hardware required:
+No hardware required. These commands do not build firmware:
 
 ```powershell
-.\scripts\build_d1l.ps1
 python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 ```
 
-Package an existing firmware build:
-
-```powershell
-python .\scripts\package_release_d1l.py --build-dir build --out-dir artifacts\release
-```
+Firmware binaries are built by GitHub Actions only. The `d1l-ci` workflow produces ESP32 firmware/release artifacts and the RP2040 SD bridge artifact.
 
 Hardware flow, once the user supplies the D1L port:
 

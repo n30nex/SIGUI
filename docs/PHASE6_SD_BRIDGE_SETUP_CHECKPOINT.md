@@ -11,6 +11,8 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Kept `storage setup confirm FORMAT-DESKOS-SD` non-destructive on the current D1L bridge, which still does not answer the SD protocol or advertise format support.
 - Added a Settings-tab Storage Setup sheet and simulator coverage.
 - Added `tools/rp2040_sd_protocol.py` as the host reference simulator for the RP2040 line protocol.
+- Added `firmware/rp2040_sd_bridge/deskos_sd_bridge` as an original Arduino RP2040 SD bridge target for the D1L internal UART and SD pins.
+- Added a GitHub Actions-only RP2040 bridge build job that compiles with Arduino CLI and uploads checksummed `rp2040-sd-bridge-firmware` artifacts.
 - Kept all retained stores on onboard NVS; no SD-backed store migration is claimed in this slice.
 
 ## Validation Rules
@@ -21,7 +23,6 @@ This checkpoint advances optional SD-card data storage without making boot or re
 
 ## Remaining SD Work
 
-- Add or import a buildable D1L RP2040 firmware target. The current repo only has Seeed example sketches/helpers and no production RP2040 SD bridge target.
-- Implement the RP2040 firmware side of `DESKOS_SD_STATUS` and `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`; see `docs/SD_BRIDGE_PROTOCOL_D1L.md`.
+- Validate the RP2040 SD bridge artifact on hardware after a safe RP2040 flashing procedure is documented and the correct RP2040 programming path is identified.
 - Move larger retained stores to SD when configured: Public/DM history, packet/route history, exports, and future map tiles.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.

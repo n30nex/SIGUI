@@ -7,7 +7,8 @@
 - `main/mesh/` contains MeshCore service/store helpers.
 - `main/comms/` contains USB console and connectivity status plumbing.
 - `main/diagnostics/` contains health and crash/reset telemetry.
-- `scripts/` contains build, flash, smoke, soak, backup, checksum, and release-package tooling.
+- `scripts/` contains host-check, flash, smoke, soak, backup, checksum, and release-package tooling.
+- `firmware/rp2040_sd_bridge/` contains the Arduino RP2040 SD bridge target. It is compiled by GitHub Actions.
 - `tests/` contains host contract tests.
 - `docs/` contains roadmap, validation notes, checklists, and phase checkpoints.
 
@@ -22,17 +23,15 @@ python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 1
 
 ## Firmware Build
 
-Preferred local container build:
+Do not build firmware on the Windows host. Use GitHub Actions for ESP32 and RP2040 binaries:
 
 ```powershell
-podman run --rm -v "F:\SIGUI:/project" -w /project docker.io/espressif/idf:release-v5.1 bash -lc "git config --global --add safe.directory /project && . /opt/esp/idf/export.sh >/tmp/idf-export.log && idf.py build"
+gh workflow run d1l-ci.yml --ref feature/meshcore-deskos-d1l
+gh run watch
+gh run download <run-id> -D artifacts\github\<run-id>
 ```
 
-Native ESP-IDF shell build:
-
-```powershell
-.\scripts\build_d1l.ps1 -RequireFirmware
-```
+The local `scripts/build_d1l.ps1` path is host-only and rejects `-RequireFirmware`.
 
 ## Release Package
 
@@ -70,11 +69,12 @@ For current local validation, COM7 has been the D1L and COM11 has been a local M
 
 ## GitHub Actions
 
-The `d1l-ci` workflow runs host checks on Windows and firmware build/package generation in `espressif/idf:release-v5.1`. Expected artifacts:
+The `d1l-ci` workflow runs host checks on Windows, ESP32 firmware build/package generation in `espressif/idf:release-v5.1`, and the RP2040 SD bridge build with Arduino CLI. Expected artifacts:
 
 - `d1l-host-artifacts`
 - `d1l-firmware-artifacts`
 - `d1l-release-package`
+- `rp2040-sd-bridge-firmware`
 
 `d1l-host-artifacts` includes `ui-sim/` screenshots and `ui-sim-report.json`, including the first-boot onboarding surface.
 
