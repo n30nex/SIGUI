@@ -20,6 +20,10 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
+    assert "d1l_storage_status_refresh" in header
+    assert "rp2040_sd_protocol_supported" in header
+    assert "setup_action" in header
+    assert "format_action" in header
     assert '"storage/storage_status.c"' in cmake
     assert '"storage"' in cmake
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
@@ -28,6 +32,11 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
     assert 's_status.sd_interface = "rp2040"' in source
     assert 's_status.sd_state = "pending_bridge"' in source
+    assert '"protocol_pending"' in source
+    assert '"bridge_protocol_pending"' in source
+    assert "d1l_rp2040_bridge_probe_sd(&sd, timeout_ms)" in source
+    assert '"format_confirmation_required"' in source
+    assert '"store_migration_pending"' in source
     assert 'status->message_store_backend = "nvs"' in source
     assert 'status->packet_log_backend = "nvs"' in source
     assert 'status->route_store_backend = "nvs"' in source
@@ -42,10 +51,15 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     console = read("main/comms/usb_console.c")
     ui = read("main/ui/ui_phase1.c")
     simulator = read("tools/ui_simulator.py")
+    rp2040_header = read("main/hal/rp2040_bridge.h")
+    rp2040_source = read("main/hal/rp2040_bridge.c")
 
     for field in [
         "storage_sd_state",
         "storage_sd_interface",
+        "storage_rp2040_sd_protocol_supported",
+        "storage_setup_action",
+        "storage_format_action",
         "storage_backend",
         "message_store_backend",
         "packet_log_backend",
@@ -57,15 +71,35 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
 
     assert '#include "storage/storage_status.h"' in console
     assert 'ok_begin("storage status")' in console
+    assert "d1l_storage_status_refresh(120U)" in console
+    assert 'ok_begin("storage setup")' in console
     assert '"storage status"' in console
+    assert '"storage setup"' in console
+    assert "storage setup confirm FORMAT-DESKOS-SD" in console
     assert 'strcmp(line, "storage status")' in console
-    assert '\\"format_action\\":\\"not_available\\"' in console
+    assert 'strcmp(line, "storage setup")' in console
+    assert "will_format" in console
+    assert "false" in console
+    assert "ESP_ERR_NOT_SUPPORTED" in console
     assert '\\"fallback\\":\\"nvs\\"' in console
     assert "storage status" in SMOKE_COMMANDS
+    assert "storage setup" in SMOKE_COMMANDS
     assert '"Storage %s  SD %s"' in ui
+    assert "static lv_obj_t *s_storage_sheet" in ui
+    assert "render_storage_sheet" in ui
+    assert "open_storage_sheet_event_cb" in ui
+    assert '"Storage Setup"' in ui
+    assert '"No automatic format. Formatting will require explicit confirmation."' in ui
     assert 'snapshot->storage_backend ? snapshot->storage_backend : "nvs"' in ui
     assert '"Storage"' in simulator
     assert "NVS fallback" in simulator
+    assert "storage_setup_sheet" in simulator
+    assert "No automatic format" in simulator
+    assert "d1l_rp2040_sd_status_t" in rp2040_header
+    assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
+    assert "DESKOS_SD_STATUS" in rp2040_source
+    assert "uart_write_bytes" in rp2040_source
+    assert "uart_read_bytes" in rp2040_source
 
 
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():

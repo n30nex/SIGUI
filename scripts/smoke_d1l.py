@@ -32,6 +32,7 @@ SMOKE_COMMANDS = [
     "ble status",
     "rp2040 status",
     "storage status",
+    "storage setup",
     "packets",
     "packets filter any any",
     "packets search test",

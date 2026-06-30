@@ -81,6 +81,13 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
+    assert {
+        "Storage Setup",
+        "SD Card",
+        "Backends",
+        "format not_available",
+        "No automatic format. Confirmation required before SD setup.",
+    } <= labels_by_view["storage_setup_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]

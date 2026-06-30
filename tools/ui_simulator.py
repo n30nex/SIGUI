@@ -81,6 +81,8 @@ class Snapshot:
     storage_state: str
     storage_backend: str
     storage_detail: str
+    storage_setup_action: str
+    storage_format_action: str
 
 
 def sample_snapshot() -> Snapshot:
@@ -124,6 +126,8 @@ def sample_snapshot() -> Snapshot:
         storage_state="pending bridge",
         storage_backend="NVS fallback",
         storage_detail="RP2040 SD bridge pending",
+        storage_setup_action="bridge_protocol_pending",
+        storage_format_action="not_available",
     )
 
 
@@ -210,6 +214,8 @@ def large_mesh_snapshot() -> Snapshot:
         storage_state="pending bridge",
         storage_backend="NVS fallback",
         storage_detail="RP2040 SD bridge pending",
+        storage_setup_action="bridge_protocol_pending",
+        storage_format_action="not_available",
     )
 
 
@@ -548,6 +554,7 @@ def render_settings(s: Surface, snap: Snapshot):
     draw_metric(s, (16, 176, 464, 238), "Identity", snap.node_name, snap.fingerprint, BLUE)
     draw_metric(s, (16, 248, 464, 310), "Companion", "USB ready", "Wi-Fi off, BLE off, offline-first", GREEN)
     draw_metric(s, (16, 320, 230, 394), "Storage", snap.storage_backend, snap.storage_detail, AMBER)
+    draw_button(s, (44, 356, 202, 386), "Storage", AMBER)
     draw_button(s, (250, 320, 354, 394), "Radio", ACCENT)
     draw_button(s, (364, 320, 464, 394), "Advert", ACCENT)
     draw_dock(s, "Settings")
@@ -643,6 +650,17 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE)
     draw_button(s, (146, 356, 238, 386), "Save", GREEN)
     draw_button(s, (248, 356, 340, 386), "Close", MUTED)
+    draw_dock(s, "Settings")
+
+
+def render_storage_setup_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Storage Setup", "Optional SD data storage")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED)
+    draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
+    draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, "messages NVS / packets NVS / routes NVS", BLUE)
+    s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
+    s.text(f"format {snap.storage_format_action}", (44, 328, 436, 350), 13, MUTED)
+    s.text("No automatic format. Confirmation required before SD setup.", (44, 358, 436, 380), 12, AMBER)
     draw_dock(s, "Settings")
 
 
@@ -802,6 +820,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
+    "storage_setup_sheet": render_storage_setup_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
@@ -837,6 +856,16 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "RX Boost On",
         "US/CAN",
         "Save",
+        "Close",
+    ),
+    "storage_setup_sheet": (
+        "Storage Setup",
+        "Optional SD data storage",
+        "SD Card",
+        "Backends",
+        "setup bridge_protocol_pending",
+        "format not_available",
+        "No automatic format. Confirmation required before SD setup.",
         "Close",
     ),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Export", "Fav", "Mute", "Close"),

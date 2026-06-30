@@ -116,14 +116,22 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_direct_supported = storage.direct_supported;
     snapshot->storage_rp2040_bridge_required = storage.rp2040_bridge_required;
     snapshot->storage_rp2040_bridge_ready = storage.rp2040_bridge_ready;
+    snapshot->storage_rp2040_sd_protocol_supported = storage.rp2040_sd_protocol_supported;
     snapshot->storage_sd_present = storage.sd_present;
     snapshot->storage_sd_mounted = storage.sd_mounted;
+    snapshot->storage_sd_data_root_ready = storage.sd_data_root_ready;
     snapshot->storage_format_required = storage.format_required;
     snapshot->storage_format_supported = storage.format_supported;
+    snapshot->storage_setup_required = storage.setup_required;
+    snapshot->storage_setup_supported = storage.setup_supported;
     snapshot->storage_data_enabled = storage.data_enabled;
+    snapshot->storage_response_truncated = storage.response_truncated;
+    snapshot->storage_capacity_kb = storage.capacity_kb;
+    snapshot->storage_free_kb = storage.free_kb;
     snapshot->storage_last_error = storage.last_error;
     snapshot->storage_sd_state = storage.sd_state;
     snapshot->storage_sd_interface = storage.sd_interface;
+    snapshot->storage_sd_filesystem = storage.sd_filesystem;
     snapshot->storage_mount_point = storage.mount_point;
     snapshot->storage_data_root = storage.data_root;
     snapshot->storage_backend = storage.data_backend;
@@ -133,6 +141,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->route_store_backend = storage.route_store_backend;
     snapshot->map_tile_backend = storage.map_tile_backend;
     snapshot->export_backend = storage.export_backend;
+    snapshot->storage_setup_action = storage.setup_action;
+    snapshot->storage_format_action = storage.format_action;
     snapshot->storage_note = storage.note;
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
     if (settings->identity_ready) {

@@ -324,3 +324,23 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "d1l_app_model_default_radio_profile(&s_radio_edit)" in source
     assert "d1l_settings_save(&settings)" in model
     assert "settings.tcxo_mode = D1L_TCXO_NONE" in model
+
+
+def test_settings_screen_has_non_destructive_storage_setup_sheet():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
+    model = read("main/app/app_model.c")
+
+    assert "static lv_obj_t *s_storage_sheet" in source
+    assert "create_storage_sheet" in source
+    assert "render_storage_sheet" in source
+    assert "open_storage_sheet_event_cb" in source
+    assert "hide_storage_sheet" in source
+    assert '"Storage Setup"' in source
+    assert '"setup %s  format %s"' in source
+    assert '"No automatic format. Formatting will require explicit confirmation."' in source
+    assert "storage_setup_action" in header
+    assert "storage_format_action" in header
+    assert "storage_rp2040_sd_protocol_supported" in header
+    assert "snapshot->storage_setup_action = storage.setup_action" in model
+    assert "snapshot->storage_format_action = storage.format_action" in model

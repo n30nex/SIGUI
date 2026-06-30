@@ -617,6 +617,7 @@ static void cmd_rp2040_status(void)
 
 static void cmd_storage_status(void)
 {
+    (void)d1l_storage_status_refresh(120U);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     ok_begin("storage status");
@@ -624,14 +625,21 @@ static void cmd_storage_status(void)
     print_json_string(status.sd_state ? status.sd_state : "unknown");
     printf(",\"interface\":");
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
-    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"present\":%s,\"mounted\":%s,\"format_required\":%s,\"format_supported\":%s,\"mount_point\":",
+    printf(",\"filesystem\":");
+    print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"format_required\":%s,\"format_supported\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"response_truncated\":%s,\"mount_point\":",
            bool_json(status.direct_supported),
            bool_json(status.rp2040_bridge_required),
            bool_json(status.rp2040_bridge_ready),
+           bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
            bool_json(status.sd_mounted),
+           bool_json(status.sd_data_root_ready),
            bool_json(status.format_required),
-           bool_json(status.format_supported));
+           bool_json(status.format_supported),
+           (unsigned long)status.capacity_kb,
+           (unsigned long)status.free_kb,
+           bool_json(status.response_truncated));
     print_json_string(status.mount_point ? status.mount_point : "");
     printf(",\"data_root\":");
     print_json_string(status.data_root ? status.data_root : "");
@@ -660,7 +668,46 @@ static void cmd_storage_status(void)
     print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
     printf(",\"exports\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf("},\"format_action\":\"not_available\",\"fallback\":\"nvs\",\"note\":");
+    printf("},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
+           bool_json(status.setup_required), bool_json(status.setup_supported));
+    print_json_string(status.setup_action ? status.setup_action : "not_available");
+    printf(",\"format_action\":");
+    print_json_string(status.format_action ? status.format_action : "not_available");
+    printf(",\"fallback\":\"nvs\",\"note\":");
+    print_json_string(status.note ? status.note : "");
+    printf("}\n");
+}
+
+static void cmd_storage_setup(const char *line)
+{
+    (void)d1l_storage_status_refresh(250U);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    const char *confirm_prefix = "storage setup confirm ";
+    if (strncmp(line, confirm_prefix, strlen(confirm_prefix)) == 0) {
+        const char *phrase = line + strlen(confirm_prefix);
+        if (strcmp(phrase, "FORMAT-DESKOS-SD") != 0) {
+            err_result("storage setup", "CONFIRMATION_REQUIRED",
+                       "type storage setup confirm FORMAT-DESKOS-SD to request SD format after the bridge supports it");
+            return;
+        }
+        err_result("storage setup", "ESP_ERR_NOT_SUPPORTED",
+                   "RP2040 SD format command is not implemented; no format was performed");
+        return;
+    }
+
+    ok_begin("storage setup");
+    printf(",\"available\":%s,\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
+           bool_json(status.rp2040_sd_protocol_supported || status.sd_present),
+           bool_json(status.setup_required),
+           bool_json(status.setup_supported));
+    print_json_string(status.setup_action ? status.setup_action : "not_available");
+    printf(",\"format_action\":");
+    print_json_string(status.format_action ? status.format_action : "not_available");
+    printf(",\"confirmation_phrase\":\"FORMAT-DESKOS-SD\",\"will_format\":false,\"data_backend\":");
+    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    printf(",\"fallback\":\"nvs\",\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
 }
@@ -1707,7 +1754,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1770,6 +1817,9 @@ static void handle_line(const char *line)
         cmd_rp2040_status();
     } else if (strcmp(line, "storage status") == 0) {
         cmd_storage_status();
+    } else if (strcmp(line, "storage setup") == 0 ||
+               strncmp(line, "storage setup confirm ", strlen("storage setup confirm ")) == 0) {
+        cmd_storage_setup(line);
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {
