@@ -42,6 +42,8 @@
 - [x] Bounded NVS-backed Public message store implemented.
 - [x] Public TX/RX events append persisted recent message rows.
 - [x] `messages public` serial diagnostic added to smoke coverage.
+- [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
+- [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
 - [x] Public message store survives reboot on `COM7`.
 - [x] Free-text Public composer implemented, built, flashed, and RF-regression tested.

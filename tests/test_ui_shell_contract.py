@@ -192,6 +192,14 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert "snapshot->dm_count" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
+    assert 'create_button(header, "History"' in source
+    assert "static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY]" in source
+    assert "render_public_history_sheet" in source
+    assert "d1l_app_model_query_public_messages(s_public_history_entries" in source
+    assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in source
+    assert '"Public History"' in source
+    assert '"Public Search"' in source
+    assert '"Search author or message"' in source
 
 
 def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():

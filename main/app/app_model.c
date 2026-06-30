@@ -184,6 +184,12 @@ esp_err_t d1l_app_model_send_public_text(const char *text)
     return d1l_meshcore_service_send_public(text);
 }
 
+size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
+                                           size_t max_entries, const char *query)
+{
+    return d1l_message_store_query(out_entries, max_entries, query);
+}
+
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
 {
     return d1l_meshcore_service_send_dm(fingerprint, text);

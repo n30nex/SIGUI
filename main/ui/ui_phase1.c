@@ -35,6 +35,10 @@ static lv_obj_t *s_compose_sheet;
 static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
 static lv_obj_t *s_compose_keyboard;
+static lv_obj_t *s_public_history_sheet;
+static lv_obj_t *s_public_search_sheet;
+static lv_obj_t *s_public_search_textarea;
+static lv_obj_t *s_public_search_keyboard;
 static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_contact_detail_sheet;
@@ -59,8 +63,10 @@ static d1l_contact_entry_t s_contact_export_contact;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
+static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
 static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
+static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
@@ -70,6 +76,8 @@ static const char s_contact_action_mute[] = "mute";
 
 static void render_active_tab(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
+static void open_public_history_event_cb(lv_event_t *event);
+static void open_public_search_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
@@ -109,6 +117,7 @@ static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 
 static void render_dm_thread_sheet(void);
+static void render_public_history_sheet(void);
 static void render_radio_settings_sheet(void);
 
 static void lv_tick_task(void *arg)
@@ -237,6 +246,20 @@ static void hide_compose_sheet(void)
     }
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
+}
+
+static void hide_public_history_sheet(void)
+{
+    if (s_public_history_sheet) {
+        lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_public_search_sheet(void)
+{
+    if (s_public_search_sheet) {
+        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void hide_dm_thread_sheet(void)
@@ -587,6 +610,8 @@ static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_contact_detail_sheet();
@@ -619,6 +644,8 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     }
     d1l_contact_entry_t selected = *entry;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_contact_detail_sheet();
@@ -752,6 +779,8 @@ static void contact_detail_export_event_cb(lv_event_t *event)
         return;
     }
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_compose_sheet();
@@ -857,6 +886,8 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     }
     s_contact_detail_contact = *entry;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_compose_sheet();
@@ -948,6 +979,8 @@ static void open_route_detail_event_cb(lv_event_t *event)
     }
     s_route_detail_route = *entry;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
@@ -1033,6 +1066,8 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     }
     s_packet_detail_packet = *entry;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
@@ -1102,6 +1137,8 @@ static void open_packet_search_event_cb(lv_event_t *event)
         return;
     }
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
@@ -1223,6 +1260,8 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
@@ -1325,6 +1364,186 @@ static void onboarding_keyboard_event_cb(lv_event_t *event)
     if (lv_event_get_code(event) == LV_EVENT_READY) {
         complete_onboarding_from_ui("D1L Desk");
     }
+}
+
+static const char *public_row_state(const d1l_message_entry_t *entry)
+{
+    if (entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq) {
+        return "new";
+    }
+    return entry->direction[0] == 't' ? "queued" : "received";
+}
+
+static void close_public_history_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_public_search_sheet();
+    hide_public_history_sheet();
+}
+
+static void close_public_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_public_search_sheet();
+}
+
+static void render_public_history_sheet(void)
+{
+    if (!s_public_history_sheet) {
+        return;
+    }
+    d1l_app_model_snapshot(&s_snapshot);
+    update_chrome(&s_snapshot);
+    lv_obj_clean(s_public_history_sheet);
+
+    lv_obj_t *title = create_label(s_public_history_sheet, "Public History", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 178);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_public_history_sheet, "Search", 196, 0, 76, 40,
+                  open_public_search_event_cb, NULL);
+    create_button(s_public_history_sheet, "Clear", 280, 0, 64, 40,
+                  open_public_search_event_cb, (void *)"clear");
+    create_button(s_public_history_sheet, "Close", 352, 0, 72, 40,
+                  close_public_history_event_cb, NULL);
+
+    const size_t history_count =
+        d1l_app_model_query_public_messages(s_public_history_entries,
+                                            D1L_MESSAGE_STORE_CAPACITY,
+                                            s_public_search_text);
+    lv_obj_t *meta = create_label(s_public_history_sheet, "", 0x8EA0AE);
+    if (s_public_search_text[0]) {
+        label_set_fmt(meta, "retained %u/%u  find %.18s",
+                      (unsigned)history_count, (unsigned)s_snapshot.message_count,
+                      s_public_search_text);
+    } else {
+        label_set_fmt(meta, "retained %u/%u rows",
+                      (unsigned)history_count, (unsigned)s_snapshot.message_count);
+    }
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 392);
+    lv_obj_set_pos(meta, 8, 42);
+
+    lv_obj_t *list = lv_obj_create(s_public_history_sheet);
+    lv_obj_set_size(list, 424, 206);
+    lv_obj_set_pos(list, 0, 70);
+    lv_obj_set_style_radius(list, 6, 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+
+    int y = 0;
+    for (size_t i = 0; i < history_count; ++i) {
+        const d1l_message_entry_t *entry = &s_public_history_entries[i];
+        const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq;
+        lv_obj_t *row = create_panel(list, 0, y, 404, 52);
+        lv_obj_set_style_pad_all(row, 8, 0);
+        lv_obj_t *author = create_label(row, entry->author,
+                                        unread ? 0xFBBF24 :
+                                        (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
+        lv_label_set_long_mode(author, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(author, 156);
+        lv_obj_align(author, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_t *state = create_label(row, "", 0x8EA0AE);
+        label_set_fmt(state, "#%lu %s", (unsigned long)entry->seq, public_row_state(entry));
+        lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+        lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(text, 372);
+        lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        y += 58;
+    }
+    if (history_count == 0) {
+        lv_obj_t *empty = create_label(list,
+                                       s_public_search_text[0] ?
+                                       "No Public rows match" : "No retained Public rows",
+                                       0x8EA0AE);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
+    } else {
+        lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
+    }
+}
+
+static void show_public_history_sheet(void)
+{
+    render_public_history_sheet();
+    if (s_public_history_sheet) {
+        lv_obj_clear_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_public_history_sheet);
+    }
+}
+
+static void apply_public_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_public_search_text[0] = '\0';
+    if (s_public_search_textarea) {
+        const char *text = lv_textarea_get_text(s_public_search_textarea);
+        if (text) {
+            snprintf(s_public_search_text, sizeof(s_public_search_text), "%s", text);
+        }
+    }
+    hide_public_search_sheet();
+    show_public_history_sheet();
+}
+
+static void clear_public_search_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_public_search_text[0] = '\0';
+    if (s_public_search_textarea) {
+        lv_textarea_set_text(s_public_search_textarea, "");
+    }
+    hide_public_search_sheet();
+    show_public_history_sheet();
+}
+
+static void public_search_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        apply_public_search_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        hide_public_search_sheet();
+    }
+}
+
+static void open_public_search_event_cb(lv_event_t *event)
+{
+    const void *user_data = lv_event_get_user_data(event);
+    if (user_data && strcmp((const char *)user_data, "clear") == 0) {
+        clear_public_search_event_cb(event);
+        return;
+    }
+    if (!s_public_search_sheet) {
+        return;
+    }
+    if (s_public_search_textarea && s_public_search_keyboard) {
+        lv_textarea_set_text(s_public_search_textarea, s_public_search_text);
+        lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
+    }
+    lv_obj_clear_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_public_search_sheet);
+}
+
+static void open_public_history_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_sheet();
+    hide_compose_sheet();
+    hide_public_search_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    show_public_history_sheet();
 }
 
 static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread)
@@ -1453,6 +1672,8 @@ static void open_dm_thread_event_cb(lv_event_t *event)
     snprintf(s_dm_thread_alias, sizeof(s_dm_thread_alias), "%s",
              entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_radio_settings_sheet();
     hide_contact_detail_sheet();
@@ -1486,9 +1707,10 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 2, 0);
-    create_button(header, "Read", 154, 10, 56, 44, mark_messages_read_event_cb, NULL);
-    create_button(header, "Compose", 218, 10, 88, 44, open_compose_event_cb, NULL);
-    create_button(header, "Test", 314, 10, 82, 44, public_test_event_cb, NULL);
+    create_button(header, "Read", 142, 10, 54, 44, mark_messages_read_event_cb, NULL);
+    create_button(header, "Compose", 202, 10, 82, 44, open_compose_event_cb, NULL);
+    create_button(header, "History", 292, 10, 76, 44, open_public_history_event_cb, NULL);
+    create_button(header, "Test", 376, 10, 48, 44, public_test_event_cb, NULL);
 
     int y = 98;
     if (snapshot->recent_message_count > 0) {
@@ -1816,6 +2038,8 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     d1l_app_model_snapshot(&s_snapshot);
     radio_edit_from_snapshot(&s_snapshot);
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_contact_detail_sheet();
@@ -1835,6 +2059,8 @@ static void advert_zero_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     show_toast("Zero advert", d1l_app_model_request_advert(false));
 }
 
@@ -1842,6 +2068,8 @@ static void advert_flood_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     show_toast("Flood advert", d1l_app_model_request_advert(true));
 }
 
@@ -1849,6 +2077,8 @@ static void open_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_sheet) {
+        hide_public_history_sheet();
+        hide_public_search_sheet();
         hide_dm_thread_sheet();
         hide_radio_settings_sheet();
         hide_contact_detail_sheet();
@@ -1947,6 +2177,8 @@ static void dock_event_cb(lv_event_t *event)
 {
     s_active_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
     hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
@@ -2109,6 +2341,68 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 
     lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_public_history_sheet(lv_obj_t *screen)
+{
+    s_public_history_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_public_history_sheet, 448, 304);
+    lv_obj_set_pos(s_public_history_sheet, 16, 88);
+    lv_obj_set_style_radius(s_public_history_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_public_history_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_public_history_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_public_history_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_public_history_sheet, 12, 0);
+    lv_obj_clear_flag(s_public_history_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_public_search_sheet(lv_obj_t *screen)
+{
+    s_public_search_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_public_search_sheet, 448, 320);
+    lv_obj_set_pos(s_public_search_sheet, 16, 82);
+    lv_obj_set_style_radius(s_public_search_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_public_search_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_public_search_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_public_search_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_public_search_sheet, 12, 0);
+    lv_obj_clear_flag(s_public_search_sheet, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(s_public_search_sheet, "Public Search", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+
+    create_button(s_public_search_sheet, "Apply", 212, 0, 66, 40,
+                  apply_public_search_event_cb, NULL);
+    create_button(s_public_search_sheet, "Clear", 286, 0, 64, 40,
+                  clear_public_search_event_cb, NULL);
+    create_button(s_public_search_sheet, "Close", 358, 0, 66, 40,
+                  close_public_search_event_cb, NULL);
+
+    s_public_search_textarea = lv_textarea_create(s_public_search_sheet);
+    lv_obj_set_size(s_public_search_textarea, 424, 48);
+    lv_obj_set_pos(s_public_search_textarea, 0, 54);
+    lv_textarea_set_one_line(s_public_search_textarea, true);
+    lv_textarea_set_max_length(s_public_search_textarea, D1L_MESSAGE_TEXT_LEN - 1U);
+    lv_textarea_set_placeholder_text(s_public_search_textarea, "Search author or message");
+    lv_obj_set_style_radius(s_public_search_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_public_search_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_public_search_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0x8EA0AE),
+                                LV_PART_TEXTAREA_PLACEHOLDER);
+
+    s_public_search_keyboard = lv_keyboard_create(s_public_search_sheet);
+    lv_obj_set_size(s_public_search_keyboard, 424, 194);
+    lv_obj_set_pos(s_public_search_keyboard, 0, 114);
+    lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
+    lv_obj_add_event_cb(s_public_search_keyboard, public_search_keyboard_event_cb,
+                        LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_public_search_keyboard, public_search_keyboard_event_cb,
+                        LV_EVENT_CANCEL, NULL);
+
+    lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_dm_thread_sheet(lv_obj_t *screen)
@@ -2360,6 +2654,8 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_dock(s_screen);
     create_sheet(s_screen);
     create_compose_sheet(s_screen);
+    create_public_history_sheet(s_screen);
+    create_public_search_sheet(s_screen);
     create_dm_thread_sheet(s_screen);
     create_radio_settings_sheet(s_screen);
     create_contact_detail_sheet(s_screen);

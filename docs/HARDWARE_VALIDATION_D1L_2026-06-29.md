@@ -18,7 +18,8 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Firmware artifact: `artifacts/github/28358816656/d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin`
 - SHA256 manifest: `artifacts/github/28358816656/d1l-firmware-artifacts/SHA256SUMS.txt`
 - Latest local hardware image: `build/meshcore_deskos_d1l.bin`
-- Latest local build size after the Phase 6 packet filter/raw-hex slice: `0xa6ae0`, 35% free in the app partition
+- Latest local build size after the Public History/Search slice: `0xa93e0` (`693216` bytes), 34% free in the app partition
+- Latest local app SHA256: `77e495fec80dc749c4359562a62474b6efd42b7efa05e023349245373bbf63a2`
 
 ## Passing Hardware Evidence
 
@@ -364,6 +365,13 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=2`; the packet log moved `packet_total_written_delta=5`.
   - Health remained ready with stack floors of `current=1032` and `ui=1264` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
   - `crashlog_count_peak=0` and `crashlog_crash_like_count=0` after start clear.
+- Phase 4 Public History/Search local smoke and COM11 DM proof:
+  - Local Podman ESP-IDF build passed; app size was `0xa93e0`, leaving 34% free in the smallest app partition.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - Standard smoke passed in `artifacts/smoke/d1l-smoke-public-history-local-COM7.json` with 33 commands, including `messages public search test`. No `mesh send public` command was sent in this smoke.
+  - Targeted hardware DM proof passed in `artifacts/smoke/d1l-dm-public-history-target-pass-local-COM7-COM11.json`: D1L sent a direct message token to `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`, `messages dm 0BF0A701D5AE2DB6` retained the exact TX token, and `packets search <token>` found the matching TX `dm_text` packet row.
+  - The local Meshcorebot status surface at `F:\Meshcorebot\logs\meshcorebot.status.json` reported active port `COM11`, `meshcore_connected=true`, and fresh `rx_contact_total +1` / `rx_log_total +3` movement during the targeted DM proof.
+  - Public-channel RF testing was intentionally not run for this checkpoint; the hardware regression used COM11 direct-message receive counters instead.
 
 ## Still Pending
 

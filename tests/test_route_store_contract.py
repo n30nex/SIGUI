@@ -67,7 +67,7 @@ def test_ui_console_and_smoke_expose_routes():
 def test_usb_console_keeps_large_preview_buffers_off_main_stack():
     console = read("main/comms/usb_console.c")
     assert "static d1l_packet_log_entry_t entries[8]" in console
-    assert "static d1l_message_entry_t entries[8]" in console
+    assert "static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY]" in console
     assert "static d1l_node_entry_t entries[8]" in console
     assert "static d1l_contact_entry_t entries[8]" in console
     assert "static d1l_route_entry_t entries[8]" in console

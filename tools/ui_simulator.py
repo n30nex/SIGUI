@@ -439,9 +439,10 @@ def render_home(s: Surface, snap: Snapshot):
 def render_messages(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Messages", (16, 64, 150, 92), 22, TEXT, True)
-    draw_button(s, (190, 64, 266, 100), "Read", GREEN)
-    draw_button(s, (274, 64, 370, 100), "Compose", ACCENT)
-    draw_button(s, (378, 64, 464, 100), "Test", AMBER)
+    draw_button(s, (172, 64, 226, 100), "Read", GREEN)
+    draw_button(s, (234, 64, 316, 100), "Compose", ACCENT)
+    draw_button(s, (324, 64, 400, 100), "History", BLUE)
+    draw_button(s, (408, 64, 464, 100), "Test", AMBER)
     s.round_rect((16, 112, 464, 258))
     s.text("Public", (28, 120, 150, 142), 14, MUTED, True)
     y = 148
@@ -561,6 +562,41 @@ def render_compose_sheet(s: Surface, snap: Snapshot):
     for i, label in enumerate(("Quick", "Clear", "Send")):
         draw_button(s, (44 + i * 132, 248, 164 + i * 132, 300), label, GREEN if label == "Send" else ACCENT)
     draw_button(s, (44, 320, 200, 370), "Close", MUTED)
+    draw_dock(s, "Messages")
+
+
+def render_public_history_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Public History", f"retained {len(snap.public_messages)} rows")
+    draw_button(s, (204, 94, 282, 134), "Search", BLUE)
+    draw_button(s, (292, 94, 356, 134), "Clear", ACCENT)
+    draw_button(s, (366, 94, 436, 134), "Close", MUTED)
+    s.round_rect((44, 154, 436, 318), SURFACE, BORDER, 8)
+    s.text("Public scrollback", (56, 162, 260, 184), 13, MUTED, True)
+    visible_messages = snap.public_messages[-3:]
+    y = 194
+    for msg in visible_messages:
+        draw_row(s, (56, y, 424, y + 34), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
+        y += 40
+    s.text("Search filters retained author, direction, and text rows.", (44, 332, 436, 354), 12, MUTED)
+    draw_dock(s, "Messages")
+    s.metrics.update(
+        {
+            "public_history_source_count": len(snap.public_messages),
+            "public_history_rendered_count": len(visible_messages),
+        }
+    )
+
+
+def render_public_search_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Public Search", "Filter retained Public rows")
+    s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
+    s.text("Search author or message", (56, 166, 424, 190), 13, MUTED, True)
+    s.text("test", (56, 188, 424, 206), 16, TEXT)
+    draw_button(s, (44, 228, 156, 278), "Apply", GREEN)
+    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT)
+    draw_button(s, (288, 228, 400, 278), "Close", MUTED)
+    s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
+    s.text("Keyboard opens for Public history search", (56, 318, 424, 350), 13, MUTED, False, "center")
     draw_dock(s, "Messages")
 
 
@@ -726,6 +762,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "packets": render_packets,
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
+    "public_history_sheet": render_public_history_sheet,
+    "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
     "contact_export_sheet": render_contact_export_sheet,
@@ -740,11 +778,13 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": ("MeshCore DeskOS", "Home", "Radio", "US/CAN", "Mesh", "Identity", "Unread", "Send", "Advert"),
-    "messages": ("Messages", "Read", "Compose", "Test", "Public", "Direct"),
+    "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Health", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
+    "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
+    "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "radio_settings_sheet": (
         "Radio Settings",
         "Freq 910.525 MHz",

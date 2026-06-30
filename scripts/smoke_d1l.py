@@ -35,6 +35,7 @@ SMOKE_COMMANDS = [
     "packets filter any any",
     "packets search test",
     "messages public",
+    "messages public search test",
     "messages dm",
     "messages unread",
     "nodes",
@@ -92,6 +93,8 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
 
 
 def expected_command_name(command: str) -> str:
+    if command.startswith("messages public search "):
+        return "messages public"
     for prefix in [
         "settings set name ",
         "settings set pathhash ",

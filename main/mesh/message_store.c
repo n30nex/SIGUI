@@ -44,6 +44,40 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
     dest[out] = '\0';
 }
 
+static char ascii_lower(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
+}
+
+static bool contains_casefold(const char *haystack, const char *needle)
+{
+    if (!needle || needle[0] == '\0') {
+        return true;
+    }
+    if (!haystack) {
+        return false;
+    }
+    for (size_t i = 0; haystack[i]; ++i) {
+        size_t j = 0;
+        while (needle[j] && haystack[i + j] &&
+               ascii_lower(haystack[i + j]) == ascii_lower(needle[j])) {
+            j++;
+        }
+        if (needle[j] == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool message_matches_query(const d1l_message_entry_t *entry, const char *query)
+{
+    return !query || query[0] == '\0' ||
+           contains_casefold(entry->author, query) ||
+           contains_casefold(entry->text, query) ||
+           contains_casefold(entry->direction, query);
+}
+
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
@@ -223,4 +257,30 @@ size_t d1l_message_store_copy_recent(d1l_message_entry_t *out_entries, size_t ma
         out_entries[i] = s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
     }
     return n;
+}
+
+size_t d1l_message_store_query(d1l_message_entry_t *out_entries, size_t max_entries,
+                               const char *query)
+{
+    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+        return 0;
+    }
+
+    size_t matches = 0;
+    size_t oldest = (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_message_entry_t *entry = &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
+        if (!message_matches_query(entry, query)) {
+            continue;
+        }
+        if (matches < max_entries) {
+            out_entries[matches] = *entry;
+        } else {
+            memmove(out_entries, out_entries + 1U, sizeof(out_entries[0]) * (max_entries - 1U));
+            out_entries[max_entries - 1U] = *entry;
+        }
+        matches++;
+    }
+
+    return matches < max_entries ? matches : max_entries;
 }

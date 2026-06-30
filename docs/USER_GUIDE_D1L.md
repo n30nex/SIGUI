@@ -8,7 +8,8 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Local MeshCore identity stored in D1L NVS.
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
-- Persisted recent Public messages, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
+- Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
+- Targeted outbound DM to the local COM11 Meshcorebot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
@@ -66,6 +67,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `radio set txpower 20`
 - `radio set rxboost <0|1>`
 - `messages public`
+- `messages public search test`
 - `messages unread`
 - `nodes`
 - `contacts`
@@ -84,7 +86,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 
 - Manual physical review of the touch UI is still pending.
 - Manual touch review of the Radio Settings sheet is still pending.
-- Full DM RF proof is still pending.
+- Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
 - Full 12-hour idle/listening soak is still pending; the 1-hour active Public `test` soak has passed.

@@ -21,6 +21,9 @@ def test_public_message_store_is_bounded_and_nvs_backed():
     assert "nvs_set_blob" in source
     assert "static d1l_message_store_blob_t s_blob_scratch" in source
     assert "d1l_message_store_copy_recent" in source
+    assert "d1l_message_store_query" in header
+    assert "contains_casefold" in source
+    assert "message_matches_query" in source
     assert '"mesh/message_store.c"' in cmake
 
 
@@ -40,9 +43,23 @@ def test_ui_and_console_expose_persistent_public_messages():
     console = read("main/comms/usb_console.c")
     assert "D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U" in app_header
     assert "recent_messages" in app_header
+    assert "d1l_app_model_query_public_messages" in app_header
     assert "d1l_message_store_copy_recent" in app_source
+    assert "d1l_message_store_query(out_entries, max_entries, query)" in app_source
     assert "render_message_row" in ui
     assert "No stored messages" in ui
+    assert "static lv_obj_t *s_public_history_sheet" in ui
+    assert "static lv_obj_t *s_public_search_sheet" in ui
+    assert "d1l_app_model_query_public_messages(s_public_history_entries" in ui
+    assert 'create_button(header, "History"' in ui
+    assert "create_public_history_sheet" in ui
+    assert "create_public_search_sheet" in ui
+    assert 'lv_textarea_set_placeholder_text(s_public_search_textarea, "Search author or message")' in ui
     assert 'ok_begin("messages public")' in console
     assert 'strcmp(line, "messages public")' in console
+    assert 'strncmp(line, "messages public search "' in console
+    assert "messages public [search <text>]" in console
+    assert "optional search filters retained rows" in console
+    assert "d1l_message_store_query(entries, D1L_MESSAGE_STORE_CAPACITY, search)" in console
     assert "messages public" in SMOKE_COMMANDS
+    assert "messages public search test" in SMOKE_COMMANDS

@@ -65,17 +65,23 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert dm_thread["dm_thread_source_count"] == 32
     assert dm_thread["dm_thread_rendered_count"] <= 3
 
+    public_history = views["public_history_sheet"]["metrics"]
+    assert public_history["public_history_source_count"] == 48
+    assert public_history["public_history_rendered_count"] <= 3
+
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     report = ui_simulator.generate(tmp_path)
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
 
-    assert {"Messages", "Read", "Compose", "Test", "Public", "Direct"} <= labels_by_view["messages"]
+    assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
+    assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
+    assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
     assert {"Contact Detail", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
     assert {"DM Thread", "Thread 2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]

@@ -28,14 +28,14 @@ Coverage:
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
-- UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, sheets, first-boot onboarding, fail on missing required labels or measured text overflow, and include a `large-mesh` scenario that proves oversized node/message stores are bounded before rendering.
+- UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, Public History/Search sheets, first-boot onboarding, fail on missing required labels or measured text overflow, and include a `large-mesh` scenario that proves oversized node/message stores are bounded before rendering.
 - First-boot onboarding contract: settings schema v3 must persist `onboarding_complete`, migrate schema v2 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract including retained-history search, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -71,6 +71,7 @@ Expected commands:
 - `packets filter any any`
 - `packets search test`
 - `messages public`
+- `messages public search test`
 - `messages dm [fingerprint]`
 - `messages unread`
 - `nodes`
@@ -137,8 +138,9 @@ For Phase 4 Public message-store validation:
 2. Run `mesh send public test`.
 3. Wait for a local MeshCore bot response.
 4. Verify `messages public` contains at least one TX row and one RX row.
-5. Reboot.
-6. Verify `messages public` retains the rows and `packets` either retains the newest packet evidence rows or starts a new evidence window if `packets clear` was run for the packet-log test.
+5. Verify `messages public search test` returns `filtered=true` and only retained rows whose author, direction, or text matches `test`.
+6. Reboot.
+7. Verify `messages public` retains the rows and `packets` either retains the newest packet evidence rows or starts a new evidence window if `packets clear` was run for the packet-log test.
 
 ## Unread State
 
@@ -167,7 +169,7 @@ For Phase 4 direct-message store validation:
 3. Run `mesh send dm <fingerprint> <text>`.
 4. Verify `messages dm` contains a TX row with the contact fingerprint, alias, text, `direction="tx"`, `persisted=true`, and a nonzero `ack_hash`.
 5. Verify `messages dm <fingerprint>` returns `filtered=true`, the same fingerprint, and only rows for that retained thread.
-6. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement.
+6. If the target contact is the local COM11 Meshcorebot, verify its status counters include fresh `rx_contact_total` movement. Use this targeted DM path instead of Public-channel RF when the operator asks to keep Public quiet.
 7. If the peer emits MeshCore ACK/PATH returns, verify `messages dm` marks the TX row `acked=true` and `contacts` shows `out_path_known=true`.
 8. Send a second DM to the same contact and verify `routes` records `kind="dm_text"`, `direction="tx"`, and `route="direct"`.
 9. Reboot.
