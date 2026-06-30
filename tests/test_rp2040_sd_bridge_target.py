@@ -34,6 +34,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_SCK_PIN = 10;" in sketch
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
+    assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
+    assert "digitalWrite(SD_POWER_PIN, HIGH)" in sketch
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch

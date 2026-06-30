@@ -22,6 +22,7 @@ constexpr uint8_t SD_CS_PIN = 13;
 constexpr uint8_t SD_SCK_PIN = 10;
 constexpr uint8_t SD_MOSI_PIN = 11;
 constexpr uint8_t SD_MISO_PIN = 12;
+constexpr uint8_t SD_POWER_PIN = 18;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
 constexpr const char *DESKOS_ROOT = "/deskos";
 
@@ -58,6 +59,8 @@ uint32_t clamp_kb(uint64_t bytes) {
 }
 
 void configure_sd_bus() {
+    pinMode(SD_POWER_PIN, OUTPUT);
+    digitalWrite(SD_POWER_PIN, HIGH);
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
@@ -936,6 +939,7 @@ void setup() {
     Serial1.setTX(RP2040_ESP32_TX_PIN);
     Serial1.begin(ESP32_BRIDGE_BAUD);
     configure_sd_bus();
+    delay(50);
     Serial.println("DeskOS RP2040 SD bridge ready");
 }
 

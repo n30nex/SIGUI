@@ -13,6 +13,7 @@ It speaks the newline-delimited protocol documented in
 - SD SCK: GPIO10.
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
+- SD/sensor rail power enable: GPIO18, driven high before SD init.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
