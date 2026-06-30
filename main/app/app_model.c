@@ -9,6 +9,7 @@
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
+#include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
 static d1l_app_model_t s_model = {
@@ -126,6 +127,10 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_setup_supported = storage.setup_supported;
     snapshot->storage_data_enabled = storage.data_enabled;
     snapshot->storage_response_truncated = storage.response_truncated;
+    snapshot->map_page_supported = true;
+    snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
+    snapshot->map_tile_download_supported = false;
+    snapshot->map_tile_sideload_supported = true;
     snapshot->storage_capacity_kb = storage.capacity_kb;
     snapshot->storage_free_kb = storage.free_kb;
     snapshot->storage_last_error = storage.last_error;
@@ -141,6 +146,10 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->route_store_backend = storage.route_store_backend;
     snapshot->map_tile_backend = storage.map_tile_backend;
     snapshot->export_backend = storage.export_backend;
+    snapshot->map_tile_cache_policy = D1L_MAP_TILE_CACHE_POLICY;
+    snapshot->map_tile_cache_path_template = D1L_MAP_TILE_CACHE_PATH_TEMPLATE;
+    snapshot->map_tile_download_state = D1L_MAP_TILE_DOWNLOAD_STATE;
+    snapshot->map_tile_download_requires = D1L_MAP_TILE_DOWNLOAD_REQUIRES;
     snapshot->storage_setup_action = storage.setup_action;
     snapshot->storage_format_action = storage.format_action;
     snapshot->storage_note = storage.note;

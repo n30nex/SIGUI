@@ -34,6 +34,7 @@
 - [x] Simulator screenshots captured for the main shell views and current modal sheets.
 - [x] Simulator layout report passes required-label and text-overflow checks.
 - [x] Simulator touch-flow report passes expected-flow, 44x44 touch-target, RF/destructive flag, and no-format storage checks.
+- [x] Offline Map tab and SD tile-cache policy are covered by simulator required-label and flow checks.
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
 - [ ] Manual visual review of the physical shell.
 - [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
@@ -70,9 +71,10 @@
 - [x] Serial-only diagnostic export SD bundle added: `storage export-diagnostics <token>` commits bounded chunked storage/health/crashlog JSON to `exports/diagnostics/diagnostic-export-<token>.json`, reports map tile cache readiness without bundling actual tiles, and `scripts/sd_diagnostic_export_d1l.py` proves the path without Public RF or formatting.
 - [x] Serial-only sampled data export SD bundle added: `storage export-data <token>` commits bounded chunked user-data JSON to `exports/data/data-export-<token>.json`, includes recent messages/DMs/routes/packets/contacts/nodes/read-state, excludes private identity material, and `scripts/sd_data_export_d1l.py` proves the path without Public RF or formatting.
 - [x] Serial-only map tile cache SD canary added: `storage map-tile-canary <token>` commits `map/tiles/z12/x1/y2-<token>.tile` through temp write/read plus atomic rename and `scripts/sd_map_tile_canary_d1l.py` proves the path without Public RF or formatting.
+- [x] First offline Map tab and serial `storage map-policy` added: they expose `map/tiles/z{z}/x{x}/y{y}.tile`, current cache readiness/backend, and disabled live-download state without Public RF or formatting.
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; the current inserted-card attempt still reports `sd.state=no_card`, and confirmed formatting is refused with `ESP_ERR_NOT_FOUND` and `format_performed=false`.
-- [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores.
+- [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
 - [x] Contact export QR-compatible serial command and touch sheet are implemented, host/simulator tested, flashed, smoke-tested, and targeted with a keyed contact on `COM7`.

@@ -664,6 +664,13 @@ static void cmd_storage_status(void)
     print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
     printf(",\"map_tile_backend\":");
     print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"map_tile_cache_ready\":%s,\"map_tile_cache_policy\":",
+           bool_json(d1l_map_tile_store_sd_ready(&status)));
+    print_json_string(D1L_MAP_TILE_CACHE_POLICY);
+    printf(",\"map_tile_cache_path_template\":");
+    print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
+    printf(",\"map_tile_download_supported\":false,\"map_tile_download_state\":");
+    print_json_string(D1L_MAP_TILE_DOWNLOAD_STATE);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
@@ -686,6 +693,40 @@ static void cmd_storage_status(void)
     printf(",\"fallback\":\"nvs\",\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
+}
+
+static void cmd_storage_map_policy(void)
+{
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
+    char sample_path[D1L_RP2040_FILE_PATH_MAX + 1U] = {0};
+    const bool sample_path_ok = d1l_map_tile_store_path(0U, 0U, 0U,
+                                                        sample_path,
+                                                        sizeof(sample_path));
+    const bool cache_ready = d1l_map_tile_store_sd_ready(&status);
+
+    ok_begin("storage map-policy");
+    printf(",\"kind\":\"map_tile_policy\",\"map_page_supported\":true,\"tile_cache_ready\":%s,\"tile_cache_backend\":",
+           bool_json(cache_ready));
+    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"cache_policy\":");
+    print_json_string(D1L_MAP_TILE_CACHE_POLICY);
+    printf(",\"cache_path_template\":");
+    print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
+    printf(",\"sample_path\":");
+    print_json_string(sample_path_ok ? sample_path : "");
+    printf(",\"zoom_max\":%u,\"sideload_supported\":true,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":false,\"live_network_download\":false,\"download_state\":",
+           (unsigned)D1L_MAP_TILE_ZOOM_MAX);
+    print_json_string(D1L_MAP_TILE_DOWNLOAD_STATE);
+    printf(",\"download_requires\":");
+    print_json_string(D1L_MAP_TILE_DOWNLOAD_REQUIRES);
+    printf(",\"wifi_state\":");
+    print_json_string(connectivity.wifi_state ? connectivity.wifi_state : "off");
+    printf(",\"wifi_build_enabled\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Offline map shell and SD cache policy are available; live tile download stays disabled until Wi-Fi runtime and explicit user opt-in are implemented\"}\n",
+           bool_json(connectivity.wifi_build_enabled));
 }
 
 static const char *storage_format_hint(esp_err_t ret, const d1l_storage_status_t *status)
@@ -3056,7 +3097,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3119,6 +3160,8 @@ static void handle_line(const char *line)
         cmd_rp2040_status();
     } else if (strcmp(line, "storage status") == 0) {
         cmd_storage_status();
+    } else if (strcmp(line, "storage map-policy") == 0) {
+        cmd_storage_map_policy();
     } else if (strcmp(line, "storage setup") == 0 ||
                strncmp(line, "storage setup confirm ", strlen("storage setup confirm ")) == 0) {
         cmd_storage_setup(line);

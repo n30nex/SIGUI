@@ -64,6 +64,10 @@ typedef struct {
     bool storage_setup_supported;
     bool storage_data_enabled;
     bool storage_response_truncated;
+    bool map_page_supported;
+    bool map_tile_cache_ready;
+    bool map_tile_download_supported;
+    bool map_tile_sideload_supported;
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
     const char *wifi_state;
@@ -81,6 +85,10 @@ typedef struct {
     const char *route_store_backend;
     const char *map_tile_backend;
     const char *export_backend;
+    const char *map_tile_cache_policy;
+    const char *map_tile_cache_path_template;
+    const char *map_tile_download_state;
+    const char *map_tile_download_requires;
     const char *storage_setup_action;
     const char *storage_format_action;
     const char *storage_note;

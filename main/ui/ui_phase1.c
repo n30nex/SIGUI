@@ -102,6 +102,7 @@ typedef enum {
     D1L_UI_TAB_HOME = 0,
     D1L_UI_TAB_MESSAGES,
     D1L_UI_TAB_NODES,
+    D1L_UI_TAB_MAP,
     D1L_UI_TAB_PACKETS,
     D1L_UI_TAB_SETTINGS,
 } d1l_ui_tab_t;
@@ -2130,6 +2131,64 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
     }
 }
 
+static void render_map(const d1l_app_snapshot_t *snapshot)
+{
+    char value[32];
+    char detail[96];
+    lv_obj_t *title = create_label(s_content, "Map", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 18, 8);
+
+    snprintf(value, sizeof(value), "%s", snapshot->map_tile_cache_ready ? "SD Ready" : "Offline");
+    snprintf(detail, sizeof(detail), "%s",
+             snapshot->map_tile_backend ? snapshot->map_tile_backend : "unavailable");
+    render_metric_card(s_content, 18, 48, "Tile Cache", value, detail,
+                       snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24);
+
+    snprintf(value, sizeof(value), "%s",
+             snapshot->map_tile_download_supported ? "Ready" : "Pending");
+    snprintf(detail, sizeof(detail), "%s",
+             snapshot->map_tile_download_state ? snapshot->map_tile_download_state :
+             "wifi_runtime_pending");
+    render_metric_card(s_content, 238, 48, "Downloads", value, detail, 0x93C5FD);
+
+    lv_obj_t *cache = create_panel(s_content, 18, 168, 424, 82);
+    create_label(cache, "Offline Cache", 0xF4F7FB);
+    lv_obj_t *policy = create_label(cache, "", 0x8EA0AE);
+    label_set_fmt(policy, "policy %s",
+                  snapshot->map_tile_cache_policy ? snapshot->map_tile_cache_policy :
+                  "sd_offline_cache_when_ready");
+    lv_label_set_long_mode(policy, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(policy, 390);
+    lv_obj_set_pos(policy, 0, 28);
+    lv_obj_t *path = create_label(cache, "", 0x8EA0AE);
+    label_set_fmt(path, "path %s",
+                  snapshot->map_tile_cache_path_template ?
+                  snapshot->map_tile_cache_path_template : "map/tiles/z{z}/x{x}/y{y}.tile");
+    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(path, 390);
+    lv_obj_set_pos(path, 0, 50);
+
+    lv_obj_t *routes = create_panel(s_content, 18, 266, 424, 94);
+    create_label(routes, "Routes", 0xF4F7FB);
+    lv_obj_t *counts = create_label(routes, "", 0x8EA0AE);
+    label_set_fmt(counts, "retained %u  nodes %u  latest RSSI %d",
+                  (unsigned)snapshot->route_count,
+                  (unsigned)snapshot->node_count,
+                  snapshot->signal_summary.latest_rssi_dbm);
+    lv_label_set_long_mode(counts, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(counts, 390);
+    lv_obj_set_pos(counts, 0, 28);
+    lv_obj_t *download = create_label(routes, "", 0x8EA0AE);
+    label_set_fmt(download, "%s",
+                  snapshot->map_tile_download_requires ?
+                  snapshot->map_tile_download_requires :
+                  "Wi-Fi runtime plus user opt-in; no background network download");
+    lv_label_set_long_mode(download, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(download, 390);
+    lv_obj_set_pos(download, 0, 52);
+}
+
 static const char *packet_filter_direction(void)
 {
     switch (s_packet_filter_mode) {
@@ -2627,6 +2686,9 @@ static void render_active_tab(void)
     case D1L_UI_TAB_NODES:
         render_nodes(&s_snapshot);
         break;
+    case D1L_UI_TAB_MAP:
+        render_map(&s_snapshot);
+        break;
     case D1L_UI_TAB_PACKETS:
         render_packets(&s_snapshot);
         break;
@@ -2722,9 +2784,9 @@ static void create_dock(lv_obj_t *screen)
     lv_obj_set_style_pad_all(dock, 5, 0);
     lv_obj_clear_flag(dock, LV_OBJ_FLAG_SCROLLABLE);
 
-    const char *labels[] = {"Home", "Msg", "Nodes", "Pkts", "Set"};
-    for (int i = 0; i < 5; ++i) {
-        create_button(dock, labels[i], 8 + i * 94, 5, 88, 50, dock_event_cb,
+    const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"};
+    for (int i = 0; i < 6; ++i) {
+        create_button(dock, labels[i], 4 + i * 80, 5, 72, 50, dock_event_cb,
                       (void *)(uintptr_t)i);
     }
 }

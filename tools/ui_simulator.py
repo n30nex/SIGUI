@@ -85,6 +85,14 @@ class Snapshot:
     storage_stores: str
     storage_setup_action: str
     storage_format_action: str
+    map_tile_backend: str
+    map_tile_cache_ready: bool
+    map_tile_cache_policy: str
+    map_tile_cache_path_template: str
+    map_tile_download_state: str
+    map_tile_download_requires: str
+    map_tile_download_supported: bool
+    map_tile_sideload_supported: bool
 
 
 def sample_snapshot() -> Snapshot:
@@ -131,6 +139,14 @@ def sample_snapshot() -> Snapshot:
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
         storage_format_action="not_available",
+        map_tile_backend="unavailable",
+        map_tile_cache_ready=False,
+        map_tile_cache_policy="sd_offline_cache_when_ready",
+        map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
+        map_tile_download_state="wifi_runtime_pending",
+        map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
+        map_tile_download_supported=False,
+        map_tile_sideload_supported=True,
     )
 
 
@@ -220,6 +236,14 @@ def large_mesh_snapshot() -> Snapshot:
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
         storage_format_action="not_available",
+        map_tile_backend="unavailable",
+        map_tile_cache_ready=False,
+        map_tile_cache_policy="sd_offline_cache_when_ready",
+        map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
+        map_tile_download_state="wifi_runtime_pending",
+        map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
+        map_tile_download_supported=False,
+        map_tile_sideload_supported=True,
     )
 
 
@@ -304,6 +328,8 @@ def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
         storage_stores="msg/pkt/route/map SD",
         storage_setup_action="retained_history_sd_enabled",
         storage_format_action="not_needed",
+        map_tile_backend="sd_map_tiles_ready",
+        map_tile_cache_ready=True,
     )
 
 
@@ -540,7 +566,7 @@ def draw_top_bar(s: Surface, snap: Snapshot):
 
 def draw_dock(s: Surface, active: str):
     s.rect((0, DOCK_Y, WIDTH, HEIGHT), (10, 16, 25))
-    tabs = [("Home", "Home"), ("Messages", "Msg"), ("Nodes", "Nodes"), ("Packets", "Packets"), ("Settings", "Set")]
+    tabs = [("Home", "Home"), ("Messages", "Msg"), ("Nodes", "Nodes"), ("Map", "Map"), ("Packets", "Pkts"), ("Settings", "Set")]
     w = WIDTH // len(tabs)
     for i, (name, label) in enumerate(tabs):
         x0 = i * w
@@ -767,6 +793,50 @@ def render_nodes(s: Surface, snap: Snapshot):
         }
     )
     draw_dock(s, "Nodes")
+
+
+def render_map(s: Surface, snap: Snapshot):
+    draw_top_bar(s, snap)
+    s.text("Map", (16, 64, 150, 92), 22, TEXT, True)
+    draw_metric(
+        s,
+        (16, 104, 230, 176),
+        "Tile Cache",
+        "SD Ready" if snap.map_tile_cache_ready else "Offline",
+        snap.map_tile_backend,
+        GREEN if snap.map_tile_cache_ready else AMBER,
+    )
+    draw_metric(
+        s,
+        (250, 104, 464, 176),
+        "Downloads",
+        "Ready" if snap.map_tile_download_supported else "Pending",
+        snap.map_tile_download_state,
+        BLUE,
+    )
+    s.round_rect((16, 190, 464, 276))
+    s.text("Offline Cache", (28, 198, 180, 220), 14, MUTED, True)
+    s.text(snap.map_tile_cache_policy, (28, 224, 452, 246), 16, TEXT, True)
+    s.text(snap.map_tile_cache_path_template, (28, 250, 452, 270), 11, MUTED)
+    s.round_rect((16, 290, 464, 402))
+    s.text("Routes", (28, 298, 160, 320), 14, MUTED, True)
+    s.text(
+        f"retained {len(snap.routes)} routes  heard {len(snap.heard)} nodes",
+        (28, 322, 452, 346),
+        16,
+        TEXT,
+        True,
+    )
+    s.text(snap.map_tile_download_requires, (28, 350, 452, 372), 11, MUTED)
+    s.text("No network tile download until Wi-Fi runtime", (28, 374, 452, 394), 11, AMBER, True)
+    s.metrics.update(
+        {
+            "map_tile_cache_ready": snap.map_tile_cache_ready,
+            "map_tile_download_supported": snap.map_tile_download_supported,
+            "map_route_count": len(snap.routes),
+        }
+    )
+    draw_dock(s, "Map")
 
 
 def render_packets(s: Surface, snap: Snapshot):
@@ -1148,6 +1218,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
     "nodes": render_nodes,
+    "map": render_map,
     "packets": render_packets,
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
@@ -1173,6 +1244,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": ("MeshCore DeskOS", "Home", "Radio", "US/CAN", "Mesh", "Identity", "Unread", "Send", "Advert"),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
+    "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Routes", "No network tile download until Wi-Fi runtime"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
@@ -1285,6 +1357,12 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "contact_edit_sheet", "action": "save_contact_alias", "destination": "contact_detail_sheet"},
             {"view": "contact_edit_sheet", "action": "forget_contact", "destination": "nodes", "destructive": True},
             {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_detail_sheet"},
+        ),
+    },
+    {
+        "name": "map_page_policy",
+        "steps": (
+            {"view": "home", "action": "open_map", "destination": "map"},
         ),
     },
     {

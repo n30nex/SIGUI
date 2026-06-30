@@ -123,12 +123,18 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
         "route_store_backend",
         "map_tile_backend",
         "export_backend",
+        "map_tile_cache_ready",
+        "map_tile_cache_policy",
+        "map_tile_cache_path_template",
+        "map_tile_download_state",
+        "map_tile_download_requires",
     ]:
         assert field in app_header
         assert field in app_source
 
     assert '#include "storage/storage_status.h"' in console
     assert 'ok_begin("storage status")' in console
+    assert 'ok_begin("storage map-policy")' in console
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
@@ -137,10 +143,12 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '"storage status"' in console
     assert '"storage setup"' in console
     assert "storage setup confirm FORMAT-DESKOS-SD" in console
+    assert "storage map-policy" in console
     assert "storage filecanary" in console
     assert "storage map-tile-canary <token>" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
+    assert 'strcmp(line, "storage map-policy")' in console
     assert 'strcmp(line, "storage setup")' in console
     assert 'strcmp(line, "storage filecanary")' in console
     assert 'strncmp(line, "storage map-tile-canary "' in console
@@ -150,6 +158,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "ESP_ERR_NOT_SUPPORTED" in console
     assert '\\"fallback\\":\\"nvs\\"' in console
     assert "storage status" in SMOKE_COMMANDS
+    assert "storage map-policy" in SMOKE_COMMANDS
     assert "storage setup" in SMOKE_COMMANDS
     assert not any(command.startswith("storage map-tile-canary") for command in SMOKE_COMMANDS)
     assert not any(command.startswith("storage export-canary") for command in SMOKE_COMMANDS)
@@ -198,6 +207,12 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"file_chunk_max\\":%lu' in console
     assert '\\"path_max\\":%lu' in console
     assert '\\"atomic_rename\\":%s' in console
+    assert "D1L_MAP_TILE_CACHE_POLICY" in console
+    assert "D1L_MAP_TILE_CACHE_PATH_TEMPLATE" in console
+    assert "D1L_MAP_TILE_DOWNLOAD_STATE" in console
+    assert "D1L_MAP_TILE_DOWNLOAD_REQUIRES" in console
+    assert '\\"download_supported\\":false' in console
+    assert '\\"live_network_download\\":false' in console
 
 
 def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
@@ -353,9 +368,17 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     docs = read("docs/TEST_PLAN_D1L.md")
 
     assert "D1L_MAP_TILE_CANARY_TOKEN_MAX 31U" in store_header
+    assert "D1L_MAP_TILE_ZOOM_MAX 18U" in store_header
+    assert 'D1L_MAP_TILE_CACHE_POLICY "sd_offline_cache_when_ready"' in store_header
+    assert 'D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/z{z}/x{x}/y{y}.tile"' in store_header
+    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "wifi_runtime_pending"' in store_header
     assert "d1l_map_tile_store_token_valid" in store_header
     assert "d1l_map_tile_store_sd_ready" in store_header
+    assert "d1l_map_tile_store_coord_valid" in store_header
+    assert "d1l_map_tile_store_path" in store_header
     assert "d1l_map_tile_store_write_canary" in store_header
+    assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
+    assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
     assert "map_tile_cache_canary" in store_source
@@ -365,6 +388,10 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_rp2040_bridge_file_stat(result.path" in store_source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_map_tile_canary" in console
+    assert "cmd_storage_map_policy" in console
+    assert "storage map-policy" in console
+    assert "map_tile_policy" in console
+    assert "d1l_map_tile_store_path(0U, 0U, 0U" in console
     assert "storage map-tile-canary <token>" in console
     assert "d1l_map_tile_store_write_canary" in console
     assert "Map tile SD cache canary committed" in console

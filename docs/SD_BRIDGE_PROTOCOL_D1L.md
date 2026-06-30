@@ -261,6 +261,12 @@ back. The final synthetic tile is intentionally left present for inspection.
 This proves the nested cache directory and atomic commit path without Public RF
 or formatting.
 
+The serial `storage map-policy` command is read-only. It reports the first
+offline Map page policy, the production cache path template
+`map/tiles/z{z}/x{x}/y{y}.tile`, the current `map_tile_backend`, and
+`download_supported=false`/`live_network_download=false`. It does not request
+network tiles, send Public RF, or format the card.
+
 The host simulator prints the deterministic request/reply shape:
 
 ```powershell
@@ -275,4 +281,4 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcri
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`; the full map page/tile download policy remains pending until its migration lands.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`, and the first offline Map page/cache policy is reported through `storage map-policy`. Live network tile downloads remain pending until Wi-Fi runtime and explicit user opt-in are implemented.

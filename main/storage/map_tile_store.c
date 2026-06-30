@@ -8,6 +8,26 @@
 #define D1L_MAP_TILE_CANARY_X 1U
 #define D1L_MAP_TILE_CANARY_Y 2U
 
+bool d1l_map_tile_store_coord_valid(uint8_t z, uint32_t x, uint32_t y)
+{
+    if (z > D1L_MAP_TILE_ZOOM_MAX) {
+        return false;
+    }
+    const uint32_t limit = 1UL << z;
+    return x < limit && y < limit;
+}
+
+bool d1l_map_tile_store_path(uint8_t z, uint32_t x, uint32_t y,
+                             char *dest, size_t dest_size)
+{
+    if (!dest || dest_size == 0 || !d1l_map_tile_store_coord_valid(z, x, y)) {
+        return false;
+    }
+    const int len = snprintf(dest, dest_size, "map/tiles/z%u/x%lu/y%lu.tile",
+                             (unsigned)z, (unsigned long)x, (unsigned long)y);
+    return len > 0 && (size_t)len < dest_size;
+}
+
 static bool result_path_set(d1l_map_tile_canary_result_t *result,
                             const char *token)
 {

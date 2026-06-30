@@ -87,6 +87,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
 
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
+    assert {"Map", "Tile Cache", "Downloads", "Offline Cache", "Routes"} <= labels_by_view["map"]
+    assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
@@ -135,6 +137,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "dm_thread_read_and_reply",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
+        "map_page_policy",
         "packet_filters_search_and_details",
         "mesh_roles_browser",
         "settings_radio_storage_and_advert",
@@ -142,6 +145,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
 
     assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
     assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
+    assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"
@@ -198,6 +202,12 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         elif scenario == "storage-ready-map-tiles-sd":
             assert "Mixed storage" in labels_by_view["settings"]
             assert "msg/pkt/route/map SD" in labels_by_view["storage_setup_sheet"]
+            map_report = ui_simulator.generate(tmp_path / f"{scenario}-map", views=("map",), scenario=scenario)
+            map_view = map_report["views"][0]
+            assert map_report["ok"] is True, scenario
+            assert map_view["metrics"]["map_tile_cache_ready"] is True
+            assert map_view["metrics"]["map_tile_download_supported"] is False
+            assert "sd_map_tiles_ready" in set(map_view["labels"])
         else:
             assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]
         assert storage_view["overflow"] == []

@@ -38,6 +38,17 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "onboarding_complete" in header
     assert "ui_task_stack_free_words" in header
     assert "lvgl_used_pct" in header
+    assert "map_page_supported" in header
+    assert "map_tile_cache_ready" in header
+    assert "map_tile_download_supported" in header
+    assert "map_tile_sideload_supported" in header
+    assert "map_tile_cache_policy" in header
+    assert "map_tile_cache_path_template" in header
+    assert "map_tile_download_state" in header
+    assert "map_tile_download_requires" in header
+    assert "d1l_map_tile_store_sd_ready(&storage)" in source
+    assert "D1L_MAP_TILE_CACHE_POLICY" in source
+    assert "D1L_MAP_TILE_DOWNLOAD_STATE" in source
     assert "d1l_app_radio_profile_edit_t" in header
     assert "radio_frequency_hz" in header
     assert "radio_bandwidth_tenths_khz" in header
@@ -57,8 +68,10 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "D1L_UI_TAB_HOME" in source
     assert "D1L_UI_TAB_MESSAGES" in source
     assert "D1L_UI_TAB_NODES" in source
+    assert "D1L_UI_TAB_MAP" in source
     assert "D1L_UI_TAB_PACKETS" in source
     assert "D1L_UI_TAB_SETTINGS" in source
+    assert "render_map" in source
     assert "create_top_bar" in source
     assert "create_dock" in source
     assert "create_sheet" in source
@@ -114,6 +127,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "dm_thread_read_and_reply",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
+        "map_page_policy",
         "packet_filters_search_and_details",
         "mesh_roles_browser",
         "settings_radio_storage_and_advert",
@@ -139,6 +153,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "edit_contact_alias": "s_contact_edit_textarea",
         "save_contact_alias": "save_contact_edit_event_cb",
         "forget_contact": "forget_contact_edit_event_cb",
+        "open_map": "dock_event_cb",
         "open_contact_export": "contact_detail_export_event_cb",
         "open_route_trace": "open_route_trace_event_cb",
         "open_packet_search": "open_packet_search_event_cb",
@@ -247,6 +262,33 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "i < snapshot->recent_contact_count && y <= 190" in source
     assert "i < snapshot->recent_node_count && y <= 300" in source
+
+
+def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
+    model = read("main/app/app_model.c")
+
+    assert "D1L_UI_TAB_MAP" in source
+    assert "render_map" in source
+    assert '"Map"' in source
+    assert '"Tile Cache"' in source
+    assert '"Downloads"' in source
+    assert '"Offline Cache"' in source
+    assert '"Routes"' in source
+    assert "snapshot->map_tile_cache_ready" in source
+    assert "snapshot->map_tile_download_supported" in source
+    assert "snapshot->map_tile_cache_policy" in source
+    assert "snapshot->map_tile_cache_path_template" in source
+    assert "snapshot->map_tile_download_requires" in source
+    assert "render_metric_card(s_content, 18, 48" in source
+    assert "render_metric_card(s_content, 238, 48" in source
+    assert 'const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"}' in source
+    assert "for (int i = 0; i < 6; ++i)" in source
+    assert "map_tile_download_supported" in header
+    assert "map_tile_sideload_supported" in header
+    assert "snapshot->map_tile_download_supported = false" in model
+    assert "snapshot->map_tile_sideload_supported = true" in model
 
 
 def test_messages_screen_renders_bounded_preview_rows():
