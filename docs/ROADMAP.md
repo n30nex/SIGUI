@@ -648,7 +648,7 @@ Tasks:
 
 - Fix memory leaks.
 - Task watchdog tuning.
-- Long-run soak test. Status: `scripts/soak_d1l.py` is implemented for idle/listening and active Public `test` soak windows with heap/PSRAM, task-stack, LVGL, uptime, packet-counter, signal, unread, command-retry, and crashlog/crash-like reset sampling. A retry-aware 1-hour active Public `test` hardware soak passed on `COM7`; the 12-hour idle/listening acceptance soak is still pending.
+- Long-run soak test. Status: `scripts/soak_d1l.py` is implemented for idle/listening and active Public `test` soak windows with heap/PSRAM, task-stack, LVGL, uptime, packet-counter, signal, unread, command-retry, and crashlog/crash-like reset sampling. It now also has a serial-only SD-aware passive mode that samples `storage status`, repeats `storage filecanary`, records stable SD/backend gates, and can explicitly allow the expected pre-RP2040-flash canary refusal without sending Public RF or format commands. A retry-aware 1-hour active Public `test` hardware soak passed on `COM7`; the 12-hour idle/listening acceptance soak is still pending.
 - Touch edge-case fixes.
 - Dark theme contrast pass.
 - UI animation performance pass.

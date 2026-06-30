@@ -44,7 +44,7 @@ Run these from the repo root after the RP2040 reboots:
 ```powershell
 python .\scripts\smoke_d1l.py --port COM12 --out artifacts\smoke\d1l-smoke-rp2040-sd-bridge-COM12.json
 python .\scripts\sd_file_canary_d1l.py --port COM12 --out artifacts\sd-canary\d1l-sd-file-canary-COM12.json
-python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --out artifacts\soak\d1l-passive-soak-rp2040-sd-bridge-COM12.json
+python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary --out artifacts\soak\d1l-passive-soak-rp2040-sd-bridge-COM12.json
 ```
 
 Expected proof with a ready card:
@@ -57,8 +57,22 @@ Expected proof with a ready card:
 - `storage filecanary` returns `ok=true`, `rename_replace=true`,
   `read_final=true`, `delete_final=true`, and `stat_deleted=true`.
 - The passive soak reports zero active Public TX, zero crash-like resets, and
-  monotonic uptime.
+  monotonic uptime, plus stable SD state/backend samples and repeated passing
+  `storage filecanary` results.
 
 Expected proof before the RP2040 bridge is flashed, with no card, or with an
 unsupported card is a safe refusal: onboard NVS remains the fallback and no
-format is performed.
+format is performed. For that pre-flash/fallback state only, the soak command
+may be run with `--allow-sd-unavailable` so the expected `storage filecanary`
+preflight refusal is recorded without failing the passive stability window:
+
+```powershell
+python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary --allow-sd-unavailable --out artifacts\soak\d1l-passive-soak-sd-aware-pre-rp2040-flash-COM12.json
+```
+
+The host simulator can print the deterministic filecanary request/reply grammar
+without hardware:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
+```

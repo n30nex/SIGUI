@@ -2,6 +2,9 @@ from pathlib import Path
 
 from tools.rp2040_sd_protocol import (
     FILE_CAPABILITY_FIELDS,
+    FILE_CANARY_FINAL_PATH,
+    FILE_CANARY_PAYLOAD,
+    FILE_CANARY_TMP_PATH,
     FILE_ERROR_CODES,
     FILE_LINE_MAX,
     FILE_REPLY,
@@ -19,6 +22,7 @@ from tools.rp2040_sd_protocol import (
     b64url,
     crc32_hex,
     encode_path,
+    file_canary_transcript,
     reply_for_request,
     validate_relative_path,
 )
@@ -194,6 +198,61 @@ def test_file_protocol_supports_bounded_write_read_rename_delete_cycle():
     assert delete["ok"] == "1"
     assert deleted["exists"] == "0"
     assert path != final
+
+
+def test_filecanary_transcript_matches_storage_filecanary_contract():
+    transcript = file_canary_transcript(SCENARIOS["ready"])
+    requests = [exchange["request"] for exchange in transcript]
+    replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+    tmp_path = encode_path(FILE_CANARY_TMP_PATH)
+    final_path = encode_path(FILE_CANARY_FINAL_PATH)
+    payload64 = b64url(FILE_CANARY_PAYLOAD)
+    payload_crc = crc32_hex(FILE_CANARY_PAYLOAD)
+
+    assert len(transcript) == 9
+    assert requests[0] == file_request(1, "delete", path=tmp_path)
+    assert replies[0]["ok"] == "0"
+    assert replies[0]["err"] == "not_found"
+    assert requests[1] == file_request(2, "delete", path=final_path)
+    assert replies[1]["err"] == "not_found"
+    assert requests[2] == file_request(
+        3,
+        "write",
+        path=tmp_path,
+        off=0,
+        len=len(FILE_CANARY_PAYLOAD),
+        trunc=1,
+        data=payload64,
+        crc=payload_crc,
+    )
+    assert replies[2]["ok"] == "1"
+    assert replies[2]["size"] == str(len(FILE_CANARY_PAYLOAD))
+    assert requests[3] == file_request(4, "read", path=tmp_path, off=0, len=24)
+    assert replies[3]["data"] == payload64
+    assert replies[3]["crc"] == payload_crc
+    assert requests[4] == file_request(5, "rename", path=tmp_path, to=final_path, replace=1)
+    assert replies[4]["ok"] == "1"
+    assert requests[5] == file_request(6, "stat", path=final_path)
+    assert replies[5]["exists"] == "1"
+    assert replies[5]["kind"] == "file"
+    assert requests[6] == file_request(7, "read", path=final_path, off=0, len=24)
+    assert replies[6]["data"] == payload64
+    assert requests[7] == file_request(8, "delete", path=final_path)
+    assert replies[7]["ok"] == "1"
+    assert requests[8] == file_request(9, "stat", path=final_path)
+    assert replies[8]["exists"] == "0"
+
+
+def test_filecanary_transcript_fails_safely_without_ready_card():
+    for scenario_name, expected_error in {
+        "no-card": "no_card",
+        "format-required": "not_ready",
+        "root-missing": "not_ready",
+    }.items():
+        transcript = file_canary_transcript(SCENARIOS[scenario_name])
+        replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+        assert {reply["ok"] for reply in replies} == {"0"}
+        assert {reply["err"] for reply in replies} == {expected_error}
 
 
 def test_file_protocol_rejects_bad_paths_crc_and_large_chunks():

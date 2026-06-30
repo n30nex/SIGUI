@@ -6,6 +6,7 @@ Date: 2026-06-29
 
 - Added `scripts/soak_d1l.py` for repeatable D1L stability windows after normal smoke validation.
 - The runner samples `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`.
+- With `--sample-storage`, the runner also samples `storage status` and summarizes SD state/backend stability plus store backend stability. With `--sd-file-canary`, it also samples `storage filecanary`; `--allow-sd-unavailable` accepts only the pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusal.
 - Optional active mode sends `mesh send public <text>` at a fixed interval, so local MeshCore bots that answer Public `test` can prove fresh RF movement during the run.
 - Reports summarize command failures, bounded command retries, uptime monotonicity, board/UI/mesh readiness, TX/RX packet deltas, packet-log deltas, heap/PSRAM deltas and floors, stack-watermark floors, LVGL peak usage, signal sample peak, and crash-like reset entries from the reset ring.
 
@@ -15,20 +16,28 @@ Host/dry-run:
 
 ```powershell
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
 Short active hardware probe:
 
 ```powershell
-$env:D1L_PORT = "COM7"
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1 --out artifacts\soak\d1l-soak-active-short-local-COM7.json
+$env:D1L_PORT = "COM12"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1 --out artifacts\soak\d1l-soak-active-short-local-COM12.json
+```
+
+Current SD-aware passive probe, with no Public RF and no format request:
+
+```powershell
+$env:D1L_PORT = "COM12"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable --out artifacts\soak\d1l-passive-soak-sd-aware-COM12.json
 ```
 
 Full acceptance windows still require explicit operator scheduling:
 
 ```powershell
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COM7.json
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-interval-sec 60 --active-public-text test --active-interval-sec 120 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start --out artifacts\soak\d1l-soak-active-1h-COM7.json
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COM12.json
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-interval-sec 60 --active-public-text test --active-interval-sec 120 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start --out artifacts\soak\d1l-soak-active-1h-COM12.json
 ```
 
 ## Validation
@@ -36,7 +45,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-i
 - `python -m pytest tests\test_soak_d1l.py -q` passed.
 - `python scripts\soak_d1l.py --dry-run ...` passed and wrote `artifacts\soak\d1l-soak-dry-run.json`.
 - `python -m pytest -q` passed with 82 tests after the crash/reset guard update.
-- Local Podman ESP-IDF build passed with `meshcore_deskos_d1l.bin` size `0xa5440`; smallest app partition free space remained `0x5abc0` bytes / 35%.
+- Historical pre-Actions-only note: a local Podman ESP-IDF build previously passed with `meshcore_deskos_d1l.bin` size `0xa5440`; current firmware builds are performed by GitHub Actions only.
 - Short active hardware soak on `COM7` passed and wrote `artifacts\soak\d1l-soak-active-short-local-COM7.json`.
   - 6 samples, 3 active Public `test` TX events, 0 command failures, and 0 threshold failures.
   - `mesh_tx_packet_delta=3`, `mesh_rx_packet_delta=8`, and `packet_total_written_delta=11`.

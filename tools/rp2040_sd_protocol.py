@@ -21,6 +21,10 @@ FILE_PROTOCOL_VERSION = 1
 FILE_LINE_MAX = 512
 MAX_FILE_PATH_CHARS = 96
 MAX_FILE_CHUNK_BYTES = 192
+FILE_CANARY_TMP_PATH = "canary/filecanary.tmp"
+FILE_CANARY_FINAL_PATH = "canary/filecanary.bin"
+FILE_CANARY_PAYLOAD = b"DeskOS SD file canary v1"
+FILE_CANARY_START_ID = 1
 STATUS_FIELDS = (
     "state",
     "present",
@@ -265,6 +269,11 @@ def file_line(**tokens: object) -> str:
     return " ".join([FILE_REPLY, *(f"{key}={value}" for key, value in merged.items())])
 
 
+def file_request_line(request_id: int, op: str, **tokens: object) -> str:
+    merged = {"v": FILE_PROTOCOL_VERSION, "id": request_id, "op": op, **tokens}
+    return " ".join([FILE_REQUEST, *(f"{key}={value}" for key, value in merged.items())])
+
+
 def file_error(request_id: int, op: str, err: str) -> str:
     assert err in FILE_ERROR_CODES
     return file_line(id=request_id, ok=0, op=op or "unknown", err=err, note=err)
@@ -474,16 +483,66 @@ def reply_for_request(
     raise ValueError(f"unsupported request: {request}")
 
 
+def file_canary_requests(request_id_start: int = FILE_CANARY_START_ID) -> list[str]:
+    tmp = encode_path(FILE_CANARY_TMP_PATH)
+    final = encode_path(FILE_CANARY_FINAL_PATH)
+    payload = FILE_CANARY_PAYLOAD
+    payload_len = len(payload)
+    payload64 = b64url(payload)
+    payload_crc = crc32_hex(payload)
+    request_id = request_id_start
+    requests = [
+        file_request_line(request_id, "delete", path=tmp),
+        file_request_line(request_id + 1, "delete", path=final),
+        file_request_line(
+            request_id + 2,
+            "write",
+            path=tmp,
+            off=0,
+            len=payload_len,
+            trunc=1,
+            data=payload64,
+            crc=payload_crc,
+        ),
+        file_request_line(request_id + 3, "read", path=tmp, off=0, len=payload_len),
+        file_request_line(request_id + 4, "rename", path=tmp, to=final, replace=1),
+        file_request_line(request_id + 5, "stat", path=final),
+        file_request_line(request_id + 6, "read", path=final, off=0, len=payload_len),
+        file_request_line(request_id + 7, "delete", path=final),
+        file_request_line(request_id + 8, "stat", path=final),
+    ]
+    return requests
+
+
+def file_canary_transcript(
+    scenario: SdScenario,
+    request_id_start: int = FILE_CANARY_START_ID,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    transcript = []
+    for request in file_canary_requests(request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="ready")
     parser.add_argument("--request", default=STATUS_REQUEST)
+    parser.add_argument("--file-canary-transcript", action="store_true")
+    parser.add_argument("--request-id-start", type=int, default=FILE_CANARY_START_ID)
     parser.add_argument("--list-scenarios", action="store_true")
     args = parser.parse_args()
 
     if args.list_scenarios:
         for name in sorted(SCENARIOS):
             print(name)
+        return 0
+
+    if args.file_canary_transcript:
+        for exchange in file_canary_transcript(SCENARIOS[args.scenario], args.request_id_start):
+            print(f"> {exchange['request']}")
+            print(f"< {exchange['reply']}")
         return 0
 
     print(reply_for_request(args.request, SCENARIOS[args.scenario], SdFileSystem()))

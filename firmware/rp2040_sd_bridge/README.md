@@ -47,12 +47,16 @@ After flashing the RP2040 bridge, validate through the ESP32 console on COM12:
 
 ```powershell
 python .\scripts\sd_file_canary_d1l.py --port COM12
-python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30
+python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary
+python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
 ```
 
 The canary sends `storage status`, `storage filecanary`, `storage status`,
 `packets`, and `health`. It does not send Public RF and does not issue
-`DESKOS_SD_FORMAT`.
+`DESKOS_SD_FORMAT`. The SD-aware soak repeats `storage status` and
+`storage filecanary` during a passive stability window. The protocol transcript
+command is host-only and prints the deterministic `DESKOS_SD_FILE v=1` request
+sequence that mirrors the ESP32 `storage filecanary` path.
 
 See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 

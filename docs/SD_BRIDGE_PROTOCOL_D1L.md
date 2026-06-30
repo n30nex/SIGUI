@@ -114,6 +114,47 @@ canary phase, ESP32 keeps an onboard NVS mirror so removing or timing out the SD
 card does not strand packet evidence. Do not blindly retry `append` after a
 timeout unless the higher-level record format has its own idempotency key.
 
+## Storage Filecanary Transcript
+
+The serial `storage filecanary` command uses the generic file protocol under
+`/deskos` with these deterministic paths and payload:
+
+- Temp path: `canary/filecanary.tmp`
+- Final path: `canary/filecanary.bin`
+- Payload: `DeskOS SD file canary v1`
+
+The host simulator prints this exact request/reply shape:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
+```
+
+Canonical ready-card transcript with request IDs starting at `1`:
+
+```text
+> DESKOS_SD_FILE v=1 id=1 op=delete path=Y2FuYXJ5L2ZpbGVjYW5hcnkudG1w
+< DESKOS_SD_FILE v=1 id=1 ok=0 op=delete err=not_found note=not_found
+> DESKOS_SD_FILE v=1 id=2 op=delete path=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu
+< DESKOS_SD_FILE v=1 id=2 ok=0 op=delete err=not_found note=not_found
+> DESKOS_SD_FILE v=1 id=3 op=write path=Y2FuYXJ5L2ZpbGVjYW5hcnkudG1w off=0 len=24 trunc=1 data=RGVza09TIFNEIGZpbGUgY2FuYXJ5IHYx crc=471861E4
+< DESKOS_SD_FILE v=1 id=3 ok=1 op=write off=0 len=24 size=24 note=ok
+> DESKOS_SD_FILE v=1 id=4 op=read path=Y2FuYXJ5L2ZpbGVjYW5hcnkudG1w off=0 len=24
+< DESKOS_SD_FILE v=1 id=4 ok=1 op=read off=0 len=24 eof=1 data=RGVza09TIFNEIGZpbGUgY2FuYXJ5IHYx crc=471861E4 note=ok
+> DESKOS_SD_FILE v=1 id=5 op=rename path=Y2FuYXJ5L2ZpbGVjYW5hcnkudG1w to=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu replace=1
+< DESKOS_SD_FILE v=1 id=5 ok=1 op=rename note=ok
+> DESKOS_SD_FILE v=1 id=6 op=stat path=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu
+< DESKOS_SD_FILE v=1 id=6 ok=1 op=stat exists=1 kind=file size=24 note=ok
+> DESKOS_SD_FILE v=1 id=7 op=read path=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu off=0 len=24
+< DESKOS_SD_FILE v=1 id=7 ok=1 op=read off=0 len=24 eof=1 data=RGVza09TIFNEIGZpbGUgY2FuYXJ5IHYx crc=471861E4 note=ok
+> DESKOS_SD_FILE v=1 id=8 op=delete path=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu
+< DESKOS_SD_FILE v=1 id=8 ok=1 op=delete note=ok
+> DESKOS_SD_FILE v=1 id=9 op=stat path=Y2FuYXJ5L2ZpbGVjYW5hcnkuYmlu
+< DESKOS_SD_FILE v=1 id=9 ok=1 op=stat exists=0 kind=none size=0 note=ok
+```
+
+The first two cleanup deletes may return `not_found`; that is acceptable. Live
+ESP32 request IDs are process-global, so hardware captures may not start at `1`.
+
 ## Safety Rules
 
 - No automatic format on boot.

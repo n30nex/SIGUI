@@ -15,6 +15,7 @@ python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
 Firmware binaries are built by GitHub Actions only. The `d1l-ci` workflow produces ESP32 firmware/release artifacts and the RP2040 SD bridge artifact.
@@ -22,15 +23,15 @@ Firmware binaries are built by GitHub Actions only. The `d1l-ci` workflow produc
 Hardware flow, once the user supplies the D1L port:
 
 ```powershell
-$env:D1L_PORT = "COMx"
+$env:D1L_PORT = "COM12"
 python .\scripts\backup_flash_d1l.py --port $env:D1L_PORT --size 8MB
 .\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\sd_file_canary_d1l.py --port $env:D1L_PORT --allow-unavailable
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
-Do not use COM11 or COM29 for D1L flashing/testing.
+Current bench D1L validation uses COM12. Do not use COM11 or COM29 for D1L flashing/testing.
 
 ## Roadmap
 

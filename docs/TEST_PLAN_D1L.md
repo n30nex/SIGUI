@@ -11,6 +11,7 @@ python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-larg
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\probe_d1l_dm.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
 Coverage:
@@ -28,7 +29,7 @@ Coverage:
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
-- Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries.
+- Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. The SD-aware soak must report `public_rf_tx=false` and `formats_sd=false` unless the operator explicitly enables an RF mode through a separate flag.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, Public History/Search sheets, first-boot onboarding, fail on missing required labels or measured text overflow, and include a `large-mesh` scenario that proves oversized node/message stores are bounded before rendering.
 - First-boot onboarding contract: settings schema v3 must persist `onboarding_complete`, migrate schema v2 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
@@ -118,6 +119,15 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-i
 ```
 
 Success requires every sampled command to return `ok=true` after bounded retries, no unrecovered command retries, no uptime rollback, `board_ready=true`, `ui_ready=true`, ready mesh state, nonzero task stack watermarks, zero crash-like reset entries, and no required packet delta threshold failures. For active RF probes, `mesh_tx_packet_delta` must increase and `mesh_rx_packet_delta` must increase when `--require-rx-delta` is used.
+
+SD-aware passive validation, with no Public RF and no format request:
+
+```powershell
+$env:D1L_PORT = "COM12"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable --out artifacts\soak\d1l-passive-soak-sd-aware-COM12.json
+```
+
+Before the RP2040 bridge file protocol is flashed, success may include `sd_file_canary_unavailable_count > 0` only because `--allow-sd-unavailable` was set. After the RP2040 bridge is flashed with a ready card, rerun without `--allow-sd-unavailable`; success then requires `storage_file_ops_ready_all=true` and every `storage filecanary` sample to pass.
 
 ## Release Package
 
@@ -316,10 +326,10 @@ Use `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the RP2040 UF2 flash and post-flash
 4. Verify the Settings screen, Storage Setup sheet, and UI simulator expose the same storage fallback/setup state without hiding the Radio and Advert actions.
 5. Boot with no card and verify firmware continues with onboard storage defaults.
 6. After the RP2040 SD bridge firmware is flashed through a documented RP2040 path, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness. If the bridge also reports file operations and atomic rename with matching limits, verify `packet_log_backend="sd"`, `data_backend="mixed"`, and `setup_action="packet_log_canary_enabled"` while messages/routes/settings/identity remain onboard-backed.
-7. With the RP2040 bridge file protocol flashed, run `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` to perform the serial-only file-operation canary under `/deskos`: temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification. Do not send Public RF for this validation.
+7. With the RP2040 bridge file protocol flashed, run `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` to perform the serial-only file-operation canary under `/deskos`: temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification. Follow with `python .\scripts\soak_d1l.py --port COM12 --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary` so the canary is repeated during a passive stability window. Do not send Public RF for this validation.
 8. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
 9. Confirm format requires explicit user confirmation, bridge-reported `format_supported=true`, and setup-required state, and does not run from incidental boot/touch events.
-10. Use `tools/rp2040_sd_protocol.py` to verify the reference status, format, and file-operation line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing retained-store migration.
+10. Use `tools/rp2040_sd_protocol.py` to verify the reference status, format, and file-operation line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing retained-store migration. Use `python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript` to print the deterministic host transcript that mirrors `storage filecanary`.
 11. With no card, protocol timeout, `file_ops=0`, `atomic_rename=0`, or smaller-than-required line/path/chunk limits, verify packet-log persistence remains on NVS and survives reboot with the existing `d1l_packets`/`ring` fallback data location.
 12. When configured, verify the packet-log canary uses SD through the retained blob-store abstraction, writes `stores/packet_log/ring.tmp`, commits to `stores/packet_log/ring.bin` with `rename replace=1`, keeps the NVS mirror, and falls back to NVS on SD absence, timeout, or corrupt blobs.
 13. When configured, verify Public/DM message history, route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.

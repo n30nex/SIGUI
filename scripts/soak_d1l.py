@@ -9,7 +9,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 try:
     from smoke_d1l import send_console_command
@@ -25,6 +25,32 @@ SOAK_COMMANDS = [
     "packets",
     "crashlog",
 ]
+STORAGE_STATUS_COMMAND = "storage status"
+SD_FILE_CANARY_COMMAND = "storage filecanary"
+STORAGE_REQUIRED_SD_FIELDS = (
+    "state",
+    "interface",
+    "rp2040_protocol_supported",
+    "file_ops",
+    "atomic_rename",
+    "file_line_max",
+    "file_chunk_max",
+    "path_max",
+)
+STORAGE_REQUIRED_TOP_FIELDS = ("data_backend", "packet_log_backend", "stores")
+STORAGE_STORE_KEYS = (
+    "settings",
+    "identity",
+    "messages",
+    "dm",
+    "packets",
+    "routes",
+    "contacts",
+    "read_state",
+    "crashlog",
+    "map_tiles",
+    "exports",
+)
 
 
 def utc_stamp() -> str:
@@ -57,6 +83,87 @@ def crashlog_entries(rows: Iterable[dict]) -> list[dict]:
     return entries
 
 
+def soak_commands(*, sample_storage: bool = False, sd_file_canary: bool = False) -> list[str]:
+    commands = list(SOAK_COMMANDS)
+    if sample_storage or sd_file_canary:
+        commands.append(STORAGE_STATUS_COMMAND)
+    if sd_file_canary:
+        commands.append(SD_FILE_CANARY_COMMAND)
+    return commands
+
+
+def sd_status(row: dict) -> dict:
+    value = row.get("sd")
+    return value if isinstance(value, dict) else {}
+
+
+def stable_values(values: list[object]) -> bool:
+    return len({json.dumps(value, sort_keys=True) for value in values}) <= 1
+
+
+def storage_file_capability_ready(row: dict) -> bool:
+    sd = sd_status(row)
+    return (
+        sd.get("file_ops") is True
+        and sd.get("atomic_rename") is True
+        and number_or_none(sd.get("file_line_max")) is not None
+        and number_or_none(sd.get("file_line_max")) >= 512
+        and number_or_none(sd.get("file_chunk_max")) is not None
+        and number_or_none(sd.get("file_chunk_max")) >= 192
+        and number_or_none(sd.get("path_max")) is not None
+        and number_or_none(sd.get("path_max")) >= 96
+    )
+
+
+def file_ops_ready(row: dict) -> bool:
+    sd = sd_status(row)
+    return (
+        row.get("data_enabled") is True
+        and row.get("data_backend") == "mixed"
+        and row.get("packet_log_backend") == "sd"
+        and sd.get("state") == "ready"
+        and sd.get("present") is True
+        and sd.get("mounted") is True
+        and sd.get("data_root_ready") is True
+        and sd.get("rp2040_protocol_supported") is True
+        and storage_file_capability_ready(row)
+    )
+
+
+def storage_status_malformed(row: dict) -> bool:
+    sd = sd_status(row)
+    if not sd:
+        return True
+    if any(field not in sd for field in STORAGE_REQUIRED_SD_FIELDS):
+        return True
+    if any(field not in row for field in STORAGE_REQUIRED_TOP_FIELDS):
+        return True
+    return not isinstance(row.get("stores"), dict)
+
+
+def storage_store_backend_values(rows: list[dict]) -> dict[str, list[str]]:
+    values: dict[str, list[str]] = {}
+    for key in STORAGE_STORE_KEYS:
+        row_values = []
+        for row in rows:
+            stores = row.get("stores")
+            if isinstance(stores, dict) and isinstance(stores.get(key), str):
+                row_values.append(stores[key])
+        if row_values:
+            values[key] = row_values
+    return values
+
+
+def allowed_sd_unavailable(result: dict, allow_sd_unavailable: bool) -> bool:
+    return (
+        allow_sd_unavailable
+        and result.get("cmd") == SD_FILE_CANARY_COMMAND
+        and result.get("ok") is False
+        and result.get("code") == "ESP_ERR_NOT_SUPPORTED"
+        and result.get("step") == "preflight"
+    )
+
+
 def first_last_delta(rows: list[dict], field: str) -> int | None:
     values = numeric_values(rows, field)
     if len(values) < 2:
@@ -68,12 +175,23 @@ def monotonic_non_decreasing(values: list[int]) -> bool:
     return all(curr >= prev for prev, curr in zip(values, values[1:]))
 
 
-def send_soak_command(ser, command: str, timeout: float, retries: int, retry_delay_sec: float) -> dict:
+def send_soak_command(
+    ser,
+    command: str,
+    timeout: float,
+    retries: int,
+    retry_delay_sec: float,
+    terminal_failure_ok: Callable[[dict], bool] | None = None,
+) -> dict:
     attempts = []
     for attempt in range(max(0, retries) + 1):
         result = send_console_command(ser, command, timeout)
         attempts.append(result)
-        if result.get("ok"):
+        terminal_ok = bool(terminal_failure_ok and terminal_failure_ok(result))
+        if result.get("ok") or terminal_ok:
+            if terminal_ok:
+                result = dict(result)
+                result["allowed_failure"] = True
             if attempt:
                 result = dict(result)
                 result["attempts"] = attempt + 1
@@ -97,10 +215,24 @@ def collect_sample(
     elapsed_sec: float,
     command_retries: int,
     retry_delay_sec: float,
+    commands: list[str] | None = None,
+    allow_sd_unavailable: bool = False,
 ) -> dict:
+    commands = commands or SOAK_COMMANDS
     results = [
-        send_soak_command(ser, command, timeout, command_retries, retry_delay_sec)
-        for command in SOAK_COMMANDS
+        send_soak_command(
+            ser,
+            command,
+            timeout,
+            command_retries,
+            retry_delay_sec,
+            terminal_failure_ok=(
+                lambda result: allowed_sd_unavailable(result, True)
+                if allow_sd_unavailable
+                else False
+            ),
+        )
+        for command in commands
     ]
     return {
         "label": label,
@@ -116,17 +248,22 @@ def summarize_soak(
     require_rx_delta: bool,
     min_rx_delta: int,
     min_tx_delta: int,
+    sample_storage: bool = False,
+    sd_file_canary: bool = False,
+    allow_sd_unavailable: bool = False,
 ) -> dict:
     health = command_results(samples, "health")
     mesh = command_results(samples, "mesh status")
     signal = command_results(samples, "signal")
     packet_rows = command_results(samples, "packets")
     crashlog = command_results(samples, "crashlog")
+    storage = command_results(samples, STORAGE_STATUS_COMMAND)
+    sd_file_canaries = command_results(samples, SD_FILE_CANARY_COMMAND)
 
     failures = []
     for sample in samples:
         for result in sample.get("results", []):
-            if not result.get("ok"):
+            if not result.get("ok") and not allowed_sd_unavailable(result, allow_sd_unavailable):
                 failures.append(
                     {
                         "sample": sample.get("label"),
@@ -164,6 +301,30 @@ def summarize_soak(
     crash_entries = crashlog_entries(crashlog)
     crash_like_count = sum(1 for entry in crash_entries if entry.get("crash_like") is True)
     crashlog_count_values = numeric_values(crashlog, "count")
+    storage_states = [sd_status(row).get("state") for row in storage if sd_status(row).get("state")]
+    storage_data_backends = [row.get("data_backend") for row in storage if row.get("data_backend")]
+    storage_packet_log_backends = [
+        row.get("packet_log_backend") for row in storage if row.get("packet_log_backend")
+    ]
+    storage_protocol_flags = [
+        sd_status(row).get("rp2040_protocol_supported")
+        for row in storage
+        if "rp2040_protocol_supported" in sd_status(row)
+    ]
+    storage_malformed_count = sum(1 for row in storage if storage_status_malformed(row))
+    storage_file_capability_ready_values = [storage_file_capability_ready(row) for row in storage]
+    storage_file_ops_ready = [file_ops_ready(row) for row in storage]
+    storage_store_backend_samples = storage_store_backend_values(storage)
+    storage_store_backends = {
+        key: sorted(set(values)) for key, values in storage_store_backend_samples.items()
+    }
+    storage_store_backend_stable = {
+        key: stable_values(values) for key, values in storage_store_backend_samples.items()
+    }
+    sd_file_canary_pass_count = sum(1 for row in sd_file_canaries if row.get("ok") is True)
+    sd_file_canary_unavailable_count = sum(
+        1 for row in sd_file_canaries if allowed_sd_unavailable(row, True)
+    )
     retry_rows = [
         result
         for sample in samples
@@ -209,6 +370,22 @@ def summarize_soak(
         threshold_failures.append("tx_delta_below_minimum")
     if require_rx_delta and (rx_delta is None or rx_delta < min_rx_delta):
         threshold_failures.append("rx_delta_below_minimum")
+    if sample_storage and not storage:
+        threshold_failures.append("storage_status_missing")
+    if sample_storage and storage_malformed_count:
+        threshold_failures.append("storage_status_malformed")
+    if storage and not stable_values(storage_states):
+        threshold_failures.append("storage_state_changed")
+    if storage_data_backends and not stable_values(storage_data_backends):
+        threshold_failures.append("storage_data_backend_changed")
+    if storage_packet_log_backends and not stable_values(storage_packet_log_backends):
+        threshold_failures.append("storage_packet_log_backend_changed")
+    if storage_store_backend_stable and not all(storage_store_backend_stable.values()):
+        threshold_failures.append("storage_store_backend_changed")
+    if sd_file_canary and not sd_file_canaries:
+        threshold_failures.append("sd_file_canary_missing")
+    if sd_file_canary and not allow_sd_unavailable and sd_file_canary_pass_count != len(sd_file_canaries):
+        threshold_failures.append("sd_file_canary_failed")
 
     ok = not failures and not threshold_failures
 
@@ -237,6 +414,31 @@ def summarize_soak(
         "crashlog_total_written_delta": crashlog_total_delta,
         "crashlog_count_peak": max(crashlog_count_values) if crashlog_count_values else None,
         "crashlog_crash_like_count": crash_like_count,
+        "storage_status_count": len(storage),
+        "storage_states": sorted(set(storage_states)),
+        "storage_data_backends": sorted(set(storage_data_backends)),
+        "storage_packet_log_backends": sorted(set(storage_packet_log_backends)),
+        "storage_state_stable": stable_values(storage_states) if storage_states else None,
+        "storage_data_backend_stable": stable_values(storage_data_backends) if storage_data_backends else None,
+        "storage_packet_log_backend_stable": stable_values(storage_packet_log_backends)
+        if storage_packet_log_backends else None,
+        "storage_status_malformed_count": storage_malformed_count,
+        "storage_store_backends": storage_store_backends,
+        "storage_store_backend_stable": storage_store_backend_stable,
+        "storage_store_backend_stable_all": bool(storage_store_backend_stable)
+        and all(storage_store_backend_stable.values()),
+        "storage_protocol_supported_any": any(flag is True for flag in storage_protocol_flags),
+        "storage_protocol_supported_all": bool(storage_protocol_flags)
+        and all(flag is True for flag in storage_protocol_flags),
+        "storage_file_capability_ready_all": bool(storage_file_capability_ready_values)
+        and all(storage_file_capability_ready_values),
+        "storage_file_ops_ready_all": bool(storage_file_ops_ready)
+        and all(storage_file_ops_ready),
+        "sd_file_canary_count": len(sd_file_canaries),
+        "sd_file_canary_pass_count": sd_file_canary_pass_count,
+        "sd_file_canary_unavailable_count": sd_file_canary_unavailable_count,
+        "sd_file_canary_required": sd_file_canary,
+        "sd_unavailable_allowed": allow_sd_unavailable,
         "command_retry_count": len(retry_rows),
         "command_recovered_after_retry_count": sum(
             1 for row in retry_rows if row.get("recovered_after_retry") is True
@@ -259,6 +461,9 @@ def dry_run_report(
     clear_crashlog_before_start: bool,
     command_retries: int,
     retry_delay_sec: float,
+    sample_storage: bool = False,
+    sd_file_canary: bool = False,
+    allow_sd_unavailable: bool = False,
 ) -> dict:
     return {
         "schema": 1,
@@ -267,8 +472,13 @@ def dry_run_report(
         "ok": True,
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
-        "commands": SOAK_COMMANDS,
+        "commands": soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary),
         "active_public_text": active_public_text,
+        "public_rf_tx": active_public_text is not None,
+        "formats_sd": False,
+        "sample_storage": sample_storage or sd_file_canary,
+        "sd_file_canary": sd_file_canary,
+        "allow_sd_unavailable": allow_sd_unavailable,
         "active_interval_sec": active_interval_sec,
         "require_rx_delta": require_rx_delta,
         "min_rx_delta": min_rx_delta,
@@ -295,6 +505,9 @@ def run_serial_soak(
     clear_crashlog_before_start: bool,
     command_retries: int,
     retry_delay_sec: float,
+    sample_storage: bool = False,
+    sd_file_canary: bool = False,
+    allow_sd_unavailable: bool = False,
 ) -> dict:
     try:
         import serial
@@ -312,6 +525,7 @@ def run_serial_soak(
     active_events: list[dict] = []
     setup_events: list[dict] = []
     started_at = datetime.now(timezone.utc)
+    commands = soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary)
 
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(startup_settle_sec)
@@ -342,7 +556,14 @@ def run_serial_soak(
                 label = "start" if sample_index == 0 else f"sample-{sample_index}"
                 samples.append(
                     collect_sample(
-                        ser, timeout, label, elapsed, command_retries, retry_delay_sec
+                        ser,
+                        timeout,
+                        label,
+                        elapsed,
+                        command_retries,
+                        retry_delay_sec,
+                        commands,
+                        allow_sd_unavailable,
                     )
                 )
                 sample_index += 1
@@ -376,7 +597,14 @@ def run_serial_soak(
         final_elapsed = time.monotonic() - start
         samples.append(
             collect_sample(
-                ser, timeout, "final", final_elapsed, command_retries, retry_delay_sec
+                ser,
+                timeout,
+                "final",
+                final_elapsed,
+                command_retries,
+                retry_delay_sec,
+                commands,
+                allow_sd_unavailable,
             )
         )
 
@@ -387,6 +615,9 @@ def run_serial_soak(
         require_rx_delta=require_rx_delta,
         min_rx_delta=min_rx_delta,
         min_tx_delta=min_tx_delta,
+        sample_storage=sample_storage or sd_file_canary,
+        sd_file_canary=sd_file_canary,
+        allow_sd_unavailable=allow_sd_unavailable,
     )
     setup_failures = [
         {
@@ -413,6 +644,11 @@ def run_serial_soak(
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
         "active_public_text": active_public_text,
+        "public_rf_tx": active_public_text is not None,
+        "formats_sd": False,
+        "sample_storage": sample_storage or sd_file_canary,
+        "sd_file_canary": sd_file_canary,
+        "allow_sd_unavailable": allow_sd_unavailable,
         "active_interval_sec": active_interval_sec,
         "require_rx_delta": require_rx_delta,
         "min_rx_delta": min_rx_delta,
@@ -454,6 +690,9 @@ def main() -> int:
     parser.add_argument("--clear-crashlog-before-start", action="store_true")
     parser.add_argument("--command-retries", type=int, default=1)
     parser.add_argument("--retry-delay-sec", type=float, default=0.5)
+    parser.add_argument("--sample-storage", action="store_true")
+    parser.add_argument("--sd-file-canary", action="store_true")
+    parser.add_argument("--allow-sd-unavailable", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -470,6 +709,9 @@ def main() -> int:
             clear_crashlog_before_start=args.clear_crashlog_before_start,
             command_retries=args.command_retries,
             retry_delay_sec=args.retry_delay_sec,
+            sample_storage=args.sample_storage or args.sd_file_canary,
+            sd_file_canary=args.sd_file_canary,
+            allow_sd_unavailable=args.allow_sd_unavailable,
         )
         mode = "dry-run"
     else:
@@ -491,6 +733,9 @@ def main() -> int:
                 clear_crashlog_before_start=args.clear_crashlog_before_start,
                 command_retries=args.command_retries,
                 retry_delay_sec=args.retry_delay_sec,
+                sample_storage=args.sample_storage or args.sd_file_canary,
+                sd_file_canary=args.sd_file_canary,
+                allow_sd_unavailable=args.allow_sd_unavailable,
             )
         except ValueError as exc:
             parser.error(str(exc))

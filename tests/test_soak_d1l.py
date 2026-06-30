@@ -1,6 +1,19 @@
 from scripts import soak_d1l
 
 
+def base_health(uptime_ms=1000):
+    return {
+        "uptime_ms": uptime_ms,
+        "heap_free": 100000,
+        "heap_min_free": 99000,
+        "psram_free": 200000,
+        "psram_min_free": 199000,
+        "current_task_stack_free_words": 1200,
+        "ui_task_stack_free_words": 1300,
+        "lvgl_used_pct": 50,
+    }
+
+
 def sample(label, elapsed, health, mesh, packets=None, signal=None):
     return {
         "label": label,
@@ -49,6 +62,59 @@ def sample(label, elapsed, health, mesh, packets=None, signal=None):
     }
 
 
+def storage_status(
+    *,
+    state="ready",
+    protocol_supported=True,
+    present=True,
+    mounted=True,
+    data_root_ready=True,
+    file_ops=True,
+    atomic_rename=True,
+    data_enabled=True,
+    data_backend="mixed",
+    packet_log_backend="sd",
+):
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": soak_d1l.STORAGE_STATUS_COMMAND,
+        "sd": {
+            "state": state,
+            "interface": "rp2040",
+            "rp2040_protocol_supported": protocol_supported,
+            "present": present,
+            "mounted": mounted,
+            "data_root_ready": data_root_ready,
+            "file_ops": file_ops,
+            "atomic_rename": atomic_rename,
+            "file_line_max": 512 if file_ops else 0,
+            "file_chunk_max": 192 if file_ops else 0,
+            "path_max": 96 if file_ops else 0,
+        },
+        "data_enabled": data_enabled,
+        "data_backend": data_backend,
+        "message_store_backend": "nvs",
+        "dm_store_backend": "nvs",
+        "packet_log_backend": packet_log_backend,
+        "route_store_backend": "nvs",
+        "map_tile_backend": "sd_pending_store_migration" if file_ops else "unavailable",
+        "stores": {
+            "settings": "nvs",
+            "identity": "nvs",
+            "messages": "nvs",
+            "dm": "nvs",
+            "packets": packet_log_backend,
+            "routes": "nvs",
+            "contacts": "nvs",
+            "read_state": "nvs",
+            "crashlog": "nvs",
+            "map_tiles": "sd_pending_store_migration" if file_ops else "unavailable",
+            "exports": "serial",
+        },
+    }
+
+
 def test_dry_run_reports_soak_commands():
     report = soak_d1l.dry_run_report(
         duration_sec=60,
@@ -69,6 +135,54 @@ def test_dry_run_reports_soak_commands():
     assert report["require_rx_delta"] is True
     assert report["clear_crashlog_before_start"] is True
     assert report["command_retries"] == 1
+
+
+def test_dry_run_defaults_do_not_send_public_rf_or_touch_sd_format():
+    report = soak_d1l.dry_run_report(
+        duration_sec=60,
+        sample_interval_sec=10,
+        active_public_text=None,
+        active_interval_sec=30,
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        clear_crashlog_before_start=False,
+        command_retries=1,
+        retry_delay_sec=0.5,
+    )
+
+    assert soak_d1l.SD_FILE_CANARY_COMMAND not in report["commands"]
+    assert soak_d1l.STORAGE_STATUS_COMMAND not in report["commands"]
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+
+
+def test_dry_run_sd_canary_is_serial_only_and_non_formatting():
+    report = soak_d1l.dry_run_report(
+        duration_sec=60,
+        sample_interval_sec=10,
+        active_public_text=None,
+        active_interval_sec=30,
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        clear_crashlog_before_start=False,
+        command_retries=1,
+        retry_delay_sec=0.5,
+        sample_storage=True,
+        sd_file_canary=True,
+        allow_sd_unavailable=True,
+    )
+
+    assert report["commands"] == [
+        *soak_d1l.SOAK_COMMANDS,
+        soak_d1l.STORAGE_STATUS_COMMAND,
+        soak_d1l.SD_FILE_CANARY_COMMAND,
+    ]
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert report["sample_storage"] is True
+    assert report["sd_file_canary"] is True
 
 
 def test_summarize_soak_tracks_deltas_and_watermarks():
@@ -255,3 +369,181 @@ def test_summarize_soak_counts_recovered_command_retries():
     assert summary["command_retry_count"] == 1
     assert summary["command_recovered_after_retry_count"] == 1
     assert summary["command_retry_failure_count"] == 0
+
+
+def test_summarize_soak_tracks_stable_sd_file_op_gate_and_store_backends():
+    rows = [
+        sample("start", 0, base_health(1000), {"rx_packets": 5, "tx_packets": 7}),
+        sample("final", 60, base_health(61000), {"rx_packets": 8, "tx_packets": 7}),
+    ]
+    for row in rows:
+        row["results"].append(storage_status())
+
+    summary = soak_d1l.summarize_soak(
+        samples=rows,
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+    )
+
+    assert summary["ok"] is True
+    assert summary["storage_status_count"] == 2
+    assert summary["storage_states"] == ["ready"]
+    assert summary["storage_data_backends"] == ["mixed"]
+    assert summary["storage_packet_log_backends"] == ["sd"]
+    assert summary["storage_file_capability_ready_all"] is True
+    assert summary["storage_file_ops_ready_all"] is True
+    assert summary["storage_store_backends"]["packets"] == ["sd"]
+    assert summary["storage_store_backend_stable_all"] is True
+
+
+def test_summarize_soak_allows_pre_flash_sd_filecanary_unavailable():
+    row = sample("start", 0, base_health(), {"rx_packets": 5, "tx_packets": 7})
+    row["results"].append(
+        storage_status(
+            state="protocol_pending",
+            protocol_supported=False,
+            present=False,
+            mounted=False,
+            data_root_ready=False,
+            file_ops=False,
+            atomic_rename=False,
+            data_enabled=False,
+            data_backend="nvs",
+            packet_log_backend="nvs",
+        )
+    )
+    row["results"].append(
+        {
+            "schema": 1,
+            "ok": False,
+            "cmd": soak_d1l.SD_FILE_CANARY_COMMAND,
+            "code": "ESP_ERR_NOT_SUPPORTED",
+            "step": "preflight",
+        }
+    )
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+        sd_file_canary=True,
+        allow_sd_unavailable=True,
+    )
+
+    assert summary["ok"] is True
+    assert summary["command_failure_count"] == 0
+    assert summary["sd_file_canary_unavailable_count"] == 1
+    assert summary["storage_file_ops_ready_all"] is False
+
+
+def test_summarize_soak_fails_store_backend_flip():
+    start = sample("start", 0, base_health(1000), {"rx_packets": 5, "tx_packets": 7})
+    final = sample("final", 60, base_health(61000), {"rx_packets": 8, "tx_packets": 7})
+    start["results"].append(storage_status())
+    changed = storage_status()
+    changed["stores"] = dict(changed["stores"])
+    changed["stores"]["messages"] = "sd"
+    final["results"].append(changed)
+
+    summary = soak_d1l.summarize_soak(
+        samples=[start, final],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+    )
+
+    assert summary["ok"] is False
+    assert summary["storage_store_backend_stable"]["messages"] is False
+    assert "storage_store_backend_changed" in summary["threshold_failures"]
+
+
+def test_summarize_soak_fails_pre_flash_sd_filecanary_without_allow_flag():
+    row = sample("start", 0, base_health(), {"rx_packets": 5, "tx_packets": 7})
+    row["results"].append(storage_status(state="protocol_pending", file_ops=False))
+    row["results"].append(
+        {
+            "schema": 1,
+            "ok": False,
+            "cmd": soak_d1l.SD_FILE_CANARY_COMMAND,
+            "code": "ESP_ERR_NOT_SUPPORTED",
+            "step": "preflight",
+        }
+    )
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+        sd_file_canary=True,
+        allow_sd_unavailable=False,
+    )
+
+    assert summary["ok"] is False
+    assert summary["command_failure_count"] == 1
+    assert "sd_file_canary_failed" in summary["threshold_failures"]
+
+
+def test_summarize_soak_fails_malformed_storage_status_when_requested():
+    row = sample("start", 0, base_health(), {"rx_packets": 5, "tx_packets": 7})
+    row["results"].append(
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": soak_d1l.STORAGE_STATUS_COMMAND,
+            "sd": {"state": "ready"},
+            "data_backend": "mixed",
+        }
+    )
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+    )
+
+    assert summary["ok"] is False
+    assert summary["storage_status_malformed_count"] == 1
+    assert "storage_status_malformed" in summary["threshold_failures"]
+
+
+def test_send_soak_command_does_not_retry_allowed_sd_unavailable(monkeypatch):
+    calls = []
+
+    def fake_send_console_command(_ser, command, _timeout):
+        calls.append(command)
+        return {
+            "schema": 1,
+            "ok": False,
+            "cmd": soak_d1l.SD_FILE_CANARY_COMMAND,
+            "code": "ESP_ERR_NOT_SUPPORTED",
+            "step": "preflight",
+        }
+
+    monkeypatch.setattr(soak_d1l, "send_console_command", fake_send_console_command)
+
+    result = soak_d1l.send_soak_command(
+        None,
+        soak_d1l.SD_FILE_CANARY_COMMAND,
+        timeout=1.0,
+        retries=3,
+        retry_delay_sec=0.0,
+        terminal_failure_ok=lambda row: soak_d1l.allowed_sd_unavailable(row, True),
+    )
+
+    assert len(calls) == 1
+    assert result["allowed_failure"] is True
+    assert "attempts" not in result
