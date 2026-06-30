@@ -36,6 +36,7 @@ Coverage:
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
+- Optional SD-card data storage contract is pending: boot should detect whether a card is absent, mounted/formatted, or present-but-unusable; unusable cards must never block normal NVS-backed operation and formatting must require explicit user confirmation.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract including retained-history search, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -300,6 +301,17 @@ For Phase 6 packet-log validation:
 8. Reboot.
 9. Verify `packets` retains the selected row. The RAM ring keeps 32 rows; NVS persists the newest 8 rows.
 10. For physical touch review, open the Packet tab, tap a packet row, verify the packet detail sheet opens with the same fields, and close it.
+
+## Optional SD-Card Data Storage
+
+Important pending production feature:
+
+1. Boot with no card and verify firmware continues with onboard storage defaults.
+2. Boot with a valid DeskOS-formatted card and verify serial/UI status reports SD data storage available.
+3. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
+4. Confirm format requires explicit user confirmation and does not run from incidental boot/touch events.
+5. When configured, verify Public/DM message history, packet/route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
+6. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
 
 ## Mesh Visibility
 

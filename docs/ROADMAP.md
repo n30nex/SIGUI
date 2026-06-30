@@ -149,7 +149,7 @@ Expected D1L model characteristics:
 - SX1262 LoRa radio on D1L/D1Pro variants.
 - Wi-Fi 2.4 GHz and BLE 5.0 LE.
 - USB-C powered; no internal battery on the normal Indicator spec.
-- MicroSD support is handled by the RP2040 side in common docs, so storage strategy must be verified.
+- MicroSD support is handled by the RP2040 side in common docs, so storage strategy must be verified. This is now an important production track because optional SD-backed data storage can reduce NVS pressure and enable larger features such as retained message history and map tiles.
 
 ### 4.2 Known ESP32-S3 pin map to verify in code
 
@@ -463,6 +463,7 @@ Use sub-agents for speed. The integration lead owns merge order and prevents con
 - Route store.
 - Packet ring buffer.
 - Crash/reset health ring.
+- Optional SD-card data layer: boot detection, filesystem validation, user-confirmed format flow, NVS fallback, and SD-backed message/packet/route/map-tile stores.
 
 ### Agent G — QA, flashing, packaging
 
@@ -628,13 +629,15 @@ Tasks:
 - Neighbor/repeater scan helper.
 - QR contact/export. Status: first MeshCore-compatible contact export URI (`meshcore://contact/add?...`) is implemented through `contacts export [fingerprint]`, Contact Detail now has an `Export` action, LVGL QR rendering is enabled in defaults, the host simulator covers the Contact Export sheet, and COM7 flash/smoke/targeted export/active Public `test` RF regression passed; manual touch review and scan/import proof are pending.
 - Radio settings editor. Status: first touch Radio Settings sheet is implemented from the Settings tab with staged frequency/BW/SF/CR/TX power/RX boost controls, a US/CAN defaults action, explicit Save, reboot/apply warning, app-model validation, and serial `radio set txpower`/`radio set rxboost` coverage; host simulator, contract tests, Podman build, COM7 flash, standard smoke, targeted serial radio proof, and active Public `test` RF regression pass. Manual touch review is pending.
-- Optional manual location/map view.
+- Optional SD-card data storage. Status: important pending production feature. On boot, firmware should detect an inserted SD card, validate that it is mounted/formatted for DeskOS use, continue using onboard NVS defaults when no usable card is found, and offer a clear user-confirmed format/setup flow when a card is present but not usable. Once enabled, larger retained stores should move to SD first: Public/DM message history, packet/route history, diagnostic exports, and future map-tile caches. Settings, identity, and minimum boot-critical state should stay safe in onboard storage so the device remains usable without a card.
+- Optional manual location/map view. Status: pending; should use the optional SD-card data layer for map tiles and offline map/cache data when a card is configured.
 
 Acceptance:
 
 - User can inspect how the mesh is behaving without using serial logs. Status: first Home/Packet-tab signal, room-server, and repeater-candidate summaries are validated on `COM7`, and contact Route Trace can summarize retained route/contact evidence from touch; richer full-list screens and active RF ping/trace are pending.
 - Packet detail screen is useful for debugging real mesh traffic. Status: first detail sheet, serial `packets detail <seq>`, packet filtering/search, and raw hex developer mode are implemented, flashed, smoke-tested, targeted with a fresh Public `test` raw-hex probe, and RF-regression tested on `COM7`.
 - Contact export is compatible with MeshCore clients. Status: export payloads now follow MeshCore's documented `meshcore://contact/add?name=<name>&public_key=<public_key>&type=<type>` format and can render as a touch QR sheet when a promoted contact has a retained 64-hex public key; `contacts export 0BF0A701D5AE2DB6` passed on `COM7` with a 64-hex `YKF Corebot` key and `type_id=1`. Manual scan/import proof with a MeshCore client is pending.
+- SD-card data storage is entirely optional for end users. Status: pending; acceptance requires boot to remain normal with no card, bad/unformatted cards to be detected without blocking normal operation, formatting to require explicit user confirmation, and SD-backed stores to survive reboot and card remount when configured.
 - Advanced/admin actions are gated and cannot be triggered accidentally.
 
 ### Phase 7 — Polish, performance, soak

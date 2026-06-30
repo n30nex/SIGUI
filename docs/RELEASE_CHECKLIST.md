@@ -58,6 +58,7 @@
 - [x] Route detail diagnostics and first Packet-tab route detail sheet are implemented, built, flashed, and Public-RF probed on `COM7`.
 - [x] Packet log persists newest 8 rows across reboot and exposes serial/touch packet detail.
 - [x] Packet log filter/search/raw-hex developer mode implemented in serial diagnostics and Packet-tab UI.
+- [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
 - [x] Contact export QR-compatible serial command and touch sheet are implemented, host/simulator tested, flashed, smoke-tested, and targeted with a keyed contact on `COM7`.
