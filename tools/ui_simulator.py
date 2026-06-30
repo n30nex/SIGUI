@@ -121,6 +121,95 @@ def sample_snapshot() -> Snapshot:
     )
 
 
+def large_mesh_snapshot() -> Snapshot:
+    """Return an intentionally large fake mesh snapshot for bounded-list stress checks."""
+
+    contacts = tuple(
+        Node(
+            f"Corebot Contact {i:02d}",
+            f"0BF0A701D5AE{i:04X}",
+            "Companion",
+            f"-{38 + (i % 12)} dBm / {24 + (i % 8)} dB",
+            "retained key, direct candidate",
+        )
+        for i in range(18)
+    )
+    heard = tuple(
+        Node(
+            f"Large Mesh Heard Node With Long Name {i:03d}",
+            f"937D290883{i:06X}",
+            "Room" if i % 5 == 0 else "Chat",
+            f"-{42 + (i % 20)} dBm / {18 + (i % 12)} dB",
+            f"{i % 4} hop, signed advert, seen {i + 1}",
+        )
+        for i in range(96)
+    )
+    public_messages = tuple(
+        Message(
+            "Public" if i % 3 else f"Long Alias Sender {i:02d}",
+            f"large simulated public message {i:02d} with enough text to truncate safely",
+            f"RX seq {200 + i}, RSSI -{40 + (i % 9)}, hop {i % 4}",
+            unread=i % 4 == 0,
+        )
+        for i in range(48)
+    )
+    dm_messages = tuple(
+        Message(
+            f"Contact {i:02d}",
+            f"dm stress row {i:02d} with ACK/path metadata",
+            f"ack {'yes' if i % 2 else 'pending'}, hash {0x9000 + i:X}",
+            unread=i % 5 == 0,
+        )
+        for i in range(32)
+    )
+    packets = tuple(
+        Packet(
+            "Public" if i % 2 else "Advert",
+            "RX" if i % 3 else "TX",
+            f"RSSI -{35 + i % 18} SNR {20 + i % 12} hop {i % 4}",
+            f"stress packet row {i:02d}",
+            f"{i:02X}" * 16,
+        )
+        for i in range(40)
+    )
+    routes = tuple(
+        Packet(
+            "Route",
+            "RX" if i % 2 else "TX",
+            f"target {i:02d} hop {i % 5}",
+            f"route stress evidence {i:02d}",
+            "",
+        )
+        for i in range(24)
+    )
+
+    return Snapshot(
+        node_name="D1L Desk Large Mesh",
+        fingerprint="60B6ABA17831F883",
+        radio_profile="US/CAN 910.525 / BW62.5 / SF7 / CR5",
+        mesh_state="ready, 96 heard",
+        rx_total=4096,
+        tx_total=1024,
+        unread_public=12,
+        unread_dm=7,
+        latest_signal="-42 dBm / 30 dB",
+        rooms=heard[:6],
+        repeaters=heard[6:18],
+        contacts=contacts,
+        heard=heard,
+        public_messages=public_messages,
+        dm_messages=dm_messages,
+        packets=packets,
+        routes=routes,
+    )
+
+
+SCENARIOS: dict[str, Callable[[], Snapshot]] = {
+    "default": sample_snapshot,
+    "large-mesh": large_mesh_snapshot,
+}
+
+
 class Surface:
     def __init__(self, view: str):
         self.view = view
@@ -129,6 +218,7 @@ class Surface:
         self._fonts: dict[tuple[int, bool], ImageFont.ImageFont] = {}
         self.text_records: list[dict[str, object]] = []
         self.labels: list[str] = []
+        self.metrics: dict[str, int | str | bool] = {}
 
     def font(self, size: int, bold: bool = False) -> ImageFont.ImageFont:
         key = (size, bold)
@@ -240,6 +330,7 @@ class Surface:
             "truncated_labels": [r for r in self.text_records if r["truncated"]],
             "overflow": [r for r in self.text_records if r["overflow"]],
             "text_count": len(self.text_records),
+            "metrics": self.metrics,
         }
 
 
@@ -354,15 +445,31 @@ def render_messages(s: Surface, snap: Snapshot):
     s.round_rect((16, 112, 464, 258))
     s.text("Public", (28, 120, 150, 142), 14, MUTED, True)
     y = 148
+    public_rendered = 0
     for msg in snap.public_messages:
+        if y + 30 > 252:
+            break
         draw_row(s, (28, y, 452, y + 30), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 34
+        public_rendered += 1
     s.round_rect((16, 270, 464, 402))
     s.text("Direct", (28, 278, 150, 300), 14, MUTED, True)
     y = 306
+    dm_rendered = 0
     for msg in snap.dm_messages:
+        if y + 34 > 396:
+            break
         draw_row(s, (28, y, 452, y + 34), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 38
+        dm_rendered += 1
+    s.metrics.update(
+        {
+            "public_source_count": len(snap.public_messages),
+            "public_rendered_count": public_rendered,
+            "dm_source_count": len(snap.dm_messages),
+            "dm_rendered_count": dm_rendered,
+        }
+    )
     draw_dock(s, "Messages")
 
 
@@ -372,16 +479,32 @@ def render_nodes(s: Surface, snap: Snapshot):
     s.round_rect((16, 104, 464, 228))
     s.text("Contacts", (28, 112, 180, 134), 14, MUTED, True)
     y = 140
+    contacts_rendered = 0
     for node in snap.contacts:
+        if y + 34 > 220:
+            break
         draw_row(s, (28, y, 374, y + 34), f"{node.name}  {node.role}", f"{node.fingerprint}  {node.signal}", None)
         draw_button(s, (384, y, 452, y + 34), "DM", GREEN)
         y += 40
+        contacts_rendered += 1
     s.round_rect((16, 240, 464, 402))
     s.text("Heard Nodes", (28, 248, 180, 270), 14, MUTED, True)
     y = 276
+    heard_rendered = 0
     for node in snap.heard:
+        if y + 32 > 396:
+            break
         draw_row(s, (28, y, 452, y + 32), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}", None)
         y += 36
+        heard_rendered += 1
+    s.metrics.update(
+        {
+            "contacts_source_count": len(snap.contacts),
+            "contacts_rendered_count": contacts_rendered,
+            "heard_source_count": len(snap.heard),
+            "heard_rendered_count": heard_rendered,
+        }
+    )
     draw_dock(s, "Nodes")
 
 
@@ -650,9 +773,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
 }
 
 
-def generate(out_dir: Path, views: tuple[str, ...] | None = None) -> dict[str, object]:
+def snapshot_counts(snap: Snapshot) -> dict[str, int]:
+    return {
+        "contacts": len(snap.contacts),
+        "heard": len(snap.heard),
+        "public_messages": len(snap.public_messages),
+        "dm_messages": len(snap.dm_messages),
+        "packets": len(snap.packets),
+        "routes": len(snap.routes),
+        "rooms": len(snap.rooms),
+        "repeaters": len(snap.repeaters),
+    }
+
+
+def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str = "default") -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    snap = sample_snapshot()
+    if scenario not in SCENARIOS:
+        raise ValueError(f"unknown scenario: {scenario}")
+    snap = SCENARIOS[scenario]()
     selected = views or tuple(RENDERERS)
     report_views = []
     overflow_count = 0
@@ -677,6 +815,8 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None) -> dict[str, o
         "ok": overflow_count == 0 and not required_missing,
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
+        "scenario": scenario,
+        "snapshot_counts": snapshot_counts(snap),
         "views": report_views,
         "overflow_count": overflow_count,
         "truncated_count": truncated_count,
@@ -691,13 +831,19 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate D1L UI simulator screenshots and layout report.")
     parser.add_argument("--out", type=Path, default=Path("artifacts/ui-sim"), help="output directory")
     parser.add_argument("--view", action="append", choices=tuple(RENDERERS), help="view to render; repeatable")
+    parser.add_argument("--scenario", choices=tuple(SCENARIOS), default="default", help="snapshot scenario")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    report = generate(args.out, tuple(args.view) if args.view else None)
-    print(json.dumps({"ok": report["ok"], "views": len(report["views"]), "out": args.out.as_posix()}, sort_keys=True))
+    report = generate(args.out, tuple(args.view) if args.view else None, scenario=args.scenario)
+    print(
+        json.dumps(
+            {"ok": report["ok"], "views": len(report["views"]), "out": args.out.as_posix(), "scenario": args.scenario},
+            sort_keys=True,
+        )
+    )
     return 0 if report["ok"] else 1
 
 

@@ -17,7 +17,9 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
     report = ui_simulator.generate(tmp_path)
 
     assert report["ok"] is True
+    assert report["scenario"] == "default"
     assert report["display"] == {"width": 480, "height": 480}
+    assert report["snapshot_counts"]["heard"] == 3
     assert report["overflow_count"] == 0
     assert report["required_labels_missing"] == []
 
@@ -33,6 +35,31 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
             assert image.size == (480, 480), name
         assert view["text_count"] > 0
         assert view["overflow"] == []
+
+
+def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
+    report = ui_simulator.generate(tmp_path, scenario="large-mesh")
+
+    assert report["ok"] is True
+    assert report["scenario"] == "large-mesh"
+    assert report["overflow_count"] == 0
+    assert report["required_labels_missing"] == []
+    assert report["snapshot_counts"]["heard"] == 96
+    assert report["snapshot_counts"]["public_messages"] == 48
+    assert report["snapshot_counts"]["dm_messages"] == 32
+
+    views = {view["name"]: view for view in report["views"]}
+    messages = views["messages"]["metrics"]
+    assert messages["public_source_count"] == 48
+    assert messages["public_rendered_count"] <= 4
+    assert messages["dm_source_count"] == 32
+    assert messages["dm_rendered_count"] <= 3
+
+    nodes = views["nodes"]["metrics"]
+    assert nodes["contacts_source_count"] == 18
+    assert nodes["contacts_rendered_count"] <= 2
+    assert nodes["heard_source_count"] == 96
+    assert nodes["heard_rendered_count"] <= 4
 
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
@@ -60,6 +87,10 @@ def test_ui_simulator_is_documented_and_run_in_ci():
 
     assert "Pillow" in workflow
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in workflow
+    assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
     assert "python .\\tools\\ui_simulator.py --out artifacts\\ui-sim" in test_plan
+    assert "python .\\tools\\ui_simulator.py --scenario large-mesh --out artifacts\\ui-sim-large" in test_plan
     assert "tools/ui_simulator.py" in roadmap
+    assert "large-mesh" in roadmap
     assert "Simulator screenshots captured" in checklist
+    assert "Large simulated mesh UI stress passes" in checklist

@@ -560,7 +560,7 @@ Tasks:
 - Modal sheets/toasts. Status: implemented for advert actions and touch feedback.
 - Lock/standby screen. Status: implemented as a tap-to-unlock overlay.
 - Onboarding flow. Status: first persisted first-boot setup sheet is implemented with node-name entry, Canada/USA preset confirmation, Desk Companion/offline-radio defaults, identity generation, serial onboarding diagnostics, simulator coverage, and NVS migration from the previous settings schema; richer optional-radio choices are pending live Wi-Fi/BLE runtime support.
-- Simulator/screenshot target if feasible. Status: first deterministic host simulator is implemented in `tools/ui_simulator.py`; it renders the current 480x480 shell and sheet surfaces to PNG and emits `ui-sim-report.json` with required-label and text-overflow checks.
+- Simulator/screenshot target if feasible. Status: first deterministic host simulator is implemented in `tools/ui_simulator.py`; it renders the current 480x480 shell and sheet surfaces to PNG and emits `ui-sim-report.json` with required-label and text-overflow checks. A `large-mesh` scenario now feeds oversized node/message stores to validate bounded preview rendering.
 
 Acceptance:
 
@@ -589,7 +589,7 @@ Tasks:
 Acceptance:
 
 - User can send and receive public and DM messages from touch UI. Status: controlled Public `test` TX/RX works and persists in the touch Public view; first free-text Public composer is implemented; first contact-row touch DM composer is implemented and routes through the same DM backend as serial; first bounded DM thread/detail sheet with `Reply` is implemented; serial DM flood TX/store/reboot persistence is validated with `YKF Corebot`; DM ACK/PATH receive parsing and direct-route TX selection are implemented. First Public unread/read behavior is validated on `COM7`: after `messages read all`, a fresh Public `test` produced two RX rows, raised `public_unread=2`, cleared with `messages read public`, and stayed cleared after reboot. Manual physical touch entry/thread/reply/read review, inbound DM proof, controlled ACK/PATH RF proof, and direct-route RF proof are pending.
-- Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack; large simulated mesh stress is still pending.
+- Node list does not crash or stutter with large simulated meshes. Status: bounded preview rows avoid unbounded UI work, and a stack-overflow boot loop found during hardware smoke was fixed by moving UI snapshot storage off the main task stack. Host simulator large-mesh stress now feeds 96 heard nodes, 18 contacts, 48 Public messages, and 32 DM messages while asserting bounded visible rows and no text overflow; live RF stress with a genuinely large hardware mesh is still pending.
 - Message store survives reboot. Status: bounded Public message store validated on `COM7` on 2026-06-29; `messages public` kept TX/RX rows after reboot. Bounded DM store TX persistence was validated on `COM7` with `YKF Corebot`; `messages dm` retained the TX row after reboot. Public read state also survived reboot with `last_public_read_seq=10` and `public_unread=0`. Packet evidence now also persists the newest 8 rows across reboot.
 - Contact store survives reboot. Status: bounded contact store validated on `COM7` on 2026-06-29; `contacts add 937D290883817CBD` promoted heard node `Krabs Lagoon` and the row survived reboot. Full public-key retention was validated on `COM7` with `YKF Corebot` fingerprint `0BF0A701D5AE2DB6`; the heard-node and promoted contact public key survived reboot. Favorite/mute contact flags were toggled on, survived reboot, and were toggled off again on `COM7`.
 - Route store survives reboot. Status: bounded route store validated on `COM7` on 2026-06-29; Public TX/RX route rows survived reboot, and `routes detail <seq>` matched a fresh Public RX route row after a local Public `test` window.
@@ -758,11 +758,11 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding; `tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large` renders the same UI against oversized node/message stores.
 - Assert required labels and button surfaces are present.
 - Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.
-- Test large node/message lists.
+- Test large node/message lists. Status: host `large-mesh` simulator stress is implemented, covered by tests, and generated in CI; physical large-mesh RF review is still pending.
 
 ### 11.3 Hardware smoke tests
 

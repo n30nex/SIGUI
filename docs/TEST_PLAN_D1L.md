@@ -7,6 +7,7 @@ Run:
 ```powershell
 python -m pytest tests
 python .\tools\ui_simulator.py --out artifacts\ui-sim
+python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
 ```
@@ -27,7 +28,7 @@ Coverage:
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
-- UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, sheets, first-boot onboarding, and fail on missing required labels or measured text overflow.
+- UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus `ui-sim-report.json`, cover the main touch surfaces, sheets, first-boot onboarding, fail on missing required labels or measured text overflow, and include a `large-mesh` scenario that proves oversized node/message stores are bounded before rendering.
 - First-boot onboarding contract: settings schema v3 must persist `onboarding_complete`, migrate schema v2 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.

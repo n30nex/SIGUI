@@ -23,7 +23,9 @@ jobs:
         run: python ./scripts/smoke_d1l.py --dry-run
 
       - name: UI simulator screenshots
-        run: python ./tools/ui_simulator.py --out artifacts/ui-sim
+        run: |
+          python ./tools/ui_simulator.py --out artifacts/ui-sim
+          python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large
 
       - name: Verify checksums
         run: python ./scripts/verify_checksums.py artifacts

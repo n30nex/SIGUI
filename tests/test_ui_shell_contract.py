@@ -157,6 +157,7 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
 
 def test_nodes_screen_renders_heard_node_rows():
     source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
     assert "render_node_row" in source
     assert "render_contact_row" in source
     assert "recent_node_count" in source
@@ -167,6 +168,23 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "node_total_written" in source
     assert "contact_total_written" in source
     assert "route_count" in source
+    assert "#define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
+    assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
+    assert "i < snapshot->recent_contact_count && y <= 190" in source
+    assert "i < snapshot->recent_node_count && y <= 300" in source
+
+
+def test_messages_screen_renders_bounded_preview_rows():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
+    assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U" in header
+    assert "#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
+    assert "i < snapshot->recent_message_count && y <= 188" in source
+    assert "i < snapshot->recent_dm_count && y <= 302" in source
+    assert "snapshot->message_count" in source
+    assert "snapshot->dm_count" in source
+    assert "snapshot->public_unread_count" in source
+    assert "snapshot->dm_unread_count" in source
 
 
 def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
