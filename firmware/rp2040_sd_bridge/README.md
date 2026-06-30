@@ -32,8 +32,15 @@ Do not use the Windows host for firmware compilation.
 ## Runtime Notes
 
 - `DESKOS_SD_STATUS` mounts the card if possible and creates `/deskos` when the
-  filesystem is usable.
+  filesystem is usable. Ready cards also advertise `file_ops=1`,
+  `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
+  `atomic_rename=1`.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
+- `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under
+  `/deskos`: `stat`, `read`, `write`, `append`, `delete`, and `rename`. Payloads
+  use base64url without padding, CRC32 checks, sanitized relative paths, and
+  192-byte chunks so each newline-delimited request remains under the 512-byte
+  line cap.
 - No formatting happens at boot or during status checks.
 - Retained DeskOS stores still remain on ESP32 onboard NVS until the SD-backed
   store migration lands.

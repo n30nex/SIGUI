@@ -120,9 +120,24 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
     assert "d1l_rp2040_bridge_format_sd" in rp2040_header
+    assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
+    assert "D1L_RP2040_FILE_CHUNK_MAX 192U" in rp2040_header
+    assert "d1l_rp2040_file_result_t" in rp2040_header
+    assert "d1l_rp2040_bridge_file_stat" in rp2040_header
+    assert "d1l_rp2040_bridge_file_read" in rp2040_header
+    assert "d1l_rp2040_bridge_file_write" in rp2040_header
+    assert "d1l_rp2040_bridge_file_append" in rp2040_header
+    assert "d1l_rp2040_bridge_file_rename" in rp2040_header
     assert "DESKOS_SD_STATUS" in rp2040_source
     assert "DESKOS_SD_FORMAT" in rp2040_source
+    assert "DESKOS_SD_FILE" in rp2040_source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_source
+    assert "base64url_encode" in rp2040_source
+    assert "base64url_decode" in rp2040_source
+    assert "crc32_bytes" in rp2040_source
+    assert "validate_relative_path" in rp2040_source
+    assert "line_has_prefix" in rp2040_source
+    assert "token_value_span" in rp2040_source
     assert "uart_write_bytes" in rp2040_source
     assert "uart_read_bytes" in rp2040_source
     assert "storage_format_hint" in console

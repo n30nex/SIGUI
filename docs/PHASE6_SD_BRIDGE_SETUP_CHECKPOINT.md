@@ -13,6 +13,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Added `tools/rp2040_sd_protocol.py` as the host reference simulator for the RP2040 line protocol.
 - Added `firmware/rp2040_sd_bridge/deskos_sd_bridge` as an original Arduino RP2040 SD bridge target for the D1L internal UART and SD pins.
 - Added a GitHub Actions-only RP2040 bridge build job that compiles with Arduino CLI and uploads checksummed `rp2040-sd-bridge-firmware` artifacts.
+- Added bounded generic `DESKOS_SD_FILE v=1` file operations to the simulator, RP2040 bridge target, and ESP32 bridge API: `stat`, `read`, `write`, `append`, `delete`, and `rename` with sanitized relative paths, base64url payloads, CRC32 checks, 512-byte lines, and 192-byte decoded chunks.
 - Kept all retained stores on onboard NVS; no SD-backed store migration is claimed in this slice.
 
 ## Validation Rules
@@ -24,5 +25,6 @@ This checkpoint advances optional SD-card data storage without making boot or re
 ## Remaining SD Work
 
 - Validate the RP2040 SD bridge artifact on hardware after a safe RP2040 flashing procedure is documented and the correct RP2040 programming path is identified.
-- Move larger retained stores to SD when configured: Public/DM history, packet/route history, exports, and future map tiles.
+- Add a retained blob-store abstraction and use packet-log storage as the first low-risk SD-backed canary when configured.
+- Move larger retained stores to SD when configured: Public/DM history, route history, exports, and future map tiles.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.

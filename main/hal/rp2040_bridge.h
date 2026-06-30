@@ -1,11 +1,16 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
 
 #define D1L_RP2040_SD_FORMAT_CONFIRMATION "FORMAT-DESKOS-SD"
+#define D1L_RP2040_FILE_PROTOCOL_VERSION 1U
+#define D1L_RP2040_FILE_LINE_MAX 512U
+#define D1L_RP2040_FILE_PATH_MAX 96U
+#define D1L_RP2040_FILE_CHUNK_MAX 192U
 
 typedef struct {
     bool uart_ready;
@@ -27,14 +32,38 @@ typedef struct {
     bool format_required;
     bool format_supported;
     bool data_ready;
+    bool file_ops_supported;
+    bool atomic_rename_supported;
     bool response_truncated;
     uint32_t capacity_kb;
     uint32_t free_kb;
+    uint32_t file_line_max;
+    uint32_t file_chunk_max;
+    uint32_t path_max;
     esp_err_t last_error;
     char state[24];
     char filesystem[16];
     char note[96];
 } d1l_rp2040_sd_status_t;
+
+typedef struct {
+    bool bridge_ready;
+    bool protocol_supported;
+    bool ok;
+    bool response_truncated;
+    bool exists;
+    bool is_directory;
+    bool eof;
+    uint16_t request_id;
+    uint32_t size;
+    uint32_t offset;
+    uint32_t length;
+    uint32_t crc32;
+    esp_err_t last_error;
+    char op[12];
+    char err[24];
+    char note[48];
+} d1l_rp2040_file_result_t;
 
 esp_err_t d1l_rp2040_bridge_init(void);
 esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status);
@@ -42,3 +71,32 @@ esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_
 esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
                                        const char *confirmation,
                                        uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
+                                      d1l_rp2040_file_result_t *out_result,
+                                      uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_read(const char *path,
+                                      uint32_t offset,
+                                      uint8_t *out_data,
+                                      size_t max_len,
+                                      d1l_rp2040_file_result_t *out_result,
+                                      uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_write(const char *path,
+                                       uint32_t offset,
+                                       const uint8_t *data,
+                                       size_t len,
+                                       bool truncate,
+                                       d1l_rp2040_file_result_t *out_result,
+                                       uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_append(const char *path,
+                                        const uint8_t *data,
+                                        size_t len,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_delete(const char *path,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_file_rename(const char *from_path,
+                                        const char *to_path,
+                                        bool replace,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms);

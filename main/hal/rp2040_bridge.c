@@ -10,18 +10,146 @@
 
 #include "hal/indicator_pins.h"
 
-#define D1L_RP2040_UART_BUF_SIZE 512
+#define D1L_RP2040_UART_BUF_SIZE 1024
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
 #define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
 #define D1L_RP2040_SD_FORMAT_REPLY_PREFIX "DESKOS_SD_FORMAT"
-#define D1L_RP2040_SD_LINE_MAX 192U
+#define D1L_RP2040_FILE_PREFIX "DESKOS_SD_FILE"
+#define D1L_RP2040_LINE_BUFFER_SIZE (D1L_RP2040_FILE_LINE_MAX + 1U)
+#define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
+#define D1L_RP2040_DATA64_MAX (((D1L_RP2040_FILE_CHUNK_MAX + 2U) / 3U) * 4U)
 
 static d1l_rp2040_status_t s_status = {
     .uart_ready = false,
     .init_result = ESP_ERR_INVALID_STATE,
     .buffered_bytes = 0,
 };
+
+static uint16_t s_file_request_id = 1;
+
+static bool line_has_prefix(const char *line, const char *prefix)
+{
+    const size_t prefix_len = strlen(prefix);
+    return line &&
+           strncmp(line, prefix, prefix_len) == 0 &&
+           (line[prefix_len] == '\0' || line[prefix_len] == ' ');
+}
+
+static bool token_value_span(const char *line, const char *key, const char **out_value,
+                             size_t *out_len)
+{
+    if (!line || !key || !out_value || !out_len) {
+        return false;
+    }
+    const size_t key_len = strlen(key);
+    const char *p = line;
+    while (*p) {
+        while (*p == ' ') {
+            ++p;
+        }
+        const char *token = p;
+        while (*p && *p != ' ') {
+            ++p;
+        }
+        const size_t token_len = (size_t)(p - token);
+        if (token_len > key_len + 1U &&
+            strncmp(token, key, key_len) == 0 &&
+            token[key_len] == '=') {
+            *out_value = token + key_len + 1U;
+            *out_len = token_len - key_len - 1U;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool copy_token_value(const char *line, const char *key, char *dest, size_t dest_size)
+{
+    const char *value = NULL;
+    size_t value_len = 0;
+    if (!dest || dest_size == 0 ||
+        !token_value_span(line, key, &value, &value_len) ||
+        value_len + 1U > dest_size) {
+        return false;
+    }
+    memcpy(dest, value, value_len);
+    dest[value_len] = '\0';
+    return true;
+}
+
+static bool parse_bool_token(const char *line, const char *key, bool *out_value)
+{
+    const char *value = NULL;
+    size_t value_len = 0;
+    if (!out_value || !token_value_span(line, key, &value, &value_len)) {
+        return false;
+    }
+    if (value_len == 1U && value[0] == '1') {
+        *out_value = true;
+        return true;
+    }
+    if (value_len == 1U && value[0] == '0') {
+        *out_value = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_u32_token(const char *line, const char *key, uint32_t *out_value)
+{
+    const char *value = NULL;
+    size_t value_len = 0;
+    if (!out_value || !token_value_span(line, key, &value, &value_len) || value_len == 0) {
+        return false;
+    }
+    uint32_t parsed = 0;
+    for (size_t i = 0; i < value_len; ++i) {
+        if (value[i] < '0' || value[i] > '9') {
+            return false;
+        }
+        const uint32_t digit = (uint32_t)(value[i] - '0');
+        if (parsed > (UINT32_MAX - digit) / 10U) {
+            return false;
+        }
+        parsed = parsed * 10U + digit;
+    }
+    *out_value = parsed;
+    return true;
+}
+
+static bool parse_hex_u32_token(const char *line, const char *key, uint32_t *out_value)
+{
+    const char *value = NULL;
+    size_t value_len = 0;
+    if (!out_value || !token_value_span(line, key, &value, &value_len) || value_len != 8U) {
+        return false;
+    }
+    uint32_t parsed = 0;
+    for (size_t i = 0; i < value_len; ++i) {
+        char c = value[i];
+        uint32_t digit = 0;
+        if (c >= '0' && c <= '9') {
+            digit = (uint32_t)(c - '0');
+        } else if (c >= 'A' && c <= 'F') {
+            digit = (uint32_t)(c - 'A' + 10);
+        } else if (c >= 'a' && c <= 'f') {
+            digit = (uint32_t)(c - 'a' + 10);
+        } else {
+            return false;
+        }
+        parsed = (parsed << 4) | digit;
+    }
+    *out_value = parsed;
+    return true;
+}
+
+static void parse_word_token(const char *line, const char *key, char *dest, size_t dest_size)
+{
+    if (!copy_token_value(line, key, dest, dest_size) && dest && dest_size > 0) {
+        dest[0] = '\0';
+    }
+}
 
 static void init_sd_status(d1l_rp2040_sd_status_t *status, esp_err_t err)
 {
@@ -37,73 +165,288 @@ static void init_sd_status(d1l_rp2040_sd_status_t *status, esp_err_t err)
              "RP2040 UART bridge is unavailable");
 }
 
-static bool parse_bool_token(const char *line, const char *key, bool *out_value)
+static void init_file_result(d1l_rp2040_file_result_t *result, esp_err_t err)
 {
-    const char *p = strstr(line, key);
-    if (!p || !out_value) {
-        return false;
+    memset(result, 0, sizeof(*result));
+    result->bridge_ready = s_status.uart_ready;
+    result->last_error = err;
+    snprintf(result->op, sizeof(result->op), "unknown");
+    if (err != ESP_OK) {
+        snprintf(result->err, sizeof(result->err), "local_error");
+        snprintf(result->note, sizeof(result->note), "local_error");
     }
-    p += strlen(key);
-    if (*p == '1' || strncmp(p, "true", 4) == 0 || strncmp(p, "yes", 3) == 0) {
-        *out_value = true;
-        return true;
-    }
-    if (*p == '0' || strncmp(p, "false", 5) == 0 || strncmp(p, "no", 2) == 0) {
-        *out_value = false;
-        return true;
-    }
-    return false;
 }
 
-static bool parse_u32_token(const char *line, const char *key, uint32_t *out_value)
+static esp_err_t map_file_error(const char *err)
 {
-    const char *p = strstr(line, key);
-    if (!p || !out_value) {
+    if (!err || err[0] == '\0') {
+        return ESP_FAIL;
+    }
+    if (strcmp(err, "no_card") == 0 || strcmp(err, "not_found") == 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (strcmp(err, "not_ready") == 0 || strcmp(err, "exists") == 0 ||
+        strcmp(err, "is_dir") == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (strcmp(err, "bad_path") == 0 || strcmp(err, "bad_request") == 0 ||
+        strcmp(err, "bad_value") == 0 || strcmp(err, "decode_failed") == 0 ||
+        strcmp(err, "crc_mismatch") == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strcmp(err, "range") == 0 || strcmp(err, "too_large") == 0 ||
+        strcmp(err, "line_too_long") == 0) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (strcmp(err, "unsupported_op") == 0) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (strcmp(err, "timeout") == 0) {
+        return ESP_ERR_TIMEOUT;
+    }
+    return ESP_FAIL;
+}
+
+static bool is_path_char(char c)
+{
+    return (c >= 'A' && c <= 'Z') ||
+           (c >= 'a' && c <= 'z') ||
+           (c >= '0' && c <= '9') ||
+           c == '.' || c == '_' || c == '-' || c == '/';
+}
+
+static bool validate_relative_path(const char *path)
+{
+    if (!path) {
         return false;
     }
-    p += strlen(key);
-    unsigned long value = 0;
-    if (sscanf(p, "%lu", &value) != 1) {
+    const size_t len = strlen(path);
+    if (len == 0 || len > D1L_RP2040_FILE_PATH_MAX ||
+        path[0] == '/' || path[len - 1U] == '/' ||
+        strstr(path, "..") || strstr(path, "//")) {
         return false;
     }
-    *out_value = (uint32_t)value;
+    const char *segment = path;
+    for (size_t i = 0; i <= len; ++i) {
+        const char c = path[i];
+        if (c == '/' || c == '\0') {
+            const size_t segment_len = (size_t)(&path[i] - segment);
+            if (segment_len == 0 ||
+                (segment_len == 1U && segment[0] == '.') ||
+                (segment_len == 2U && segment[0] == '.' && segment[1] == '.')) {
+                return false;
+            }
+            segment = &path[i + 1U];
+            continue;
+        }
+        if (!is_path_char(c)) {
+            return false;
+        }
+    }
     return true;
 }
 
-static void parse_word_token(const char *line, const char *key, char *dest, size_t dest_size)
+static uint32_t crc32_bytes(const uint8_t *data, size_t len)
 {
-    const char *p = strstr(line, key);
-    if (!p || !dest || dest_size == 0) {
-        return;
+    uint32_t crc = 0xFFFFFFFFUL;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t mask = (uint32_t)(-((int32_t)(crc & 1U)));
+            crc = (crc >> 1) ^ (0xEDB88320UL & mask);
+        }
     }
-    p += strlen(key);
-    size_t out = 0;
-    while (*p && *p != ' ' && *p != '\r' && *p != '\n' && out + 1U < dest_size) {
-        dest[out++] = *p++;
+    return ~crc;
+}
+
+static void crc32_hex(uint32_t crc, char out[9])
+{
+    snprintf(out, 9, "%08lX", (unsigned long)crc);
+}
+
+static size_t base64url_encoded_len(size_t len)
+{
+    if (len == 0) {
+        return 0;
     }
-    dest[out] = '\0';
+    const size_t padded = ((len + 2U) / 3U) * 4U;
+    const size_t pad = (3U - (len % 3U)) % 3U;
+    return padded - pad;
+}
+
+static bool base64url_encode(const uint8_t *data, size_t len, char *out, size_t out_size)
+{
+    static const char table[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const size_t encoded_len = base64url_encoded_len(len);
+    if (!out || out_size <= encoded_len || (!data && len > 0)) {
+        return false;
+    }
+    size_t used = 0;
+    for (size_t i = 0; i < len; i += 3U) {
+        const uint32_t b0 = data[i];
+        const uint32_t b1 = (i + 1U < len) ? data[i + 1U] : 0U;
+        const uint32_t b2 = (i + 2U < len) ? data[i + 2U] : 0U;
+        const uint32_t triple = (b0 << 16) | (b1 << 8) | b2;
+        out[used++] = table[(triple >> 18) & 0x3FU];
+        out[used++] = table[(triple >> 12) & 0x3FU];
+        if (i + 1U < len) {
+            out[used++] = table[(triple >> 6) & 0x3FU];
+        }
+        if (i + 2U < len) {
+            out[used++] = table[triple & 0x3FU];
+        }
+    }
+    out[used] = '\0';
+    return used == encoded_len;
+}
+
+static int base64url_value(char c)
+{
+    if (c >= 'A' && c <= 'Z') {
+        return c - 'A';
+    }
+    if (c >= 'a' && c <= 'z') {
+        return c - 'a' + 26;
+    }
+    if (c >= '0' && c <= '9') {
+        return c - '0' + 52;
+    }
+    if (c == '-') {
+        return 62;
+    }
+    if (c == '_') {
+        return 63;
+    }
+    return -1;
+}
+
+static bool base64url_decode(const char *input, uint8_t *out, size_t out_size,
+                             size_t *out_len)
+{
+    if (!input || !out || !out_len) {
+        return false;
+    }
+    const size_t input_len = strlen(input);
+    if ((input_len % 4U) == 1U) {
+        return false;
+    }
+    uint32_t value = 0;
+    int value_bits = -8;
+    size_t used = 0;
+    for (size_t i = 0; i < input_len; ++i) {
+        const int part = base64url_value(input[i]);
+        if (part < 0) {
+            return false;
+        }
+        value = (value << 6) | (uint32_t)part;
+        value_bits += 6;
+        if (value_bits >= 0) {
+            if (used >= out_size) {
+                return false;
+            }
+            out[used++] = (uint8_t)((value >> value_bits) & 0xFFU);
+            value_bits -= 8;
+        }
+    }
+    *out_len = used;
+    return true;
+}
+
+static bool encode_path(const char *path, char *encoded, size_t encoded_size)
+{
+    return validate_relative_path(path) &&
+           base64url_encode((const uint8_t *)path, strlen(path), encoded, encoded_size);
+}
+
+static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
+                                        const char *const *prefixes, size_t prefix_count,
+                                        char *line, size_t line_size, uint32_t timeout_ms,
+                                        bool *response_truncated)
+{
+    if (!s_status.uart_ready) {
+        return s_status.init_result;
+    }
+    if (!command || command_len == 0 || !prefixes || prefix_count == 0 ||
+        !line || line_size < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (response_truncated) {
+        *response_truncated = false;
+    }
+    uart_flush_input((uart_port_t)s_status.uart_port);
+    const int written = uart_write_bytes((uart_port_t)s_status.uart_port, command, command_len);
+    if (written != (int)command_len) {
+        return ESP_FAIL;
+    }
+
+    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
+    size_t used = 0;
+    bool dropping = false;
+    while (esp_timer_get_time() < deadline_us) {
+        uint8_t ch = 0;
+        int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
+        if (len <= 0) {
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (ch == '\n') {
+            if (!dropping) {
+                line[used] = '\0';
+                for (size_t i = 0; i < prefix_count; ++i) {
+                    if (line_has_prefix(line, prefixes[i])) {
+                        return ESP_OK;
+                    }
+                }
+            }
+            used = 0;
+            dropping = false;
+            continue;
+        }
+        if (dropping) {
+            continue;
+        }
+        if (used + 1U < line_size) {
+            line[used++] = (char)ch;
+        } else {
+            used = 0;
+            dropping = true;
+            if (response_truncated) {
+                *response_truncated = true;
+            }
+        }
+    }
+    return ESP_ERR_TIMEOUT;
 }
 
 static esp_err_t parse_sd_line_with_prefix(const char *line,
                                            const char *prefix,
                                            d1l_rp2040_sd_status_t *status)
 {
-    if (!line || !prefix || !status || strncmp(line, prefix, strlen(prefix)) != 0) {
+    if (!line || !prefix || !status || !line_has_prefix(line, prefix)) {
         return ESP_FAIL;
     }
 
     init_sd_status(status, ESP_OK);
     status->protocol_supported = true;
-    parse_word_token(line, "state=", status->state, sizeof(status->state));
-    parse_word_token(line, "fs=", status->filesystem, sizeof(status->filesystem));
-    parse_word_token(line, "note=", status->note, sizeof(status->note));
-    (void)parse_bool_token(line, "present=", &status->card_present);
-    (void)parse_bool_token(line, "mounted=", &status->filesystem_mounted);
-    (void)parse_bool_token(line, "deskos=", &status->deskos_root_ready);
-    (void)parse_bool_token(line, "format_required=", &status->format_required);
-    (void)parse_bool_token(line, "format_supported=", &status->format_supported);
-    (void)parse_u32_token(line, "capacity_kb=", &status->capacity_kb);
-    (void)parse_u32_token(line, "free_kb=", &status->free_kb);
+    parse_word_token(line, "state", status->state, sizeof(status->state));
+    parse_word_token(line, "fs", status->filesystem, sizeof(status->filesystem));
+    parse_word_token(line, "note", status->note, sizeof(status->note));
+    (void)parse_bool_token(line, "present", &status->card_present);
+    (void)parse_bool_token(line, "mounted", &status->filesystem_mounted);
+    (void)parse_bool_token(line, "deskos", &status->deskos_root_ready);
+    (void)parse_bool_token(line, "format_required", &status->format_required);
+    (void)parse_bool_token(line, "format_supported", &status->format_supported);
+    (void)parse_bool_token(line, "file_ops", &status->file_ops_supported);
+    (void)parse_bool_token(line, "atomic_rename", &status->atomic_rename_supported);
+    (void)parse_u32_token(line, "capacity_kb", &status->capacity_kb);
+    (void)parse_u32_token(line, "free_kb", &status->free_kb);
+    (void)parse_u32_token(line, "file_line_max", &status->file_line_max);
+    (void)parse_u32_token(line, "file_chunk_max", &status->file_chunk_max);
+    (void)parse_u32_token(line, "path_max", &status->path_max);
 
     if (status->card_present && !status->filesystem_mounted) {
         status->format_required = true;
@@ -116,6 +459,9 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
         snprintf(status->state, sizeof(status->state), "%s",
                  status->data_ready ? "ready" :
                  status->card_present ? "setup_required" : "no_card");
+    }
+    if (status->filesystem[0] == '\0') {
+        snprintf(status->filesystem, sizeof(status->filesystem), "unknown");
     }
     if (status->note[0] == '\0') {
         snprintf(status->note, sizeof(status->note), "%s",
@@ -134,6 +480,126 @@ static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *
 static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *status)
 {
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
+}
+
+static uint16_t next_file_request_id(void)
+{
+    const uint16_t id = s_file_request_id;
+    ++s_file_request_id;
+    if (s_file_request_id == 0) {
+        s_file_request_id = 1;
+    }
+    return id;
+}
+
+static esp_err_t parse_file_line(const char *line, uint16_t expected_id,
+                                 const char *expected_op, uint8_t *out_data,
+                                 size_t out_data_size,
+                                 d1l_rp2040_file_result_t *result)
+{
+    if (!line || !expected_op || !result || !line_has_prefix(line, D1L_RP2040_FILE_PREFIX)) {
+        return ESP_FAIL;
+    }
+
+    init_file_result(result, ESP_OK);
+    result->protocol_supported = true;
+    uint32_t version = 0;
+    uint32_t request_id = 0;
+    if (!parse_u32_token(line, "v", &version) ||
+        version != D1L_RP2040_FILE_PROTOCOL_VERSION ||
+        !parse_u32_token(line, "id", &request_id) ||
+        request_id != expected_id ||
+        !parse_bool_token(line, "ok", &result->ok)) {
+        result->last_error = ESP_FAIL;
+        snprintf(result->err, sizeof(result->err), "bad_response");
+        snprintf(result->note, sizeof(result->note), "bad_response");
+        return ESP_FAIL;
+    }
+    result->request_id = (uint16_t)request_id;
+    parse_word_token(line, "op", result->op, sizeof(result->op));
+    parse_word_token(line, "err", result->err, sizeof(result->err));
+    parse_word_token(line, "note", result->note, sizeof(result->note));
+    if (strcmp(result->op, expected_op) != 0) {
+        result->last_error = ESP_FAIL;
+        snprintf(result->err, sizeof(result->err), "op_mismatch");
+        snprintf(result->note, sizeof(result->note), "op_mismatch");
+        return ESP_FAIL;
+    }
+    if (!result->ok) {
+        result->last_error = map_file_error(result->err);
+        return result->last_error;
+    }
+
+    if (strcmp(expected_op, "stat") == 0) {
+        bool exists = false;
+        (void)parse_bool_token(line, "exists", &exists);
+        result->exists = exists;
+        char kind[8] = {0};
+        parse_word_token(line, "kind", kind, sizeof(kind));
+        result->is_directory = (strcmp(kind, "dir") == 0);
+        (void)parse_u32_token(line, "size", &result->size);
+    } else if (strcmp(expected_op, "read") == 0) {
+        (void)parse_u32_token(line, "off", &result->offset);
+        (void)parse_u32_token(line, "len", &result->length);
+        (void)parse_bool_token(line, "eof", &result->eof);
+        if (result->length > out_data_size || result->length > D1L_RP2040_FILE_CHUNK_MAX ||
+            !out_data) {
+            result->last_error = ESP_ERR_INVALID_SIZE;
+            return result->last_error;
+        }
+        char encoded[D1L_RP2040_DATA64_MAX + 1U];
+        if (!copy_token_value(line, "data", encoded, sizeof(encoded)) ||
+            !parse_hex_u32_token(line, "crc", &result->crc32)) {
+            result->last_error = ESP_FAIL;
+            return result->last_error;
+        }
+        size_t decoded_len = 0;
+        if (!base64url_decode(encoded, out_data, out_data_size, &decoded_len) ||
+            decoded_len != result->length ||
+            crc32_bytes(out_data, decoded_len) != result->crc32) {
+            result->last_error = ESP_FAIL;
+            return result->last_error;
+        }
+    } else if (strcmp(expected_op, "write") == 0 || strcmp(expected_op, "append") == 0) {
+        (void)parse_u32_token(line, "off", &result->offset);
+        (void)parse_u32_token(line, "len", &result->length);
+        (void)parse_u32_token(line, "size", &result->size);
+    }
+
+    result->last_error = ESP_OK;
+    return ESP_OK;
+}
+
+static esp_err_t send_file_command(const char *command, size_t command_len,
+                                   uint16_t request_id, const char *expected_op,
+                                   uint8_t *out_data, size_t out_data_size,
+                                   d1l_rp2040_file_result_t *out_result,
+                                   uint32_t timeout_ms)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_file_result(out_result, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    const char *prefixes[] = {D1L_RP2040_FILE_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    init_file_result(out_result, ESP_ERR_TIMEOUT);
+    esp_err_t ret = exchange_prefixed_line(command, command_len, prefixes, 1, line,
+                                           sizeof(line), timeout_ms, &truncated);
+    if (ret != ESP_OK) {
+        out_result->last_error = ret;
+        out_result->response_truncated = truncated;
+        snprintf(out_result->note, sizeof(out_result->note),
+                 ret == ESP_ERR_TIMEOUT ? "timeout" : "query_failed");
+        return ret;
+    }
+    ret = parse_file_line(line, request_id, expected_op, out_data, out_data_size, out_result);
+    out_result->response_truncated = truncated;
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_init(void)
@@ -196,51 +662,28 @@ esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_
         return s_status.init_result;
     }
 
+    const char *prefixes[] = {D1L_RP2040_SD_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
     init_sd_status(out_status, ESP_ERR_TIMEOUT);
-    uart_flush_input((uart_port_t)s_status.uart_port);
-    const int written = uart_write_bytes((uart_port_t)s_status.uart_port,
-                                         D1L_RP2040_SD_QUERY,
-                                         strlen(D1L_RP2040_SD_QUERY));
-    if (written <= 0) {
-        out_status->last_error = ESP_FAIL;
-        snprintf(out_status->state, sizeof(out_status->state), "query_failed");
-        snprintf(out_status->note, sizeof(out_status->note), "Could not write SD status query to RP2040 UART");
-        return ESP_FAIL;
+    esp_err_t ret = exchange_prefixed_line(D1L_RP2040_SD_QUERY,
+                                           strlen(D1L_RP2040_SD_QUERY),
+                                           prefixes, 1, line, sizeof(line),
+                                           timeout_ms, &truncated);
+    out_status->response_truncated = truncated;
+    if (ret != ESP_OK) {
+        out_status->last_error = ret;
+        if (ret != ESP_ERR_TIMEOUT) {
+            snprintf(out_status->state, sizeof(out_status->state), "query_failed");
+            snprintf(out_status->note, sizeof(out_status->note),
+                     "Could not write SD status query to RP2040 UART");
+        }
+        return ret;
     }
-
-    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
-    char line[D1L_RP2040_SD_LINE_MAX];
-    size_t used = 0;
-    while (esp_timer_get_time() < deadline_us) {
-        uint8_t ch = 0;
-        int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
-        if (len <= 0) {
-            continue;
-        }
-        if (ch == '\n') {
-            line[used] = '\0';
-            if (strncmp(line, D1L_RP2040_SD_REPLY_PREFIX,
-                        strlen(D1L_RP2040_SD_REPLY_PREFIX)) == 0) {
-                esp_err_t ret = parse_sd_status_line(line, out_status);
-                out_status->last_error = ret;
-                return ret;
-            }
-            used = 0;
-            continue;
-        }
-        if (ch == '\r') {
-            continue;
-        }
-        if (used + 1U < sizeof(line)) {
-            line[used++] = (char)ch;
-        } else {
-            out_status->response_truncated = true;
-            used = 0;
-        }
-    }
-
-    out_status->last_error = ESP_ERR_TIMEOUT;
-    return ESP_ERR_TIMEOUT;
+    ret = parse_sd_status_line(line, out_status);
+    out_status->response_truncated = truncated;
+    out_status->last_error = ret;
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
@@ -261,68 +704,228 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
         return s_status.init_result;
     }
 
-    init_sd_status(out_status, ESP_ERR_TIMEOUT);
-    uart_flush_input((uart_port_t)s_status.uart_port);
     char command[64];
     const int command_len = snprintf(command, sizeof(command), "%s%s\n",
                                      D1L_RP2040_SD_FORMAT_QUERY_PREFIX,
                                      confirmation);
     if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
-        out_status->last_error = ESP_ERR_INVALID_SIZE;
+        init_sd_status(out_status, ESP_ERR_INVALID_SIZE);
         snprintf(out_status->state, sizeof(out_status->state), "query_failed");
         snprintf(out_status->note, sizeof(out_status->note), "SD format command was too large");
         return ESP_ERR_INVALID_SIZE;
     }
 
-    const int written = uart_write_bytes((uart_port_t)s_status.uart_port,
-                                         command,
-                                         (size_t)command_len);
-    if (written != command_len) {
-        out_status->last_error = ESP_FAIL;
-        snprintf(out_status->state, sizeof(out_status->state), "query_failed");
-        snprintf(out_status->note, sizeof(out_status->note), "Could not write SD format command to RP2040 UART");
-        return ESP_FAIL;
+    const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX, D1L_RP2040_SD_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    init_sd_status(out_status, ESP_ERR_TIMEOUT);
+    esp_err_t ret = exchange_prefixed_line(command, (size_t)command_len, prefixes, 2,
+                                           line, sizeof(line), timeout_ms, &truncated);
+    out_status->response_truncated = truncated;
+    if (ret != ESP_OK) {
+        out_status->last_error = ret;
+        snprintf(out_status->note, sizeof(out_status->note),
+                 ret == ESP_ERR_TIMEOUT ?
+                 "RP2040 SD format command timed out; no format confirmation received" :
+                 "Could not write SD format command to RP2040 UART");
+        return ret;
     }
 
-    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
-    char line[D1L_RP2040_SD_LINE_MAX];
-    size_t used = 0;
-    while (esp_timer_get_time() < deadline_us) {
-        uint8_t ch = 0;
-        int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
-        if (len <= 0) {
-            continue;
-        }
-        if (ch == '\n') {
-            line[used] = '\0';
-            esp_err_t ret = ESP_FAIL;
-            if (strncmp(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX,
-                        strlen(D1L_RP2040_SD_FORMAT_REPLY_PREFIX)) == 0) {
-                ret = parse_sd_format_line(line, out_status);
-            } else if (strncmp(line, D1L_RP2040_SD_REPLY_PREFIX,
-                               strlen(D1L_RP2040_SD_REPLY_PREFIX)) == 0) {
-                ret = parse_sd_status_line(line, out_status);
-            }
-            if (ret != ESP_FAIL) {
-                out_status->last_error = ret;
-                return ret;
-            }
-            used = 0;
-            continue;
-        }
-        if (ch == '\r') {
-            continue;
-        }
-        if (used + 1U < sizeof(line)) {
-            line[used++] = (char)ch;
-        } else {
-            out_status->response_truncated = true;
-            used = 0;
-        }
+    if (line_has_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX)) {
+        ret = parse_sd_format_line(line, out_status);
+    } else {
+        ret = parse_sd_status_line(line, out_status);
     }
+    out_status->response_truncated = truncated;
+    out_status->last_error = ret;
+    return ret;
+}
 
-    out_status->last_error = ESP_ERR_TIMEOUT;
-    snprintf(out_status->note, sizeof(out_status->note),
-             "RP2040 SD format command timed out; no format confirmation received");
-    return ESP_ERR_TIMEOUT;
+esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
+                                      d1l_rp2040_file_result_t *out_result,
+                                      uint32_t timeout_ms)
+{
+    if (!path || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    if (!encode_path(path, path64, sizeof(path64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=stat path=%s\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "stat",
+                             NULL, 0, out_result, timeout_ms);
+}
+
+esp_err_t d1l_rp2040_bridge_file_read(const char *path,
+                                      uint32_t offset,
+                                      uint8_t *out_data,
+                                      size_t max_len,
+                                      d1l_rp2040_file_result_t *out_result,
+                                      uint32_t timeout_ms)
+{
+    if (!path || !out_data || !out_result || max_len == 0 ||
+        max_len > D1L_RP2040_FILE_CHUNK_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    if (!encode_path(path, path64, sizeof(path64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=read path=%s off=%lu len=%lu\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64,
+                                     (unsigned long)offset, (unsigned long)max_len);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "read",
+                             out_data, max_len, out_result, timeout_ms);
+}
+
+esp_err_t d1l_rp2040_bridge_file_write(const char *path,
+                                       uint32_t offset,
+                                       const uint8_t *data,
+                                       size_t len,
+                                       bool truncate,
+                                       d1l_rp2040_file_result_t *out_result,
+                                       uint32_t timeout_ms)
+{
+    if (!path || !out_result || (len > 0 && !data) || len > D1L_RP2040_FILE_CHUNK_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    char data64[D1L_RP2040_DATA64_MAX + 1U];
+    char crc[9];
+    if (!encode_path(path, path64, sizeof(path64)) ||
+        !base64url_encode(data, len, data64, sizeof(data64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    crc32_hex(crc32_bytes(data, len), crc);
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=write path=%s off=%lu len=%lu trunc=%u data=%s crc=%s\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64,
+                                     (unsigned long)offset, (unsigned long)len,
+                                     truncate ? 1U : 0U, data64, crc);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "write",
+                             NULL, 0, out_result, timeout_ms);
+}
+
+esp_err_t d1l_rp2040_bridge_file_append(const char *path,
+                                        const uint8_t *data,
+                                        size_t len,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms)
+{
+    if (!path || !out_result || !data || len == 0 || len > D1L_RP2040_FILE_CHUNK_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    char data64[D1L_RP2040_DATA64_MAX + 1U];
+    char crc[9];
+    if (!encode_path(path, path64, sizeof(path64)) ||
+        !base64url_encode(data, len, data64, sizeof(data64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    crc32_hex(crc32_bytes(data, len), crc);
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=append path=%s len=%lu data=%s crc=%s\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64,
+                                     (unsigned long)len, data64, crc);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "append",
+                             NULL, 0, out_result, timeout_ms);
+}
+
+esp_err_t d1l_rp2040_bridge_file_delete(const char *path,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms)
+{
+    if (!path || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char path64[D1L_RP2040_PATH64_MAX + 1U];
+    if (!encode_path(path, path64, sizeof(path64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=delete path=%s\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, path64);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "delete",
+                             NULL, 0, out_result, timeout_ms);
+}
+
+esp_err_t d1l_rp2040_bridge_file_rename(const char *from_path,
+                                        const char *to_path,
+                                        bool replace,
+                                        d1l_rp2040_file_result_t *out_result,
+                                        uint32_t timeout_ms)
+{
+    if (!from_path || !to_path || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char from64[D1L_RP2040_PATH64_MAX + 1U];
+    char to64[D1L_RP2040_PATH64_MAX + 1U];
+    if (!encode_path(from_path, from64, sizeof(from64)) ||
+        !encode_path(to_path, to64, sizeof(to64))) {
+        init_file_result(out_result, ESP_ERR_INVALID_ARG);
+        snprintf(out_result->err, sizeof(out_result->err), "bad_path");
+        snprintf(out_result->note, sizeof(out_result->note), "bad_path");
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint16_t request_id = next_file_request_id();
+    char command[D1L_RP2040_FILE_LINE_MAX + 2U];
+    const int command_len = snprintf(command, sizeof(command),
+                                     "%s v=1 id=%u op=rename path=%s to=%s replace=%u\n",
+                                     D1L_RP2040_FILE_PREFIX, (unsigned)request_id, from64, to64,
+                                     replace ? 1U : 0U);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        init_file_result(out_result, ESP_ERR_INVALID_SIZE);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return send_file_command(command, (size_t)command_len, request_id, "rename",
+                             NULL, 0, out_result, timeout_ms);
 }
