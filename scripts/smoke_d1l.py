@@ -124,6 +124,7 @@ def expected_command_name(command: str) -> str:
         "storage map-tile-canary ",
         "storage export-canary ",
         "storage export-diagnostics ",
+        "storage export-data ",
         "storage retained-canary ",
         "backlight ",
         "mesh send public ",

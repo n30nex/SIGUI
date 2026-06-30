@@ -31,6 +31,8 @@ DIAGNOSTIC_EXPORT_START_ID = 40
 DIAGNOSTIC_EXPORT_DEFAULT_TOKEN = "diag1"
 MAP_TILE_CANARY_START_ID = 80
 MAP_TILE_CANARY_DEFAULT_TOKEN = "map1"
+DATA_EXPORT_START_ID = 120
+DATA_EXPORT_DEFAULT_TOKEN = "data1"
 STATUS_FIELDS = (
     "state",
     "present",
@@ -667,6 +669,121 @@ def diagnostic_export_transcript(
     return transcript
 
 
+def data_export_paths(token: str) -> tuple[str, str]:
+    return (
+        f"exports/data/data-export-{token}.tmp",
+        f"exports/data/data-export-{token}.json",
+    )
+
+
+def data_export_payload(token: str) -> bytes:
+    return (
+        f'{{"schema":1,"kind":"data_export","token":"{token}",'
+        '"sampled":true,"public_rf_tx":false,"formats_sd":false,'
+        '"private_identity_exported":false,'
+        '"storage":{"sd_state":"ready","data_backend":"mixed",'
+        '"export_backend":"sd_diagnostic_exports_ready",'
+        '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd",'
+        '"contacts":"onboard","nodes":"onboard","read_state":"onboard",'
+        '"map_tiles":"sd_map_tiles_ready"},"file_ops":true,"atomic_rename":true},'
+        '"limits":{"payload_max":12288,"sample_max":4},'
+        '"settings":{"role":"client","onboarding_complete":true,'
+        '"region":"Canada/USA","radio":{"frequency_hz":910525000,'
+        '"bandwidth_khz":62.5,"sf":7,"cr":5,"tx_power_dbm":20,'
+        '"rx_boost":true,"tcxo":"auto"},"node_name":"DeskOS Export"},'
+        '"messages":{"count":1,"capacity":16,"total_written":7,"dropped_oldest":0,'
+        '"entries":[{"seq":7,"uptime_ms":1000,"direction":"rx","author":"Meshbot",'
+        '"text":"hello export","rssi_dbm":-70,"snr_tenths":80,'
+        '"path_hash_bytes":2,"path_hops":1,"delivered":true}]},'
+        '"dm":{"count":1,"capacity":16,"total_written":2,"dropped_oldest":0,'
+        '"entries":[{"seq":2,"uptime_ms":1200,"contact_fingerprint":"0011223344556677",'
+        '"contact_alias":"Meshbot","direction":"rx","text":"dm export",'
+        '"rssi_dbm":-71,"snr_tenths":75,"path_hash_bytes":2,"path_hops":1,'
+        '"attempt":0,"delivered":true,"acked":true,"ack_hash":1234}]},'
+        '"routes":{"count":1,"capacity":16,"total_written":3,"dropped_oldest":0,'
+        '"entries":[{"seq":3,"first_seen_ms":900,"last_seen_ms":1300,'
+        '"seen_count":2,"target":"0011223344556677","label":"Meshbot",'
+        '"kind":"advert","route":"local","direction":"rx","last_rssi_dbm":-71,'
+        '"last_snr_tenths":75,"path_hash_bytes":2,"path_hops":1,'
+        '"confidence":2,"payload_len":32}]},'
+        '"packets":{"count":1,"capacity":32,"total_written":5,"dropped_oldest":0,'
+        '"entries":[{"seq":5,"uptime_ms":1300,"direction":"rx","kind":"text",'
+        '"rssi_dbm":-71,"snr_tenths":75,"path_hash_bytes":2,"path_hops":1,'
+        '"payload_len":12,"raw_len":12,"raw_truncated":false,'
+        '"note":"export sample","raw_hex":"68656C6C6F"}]},'
+        '"contacts":{"count":1,"capacity":16,"total_written":1,"dropped_oldest":0,'
+        '"entries":[{"seq":1,"created_ms":800,"updated_ms":1300,'
+        '"out_path_updated_ms":0,"fingerprint":"0011223344556677",'
+        '"public_key_hex":"00112233445566778899AABBCCDDEEFF",'
+        '"alias":"Meshbot","heard_name":"Meshbot","type":"client",'
+        '"last_rssi_dbm":-71,"last_snr_tenths":75,"path_hash_bytes":2,'
+        '"path_hops":1,"out_path_valid":false,"out_path_len":0,'
+        '"favorite":true,"muted":false}]},'
+        '"nodes":{"count":1,"capacity":16,"total_written":1,"dropped_oldest":0,'
+        '"entries":[{"seq":1,"first_heard_ms":800,"last_heard_ms":1300,'
+        '"advert_timestamp":42,"heard_count":2,"fingerprint":"0011223344556677",'
+        '"public_key_hex":"00112233445566778899AABBCCDDEEFF",'
+        '"name":"Meshbot","type":"client","rssi_dbm":-71,"snr_tenths":75,'
+        '"path_hash_bytes":2,"path_hops":1}]},'
+        '"read_state":{"last_public_read_seq":7,"last_dm_read_seq":2,'
+        '"newest_public_rx_seq":7,"newest_dm_rx_seq":2,"public_unread_count":0,'
+        '"dm_unread_count":0,"muted_dm_unread_count":0,"dm_thread_count":1,'
+        '"mark_read_count":2,"threads":[{"last_read_seq":2,"newest_rx_seq":2,'
+        '"unread_count":0,"muted":false,"fingerprint":"0011223344556677"}]}}\n'
+    ).encode("ascii")
+
+
+def data_export_requests(
+    token: str,
+    request_id_start: int = DATA_EXPORT_START_ID,
+) -> list[str]:
+    tmp_path, final_path = data_export_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = data_export_payload(token)
+    request_id = request_id_start
+    requests = [file_request_line(request_id, "delete", path=tmp)]
+    request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        chunk = payload[offset : offset + chunk_len]
+        requests.append(
+            file_request_line(
+                request_id,
+                "write",
+                path=tmp,
+                off=offset,
+                len=chunk_len,
+                trunc=1 if offset == 0 else 0,
+                data=b64url(chunk),
+                crc=crc32_hex(chunk),
+            )
+        )
+        request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        requests.append(file_request_line(request_id, "read", path=tmp, off=offset, len=chunk_len))
+        request_id += 1
+    requests.append(file_request_line(request_id, "rename", path=tmp, to=final, replace=1))
+    request_id += 1
+    requests.append(file_request_line(request_id, "stat", path=final))
+    request_id += 1
+    for offset, chunk_len in chunk_ranges(len(payload)):
+        requests.append(file_request_line(request_id, "read", path=final, off=offset, len=chunk_len))
+        request_id += 1
+    return requests
+
+
+def data_export_transcript(
+    scenario: SdScenario,
+    token: str = DATA_EXPORT_DEFAULT_TOKEN,
+    request_id_start: int = DATA_EXPORT_START_ID,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    transcript = []
+    for request in data_export_requests(token, request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
 def map_tile_canary_paths(token: str) -> tuple[str, str]:
     return (
         f"map/tiles/z12/x1/y2-{token}.tmp",
@@ -729,6 +846,7 @@ def main() -> int:
     parser.add_argument("--file-canary-transcript", action="store_true")
     parser.add_argument("--export-canary-transcript", action="store_true")
     parser.add_argument("--diagnostic-export-transcript", action="store_true")
+    parser.add_argument("--data-export-transcript", action="store_true")
     parser.add_argument("--map-tile-canary-transcript", action="store_true")
     parser.add_argument("--request-id-start", type=int)
     parser.add_argument("--token")
@@ -765,6 +883,16 @@ def main() -> int:
         )
         token = args.token or DIAGNOSTIC_EXPORT_DEFAULT_TOKEN
         for exchange in diagnostic_export_transcript(SCENARIOS[args.scenario], token, request_id_start):
+            print(f"> {exchange['request']}")
+            print(f"< {exchange['reply']}")
+        return 0
+
+    if args.data_export_transcript:
+        request_id_start = (
+            DATA_EXPORT_START_ID if args.request_id_start is None else args.request_id_start
+        )
+        token = args.token or DATA_EXPORT_DEFAULT_TOKEN
+        for exchange in data_export_transcript(SCENARIOS[args.scenario], token, request_id_start):
             print(f"> {exchange['request']}")
             print(f"< {exchange['reply']}")
         return 0

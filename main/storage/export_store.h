@@ -11,6 +11,7 @@
 
 #define D1L_EXPORT_CANARY_TOKEN_MAX 31U
 #define D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX 4096U
+#define D1L_EXPORT_DATA_PAYLOAD_MAX 12288U
 
 typedef struct {
     char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U];
@@ -44,3 +45,8 @@ esp_err_t d1l_export_store_write_diagnostics(const char *token,
                                              size_t payload_len,
                                              const d1l_storage_status_t *status,
                                              d1l_export_canary_result_t *out_result);
+esp_err_t d1l_export_store_write_data(const char *token,
+                                      const uint8_t *payload,
+                                      size_t payload_len,
+                                      const d1l_storage_status_t *status,
+                                      d1l_export_canary_result_t *out_result);

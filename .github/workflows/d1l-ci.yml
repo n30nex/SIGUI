@@ -37,6 +37,9 @@ jobs:
       - name: SD diagnostic export dry run
         run: python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run
 
+      - name: SD data export dry run
+        run: python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run
+
       - name: RP2040 SD bridge preflight dry run
         run: python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge
 

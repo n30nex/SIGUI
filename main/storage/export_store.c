@@ -21,6 +21,23 @@ static bool result_path_set(d1l_export_canary_result_t *result,
            (size_t)tmp_len < sizeof(result->tmp_path);
 }
 
+static bool data_path_set(d1l_export_canary_result_t *result,
+                          const char *token)
+{
+    if (!result || !token || token[0] == '\0') {
+        return false;
+    }
+    const int final_len = snprintf(result->path, sizeof(result->path),
+                                   "exports/data/data-export-%s.json",
+                                   token);
+    const int tmp_len = snprintf(result->tmp_path, sizeof(result->tmp_path),
+                                 "exports/data/data-export-%s.tmp",
+                                 token);
+    return final_len > 0 && tmp_len > 0 &&
+           (size_t)final_len < sizeof(result->path) &&
+           (size_t)tmp_len < sizeof(result->tmp_path);
+}
+
 static bool diagnostics_path_set(d1l_export_canary_result_t *result,
                                  const char *token)
 {
@@ -272,6 +289,43 @@ esp_err_t d1l_export_store_write_diagnostics(const char *token,
     }
     snprintf(result.token, sizeof(result.token), "%s", token);
     if (!diagnostics_path_set(&result, token)) {
+        result_step(&result, "path", ESP_ERR_INVALID_SIZE, NULL);
+        *out_result = result;
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t ret = write_payload_atomic(payload, payload_len, status, &result);
+    *out_result = result;
+    return ret;
+}
+
+esp_err_t d1l_export_store_write_data(const char *token,
+                                      const uint8_t *payload,
+                                      size_t payload_len,
+                                      const d1l_storage_status_t *status,
+                                      d1l_export_canary_result_t *out_result)
+{
+    if (!token || !payload || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_export_canary_result_t result = {
+        .public_rf_tx = false,
+        .formats_sd = false,
+        .last_error = ESP_OK,
+    };
+    if (!d1l_export_store_token_valid(token)) {
+        result_step(&result, "token", ESP_ERR_INVALID_ARG, NULL);
+        *out_result = result;
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (payload_len == 0 || payload_len > D1L_EXPORT_DATA_PAYLOAD_MAX) {
+        result_step(&result, "payload", ESP_ERR_INVALID_SIZE, NULL);
+        *out_result = result;
+        return ESP_ERR_INVALID_SIZE;
+    }
+    snprintf(result.token, sizeof(result.token), "%s", token);
+    if (!data_path_set(&result, token)) {
         result_step(&result, "path", ESP_ERR_INVALID_SIZE, NULL);
         *out_result = result;
         return ESP_ERR_INVALID_SIZE;

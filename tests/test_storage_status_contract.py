@@ -260,20 +260,25 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     store_source = read("main/storage/export_store.c")
     runner = read("scripts/sd_export_canary_d1l.py")
     diagnostic_runner = read("scripts/sd_diagnostic_export_d1l.py")
+    data_runner = read("scripts/sd_data_export_d1l.py")
     protocol = read("tools/rp2040_sd_protocol.py")
     workflow = read(".github/workflows/d1l-ci.yml")
     docs = read("docs/TEST_PLAN_D1L.md")
 
     assert "D1L_EXPORT_CANARY_TOKEN_MAX 31U" in store_header
     assert "D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX 4096U" in store_header
+    assert "D1L_EXPORT_DATA_PAYLOAD_MAX 12288U" in store_header
     assert "d1l_export_store_token_valid" in store_header
     assert "d1l_export_store_sd_ready" in store_header
     assert "d1l_export_store_write_canary" in store_header
     assert "d1l_export_store_write_diagnostics" in store_header
+    assert "d1l_export_store_write_data" in store_header
     assert "exports/diagnostics/export-canary-%s.tmp" in store_source
     assert "exports/diagnostics/export-canary-%s.json" in store_source
     assert "exports/diagnostics/diagnostic-export-%s.tmp" in store_source
     assert "exports/diagnostics/diagnostic-export-%s.json" in store_source
+    assert "exports/data/data-export-%s.tmp" in store_source
+    assert "exports/data/data-export-%s.json" in store_source
     assert "diagnostic_export_canary" in store_source
     assert "write_payload_atomic" in store_source
     assert "verify_payload" in store_source
@@ -288,10 +293,18 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_export_canary" in console
     assert "cmd_storage_export_diagnostics" in console
+    assert "cmd_storage_export_data" in console
     assert "storage export-canary <token>" in console
     assert "storage export-diagnostics <token>" in console
+    assert "storage export-data <token>" in console
     assert "d1l_export_store_write_canary" in console
     assert "d1l_export_store_write_diagnostics" in console
+    assert "d1l_export_store_write_data" in console
+    assert "build_data_export_payload" in console
+    assert "append_export_json_string_field" in console
+    assert '\\"kind\\":\\"data_export\\"' in console
+    assert '\\"private_identity_exported\\":false' in console
+    assert "identity_private_key" not in console
     assert '\\"map_tiles\\"' in console
     assert '\\"exported\\":false' in console
     assert '\\"cache_ready\\":%s' in console
@@ -302,6 +315,13 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "export_backend_ready" in runner
     assert "storage export-diagnostics" in diagnostic_runner
     assert "diagnostic_export_passed" in diagnostic_runner
+    assert "storage export-data" in data_runner
+    assert "data_export_passed" in data_runner
+    assert "private_identity_exported" in data_runner
+    assert "mesh send public" not in data_runner
+    assert "FORMAT-DESKOS-SD" not in data_runner
+    assert "COM11" not in data_runner
+    assert "COM29" not in data_runner
     assert "mesh send public" not in diagnostic_runner
     assert "FORMAT-DESKOS-SD" not in diagnostic_runner
     assert "COM11" not in diagnostic_runner
@@ -312,11 +332,15 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "COM29" not in runner
     assert "export_canary_transcript" in protocol
     assert "diagnostic_export_transcript" in protocol
+    assert "data_export_transcript" in protocol
     assert "EXPORT_CANARY_START_ID" in protocol
     assert "DIAGNOSTIC_EXPORT_START_ID" in protocol
+    assert "DATA_EXPORT_START_ID" in protocol
     assert "python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in workflow
+    assert "python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "sd_export_canary_d1l.py" in docs
+    assert "sd_data_export_d1l.py" in docs
 
 
 def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():

@@ -1082,6 +1082,78 @@ static bool append_export_json(char *dest, size_t dest_size, size_t *used,
     return true;
 }
 
+static bool append_export_json_string(char *dest, size_t dest_size, size_t *used,
+                                      const char *text)
+{
+    if (!dest || !used || *used >= dest_size) {
+        return false;
+    }
+    if (!append_export_json(dest, dest_size, used, "\"")) {
+        return false;
+    }
+    if (text) {
+        for (const unsigned char *p = (const unsigned char *)text; *p; ++p) {
+            switch (*p) {
+            case '"':
+                if (!append_export_json(dest, dest_size, used, "\\\"")) {
+                    return false;
+                }
+                break;
+            case '\\':
+                if (!append_export_json(dest, dest_size, used, "\\\\")) {
+                    return false;
+                }
+                break;
+            case '\b':
+                if (!append_export_json(dest, dest_size, used, "\\b")) {
+                    return false;
+                }
+                break;
+            case '\f':
+                if (!append_export_json(dest, dest_size, used, "\\f")) {
+                    return false;
+                }
+                break;
+            case '\n':
+                if (!append_export_json(dest, dest_size, used, "\\n")) {
+                    return false;
+                }
+                break;
+            case '\r':
+                if (!append_export_json(dest, dest_size, used, "\\r")) {
+                    return false;
+                }
+                break;
+            case '\t':
+                if (!append_export_json(dest, dest_size, used, "\\t")) {
+                    return false;
+                }
+                break;
+            default:
+                if (*p < 0x20U) {
+                    if (!append_export_json(dest, dest_size, used, "\\u%04x",
+                                            (unsigned)*p)) {
+                        return false;
+                    }
+                } else {
+                    if (!append_export_json(dest, dest_size, used, "%c", (int)*p)) {
+                        return false;
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return append_export_json(dest, dest_size, used, "\"");
+}
+
+static bool append_export_json_string_field(char *dest, size_t dest_size, size_t *used,
+                                            const char *key, const char *value)
+{
+    return append_export_json(dest, dest_size, used, "\"%s\":", key) &&
+           append_export_json_string(dest, dest_size, used, value);
+}
+
 static bool build_diagnostic_export_payload(const char *token,
                                             const d1l_storage_status_t *status,
                                             char *dest,
@@ -1188,6 +1260,436 @@ static bool build_diagnostic_export_payload(const char *token,
     return true;
 }
 
+#define D1L_EXPORT_DATA_SAMPLE_MAX 4U
+
+static bool append_data_export_message_entries(char *dest, size_t dest_size, size_t *used,
+                                               const d1l_message_entry_t *entries,
+                                               size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_message_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"uptime_ms\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->uptime_ms) ||
+            !append_export_json_string_field(dest, dest_size, used, "direction", e->direction) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "author", e->author) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "text", e->text) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"delivered\":%s}",
+                                e->rssi_dbm,
+                                e->snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops,
+                                bool_json(e->delivered))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_dm_entries(char *dest, size_t dest_size, size_t *used,
+                                          const d1l_dm_entry_t *entries,
+                                          size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_dm_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"uptime_ms\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->uptime_ms) ||
+            !append_export_json_string_field(dest, dest_size, used, "contact_fingerprint", e->contact_fingerprint) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "contact_alias", e->contact_alias) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "direction", e->direction) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "text", e->text) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"attempt\":%u,\"delivered\":%s,\"acked\":%s,"
+                                "\"ack_hash\":%lu}",
+                                e->rssi_dbm,
+                                e->snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops,
+                                (unsigned)e->attempt,
+                                bool_json(e->delivered),
+                                bool_json(e->acked),
+                                (unsigned long)e->ack_hash)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_route_entries(char *dest, size_t dest_size, size_t *used,
+                                             const d1l_route_entry_t *entries,
+                                             size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_route_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"first_seen_ms\":%lu,"
+                                "\"last_seen_ms\":%lu,\"seen_count\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->first_seen_ms,
+                                (unsigned long)e->last_seen_ms,
+                                (unsigned long)e->seen_count) ||
+            !append_export_json_string_field(dest, dest_size, used, "target", e->target) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "label", e->label) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "kind", e->kind) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "route", e->route) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "direction", e->direction) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"confidence\":%u,\"payload_len\":%u}",
+                                e->last_rssi_dbm,
+                                e->last_snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops,
+                                (unsigned)e->confidence,
+                                (unsigned)e->payload_len)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_packet_entries(char *dest, size_t dest_size, size_t *used,
+                                              const d1l_packet_log_entry_t *entries,
+                                              size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_packet_log_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"uptime_ms\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->uptime_ms) ||
+            !append_export_json_string_field(dest, dest_size, used, "direction", e->direction) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "kind", e->kind) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"payload_len\":%u,\"raw_len\":%u,"
+                                "\"raw_truncated\":%s,",
+                                e->rssi_dbm,
+                                e->snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops,
+                                (unsigned)e->payload_len,
+                                (unsigned)e->raw_len,
+                                bool_json(e->raw_truncated)) ||
+            !append_export_json_string_field(dest, dest_size, used, "note", e->note) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "raw_hex", e->raw_hex) ||
+            !append_export_json(dest, dest_size, used, "}")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_contact_entries(char *dest, size_t dest_size, size_t *used,
+                                               const d1l_contact_entry_t *entries,
+                                               size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_contact_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"created_ms\":%lu,"
+                                "\"updated_ms\":%lu,\"out_path_updated_ms\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->created_ms,
+                                (unsigned long)e->updated_ms,
+                                (unsigned long)e->out_path_updated_ms) ||
+            !append_export_json_string_field(dest, dest_size, used, "fingerprint", e->fingerprint) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "public_key_hex", e->public_key_hex) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "alias", e->alias) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "heard_name", e->heard_name) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "type", e->type) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"out_path_valid\":%s,\"out_path_len\":%u,"
+                                "\"favorite\":%s,\"muted\":%s}",
+                                e->last_rssi_dbm,
+                                e->last_snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops,
+                                bool_json(e->out_path_valid),
+                                (unsigned)e->out_path_len,
+                                bool_json(e->favorite),
+                                bool_json(e->muted))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_node_entries(char *dest, size_t dest_size, size_t *used,
+                                            const d1l_node_entry_t *entries,
+                                            size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_node_entry_t *e = &entries[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"seq\":%lu,\"first_heard_ms\":%lu,"
+                                "\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,"
+                                "\"heard_count\":%lu,",
+                                i ? "," : "",
+                                (unsigned long)e->seq,
+                                (unsigned long)e->first_heard_ms,
+                                (unsigned long)e->last_heard_ms,
+                                (unsigned long)e->advert_timestamp,
+                                (unsigned long)e->heard_count) ||
+            !append_export_json_string_field(dest, dest_size, used, "fingerprint", e->fingerprint) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "public_key_hex", e->public_key_hex) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "name", e->name) ||
+            !append_export_json(dest, dest_size, used, ",") ||
+            !append_export_json_string_field(dest, dest_size, used, "type", e->type) ||
+            !append_export_json(dest, dest_size, used,
+                                ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u}",
+                                e->rssi_dbm,
+                                e->snr_tenths,
+                                (unsigned)e->path_hash_bytes,
+                                (unsigned)e->path_hops)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool append_data_export_read_threads(char *dest, size_t dest_size, size_t *used,
+                                            const d1l_read_state_dm_thread_t *threads,
+                                            size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        const d1l_read_state_dm_thread_t *t = &threads[i];
+        if (!append_export_json(dest, dest_size, used,
+                                "%s{\"last_read_seq\":%lu,\"newest_rx_seq\":%lu,"
+                                "\"unread_count\":%lu,\"muted\":%s,",
+                                i ? "," : "",
+                                (unsigned long)t->last_read_seq,
+                                (unsigned long)t->newest_rx_seq,
+                                (unsigned long)t->unread_count,
+                                bool_json(t->muted)) ||
+            !append_export_json_string_field(dest, dest_size, used, "fingerprint", t->fingerprint) ||
+            !append_export_json(dest, dest_size, used, "}")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool build_data_export_payload(const char *token,
+                                      const d1l_storage_status_t *status,
+                                      char *dest,
+                                      size_t dest_size,
+                                      size_t *out_len)
+{
+    if (!token || !status || !dest || !out_len || dest_size == 0) {
+        return false;
+    }
+
+    static d1l_message_entry_t messages[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_dm_entry_t dms[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_route_entry_t routes[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_packet_log_entry_t packets[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_contact_entry_t contacts[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_node_entry_t nodes[D1L_EXPORT_DATA_SAMPLE_MAX];
+    static d1l_read_state_dm_thread_t read_threads[D1L_EXPORT_DATA_SAMPLE_MAX];
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    const d1l_message_store_stats_t message_stats = d1l_message_store_stats();
+    const d1l_dm_store_stats_t dm_stats = d1l_dm_store_stats();
+    const d1l_route_store_stats_t route_stats = d1l_route_store_stats();
+    const d1l_packet_log_stats_t packet_stats = d1l_packet_log_stats();
+    const d1l_contact_store_stats_t contact_stats = d1l_contact_store_stats();
+    const d1l_node_store_stats_t node_stats = d1l_node_store_stats();
+    const d1l_read_state_stats_t read_stats = d1l_read_state_stats();
+    const size_t message_count = d1l_message_store_copy_recent(messages, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t dm_count = d1l_dm_store_copy_recent(dms, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t route_count = d1l_route_store_copy_recent(routes, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t packet_count = d1l_packet_log_copy_recent(packets, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t contact_count = d1l_contact_store_copy_recent(contacts, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t node_count = d1l_node_store_copy_recent(nodes, D1L_EXPORT_DATA_SAMPLE_MAX);
+    const size_t read_thread_count = d1l_read_state_copy_dm_threads(read_threads,
+                                                                    D1L_EXPORT_DATA_SAMPLE_MAX);
+    size_t used = 0;
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "{\"schema\":1,\"kind\":\"data_export\",\"token\":\"%s\","
+                            "\"sampled\":true,\"public_rf_tx\":false,\"formats_sd\":false,"
+                            "\"private_identity_exported\":false,"
+                            "\"storage\":{\"sd_state\":\"%s\",\"data_backend\":\"%s\","
+                            "\"export_backend\":\"%s\",\"stores\":{\"messages\":\"%s\","
+                            "\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\","
+                            "\"contacts\":\"onboard\",\"nodes\":\"onboard\","
+                            "\"read_state\":\"onboard\",\"map_tiles\":\"%s\"},"
+                            "\"file_ops\":%s,\"atomic_rename\":%s},"
+                            "\"limits\":{\"payload_max\":%u,\"sample_max\":%u},",
+                            token,
+                            status->sd_state ? status->sd_state : "unknown",
+                            status->data_backend ? status->data_backend : "nvs",
+                            status->export_backend ? status->export_backend : "serial",
+                            status->message_store_backend ? status->message_store_backend : "nvs",
+                            status->dm_store_backend ? status->dm_store_backend : "nvs",
+                            status->route_store_backend ? status->route_store_backend : "nvs",
+                            status->packet_log_backend ? status->packet_log_backend : "nvs",
+                            status->map_tile_backend ? status->map_tile_backend : "unavailable",
+                            bool_json(status->file_ops_supported),
+                            bool_json(status->atomic_rename_supported),
+                            (unsigned)D1L_EXPORT_DATA_PAYLOAD_MAX,
+                            (unsigned)D1L_EXPORT_DATA_SAMPLE_MAX)) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"settings\":{\"role\":\"%s\",\"onboarding_complete\":%s,"
+                            "\"region\":\"Canada/USA\",\"radio\":{\"frequency_hz\":%lu,"
+                            "\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,"
+                            "\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\"},",
+                            d1l_settings_role_name(settings->role),
+                            bool_json(settings->onboarding_complete),
+                            (unsigned long)settings->frequency_hz,
+                            ((float)settings->bandwidth_tenths_khz) / 10.0f,
+                            settings->spreading_factor,
+                            settings->coding_rate,
+                            settings->tx_power_dbm,
+                            bool_json(settings->rx_boost),
+                            d1l_settings_tcxo_name(settings->tcxo_mode)) ||
+        !append_export_json_string_field(dest, dest_size, &used, "node_name", settings->node_name) ||
+        !append_export_json(dest, dest_size, &used, "},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"messages\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)message_stats.count,
+                            (unsigned)message_stats.capacity,
+                            (unsigned long)message_stats.total_written,
+                            (unsigned long)message_stats.dropped_oldest) ||
+        !append_data_export_message_entries(dest, dest_size, &used, messages, message_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"dm\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)dm_stats.count,
+                            (unsigned)dm_stats.capacity,
+                            (unsigned long)dm_stats.total_written,
+                            (unsigned long)dm_stats.dropped_oldest) ||
+        !append_data_export_dm_entries(dest, dest_size, &used, dms, dm_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"routes\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)route_stats.count,
+                            (unsigned)route_stats.capacity,
+                            (unsigned long)route_stats.total_written,
+                            (unsigned long)route_stats.dropped_oldest) ||
+        !append_data_export_route_entries(dest, dest_size, &used, routes, route_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"packets\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)packet_stats.count,
+                            (unsigned)packet_stats.capacity,
+                            (unsigned long)packet_stats.total_written,
+                            (unsigned long)packet_stats.dropped_oldest) ||
+        !append_data_export_packet_entries(dest, dest_size, &used, packets, packet_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"contacts\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)contact_stats.count,
+                            (unsigned)contact_stats.capacity,
+                            (unsigned long)contact_stats.total_written,
+                            (unsigned long)contact_stats.dropped_oldest) ||
+        !append_data_export_contact_entries(dest, dest_size, &used, contacts, contact_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"nodes\":{\"count\":%u,\"capacity\":%u,"
+                            "\"total_written\":%lu,\"dropped_oldest\":%lu,"
+                            "\"entries\":[",
+                            (unsigned)node_stats.count,
+                            (unsigned)node_stats.capacity,
+                            (unsigned long)node_stats.total_written,
+                            (unsigned long)node_stats.dropped_oldest) ||
+        !append_data_export_node_entries(dest, dest_size, &used, nodes, node_count) ||
+        !append_export_json(dest, dest_size, &used, "]},")) {
+        return false;
+    }
+
+    if (!append_export_json(dest, dest_size, &used,
+                            "\"read_state\":{\"last_public_read_seq\":%lu,"
+                            "\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,"
+                            "\"newest_dm_rx_seq\":%lu,\"public_unread_count\":%lu,"
+                            "\"dm_unread_count\":%lu,\"muted_dm_unread_count\":%lu,"
+                            "\"dm_thread_count\":%lu,\"mark_read_count\":%lu,"
+                            "\"threads\":[",
+                            (unsigned long)read_stats.last_public_read_seq,
+                            (unsigned long)read_stats.last_dm_read_seq,
+                            (unsigned long)read_stats.newest_public_rx_seq,
+                            (unsigned long)read_stats.newest_dm_rx_seq,
+                            (unsigned long)read_stats.public_unread_count,
+                            (unsigned long)read_stats.dm_unread_count,
+                            (unsigned long)read_stats.muted_dm_unread_count,
+                            (unsigned long)read_stats.dm_thread_count,
+                            (unsigned long)read_stats.mark_read_count) ||
+        !append_data_export_read_threads(dest, dest_size, &used, read_threads, read_thread_count) ||
+        !append_export_json(dest, dest_size, &used, "]}}\n")) {
+        return false;
+    }
+
+    *out_len = used;
+    return true;
+}
+
 static void cmd_storage_export_diagnostics(const char *line)
 {
     static const char prefix[] = "storage export-diagnostics ";
@@ -1248,6 +1750,68 @@ static void cmd_storage_export_diagnostics(const char *line)
            bool_json(export_result.read_final));
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"note\":\"Diagnostic export JSON committed to SD by chunked temp write and atomic rename; no Public RF or format command was used\"}\n");
+}
+
+static void cmd_storage_export_data(const char *line)
+{
+    static const char prefix[] = "storage export-data ";
+    char token[D1L_EXPORT_CANARY_TOKEN_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("storage export-data", "INVALID_TOKEN",
+                   "usage: storage export-data <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    static char payload[D1L_EXPORT_DATA_PAYLOAD_MAX];
+    size_t payload_len = 0;
+    if (!build_data_export_payload(token, &status, payload, sizeof(payload),
+                                   &payload_len)) {
+        d1l_export_canary_result_t failed = {0};
+        print_storage_export_error(
+            "storage export-data", "payload", ESP_ERR_INVALID_SIZE,
+            &status, &failed,
+            "data export payload exceeded its bounded buffer; no SD write was attempted");
+        return;
+    }
+
+    d1l_export_canary_result_t export_result = {0};
+    esp_err_t ret = d1l_export_store_write_data(
+        token, (const uint8_t *)payload, payload_len, &status, &export_result);
+    if (ret != ESP_OK) {
+        print_storage_export_error(
+            "storage export-data", export_result.step, ret, &status,
+            &export_result,
+            "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
+        return;
+    }
+
+    d1l_storage_status(&status);
+    ok_begin("storage export-data");
+    printf(",\"token\":");
+    print_json_string(export_result.token);
+    printf(",\"kind\":\"data_export\",\"path\":");
+    print_json_string(export_result.path);
+    printf(",\"tmp_path\":");
+    print_json_string(export_result.tmp_path);
+    printf(",\"bytes\":%u,\"chunks_written\":%lu,\"chunks_verified_tmp\":%lu,\"chunks_verified_final\":%lu,\"tmp_verified_bytes\":%u,\"final_verified_bytes\":%u,\"write_tmp\":%s,\"read_tmp\":%s,\"rename_replace\":%s,\"stat_final\":%s,\"read_final\":%s,\"sampled\":true,\"private_identity_exported\":false,\"public_rf_tx\":false,\"formats_sd\":false,\"export_backend\":",
+           (unsigned)export_result.bytes,
+           (unsigned long)export_result.chunks_written,
+           (unsigned long)export_result.chunks_verified_tmp,
+           (unsigned long)export_result.chunks_verified_final,
+           (unsigned)export_result.tmp_verified_bytes,
+           (unsigned)export_result.final_verified_bytes,
+           bool_json(export_result.write_tmp),
+           bool_json(export_result.read_tmp),
+           bool_json(export_result.rename_replace),
+           bool_json(export_result.stat_final),
+           bool_json(export_result.read_final));
+    print_json_string(status.export_backend ? status.export_backend : "serial");
+    printf(",\"note\":\"Sampled user data export JSON committed to SD by chunked temp write and atomic rename; no private identity material, Public RF, or format command was used\"}\n");
 }
 
 static uint32_t retained_canary_hash(const char *token)
@@ -2492,7 +3056,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -2566,6 +3130,8 @@ static void handle_line(const char *line)
         cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {
         cmd_storage_export_diagnostics(line);
+    } else if (strncmp(line, "storage export-data ", strlen("storage export-data ")) == 0) {
+        cmd_storage_export_data(line);
     } else if (strncmp(line, "storage retained-canary ", strlen("storage retained-canary ")) == 0) {
         cmd_storage_retained_canary(line);
     } else if (strcmp(line, "packets") == 0) {

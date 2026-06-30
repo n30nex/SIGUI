@@ -226,6 +226,27 @@ The host simulator prints the deterministic request/reply shape:
 python .\tools\rp2040_sd_protocol.py --scenario ready --diagnostic-export-transcript --token diag1
 ```
 
+## Storage Data-Export Transcript
+
+The serial `storage export-data <token>` command uses the same file protocol to
+commit a bounded sampled user-data JSON bundle under:
+
+- Temp path: `exports/data/data-export-<token>.tmp`
+- Final path: `exports/data/data-export-<token>.json`
+
+The bundle includes storage backend labels, a settings summary, recent Public
+messages, DMs, routes, packets, contacts, nodes, and read-state counters. It
+sets `private_identity_exported=false` and does not serialize the private
+identity key. It is chunked into 192-byte-or-smaller writes, read back from the
+temp path, committed with `rename replace=1`, statted, and read back from the
+final path. The final JSON is intentionally left present for inspection.
+
+The host simulator prints the deterministic request/reply shape:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --data-export-transcript --token data1
+```
+
 ## Map Tile Cache Canary Transcript
 
 The serial `storage map-tile-canary <token>` command uses the same file protocol
@@ -254,4 +275,4 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcri
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`; general non-diagnostic exports and the full map page/tile download policy remain pending until their migrations land.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`; the full map page/tile download policy remains pending until its migration lands.

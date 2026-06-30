@@ -46,6 +46,7 @@ def test_storage_setup_confirm_maps_to_storage_setup_response():
     assert expected_command_name("storage setup confirm FORMAT-DESKOS-SD") == "storage setup"
     assert expected_command_name("storage export-canary exportTest1") == "storage export-canary"
     assert expected_command_name("storage export-diagnostics diagTest1") == "storage export-diagnostics"
+    assert expected_command_name("storage export-data dataTest1") == "storage export-data"
 
     ser = FakeSerial(
         [
