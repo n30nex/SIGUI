@@ -192,6 +192,43 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     return ret;
 }
 
+esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t timeout_ms)
+{
+    if (!s_status.initialized) {
+        (void)d1l_storage_status_init();
+    }
+
+    if (!confirmation || strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION) != 0) {
+        s_status.last_error = ESP_ERR_INVALID_ARG;
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.rp2040_bridge_required || !s_status.rp2040_sd_protocol_supported) {
+        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!s_status.sd_present) {
+        s_status.last_error = ESP_ERR_NOT_FOUND;
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (!s_status.format_supported) {
+        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (!s_status.setup_required) {
+        s_status.last_error = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_rp2040_sd_status_t sd = {0};
+    esp_err_t ret = d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms);
+    apply_rp2040_sd_status(&sd);
+    set_nvs_fallback_backends(&s_status);
+    if (ret == ESP_OK && sd.protocol_supported && sd.data_ready) {
+        s_status.map_tile_backend = "sd_pending_store_migration";
+    }
+    return ret;
+}
+
 void d1l_storage_status(d1l_storage_status_t *out_status)
 {
     if (!out_status) {

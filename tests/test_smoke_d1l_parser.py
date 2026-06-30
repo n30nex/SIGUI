@@ -1,7 +1,7 @@
 import json
 
 from scripts import smoke_d1l
-from scripts.smoke_d1l import SMOKE_COMMANDS, dry_run_report, parse_jsonl
+from scripts.smoke_d1l import SMOKE_COMMANDS, dry_run_report, expected_command_name, parse_jsonl, send_console_command
 
 
 class FakeSerial:
@@ -37,6 +37,25 @@ def test_dry_run_lists_phase1_commands():
     assert "radiohw" in report["commands"]
     assert "touch test" in report["commands"]
     assert report["commands"] == SMOKE_COMMANDS
+    assert "storage status" in report["commands"]
+    assert "storage setup" in report["commands"]
+    assert not any(command.startswith("mesh send public") for command in report["commands"])
+
+
+def test_storage_setup_confirm_maps_to_storage_setup_response():
+    assert expected_command_name("storage setup confirm FORMAT-DESKOS-SD") == "storage setup"
+
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":false,"cmd":"storage setup","code":"ESP_ERR_NOT_SUPPORTED","hint":"no format was performed"}\n',
+        ]
+    )
+    result = send_console_command(ser, "storage setup confirm FORMAT-DESKOS-SD", timeout=1)
+
+    assert result["cmd"] == "storage setup"
+    assert result["code"] == "ESP_ERR_NOT_SUPPORTED"
+    assert "no format was performed" in result["hint"]
+    assert ser.writes == ["storage setup confirm FORMAT-DESKOS-SD\n"]
 
 
 def test_persistence_check_reboots_and_restores_defaults(monkeypatch):

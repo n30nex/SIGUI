@@ -18,6 +18,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
 
     assert "D1L_STORAGE_SD_MOUNT_POINT \"/sdcard\"" in header
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
+    assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
     assert "d1l_storage_status_refresh" in header
@@ -35,6 +36,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"protocol_pending"' in source
     assert '"bridge_protocol_pending"' in source
     assert "d1l_rp2040_bridge_probe_sd(&sd, timeout_ms)" in source
+    assert "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)" in source
+    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in source
     assert '"format_confirmation_required"' in source
     assert '"store_migration_pending"' in source
     assert 'status->message_store_backend = "nvs"' in source
@@ -43,6 +46,24 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert 'status->map_tile_backend = "unavailable"' in source
     assert "bsp_sdcard_init" not in source
     assert "format_if_mount_failed" not in source
+
+
+def test_storage_format_request_is_guarded_before_bridge_command():
+    source = read("main/storage/storage_status.c")
+    guard_order = [
+        "strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION)",
+        "!s_status.rp2040_bridge_required || !s_status.rp2040_sd_protocol_supported",
+        "!s_status.sd_present",
+        "!s_status.format_supported",
+        "!s_status.setup_required",
+        "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)",
+    ]
+
+    positions = [source.index(token) for token in guard_order]
+    assert positions == sorted(positions)
+    assert source.count("set_nvs_fallback_backends(&s_status)") >= 3
+    assert "s_status.data_enabled = false" in source
+    assert 's_status.map_tile_backend = "sd_pending_store_migration"' in source
 
 
 def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
@@ -96,10 +117,18 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage_setup_sheet" in simulator
     assert "No automatic format" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
+    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
+    assert "d1l_rp2040_bridge_format_sd" in rp2040_header
     assert "DESKOS_SD_STATUS" in rp2040_source
+    assert "DESKOS_SD_FORMAT" in rp2040_source
+    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_source
     assert "uart_write_bytes" in rp2040_source
     assert "uart_read_bytes" in rp2040_source
+    assert "storage_format_hint" in console
+    assert "format_requested" in console
+    assert "format_performed" in console
+    assert "d1l_storage_format_sd_confirmed(phrase, 3000U)" in console
 
 
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
@@ -112,3 +141,13 @@ def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
     assert "return ESP_ERR_NOT_SUPPORTED" in bsp_sd
     assert ".format_if_mount_failed = false" in bsp_sd
     assert "MicroSD support is handled by the RP2040 side" in roadmap
+
+
+def test_sd_checkpoint_validation_does_not_require_public_rf_or_reserved_ports():
+    checkpoint = read("docs/PHASE6_SD_BRIDGE_SETUP_CHECKPOINT.md")
+    validation = checkpoint.split("## Validation Rules", 1)[1].split("## Remaining SD Work", 1)[0]
+
+    assert "mesh send public" not in validation
+    assert "COM11" not in validation
+    assert "COM29" not in validation
+    assert "COM12" in validation

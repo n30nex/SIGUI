@@ -13,6 +13,8 @@
 #define D1L_RP2040_UART_BUF_SIZE 512
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
+#define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
+#define D1L_RP2040_SD_FORMAT_REPLY_PREFIX "DESKOS_SD_FORMAT"
 #define D1L_RP2040_SD_LINE_MAX 192U
 
 static d1l_rp2040_status_t s_status = {
@@ -82,10 +84,11 @@ static void parse_word_token(const char *line, const char *key, char *dest, size
     dest[out] = '\0';
 }
 
-static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *status)
+static esp_err_t parse_sd_line_with_prefix(const char *line,
+                                           const char *prefix,
+                                           d1l_rp2040_sd_status_t *status)
 {
-    if (!line || !status || strncmp(line, D1L_RP2040_SD_REPLY_PREFIX,
-                                    strlen(D1L_RP2040_SD_REPLY_PREFIX)) != 0) {
+    if (!line || !prefix || !status || strncmp(line, prefix, strlen(prefix)) != 0) {
         return ESP_FAIL;
     }
 
@@ -121,6 +124,16 @@ static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *
                  "SD card is not ready for DeskOS data");
     }
     return ESP_OK;
+}
+
+static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *status)
+{
+    return parse_sd_line_with_prefix(line, D1L_RP2040_SD_REPLY_PREFIX, status);
+}
+
+static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *status)
+{
+    return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
 }
 
 esp_err_t d1l_rp2040_bridge_init(void)
@@ -227,5 +240,89 @@ esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_
     }
 
     out_status->last_error = ESP_ERR_TIMEOUT;
+    return ESP_ERR_TIMEOUT;
+}
+
+esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
+                                       const char *confirmation,
+                                       uint32_t timeout_ms)
+{
+    if (out_status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!confirmation || strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION) != 0) {
+        init_sd_status(out_status, ESP_ERR_INVALID_ARG);
+        snprintf(out_status->state, sizeof(out_status->state), "confirmation_required");
+        snprintf(out_status->note, sizeof(out_status->note), "SD format confirmation phrase did not match");
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_sd_status(out_status, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    init_sd_status(out_status, ESP_ERR_TIMEOUT);
+    uart_flush_input((uart_port_t)s_status.uart_port);
+    char command[64];
+    const int command_len = snprintf(command, sizeof(command), "%s%s\n",
+                                     D1L_RP2040_SD_FORMAT_QUERY_PREFIX,
+                                     confirmation);
+    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
+        out_status->last_error = ESP_ERR_INVALID_SIZE;
+        snprintf(out_status->state, sizeof(out_status->state), "query_failed");
+        snprintf(out_status->note, sizeof(out_status->note), "SD format command was too large");
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const int written = uart_write_bytes((uart_port_t)s_status.uart_port,
+                                         command,
+                                         (size_t)command_len);
+    if (written != command_len) {
+        out_status->last_error = ESP_FAIL;
+        snprintf(out_status->state, sizeof(out_status->state), "query_failed");
+        snprintf(out_status->note, sizeof(out_status->note), "Could not write SD format command to RP2040 UART");
+        return ESP_FAIL;
+    }
+
+    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
+    char line[D1L_RP2040_SD_LINE_MAX];
+    size_t used = 0;
+    while (esp_timer_get_time() < deadline_us) {
+        uint8_t ch = 0;
+        int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
+        if (len <= 0) {
+            continue;
+        }
+        if (ch == '\n') {
+            line[used] = '\0';
+            esp_err_t ret = ESP_FAIL;
+            if (strncmp(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX,
+                        strlen(D1L_RP2040_SD_FORMAT_REPLY_PREFIX)) == 0) {
+                ret = parse_sd_format_line(line, out_status);
+            } else if (strncmp(line, D1L_RP2040_SD_REPLY_PREFIX,
+                               strlen(D1L_RP2040_SD_REPLY_PREFIX)) == 0) {
+                ret = parse_sd_status_line(line, out_status);
+            }
+            if (ret != ESP_FAIL) {
+                out_status->last_error = ret;
+                return ret;
+            }
+            used = 0;
+            continue;
+        }
+        if (ch == '\r') {
+            continue;
+        }
+        if (used + 1U < sizeof(line)) {
+            line[used++] = (char)ch;
+        } else {
+            out_status->response_truncated = true;
+            used = 0;
+        }
+    }
+
+    out_status->last_error = ESP_ERR_TIMEOUT;
+    snprintf(out_status->note, sizeof(out_status->note),
+             "RP2040 SD format command timed out; no format confirmation received");
     return ESP_ERR_TIMEOUT;
 }

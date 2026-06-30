@@ -36,7 +36,7 @@ Coverage:
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
-- Optional SD-card data storage contract: `storage status` must report the current fallback backend, direct ESP32 SD support, RP2040 bridge/protocol/card/root state, per-store backend labels, and the current setup/format action. `storage setup` must be non-destructive and report the next action while `storage setup confirm FORMAT-DESKOS-SD` must not format until the RP2040 bridge implements the matching command. Full SD storage remains pending: boot should detect whether a card is absent, mounted/formatted, or present-but-unusable; unusable cards must never block normal NVS-backed operation and formatting must require explicit user confirmation.
+- Optional SD-card data storage contract: `storage status` must report the current fallback backend, direct ESP32 SD support, RP2040 bridge/protocol/card/root state, per-store backend labels, and the current setup/format action. `storage setup` must be non-destructive and report the next action. `storage setup confirm FORMAT-DESKOS-SD` may send `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` only after the latest RP2040 status reports a present card, `format_supported=true`, and setup is required; otherwise it must refuse with a machine-readable error and no format performed. Full SD storage remains pending: boot should detect whether a card is absent, mounted/formatted, or present-but-unusable; unusable cards must never block normal NVS-backed operation and formatting must require explicit user confirmation.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract including retained-history search, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
@@ -310,14 +310,15 @@ Important pending production feature:
 
 1. On the current D1L build, run `storage status` and verify `sd.interface="rp2040"`, `sd.direct_supported=false`, `sd.rp2040_protocol_supported` reflects whether the RP2040 bridge answered `DESKOS_SD_STATUS`, `data_backend="nvs"`, `setup_action` is machine-readable, and store backends keep settings, identity, messages, packets, routes, contacts, read-state, and crashlog on onboard storage.
 2. Run `storage setup` and verify it reports `will_format=false`, `fallback="nvs"`, `confirmation_phrase="FORMAT-DESKOS-SD"`, and the same setup/format action without modifying onboard data.
-3. Run `storage setup confirm FORMAT-DESKOS-SD` on the current bridge and verify it returns `ESP_ERR_NOT_SUPPORTED` and explicitly says no format was performed.
+3. Run `storage setup confirm FORMAT-DESKOS-SD` on the current bridge and verify it returns `ESP_ERR_NOT_SUPPORTED` while the bridge does not advertise format support; no format is performed.
 4. Verify the Settings screen, Storage Setup sheet, and UI simulator expose the same storage fallback/setup state without hiding the Radio and Advert actions.
 5. Boot with no card and verify firmware continues with onboard storage defaults.
 6. After the RP2040 SD protocol exists, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness while retained stores still remain NVS until the store migration lands.
 7. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
-8. Confirm format requires explicit user confirmation and does not run from incidental boot/touch events.
-9. When configured, verify Public/DM message history, packet/route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
-10. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
+8. Confirm format requires explicit user confirmation, bridge-reported `format_supported=true`, and setup-required state, and does not run from incidental boot/touch events.
+9. Use `tools/rp2040_sd_protocol.py` to verify the reference status and format line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing RP2040 firmware.
+10. When configured, verify Public/DM message history, packet/route history, diagnostic exports, and map-tile cache paths write to SD-backed stores and survive reboot/card remount.
+11. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
 
 ## Mesh Visibility
 

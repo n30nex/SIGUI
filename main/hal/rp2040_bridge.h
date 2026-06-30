@@ -5,6 +5,8 @@
 
 #include "esp_err.h"
 
+#define D1L_RP2040_SD_FORMAT_CONFIRMATION "FORMAT-DESKOS-SD"
+
 typedef struct {
     bool uart_ready;
     esp_err_t init_result;
@@ -37,3 +39,6 @@ typedef struct {
 esp_err_t d1l_rp2040_bridge_init(void);
 esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status);
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
+                                       const char *confirmation,
+                                       uint32_t timeout_ms);

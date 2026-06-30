@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -219,9 +219,57 @@ def large_mesh_snapshot() -> Snapshot:
     )
 
 
+def storage_no_card_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="no card",
+        storage_backend="NVS fallback",
+        storage_detail="No SD card reported",
+        storage_setup_action="insert_card",
+        storage_format_action="not_available",
+    )
+
+
+def storage_format_required_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="setup required",
+        storage_backend="NVS fallback",
+        storage_detail="Card needs confirmed setup",
+        storage_setup_action="format_confirmation_required",
+        storage_format_action="confirm_required",
+    )
+
+
+def storage_root_missing_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="root missing",
+        storage_backend="NVS fallback",
+        storage_detail="DeskOS root missing",
+        storage_setup_action="manual_format_required",
+        storage_format_action="not_available",
+    )
+
+
+def storage_ready_pending_migration_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="ready",
+        storage_backend="NVS fallback",
+        storage_detail="SD valid, stores pending",
+        storage_setup_action="store_migration_pending",
+        storage_format_action="not_needed",
+    )
+
+
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
+    "storage-no-card": storage_no_card_snapshot,
+    "storage-format-required": storage_format_required_snapshot,
+    "storage-root-missing": storage_root_missing_snapshot,
+    "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
 }
 
 
@@ -863,8 +911,6 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Optional SD data storage",
         "SD Card",
         "Backends",
-        "setup bridge_protocol_pending",
-        "format not_available",
         "No automatic format. Confirmation required before SD setup.",
         "Close",
     ),

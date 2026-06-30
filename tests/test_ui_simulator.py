@@ -100,6 +100,33 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
 
+def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
+    scenarios = {
+        "storage-no-card": ("insert_card", "not_available"),
+        "storage-format-required": ("format_confirmation_required", "confirm_required"),
+        "storage-root-missing": ("manual_format_required", "not_available"),
+        "storage-ready-pending-migration": ("store_migration_pending", "not_needed"),
+    }
+
+    for scenario, (setup_action, format_action) in scenarios.items():
+        report = ui_simulator.generate(tmp_path / scenario, views=("settings", "storage_setup_sheet"), scenario=scenario)
+        labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
+        storage_view = next(view for view in report["views"] if view["name"] == "storage_setup_sheet")
+
+        assert report["ok"] is True, scenario
+        assert report["overflow_count"] == 0, scenario
+        assert report["required_labels_missing"] == [], scenario
+        assert {"Settings", "Radio", "Advert", "Storage"} <= labels_by_view["settings"]
+        assert {
+            "Storage Setup",
+            "Backends",
+            f"setup {setup_action}",
+            f"format {format_action}",
+            "No automatic format. Confirmation required before SD setup.",
+        } <= labels_by_view["storage_setup_sheet"]
+        assert storage_view["overflow"] == []
+
+
 def test_ui_simulator_is_documented_and_run_in_ci():
     workflow = read(".github/workflows/d1l-ci.yml")
     test_plan = read("docs/TEST_PLAN_D1L.md")

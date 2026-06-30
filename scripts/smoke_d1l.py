@@ -98,6 +98,8 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
 def expected_command_name(command: str) -> str:
     if command.startswith("messages public search "):
         return "messages public"
+    if command.startswith("storage setup confirm "):
+        return "storage setup"
     if command == "messages dm clear":
         return command
     for prefix in [
