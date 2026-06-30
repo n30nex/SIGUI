@@ -308,13 +308,15 @@ For Phase 6 packet-log validation:
 
 Important pending production feature:
 
-1. On the current D1L build, run `storage status` and verify `sd.interface="rp2040"`, `sd.direct_supported=false`, `sd.rp2040_protocol_supported` reflects whether the RP2040 bridge answered `DESKOS_SD_STATUS`, `data_backend` is either `nvs` or `mixed`, `setup_action` is machine-readable, and store backends keep settings, identity, messages, routes, contacts, read-state, and crashlog on onboard storage.
+Use `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the RP2040 UF2 flash and post-flash proof sequence.
+
+1. On the current D1L build, run `storage status` and verify `sd.interface="rp2040"`, `sd.direct_supported=false`, `sd.rp2040_protocol_supported` reflects whether the RP2040 bridge answered `DESKOS_SD_STATUS`, `sd.file_ops`, `sd.file_line_max`, `sd.file_chunk_max`, `sd.path_max`, and `sd.atomic_rename` expose the exact file-operation gate, `data_backend` is either `nvs` or `mixed`, `setup_action` is machine-readable, and store backends keep settings, identity, messages, routes, contacts, read-state, and crashlog on onboard storage.
 2. Run `storage setup` and verify it reports `will_format=false`, `fallback="nvs"`, `confirmation_phrase="FORMAT-DESKOS-SD"`, and the same setup/format action without modifying onboard data.
 3. Run `storage setup confirm FORMAT-DESKOS-SD` before the RP2040 bridge advertises a present setup-required card and verify it returns a machine-readable refusal; no format is performed.
 4. Verify the Settings screen, Storage Setup sheet, and UI simulator expose the same storage fallback/setup state without hiding the Radio and Advert actions.
 5. Boot with no card and verify firmware continues with onboard storage defaults.
 6. After the RP2040 SD bridge firmware is flashed through a documented RP2040 path, boot with a valid DeskOS-formatted card and verify serial/UI status reports card/root readiness. If the bridge also reports file operations and atomic rename with matching limits, verify `packet_log_backend="sd"`, `data_backend="mixed"`, and `setup_action="packet_log_canary_enabled"` while messages/routes/settings/identity remain onboard-backed.
-7. With the RP2040 bridge file protocol flashed, run a serial-only file-operation canary under `/deskos` using temp write, read, `rename replace=1`, stat, and delete. Do not send Public RF for this validation.
+7. With the RP2040 bridge file protocol flashed, run `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` to perform the serial-only file-operation canary under `/deskos`: temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification. Do not send Public RF for this validation.
 8. Boot with a present but unformatted/unsupported card and verify firmware offers a format/setup action without formatting automatically.
 9. Confirm format requires explicit user confirmation, bridge-reported `format_supported=true`, and setup-required state, and does not run from incidental boot/touch events.
 10. Use `tools/rp2040_sd_protocol.py` to verify the reference status, format, and file-operation line grammar for `no-card`, `ready`, and `format-required` scenarios before implementing retained-store migration.

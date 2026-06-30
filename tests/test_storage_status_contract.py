@@ -42,6 +42,16 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in source
     assert '"format_confirmation_required"' in source
     assert '"store_migration_pending"' in source
+    assert "file_ops_supported" in header
+    assert "atomic_rename_supported" in header
+    assert "file_line_max" in header
+    assert "file_chunk_max" in header
+    assert "path_max" in header
+    assert "s_status.file_ops_supported = sd->file_ops_supported" in source
+    assert "s_status.atomic_rename_supported = sd->atomic_rename_supported" in source
+    assert "s_status.file_line_max = sd->file_line_max" in source
+    assert "s_status.file_chunk_max = sd->file_chunk_max" in source
+    assert "s_status.path_max = sd->path_max" in source
     assert 'status->message_store_backend = "nvs"' in source
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
@@ -102,11 +112,14 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'ok_begin("storage status")' in console
     assert "d1l_storage_status_refresh(120U)" in console
     assert 'ok_begin("storage setup")' in console
+    assert 'ok_begin("storage filecanary")' in console
     assert '"storage status"' in console
     assert '"storage setup"' in console
     assert "storage setup confirm FORMAT-DESKOS-SD" in console
+    assert "storage filecanary" in console
     assert 'strcmp(line, "storage status")' in console
     assert 'strcmp(line, "storage setup")' in console
+    assert 'strcmp(line, "storage filecanary")' in console
     assert "will_format" in console
     assert "false" in console
     assert "ESP_ERR_NOT_SUPPORTED" in console
@@ -152,6 +165,43 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "format_requested" in console
     assert "format_performed" in console
     assert "d1l_storage_format_sd_confirmed(phrase, 3000U)" in console
+    assert '\\"file_ops\\":%s' in console
+    assert '\\"file_line_max\\":%lu' in console
+    assert '\\"file_chunk_max\\":%lu' in console
+    assert '\\"path_max\\":%lu' in console
+    assert '\\"atomic_rename\\":%s' in console
+
+
+def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
+    console = read("main/comms/usb_console.c")
+    runner = read("scripts/sd_file_canary_d1l.py")
+    docs = read("docs/TEST_PLAN_D1L.md")
+    runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
+
+    assert "cmd_storage_filecanary" in console
+    assert "d1l_storage_status_refresh(1000U)" in console
+    assert "d1l_rp2040_bridge_file_write(tmp_path, 0U, payload" in console
+    assert "d1l_rp2040_bridge_file_read(tmp_path" in console
+    assert "d1l_rp2040_bridge_file_rename(tmp_path, final_path, true" in console
+    assert "d1l_rp2040_bridge_file_stat(final_path" in console
+    assert "d1l_rp2040_bridge_file_delete(final_path" in console
+    assert '"canary/filecanary.tmp"' in console
+    assert '"canary/filecanary.bin"' in console
+    assert "D1L_RP2040_FILE_LINE_MAX" in console
+    assert "D1L_RP2040_FILE_CHUNK_MAX" in console
+    assert "D1L_RP2040_FILE_PATH_MAX" in console
+    assert "no Public RF or format command was used" in console
+    assert "cmd_storage_setup" in console
+    assert "storage filecanary" in runner
+    assert "mesh send public" not in runner
+    assert "FORMAT-DESKOS-SD" not in runner
+    assert "storage filecanary" in docs
+    assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
+    assert "COM12" in runbook
+    assert "Do not use COM11 or COM29" in runbook
+    assert "Do not send Public RF" in runbook
+    assert "flash_d1l.ps1" in runbook
+    assert "deskos_sd_bridge.ino.uf2" in runbook
 
 
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():

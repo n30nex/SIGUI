@@ -29,6 +29,11 @@ static void set_default_actions(d1l_storage_status_t *status)
     status->setup_action = "not_available";
     status->format_action = "not_available";
     status->sd_filesystem = "unknown";
+    status->file_ops_supported = false;
+    status->atomic_rename_supported = false;
+    status->file_line_max = 0;
+    status->file_chunk_max = 0;
+    status->path_max = 0;
 }
 
 static const char *stable_sd_state(const char *state)
@@ -90,9 +95,14 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
                                                     !sd->deskos_root_ready ||
                                                     sd->format_required);
     s_status.setup_supported = sd->protocol_supported && sd->card_present;
+    s_status.file_ops_supported = sd->file_ops_supported;
+    s_status.atomic_rename_supported = sd->atomic_rename_supported;
     s_status.response_truncated = sd->response_truncated;
     s_status.capacity_kb = sd->capacity_kb;
     s_status.free_kb = sd->free_kb;
+    s_status.file_line_max = sd->file_line_max;
+    s_status.file_chunk_max = sd->file_chunk_max;
+    s_status.path_max = sd->path_max;
     s_status.last_error = sd->last_error;
     s_status.sd_state = stable_sd_state(sd->state);
     s_status.sd_filesystem = stable_filesystem(sd->filesystem);
@@ -175,6 +185,11 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
     if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready) {
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
+        s_status.file_ops_supported = false;
+        s_status.atomic_rename_supported = false;
+        s_status.file_line_max = 0;
+        s_status.file_chunk_max = 0;
+        s_status.path_max = 0;
         s_status.sd_state = "rp2040_unavailable";
         s_status.last_error = rp2040_init_result;
         s_status.setup_action = "bridge_unavailable";
@@ -183,6 +198,11 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
     } else if (s_status.rp2040_bridge_required) {
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
+        s_status.file_ops_supported = false;
+        s_status.atomic_rename_supported = false;
+        s_status.file_line_max = 0;
+        s_status.file_chunk_max = 0;
+        s_status.path_max = 0;
         s_status.sd_state = "protocol_pending";
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
         s_status.setup_action = "bridge_protocol_pending";

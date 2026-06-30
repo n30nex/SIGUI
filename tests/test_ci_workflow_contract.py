@@ -38,6 +38,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
     assert "python ./scripts/smoke_d1l.py --dry-run" in host
+    assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/verify_checksums.py artifacts" in host
 
 

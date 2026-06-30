@@ -29,6 +29,33 @@ adds the `earlephilhower/arduino-pico` board package URL, installs
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.
 
+## Hardware Validation
+
+Verify the GitHub Actions artifact checksum before any RP2040 flash attempt:
+
+```powershell
+python .\scripts\verify_checksums.py artifacts\github\<run-id>\rp2040-sd-bridge-firmware
+```
+
+The current ESP32 release flashing scripts are not RP2040 UF2 flashing tools.
+Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode before
+copying `deskos_sd_bridge.ino.uf2`. Use an empty or sacrificial SD card first:
+`DESKOS_SD_STATUS` is non-formatting, but a mounted usable filesystem may get a
+`/deskos` directory.
+
+After flashing the RP2040 bridge, validate through the ESP32 console on COM12:
+
+```powershell
+python .\scripts\sd_file_canary_d1l.py --port COM12
+python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30
+```
+
+The canary sends `storage status`, `storage filecanary`, `storage status`,
+`packets`, and `health`. It does not send Public RF and does not issue
+`DESKOS_SD_FORMAT`.
+
+See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
+
 ## Runtime Notes
 
 - `DESKOS_SD_STATUS` mounts the card if possible and creates `/deskos` when the

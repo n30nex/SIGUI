@@ -23,10 +23,11 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Do not run firmware builds on the Windows host. Firmware artifacts must come from GitHub Actions.
 - Local verification for this slice is limited to host tests, simulator generation, dry-run smoke, diff checks, and GitHub Actions status.
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
+- After the RP2040 bridge is flashed, use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof. The canary is serial-only and does not send Public RF or issue `DESKOS_SD_FORMAT`.
 
 ## Remaining SD Work
 
 - Validate the RP2040 SD bridge artifact on hardware after a safe RP2040 flashing procedure is documented and the correct RP2040 programming path is identified.
-- Safely flash and validate the RP2040 SD bridge artifact on hardware so the packet-log SD canary can be proven against a real card.
+- Safely flash and validate the RP2040 SD bridge artifact on hardware so `storage status` reports the file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Move larger retained stores to SD when configured: Public/DM history, route history, exports, and future map tiles.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.

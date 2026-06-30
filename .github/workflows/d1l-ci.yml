@@ -22,6 +22,9 @@ jobs:
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
 
+      - name: SD file canary dry run
+        run: python ./scripts/sd_file_canary_d1l.py --dry-run
+
       - name: UI simulator screenshots
         run: |
           python ./tools/ui_simulator.py --out artifacts/ui-sim

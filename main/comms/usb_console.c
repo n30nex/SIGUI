@@ -627,7 +627,7 @@ static void cmd_storage_status(void)
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
     printf(",\"filesystem\":");
     print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
-    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"format_required\":%s,\"format_supported\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"response_truncated\":%s,\"mount_point\":",
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"format_required\":%s,\"format_supported\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"mount_point\":",
            bool_json(status.direct_supported),
            bool_json(status.rp2040_bridge_required),
            bool_json(status.rp2040_bridge_ready),
@@ -639,6 +639,11 @@ static void cmd_storage_status(void)
            bool_json(status.format_supported),
            (unsigned long)status.capacity_kb,
            (unsigned long)status.free_kb,
+           bool_json(status.file_ops_supported),
+           (unsigned long)status.file_line_max,
+           (unsigned long)status.file_chunk_max,
+           (unsigned long)status.path_max,
+           bool_json(status.atomic_rename_supported),
            bool_json(status.response_truncated));
     print_json_string(status.mount_point ? status.mount_point : "");
     printf(",\"data_root\":");
@@ -720,6 +725,148 @@ static void print_storage_setup_payload(const d1l_storage_status_t *status,
     printf(",\"fallback\":\"nvs\",\"note\":");
     print_json_string(status->note ? status->note : "");
     printf("}\n");
+}
+
+static void print_storage_filecanary_error(const char *step,
+                                           esp_err_t ret,
+                                           const d1l_storage_status_t *status,
+                                           const d1l_rp2040_file_result_t *file,
+                                           const char *hint)
+{
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage filecanary\",\"code\":\"%s\",\"step\":",
+           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    print_json_string(step ? step : "unknown");
+    printf(",\"sd_state\":");
+    print_json_string(status && status->sd_state ? status->sd_state : "unknown");
+    printf(",\"data_backend\":");
+    print_json_string(status && status->data_backend ? status->data_backend : "nvs");
+    printf(",\"packet_log_backend\":");
+    print_json_string(status && status->packet_log_backend ? status->packet_log_backend : "nvs");
+    printf(",\"file_op\":");
+    print_json_string(file && file->op[0] ? file->op : "");
+    printf(",\"file_error\":");
+    print_json_string(file && file->err[0] ? file->err : "");
+    printf(",\"file_note\":");
+    print_json_string(file && file->note[0] ? file->note : "");
+    printf(",\"hint\":");
+    print_json_string(hint ? hint : "SD file-operation canary failed; no format was performed");
+    printf("}\n");
+}
+
+static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_result_t *file)
+{
+    return ret == ESP_OK || ret == ESP_ERR_NOT_FOUND ||
+           (file && strcmp(file->err, "not_found") == 0);
+}
+
+static void cmd_storage_filecanary(void)
+{
+    (void)d1l_storage_status_refresh(1000U);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    if (!status.data_enabled ||
+        !status.file_ops_supported ||
+        !status.atomic_rename_supported ||
+        status.file_line_max < D1L_RP2040_FILE_LINE_MAX ||
+        status.file_chunk_max < D1L_RP2040_FILE_CHUNK_MAX ||
+        status.path_max < D1L_RP2040_FILE_PATH_MAX ||
+        !status.packet_log_backend ||
+        strcmp(status.packet_log_backend, "sd") != 0) {
+        print_storage_filecanary_error(
+            "preflight",
+            ESP_ERR_NOT_SUPPORTED,
+            &status,
+            NULL,
+            "requires a ready RP2040 SD bridge with file_ops, atomic rename, and packet-log SD canary enabled");
+        return;
+    }
+
+    static const char tmp_path[] = "canary/filecanary.tmp";
+    static const char final_path[] = "canary/filecanary.bin";
+    static const uint8_t payload[] = "DeskOS SD file canary v1";
+    const size_t payload_len = sizeof(payload) - 1U;
+    uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX];
+    d1l_rp2040_file_result_t file = {0};
+
+    esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file, 3000U);
+    if (!storage_delete_missing_ok(ret, &file)) {
+        print_storage_filecanary_error("cleanup_tmp", ret, &status, &file,
+                                       "could not remove stale temp canary path");
+        return;
+    }
+    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
+    if (!storage_delete_missing_ok(ret, &file)) {
+        print_storage_filecanary_error("cleanup_final", ret, &status, &file,
+                                       "could not remove stale final canary path");
+        return;
+    }
+
+    ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
+                                       &file, 3000U);
+    if (ret != ESP_OK || file.length != payload_len || file.size != payload_len) {
+        print_storage_filecanary_error("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                       &status, &file, "temp write failed");
+        return;
+    }
+
+    memset(read_buf, 0, sizeof(read_buf));
+    ret = d1l_rp2040_bridge_file_read(tmp_path, 0U, read_buf, payload_len, &file, 3000U);
+    if (ret != ESP_OK || file.length != payload_len ||
+        memcmp(read_buf, payload, payload_len) != 0) {
+        print_storage_filecanary_error("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                       &status, &file, "temp read-back did not match");
+        return;
+    }
+
+    ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file, 3000U);
+    if (ret != ESP_OK) {
+        print_storage_filecanary_error("rename_final", ret, &status, &file,
+                                       "rename replace commit failed");
+        return;
+    }
+
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    if (ret != ESP_OK || !file.exists || file.is_directory || file.size != payload_len) {
+        print_storage_filecanary_error("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                       &status, &file, "final canary stat did not match");
+        return;
+    }
+
+    memset(read_buf, 0, sizeof(read_buf));
+    ret = d1l_rp2040_bridge_file_read(final_path, 0U, read_buf, payload_len, &file, 3000U);
+    if (ret != ESP_OK || file.length != payload_len ||
+        memcmp(read_buf, payload, payload_len) != 0) {
+        print_storage_filecanary_error("read_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                       &status, &file, "final read-back did not match");
+        return;
+    }
+
+    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
+    if (ret != ESP_OK) {
+        print_storage_filecanary_error("delete_final", ret, &status, &file,
+                                       "could not delete final canary file");
+        return;
+    }
+
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    if (ret != ESP_OK || file.exists) {
+        print_storage_filecanary_error("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
+                                       &status, &file, "final canary file still exists after delete");
+        return;
+    }
+
+    ok_begin("storage filecanary");
+    printf(",\"path\":");
+    print_json_string(final_path);
+    printf(",\"tmp_path\":");
+    print_json_string(tmp_path);
+    printf(",\"bytes\":%u,\"write_tmp\":true,\"read_tmp\":true,\"rename_replace\":true,\"stat_final\":true,\"read_final\":true,\"delete_final\":true,\"stat_deleted\":true,\"data_backend\":",
+           (unsigned)payload_len);
+    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    printf(",\"packet_log_backend\":");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    printf(",\"note\":\"Serial-only RP2040 SD file-operation canary passed; no Public RF or format command was used\"}\n");
 }
 
 static void cmd_storage_setup(const char *line)
@@ -1793,7 +1940,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1859,6 +2006,8 @@ static void handle_line(const char *line)
     } else if (strcmp(line, "storage setup") == 0 ||
                strncmp(line, "storage setup confirm ", strlen("storage setup confirm ")) == 0) {
         cmd_storage_setup(line);
+    } else if (strcmp(line, "storage filecanary") == 0) {
+        cmd_storage_filecanary();
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {

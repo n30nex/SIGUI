@@ -22,9 +22,14 @@ typedef struct {
     bool setup_required;
     bool setup_supported;
     bool data_enabled;
+    bool file_ops_supported;
+    bool atomic_rename_supported;
     bool response_truncated;
     uint32_t capacity_kb;
     uint32_t free_kb;
+    uint32_t file_line_max;
+    uint32_t file_chunk_max;
+    uint32_t path_max;
     esp_err_t last_error;
     const char *sd_state;
     const char *sd_interface;
