@@ -26,6 +26,8 @@ from tools.rp2040_sd_protocol import (
     EXPORT_CANARY_START_ID,
     DIAGNOSTIC_EXPORT_DEFAULT_TOKEN,
     DIAGNOSTIC_EXPORT_START_ID,
+    MAP_TILE_CANARY_DEFAULT_TOKEN,
+    MAP_TILE_CANARY_START_ID,
     diagnostic_export_paths,
     diagnostic_export_payload,
     diagnostic_export_transcript,
@@ -33,6 +35,9 @@ from tools.rp2040_sd_protocol import (
     export_canary_payload,
     export_canary_transcript,
     file_canary_transcript,
+    map_tile_canary_paths,
+    map_tile_canary_payload,
+    map_tile_canary_transcript,
     reply_for_request,
     validate_relative_path,
 )
@@ -495,7 +500,9 @@ def test_diagnostic_export_transcript_chunks_and_commits_without_delete():
     assert not any(" op=delete " in request and final in request for request in requests)
     assert b'"kind":"diagnostic_export"' in payload
     assert b'"limits"' in payload
-    assert b'"map_tiles":{"exported":false,"reason":"pending"}' in payload
+    assert b'"map_tiles":{"exported":false,"cache_ready":true' in payload
+    assert b'"backend":"sd_map_tiles_ready"' in payload
+    assert b'"reason":"diagnostic_export_does_not_bundle_map_tiles"' in payload
 
 
 def test_diagnostic_export_transcript_fails_safely_without_ready_card():
@@ -505,6 +512,83 @@ def test_diagnostic_export_transcript_fails_safely_without_ready_card():
         "root-missing": "not_ready",
     }.items():
         transcript = diagnostic_export_transcript(SCENARIOS[scenario_name], "diag1")
+        replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+        assert {reply["ok"] for reply in replies} == {"0"}
+        assert {reply["err"] for reply in replies} == {expected_error}
+
+
+def test_map_tile_canary_transcript_commits_nested_cache_tile():
+    token = MAP_TILE_CANARY_DEFAULT_TOKEN
+    transcript = map_tile_canary_transcript(SCENARIOS["ready"], token)
+    requests = [exchange["request"] for exchange in transcript]
+    replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+    tmp, final = map_tile_canary_paths(token)
+    payload = map_tile_canary_payload(token)
+
+    assert tmp == "map/tiles/z12/x1/y2-map1.tmp"
+    assert final == "map/tiles/z12/x1/y2-map1.tile"
+    assert validate_relative_path(tmp)
+    assert validate_relative_path(final)
+    assert payload.startswith(b'{"schema":1,"kind":"map_tile_cache_canary"')
+    assert requests == [
+        file_request(
+            MAP_TILE_CANARY_START_ID,
+            "delete",
+            path=encode_path(tmp),
+        ),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 1,
+            "write",
+            path=encode_path(tmp),
+            off=0,
+            len=len(payload),
+            trunc=1,
+            data=b64url(payload),
+            crc=crc32_hex(payload),
+        ),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 2,
+            "read",
+            path=encode_path(tmp),
+            off=0,
+            len=len(payload),
+        ),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 3,
+            "rename",
+            path=encode_path(tmp),
+            to=encode_path(final),
+            replace=1,
+        ),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 4,
+            "stat",
+            path=encode_path(final),
+        ),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 5,
+            "read",
+            path=encode_path(final),
+            off=0,
+            len=len(payload),
+        ),
+    ]
+    assert replies[0]["ok"] == "0"
+    assert replies[0]["err"] == "not_found"
+    assert all(reply["ok"] == "1" for reply in replies[1:])
+    assert replies[2]["data"] == b64url(payload)
+    assert replies[4]["exists"] == "1"
+    assert replies[4]["size"] == str(len(payload))
+    assert replies[5]["data"] == b64url(payload)
+
+
+def test_map_tile_canary_transcript_fails_safely_without_ready_card():
+    for scenario_name, expected_error in {
+        "no-card": "no_card",
+        "format-required": "not_ready",
+        "root-missing": "not_ready",
+    }.items():
+        transcript = map_tile_canary_transcript(SCENARIOS[scenario_name], "map1")
         replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
         assert {reply["ok"] for reply in replies} == {"0"}
         assert {reply["err"] for reply in replies} == {expected_error}
@@ -623,6 +707,7 @@ def test_reference_transcripts_stay_inside_line_cap():
         file_canary_transcript(SCENARIOS["ready"]),
         export_canary_transcript(SCENARIOS["ready"], "export1"),
         diagnostic_export_transcript(SCENARIOS["ready"], "diag1"),
+        map_tile_canary_transcript(SCENARIOS["ready"], "map1"),
     ]
 
     for transcript in transcripts:

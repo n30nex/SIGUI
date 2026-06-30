@@ -213,16 +213,37 @@ protocol to commit a bounded diagnostic JSON bundle under:
 - Temp path: `exports/diagnostics/diagnostic-export-<token>.tmp`
 - Final path: `exports/diagnostics/diagnostic-export-<token>.json`
 
-The bundle includes storage, health, crashlog, limits, and a
-`map_tiles.exported=false` marker. It is chunked into 192-byte-or-smaller writes,
-then read back from the temp path, committed with `rename replace=1`, statted,
-and read back from the final path. The final JSON is intentionally left present
-for inspection.
+The bundle includes storage, health, crashlog, limits, and a `map_tiles` object
+that reports cache readiness while keeping `exported=false`; diagnostic exports
+do not bundle actual tile payloads. It is chunked into 192-byte-or-smaller
+writes, then read back from the temp path, committed with `rename replace=1`,
+statted, and read back from the final path. The final JSON is intentionally left
+present for inspection.
 
 The host simulator prints the deterministic request/reply shape:
 
 ```powershell
 python .\tools\rp2040_sd_protocol.py --scenario ready --diagnostic-export-transcript --token diag1
+```
+
+## Map Tile Cache Canary Transcript
+
+The serial `storage map-tile-canary <token>` command uses the same file protocol
+to commit a synthetic tile under:
+
+- Temp path: `map/tiles/z12/x1/y2-<token>.tmp`
+- Final path: `map/tiles/z12/x1/y2-<token>.tile`
+
+The canary writes a small JSON payload, reads it back from the temp path,
+commits with `rename replace=1`, stats the final path, and reads the final tile
+back. The final synthetic tile is intentionally left present for inspection.
+This proves the nested cache directory and atomic commit path without Public RF
+or formatting.
+
+The host simulator prints the deterministic request/reply shape:
+
+```powershell
+python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcript --token map1
 ```
 
 ## Safety Rules
@@ -233,4 +254,4 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --diagnostic-export-transc
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; general non-diagnostic export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`; general non-diagnostic exports and the full map page/tile download policy remain pending until their migrations land.

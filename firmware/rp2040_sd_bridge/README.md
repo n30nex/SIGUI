@@ -92,7 +92,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   existing final file so ordinary rename failures do not erase the old final.
 - No formatting happens at boot or during status checks.
 - Retained Public message history, DM history, route history, and packet history
-  can use the SD file protocol once the ESP32 sees a ready card, file operations,
-  and atomic rename. The ESP32 keeps onboard NVS mirrors for these retained
-  history stores. Settings, identity, contacts, read-state, crashlog, exports,
-  and map tiles remain onboard/fallback-backed or pending.
+  can use the SD file protocol once the ESP32 sees a ready card, file
+  operations, and atomic rename. The ESP32 keeps onboard NVS mirrors for these retained
+  history stores. Diagnostic exports and the map-tile cache can use the
+  same file gate. Settings, identity, contacts, read-state, crashlog, general
+  non-diagnostic exports, and the full map page/tile download policy remain
+  onboard/fallback-backed or pending.

@@ -121,6 +121,7 @@ def expected_command_name(command: str) -> str:
         "radio set cr ",
         "radio set txpower ",
         "radio set rxboost ",
+        "storage map-tile-canary ",
         "storage export-canary ",
         "storage export-diagnostics ",
         "storage retained-canary ",

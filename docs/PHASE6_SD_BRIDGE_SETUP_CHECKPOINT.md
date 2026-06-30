@@ -16,7 +16,8 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Added bounded generic `DESKOS_SD_FILE v=1` file operations to the simulator, RP2040 bridge target, and ESP32 bridge API: `stat`, `read`, `write`, `append`, `delete`, and `rename` with sanitized relative paths, base64url payloads, CRC32 checks, 512-byte lines, and 192-byte decoded chunks.
 - Added an SD-capable retained blob-store provider for the packet-log canary. It enables SD only when the RP2040 reports ready data, file operations, matching line/path/chunk limits, and atomic rename; writes use `stores/packet_log/ring.tmp` plus `rename replace=1` to commit `stores/packet_log/ring.bin`.
 - Kept an onboard NVS mirror for the packet-log canary and retained NVS fallback on no-card, timeout, missing file support, missing atomic rename, insufficient limits, and invalid SD blob cases.
-- Kept messages, routes, settings, identity, contacts, read-state, diagnostics, exports, and map tiles on onboard/fallback storage; no broad SD-backed store migration is claimed in this slice.
+- Added serial-only diagnostic export and map-tile cache canaries. Diagnostic exports commit under `exports/diagnostics/`; map-tile cache canary commits a synthetic tile under `map/tiles/`. Both use temp write/read plus `rename replace=1`, leave the final artifact present for inspection, and do not send Public RF or format.
+- Kept settings, identity, contacts, read-state, crashlog, general non-diagnostic exports, and the full map page/tile download policy on onboard/fallback storage or pending; no card-dependent boot state is claimed in this slice.
 - Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added a raw SdFat card probe plus SPI1-aware formatter, and kept the ESP32 runtime SD probe window long enough for slow card status replies while boot probing stays short.
 
 ## Validation Rules
@@ -24,7 +25,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Do not run firmware builds on the Windows host. Firmware artifacts must come from GitHub Actions.
 - Local verification for this slice is limited to host tests, simulator generation, dry-run smoke, diff checks, and GitHub Actions status.
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
-- After the RP2040 bridge is flashed, use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof. The canary is serial-only and does not send Public RF or issue `DESKOS_SD_FORMAT`.
+- After the RP2040 bridge is flashed, use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof once the ready file gate is available. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
 
 ## Hardware Evidence
 
@@ -38,5 +39,6 @@ This checkpoint advances optional SD-card data storage without making boot or re
 
 - Reseat or replace the D1L microSD card until the RP2040 bridge reports `present=true`; then validate the guarded format path if setup is required.
 - Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
-- Move larger retained stores to SD when configured: Public/DM history, route history, exports, and future map tiles.
+- Complete hardware proof for retained Public/DM history, route history, packet history, diagnostic exports, and map-tile cache once a card is electrically detected.
+- Implement the full map page/tile download policy and general non-diagnostic exports on top of the SD cache path.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.

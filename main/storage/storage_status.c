@@ -6,6 +6,7 @@
 
 #include "hal/rp2040_bridge.h"
 #include "storage/export_store.h"
+#include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
 
 static d1l_storage_status_t s_status;
@@ -33,7 +34,8 @@ static void set_store_backends(d1l_storage_status_t *status)
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
     status->route_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES);
-    status->map_tile_backend = "unavailable";
+    status->map_tile_backend = d1l_map_tile_store_sd_ready(status) ?
+        "sd_map_tiles_ready" : "unavailable";
     status->export_backend = d1l_export_store_sd_ready(status) ?
         "sd_diagnostic_exports_ready" : "serial";
     status->data_enabled = any_retained_sd;
@@ -173,9 +175,10 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
                                 "store_migration_pending";
         s_status.format_action = "not_needed";
         s_status.note = s_status.data_enabled ?
-            "SD card is valid; retained Public/DM message, route, and packet history can use SD with onboard NVS mirrors" :
+            "SD card is valid; retained Public/DM message, route, packet history, diagnostic exports, and map tile cache can use SD with onboard NVS mirrors" :
             "SD card is valid, but retained stores remain on onboard NVS until SD-backed store migration is enabled";
-        s_status.map_tile_backend = "sd_pending_store_migration";
+        s_status.map_tile_backend = d1l_map_tile_store_sd_ready(&s_status) ?
+            "sd_map_tiles_ready" : "sd_pending_store_migration";
     }
 }
 
@@ -251,9 +254,6 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_probe_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    if (ret == ESP_OK && sd.protocol_supported && sd.data_ready) {
-        s_status.map_tile_backend = "sd_pending_store_migration";
-    }
     return ret;
 }
 
@@ -287,9 +287,6 @@ esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t tim
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    if (ret == ESP_OK && sd.protocol_supported && sd.data_ready) {
-        s_status.map_tile_backend = "sd_pending_store_migration";
-    }
     return ret;
 }
 

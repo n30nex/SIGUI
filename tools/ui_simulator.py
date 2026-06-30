@@ -295,6 +295,18 @@ def storage_ready_retained_history_sd_snapshot() -> Snapshot:
     )
 
 
+def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="ready",
+        storage_backend="Mixed storage",
+        storage_detail="SD retained stores + map cache",
+        storage_stores="msg/pkt/route/map SD",
+        storage_setup_action="retained_history_sd_enabled",
+        storage_format_action="not_needed",
+    )
+
+
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
@@ -304,6 +316,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
     "storage-ready-retained-history-sd": storage_ready_retained_history_sd_snapshot,
+    "storage-ready-map-tiles-sd": storage_ready_map_tiles_sd_snapshot,
 }
 
 

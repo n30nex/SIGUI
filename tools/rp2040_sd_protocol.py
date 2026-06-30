@@ -29,6 +29,8 @@ EXPORT_CANARY_START_ID = 20
 EXPORT_CANARY_DEFAULT_TOKEN = "export1"
 DIAGNOSTIC_EXPORT_START_ID = 40
 DIAGNOSTIC_EXPORT_DEFAULT_TOKEN = "diag1"
+MAP_TILE_CANARY_START_ID = 80
+MAP_TILE_CANARY_DEFAULT_TOKEN = "map1"
 STATUS_FIELDS = (
     "state",
     "present",
@@ -599,7 +601,8 @@ def diagnostic_export_payload(token: str) -> bytes:
         '"psram_largest_free":150000,"current_task_stack_free_words":1200,'
         '"ui_task_stack_free_words":1300,"lvgl_used_pct":42,"reset_reason":"SW"},'
         '"limits":{"payload_max":4096,"file_chunk_max":192,"crashlog_capacity":8,"sampled":true},'
-        '"map_tiles":{"exported":false,"reason":"pending"},'
+        '"map_tiles":{"exported":false,"cache_ready":true,"backend":"sd_map_tiles_ready",'
+        '"reason":"diagnostic_export_does_not_bundle_map_tiles"},'
         '"crashlog":{"count":1,"capacity":8,"total_written":3,"dropped_oldest":0,'
         '"entries":[{"seq":3,"uptime_ms":50,"reset_reason":"SW","reset_reason_code":3,'
         '"crash_like":false,"heap_free":100000,"heap_min_free":99000,"psram_free":200000}]}}\n'
@@ -664,6 +667,61 @@ def diagnostic_export_transcript(
     return transcript
 
 
+def map_tile_canary_paths(token: str) -> tuple[str, str]:
+    return (
+        f"map/tiles/z12/x1/y2-{token}.tmp",
+        f"map/tiles/z12/x1/y2-{token}.tile",
+    )
+
+
+def map_tile_canary_payload(token: str) -> bytes:
+    return (
+        f'{{"schema":1,"kind":"map_tile_cache_canary","token":"{token}",'
+        '"z":12,"x":1,"y":2,"public_rf_tx":false,"formats_sd":false}\n'
+    ).encode("ascii")
+
+
+def map_tile_canary_requests(
+    token: str,
+    request_id_start: int = MAP_TILE_CANARY_START_ID,
+) -> list[str]:
+    tmp_path, final_path = map_tile_canary_paths(token)
+    tmp = encode_path(tmp_path)
+    final = encode_path(final_path)
+    payload = map_tile_canary_payload(token)
+    payload64 = b64url(payload)
+    payload_crc = crc32_hex(payload)
+    return [
+        file_request_line(request_id_start, "delete", path=tmp),
+        file_request_line(
+            request_id_start + 1,
+            "write",
+            path=tmp,
+            off=0,
+            len=len(payload),
+            trunc=1,
+            data=payload64,
+            crc=payload_crc,
+        ),
+        file_request_line(request_id_start + 2, "read", path=tmp, off=0, len=len(payload)),
+        file_request_line(request_id_start + 3, "rename", path=tmp, to=final, replace=1),
+        file_request_line(request_id_start + 4, "stat", path=final),
+        file_request_line(request_id_start + 5, "read", path=final, off=0, len=len(payload)),
+    ]
+
+
+def map_tile_canary_transcript(
+    scenario: SdScenario,
+    token: str = MAP_TILE_CANARY_DEFAULT_TOKEN,
+    request_id_start: int = MAP_TILE_CANARY_START_ID,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    transcript = []
+    for request in map_tile_canary_requests(token, request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="ready")
@@ -671,6 +729,7 @@ def main() -> int:
     parser.add_argument("--file-canary-transcript", action="store_true")
     parser.add_argument("--export-canary-transcript", action="store_true")
     parser.add_argument("--diagnostic-export-transcript", action="store_true")
+    parser.add_argument("--map-tile-canary-transcript", action="store_true")
     parser.add_argument("--request-id-start", type=int)
     parser.add_argument("--token")
     parser.add_argument("--list-scenarios", action="store_true")
@@ -706,6 +765,16 @@ def main() -> int:
         )
         token = args.token or DIAGNOSTIC_EXPORT_DEFAULT_TOKEN
         for exchange in diagnostic_export_transcript(SCENARIOS[args.scenario], token, request_id_start):
+            print(f"> {exchange['request']}")
+            print(f"< {exchange['reply']}")
+        return 0
+
+    if args.map_tile_canary_transcript:
+        request_id_start = (
+            MAP_TILE_CANARY_START_ID if args.request_id_start is None else args.request_id_start
+        )
+        token = args.token or MAP_TILE_CANARY_DEFAULT_TOKEN
+        for exchange in map_tile_canary_transcript(SCENARIOS[args.scenario], token, request_id_start):
             print(f"> {exchange['request']}")
             print(f"< {exchange['reply']}")
         return 0

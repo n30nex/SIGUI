@@ -30,6 +30,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "format_action" in header
     assert '"storage/storage_status.c"' in cmake
     assert '"storage/export_store.c"' in cmake
+    assert '"storage/map_tile_store.c"' in cmake
     assert '"storage"' in cmake
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
@@ -71,7 +72,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
     assert 'status->data_backend = any_retained_sd ? "mixed" : "nvs"' in source
-    assert 'status->map_tile_backend = "unavailable"' in source
+    assert '#include "storage/map_tile_store.h"' in source
+    assert "d1l_map_tile_store_sd_ready(status)" in source
+    assert '"sd_map_tiles_ready" : "unavailable"' in source
     assert '"sd_diagnostic_exports_ready" : "serial"' in source
     assert "bsp_sdcard_init" not in source
     assert "format_if_mount_failed" not in source
@@ -94,7 +97,8 @@ def test_storage_format_request_is_guarded_before_bridge_command():
     bridge_unavailable_branch = source.split("if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready)", 1)[1].split("} else if", 1)[0]
     assert bridge_unavailable_branch.index("clear_sd_runtime_fields(&s_status)") < bridge_unavailable_branch.index("set_store_backends(&s_status)")
     assert "status->data_enabled = any_retained_sd" in source
-    assert 's_status.map_tile_backend = "sd_pending_store_migration"' in source
+    assert "d1l_map_tile_store_sd_ready(&s_status)" in source
+    assert '"sd_map_tiles_ready" : "sd_pending_store_migration"' in source
     assert '"retained_history_sd_enabled"' in source
 
 
@@ -128,15 +132,18 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
+    assert 'ok_begin("storage map-tile-canary")' in console
     assert 'ok_begin("storage export-canary")' in console
     assert '"storage status"' in console
     assert '"storage setup"' in console
     assert "storage setup confirm FORMAT-DESKOS-SD" in console
     assert "storage filecanary" in console
+    assert "storage map-tile-canary <token>" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
     assert 'strcmp(line, "storage setup")' in console
     assert 'strcmp(line, "storage filecanary")' in console
+    assert 'strncmp(line, "storage map-tile-canary "' in console
     assert 'strncmp(line, "storage export-canary "' in console
     assert "will_format" in console
     assert "false" in console
@@ -144,6 +151,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"fallback\\":\\"nvs\\"' in console
     assert "storage status" in SMOKE_COMMANDS
     assert "storage setup" in SMOKE_COMMANDS
+    assert not any(command.startswith("storage map-tile-canary") for command in SMOKE_COMMANDS)
     assert not any(command.startswith("storage export-canary") for command in SMOKE_COMMANDS)
     assert '"Storage %s  SD %s"' in ui
     assert "static lv_obj_t *s_storage_sheet" in ui
@@ -286,7 +294,9 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_export_store_write_diagnostics" in console
     assert '\\"map_tiles\\"' in console
     assert '\\"exported\\":false' in console
-    assert '\\"reason\\":\\"pending\\"' in console
+    assert '\\"cache_ready\\":%s' in console
+    assert '\\"backend\\":\\"%s\\"' in console
+    assert "diagnostic_export_does_not_bundle_map_tiles" in console
     assert '\\"limits\\"' in console
     assert "storage export-canary" in runner
     assert "export_backend_ready" in runner
@@ -307,6 +317,43 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "sd_export_canary_d1l.py" in docs
+
+
+def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
+    console = read("main/comms/usb_console.c")
+    store_header = read("main/storage/map_tile_store.h")
+    store_source = read("main/storage/map_tile_store.c")
+    runner = read("scripts/sd_map_tile_canary_d1l.py")
+    protocol = read("tools/rp2040_sd_protocol.py")
+    workflow = read(".github/workflows/d1l-ci.yml")
+    docs = read("docs/TEST_PLAN_D1L.md")
+
+    assert "D1L_MAP_TILE_CANARY_TOKEN_MAX 31U" in store_header
+    assert "d1l_map_tile_store_token_valid" in store_header
+    assert "d1l_map_tile_store_sd_ready" in store_header
+    assert "d1l_map_tile_store_write_canary" in store_header
+    assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
+    assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
+    assert "map_tile_cache_canary" in store_source
+    assert "d1l_rp2040_bridge_file_write(result.tmp_path" in store_source
+    assert "d1l_rp2040_bridge_file_read(result.tmp_path" in store_source
+    assert "d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true" in store_source
+    assert "d1l_rp2040_bridge_file_stat(result.path" in store_source
+    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
+    assert "cmd_storage_map_tile_canary" in console
+    assert "storage map-tile-canary <token>" in console
+    assert "d1l_map_tile_store_write_canary" in console
+    assert "Map tile SD cache canary committed" in console
+    assert "storage map-tile-canary" in runner
+    assert "map_tile_backend_ready" in runner
+    assert "mesh send public" not in runner
+    assert "FORMAT-DESKOS-SD" not in runner
+    assert "COM11" not in runner
+    assert "COM29" not in runner
+    assert "map_tile_canary_transcript" in protocol
+    assert "MAP_TILE_CANARY_START_ID" in protocol
+    assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in workflow
+    assert "sd_map_tile_canary_d1l.py" in docs
 
 
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():

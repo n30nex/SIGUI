@@ -68,6 +68,7 @@ python .\scripts\smoke_d1l.py --port COM12 --out artifacts\smoke\d1l-smoke-rp204
 python .\scripts\sd_file_canary_d1l.py --port COM12 --out artifacts\sd-canary\d1l-sd-file-canary-COM12.json
 python .\scripts\sd_export_canary_d1l.py --port COM12 --token export1 --out artifacts\sd-export-canary\d1l-sd-export-canary-COM12.json
 python .\scripts\sd_diagnostic_export_d1l.py --port COM12 --token diag1 --out artifacts\sd-diagnostic-export\d1l-sd-diagnostic-export-COM12.json
+python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1 --out artifacts\sd-map-tile-canary\d1l-sd-map-tile-canary-COM12.json
 python .\scripts\sd_retained_history_acceptance_d1l.py --port COM12 --out artifacts\sd-retained-history\d1l-sd-retained-history-COM12.json
 python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-sec 30 --sample-storage --sd-file-canary --out artifacts\soak\d1l-passive-soak-rp2040-sd-bridge-COM12.json
 ```
@@ -90,6 +91,10 @@ Expected proof with a ready card:
   diagnostic bundle to `exports/diagnostics/diagnostic-export-<token>.json`,
   verifies temp and final readback, leaves the final JSON present, and reports
   `public_rf_tx=false` plus `formats_sd=false`.
+- `storage map-tile-canary <token>` returns `ok=true`, writes
+  `map/tiles/z12/x1/y2-<token>.tile` through temp write/read and atomic rename,
+  leaves the final synthetic tile present, and reports `public_rf_tx=false`
+  plus `formats_sd=false`.
 - `storage retained-canary <token>` returns `ok=true`, appends synthetic Public,
   DM, route, and packet rows without Public RF or formatting, and
   `sd_retained_history_acceptance_d1l.py` proves those rows are readable before
@@ -113,4 +118,5 @@ without hardware:
 
 ```powershell
 python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
+python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcript --token map1
 ```

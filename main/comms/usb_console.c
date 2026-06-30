@@ -34,6 +34,7 @@
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
 #include "storage/export_store.h"
+#include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
 
 static void trim_line(char *line)
@@ -949,6 +950,78 @@ static void print_storage_export_error(const char *cmd,
     printf("}\n");
 }
 
+static void print_storage_map_tile_error(const char *step,
+                                         esp_err_t ret,
+                                         const d1l_storage_status_t *status,
+                                         const d1l_map_tile_canary_result_t *canary,
+                                         const char *hint)
+{
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage map-tile-canary\",\"code\":\"%s\",\"step\":",
+           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    print_json_string(step ? step : "unknown");
+    printf(",\"sd_state\":");
+    print_json_string(status && status->sd_state ? status->sd_state : "unknown");
+    printf(",\"map_tile_backend\":");
+    print_json_string(status && status->map_tile_backend ? status->map_tile_backend : "unavailable");
+    printf(",\"path\":");
+    print_json_string(canary ? canary->path : "");
+    printf(",\"tmp_path\":");
+    print_json_string(canary ? canary->tmp_path : "");
+    printf(",\"file_op\":");
+    print_json_string(canary && canary->file.op[0] ? canary->file.op : "");
+    printf(",\"file_error\":");
+    print_json_string(canary && canary->file.err[0] ? canary->file.err : "");
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":");
+    print_json_string(hint ? hint : "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
+    printf("}\n");
+}
+
+static void cmd_storage_map_tile_canary(const char *line)
+{
+    static const char prefix[] = "storage map-tile-canary ";
+    char token[D1L_MAP_TILE_CANARY_TOKEN_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("storage map-tile-canary", "INVALID_TOKEN",
+                   "usage: storage map-tile-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    d1l_map_tile_canary_result_t canary = {0};
+    esp_err_t ret = d1l_map_tile_store_write_canary(token, &status, &canary);
+    if (ret != ESP_OK) {
+        print_storage_map_tile_error(
+            canary.step, ret, &status, &canary,
+            "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
+        return;
+    }
+
+    d1l_storage_status(&status);
+    ok_begin("storage map-tile-canary");
+    printf(",\"token\":");
+    print_json_string(canary.token);
+    printf(",\"path\":");
+    print_json_string(canary.path);
+    printf(",\"tmp_path\":");
+    print_json_string(canary.tmp_path);
+    printf(",\"z\":%u,\"x\":%lu,\"y\":%lu,\"bytes\":%u,\"write_tmp\":%s,\"read_tmp\":%s,\"rename_replace\":%s,\"stat_final\":%s,\"read_final\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"map_tile_backend\":",
+           (unsigned)canary.z,
+           (unsigned long)canary.x,
+           (unsigned long)canary.y,
+           (unsigned)canary.bytes,
+           bool_json(canary.write_tmp),
+           bool_json(canary.read_tmp),
+           bool_json(canary.rename_replace),
+           bool_json(canary.stat_final),
+           bool_json(canary.read_final));
+    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"note\":\"Map tile SD cache canary committed by temp write and atomic rename; no Public RF or format command was used\"}\n");
+}
+
 static void cmd_storage_export_canary(const char *line)
 {
     static const char prefix[] = "storage export-canary ";
@@ -1069,15 +1142,20 @@ static bool build_diagnostic_export_payload(const char *token,
                             h.reset_reason ? h.reset_reason : "UNKNOWN")) {
         return false;
     }
+    const bool map_tile_cache_ready = d1l_map_tile_store_sd_ready(status);
     if (!append_export_json(dest, dest_size, &used,
                             "\"limits\":{\"payload_max\":%u,\"file_chunk_max\":%u,"
                             "\"crashlog_capacity\":%u,\"sampled\":true},"
-                            "\"map_tiles\":{\"exported\":false,\"reason\":\"pending\"},"
+                            "\"map_tiles\":{\"exported\":false,\"cache_ready\":%s,"
+                            "\"backend\":\"%s\",\"reason\":\"%s\"},"
                             "\"crashlog\":{\"count\":%u,\"capacity\":%u,"
                             "\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
                             (unsigned)D1L_EXPORT_DIAGNOSTIC_PAYLOAD_MAX,
                             (unsigned)D1L_RP2040_FILE_CHUNK_MAX,
                             (unsigned)D1L_CRASH_LOG_CAPACITY,
+                            bool_json(map_tile_cache_ready),
+                            status->map_tile_backend ? status->map_tile_backend : "unavailable",
+                            map_tile_cache_ready ? "diagnostic_export_does_not_bundle_map_tiles" : "pending",
                             (unsigned)crash_stats.count,
                             (unsigned)crash_stats.capacity,
                             (unsigned long)crash_stats.total_written,
@@ -2414,7 +2492,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -2482,6 +2560,8 @@ static void handle_line(const char *line)
         cmd_storage_setup(line);
     } else if (strcmp(line, "storage filecanary") == 0) {
         cmd_storage_filecanary();
+    } else if (strncmp(line, "storage map-tile-canary ", strlen("storage map-tile-canary ")) == 0) {
+        cmd_storage_map_tile_canary(line);
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {

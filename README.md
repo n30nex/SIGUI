@@ -2,7 +2,7 @@
 
 MeshCore DeskOS D1L is a Seeed SenseCAP Indicator D1L firmware project for a touch-first MeshCore desk console. It targets the ESP32-S3 + RP2040 D1L with the 480x480 RGB touch display and SX1262 LoRa radio.
 
-Current status: staged D1L hardware validation through the Phase 7 diagnostics and soak-readiness slices. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS-backed settings/identity/contact/read-state storage, MeshCore Public group text TX/RX over the D1L SX1262, first DM TX/ACK/PATH plumbing, a 480x480 touch shell, mesh visibility diagnostics, strict serial smoke/soak commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`. Optional SD-card work now includes a CI-buildable RP2040 SD bridge target with status/format and generic bounded file-operation protocol support. Retained Public/DM message history, route history, and packet history can switch to SD through the retained blob-store abstraction when the RP2040 reports a ready card, file operations, and atomic rename; NVS remains mirrored as fallback. Serial-only `storage export-canary <token>` and `storage export-diagnostics <token>` commands can prove diagnostic export temp-write/read/atomic-rename/final-read paths on SD without Public RF or formatting. Map tiles, general non-diagnostic exports, settings, identity, contacts, and read-state remain onboard-backed or pending until later migrations are implemented and hardware-proven.
+Current status: staged D1L hardware validation through the Phase 7 diagnostics and soak-readiness slices. The project has an ESP-IDF v5.1.x firmware skeleton, D1L pin/profile contracts, NVS-backed settings/identity/contact/read-state storage, MeshCore Public group text TX/RX over the D1L SX1262, first DM TX/ACK/PATH plumbing, a 480x480 touch shell, mesh visibility diagnostics, strict serial smoke/soak commands, no-port host tests, and flashing/recovery scripts that require an explicit `D1L_PORT` or `--port`. Optional SD-card work now includes a CI-buildable RP2040 SD bridge target with status/format and generic bounded file-operation protocol support. Retained Public/DM message history, route history, and packet history can switch to SD through the retained blob-store abstraction when the RP2040 reports a ready card, file operations, and atomic rename; NVS remains mirrored as fallback. Serial-only `storage export-canary <token>`, `storage export-diagnostics <token>`, and `storage map-tile-canary <token>` commands can prove diagnostic export and map-tile cache temp-write/read/atomic-rename/final-read paths on SD without Public RF or formatting. General non-diagnostic exports, the full map page/tile download policy, settings, identity, contacts, and read-state remain onboard-backed or pending until later migrations are implemented and hardware-proven.
 
 The companion compatibility contract is documented in [docs/COMPANION_3BYTE_COMPATIBILITY.md](docs/COMPANION_3BYTE_COMPATIBILITY.md). Phase 1 includes the MeshCore 3-byte transport codec and status command; live binary companion bridging is scheduled after D1L board/radio bring-up.
 
@@ -15,6 +15,7 @@ python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
+python .\scripts\sd_map_tile_canary_d1l.py --dry-run --token dryrun
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --dry-run
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
@@ -32,6 +33,7 @@ python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port $env:D1L_PORT --artifact-dir .\artifacts\github\<run-id>\rp2040-sd-bridge-firmware
 python .\scripts\sd_file_canary_d1l.py --port $env:D1L_PORT --allow-unavailable
 python .\scripts\sd_retained_history_acceptance_d1l.py --port $env:D1L_PORT --allow-unavailable --token prebridge
+python .\scripts\sd_map_tile_canary_d1l.py --port $env:D1L_PORT --allow-unavailable --token prebridge
 python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
