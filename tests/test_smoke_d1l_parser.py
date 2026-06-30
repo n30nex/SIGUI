@@ -58,6 +58,12 @@ def test_storage_setup_confirm_maps_to_storage_setup_response():
     assert ser.writes == ["storage setup confirm FORMAT-DESKOS-SD\n"]
 
 
+def test_contact_mutation_commands_map_to_console_responses():
+    assert expected_command_name("contacts add A1B2C3D4E5F60789 CodexTemp") == "contacts add"
+    assert expected_command_name("contacts rename A1B2C3D4E5F60789 CodexTemp2") == "contacts rename"
+    assert expected_command_name("contacts delete A1B2C3D4E5F60789") == "contacts delete"
+
+
 def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
     monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
     ser = FakeSerial(

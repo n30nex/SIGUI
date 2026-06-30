@@ -79,6 +79,7 @@ static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_contact_store_blob_t s_blob_scratch;
+static d1l_contact_store_blob_t s_rollback_scratch;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -116,6 +117,19 @@ static void fill_blob(d1l_contact_store_blob_t *blob)
     memcpy(blob->entries, s_entries, sizeof(s_entries));
 }
 
+static void restore_blob(const d1l_contact_store_blob_t *blob)
+{
+    if (!blob) {
+        return;
+    }
+    s_next_seq = blob->next_seq;
+    s_total_written = blob->total_written;
+    s_dropped_oldest = blob->dropped_oldest;
+    s_count = blob->count <= D1L_CONTACT_STORE_CAPACITY ? blob->count : 0;
+    memset(s_entries, 0, sizeof(s_entries));
+    memcpy(s_entries, blob->entries, s_count * sizeof(s_entries[0]));
+}
+
 static esp_err_t persist_store(void)
 {
     nvs_handle_t handle;
@@ -130,6 +144,15 @@ static esp_err_t persist_store(void)
         ret = nvs_commit(handle);
     }
     nvs_close(handle);
+    return ret;
+}
+
+static esp_err_t persist_store_or_rollback(const d1l_contact_store_blob_t *before)
+{
+    esp_err_t ret = persist_store();
+    if (ret != ESP_OK) {
+        restore_blob(before);
+    }
     return ret;
 }
 
@@ -371,6 +394,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
 
     int existing = find_index_by_fingerprint(fingerprint);
+    fill_blob(&s_rollback_scratch);
     size_t index;
     bool is_new = existing < 0;
     if (!is_new) {
@@ -427,7 +451,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
 
     s_total_written++;
-    return persist_store();
+    return persist_store_or_rollback(&s_rollback_scratch);
 }
 
 esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
@@ -452,6 +476,7 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
         return ESP_ERR_NOT_FOUND;
     }
 
+    fill_blob(&s_rollback_scratch);
     d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     entry->seq = s_next_seq++;
@@ -464,7 +489,7 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
         memcpy(entry->out_path, path, bytes);
     }
     s_total_written++;
-    return persist_store();
+    return persist_store_or_rollback(&s_rollback_scratch);
 }
 
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
@@ -487,13 +512,14 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
 
     d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
     if (entry->favorite != favorite || entry->muted != muted) {
+        fill_blob(&s_rollback_scratch);
         const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
         entry->seq = s_next_seq++;
         entry->updated_ms = now_ms;
         entry->favorite = favorite;
         entry->muted = muted;
         s_total_written++;
-        esp_err_t ret = persist_store();
+        esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
             return ret;
         }
@@ -529,12 +555,13 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
         return ESP_ERR_INVALID_ARG;
     }
     if (strncmp(entry->alias, sanitized, sizeof(entry->alias)) != 0) {
+        fill_blob(&s_rollback_scratch);
         const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
         entry->seq = s_next_seq++;
         entry->updated_ms = now_ms;
         snprintf(entry->alias, sizeof(entry->alias), "%s", sanitized);
         s_total_written++;
-        esp_err_t ret = persist_store();
+        esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
             return ret;
         }
@@ -563,9 +590,8 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
     }
 
     const size_t index = (size_t)existing;
-    if (out_entry) {
-        *out_entry = s_entries[index];
-    }
+    d1l_contact_entry_t removed = s_entries[index];
+    fill_blob(&s_rollback_scratch);
     if (index + 1U < s_count) {
         memmove(&s_entries[index], &s_entries[index + 1U],
                 (s_count - index - 1U) * sizeof(s_entries[0]));
@@ -573,7 +599,14 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
     s_count--;
     memset(&s_entries[s_count], 0, sizeof(s_entries[s_count]));
     s_total_written++;
-    return persist_store();
+    esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (out_entry) {
+        *out_entry = removed;
+    }
+    return ESP_OK;
 }
 
 uint8_t d1l_contact_store_meshcore_type_id(const char *type)

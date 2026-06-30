@@ -31,6 +31,8 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "nvs_get_blob" in source
     assert "nvs_set_blob" in source
     assert "static d1l_contact_store_blob_t s_blob_scratch" in source
+    assert "static d1l_contact_store_blob_t s_rollback_scratch" in source
+    assert "persist_store_or_rollback" in source
     assert "find_index_by_fingerprint" in source
     assert "oldest_index" in source
     assert "d1l_contact_store_update_path" in source
@@ -39,6 +41,8 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "d1l_contact_store_delete" in header
     assert "esp_err_t d1l_contact_store_rename" in source
     assert "esp_err_t d1l_contact_store_delete" in source
+    assert source.count("persist_store_or_rollback(&s_rollback_scratch)") >= 5
+    assert "d1l_contact_entry_t removed = s_entries[index]" in source
     assert "D1L_CONTACT_EXPORT_URI_LEN 224U" in header
     assert "d1l_contact_store_export_uri" in header
     assert "meshcore://contact/add?name=%s&public_key=%s&type=%u" in source

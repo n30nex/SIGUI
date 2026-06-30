@@ -106,6 +106,7 @@ def expected_command_name(command: str) -> str:
         "settings set name ",
         "settings set pathhash ",
         "settings onboarding complete ",
+        "contacts add ",
         "contacts export ",
         "contacts rename ",
         "contacts delete ",
