@@ -31,6 +31,7 @@ SMOKE_COMMANDS = [
     "wifi scan",
     "ble status",
     "rp2040 status",
+    "storage status",
     "packets",
     "packets filter any any",
     "packets search test",

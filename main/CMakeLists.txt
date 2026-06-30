@@ -31,6 +31,7 @@ idf_component_register(
         "mesh/route_store.c"
         "mesh/meshcore_service.c"
         "mesh/meshcore_radio_profile.c"
+        "storage/storage_status.c"
         "ui/ui_phase1.c"
     INCLUDE_DIRS
         "."
@@ -39,6 +40,7 @@ idf_component_register(
         "diagnostics"
         "hal"
         "mesh"
+        "storage"
         "../third_party/MeshCore/lib/ed25519"
         "ui"
     REQUIRES

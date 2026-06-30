@@ -78,6 +78,9 @@ class Snapshot:
     dm_messages: tuple[Message, ...]
     packets: tuple[Packet, ...]
     routes: tuple[Packet, ...]
+    storage_state: str
+    storage_backend: str
+    storage_detail: str
 
 
 def sample_snapshot() -> Snapshot:
@@ -118,6 +121,9 @@ def sample_snapshot() -> Snapshot:
             Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon", ""),
             Packet("DM route", "TX", "target 0BF0A direct", "direct path retained", ""),
         ),
+        storage_state="pending bridge",
+        storage_backend="NVS fallback",
+        storage_detail="RP2040 SD bridge pending",
     )
 
 
@@ -201,6 +207,9 @@ def large_mesh_snapshot() -> Snapshot:
         dm_messages=dm_messages,
         packets=packets,
         routes=routes,
+        storage_state="pending bridge",
+        storage_backend="NVS fallback",
+        storage_detail="RP2040 SD bridge pending",
     )
 
 
@@ -538,7 +547,7 @@ def render_settings(s: Surface, snap: Snapshot):
     draw_metric(s, (16, 104, 464, 166), "Radio", snap.radio_profile, "TX 20 dBm, TCXO NONE", ACCENT)
     draw_metric(s, (16, 176, 464, 238), "Identity", snap.node_name, snap.fingerprint, BLUE)
     draw_metric(s, (16, 248, 464, 310), "Companion", "USB ready", "Wi-Fi off, BLE off, offline-first", GREEN)
-    draw_metric(s, (16, 320, 230, 394), "Health", "heap 246K", "ui stack 3268, reset SW", AMBER)
+    draw_metric(s, (16, 320, 230, 394), "Storage", snap.storage_backend, snap.storage_detail, AMBER)
     draw_button(s, (250, 320, 354, 394), "Radio", ACCENT)
     draw_button(s, (364, 320, 464, 394), "Advert", ACCENT)
     draw_dock(s, "Settings")
@@ -810,7 +819,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
-    "settings": ("Settings", "Radio", "Identity", "Companion", "Health", "Advert"),
+    "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),

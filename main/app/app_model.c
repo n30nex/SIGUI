@@ -9,6 +9,7 @@
 #include "diagnostics/health_monitor.h"
 #include "mesh/meshcore_service.h"
 #include "mesh/read_state.h"
+#include "storage/storage_status.h"
 
 static d1l_app_model_t s_model = {
     .board_ready = false,
@@ -88,6 +89,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     d1l_health_snapshot_t health = d1l_health_snapshot();
     d1l_connectivity_status_t connectivity = {0};
     d1l_connectivity_status(&connectivity);
+    d1l_storage_status_t storage = {0};
+    d1l_storage_status(&storage);
 
     snapshot->board_ready = s_model.board_ready;
     snapshot->ui_ready = s_model.ui_ready;
@@ -110,6 +113,27 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->wifi_state = connectivity.wifi_state;
     snapshot->ble_state = connectivity.ble_state;
     snapshot->coexistence_policy = connectivity.coexistence_policy;
+    snapshot->storage_direct_supported = storage.direct_supported;
+    snapshot->storage_rp2040_bridge_required = storage.rp2040_bridge_required;
+    snapshot->storage_rp2040_bridge_ready = storage.rp2040_bridge_ready;
+    snapshot->storage_sd_present = storage.sd_present;
+    snapshot->storage_sd_mounted = storage.sd_mounted;
+    snapshot->storage_format_required = storage.format_required;
+    snapshot->storage_format_supported = storage.format_supported;
+    snapshot->storage_data_enabled = storage.data_enabled;
+    snapshot->storage_last_error = storage.last_error;
+    snapshot->storage_sd_state = storage.sd_state;
+    snapshot->storage_sd_interface = storage.sd_interface;
+    snapshot->storage_mount_point = storage.mount_point;
+    snapshot->storage_data_root = storage.data_root;
+    snapshot->storage_backend = storage.data_backend;
+    snapshot->message_store_backend = storage.message_store_backend;
+    snapshot->dm_store_backend = storage.dm_store_backend;
+    snapshot->packet_log_backend = storage.packet_log_backend;
+    snapshot->route_store_backend = storage.route_store_backend;
+    snapshot->map_tile_backend = storage.map_tile_backend;
+    snapshot->export_backend = storage.export_backend;
+    snapshot->storage_note = storage.note;
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
     if (settings->identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),

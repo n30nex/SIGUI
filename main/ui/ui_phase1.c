@@ -448,11 +448,21 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     render_metric_card(s_content, 18, 136, "RF Packets", value, detail, 0x93C5FD);
 
     snprintf(value, sizeof(value), "%luK", (unsigned long)(snapshot->heap_free / 1024U));
-    snprintf(detail, sizeof(detail), "%s  stk %lu  up %lum",
-             snapshot->reset_reason ? snapshot->reset_reason : "reset",
-             (unsigned long)snapshot->ui_task_stack_free_words,
+    snprintf(detail, sizeof(detail), "store %s  up %lum",
+             snapshot->storage_backend ? snapshot->storage_backend : "nvs",
              (unsigned long)(snapshot->uptime_ms / 60000U));
     render_metric_card(s_content, 238, 136, "System", value, detail, 0xC4B5FD);
+}
+
+static void render_storage_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
+{
+    lv_obj_t *line = create_label(parent, "", 0x8EA0AE);
+    label_set_fmt(line, "Storage %s  SD %s",
+                  snapshot->storage_backend ? snapshot->storage_backend : "nvs",
+                  snapshot->storage_sd_state ? snapshot->storage_sd_state : "unknown");
+    lv_label_set_long_mode(line, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(line, 126);
+    lv_obj_set_pos(line, 0, y);
 }
 
 static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -2325,6 +2335,10 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
 
     create_button(s_content, "Radio", 18, 332, 130, 48, open_radio_settings_event_cb, NULL);
     create_button(s_content, "Advert", 160, 332, 130, 48, open_sheet_event_cb, NULL);
+    lv_obj_t *storage = create_panel(s_content, 302, 332, 140, 48);
+    lv_obj_set_style_pad_all(storage, 8, 0);
+    create_label(storage, "Storage", 0xF4F7FB);
+    render_storage_line(storage, 22, snapshot);
 }
 
 static void render_active_tab(void)

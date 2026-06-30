@@ -17,6 +17,7 @@
 #include "mesh/read_state.h"
 #include "mesh/route_store.h"
 #include "mesh/meshcore_service.h"
+#include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 #include "comms/connectivity_manager.h"
 #include "comms/usb_console.h"
@@ -34,6 +35,11 @@ void app_main(void)
 
     printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\"}\n",
            D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION);
+
+    esp_err_t storage_ret = d1l_storage_status_init();
+    if (storage_ret != ESP_OK) {
+        ESP_LOGW(TAG, "storage status init failed: %s", esp_err_to_name(storage_ret));
+    }
 
     esp_err_t crash_log_ret = d1l_crash_log_init();
     if (crash_log_ret != ESP_OK) {
@@ -80,6 +86,7 @@ void app_main(void)
 
     esp_err_t board_ret = d1l_board_init();
     esp_err_t rp2040_ret = d1l_rp2040_bridge_init();
+    d1l_storage_status_note_rp2040(rp2040_ret);
     if (rp2040_ret != ESP_OK) {
         ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s", esp_err_to_name(rp2040_ret));
     }

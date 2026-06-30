@@ -34,6 +34,7 @@ def test_packet_log_is_bounded_and_nvs_backed():
     assert "packet_matches" in source
     assert "D1L_PACKET_LOG_SCHEMA 2U" in source
     assert "ESP_ERR_NOT_FOUND" in source
+    assert '\\"packet_log_backend\\"' in read("main/comms/usb_console.c")
     assert "esp_err_t packet_log_ret = d1l_packet_log_init()" in app_main
 
 
@@ -63,3 +64,4 @@ def test_console_exposes_packet_detail_and_clear():
     assert "packets" in SMOKE_COMMANDS
     assert "packets filter any any" in SMOKE_COMMANDS
     assert "packets search test" in SMOKE_COMMANDS
+    assert "storage status" in SMOKE_COMMANDS

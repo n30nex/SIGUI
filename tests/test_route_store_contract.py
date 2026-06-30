@@ -29,6 +29,7 @@ def test_route_store_is_bounded_and_nvs_backed():
     assert "d1l_route_store_copy_for_target" in header
     assert "strncmp(s_entries[i].target, target" in source
     assert "ESP_ERR_NOT_FOUND" in source
+    assert '\\"route_store_backend\\"' in read("main/comms/usb_console.c")
     assert '"mesh/route_store.c"' in cmake
     assert "d1l_route_store_init()" in app_main
 

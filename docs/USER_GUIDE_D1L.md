@@ -83,6 +83,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `wifi status`
 - `wifi scan`
 - `ble status`
+- `storage status`
 
 ## Current Limits
 
@@ -92,6 +93,6 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - Route Trace is retained local evidence only; active RF ping/trace commands are not enabled yet.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.
 - Wi-Fi runtime, BLE companion runtime, OTA, and live Wi-Fi scan/connect are not enabled yet.
-- Optional SD-card data storage is planned but not implemented yet. Current builds keep retained stores on onboard flash/NVS and continue normally regardless of SD card presence.
+- Optional SD-card data storage is planned but not implemented yet. Current builds expose `storage status`, report the D1L SD path as pending the RP2040 bridge, keep retained stores on onboard flash/NVS, and do not offer or run formatting.
 - Full 12-hour idle/listening soak is still pending; the 1-hour active Public `test` soak has passed.
 - Flash backup was intentionally skipped during current bring-up when the operator requested it.

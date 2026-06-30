@@ -32,6 +32,7 @@
 #include "mesh/route_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
+#include "storage/storage_status.h"
 
 static void trim_line(char *line)
 {
@@ -612,6 +613,56 @@ static void cmd_rp2040_status(void)
            status.uart_ready ? "true" : "false", esp_err_to_name(ret), status.uart_port,
            status.tx_gpio, status.rx_gpio, status.baud_rate, status.reset_expander_pin,
            (unsigned long)status.buffered_bytes);
+}
+
+static void cmd_storage_status(void)
+{
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+    ok_begin("storage status");
+    printf(",\"sd\":{\"state\":");
+    print_json_string(status.sd_state ? status.sd_state : "unknown");
+    printf(",\"interface\":");
+    print_json_string(status.sd_interface ? status.sd_interface : "unknown");
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"present\":%s,\"mounted\":%s,\"format_required\":%s,\"format_supported\":%s,\"mount_point\":",
+           bool_json(status.direct_supported),
+           bool_json(status.rp2040_bridge_required),
+           bool_json(status.rp2040_bridge_ready),
+           bool_json(status.sd_present),
+           bool_json(status.sd_mounted),
+           bool_json(status.format_required),
+           bool_json(status.format_supported));
+    print_json_string(status.mount_point ? status.mount_point : "");
+    printf(",\"data_root\":");
+    print_json_string(status.data_root ? status.data_root : "");
+    printf(",\"last_error\":\"%s\"},\"data_enabled\":%s,\"data_backend\":",
+           esp_err_to_name(status.last_error), bool_json(status.data_enabled));
+    print_json_string(status.data_backend ? status.data_backend : "nvs");
+    printf(",\"message_store_backend\":");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    printf(",\"dm_store_backend\":");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    printf(",\"packet_log_backend\":");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    printf(",\"route_store_backend\":");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    printf(",\"map_tile_backend\":");
+    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
+    print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
+    printf(",\"dm\":");
+    print_json_string(status.dm_store_backend ? status.dm_store_backend : "nvs");
+    printf(",\"packets\":");
+    print_json_string(status.packet_log_backend ? status.packet_log_backend : "nvs");
+    printf(",\"routes\":");
+    print_json_string(status.route_store_backend ? status.route_store_backend : "nvs");
+    printf(",\"contacts\":\"nvs\",\"read_state\":\"nvs\",\"crashlog\":\"nvs\",\"map_tiles\":");
+    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"exports\":");
+    print_json_string(status.export_backend ? status.export_backend : "serial");
+    printf("},\"format_action\":\"not_available\",\"fallback\":\"nvs\",\"note\":");
+    print_json_string(status.note ? status.note : "");
+    printf("}\n");
 }
 
 static void print_packet_entry_json(const d1l_packet_log_entry_t *e)
@@ -1656,7 +1707,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -1717,6 +1768,8 @@ static void handle_line(const char *line)
         cmd_companion_status();
     } else if (strcmp(line, "rp2040 status") == 0) {
         cmd_rp2040_status();
+    } else if (strcmp(line, "storage status") == 0) {
+        cmd_storage_status();
     } else if (strcmp(line, "packets") == 0) {
         cmd_packets();
     } else if (strncmp(line, "packets filter ", 15) == 0) {
