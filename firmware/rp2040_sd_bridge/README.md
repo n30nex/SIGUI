@@ -72,13 +72,15 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_STATUS` mounts the card if possible and creates `/deskos` when the
   filesystem is usable. Ready cards also advertise `file_ops=1`,
   `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
-  `atomic_rename=1`.
+  `atomic_rename=1`. If the bridge cannot mount the SD path, it reports a safe
+  no-card/unavailable state instead of enabling the format path.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
 - `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under
   `/deskos`: `stat`, `read`, `write`, `append`, `delete`, and `rename`. Payloads
   use base64url without padding, CRC32 checks, sanitized relative paths, and
   192-byte chunks so each newline-delimited request remains under the 512-byte
-  line cap.
+  line cap. `rename replace=1` uses a backup/rollback step when replacing an
+  existing final file so ordinary rename failures do not erase the old final.
 - No formatting happens at boot or during status checks.
 - Retained Public message history, DM history, route history, and packet history
   can use the SD file protocol once the ESP32 sees a ready card, file operations,

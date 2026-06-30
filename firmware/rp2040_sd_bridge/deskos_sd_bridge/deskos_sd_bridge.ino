@@ -32,6 +32,8 @@ constexpr size_t FILE_CHUNK_MAX = 192;
 constexpr size_t FILE_PATH64_MAX = 128;
 constexpr size_t FILE_DATA64_MAX = 256;
 constexpr size_t FILE_FULL_PATH_MAX = sizeof("/deskos/") + FILE_PATH_MAX;
+constexpr const char *REPLACE_BACKUP_SUFFIX = ".bak";
+constexpr bool REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE = true;
 
 struct SdSnapshot {
     const char *state;
@@ -95,16 +97,16 @@ void fill_capacity(SdSnapshot &snapshot) {
 
 SdSnapshot current_status() {
     SdSnapshot snapshot = {
-        "setup_required",
-        true,
+        "no_card",
         false,
         false,
-        "unknown",
-        true,
-        true,
+        false,
+        "none",
+        false,
+        false,
         0,
         0,
-        "mount_failed_or_unformatted",
+        "no_card",
     };
 
     if (!mount_sd()) {
@@ -254,7 +256,7 @@ bool copy_token_value(const char *line, const char *key, char *dest, size_t dest
             ++p;
         }
         const size_t token_len = static_cast<size_t>(p - token);
-        if (token_len > key_len + 1U &&
+        if (token_len >= key_len + 1U &&
             strncmp(token, key, key_len) == 0 &&
             token[key_len] == '=') {
             const size_t value_len = token_len - key_len - 1U;
@@ -390,6 +392,40 @@ bool ensure_parent_dirs(const char *full_path) {
     return true;
 }
 
+bool make_backup_path(const char *target_path, char *backup_path, size_t backup_size) {
+    if (!target_path || !backup_path || backup_size == 0) {
+        return false;
+    }
+    const int written = snprintf(backup_path, backup_size, "%s%s",
+                                 target_path, REPLACE_BACKUP_SUFFIX);
+    return written > 0 && static_cast<size_t>(written) < backup_size;
+}
+
+const char *rename_replace_preserving_old(const char *source_path, const char *target_path) {
+    if (!SD.exists(target_path)) {
+        return SD.rename(source_path, target_path) ? nullptr : "rename_failed";
+    }
+
+    char backup_path[FILE_FULL_PATH_MAX];
+    if (!make_backup_path(target_path, backup_path, sizeof(backup_path))) {
+        return "too_large";
+    }
+    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
+        return "delete_failed";
+    }
+    if (!SD.rename(target_path, backup_path)) {
+        return "rename_failed";
+    }
+    if (!SD.rename(source_path, target_path)) {
+        (void)SD.rename(backup_path, target_path);
+        return "rename_failed";
+    }
+    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
+        return "delete_failed";
+    }
+    return nullptr;
+}
+
 void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) {
     const bool file_ready = snapshot.present && snapshot.mounted && snapshot.deskos &&
                             !snapshot.format_required;
@@ -423,7 +459,7 @@ void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) 
     line += " path_max=";
     line += String(static_cast<unsigned long>(FILE_PATH_MAX));
     line += " atomic_rename=";
-    line += bool_token(file_ready);
+    line += bool_token(file_ready && REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE);
     out.println(line);
 }
 
@@ -573,9 +609,12 @@ void handle_file_read(uint32_t request_id, const char *line) {
         return;
     }
     if (!parse_u32_token(line, "off", &offset) ||
-        !parse_u32_token(line, "len", &requested_len) ||
-        requested_len > FILE_CHUNK_MAX) {
+        !parse_u32_token(line, "len", &requested_len)) {
         send_file_error(request_id, "read", "range");
+        return;
+    }
+    if (requested_len > FILE_CHUNK_MAX) {
+        send_file_error(request_id, "read", "too_large");
         return;
     }
     if (!SD.exists(full_path)) {
@@ -638,6 +677,10 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     }
     if (!decode_file_data(line, data, sizeof(data), &data_len, &err)) {
         send_file_error(request_id, op_name, err);
+        return;
+    }
+    if (append_mode && data_len == 0U) {
+        send_file_error(request_id, op_name, "bad_value");
         return;
     }
 
@@ -750,21 +793,23 @@ void handle_file_rename(uint32_t request_id, const char *line) {
         send_file_error(request_id, "rename", "not_found");
         return;
     }
-    if (SD.exists(target_path)) {
-        if (!replace_target) {
-            send_file_error(request_id, "rename", "exists");
-            return;
-        }
-        if (!SD.remove(target_path)) {
-            send_file_error(request_id, "rename", "delete_failed");
-            return;
-        }
-    }
     if (!ensure_parent_dirs(target_path)) {
         send_file_error(request_id, "rename", "open_failed");
         return;
     }
-    if (!SD.rename(source_path, target_path)) {
+    if (SD.exists(target_path) && !replace_target) {
+        send_file_error(request_id, "rename", "exists");
+        return;
+    }
+
+    const char *replace_error = replace_target
+                                    ? rename_replace_preserving_old(source_path, target_path)
+                                    : (SD.rename(source_path, target_path) ? nullptr : "rename_failed");
+    if (replace_error) {
+        send_file_error(request_id, "rename", replace_error);
+        return;
+    }
+    if (!SD.exists(target_path)) {
         send_file_error(request_id, "rename", "rename_failed");
         return;
     }

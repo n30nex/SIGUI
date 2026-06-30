@@ -210,6 +210,83 @@ def test_file_protocol_supports_bounded_write_read_rename_delete_cycle():
     assert path != final
 
 
+def test_file_protocol_replace_preserves_final_and_zero_length_write_policy():
+    fs = SdFileSystem(files={"logs/final.bin": b"old-final"})
+    tmp = encode_path("logs/tmp.bin")
+    final = encode_path("logs/final.bin")
+    zero = b""
+    new = b"new-final"
+
+    zero_write = file_tokens(
+        reply_for_request(
+            file_request(
+                30,
+                "write",
+                path=tmp,
+                off=0,
+                len=0,
+                trunc=1,
+                data=b64url(zero),
+                crc=crc32_hex(zero),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    rewrite = file_tokens(
+        reply_for_request(
+            file_request(
+                31,
+                "write",
+                path=tmp,
+                off=0,
+                len=len(new),
+                trunc=1,
+                data=b64url(new),
+                crc=crc32_hex(new),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    replace = file_tokens(
+        reply_for_request(
+            file_request(32, "rename", path=tmp, to=final, replace=1),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    read = file_tokens(
+        reply_for_request(
+            file_request(33, "read", path=final, off=0, len=MAX_FILE_CHUNK_BYTES),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    empty_append = file_tokens(
+        reply_for_request(
+            file_request(
+                34,
+                "append",
+                path=tmp,
+                len=0,
+                data=b64url(zero),
+                crc=crc32_hex(zero),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+
+    assert zero_write["ok"] == "1"
+    assert zero_write["size"] == "0"
+    assert rewrite["ok"] == "1"
+    assert replace["ok"] == "1"
+    assert read["data"] == b64url(new)
+    assert empty_append["ok"] == "0"
+    assert empty_append["err"] == "bad_value"
+
+
 def test_filecanary_transcript_matches_storage_filecanary_contract():
     transcript = file_canary_transcript(SCENARIOS["ready"])
     requests = [exchange["request"] for exchange in transcript]
@@ -539,6 +616,19 @@ def test_file_protocol_rejects_bad_paths_crc_and_large_chunks():
     assert FILE_LINE_MAX == 512
     assert MAX_FILE_CHUNK_BYTES == 192
     assert "crc_mismatch" in FILE_ERROR_CODES
+
+
+def test_reference_transcripts_stay_inside_line_cap():
+    transcripts = [
+        file_canary_transcript(SCENARIOS["ready"]),
+        export_canary_transcript(SCENARIOS["ready"], "export1"),
+        diagnostic_export_transcript(SCENARIOS["ready"], "diag1"),
+    ]
+
+    for transcript in transcripts:
+        for exchange in transcript:
+            assert len(exchange["request"]) <= FILE_LINE_MAX
+            assert len(exchange["reply"]) <= FILE_LINE_MAX
 
 
 def test_unknown_request_is_rejected():

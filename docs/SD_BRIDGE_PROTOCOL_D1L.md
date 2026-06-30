@@ -33,6 +33,9 @@ Required tokens:
 - `file_chunk_max`: maximum decoded read/write/append payload size. Current value: `192` bytes.
 - `path_max`: maximum decoded relative path length. Current value: `96` bytes.
 - `atomic_rename`: `1` when temp-file writes can be committed with `rename replace=1`.
+  The RP2040 bridge must preserve the previous final file on ordinary rename
+  failure when replacing an existing target; power-loss atomicity is still
+  limited by the underlying FAT/SD stack.
 
 Values must not contain spaces. Use underscores in `note`.
 
@@ -114,6 +117,9 @@ through a same-directory `.tmp` path. ESP32 keeps an onboard NVS mirror so
 removing or timing out the SD card does not strand message, route, or packet
 history. Do not blindly retry `append` after a timeout unless the higher-level
 record format has its own idempotency key.
+
+Zero-byte `write` with `trunc=1` is allowed for create/truncate semantics.
+Zero-byte `append` is rejected with `bad_value`.
 
 ## Storage Filecanary Transcript
 

@@ -54,6 +54,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
     for field in FILE_CAPABILITY_FIELDS:
         assert f"{field}=" in sketch
     for state in [
+        "no_card",
         "ready",
         "setup_required",
         "confirmation_required",
@@ -61,9 +62,9 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
     ]:
         assert state in sketch
     for note in [
+        "no_card",
         "ready",
         "deskos_root_missing",
-        "mount_failed_or_unformatted",
         "format_complete",
         "confirmation_required",
         "format_failed",
@@ -91,12 +92,19 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "encode_base64url" in sketch
     assert "crc32_bytes" in sketch
     assert "crc_mismatch" in sketch
+    assert '"too_large"' in sketch
+    assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch
     assert "handle_file_read" in sketch
     assert "handle_file_write" in sketch
     assert "handle_file_delete" in sketch
     assert "handle_file_rename" in sketch
     assert "SD.rename(source_path, target_path)" in sketch
+    assert "REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE" in sketch
+    assert "rename_replace_preserving_old" in sketch
+    assert "REPLACE_BACKUP_SUFFIX" in sketch
+    assert "SD.rename(target_path, backup_path)" in sketch
+    assert "(void)SD.rename(backup_path, target_path)" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
