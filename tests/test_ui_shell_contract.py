@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from tools import ui_simulator
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -93,6 +95,70 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_meshcore_service_request_advert(flood)" in model
     assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
     assert "d1l_meshcore_service_ensure_identity()" in model
+
+
+def test_ui_simulator_flow_names_match_lvgl_handlers():
+    source = read("main/ui/ui_phase1.c")
+    actions = {
+        step["action"]
+        for flow in ui_simulator.EXPECTED_FLOWS
+        for step in flow["steps"]
+    }
+    flow_names = {flow["name"] for flow in ui_simulator.EXPECTED_FLOWS}
+
+    assert {
+        "first_boot_onboarding",
+        "lock_overlay_unlock",
+        "public_compose_and_send",
+        "public_history_search",
+        "dm_thread_read_and_reply",
+        "contact_detail_management",
+        "contact_edit_alias_and_forget",
+        "packet_filters_search_and_details",
+        "mesh_roles_browser",
+        "settings_radio_storage_and_advert",
+    } <= flow_names
+
+    handler_symbols = {
+        "complete_onboarding": "onboarding_start_event_cb",
+        "apply_onboarding_defaults": "onboarding_defaults_event_cb",
+        "unlock": "unlock_event_cb",
+        "open_public_compose": "open_compose_event_cb",
+        "edit_public_message": "s_compose_textarea",
+        "send_public_text": "send_compose_text",
+        "mark_messages_read": "mark_messages_read_event_cb",
+        "open_public_history": "open_public_history_event_cb",
+        "open_public_search": "open_public_search_event_cb",
+        "edit_public_search": "s_public_search_textarea",
+        "apply_public_search": "apply_public_search_event_cb",
+        "open_dm_thread": "open_dm_thread_event_cb",
+        "open_dm_reply": "reply_dm_thread_event_cb",
+        "mark_dm_thread_read": "read_dm_thread_event_cb",
+        "open_contact_detail": "open_contact_detail_event_cb",
+        "open_contact_edit": "open_contact_edit_event_cb",
+        "edit_contact_alias": "s_contact_edit_textarea",
+        "save_contact_alias": "save_contact_edit_event_cb",
+        "forget_contact": "forget_contact_edit_event_cb",
+        "open_contact_export": "contact_detail_export_event_cb",
+        "open_route_trace": "open_route_trace_event_cb",
+        "open_packet_search": "open_packet_search_event_cb",
+        "edit_packet_search": "s_packet_search_textarea",
+        "apply_packet_search": "apply_packet_search_event_cb",
+        "open_packet_detail": "open_packet_detail_event_cb",
+        "open_route_detail": "open_route_detail_event_cb",
+        "open_mesh_roles": "open_mesh_roles_event_cb",
+        "open_radio_settings": "open_radio_settings_event_cb",
+        "radio_freq_down": "radio_edit_adjust_event_cb",
+        "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
+        "save_radio_profile": "radio_save_event_cb",
+        "open_storage_setup": "open_storage_sheet_event_cb",
+        "open_advert_sheet": "open_sheet_event_cb",
+        "send_advert_zero": "advert_zero_event_cb",
+        "send_advert_flood": "advert_flood_event_cb",
+    }
+    assert set(handler_symbols) <= actions
+    for symbol in handler_symbols.values():
+        assert symbol in source
 
 
 def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():

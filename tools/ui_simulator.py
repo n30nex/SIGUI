@@ -17,6 +17,7 @@ HEIGHT = 480
 TOP_BAR_H = 54
 DOCK_Y = 420
 DOCK_H = 60
+MIN_TOUCH_TARGET = 44
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -313,6 +314,7 @@ class Surface:
         self.draw = ImageDraw.Draw(self.image)
         self._fonts: dict[tuple[int, bool], ImageFont.ImageFont] = {}
         self.text_records: list[dict[str, object]] = []
+        self.touch_targets: list[dict[str, object]] = []
         self.labels: list[str] = []
         self.metrics: dict[str, int | str | bool] = {}
 
@@ -364,6 +366,76 @@ class Surface:
 
     def line(self, points: tuple[tuple[int, int], tuple[int, int]], fill: tuple[int, int, int] = BORDER):
         self.draw.line(points, fill=fill, width=1)
+
+    def touch_target(
+        self,
+        label: str,
+        box: tuple[int, int, int, int],
+        *,
+        kind: str = "button",
+        action: str | None = None,
+        destination: str | None = None,
+        rf_tx: bool = False,
+        public_rf_tx: bool = False,
+        dm_tx: bool = False,
+        destructive: bool = False,
+        formats_sd: bool = False,
+    ):
+        target = self._minimum_touch_box(box)
+        x0, y0, x1, y1 = target
+        width = x1 - x0
+        height = y1 - y0
+        offscreen = x0 < 0 or y0 < 0 or x1 > WIDTH or y1 > HEIGHT
+        top_bar_overlap = kind not in ("screen", "top_bar") and self.view != "lock_overlay" and y0 < TOP_BAR_H
+        dock_overlap = kind != "dock_tab" and self.view not in ("lock_overlay", "onboarding_sheet") and y1 > DOCK_Y
+        self.touch_targets.append(
+            {
+                "label": label,
+                "kind": kind,
+                "action": action or normalize_action(label),
+                "destination": destination,
+                "visual_box": list(box),
+                "box": [x0, y0, x1, y1],
+                "center": [(x0 + x1) // 2, (y0 + y1) // 2],
+                "width": width,
+                "height": height,
+                "too_small": width < MIN_TOUCH_TARGET or height < MIN_TOUCH_TARGET,
+                "offscreen": offscreen,
+                "top_bar_overlap": top_bar_overlap,
+                "dock_overlap": dock_overlap,
+                "rf_tx": rf_tx or public_rf_tx or dm_tx,
+                "public_rf_tx": public_rf_tx,
+                "dm_tx": dm_tx,
+                "destructive": destructive,
+                "formats_sd": formats_sd,
+            }
+        )
+
+    def _minimum_touch_box(self, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        x0, y0, x1, y1 = box
+        width = x1 - x0
+        height = y1 - y0
+        if width < MIN_TOUCH_TARGET:
+            pad = MIN_TOUCH_TARGET - width
+            x0 -= pad // 2
+            x1 += pad - pad // 2
+        if height < MIN_TOUCH_TARGET:
+            pad = MIN_TOUCH_TARGET - height
+            y0 -= pad // 2
+            y1 += pad - pad // 2
+        if x0 < 0:
+            x1 -= x0
+            x0 = 0
+        if x1 > WIDTH:
+            x0 -= x1 - WIDTH
+            x1 = WIDTH
+        if y0 < 0:
+            y1 -= y0
+            y0 = 0
+        if y1 > HEIGHT:
+            y0 -= y1 - HEIGHT
+            y1 = HEIGHT
+        return (max(0, x0), max(0, y0), min(WIDTH, x1), min(HEIGHT, y1))
 
     def text(
         self,
@@ -418,16 +490,28 @@ class Surface:
 
     def summary(self, screenshot: Path, required: tuple[str, ...]) -> dict[str, object]:
         missing = [label for label in required if label not in self.labels]
+        touch_issues = [
+            target
+            for target in self.touch_targets
+            if target["too_small"] or target["offscreen"] or target["top_bar_overlap"] or target["dock_overlap"]
+        ]
         return {
             "name": self.view,
             "screenshot": screenshot.as_posix(),
             "labels": self.labels,
+            "touch_targets": self.touch_targets,
+            "touch_target_count": len(self.touch_targets),
+            "touch_target_issues": touch_issues,
             "missing_required_labels": missing,
             "truncated_labels": [r for r in self.text_records if r["truncated"]],
             "overflow": [r for r in self.text_records if r["overflow"]],
             "text_count": len(self.text_records),
             "metrics": self.metrics,
         }
+
+
+def normalize_action(label: str) -> str:
+    return "tap_" + "".join(ch.lower() if ch.isalnum() else "_" for ch in label).strip("_")
 
 
 def draw_top_bar(s: Surface, snap: Snapshot):
@@ -452,19 +536,56 @@ def draw_dock(s: Surface, active: str):
         if active_tab:
             s.round_rect((x0 + 8, DOCK_Y + 8, x1 - 8, HEIGHT - 8), (29, 48, 62), (58, 88, 104), 8)
         s.text(label, (x0 + 6, DOCK_Y + 17, x1 - 6, HEIGHT - 15), 13, TEXT if active_tab else MUTED, active_tab, "center")
+        s.touch_target(f"{name} tab", (x0, DOCK_Y, x1, HEIGHT), kind="dock_tab", action=f"open_{name.lower()}", destination=name.lower())
 
 
-def draw_metric(s: Surface, box: tuple[int, int, int, int], title: str, value: str, detail: str, color: tuple[int, int, int] = ACCENT):
+def draw_metric(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    value: str,
+    detail: str,
+    color: tuple[int, int, int] = ACCENT,
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+):
     x0, y0, x1, y1 = box
     s.round_rect(box)
     s.text(title, (x0 + 12, y0 + 8, x1 - 12, y0 + 28), 12, MUTED, True)
     s.text(value, (x0 + 12, y0 + 30, x1 - 12, y0 + 57), 20, color, True)
     s.text(detail, (x0 + 12, y1 - 27, x1 - 12, y1 - 8), 11, MUTED)
+    if action or destination:
+        s.touch_target(title, box, kind="card", action=action, destination=destination)
 
 
-def draw_button(s: Surface, box: tuple[int, int, int, int], label: str, color: tuple[int, int, int] = ACCENT):
+def draw_button(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    label: str,
+    color: tuple[int, int, int] = ACCENT,
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+    rf_tx: bool = False,
+    public_rf_tx: bool = False,
+    dm_tx: bool = False,
+    destructive: bool = False,
+    formats_sd: bool = False,
+):
     s.round_rect(box, (24, 43, 54), (52, 92, 105), 8)
     s.text(label, (box[0] + 8, box[1] + 8, box[2] - 8, box[3] - 8), 14, color, True, "center")
+    s.touch_target(
+        label,
+        box,
+        action=action,
+        destination=destination,
+        rf_tx=rf_tx,
+        public_rf_tx=public_rf_tx,
+        dm_tx=dm_tx,
+        destructive=destructive,
+        formats_sd=formats_sd,
+    )
 
 
 def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
@@ -493,9 +614,21 @@ def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
                 s.rect((ox + x * cell, oy + y * cell, ox + (x + 1) * cell, oy + (y + 1) * cell), (2, 6, 10))
 
 
-def draw_row(s: Surface, box: tuple[int, int, int, int], title: str, detail: str, badge: str | None = None):
+def draw_row(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    detail: str,
+    badge: str | None = None,
+    *,
+    target_label: str | None = None,
+    action: str | None = None,
+    destination: str | None = None,
+):
     x0, y0, x1, y1 = box
     s.round_rect(box, SURFACE_2, BORDER, 8)
+    if target_label or action or destination:
+        s.touch_target(target_label or title, box, kind="row", action=action, destination=destination)
     row_h = y1 - y0
     title_right = x1 - 70 if badge else x1 - 10
     if row_h >= 38:
@@ -520,10 +653,10 @@ def draw_home_body(s: Surface, snap: Snapshot):
     s.text("Latest Public", (28, 252, 180, 272), 13, MUTED, True)
     s.text("YKF Corebot: Public test reply received", (28, 276, 452, 300), 16, TEXT, True)
     s.text("RX new  RSSI -41  route direct", (28, 300, 452, 316), 11, MUTED)
-    draw_button(s, (16, 332, 120, 388), "Send")
-    draw_button(s, (128, 332, 232, 388), "Advert")
-    draw_button(s, (248, 332, 352, 388), "Nodes", BLUE)
-    draw_button(s, (360, 332, 464, 388), "Packets", AMBER)
+    draw_button(s, (16, 332, 120, 388), "Send", action="open_public_compose", destination="compose_sheet")
+    draw_button(s, (128, 332, 232, 388), "Advert", action="open_advert_sheet", destination="advert_sheet")
+    draw_button(s, (248, 332, 352, 388), "Nodes", BLUE, action="open_nodes_tab", destination="nodes")
+    draw_button(s, (360, 332, 464, 388), "Packets", AMBER, action="open_packets_tab", destination="packets")
 
 
 def render_home(s: Surface, snap: Snapshot):
@@ -535,10 +668,10 @@ def render_home(s: Surface, snap: Snapshot):
 def render_messages(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Messages", (16, 64, 150, 92), 22, TEXT, True)
-    draw_button(s, (172, 64, 226, 100), "Read", GREEN)
-    draw_button(s, (234, 64, 316, 100), "Compose", ACCENT)
-    draw_button(s, (324, 64, 400, 100), "History", BLUE)
-    draw_button(s, (408, 64, 464, 100), "Test", AMBER)
+    draw_button(s, (172, 64, 226, 100), "Read", GREEN, action="mark_messages_read")
+    draw_button(s, (234, 64, 316, 100), "Compose", ACCENT, action="open_public_compose", destination="compose_sheet")
+    draw_button(s, (324, 64, 400, 100), "History", BLUE, action="open_public_history", destination="public_history_sheet")
+    draw_button(s, (408, 64, 464, 100), "Test", AMBER, action="send_public_test", public_rf_tx=True)
     s.round_rect((16, 112, 464, 258))
     s.text("Public", (28, 120, 150, 142), 14, MUTED, True)
     y = 148
@@ -556,7 +689,16 @@ def render_messages(s: Surface, snap: Snapshot):
     for msg in snap.dm_messages:
         if y + 34 > 396:
             break
-        draw_row(s, (28, y, 452, y + 34), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
+        draw_row(
+            s,
+            (28, y, 452, y + 34),
+            f"{msg.source}: {msg.text}",
+            msg.meta,
+            "new" if msg.unread else None,
+            target_label=f"DM row {msg.source}",
+            action="open_dm_thread",
+            destination="dm_thread_sheet",
+        )
         y += 38
         dm_rendered += 1
     s.metrics.update(
@@ -580,8 +722,17 @@ def render_nodes(s: Surface, snap: Snapshot):
     for node in snap.contacts:
         if y + 34 > 220:
             break
-        draw_row(s, (28, y, 374, y + 34), f"{node.name}  {node.role}", f"{node.fingerprint}  {node.signal}", None)
-        draw_button(s, (384, y, 452, y + 34), "DM", GREEN)
+        draw_row(
+            s,
+            (28, y, 374, y + 34),
+            f"{node.name}  {node.role}",
+            f"{node.fingerprint}  {node.signal}",
+            None,
+            target_label=f"Contact row {node.name}",
+            action="open_contact_detail",
+            destination="contact_detail_sheet",
+        )
+        draw_button(s, (384, y, 452, y + 34), "DM", GREEN, action="open_dm_compose", destination="compose_sheet")
         y += 40
         contacts_rendered += 1
     s.round_rect((16, 240, 464, 402))
@@ -609,22 +760,53 @@ def render_packets(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Packets", (16, 64, 150, 92), 22, TEXT, True)
     draw_metric(s, (16, 104, 230, 176), "Signal", snap.latest_signal, "3 recent packets", GREEN)
-    draw_metric(s, (250, 104, 464, 176), "Mesh Roles", "1 room / 1 repeater", "tap for role browser", ACCENT)
+    draw_metric(
+        s,
+        (250, 104, 464, 176),
+        "Mesh Roles",
+        "1 room / 1 repeater",
+        "tap for role browser",
+        ACCENT,
+        action="open_mesh_roles",
+        destination="mesh_roles_sheet",
+    )
     for i, label in enumerate(("All", "RX", "TX", "Text")):
-        draw_button(s, (16 + i * 64, 188, 72 + i * 64, 222), label, GREEN if label == "All" else ACCENT)
-    draw_button(s, (286, 188, 366, 222), "Search", BLUE)
+        draw_button(
+            s,
+            (16 + i * 64, 188, 72 + i * 64, 222),
+            label,
+            GREEN if label == "All" else ACCENT,
+            action=f"packet_filter_{label.lower()}",
+        )
+    draw_button(s, (286, 188, 366, 222), "Search", BLUE, action="open_packet_search", destination="packet_search_sheet")
     s.text("find raw/test", (374, 194, 464, 216), 11, AMBER)
     s.round_rect((16, 232, 464, 326))
     s.text("Packet Feed", (28, 240, 180, 262), 14, MUTED, True)
     y = 268
     for packet in snap.packets[:2]:
-        draw_row(s, (28, y, 452, y + 25), f"{packet.kind} {packet.direction}", f"{packet.meta}  {packet.note}")
+        draw_row(
+            s,
+            (28, y, 452, y + 25),
+            f"{packet.kind} {packet.direction}",
+            f"{packet.meta}  {packet.note}",
+            target_label=f"Packet row {packet.kind} {packet.direction}",
+            action="open_packet_detail",
+            destination="packet_detail_sheet",
+        )
         y += 29
     s.round_rect((16, 336, 464, 402))
     s.text("Routes", (28, 344, 180, 366), 14, MUTED, True)
     y = 372
     for route in snap.routes[:1]:
-        draw_row(s, (28, y, 452, y + 25), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
+        draw_row(
+            s,
+            (28, y, 452, y + 25),
+            f"{route.kind} {route.direction}",
+            f"{route.meta}  {route.note}",
+            target_label=f"Route row {route.kind} {route.direction}",
+            action="open_route_detail",
+            destination="route_detail_sheet",
+        )
     draw_dock(s, "Packets")
 
 
@@ -635,15 +817,16 @@ def render_settings(s: Surface, snap: Snapshot):
     draw_metric(s, (16, 176, 464, 238), "Identity", snap.node_name, snap.fingerprint, BLUE)
     draw_metric(s, (16, 248, 464, 310), "Companion", "USB ready", "Wi-Fi off, BLE off, offline-first", GREEN)
     draw_metric(s, (16, 320, 230, 394), "Storage", snap.storage_backend, snap.storage_detail, AMBER)
-    draw_button(s, (44, 356, 202, 386), "Storage", AMBER)
-    draw_button(s, (250, 320, 354, 394), "Radio", ACCENT)
-    draw_button(s, (364, 320, 464, 394), "Advert", ACCENT)
+    draw_button(s, (44, 356, 202, 386), "Storage", AMBER, action="open_storage_setup", destination="storage_setup_sheet")
+    draw_button(s, (250, 320, 354, 394), "Radio", ACCENT, action="open_radio_settings", destination="radio_settings_sheet")
+    draw_button(s, (364, 320, 464, 394), "Advert", ACCENT, action="open_advert_sheet", destination="advert_sheet")
     draw_dock(s, "Settings")
 
 
 def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
     draw_top_bar(s, sample_snapshot())
     draw_home_body(s, sample_snapshot())
+    s.touch_targets.clear()
     s.rect((0, TOP_BAR_H, WIDTH, DOCK_Y), DIM)
     s.round_rect((24, 78, 456, 392), (18, 27, 39), (72, 92, 112), 8)
     s.text(title, (44, 94, 330, 122), 22, TEXT, True)
@@ -654,19 +837,27 @@ def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
 def render_compose_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Compose Public", "On-screen keyboard entry surface")
     s.round_rect((44, 158, 436, 228), SURFACE_2, BORDER, 8)
+    s.touch_target("Public message", (44, 158, 436, 228), kind="text_field", action="edit_public_message")
     s.text("Public message", (56, 166, 220, 188), 13, MUTED, True)
     s.text("test from DeskOS D1L", (56, 194, 424, 222), 18, TEXT)
     for i, label in enumerate(("Quick", "Clear", "Send")):
-        draw_button(s, (44 + i * 132, 248, 164 + i * 132, 300), label, GREEN if label == "Send" else ACCENT)
-    draw_button(s, (44, 320, 200, 370), "Close", MUTED)
+        draw_button(
+            s,
+            (44 + i * 132, 248, 164 + i * 132, 300),
+            label,
+            GREEN if label == "Send" else ACCENT,
+            action={"Quick": "insert_quick_text", "Clear": "clear_public_message", "Send": "send_public_text"}[label],
+            public_rf_tx=label == "Send",
+        )
+    draw_button(s, (44, 320, 200, 370), "Close", MUTED, action="close_compose", destination="messages")
     draw_dock(s, "Messages")
 
 
 def render_public_history_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Public History", f"retained {len(snap.public_messages)} rows")
-    draw_button(s, (204, 94, 282, 134), "Search", BLUE)
-    draw_button(s, (292, 94, 356, 134), "Clear", ACCENT)
-    draw_button(s, (366, 94, 436, 134), "Close", MUTED)
+    draw_button(s, (204, 94, 282, 134), "Search", BLUE, action="open_public_search", destination="public_search_sheet")
+    draw_button(s, (292, 94, 356, 134), "Clear", ACCENT, action="clear_public_search")
+    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_public_history", destination="messages")
     s.round_rect((44, 154, 436, 318), SURFACE, BORDER, 8)
     s.text("Public scrollback", (56, 162, 260, 184), 13, MUTED, True)
     visible_messages = snap.public_messages[-3:]
@@ -687,11 +878,12 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
 def render_public_search_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Public Search", "Filter retained Public rows")
     s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
+    s.touch_target("Search author or message", (44, 158, 436, 210), kind="text_field", action="edit_public_search")
     s.text("Search author or message", (56, 166, 424, 190), 13, MUTED, True)
     s.text("test", (56, 188, 424, 206), 16, TEXT)
-    draw_button(s, (44, 228, 156, 278), "Apply", GREEN)
-    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT)
-    draw_button(s, (288, 228, 400, 278), "Close", MUTED)
+    draw_button(s, (44, 228, 156, 278), "Apply", GREEN, action="apply_public_search", destination="public_history_sheet")
+    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT, action="clear_public_search")
+    draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_public_search", destination="public_history_sheet")
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard opens for Public history search", (56, 318, 424, 350), 13, MUTED, False, "center")
     draw_dock(s, "Messages")
@@ -705,20 +897,38 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Signal", (44, 210, 180, 230), 13, MUTED, True)
     s.text(f"{contact.signal}  {contact.meta}", (44, 232, 436, 254), 14, GREEN)
     buttons = (("DM", GREEN), ("Trace", BLUE), ("Edit", ACCENT), ("Export", ACCENT), ("Fav", ACCENT), ("Mute", ACCENT))
+    actions = {
+        "DM": ("open_dm_compose", "compose_sheet", False),
+        "Trace": ("open_route_trace", "route_trace_sheet", False),
+        "Edit": ("open_contact_edit", "contact_edit_sheet", False),
+        "Export": ("open_contact_export", "contact_export_sheet", False),
+        "Fav": ("toggle_favorite", None, False),
+        "Mute": ("toggle_mute", None, False),
+    }
     for i, (label, color) in enumerate(buttons):
-        draw_button(s, (44 + i * 64, 278, 100 + i * 64, 330), label, color)
-    draw_button(s, (44, 346, 200, 378), "Close", MUTED)
+        action, destination, destructive = actions[label]
+        draw_button(
+            s,
+            (44 + i * 64, 278, 100 + i * 64, 330),
+            label,
+            color,
+            action=action,
+            destination=destination,
+            destructive=destructive,
+        )
+    draw_button(s, (44, 346, 200, 378), "Close", MUTED, action="close_contact_detail", destination="nodes")
     draw_dock(s, "Nodes")
 
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
     draw_sheet_frame(s, "Edit Contact", contact.name)
-    draw_button(s, (210, 94, 274, 134), "Save", GREEN)
-    draw_button(s, (284, 94, 356, 134), "Forget", RED)
-    draw_button(s, (366, 94, 436, 134), "Close", MUTED)
+    draw_button(s, (210, 94, 274, 134), "Save", GREEN, action="save_contact_alias", destination="contact_detail_sheet")
+    draw_button(s, (284, 94, 356, 134), "Forget", RED, action="forget_contact", destination="nodes", destructive=True)
+    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_contact_edit", destination="contact_detail_sheet")
     s.text("Alias only; retained history remains", (44, 150, 436, 172), 13, MUTED, True)
     s.round_rect((44, 184, 436, 236), SURFACE_2, BORDER, 8)
+    s.touch_target("Contact alias", (44, 184, 436, 236), kind="text_field", action="edit_contact_alias")
     s.text("Contact alias", (56, 192, 220, 214), 13, MUTED, True)
     s.text(contact.name, (56, 214, 424, 232), 16, TEXT)
     s.round_rect((44, 258, 436, 370), SURFACE, BORDER, 8)
@@ -730,33 +940,45 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Radio Settings", "Saved profile applies after reboot")
     s.text(snap.radio_profile, (44, 154, 436, 178), 14, GREEN, True)
     s.text("Freq 910.525 MHz", (44, 190, 220, 212), 13, TEXT, True)
-    draw_button(s, (244, 184, 316, 220), "-25k", ACCENT)
-    draw_button(s, (324, 184, 396, 220), "+25k", ACCENT)
+    draw_button(s, (244, 184, 316, 220), "-25k", ACCENT, action="radio_freq_down")
+    draw_button(s, (324, 184, 396, 220), "+25k", ACCENT, action="radio_freq_up")
     s.text("BW 62.5 kHz", (44, 232, 220, 254), 13, TEXT, True)
-    draw_button(s, (244, 226, 396, 262), "Cycle BW", ACCENT)
+    draw_button(s, (244, 226, 396, 262), "Cycle BW", ACCENT, action="radio_cycle_bandwidth")
     s.text("SF 7", (44, 274, 98, 296), 13, TEXT, True)
-    draw_button(s, (106, 268, 166, 304), "SF-", ACCENT)
-    draw_button(s, (174, 268, 234, 304), "SF+", ACCENT)
+    draw_button(s, (106, 268, 166, 304), "SF-", ACCENT, action="radio_sf_down")
+    draw_button(s, (174, 268, 234, 304), "SF+", ACCENT, action="radio_sf_up")
     s.text("CR 5", (250, 274, 304, 296), 13, TEXT, True)
-    draw_button(s, (312, 268, 396, 304), "Cycle", ACCENT)
+    draw_button(s, (312, 268, 396, 304), "Cycle", ACCENT, action="radio_cycle_cr")
     s.text("TX 20 dBm", (44, 318, 136, 340), 13, TEXT, True)
-    draw_button(s, (146, 312, 206, 348), "TX-", ACCENT)
-    draw_button(s, (214, 312, 274, 348), "TX+", ACCENT)
-    draw_button(s, (282, 312, 416, 348), "RX Boost On", GREEN)
-    draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE)
-    draw_button(s, (146, 356, 238, 386), "Save", GREEN)
-    draw_button(s, (248, 356, 340, 386), "Close", MUTED)
+    draw_button(s, (146, 312, 206, 348), "TX-", ACCENT, action="radio_tx_power_down")
+    draw_button(s, (214, 312, 274, 348), "TX+", ACCENT, action="radio_tx_power_up")
+    draw_button(s, (282, 312, 416, 348), "RX Boost On", GREEN, action="radio_toggle_rx_boost")
+    draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE, action="radio_defaults")
+    draw_button(s, (146, 356, 238, 386), "Save", GREEN, action="save_radio_profile", destination="settings")
+    draw_button(s, (248, 356, 340, 386), "Close", MUTED, action="close_radio_settings", destination="settings")
     draw_dock(s, "Settings")
 
 
 def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Storage Setup", "Optional SD data storage")
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED)
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_storage_setup", destination="settings")
     draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
     draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
     s.text(f"format {snap.storage_format_action}", (44, 328, 436, 350), 13, MUTED)
     s.text("No automatic format. Confirmation required before SD setup.", (44, 358, 436, 380), 12, AMBER)
+    draw_dock(s, "Settings")
+
+
+def render_advert_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Advert", "Share this node with nearby MeshCore clients")
+    s.text("Zero-hop advert", (44, 162, 220, 184), 13, MUTED, True)
+    s.text("Use when the peer is nearby and Public should stay quiet.", (44, 186, 436, 208), 12, TEXT)
+    draw_button(s, (44, 222, 184, 274), "Zero Hop", GREEN, action="send_advert_zero", rf_tx=True)
+    s.text("Flood advert", (44, 292, 220, 314), 13, MUTED, True)
+    s.text("Intentional wider RF advert for controlled tests only.", (44, 316, 436, 338), 12, AMBER)
+    draw_button(s, (44, 352, 184, 386), "Flood", AMBER, action="send_advert_flood", rf_tx=True)
+    draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_advert_sheet", destination="settings")
     draw_dock(s, "Settings")
 
 
@@ -771,7 +993,7 @@ def render_contact_export_sheet(s: Surface, snap: Snapshot):
     s.text("meshcore://contact/add", (234, 272, 436, 288), 10, BLUE)
     s.text("name=YKF+Corebot  type=1", (234, 288, 436, 304), 10, MUTED)
     s.text(f"key {SAMPLE_PUBLIC_KEY[:12]}...{SAMPLE_PUBLIC_KEY[-8:]}", (234, 304, 436, 320), 10, BLUE)
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED)
+    draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_contact_export", destination="contact_detail_sheet")
     draw_dock(s, "Nodes")
 
 
@@ -783,9 +1005,9 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     for msg in visible_messages:
         draw_row(s, (44, y, 436, y + 42), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 50
-    draw_button(s, (44, 304, 160, 356), "Reply", GREEN)
-    draw_button(s, (174, 304, 290, 356), "Read", ACCENT)
-    draw_button(s, (304, 304, 420, 356), "Close", MUTED)
+    draw_button(s, (44, 304, 160, 356), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
+    draw_button(s, (174, 304, 290, 356), "Read", ACCENT, action="mark_dm_thread_read")
+    draw_button(s, (304, 304, 420, 356), "Close", MUTED, action="close_dm_thread", destination="messages")
     draw_dock(s, "Messages")
     s.metrics.update(
         {
@@ -804,7 +1026,7 @@ def render_route_detail_sheet(s: Surface, snap: Snapshot):
     s.text(f"{route.direction}  {route.meta}", (44, 232, 436, 256), 16, AMBER)
     s.text("Confidence", (44, 270, 180, 290), 13, MUTED, True)
     s.text("recent live packet evidence", (44, 292, 436, 316), 16, GREEN)
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED)
+    draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_route_detail", destination="packets")
     draw_dock(s, "Packets")
 
 
@@ -824,7 +1046,7 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
         draw_row(s, (44, y, 436, y + 30), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
         y += 34
         rendered += 1
-    draw_button(s, (316, 94, 436, 134), "Close", MUTED)
+    draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_route_trace", destination="contact_detail_sheet")
     s.text("Local evidence only", (44, 390, 300, 408), 11, MUTED)
     draw_dock(s, "Nodes")
     s.metrics.update(
@@ -846,18 +1068,19 @@ def render_packet_detail_sheet(s: Surface, snap: Snapshot):
     s.text("parsed MeshCore text packet", (44, 292, 436, 316), 16, BLUE)
     s.text("Raw Hex", (44, 324, 180, 344), 13, MUTED, True)
     s.text(packet.raw_hex, (44, 346, 436, 368), 14, BLUE)
-    draw_button(s, (44, 374, 200, 402), "Close", MUTED)
+    draw_button(s, (44, 374, 200, 402), "Close", MUTED, action="close_packet_detail", destination="packets")
     draw_dock(s, "Packets")
 
 
 def render_packet_search_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Packet Search", "Filter kind, note, or raw hex")
     s.round_rect((44, 158, 436, 210), SURFACE_2, BORDER, 8)
+    s.touch_target("Search kind, note, raw hex", (44, 158, 436, 210), kind="text_field", action="edit_packet_search")
     s.text("Search kind, note, raw hex", (56, 166, 424, 190), 13, MUTED, True)
     s.text("test", (56, 188, 424, 206), 16, TEXT)
-    draw_button(s, (44, 228, 156, 278), "Apply", GREEN)
-    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT)
-    draw_button(s, (288, 228, 400, 278), "Close", MUTED)
+    draw_button(s, (44, 228, 156, 278), "Apply", GREEN, action="apply_packet_search", destination="packets")
+    draw_button(s, (166, 228, 278, 278), "Clear", ACCENT, action="clear_packet_search")
+    draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_packet_search", destination="packets")
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard opens for packet search", (56, 318, 424, 350), 13, MUTED, False, "center")
     draw_dock(s, "Packets")
@@ -875,12 +1098,13 @@ def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
     for node in snap.repeaters:
         draw_row(s, (44, y, 436, y + 36), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}")
         y += 44
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED)
+    draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_mesh_roles", destination="packets")
     draw_dock(s, "Packets")
 
 
 def render_lock_overlay(s: Surface, snap: Snapshot):
     s.rect((0, 0, WIDTH, HEIGHT), (4, 8, 13))
+    s.touch_target("Tap to unlock", (0, 0, WIDTH, HEIGHT), kind="screen", action="unlock", destination="home")
     s.text("MeshCore DeskOS", (40, 72, 440, 110), 28, TEXT, True, "center")
     s.text(snap.node_name, (40, 116, 440, 140), 16, MUTED, False, "center")
     draw_metric(s, (76, 176, 404, 252), "Mesh", snap.mesh_state, f"{snap.latest_signal} latest", GREEN)
@@ -895,13 +1119,14 @@ def render_onboarding_sheet(s: Surface, snap: Snapshot):
     s.text("First boot setup", (32, 74, 430, 96), 14, ACCENT, True)
     s.text("Node name", (32, 112, 200, 134), 13, MUTED, True)
     s.round_rect((32, 140, 448, 190), SURFACE_2, BORDER, 8)
+    s.touch_target("Node name", (32, 140, 448, 190), kind="text_field", action="edit_node_name")
     s.text(snap.node_name, (46, 152, 430, 180), 18, TEXT)
     s.text("Canada/USA preset confirmed", (32, 204, 430, 226), 14, TEXT, True)
     s.text("910.525 BW62.5 SF7 CR5", (32, 228, 430, 250), 13, MUTED)
     s.text("Role Desk Companion", (32, 260, 430, 282), 14, TEXT, True)
     s.text("Wi-Fi off  BLE off  Observer off", (32, 284, 430, 306), 13, MUTED)
-    draw_button(s, (32, 324, 148, 374), "Start", GREEN)
-    draw_button(s, (164, 324, 310, 374), "Use Defaults", ACCENT)
+    draw_button(s, (32, 324, 148, 374), "Start", GREEN, action="complete_onboarding", destination="home")
+    draw_button(s, (164, 324, 310, 374), "Use Defaults", ACCENT, action="apply_onboarding_defaults")
     s.round_rect((32, 392, 448, 432), SURFACE, BORDER, 8)
     s.text("Keyboard opens for name editing", (44, 400, 436, 424), 13, MUTED, False, "center")
 
@@ -917,6 +1142,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
+    "advert_sheet": render_advert_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
@@ -963,6 +1189,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "No automatic format. Confirmation required before SD setup.",
         "Close",
     ),
+    "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Edit", "Export", "Fav", "Mute", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
@@ -985,6 +1212,109 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
+    {
+        "name": "first_boot_onboarding",
+        "steps": (
+            {"view": "onboarding_sheet", "action": "edit_node_name"},
+            {"view": "onboarding_sheet", "action": "complete_onboarding", "destination": "home"},
+            {"view": "onboarding_sheet", "action": "apply_onboarding_defaults"},
+        ),
+    },
+    {
+        "name": "lock_overlay_unlock",
+        "steps": ({"view": "lock_overlay", "action": "unlock", "destination": "home"},),
+    },
+    {
+        "name": "public_compose_and_send",
+        "steps": (
+            {"view": "messages", "action": "open_public_compose", "destination": "compose_sheet"},
+            {"view": "compose_sheet", "action": "edit_public_message"},
+            {"view": "compose_sheet", "action": "send_public_text", "public_rf_tx": True},
+            {"view": "compose_sheet", "action": "close_compose", "destination": "messages"},
+        ),
+    },
+    {
+        "name": "public_history_search",
+        "steps": (
+            {"view": "messages", "action": "mark_messages_read"},
+            {"view": "messages", "action": "open_public_history", "destination": "public_history_sheet"},
+            {"view": "public_history_sheet", "action": "open_public_search", "destination": "public_search_sheet"},
+            {"view": "public_search_sheet", "action": "edit_public_search"},
+            {"view": "public_search_sheet", "action": "apply_public_search", "destination": "public_history_sheet"},
+        ),
+    },
+    {
+        "name": "dm_thread_read_and_reply",
+        "steps": (
+            {"view": "messages", "action": "open_dm_thread", "destination": "dm_thread_sheet"},
+            {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
+            {"view": "dm_thread_sheet", "action": "mark_dm_thread_read"},
+            {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages"},
+        ),
+    },
+    {
+        "name": "contact_detail_management",
+        "steps": (
+            {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
+            {"view": "contact_detail_sheet", "action": "open_dm_compose", "destination": "compose_sheet"},
+            {"view": "contact_detail_sheet", "action": "open_route_trace", "destination": "route_trace_sheet"},
+            {"view": "contact_detail_sheet", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
+            {"view": "contact_detail_sheet", "action": "open_contact_export", "destination": "contact_export_sheet"},
+            {"view": "contact_detail_sheet", "action": "toggle_favorite"},
+            {"view": "contact_detail_sheet", "action": "toggle_mute"},
+        ),
+    },
+    {
+        "name": "contact_edit_alias_and_forget",
+        "steps": (
+            {"view": "contact_edit_sheet", "action": "edit_contact_alias"},
+            {"view": "contact_edit_sheet", "action": "save_contact_alias", "destination": "contact_detail_sheet"},
+            {"view": "contact_edit_sheet", "action": "forget_contact", "destination": "nodes", "destructive": True},
+            {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_detail_sheet"},
+        ),
+    },
+    {
+        "name": "packet_filters_search_and_details",
+        "steps": (
+            {"view": "packets", "action": "packet_filter_all"},
+            {"view": "packets", "action": "packet_filter_rx"},
+            {"view": "packets", "action": "packet_filter_tx"},
+            {"view": "packets", "action": "packet_filter_text"},
+            {"view": "packets", "action": "open_packet_search", "destination": "packet_search_sheet"},
+            {"view": "packet_search_sheet", "action": "edit_packet_search"},
+            {"view": "packet_search_sheet", "action": "apply_packet_search", "destination": "packets"},
+            {"view": "packets", "action": "open_packet_detail", "destination": "packet_detail_sheet"},
+            {"view": "packets", "action": "open_route_detail", "destination": "route_detail_sheet"},
+        ),
+    },
+    {
+        "name": "mesh_roles_browser",
+        "steps": (
+            {"view": "packets", "action": "open_mesh_roles", "destination": "mesh_roles_sheet"},
+            {"view": "mesh_roles_sheet", "action": "close_mesh_roles", "destination": "packets"},
+        ),
+    },
+    {
+        "name": "settings_radio_storage_and_advert",
+        "steps": (
+            {"view": "settings", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "radio_settings_sheet", "action": "radio_freq_down"},
+            {"view": "radio_settings_sheet", "action": "radio_freq_up"},
+            {"view": "radio_settings_sheet", "action": "radio_cycle_bandwidth"},
+            {"view": "radio_settings_sheet", "action": "radio_sf_down"},
+            {"view": "radio_settings_sheet", "action": "radio_sf_up"},
+            {"view": "radio_settings_sheet", "action": "save_radio_profile", "destination": "settings"},
+            {"view": "settings", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "settings"},
+            {"view": "settings", "action": "open_advert_sheet", "destination": "advert_sheet"},
+            {"view": "advert_sheet", "action": "send_advert_zero", "rf_tx": True},
+            {"view": "advert_sheet", "action": "send_advert_flood", "rf_tx": True},
+            {"view": "advert_sheet", "action": "close_advert_sheet", "destination": "settings"},
+        ),
+    },
+)
+
 
 def snapshot_counts(snap: Snapshot) -> dict[str, int]:
     return {
@@ -999,6 +1329,112 @@ def snapshot_counts(snap: Snapshot) -> dict[str, int]:
     }
 
 
+def find_target(views_by_name: dict[str, dict[str, object]], step: dict[str, object]) -> dict[str, object] | None:
+    view = views_by_name.get(str(step["view"]))
+    if not view:
+        return None
+    for target in view["touch_targets"]:
+        if target["action"] != step["action"]:
+            continue
+        for key in ("destination", "rf_tx", "public_rf_tx", "dm_tx", "destructive", "formats_sd"):
+            if key in step and target.get(key) != step[key]:
+                break
+        else:
+            return target
+    return None
+
+
+def touch_target_overlaps(targets: list[dict[str, object]]) -> list[dict[str, object]]:
+    overlaps: list[dict[str, object]] = []
+    for i, left in enumerate(targets):
+        if left["kind"] == "screen":
+            continue
+        lx0, ly0, lx1, ly1 = left["visual_box"]
+        for right in targets[i + 1 :]:
+            if right["kind"] == "screen":
+                continue
+            rx0, ry0, rx1, ry1 = right["visual_box"]
+            width = min(lx1, rx1) - max(lx0, rx0)
+            height = min(ly1, ry1) - max(ly0, ry0)
+            if width > 0 and height > 0:
+                overlaps.append(
+                    {
+                        "left": left["label"],
+                        "right": right["label"],
+                        "box": [max(lx0, rx0), max(ly0, ry0), min(lx1, rx1), min(ly1, ry1)],
+                    }
+                )
+    return overlaps
+
+
+def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object]:
+    views_by_name = {str(view["name"]): view for view in report_views}
+    flows = []
+    missing_steps: list[dict[str, object]] = []
+    public_rf_actions: list[dict[str, object]] = []
+    rf_actions: list[dict[str, object]] = []
+    destructive_actions: list[dict[str, object]] = []
+    format_actions: list[dict[str, object]] = []
+    target_issues: list[dict[str, object]] = []
+    target_overlaps: list[dict[str, object]] = []
+    skipped_flows: list[str] = []
+
+    for view in report_views:
+        view_name = str(view["name"])
+        target_issues.extend({"view": view_name, **target} for target in view["touch_target_issues"])
+        target_overlaps.extend({"view": view_name, **overlap} for overlap in touch_target_overlaps(view["touch_targets"]))
+        for target in view["touch_targets"]:
+            action_summary = {
+                "view": view_name,
+                "action": target["action"],
+                "label": target["label"],
+                "destination": target["destination"],
+            }
+            if target["rf_tx"]:
+                rf_actions.append(action_summary)
+            if target["public_rf_tx"]:
+                public_rf_actions.append(action_summary)
+            if target["destructive"]:
+                destructive_actions.append(action_summary)
+            if target["formats_sd"]:
+                format_actions.append(action_summary)
+
+    for flow in EXPECTED_FLOWS:
+        flow_views = {str(step["view"]) for step in flow["steps"]}
+        if not flow_views <= set(views_by_name):
+            skipped_flows.append(str(flow["name"]))
+            continue
+        checked_steps = []
+        flow_missing = []
+        for step in flow["steps"]:
+            target = find_target(views_by_name, step)
+            checked_step = dict(step)
+            checked_step["present"] = target is not None
+            if target:
+                checked_step["label"] = target["label"]
+                checked_step["box"] = target["box"]
+            else:
+                flow_missing.append(dict(step))
+                missing_steps.append({"flow": flow["name"], **step})
+            checked_steps.append(checked_step)
+        flows.append({"name": flow["name"], "ok": not flow_missing, "steps": checked_steps, "missing_steps": flow_missing})
+
+    return {
+        "schema": 1,
+        "min_touch_target": MIN_TOUCH_TARGET,
+        "flows": flows,
+        "skipped_flows": skipped_flows,
+        "missing_steps": missing_steps,
+        "target_issues": target_issues,
+        "target_overlaps": target_overlaps,
+        "rf_actions": rf_actions,
+        "public_rf_actions": public_rf_actions,
+        "destructive_actions": destructive_actions,
+        "format_actions": format_actions,
+        "ok": not missing_steps and not target_issues and not target_overlaps and not format_actions,
+    }
+
+
 def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str = "default") -> dict[str, object]:
     out_dir.mkdir(parents=True, exist_ok=True)
     if scenario not in SCENARIOS:
@@ -1009,6 +1445,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
     overflow_count = 0
     truncated_count = 0
     required_missing: list[dict[str, str]] = []
+    touch_target_issue_count = 0
     for view in selected:
         if view not in RENDERERS:
             raise ValueError(f"unknown view: {view}")
@@ -1019,18 +1456,22 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         summary = surface.summary(screenshot, REQUIRED_LABELS.get(view, ()))
         overflow_count += len(summary["overflow"])
         truncated_count += len(summary["truncated_labels"])
+        touch_target_issue_count += len(summary["touch_target_issues"])
         for label in summary["missing_required_labels"]:
             required_missing.append({"view": view, "label": label})
         report_views.append(summary)
 
+    flow_report = build_flow_report(report_views)
     report = {
-        "schema": 1,
-        "ok": overflow_count == 0 and not required_missing,
+        "schema": 2,
+        "ok": overflow_count == 0 and not required_missing and flow_report["ok"],
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
         "snapshot_counts": snapshot_counts(snap),
         "views": report_views,
+        "touch_target_issue_count": touch_target_issue_count,
+        "flow_report": flow_report,
         "overflow_count": overflow_count,
         "truncated_count": truncated_count,
         "required_labels_missing": required_missing,

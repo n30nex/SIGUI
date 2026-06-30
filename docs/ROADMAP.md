@@ -762,8 +762,9 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/Public-history/Public-search/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding; `tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large` renders the same UI against oversized node/message stores.
-- Assert required labels and button surfaces are present.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Packets, Settings, compose/Public-history/Public-search/advert/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding; `tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large` renders the same UI against oversized node/message stores.
+- Assert required labels and button surfaces are present. Status: schema-v2 `ui-sim-report.json` now includes a touch-target map with expanded 44x44 boxes and expected flow coverage for onboarding, lock/unlock, Public compose/history/search, DM thread read/reply, contact detail/edit/export/trace, packet search/detail/routes, Mesh Roles, Radio, Storage, and Advert paths.
+- Assert RF/destructive/format-capable UI actions are clearly flagged in simulator reports. Status: Public send/test and advert actions are marked RF-bearing, promoted-contact Forget is marked destructive, and Storage Setup remains `formats_sd=false`.
 - Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.
 - Test large node/message lists. Status: host `large-mesh` simulator stress is implemented, covered by tests, generated in CI, and now includes retained Public History bounds; physical large-mesh RF review is still pending.

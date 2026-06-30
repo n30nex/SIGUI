@@ -21,10 +21,16 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
     assert report["display"] == {"width": 480, "height": 480}
     assert report["snapshot_counts"]["heard"] == 3
     assert report["overflow_count"] == 0
+    assert report["touch_target_issue_count"] == 0
     assert report["required_labels_missing"] == []
+    assert report["flow_report"]["ok"] is True
+    assert report["flow_report"]["target_overlaps"] == []
+    assert report["flow_report"]["format_actions"] == []
 
     report_path = tmp_path / "ui-sim-report.json"
-    assert json.loads(report_path.read_text(encoding="utf-8"))["ok"] is True
+    saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert saved_report["ok"] is True
+    assert saved_report["schema"] == 2
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
@@ -35,6 +41,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
             assert image.size == (480, 480), name
         assert view["text_count"] > 0
         assert view["overflow"] == []
+        assert view["touch_target_issues"] == []
 
 
 def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
@@ -43,6 +50,8 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert report["ok"] is True
     assert report["scenario"] == "large-mesh"
     assert report["overflow_count"] == 0
+    assert report["touch_target_issue_count"] == 0
+    assert report["flow_report"]["ok"] is True
     assert report["required_labels_missing"] == []
     assert report["snapshot_counts"]["heard"] == 96
     assert report["snapshot_counts"]["public_messages"] == 48
@@ -89,6 +98,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "No automatic format. Confirmation required before SD setup.",
     } <= labels_by_view["storage_setup_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
+    assert {"Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"} <= labels_by_view["advert_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
@@ -99,6 +109,55 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
+
+
+def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
+    report = ui_simulator.generate(tmp_path)
+    views = {view["name"]: view for view in report["views"]}
+    actions_by_view = {
+        name: {target["action"]: target for target in view["touch_targets"]}
+        for name, view in views.items()
+    }
+
+    assert ui_simulator.EXPECTED_FLOWS
+    assert report["flow_report"]["skipped_flows"] == []
+    assert report["flow_report"]["missing_steps"] == []
+    assert report["flow_report"]["target_issues"] == []
+    assert report["flow_report"]["target_overlaps"] == []
+    assert report["flow_report"]["format_actions"] == []
+
+    flow_names = {flow["name"] for flow in report["flow_report"]["flows"]}
+    assert {
+        "first_boot_onboarding",
+        "lock_overlay_unlock",
+        "public_compose_and_send",
+        "public_history_search",
+        "dm_thread_read_and_reply",
+        "contact_detail_management",
+        "contact_edit_alias_and_forget",
+        "packet_filters_search_and_details",
+        "mesh_roles_browser",
+        "settings_radio_storage_and_advert",
+    } <= flow_names
+
+    assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
+    assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
+    assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
+    assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
+    assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"
+    assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
+    assert actions_by_view["advert_sheet"]["send_advert_flood"]["rf_tx"] is True
+    assert actions_by_view["contact_edit_sheet"]["forget_contact"]["destructive"] is True
+    assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["formats_sd"] is False
+    assert actions_by_view["lock_overlay"]["unlock"]["destination"] == "home"
+
+    for view in report["views"]:
+        for target in view["touch_targets"]:
+            assert target["width"] >= ui_simulator.MIN_TOUCH_TARGET, (view["name"], target["label"])
+            assert target["height"] >= ui_simulator.MIN_TOUCH_TARGET, (view["name"], target["label"])
+            assert target["offscreen"] is False, (view["name"], target["label"])
+            assert target["top_bar_overlap"] is False, (view["name"], target["label"])
+            assert target["dock_overlap"] is False, (view["name"], target["label"])
 
 
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
@@ -118,6 +177,8 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
 
         assert report["ok"] is True, scenario
         assert report["overflow_count"] == 0, scenario
+        assert report["touch_target_issue_count"] == 0, scenario
+        assert report["flow_report"]["format_actions"] == [], scenario
         assert report["required_labels_missing"] == [], scenario
         assert {"Settings", "Radio", "Advert", "Storage"} <= labels_by_view["settings"]
         assert {

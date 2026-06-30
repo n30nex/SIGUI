@@ -33,6 +33,7 @@
 - [x] Controlled Public `test` RF regression still receives local bot replies.
 - [x] Simulator screenshots captured for the main shell views and current modal sheets.
 - [x] Simulator layout report passes required-label and text-overflow checks.
+- [x] Simulator touch-flow report passes expected-flow, 44x44 touch-target, RF/destructive flag, and no-format storage checks.
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
 - [ ] Manual visual review of the physical shell.
 - [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
