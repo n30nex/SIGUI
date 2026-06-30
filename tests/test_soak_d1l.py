@@ -73,7 +73,10 @@ def storage_status(
     atomic_rename=True,
     data_enabled=True,
     data_backend="mixed",
+    message_store_backend="nvs",
+    dm_store_backend="nvs",
     packet_log_backend="sd",
+    route_store_backend="nvs",
 ):
     return {
         "schema": 1,
@@ -94,18 +97,18 @@ def storage_status(
         },
         "data_enabled": data_enabled,
         "data_backend": data_backend,
-        "message_store_backend": "nvs",
-        "dm_store_backend": "nvs",
+        "message_store_backend": message_store_backend,
+        "dm_store_backend": dm_store_backend,
         "packet_log_backend": packet_log_backend,
-        "route_store_backend": "nvs",
+        "route_store_backend": route_store_backend,
         "map_tile_backend": "sd_pending_store_migration" if file_ops else "unavailable",
         "stores": {
             "settings": "nvs",
             "identity": "nvs",
-            "messages": "nvs",
-            "dm": "nvs",
+            "messages": message_store_backend,
+            "dm": dm_store_backend,
             "packets": packet_log_backend,
-            "routes": "nvs",
+            "routes": route_store_backend,
             "contacts": "nvs",
             "read_state": "nvs",
             "crashlog": "nvs",
@@ -396,6 +399,38 @@ def test_summarize_soak_tracks_stable_sd_file_op_gate_and_store_backends():
     assert summary["storage_file_capability_ready_all"] is True
     assert summary["storage_file_ops_ready_all"] is True
     assert summary["storage_store_backends"]["packets"] == ["sd"]
+    assert summary["storage_store_backend_stable_all"] is True
+
+
+def test_summarize_soak_accepts_stable_retained_history_sd_backends():
+    rows = [
+        sample("start", 0, base_health(1000), {"rx_packets": 5, "tx_packets": 7}),
+        sample("final", 60, base_health(61000), {"rx_packets": 8, "tx_packets": 7}),
+    ]
+    for row in rows:
+        row["results"].append(
+            storage_status(
+                message_store_backend="sd",
+                dm_store_backend="sd",
+                packet_log_backend="sd",
+                route_store_backend="sd",
+            )
+        )
+
+    summary = soak_d1l.summarize_soak(
+        samples=rows,
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+    )
+
+    assert summary["ok"] is True
+    assert summary["storage_store_backends"]["messages"] == ["sd"]
+    assert summary["storage_store_backends"]["dm"] == ["sd"]
+    assert summary["storage_store_backends"]["packets"] == ["sd"]
+    assert summary["storage_store_backends"]["routes"] == ["sd"]
     assert summary["storage_store_backend_stable_all"] is True
 
 

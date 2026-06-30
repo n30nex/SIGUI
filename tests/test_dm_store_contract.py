@@ -10,9 +10,10 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_dm_store_is_bounded_and_nvs_backed():
+def test_dm_store_is_bounded_and_retained_blob_store_backed():
     header = read("main/mesh/dm_store.h")
     source = read("main/mesh/dm_store.c")
+    blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     assert "D1L_DM_STORE_CAPACITY 16U" in header
@@ -20,10 +21,18 @@ def test_dm_store_is_bounded_and_nvs_backed():
     assert "ack_hash" in header
     assert "d1l_dm_store_mark_acked" in header
     assert "d1l_dm_store_copy_thread" in header
-    assert 'D1L_DM_STORE_NAMESPACE "d1l_dms"' in source
+    assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
+    assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
+    assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
     assert 'D1L_DM_STORE_KEY "threads"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "d1l_retained_blob_store_read(D1L_DM_STORE_ID" in source
+    assert "d1l_retained_blob_store_read_fallback(D1L_DM_STORE_ID" in source
+    assert "d1l_retained_blob_store_write(D1L_DM_STORE_ID" in source
+    assert "d1l_retained_blob_store_erase(D1L_DM_STORE_ID" in source
+    assert "d1l_retained_blob_store_uses_sd(D1L_DM_STORE_ID)" in source
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
     assert "entry->acked = true" in source
     assert "d1l_dm_store_copy_thread" in source
     assert "strncmp(entry->contact_fingerprint, contact_fingerprint" in source

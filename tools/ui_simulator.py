@@ -282,6 +282,18 @@ def storage_ready_packet_log_sd_snapshot() -> Snapshot:
     )
 
 
+def storage_ready_retained_history_sd_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="ready",
+        storage_backend="Mixed storage",
+        storage_detail="SD retained-history stores",
+        storage_stores="messages SD / packets SD / routes SD",
+        storage_setup_action="retained_history_sd_enabled",
+        storage_format_action="not_needed",
+    )
+
+
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
@@ -290,6 +302,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-root-missing": storage_root_missing_snapshot,
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
+    "storage-ready-retained-history-sd": storage_ready_retained_history_sd_snapshot,
 }
 
 

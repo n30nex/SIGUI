@@ -73,7 +73,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   192-byte chunks so each newline-delimited request remains under the 512-byte
   line cap.
 - No formatting happens at boot or during status checks.
-- Packet-log can use the SD file protocol as the first retained-store canary
-  once the ESP32 sees a ready card, file operations, and atomic rename. The ESP32
-  keeps an onboard NVS mirror during the canary. Other retained DeskOS stores
-  still remain onboard-backed until their SD migrations land.
+- Retained Public message history, DM history, route history, and packet history
+  can use the SD file protocol once the ESP32 sees a ready card, file operations,
+  and atomic rename. The ESP32 keeps onboard NVS mirrors for these retained
+  history stores. Settings, identity, contacts, read-state, crashlog, exports,
+  and map tiles remain onboard/fallback-backed or pending.

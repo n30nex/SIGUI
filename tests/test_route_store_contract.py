@@ -10,17 +10,26 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_route_store_is_bounded_and_nvs_backed():
+def test_route_store_is_bounded_and_retained_blob_store_backed():
     header = read("main/mesh/route_store.h")
     source = read("main/mesh/route_store.c")
+    blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     assert "D1L_ROUTE_STORE_CAPACITY 16U" in header
     assert "D1L_ROUTE_TARGET_LEN 17U" in header
-    assert 'D1L_ROUTE_STORE_NAMESPACE "d1l_routes"' in source
+    assert 'D1L_RETAINED_ROUTE_NAMESPACE "d1l_routes"' in blob_store
+    assert 'D1L_RETAINED_ROUTE_SD_DIR "stores/routes"' in blob_store
+    assert "D1L_ROUTE_STORE_ID D1L_RETAINED_BLOB_STORE_ROUTES" in source
     assert 'D1L_ROUTE_STORE_KEY "routes"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "d1l_retained_blob_store_read(D1L_ROUTE_STORE_ID" in source
+    assert "d1l_retained_blob_store_read_fallback(D1L_ROUTE_STORE_ID" in source
+    assert "d1l_retained_blob_store_write(D1L_ROUTE_STORE_ID" in source
+    assert "d1l_retained_blob_store_erase(D1L_ROUTE_STORE_ID" in source
+    assert "d1l_retained_blob_store_uses_sd(D1L_ROUTE_STORE_ID)" in source
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
     assert "static d1l_route_store_blob_t s_blob_scratch" in source
     assert "route_confidence" in source
     assert "now_ms < entry->first_seen_ms" in source

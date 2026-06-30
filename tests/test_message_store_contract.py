@@ -10,15 +10,24 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
-def test_public_message_store_is_bounded_and_nvs_backed():
+def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     header = read("main/mesh/message_store.h")
     source = read("main/mesh/message_store.c")
+    blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_MESSAGE_STORE_CAPACITY 16U" in header
     assert "D1L_MESSAGE_TEXT_LEN 96U" in header
-    assert 'D1L_MESSAGE_STORE_NAMESPACE "d1l_messages"' in source
-    assert "nvs_get_blob" in source
-    assert "nvs_set_blob" in source
+    assert 'D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"' in blob_store
+    assert 'D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"' in blob_store
+    assert "D1L_MESSAGE_STORE_ID D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
+    assert '#include "storage/retained_blob_store.h"' in source
+    assert "d1l_retained_blob_store_read(D1L_MESSAGE_STORE_ID" in source
+    assert "d1l_retained_blob_store_read_fallback(D1L_MESSAGE_STORE_ID" in source
+    assert "d1l_retained_blob_store_write(D1L_MESSAGE_STORE_ID" in source
+    assert "d1l_retained_blob_store_erase(D1L_MESSAGE_STORE_ID" in source
+    assert "d1l_retained_blob_store_uses_sd(D1L_MESSAGE_STORE_ID)" in source
+    assert "nvs_get_blob" not in source
+    assert "nvs_set_blob" not in source
     assert "static d1l_message_store_blob_t s_blob_scratch" in source
     assert "d1l_message_store_copy_recent" in source
     assert "d1l_message_store_query" in header

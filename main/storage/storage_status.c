@@ -11,17 +11,30 @@ static d1l_storage_status_t s_status;
 
 static void set_store_backends(d1l_storage_status_t *status)
 {
+    const bool public_messages_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
+    const bool dm_messages_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
+    const bool routes_on_sd =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_ROUTES);
     const bool packet_log_on_sd =
         d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
-    status->data_backend = packet_log_on_sd ? "mixed" : "nvs";
-    status->message_store_backend = "nvs";
-    status->dm_store_backend = "nvs";
+    const bool any_retained_sd = public_messages_on_sd ||
+                                 dm_messages_on_sd ||
+                                 routes_on_sd ||
+                                 packet_log_on_sd;
+    status->data_backend = any_retained_sd ? "mixed" : "nvs";
+    status->message_store_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
+    status->dm_store_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES);
     status->packet_log_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
-    status->route_store_backend = "nvs";
+    status->route_store_backend =
+        d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES);
     status->map_tile_backend = "unavailable";
     status->export_backend = "serial";
-    status->data_enabled = packet_log_on_sd;
+    status->data_enabled = any_retained_sd;
 }
 
 static void set_default_actions(d1l_storage_status_t *status)
@@ -133,13 +146,11 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.note =
             "SD card is present but not ready for DeskOS data; setup must be explicitly confirmed before any format";
     } else {
-        const bool packet_log_on_sd =
-            d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
-        s_status.setup_action = packet_log_on_sd ? "packet_log_canary_enabled" :
+        s_status.setup_action = s_status.data_enabled ? "retained_history_sd_enabled" :
                                 "store_migration_pending";
         s_status.format_action = "not_needed";
-        s_status.note = packet_log_on_sd ?
-            "SD card is valid; packet-log canary uses SD while other retained stores remain on onboard NVS" :
+        s_status.note = s_status.data_enabled ?
+            "SD card is valid; retained Public/DM message, route, and packet history can use SD with onboard NVS mirrors" :
             "SD card is valid, but retained stores remain on onboard NVS until SD-backed store migration is enabled";
         s_status.map_tile_backend = "sd_pending_store_migration";
     }

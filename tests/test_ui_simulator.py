@@ -107,6 +107,7 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         "storage-root-missing": ("manual_format_required", "not_available"),
         "storage-ready-pending-migration": ("store_migration_pending", "not_needed"),
         "storage-ready-packet-log-sd": ("packet_log_canary_enabled", "not_needed"),
+        "storage-ready-retained-history-sd": ("retained_history_sd_enabled", "not_needed"),
     }
 
     for scenario, (setup_action, format_action) in scenarios.items():
@@ -128,6 +129,9 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         if scenario == "storage-ready-packet-log-sd":
             assert "Mixed storage" in labels_by_view["settings"]
             assert "messages NVS / packets SD / routes NVS" in labels_by_view["storage_setup_sheet"]
+        elif scenario == "storage-ready-retained-history-sd":
+            assert "Mixed storage" in labels_by_view["settings"]
+            assert "messages SD / packets SD / routes SD" in labels_by_view["storage_setup_sheet"]
         else:
             assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]
         assert storage_view["overflow"] == []

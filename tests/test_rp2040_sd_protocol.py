@@ -255,6 +255,67 @@ def test_filecanary_transcript_fails_safely_without_ready_card():
         assert {reply["err"] for reply in replies} == {expected_error}
 
 
+def test_retained_history_blob_paths_support_atomic_commit_cycle():
+    retained_paths = (
+        "stores/messages/public/public",
+        "stores/messages/dm/threads",
+        "stores/routes/routes",
+        "stores/packet_log/ring",
+    )
+    payload = b"retained-history-blob-v1"
+
+    for index, base_path in enumerate(retained_paths, start=40):
+        fs = SdFileSystem()
+        tmp = encode_path(f"{base_path}.tmp")
+        final = encode_path(f"{base_path}.bin")
+        write = file_tokens(
+            reply_for_request(
+                file_request(
+                    index,
+                    "write",
+                    path=tmp,
+                    off=0,
+                    len=len(payload),
+                    trunc=1,
+                    data=b64url(payload),
+                    crc=crc32_hex(payload),
+                ),
+                SCENARIOS["ready"],
+                fs,
+            )
+        )
+        rename = file_tokens(
+            reply_for_request(
+                file_request(index + 100, "rename", path=tmp, to=final, replace=1),
+                SCENARIOS["ready"],
+                fs,
+            )
+        )
+        stat = file_tokens(
+            reply_for_request(
+                file_request(index + 200, "stat", path=final),
+                SCENARIOS["ready"],
+                fs,
+            )
+        )
+        read = file_tokens(
+            reply_for_request(
+                file_request(index + 300, "read", path=final, off=0, len=len(payload)),
+                SCENARIOS["ready"],
+                fs,
+            )
+        )
+
+        assert validate_relative_path(f"{base_path}.tmp")
+        assert validate_relative_path(f"{base_path}.bin")
+        assert write["ok"] == "1"
+        assert rename["ok"] == "1"
+        assert stat["exists"] == "1"
+        assert stat["size"] == str(len(payload))
+        assert read["data"] == b64url(payload)
+        assert read["crc"] == crc32_hex(payload)
+
+
 def test_file_protocol_rejects_bad_paths_crc_and_large_chunks():
     fs = SdFileSystem()
     safe_path = encode_path("logs/packet.bin")

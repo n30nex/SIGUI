@@ -107,12 +107,13 @@ Standard error codes are `bad_request`, `bad_value`, `unsupported_op`,
 `io_error`, and `timeout`.
 
 For compacted stores and map tiles, write chunks to a temporary path, then use
-`rename replace=1` as the commit step. The first ESP32-side canary is packet-log
-blob storage at `stores/packet_log/ring.bin`, written through
-`stores/packet_log/ring.tmp` and committed with `rename replace=1`. During this
-canary phase, ESP32 keeps an onboard NVS mirror so removing or timing out the SD
-card does not strand packet evidence. Do not blindly retry `append` after a
-timeout unless the higher-level record format has its own idempotency key.
+`rename replace=1` as the commit step. Retained history blobs use:
+`stores/messages/public/public.bin`, `stores/messages/dm/threads.bin`,
+`stores/routes/routes.bin`, and `stores/packet_log/ring.bin`, each committed
+through a same-directory `.tmp` path. ESP32 keeps an onboard NVS mirror so
+removing or timing out the SD card does not strand message, route, or packet
+history. Do not blindly retry `append` after a timeout unless the higher-level
+record format has its own idempotency key.
 
 ## Storage Filecanary Transcript
 
@@ -162,5 +163,5 @@ ESP32 request IDs are process-global, so hardware captures may not start at `1`.
 - No format when no card is present.
 - No format when the RP2040 did not first report `format_supported=1`.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
-- Until SD-backed stores are implemented, valid SD cards are reported as `store_migration_pending` unless the packet-log canary is enabled.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Packet-log can use SD as the first canary when ready; message, route, export, and map-tile stores remain onboard/fallback-backed until their migrations land.
+- Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; export and map-tile stores remain onboard/fallback-backed or pending until their migrations land.

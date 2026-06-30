@@ -52,8 +52,9 @@ Expected proof with a ready card:
 - `storage status` reports `sd.rp2040_protocol_supported=true`.
 - `sd.file_ops=true`, `sd.atomic_rename=true`, `sd.file_line_max >= 512`,
   `sd.file_chunk_max >= 192`, and `sd.path_max >= 96`.
-- `packet_log_backend="sd"`, `data_backend="mixed"`, and
-  `setup_action="packet_log_canary_enabled"`.
+- `message_store_backend="sd"`, `dm_store_backend="sd"`,
+  `route_store_backend="sd"`, `packet_log_backend="sd"`,
+  `data_backend="mixed"`, and `setup_action="retained_history_sd_enabled"`.
 - `storage filecanary` returns `ok=true`, `rename_replace=true`,
   `read_final=true`, `delete_final=true`, and `stat_deleted=true`.
 - The passive soak reports zero active Public TX, zero crash-like resets, and

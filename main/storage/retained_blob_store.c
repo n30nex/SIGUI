@@ -6,7 +6,13 @@
 #include "hal/rp2040_bridge.h"
 #include "nvs.h"
 
+#define D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"
+#define D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"
+#define D1L_RETAINED_ROUTE_NAMESPACE "d1l_routes"
 #define D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"
+#define D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"
+#define D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"
+#define D1L_RETAINED_ROUTE_SD_DIR "stores/routes"
 #define D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"
 #define D1L_RETAINED_SD_WRITE_TIMEOUT_MS 750U
 #define D1L_RETAINED_SD_READ_TIMEOUT_MS 750U
@@ -20,6 +26,24 @@ typedef struct {
 
 static const d1l_retained_blob_store_config_t s_store_configs[] = {
     {
+        .id = D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+        .name = "public_messages",
+        .nvs_namespace = D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE,
+        .sd_directory = D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR,
+    },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
+        .name = "dm_messages",
+        .nvs_namespace = D1L_RETAINED_DM_MESSAGE_NAMESPACE,
+        .sd_directory = D1L_RETAINED_DM_MESSAGE_SD_DIR,
+    },
+    {
+        .id = D1L_RETAINED_BLOB_STORE_ROUTES,
+        .name = "routes",
+        .nvs_namespace = D1L_RETAINED_ROUTE_NAMESPACE,
+        .sd_directory = D1L_RETAINED_ROUTE_SD_DIR,
+    },
+    {
         .id = D1L_RETAINED_BLOB_STORE_PACKET_LOG,
         .name = "packet_log",
         .nvs_namespace = D1L_RETAINED_PACKET_LOG_NAMESPACE,
@@ -27,7 +51,7 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
     },
 };
 
-static bool s_packet_log_sd_enabled;
+static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
 
 static const d1l_retained_blob_store_config_t *find_store(d1l_retained_blob_store_id_t store_id)
 {
@@ -74,8 +98,8 @@ static bool build_sd_path(const d1l_retained_blob_store_config_t *config,
 
 static bool store_sd_enabled(const d1l_retained_blob_store_config_t *config)
 {
-    return config && config->id == D1L_RETAINED_BLOB_STORE_PACKET_LOG &&
-           s_packet_log_sd_enabled;
+    return config && config->id < D1L_RETAINED_BLOB_STORE_COUNT &&
+           s_store_sd_enabled[config->id];
 }
 
 static esp_err_t nvs_read_blob(const d1l_retained_blob_store_config_t *config,
@@ -273,7 +297,7 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
                                              uint32_t file_chunk_max,
                                              uint32_t path_max)
 {
-    const bool can_use_packet_log =
+    const bool can_use_retained_sd =
         data_ready &&
         file_ops_supported &&
         atomic_rename_supported &&
@@ -281,7 +305,9 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
         file_chunk_max >= D1L_RP2040_FILE_CHUNK_MAX &&
         path_max >= D1L_RP2040_FILE_PATH_MAX;
 
-    s_packet_log_sd_enabled = can_use_packet_log;
+    for (size_t i = 0; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        s_store_sd_enabled[i] = can_use_retained_sd;
+    }
 }
 
 esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
