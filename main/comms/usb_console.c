@@ -837,16 +837,29 @@ static void cmd_messages_dm_clear(void)
 static void cmd_messages_unread(void)
 {
     d1l_read_state_stats_t stats = d1l_read_state_stats();
+    static d1l_read_state_dm_thread_t threads[8];
+    size_t thread_count = d1l_read_state_copy_dm_threads(threads, 8);
     ok_begin("messages unread");
-    printf(",\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,\"persisted\":true,\"note\":\"Unread counters are derived from persisted RX rows; muted DM rows are counted separately\"}\n",
+    printf(",\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"dm_thread_count\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu,\"newest_public_rx_seq\":%lu,\"newest_dm_rx_seq\":%lu,\"mark_read_count\":%lu,\"dm_threads\":[",
            (unsigned long)stats.public_unread_count,
            (unsigned long)stats.dm_unread_count,
            (unsigned long)stats.muted_dm_unread_count,
+           (unsigned long)stats.dm_thread_count,
            (unsigned long)stats.last_public_read_seq,
            (unsigned long)stats.last_dm_read_seq,
            (unsigned long)stats.newest_public_rx_seq,
            (unsigned long)stats.newest_dm_rx_seq,
            (unsigned long)stats.mark_read_count);
+    for (size_t i = 0; i < thread_count; ++i) {
+        const d1l_read_state_dm_thread_t *thread = &threads[i];
+        printf("%s{\"fingerprint\":\"%s\",\"last_read_seq\":%lu,\"newest_rx_seq\":%lu,\"unread\":%lu,\"muted\":%s}",
+               i ? "," : "", thread->fingerprint,
+               (unsigned long)thread->last_read_seq,
+               (unsigned long)thread->newest_rx_seq,
+               (unsigned long)thread->unread_count,
+               bool_json(thread->muted));
+    }
+    printf("],\"persisted\":true,\"note\":\"Unread counters are derived from persisted RX rows; DM cursors are tracked per thread\"}\n");
 }
 
 static void cmd_messages_read(const char *line)
@@ -858,12 +871,22 @@ static void cmd_messages_read(const char *line)
 
     esp_err_t ret = ESP_ERR_INVALID_ARG;
     const char *target = "invalid";
+    char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     if (strcmp(arg, "public") == 0) {
         target = "public";
         ret = d1l_read_state_mark_public_read();
     } else if (strcmp(arg, "dm") == 0) {
         target = "dm";
         ret = d1l_read_state_mark_dm_read();
+    } else if (strncmp(arg, "dm ", 3) == 0) {
+        const char *fingerprint = arg + 3;
+        while (*fingerprint == ' ') {
+            fingerprint++;
+        }
+        if (parse_fingerprint_token(fingerprint, thread_fingerprint, sizeof(thread_fingerprint))) {
+            target = "dm_thread";
+            ret = d1l_read_state_mark_dm_thread_read(thread_fingerprint);
+        }
     } else if (strcmp(arg, "all") == 0) {
         target = "all";
         ret = d1l_read_state_mark_all_read();
@@ -871,17 +894,21 @@ static void cmd_messages_read(const char *line)
     if (ret != ESP_OK) {
         err_result("messages read",
                    ret == ESP_ERR_INVALID_ARG ? "INVALID_TARGET" : esp_err_to_name(ret),
-                   "usage: messages read <public|dm|all>");
+                   "usage: messages read <public|dm|dm <fingerprint>|all>");
         return;
     }
 
     d1l_read_state_stats_t stats = d1l_read_state_stats();
     ok_begin("messages read");
-    printf(",\"target\":\"%s\",\"persisted\":true,\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu}\n",
-           target,
+    printf(",\"target\":\"%s\"", target);
+    if (thread_fingerprint[0] != '\0') {
+        printf(",\"fingerprint\":\"%s\"", thread_fingerprint);
+    }
+    printf(",\"persisted\":true,\"public_unread\":%lu,\"dm_unread\":%lu,\"muted_dm_unread\":%lu,\"dm_thread_count\":%lu,\"last_public_read_seq\":%lu,\"last_dm_read_seq\":%lu}\n",
            (unsigned long)stats.public_unread_count,
            (unsigned long)stats.dm_unread_count,
            (unsigned long)stats.muted_dm_unread_count,
+           (unsigned long)stats.dm_thread_count,
            (unsigned long)stats.last_public_read_seq,
            (unsigned long)stats.last_dm_read_seq);
 }
@@ -1445,7 +1472,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public\",\"messages dm\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)

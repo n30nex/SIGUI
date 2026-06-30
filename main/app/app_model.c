@@ -167,6 +167,9 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
     snapshot->recent_dm_count =
         d1l_dm_store_copy_recent(snapshot->recent_dms, D1L_APP_SNAPSHOT_DM_PREVIEW);
+    for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
+        snapshot->recent_dm_unread[i] = d1l_read_state_dm_entry_is_unread(&snapshot->recent_dms[i]);
+    }
     snapshot->recent_packet_count =
         d1l_packet_log_copy_recent(snapshot->recent_packets, D1L_APP_SNAPSHOT_PACKET_PREVIEW);
 }
@@ -216,6 +219,11 @@ esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, 
 esp_err_t d1l_app_model_mark_messages_read(void)
 {
     return d1l_read_state_mark_all_read();
+}
+
+esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint)
+{
+    return d1l_read_state_mark_dm_thread_read(fingerprint);
 }
 
 esp_err_t d1l_app_model_request_advert(bool flood)

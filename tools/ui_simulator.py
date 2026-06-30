@@ -621,8 +621,9 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     for msg in snap.dm_messages:
         draw_row(s, (44, y, 436, y + 42), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 50
-    draw_button(s, (44, 304, 206, 356), "Reply", GREEN)
-    draw_button(s, (226, 304, 388, 356), "Close", MUTED)
+    draw_button(s, (44, 304, 160, 356), "Reply", GREEN)
+    draw_button(s, (174, 304, 290, 356), "Read", ACCENT)
+    draw_button(s, (304, 304, 420, 356), "Close", MUTED)
     draw_dock(s, "Messages")
 
 
@@ -754,7 +755,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Export", "Fav", "Mute", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
-    "dm_thread_sheet": ("DM Thread", "Reply", "Close"),
+    "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),

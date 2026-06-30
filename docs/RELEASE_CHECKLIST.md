@@ -63,6 +63,7 @@
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.
 - [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
+- [x] Per-thread DM read cursors are persisted, exposed through serial diagnostics, and surfaced in the DM thread sheet.
 - [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, controlled inbound DM proof, and richer full-thread history.
 
 ## Phase 7 Polish And Soak

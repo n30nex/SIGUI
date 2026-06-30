@@ -1,8 +1,23 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
+
+#include "mesh/contact_store.h"
+#include "mesh/dm_store.h"
+
+#define D1L_READ_STATE_DM_THREAD_CAPACITY 16U
+
+typedef struct {
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    uint32_t last_read_seq;
+    uint32_t newest_rx_seq;
+    uint32_t unread_count;
+    bool muted;
+} d1l_read_state_dm_thread_t;
 
 typedef struct {
     uint32_t last_public_read_seq;
@@ -12,6 +27,7 @@ typedef struct {
     uint32_t public_unread_count;
     uint32_t dm_unread_count;
     uint32_t muted_dm_unread_count;
+    uint32_t dm_thread_count;
     uint32_t mark_read_count;
 } d1l_read_state_stats_t;
 
@@ -19,5 +35,9 @@ esp_err_t d1l_read_state_init(void);
 esp_err_t d1l_read_state_clear(void);
 esp_err_t d1l_read_state_mark_public_read(void);
 esp_err_t d1l_read_state_mark_dm_read(void);
+esp_err_t d1l_read_state_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_read_state_mark_all_read(void);
 d1l_read_state_stats_t d1l_read_state_stats(void);
+bool d1l_read_state_dm_entry_is_unread(const d1l_dm_entry_t *entry);
+size_t d1l_read_state_copy_dm_threads(d1l_read_state_dm_thread_t *out_threads,
+                                      size_t max_threads);

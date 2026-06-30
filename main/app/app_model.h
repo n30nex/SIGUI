@@ -113,6 +113,7 @@ typedef struct {
     d1l_message_entry_t recent_messages[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW];
     size_t recent_message_count;
     d1l_dm_entry_t recent_dms[D1L_APP_SNAPSHOT_DM_PREVIEW];
+    bool recent_dm_unread[D1L_APP_SNAPSHOT_DM_PREVIEW];
     size_t recent_dm_count;
     d1l_packet_log_entry_t recent_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
     size_t recent_packet_count;
@@ -128,6 +129,7 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
                                           d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size);
 esp_err_t d1l_app_model_mark_messages_read(void);
+esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile);
 void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile);

@@ -106,6 +106,7 @@ typedef enum {
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 
+static void render_dm_thread_sheet(void);
 static void render_radio_settings_sheet(void);
 
 static void lv_tick_task(void *arg)
@@ -450,16 +451,15 @@ static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_
     lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
-static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry)
+static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry, bool unread)
 {
     lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
-    const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_dm_read_seq;
     lv_obj_t *alias = create_label(row, entry->contact_alias,
-                                   unread ? 0xFBBF24 :
-                                   (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
+                                    unread ? 0xFBBF24 :
+                                    (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
     lv_label_set_long_mode(alias, LV_LABEL_LONG_DOT);
     lv_obj_set_width(alias, 190);
     lv_obj_align(alias, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -1325,8 +1325,11 @@ static void onboarding_keyboard_event_cb(lv_event_t *event)
     }
 }
 
-static const char *dm_row_state(const d1l_dm_entry_t *entry)
+static const char *dm_row_state(const d1l_dm_entry_t *entry, bool unread)
 {
+    if (unread) {
+        return "new";
+    }
     if (entry->acked) {
         return "acked";
     }
@@ -1351,6 +1354,21 @@ static void reply_dm_thread_event_cb(lv_event_t *event)
     open_dm_compose_for_contact(&contact);
 }
 
+static void read_dm_thread_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_mark_dm_thread_read(s_dm_thread_fingerprint);
+    show_toast("Thread read", ret);
+    if (ret == ESP_OK) {
+        render_active_tab();
+        render_dm_thread_sheet();
+        if (s_dm_thread_sheet) {
+            lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(s_dm_thread_sheet);
+        }
+    }
+}
+
 static void render_dm_thread_sheet(void)
 {
     if (!s_dm_thread_sheet) {
@@ -1364,11 +1382,12 @@ static void render_dm_thread_sheet(void)
     lv_obj_t *title = create_label(s_dm_thread_sheet, alias, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 206);
+    lv_obj_set_width(title, 178);
     lv_obj_set_pos(title, 8, 4);
 
-    create_button(s_dm_thread_sheet, "Reply", 228, 0, 64, 40, reply_dm_thread_event_cb, NULL);
-    create_button(s_dm_thread_sheet, "Close", 316, 0, 76, 40, close_dm_thread_event_cb, NULL);
+    create_button(s_dm_thread_sheet, "Reply", 198, 0, 64, 40, reply_dm_thread_event_cb, NULL);
+    create_button(s_dm_thread_sheet, "Read", 270, 0, 56, 40, read_dm_thread_event_cb, NULL);
+    create_button(s_dm_thread_sheet, "Close", 334, 0, 76, 40, close_dm_thread_event_cb, NULL);
 
     lv_obj_t *meta = create_label(s_dm_thread_sheet, "", 0x8EA0AE);
     label_set_fmt(meta, "%.16s  stored %u", s_dm_thread_fingerprint, (unsigned)s_snapshot.dm_count);
@@ -1383,14 +1402,17 @@ static void render_dm_thread_sheet(void)
         if (strcmp(entry->contact_fingerprint, s_dm_thread_fingerprint) != 0) {
             continue;
         }
+        const bool unread = s_snapshot.recent_dm_unread[i];
         lv_obj_t *row = create_panel(s_dm_thread_sheet, 0, y, 424, 48);
         lv_obj_set_style_pad_all(row, 8, 0);
         const char *who = entry->direction[0] == 't' ? "You" : alias;
-        lv_obj_t *sender = create_label(row, who, entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0);
+        lv_obj_t *sender = create_label(row, who,
+                                        unread ? 0xFBBF24 :
+                                        (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
         lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
         lv_obj_set_width(sender, 190);
         lv_obj_align(sender, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_t *state = create_label(row, dm_row_state(entry), 0x8EA0AE);
+        lv_obj_t *state = create_label(row, dm_row_state(entry, unread), 0x8EA0AE);
         lv_obj_align(state, LV_ALIGN_TOP_RIGHT, 0, 0);
         lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
         lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
@@ -1470,7 +1492,7 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
         y += 26;
     }
     for (size_t i = 0; i < snapshot->recent_dm_count && y <= 302; ++i) {
-        render_dm_row(s_content, y, &snapshot->recent_dms[i]);
+        render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
         y += 60;
     }
     if (snapshot->recent_message_count == 0 && snapshot->recent_dm_count == 0) {

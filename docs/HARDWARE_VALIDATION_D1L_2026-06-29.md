@@ -342,6 +342,17 @@ Do not use `COM11` or `COM29` for this D1L target.
   - `crashlog_total_written_delta=0`, `crashlog_count_peak=0`, and `crashlog_crash_like_count=0` after start clear.
   - Health remained ready with stack floors of `current=1000` and `ui=1204` words, `lvgl_used_pct_peak=80`, `heap_free_delta=0`, and `psram_free_delta=0`.
   - Post-soak hardware smoke passed in `artifacts/smoke/d1l-smoke-post-active-1h-crashguard-retry-local-COM7.json`; `mesh status` still reported ready with `rx_packets=87`, `tx_packets=63`, `crashlog` was empty after the start clear, and `health` still reported `board_ready=true` and `ui_ready=true`.
+- Phase 4 DM thread read local smoke: `artifacts/smoke/d1l-smoke-dm-thread-read-local-COM7.json`
+  - Local Podman ESP-IDF build passed; `meshcore_deskos_d1l.bin` size was `0xa85f0`, leaving 34% free in the smallest app partition.
+  - Local app SHA256 was `F86FBDDB2DA2D818E62BE85AEF143F6C89C80AF122E8A13541E7FF504D9B5241`.
+  - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
+  - Standard smoke passed with 32 commands. `mesh status` reported `ready`, `health` reported `board_ready=true` and `ui_ready=true`, and `messages unread` included the new `dm_threads` field.
+  - Targeted serial proof passed: `messages read dm 0BF0A701D5AE2DB6` returned `ok=true` with `target="dm_thread"`, and `help` advertised `messages read <public|dm|dm <fingerprint>|all>`.
+- Phase 4 DM thread read active Public `test` RF regression: `artifacts/soak/d1l-soak-dm-thread-read-rf-local-COM7.json`
+  - The 3-minute active soak passed with 8 samples, 3 queued Public `test` TX events, 0 command failures, 0 threshold failures, 0 retries, and monotonic uptime.
+  - Mesh counters moved `mesh_tx_packet_delta=3` and `mesh_rx_packet_delta=4`; the packet log moved `packet_total_written_delta=7`.
+  - Health remained ready with stack floors of `current=1000` and `ui=1344` words, `lvgl_used_pct_peak=80`, `heap_free_delta=-16`, and `psram_free_delta=0`.
+  - `crashlog_count_peak=0` and `crashlog_crash_like_count=0` after start clear.
 
 ## Still Pending
 
@@ -349,7 +360,7 @@ Do not use `COM11` or `COM29` for this D1L target.
 - Manual physical touch entry on the Public/DM composer keyboard, contact detail sheet, contact export sheet, Radio Settings sheet, DM thread/reply sheet, Messages `Read` action, Packet-tab filter/search controls, and Mesh Roles browser open/scroll/close flow is still pending.
 - Full DM workflow is still pending: controlled ACK/PATH RF proof, direct-route RF proof, and a controlled inbound DM artifact.
 - D1L-heard Public bot reply validation passed again in the unread-state proof with `Krabs Node: Test OK CH0.`; controlled inbound DM unread proof is still pending.
-- Large heard-node list virtualization and stress testing are still pending; the current UI renders a bounded newest-node preview.
+- Physical large-mesh RF stress is still pending; host `large-mesh` simulator stress now covers oversized node/message stores while the current UI renders bounded previews.
 - Richer contact edit actions, dedicated room-server/repeater list screens, larger packet retention/export/deeper protocol decode, QR scan/import proof, and route trace/ping helpers are still pending; the current UI renders a bounded newest-contact preview, first contact detail sheet, contact export sheet, Home/Packet-tab signal/mesh-role summaries, route rows, a first route detail sheet, and packet rows with filter/search/raw-hex detail.
 - Full 12-hour idle/listening soak is still pending.
 - Flash backup was intentionally skipped per operator instruction.

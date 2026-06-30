@@ -35,7 +35,7 @@ Coverage:
 - Phase 6 contact export contract: promoted contacts with retained 64-hex public keys must export MeshCore-compatible `meshcore://contact/add?...` URIs through serial and a touch Contact Export QR sheet, with no failure from the smokeable list form when no contact is available.
 - Phase 6 radio settings contract: `settings get` and `radio get` must expose the persisted radio profile, serial `radio set txpower` and `radio set rxboost` must validate and persist safe values without live RF apply, and the Settings tab must open a simulator-covered Radio Settings sheet with staged edits, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Phase 2 MeshCore service command surface.
-- Phase 4 Public message store contract, DM store contract, unread/read-state contract, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
+- Phase 4 Public message store contract, DM store contract, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
 ## Hardware Smoke
 
@@ -154,8 +154,9 @@ For Phase 4 unread/read-state validation:
 8. Verify `messages unread` reports `public_unread=0`.
 9. Reboot.
 10. Verify `messages unread` still reports `public_unread=0` and `health` reports `board_ready=true` and `ui_ready=true`.
-11. For physical touch review, open the Messages tab, verify new RX rows are highlighted as `new`, tap `Read`, and verify the unread count clears.
-12. For muted DM behavior when an inbound DM source is available, mute that contact, receive a DM, and verify the unread row is counted under `muted_dm_unread` rather than audible `dm_unread`.
+11. For DM-thread read-state validation, when a DM thread has an inbound RX row, run `messages unread`, note the thread entry under `dm_threads`, run `messages read dm <fingerprint>`, and verify only that thread's unread count clears while other unread DM threads remain counted.
+12. For physical touch review, open the Messages tab, verify new RX rows are highlighted as `new`, tap global `Read`, and verify the unread count clears; then open a DM thread and verify its `Read` action clears only that thread.
+13. For muted DM behavior when an inbound DM source is available, mute that contact, receive a DM, and verify the unread row is counted under `muted_dm_unread` rather than audible `dm_unread`.
 
 ## DM Store And Serial TX
 
@@ -186,7 +187,7 @@ For Phase 4 touch direct-message thread validation:
 
 1. Verify `messages dm` contains at least one row for a contact with a full public key.
 2. Open the Messages tab and tap the DM preview row.
-3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, recent rows for the same fingerprint, and `Reply`/`Close` actions.
+3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, recent rows for the same fingerprint, and `Reply`/`Read`/`Close` actions.
 4. Tap `Reply`, type a short message, and tap `Send`.
 5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
 6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.
