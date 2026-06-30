@@ -17,6 +17,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Added an SD-capable retained blob-store provider for the packet-log canary. It enables SD only when the RP2040 reports ready data, file operations, matching line/path/chunk limits, and atomic rename; writes use `stores/packet_log/ring.tmp` plus `rename replace=1` to commit `stores/packet_log/ring.bin`.
 - Kept an onboard NVS mirror for the packet-log canary and retained NVS fallback on no-card, timeout, missing file support, missing atomic rename, insufficient limits, and invalid SD blob cases.
 - Kept messages, routes, settings, identity, contacts, read-state, diagnostics, exports, and map tiles on onboard/fallback storage; no broad SD-backed store migration is claimed in this slice.
+- Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added a raw SdFat card probe plus SPI1-aware formatter, and kept the ESP32 runtime SD probe window long enough for slow card status replies while boot probing stays short.
 
 ## Validation Rules
 
@@ -25,9 +26,17 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
 - After the RP2040 bridge is flashed, use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof. The canary is serial-only and does not send Public RF or issue `DESKOS_SD_FORMAT`.
 
+## Hardware Evidence
+
+- GitHub Actions run `28478756887` for commit `d26f345dd02e5debfb33e42db0111a7fa663efb4` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. Its checksum manifests were verified locally before flashing.
+- The D1L ESP32 on COM12 and RP2040 bridge on COM16 were flashed only from that Actions run. RP2040 UF2 SHA-256 was `E81196310680F4CA282574E6EBB9608542575C44EEDB32BAD866AFF576AAB4A2`.
+- `artifacts/hardware/com12/rp2040_sd_bridge_preflight_after_sd_bus_harden.json` proves the ESP32/RP2040 protocol is live: `rp2040_protocol_supported=true`, UART2 GPIO19/GPIO20 at 921600 baud, file protocol limits are advertised, and no Public RF, formatting, or UF2 copying occurred during preflight.
+- The same preflight reports `sd.state=no_card`, `present=false`, `mounted=false`, and `format_supported=false`. `artifacts/hardware/com12/storage_setup_after_sd_bus_harden.json` confirms `storage setup confirm FORMAT-DESKOS-SD` was refused with `ESP_ERR_NOT_FOUND` and `format_performed=false`.
+- Result: protocol/no-card fallback is hardware-validated, but SD acceptance cannot be completed until the RP2040 reports an electrically present card. The next hardware step is to reseat or replace the card, then rerun preflight and only use the guarded format command if status reports `setup_required` with `format_supported=true`.
+
 ## Remaining SD Work
 
-- Validate the RP2040 SD bridge artifact on hardware after a safe RP2040 flashing procedure is documented and the correct RP2040 programming path is identified.
-- Safely flash and validate the RP2040 SD bridge artifact on hardware so `storage status` reports the file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
+- Reseat or replace the D1L microSD card until the RP2040 bridge reports `present=true`; then validate the guarded format path if setup is required.
+- Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Move larger retained stores to SD when configured: Public/DM history, route history, exports, and future map tiles.
 - Keep settings, identity, and minimum boot-critical state on onboard storage.
