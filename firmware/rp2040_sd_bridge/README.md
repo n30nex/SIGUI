@@ -14,6 +14,8 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
+- SD CS is driven high during bus setup, and the bridge waits once after
+  enabling the SD/sensor rail so slow cards have time to power up.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
@@ -74,9 +76,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   filesystem is usable. Ready cards also advertise `file_ops=1`,
   `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
   `atomic_rename=1`. If the FAT mount fails, the bridge probes the raw card on
-  `SPI1`: no electrical card still reports `no_card`, while an inserted card
-  with an unusable filesystem reports `setup_required`, `format_required=1`,
-  and `format_supported=1`.
+  `SPI1` using the same dedicated-SPI card open used by the formatter: no
+  electrical card still reports `no_card`, while an inserted card with an
+  unusable filesystem reports `setup_required`, `format_required=1`, and
+  `format_supported=1`.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
   Formatting uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
   wrapper is avoided because that wrapper does not preserve the configured SPI

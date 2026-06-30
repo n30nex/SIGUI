@@ -65,8 +65,15 @@ uint32_t clamp_kb(uint64_t bytes) {
 }
 
 void configure_sd_bus() {
+    static bool sd_power_settled = false;
     pinMode(SD_POWER_PIN, OUTPUT);
     digitalWrite(SD_POWER_PIN, HIGH);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    if (!sd_power_settled) {
+        delay(250);
+        sd_power_settled = true;
+    }
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
@@ -86,7 +93,7 @@ CardProbe probe_card() {
     CardProbe probe = {false, 0};
     configure_sd_bus();
     SdCardFactory card_factory;
-    SdCard *card = card_factory.newCard(sd_spi_config(SHARED_SPI));
+    SdCard *card = card_factory.newCard(sd_spi_config(DEDICATED_SPI));
     if (!card || card->errorCode()) {
         return probe;
     }

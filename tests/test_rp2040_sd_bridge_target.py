@@ -37,14 +37,16 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
     assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
     assert "digitalWrite(SD_POWER_PIN, HIGH)" in sketch
+    assert "pinMode(SD_CS_PIN, OUTPUT)" in sketch
+    assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
+    assert "delay(250)" in sketch
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
-    assert "card_factory.newCard(sd_spi_config(SHARED_SPI))" in sketch
-    assert "card_factory.newCard(sd_spi_config(DEDICATED_SPI))" in sketch
+    assert sketch.count("card_factory.newCard(sd_spi_config(DEDICATED_SPI))") == 2
     assert "FatFormatter fat_formatter" in sketch
     assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
     assert "SDFS.format()" not in sketch
