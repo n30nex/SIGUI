@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -151,6 +152,7 @@ def run_preflight(
     uf2_candidates = candidate_volumes()
     results: list[dict] = []
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        time.sleep(1.0)
         ser.reset_input_buffer()
         for command in PREFLIGHT_COMMANDS:
             results.append(send_console_command(ser, command, timeout))
@@ -159,7 +161,11 @@ def run_preflight(
     storage_status = results[1] if len(results) > 1 else {}
     health = results[2] if len(results) > 2 else {}
     classification = classify_preflight(rp2040_status, storage_status, uf2_candidates, artifact)
-    command_ok = all(result.get("ok") is True for result in results)
+    storage_ok = storage_status.get("ok") is True
+    health_ok = health.get("ok") is True
+    rp2040_status_ok = rp2040_status.get("ok") is True
+    rp2040_status_optional_ok = rp2040_status_ok or classification["rp2040_uart_ready"]
+    command_ok = rp2040_status_optional_ok and storage_ok and health_ok
     artifact_ok = artifact.get("ok") is not False
     return {
         "schema": 1,
@@ -171,6 +177,9 @@ def run_preflight(
         "formats_sd": False,
         "copies_uf2": False,
         "ok": command_ok and artifact_ok,
+        "serial_commands_ok": command_ok,
+        "rp2040_status_ok": rp2040_status_ok,
+        "rp2040_status_optional_ok": rp2040_status_optional_ok,
         "ready_for_sd_acceptance": classification["storage_file_gate_ready"],
         "classification": classification,
         "artifact": artifact,

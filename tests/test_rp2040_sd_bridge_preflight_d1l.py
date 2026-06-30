@@ -23,6 +23,35 @@ class FakeSerial:
         return False
 
 
+class CommandAwareSerial:
+    def __init__(self, responses_by_command):
+        self.responses_by_command = {
+            command: [line.encode("utf-8") for line in responses]
+            for command, responses in responses_by_command.items()
+        }
+        self.current_command = None
+        self.writes = []
+        self.reset_count = 0
+
+    def write(self, data):
+        command = data.decode("utf-8")
+        self.writes.append(command)
+        self.current_command = command.strip()
+
+    def readline(self):
+        responses = self.responses_by_command.get(self.current_command, [])
+        return responses.pop(0) if responses else b""
+
+    def reset_input_buffer(self):
+        self.reset_count += 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def protocol_pending_storage_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
@@ -141,6 +170,7 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
         Serial = lambda self, **_kwargs: ser
 
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
     monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
 
@@ -165,6 +195,37 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     ]
 
 
+def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridge(monkeypatch):
+    ser = CommandAwareSerial(
+        {
+            "storage status": [protocol_pending_storage_line()],
+            "health": ['{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'],
+        }
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=0.01,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is True
+    assert report["rp2040_status_ok"] is False
+    assert report["rp2040_status_optional_ok"] is True
+    assert report["classification"]["rp2040_uart_ready"] is True
+    assert report["classification"]["state"] == "rp2040_protocol_pending"
+
+
 def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
     ser = FakeSerial(
         [
@@ -178,6 +239,7 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
         Serial = lambda self, **_kwargs: ser
 
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
     monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
 
