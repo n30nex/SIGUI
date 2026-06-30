@@ -1694,6 +1694,66 @@ static void cmd_contacts_set(const char *line)
            contact.fingerprint, bool_json(contact.favorite), bool_json(contact.muted));
 }
 
+static void cmd_contacts_rename(const char *line)
+{
+    const char *arg = line + strlen("contacts rename ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("contacts rename", "INVALID_FINGERPRINT",
+                   "usage: contacts rename <fingerprint> <alias>");
+        return;
+    }
+    const char *alias = arg + strlen(fingerprint);
+    while (*alias == ' ') {
+        alias++;
+    }
+    if (alias[0] == '\0') {
+        err_result("contacts rename", "EMPTY_ALIAS",
+                   "usage: contacts rename <fingerprint> <alias>");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = d1l_contact_store_rename(fingerprint, alias, &contact);
+    if (ret != ESP_OK) {
+        err_result("contacts rename", esp_err_to_name(ret), "could not persist contact alias");
+        return;
+    }
+
+    ok_begin("contacts rename");
+    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"updated_ms\":%lu}\n",
+           contact.fingerprint, contact.alias, (unsigned long)contact.updated_ms);
+}
+
+static void cmd_contacts_delete(const char *line)
+{
+    const char *arg = line + strlen("contacts delete ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    if (!parse_fingerprint_token(arg, fingerprint, sizeof(fingerprint))) {
+        err_result("contacts delete", "INVALID_FINGERPRINT",
+                   "usage: contacts delete <fingerprint>");
+        return;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    esp_err_t ret = d1l_contact_store_delete(fingerprint, &contact);
+    if (ret != ESP_OK) {
+        err_result("contacts delete", esp_err_to_name(ret), "could not delete contact");
+        return;
+    }
+
+    d1l_contact_store_stats_t stats = d1l_contact_store_stats();
+    ok_begin("contacts delete");
+    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"count\":%u,\"history_retained\":true}\n",
+           contact.fingerprint, contact.alias, (unsigned)stats.count);
+}
+
 static void cmd_mesh_send_dm(const char *line)
 {
     const char *arg = line + strlen("mesh send dm ");
@@ -2098,7 +2158,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -2209,6 +2269,10 @@ static void handle_line(const char *line)
         cmd_contacts_clear();
     } else if (strncmp(line, "contacts add ", 13) == 0) {
         cmd_contacts_add(line);
+    } else if (strncmp(line, "contacts rename ", 16) == 0) {
+        cmd_contacts_rename(line);
+    } else if (strncmp(line, "contacts delete ", 16) == 0) {
+        cmd_contacts_delete(line);
     } else if (strncmp(line, "contacts set ", 13) == 0) {
         cmd_contacts_set(line);
     } else if (strcmp(line, "routes") == 0) {

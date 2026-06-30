@@ -50,6 +50,9 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
                                         uint8_t path_len);
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
                                       d1l_contact_entry_t *out_entry);
+esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
+                                   d1l_contact_entry_t *out_entry);
+esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t *out_entry);
 uint8_t d1l_contact_store_meshcore_type_id(const char *type);
 bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry);
 esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *dest,

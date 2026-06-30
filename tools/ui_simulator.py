@@ -704,10 +704,25 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     s.text(contact.fingerprint, (44, 176, 436, 200), 17, TEXT)
     s.text("Signal", (44, 210, 180, 230), 13, MUTED, True)
     s.text(f"{contact.signal}  {contact.meta}", (44, 232, 436, 254), 14, GREEN)
-    buttons = (("DM", GREEN), ("Trace", BLUE), ("Export", ACCENT), ("Fav", ACCENT), ("Mute", ACCENT))
+    buttons = (("DM", GREEN), ("Trace", BLUE), ("Edit", ACCENT), ("Export", ACCENT), ("Fav", ACCENT), ("Mute", ACCENT))
     for i, (label, color) in enumerate(buttons):
-        draw_button(s, (44 + i * 76, 278, 112 + i * 76, 330), label, color)
+        draw_button(s, (44 + i * 64, 278, 100 + i * 64, 330), label, color)
     draw_button(s, (44, 346, 200, 378), "Close", MUTED)
+    draw_dock(s, "Nodes")
+
+
+def render_contact_edit_sheet(s: Surface, snap: Snapshot):
+    contact = snap.contacts[0]
+    draw_sheet_frame(s, "Edit Contact", contact.name)
+    draw_button(s, (210, 94, 274, 134), "Save", GREEN)
+    draw_button(s, (284, 94, 356, 134), "Forget", RED)
+    draw_button(s, (366, 94, 436, 134), "Close", MUTED)
+    s.text("Alias only; retained history remains", (44, 150, 436, 172), 13, MUTED, True)
+    s.round_rect((44, 184, 436, 236), SURFACE_2, BORDER, 8)
+    s.text("Contact alias", (56, 192, 220, 214), 13, MUTED, True)
+    s.text(contact.name, (56, 214, 424, 232), 16, TEXT)
+    s.round_rect((44, 258, 436, 370), SURFACE, BORDER, 8)
+    s.text("Keyboard saves alias; Forget removes only the promoted contact", (56, 280, 424, 340), 13, MUTED, False, "center")
     draw_dock(s, "Nodes")
 
 
@@ -903,6 +918,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
+    "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
@@ -947,7 +963,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "No automatic format. Confirmation required before SD setup.",
         "Close",
     ),
-    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Export", "Fav", "Mute", "Close"),
+    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Edit", "Export", "Fav", "Mute", "Close"),
+    "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),

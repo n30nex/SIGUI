@@ -504,6 +504,78 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
     return ESP_OK;
 }
 
+esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
+                                   d1l_contact_entry_t *out_entry)
+{
+    if (!fingerprint || fingerprint[0] == '\0' || !alias || alias[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_contact_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    int existing = find_index_by_fingerprint(fingerprint);
+    if (existing < 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    d1l_contact_entry_t *entry = &s_entries[(size_t)existing];
+    char sanitized[D1L_CONTACT_ALIAS_LEN] = {0};
+    sanitize_ascii(sanitized, sizeof(sanitized), alias);
+    if (sanitized[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strncmp(entry->alias, sanitized, sizeof(entry->alias)) != 0) {
+        const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        entry->seq = s_next_seq++;
+        entry->updated_ms = now_ms;
+        snprintf(entry->alias, sizeof(entry->alias), "%s", sanitized);
+        s_total_written++;
+        esp_err_t ret = persist_store();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (out_entry) {
+        *out_entry = *entry;
+    }
+    return ESP_OK;
+}
+
+esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t *out_entry)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_contact_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    int existing = find_index_by_fingerprint(fingerprint);
+    if (existing < 0) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    const size_t index = (size_t)existing;
+    if (out_entry) {
+        *out_entry = s_entries[index];
+    }
+    if (index + 1U < s_count) {
+        memmove(&s_entries[index], &s_entries[index + 1U],
+                (s_count - index - 1U) * sizeof(s_entries[0]));
+    }
+    s_count--;
+    memset(&s_entries[s_count], 0, sizeof(s_entries[s_count]));
+    s_total_written++;
+    return persist_store();
+}
+
 uint8_t d1l_contact_store_meshcore_type_id(const char *type)
 {
     if (!type) {

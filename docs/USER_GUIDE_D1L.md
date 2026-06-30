@@ -74,6 +74,8 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `contacts`
 - `contacts export`
 - `contacts export <fingerprint>`
+- `contacts rename <fingerprint> <alias>`
+- `contacts delete <fingerprint>`
 - `routes`
 - `routes trace <fingerprint>`
 - `packets`
@@ -90,6 +92,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 
 - Manual physical review of the touch UI is still pending.
 - Manual touch review of the Radio Settings sheet is still pending.
+- Manual touch review of the Contact Edit rename/Forget sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.
 - Route Trace is retained local evidence only; active RF ping/trace commands are not enabled yet.
 - Contact export QR scanning/import has not yet been manually proven with a phone/client.

@@ -162,6 +162,9 @@ size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite, bool muted,
                                           d1l_contact_entry_t *out_contact);
+esp_err_t d1l_app_model_rename_contact(const char *fingerprint, const char *alias,
+                                       d1l_contact_entry_t *out_contact);
+esp_err_t d1l_app_model_delete_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size);
 size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t *out_entries,
                                       size_t max_entries);

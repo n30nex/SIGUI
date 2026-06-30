@@ -207,6 +207,7 @@ def test_messages_screen_renders_bounded_preview_rows():
 def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     source = read("main/ui/ui_phase1.c")
     assert "static lv_obj_t *s_contact_detail_sheet" in source
+    assert "static lv_obj_t *s_contact_edit_sheet" in source
     assert "static lv_obj_t *s_contact_export_sheet" in source
     assert "static lv_obj_t *s_route_trace_sheet" in source
     assert "static d1l_contact_entry_t s_contact_detail_contact" in source
@@ -216,21 +217,27 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "open_contact_detail_event_cb" in source
     assert "open_route_trace_event_cb" in source
     assert "create_contact_detail_sheet" in source
+    assert "create_contact_edit_sheet" in source
     assert "create_contact_export_sheet" in source
     assert "create_route_trace_sheet" in source
     assert "render_contact_detail_sheet" in source
+    assert "open_contact_edit_event_cb" in source
     assert "render_contact_export_sheet" in source
     assert "render_route_trace_sheet" in source
     assert "contact_detail_dm_event_cb" in source
     assert "contact_detail_export_event_cb" in source
     assert "lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint" in source
+    assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in source
+    assert "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint" in source
     assert "d1l_app_model_export_contact_uri(s_contact_detail_contact.fingerprint" in source
     assert "s_contact_action_favorite" in source
     assert "s_contact_action_mute" in source
     assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source
     assert "d1l_app_model_copy_route_trace(contact->fingerprint, s_route_trace_entries" in source
     assert 'create_button(s_contact_detail_sheet, "Trace"' in source
+    assert 'create_button(s_contact_detail_sheet, "Edit"' in source
+    assert '"Alias only; retained history remains"' in source
     assert '"Local evidence only; active RF ping/trace is pending"' in source
     assert '"Contact Export"' in source
     assert '"MeshCore QR  %.16s  type %u"' in source

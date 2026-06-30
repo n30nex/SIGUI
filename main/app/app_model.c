@@ -256,6 +256,17 @@ esp_err_t d1l_app_model_set_contact_flags(const char *fingerprint, bool favorite
     return d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact);
 }
 
+esp_err_t d1l_app_model_rename_contact(const char *fingerprint, const char *alias,
+                                       d1l_contact_entry_t *out_contact)
+{
+    return d1l_contact_store_rename(fingerprint, alias, out_contact);
+}
+
+esp_err_t d1l_app_model_delete_contact(const char *fingerprint, d1l_contact_entry_t *out_contact)
+{
+    return d1l_contact_store_delete(fingerprint, out_contact);
+}
+
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size)
 {
     if (!fingerprint || fingerprint[0] == '\0' || !dest || dest_size == 0) {

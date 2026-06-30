@@ -242,8 +242,10 @@ For Phase 4 contact-store validation:
 4. Run `contacts add <fingerprint>`.
 5. Verify `contacts add` reports `source="heard_node"`.
 6. Verify `contacts` contains the promoted alias, full 64-hex `public_key`, heard name, type, RSSI/SNR, path metadata, `out_path_known`, `out_path_len`, and `persisted=true`.
-7. Reboot.
-8. Verify `contacts` retains the row and its copied `public_key`.
+7. Run `contacts rename <fingerprint> <alias>` and verify `contacts` shows the new alias with `persisted=true`.
+8. Reboot.
+9. Verify `contacts` retains the renamed row and its copied `public_key`.
+10. If deleting a promoted contact is in scope for the test unit, run `contacts delete <fingerprint>` and verify `contacts` removes only the contact row while retained DM/message/route/packet history remains available.
 
 For Phase 4 contact detail and favorite/mute validation:
 
@@ -254,7 +256,7 @@ For Phase 4 contact detail and favorite/mute validation:
 5. Reboot and verify both flags are still true.
 6. Run `contacts set <fingerprint> favorite 0` and `contacts set <fingerprint> mute 0`.
 7. Verify `contacts` shows both flags false.
-8. For physical touch review, open the Nodes tab, tap the contact row, verify the detail sheet shows signal/key/path metadata, and verify `Fav`, `Mute`, `DM`, and `Close` actions respond.
+8. For physical touch review, open the Nodes tab, tap the contact row, verify the detail sheet shows signal/key/path metadata, and verify `Fav`, `Mute`, `DM`, `Edit`, and `Close` actions respond. In `Edit`, verify alias save updates only the contact alias and `Forget` removes only the promoted contact.
 
 For Phase 6 contact export validation:
 

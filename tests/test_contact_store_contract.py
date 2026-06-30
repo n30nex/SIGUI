@@ -35,6 +35,10 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "oldest_index" in source
     assert "d1l_contact_store_update_path" in source
     assert "d1l_contact_store_set_flags" in source
+    assert "d1l_contact_store_rename" in header
+    assert "d1l_contact_store_delete" in header
+    assert "esp_err_t d1l_contact_store_rename" in source
+    assert "esp_err_t d1l_contact_store_delete" in source
     assert "D1L_CONTACT_EXPORT_URI_LEN 224U" in header
     assert "d1l_contact_store_export_uri" in header
     assert "meshcore://contact/add?name=%s&public_key=%s&type=%u" in source
@@ -62,9 +66,15 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert 'strncmp(line, "contacts export ", 16)' in console
     assert 'strcmp(line, "contacts clear")' in console
     assert 'strncmp(line, "contacts add ", 13)' in console
+    assert 'strncmp(line, "contacts rename ", 16)' in console
+    assert 'strncmp(line, "contacts delete ", 16)' in console
     assert 'strncmp(line, "contacts set ", 13)' in console
     assert "d1l_contact_store_set_flags(fingerprint, contact.favorite, contact.muted, &contact)" in console
+    assert "d1l_contact_store_rename(fingerprint, alias, &contact)" in console
+    assert "d1l_contact_store_delete(fingerprint, &contact)" in console
     assert 'contacts set <fingerprint> <favorite|mute> <0|1>' in console
+    assert 'contacts rename <fingerprint> <alias>' in console
+    assert 'contacts delete <fingerprint>' in console
 
 
 def test_ui_console_and_smoke_expose_contacts():
@@ -76,13 +86,21 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "contact_total_written" in app_header
     assert "d1l_contact_store_copy_recent" in app_source
     assert "d1l_app_model_set_contact_flags" in app_header
+    assert "d1l_app_model_rename_contact" in app_header
+    assert "d1l_app_model_delete_contact" in app_header
     assert "d1l_app_model_export_contact_uri" in app_header
     assert "d1l_contact_store_export_uri(&contact, dest, dest_size)" in app_source
     assert "d1l_contact_store_set_flags(fingerprint, favorite, muted, out_contact)" in app_source
+    assert "d1l_contact_store_rename(fingerprint, alias, out_contact)" in app_source
+    assert "d1l_contact_store_delete(fingerprint, out_contact)" in app_source
     assert "render_contact_row" in ui
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
     assert "create_contact_detail_sheet" in ui
+    assert "create_contact_edit_sheet" in ui
     assert "render_contact_detail_sheet" in ui
+    assert "open_contact_edit_event_cb" in ui
+    assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in ui
+    assert "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint" in ui
     assert "create_contact_export_sheet" in ui
     assert "render_contact_export_sheet" in ui
     assert "lv_qrcode_create" in ui

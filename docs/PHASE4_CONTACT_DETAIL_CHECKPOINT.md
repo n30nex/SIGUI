@@ -22,4 +22,4 @@ Date: 2026-06-29
 ## Remaining Gaps
 
 - Manual physical touch review of opening the contact detail sheet and using its actions is still pending.
-- Route detail views, richer contact editing, and large-list stress testing are still pending.
+- Route detail views and large-list stress testing were pending at this checkpoint; contact rename/delete management was added later in the roadmap.
