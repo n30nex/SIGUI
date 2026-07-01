@@ -79,6 +79,8 @@ static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
 static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
+static bool s_tab_switch_pending = false;
+static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
@@ -2796,7 +2798,17 @@ static void render_active_tab(void)
 
 static void dock_event_cb(lv_event_t *event)
 {
-    s_active_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
+    s_pending_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
+    s_tab_switch_pending = true;
+}
+
+static void process_pending_tab_switch(void)
+{
+    if (!s_tab_switch_pending) {
+        return;
+    }
+    s_tab_switch_pending = false;
+    s_active_tab = s_pending_tab;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3365,6 +3377,7 @@ static void ui_task(void *arg)
     (void)arg;
     while (true) {
         uint32_t wait_ms = lv_timer_handler();
+        process_pending_tab_switch();
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {
