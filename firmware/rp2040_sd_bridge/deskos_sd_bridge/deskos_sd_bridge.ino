@@ -8,6 +8,8 @@ namespace {
 
 constexpr const char *STATUS_REQUEST = "DESKOS_SD_STATUS";
 constexpr const char *STATUS_REPLY = "DESKOS_SD_STATUS";
+constexpr const char *PING_REQUEST = "DESKOS_SD_PING";
+constexpr const char *PING_REPLY = "DESKOS_SD_PING";
 constexpr const char *FORMAT_REQUEST = "DESKOS_SD_FORMAT";
 constexpr const char *FORMAT_REPLY = "DESKOS_SD_FORMAT";
 constexpr const char *FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD";
@@ -228,33 +230,24 @@ SdSnapshot current_status() {
         0,
     };
 
-    CardProbe probes[] = {
-        probe_card(DEDICATED_SPI, true),
-        probe_card(SHARED_SPI, true),
-        probe_card(DEDICATED_SPI, false),
-        probe_card(SHARED_SPI, false),
-    };
-    const CardProbe *probe = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-    if (!probe) {
-        probe = &probes[0];
-    }
-    apply_probe_to_snapshot(snapshot, *probe);
-    if (!probe->present) {
-        s_sd_power_high = true;
-        s_sd_spi_options = DEDICATED_SPI;
-        configure_sd_bus();
-        return snapshot;
-    }
-
-    s_sd_power_high = probe->power_high;
-    s_sd_spi_options = probe->options;
+    s_sd_power_high = true;
+    s_sd_spi_options = DEDICATED_SPI;
     if (!mount_sd()) {
+        CardProbe probe = default_probe();
+        apply_probe_to_snapshot(snapshot, probe);
+        if (!probe.present) {
+            s_sd_power_high = true;
+            s_sd_spi_options = DEDICATED_SPI;
+            configure_sd_bus();
+            return snapshot;
+        }
+
         snapshot.state = "setup_required";
         snapshot.present = true;
         snapshot.fs = "unknown";
         snapshot.format_required = true;
         snapshot.format_supported = true;
-        snapshot.capacity_kb = probe->capacity_kb;
+        snapshot.capacity_kb = probe.capacity_kb;
         snapshot.note = "format_required";
         return snapshot;
     }
@@ -715,6 +708,21 @@ void send_status() {
     send_snapshot(*reply_stream, STATUS_REPLY, current_status());
 }
 
+void send_ping() {
+    String line(PING_REPLY);
+    line += " v=1";
+    line += " file_line_max=";
+    line += String(static_cast<unsigned long>(FILE_LINE_MAX));
+    line += " file_chunk_max=";
+    line += String(static_cast<unsigned long>(FILE_CHUNK_MAX));
+    line += " path_max=";
+    line += String(static_cast<unsigned long>(FILE_PATH_MAX));
+    line += " atomic_rename=";
+    line += bool_token(REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE);
+    line += " sd_touch=0";
+    reply_stream->println(line);
+}
+
 void send_format_result(const char *phrase) {
     if (strcmp(phrase, FORMAT_CONFIRMATION) != 0) {
         SdSnapshot refused = current_status();
@@ -1115,6 +1123,11 @@ void handle_line(char *line) {
     size_t len = strlen(line);
     while (len > 0 && (line[len - 1] == ' ' || line[len - 1] == '\t')) {
         line[--len] = '\0';
+    }
+
+    if (strcmp(line, PING_REQUEST) == 0) {
+        send_ping();
+        return;
     }
 
     if (strcmp(line, STATUS_REQUEST) == 0) {

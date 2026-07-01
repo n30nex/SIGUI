@@ -73,6 +73,15 @@ def ready_storage_line() -> str:
     )
 
 
+def rp2040_ping_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"rp2040 ping","bridge_ready":true,'
+        '"protocol_supported":true,"sd_touched":false,'
+        '"file_line_max":512,"file_chunk_max":192,"path_max":96,'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
 def test_preflight_dry_run_is_non_destructive():
     report = preflight.dry_run_report("artifact-dir")
 
@@ -80,7 +89,13 @@ def test_preflight_dry_run_is_non_destructive():
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
     assert report["copies_uf2"] is False
-    assert report["commands"] == ["rp2040 status", "storage status", "storage diag", "health"]
+    assert report["commands"] == [
+        "rp2040 status",
+        "rp2040 ping",
+        "storage status",
+        "storage diag",
+        "health",
+    ]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
     assert 'command_timeout = max(timeout, 12.0) if command == "storage diag" else timeout' in (
@@ -91,6 +106,7 @@ def test_preflight_dry_run_is_non_destructive():
 def test_preflight_classifies_protocol_pending_without_uf2_volume():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {},
         {
             "ok": True,
             "cmd": "storage status",
@@ -114,6 +130,7 @@ def test_preflight_classifies_protocol_pending_without_uf2_volume():
 def test_preflight_classifies_protocol_pending_with_uf2_volume():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {},
         {
             "ok": True,
             "cmd": "storage status",
@@ -135,6 +152,7 @@ def test_preflight_classifies_protocol_pending_with_uf2_volume():
 def test_preflight_classifies_ready_storage_gate():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
         {
             "ok": True,
             "cmd": "storage status",
@@ -160,9 +178,33 @@ def test_preflight_classifies_ready_storage_gate():
     assert report["storage_file_gate_ready"] is True
 
 
+def test_preflight_classifies_ping_ok_but_status_pending_separately():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "protocol_pending",
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": False,
+            },
+        },
+        [],
+        {"ok": True},
+    )
+
+    assert report["state"] == "sd_status_pending"
+    assert report["next_action"] == "inspect_storage_status_and_run_storage_diag"
+    assert report["rp2040_ping_supported"] is True
+    assert report["rp2040_ping_sd_touched"] is False
+
+
 def test_preflight_classifies_no_card_with_diag_pending_as_bridge_flash_needed():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {},
         {
             "ok": True,
             "cmd": "storage status",
@@ -187,6 +229,7 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     ser = FakeSerial(
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
+            rp2040_ping_line(),
             protocol_pending_storage_line(),
             '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
@@ -213,10 +256,11 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
     assert report["copies_uf2"] is False
-    assert report["classification"]["state"] == "rp2040_protocol_pending"
+    assert report["classification"]["state"] == "sd_status_pending"
     assert ser.reset_count == 1
     assert ser.writes == [
         "rp2040 status\n",
+        "rp2040 ping\n",
         "storage status\n",
         "storage diag\n",
         "health\n",
@@ -226,6 +270,7 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
 def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridge(monkeypatch):
     ser = CommandAwareSerial(
         {
+            "rp2040 ping": [rp2040_ping_line()],
             "storage status": [protocol_pending_storage_line()],
             "storage diag": [
                 '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n'
@@ -252,15 +297,17 @@ def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridg
 
     assert report["ok"] is True
     assert report["rp2040_status_ok"] is False
+    assert report["rp2040_ping_ok"] is True
     assert report["rp2040_status_optional_ok"] is True
     assert report["classification"]["rp2040_uart_ready"] is True
-    assert report["classification"]["state"] == "rp2040_protocol_pending"
+    assert report["classification"]["state"] == "sd_status_pending"
 
 
 def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
     ser = FakeSerial(
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
+            rp2040_ping_line(),
             ready_storage_line(),
             '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
             '"mount_selected":true,"public_rf_tx":false,"formats_sd":false}\n',

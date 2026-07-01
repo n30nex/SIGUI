@@ -42,13 +42,32 @@ Required tokens:
 
 Values must not contain spaces. Use underscores in `note`.
 
-On the D1L RP2040 bridge, a failed FAT mount is followed by raw SdFat card
-probes on `SPI1` across high/low rail settings and dedicated/shared SPI modes.
-If no card responds, the bridge reports `state=no_card` and `format_supported=0`.
-If a card responds but the filesystem is unusable, the bridge reports
-`state=setup_required present=1 mounted=0 format_required=1 format_supported=1
-note=format_required`; the ESP32 may then show the guarded format confirmation
-path.
+On the D1L RP2040 bridge, status first tries the expected high-power,
+dedicated-`SPI1` FAT mount. If that mount fails, status uses one raw SdFat
+presence probe on the same expected D1L bus before reporting `no_card` or a
+guarded setup-required state. Exhaustive high/low and dedicated/shared probing
+is reserved for the manual diagnostic request below. If no card responds, the
+bridge reports `state=no_card` and `format_supported=0`. If a card responds but
+the filesystem is unusable, the bridge reports `state=setup_required present=1
+mounted=0 format_required=1 format_supported=1 note=format_required`; the ESP32
+may then show the guarded format confirmation path.
+
+## Ping Request
+
+ESP32 sends this fast protocol sanity check before SD-specific preflight work:
+
+```text
+DESKOS_SD_PING
+```
+
+RP2040 replies with one line and must not probe, mount, format, or write SD:
+
+```text
+DESKOS_SD_PING v=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1 sd_touch=0
+```
+
+`sd_touch=0` is the important safety contract. The ESP32 exposes this as
+`rp2040 ping`, including `public_rf_tx=false` and `formats_sd=false`.
 
 ## Diagnostic Request
 

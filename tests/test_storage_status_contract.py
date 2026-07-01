@@ -180,7 +180,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage_setup_sheet" in simulator
     assert "No automatic format" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
+    assert "d1l_rp2040_ping_t" in rp2040_header
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_header
+    assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
     assert "d1l_rp2040_bridge_format_sd" in rp2040_header
     assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
@@ -192,6 +194,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_rp2040_bridge_file_append" in rp2040_header
     assert "d1l_rp2040_bridge_file_rename" in rp2040_header
     assert "DESKOS_SD_STATUS" in rp2040_source
+    assert "DESKOS_SD_PING" in rp2040_source
     assert "DESKOS_SD_FORMAT" in rp2040_source
     assert "DESKOS_SD_FILE" in rp2040_source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_source
@@ -203,6 +206,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "token_value_span" in rp2040_source
     assert "uart_write_bytes" in rp2040_source
     assert "uart_read_bytes" in rp2040_source
+    assert '"rp2040 ping"' in console
+    assert "cmd_rp2040_ping" in console
     assert "storage_format_hint" in console
     assert "format_requested" in console
     assert "format_performed" in console

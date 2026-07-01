@@ -12,6 +12,8 @@
 #include "tca9535.h"
 
 #define D1L_RP2040_UART_BUF_SIZE 1024
+#define D1L_RP2040_PING_QUERY "DESKOS_SD_PING\n"
+#define D1L_RP2040_PING_REPLY_PREFIX "DESKOS_SD_PING"
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
 #define D1L_RP2040_SD_DIAG_QUERY "DESKOS_SD_DIAG\n"
@@ -168,6 +170,17 @@ static void init_sd_status(d1l_rp2040_sd_status_t *status, esp_err_t err)
              "RP2040 UART bridge is unavailable");
     snprintf(status->probe_power, sizeof(status->probe_power), "unknown");
     snprintf(status->probe_mode, sizeof(status->probe_mode), "unknown");
+}
+
+static void init_ping(d1l_rp2040_ping_t *ping, esp_err_t err)
+{
+    memset(ping, 0, sizeof(*ping));
+    ping->bridge_ready = s_status.uart_ready;
+    ping->last_error = err;
+    snprintf(ping->note, sizeof(ping->note), "%s",
+             s_status.uart_ready ?
+             "RP2040 UART is ready but DeskOS ping has not answered" :
+             "RP2040 UART bridge is unavailable");
 }
 
 static void init_sd_diag(d1l_rp2040_sd_diag_t *diag, esp_err_t err)
@@ -505,6 +518,25 @@ static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
 }
 
+static esp_err_t parse_ping_line(const char *line, d1l_rp2040_ping_t *ping)
+{
+    if (!line || !ping || !line_has_prefix(line, D1L_RP2040_PING_REPLY_PREFIX)) {
+        return ESP_FAIL;
+    }
+
+    init_ping(ping, ESP_OK);
+    ping->protocol_supported = true;
+    (void)parse_u32_token(line, "v", &ping->protocol_version);
+    (void)parse_u32_token(line, "file_line_max", &ping->file_line_max);
+    (void)parse_u32_token(line, "file_chunk_max", &ping->file_chunk_max);
+    (void)parse_u32_token(line, "path_max", &ping->path_max);
+    (void)parse_bool_token(line, "atomic_rename", &ping->atomic_rename_supported);
+    (void)parse_bool_token(line, "sd_touch", &ping->sd_touched);
+    snprintf(ping->note, sizeof(ping->note), "%s",
+             ping->sd_touched ? "ping_touched_sd" : "ok_no_sd_touch");
+    return ESP_OK;
+}
+
 static esp_err_t parse_sd_diag_line(const char *line, d1l_rp2040_sd_diag_t *diag)
 {
     if (!line || !diag || !line_has_prefix(line, D1L_RP2040_SD_DIAG_REPLY_PREFIX)) {
@@ -737,6 +769,37 @@ esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
     }
     vTaskDelay(pdMS_TO_TICKS(settle));
     return ESP_OK;
+}
+
+esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_ms)
+{
+    if (out_ping == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_ping(out_ping, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    const char *prefixes[] = {D1L_RP2040_PING_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    init_ping(out_ping, ESP_ERR_TIMEOUT);
+    esp_err_t ret = exchange_prefixed_line(D1L_RP2040_PING_QUERY,
+                                           strlen(D1L_RP2040_PING_QUERY),
+                                           prefixes, 1, line, sizeof(line),
+                                           timeout_ms, &truncated);
+    out_ping->response_truncated = truncated;
+    if (ret != ESP_OK) {
+        out_ping->last_error = ret;
+        snprintf(out_ping->note, sizeof(out_ping->note),
+                 ret == ESP_ERR_TIMEOUT ? "timeout" : "query_failed");
+        return ret;
+    }
+    ret = parse_ping_line(line, out_ping);
+    out_ping->response_truncated = truncated;
+    out_ping->last_error = ret;
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms)

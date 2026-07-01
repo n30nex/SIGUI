@@ -26,6 +26,20 @@ typedef struct {
 typedef struct {
     bool bridge_ready;
     bool protocol_supported;
+    bool atomic_rename_supported;
+    bool response_truncated;
+    bool sd_touched;
+    uint32_t protocol_version;
+    uint32_t file_line_max;
+    uint32_t file_chunk_max;
+    uint32_t path_max;
+    esp_err_t last_error;
+    char note[64];
+} d1l_rp2040_ping_t;
+
+typedef struct {
+    bool bridge_ready;
+    bool protocol_supported;
     bool card_present;
     bool filesystem_mounted;
     bool deskos_root_ready;
@@ -101,6 +115,7 @@ typedef struct {
 esp_err_t d1l_rp2040_bridge_init(void);
 esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status);
 esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms);
+esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,

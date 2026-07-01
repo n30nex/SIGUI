@@ -12,6 +12,8 @@ from dataclasses import dataclass, field, replace
 
 STATUS_REQUEST = "DESKOS_SD_STATUS"
 STATUS_REPLY = "DESKOS_SD_STATUS"
+PING_REQUEST = "DESKOS_SD_PING"
+PING_REPLY = "DESKOS_SD_PING"
 FORMAT_REQUEST = "DESKOS_SD_FORMAT"
 FORMAT_REPLY = "DESKOS_SD_FORMAT"
 FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD"
@@ -58,6 +60,14 @@ FILE_CAPABILITY_FIELDS = (
     "file_chunk_max",
     "path_max",
     "atomic_rename",
+)
+PING_FIELDS = (
+    "v",
+    "file_line_max",
+    "file_chunk_max",
+    "path_max",
+    "atomic_rename",
+    "sd_touch",
 )
 FILE_REPLY_COMMON_FIELDS = ("v", "id", "ok", "op", "note")
 FILE_ERROR_CODES = {
@@ -229,6 +239,17 @@ def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
         f" file_chunk_max={MAX_FILE_CHUNK_BYTES}"
         f" path_max={MAX_FILE_PATH_CHARS}"
         f" atomic_rename={bool_token(file_ready(scenario))}"
+    )
+
+
+def ping_line() -> str:
+    return (
+        f"{PING_REPLY} v=1"
+        f" file_line_max={FILE_LINE_MAX}"
+        f" file_chunk_max={MAX_FILE_CHUNK_BYTES}"
+        f" path_max={MAX_FILE_PATH_CHARS}"
+        " atomic_rename=1"
+        " sd_touch=0"
     )
 
 
@@ -504,6 +525,8 @@ def reply_for_request(
 ) -> str:
     request = request.strip()
     fs = fs or SdFileSystem()
+    if request == PING_REQUEST:
+        return ping_line()
     if request == STATUS_REQUEST:
         return status_line(scenario)
     if request == DIAG_REQUEST:

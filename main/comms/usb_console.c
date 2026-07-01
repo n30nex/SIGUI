@@ -783,6 +783,27 @@ static void cmd_rp2040_reset(void)
            status.uart_ready ? "true" : "false");
 }
 
+static void cmd_rp2040_ping(void)
+{
+    d1l_rp2040_ping_t ping = {0};
+    esp_err_t ret = d1l_rp2040_bridge_ping(&ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 ping\",\"code\":\"%s\",\"bridge_ready\":%s,\"protocol_supported\":%s,\"response_truncated\":%s,\"version\":%lu,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"sd_touched\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":",
+           D1L_CONSOLE_SCHEMA,
+           bool_json(ret == ESP_OK),
+           esp_err_to_name(ret),
+           bool_json(ping.bridge_ready),
+           bool_json(ping.protocol_supported),
+           bool_json(ping.response_truncated),
+           (unsigned long)ping.protocol_version,
+           (unsigned long)ping.file_line_max,
+           (unsigned long)ping.file_chunk_max,
+           (unsigned long)ping.path_max,
+           bool_json(ping.atomic_rename_supported),
+           bool_json(ping.sd_touched));
+    print_json_string(ping.note[0] ? ping.note : "");
+    printf("}\n");
+}
+
 static void cmd_storage_status(void)
 {
     (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
@@ -3327,7 +3348,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 reset\",\"storage status\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3398,6 +3419,8 @@ static void handle_line(const char *line)
         cmd_companion_status();
     } else if (strcmp(line, "rp2040 status") == 0) {
         cmd_rp2040_status();
+    } else if (strcmp(line, "rp2040 ping") == 0) {
+        cmd_rp2040_ping();
     } else if (strcmp(line, "rp2040 reset") == 0) {
         cmd_rp2040_reset();
     } else if (strcmp(line, "storage status") == 0) {

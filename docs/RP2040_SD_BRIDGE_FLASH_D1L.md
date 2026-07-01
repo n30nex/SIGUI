@@ -32,20 +32,23 @@ AFB6B12EE3518C48811F6C2876717B9BFAF43C1ABFE02E9BF693D95F977E16E5
 Earlier Actions artifact `28494746866` was copied once after the RP2040 UF2
 volume mounted as `RPI-RP2` at `G:\`. Post-copy COM12 preflight then reported
 `state="rp2040_protocol_pending"` and `storage status` / `storage diag`
-timeouts, so the follow-up `e052640` bridge changes were built by Actions. As
-of `artifacts/hardware/com12/rp2040_sd_preflight_mount_blocked_28495545520.json`,
-the fixed UF2 is verified but not flashed yet because no UF2 mass-storage volume
-is mounted and the RP2040 CDC port `COM16` is stuck access-denied/hanging on
-host open attempts.
+timeouts, so the follow-up bridge changes were built by Actions. Later run
+`28498333005` also flashed the ESP32 image and copied the RP2040 UF2 after the
+ESP32 `rp2040 reset` command cleared the RP2040 USB/CDC wedge, but SD status
+still timed out. Current preflight therefore includes `rp2040 ping` to prove the
+flashed bridge app answers without touching SD before diagnosing status/mount.
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
-port with `rp2040 status`, `storage status`, optional `storage diag`, and
-`health`, and reports the next safe action as JSON. `storage diag` is
-non-formatting and may be unavailable on older bridge firmware. If preflight
-reports `state="rp2040_protocol_pending"` or
-`state="sd_card_not_present_diag_pending"` and no UF2 volume is available, put
-the RP2040 into UF2/BOOTSEL mode before running the copy helper.
+port with `rp2040 status`, `rp2040 ping`, `storage status`, optional
+`storage diag`, and `health`, and reports the next safe action as JSON.
+`rp2040 ping` must report `sd_touched=false`; `storage diag` is non-formatting
+and may be unavailable on older bridge firmware. If preflight reports
+`state="rp2040_protocol_pending"` or `state="sd_card_not_present_diag_pending"`
+and no UF2 volume is available, put the RP2040 into UF2/BOOTSEL mode before
+running the copy helper. If it reports `state="sd_status_pending"` after a
+successful ping, keep the current UF2 installed and inspect the status/mount
+path instead of copying the same UF2 again.
 
 ## Flash
 
@@ -89,6 +92,8 @@ python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-se
 Expected proof with a ready card:
 
 - `storage status` reports `sd.rp2040_protocol_supported=true`.
+- `rp2040 ping` reports `ok=true`, `protocol_supported=true`,
+  `sd_touched=false`, `public_rf_tx=false`, and `formats_sd=false`.
 - `sd.file_ops=true`, `sd.atomic_rename=true`, `sd.file_line_max >= 512`,
   `sd.file_chunk_max >= 192`, and `sd.path_max >= 96`.
 - `message_store_backend="sd"`, `dm_store_backend="sd"`,
