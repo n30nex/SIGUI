@@ -143,6 +143,7 @@ void configure_sd_bus(bool power_high) {
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
+    SPI1.setCS(SD_CS_PIN);
 }
 
 void configure_sd_bus() {
@@ -152,7 +153,7 @@ void configure_sd_bus() {
 bool mount_sd_with_power(bool power_high) {
     configure_sd_bus(power_high);
     SD.end(false);
-    return SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+    return SD.begin(SD_CS_PIN, SPI1);
 }
 
 bool mount_sd() {

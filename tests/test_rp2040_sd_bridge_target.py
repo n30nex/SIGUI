@@ -48,7 +48,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
-    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
+    assert "SPI1.setCS(SD_CS_PIN)" in sketch
+    assert "SD.begin(SD_CS_PIN, SPI1)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
     assert "manual_probe_card(DEDICATED_SPI, true)" in sketch
