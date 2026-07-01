@@ -106,6 +106,9 @@ static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 #define D1L_UI_TASK_CORE 1
 #endif
 
+#define D1L_TOUCH_TASK_STACK_BYTES 4096U
+#define D1L_UI_TASK_STACK_BYTES 6144U
+
 static void render_active_tab(void);
 static void render_contact_detail_sheet(void);
 static void render_node_detail_sheet(void);
@@ -366,14 +369,90 @@ static void obj_set_style_text_font_if(lv_obj_t *obj, const lv_font_t *font)
     lv_obj_set_style_text_font(obj, font, 0);
 }
 
+static lv_obj_t *create_screen_object(const char *name)
+{
+    lv_obj_t *obj = lv_obj_create(NULL);
+    if (!obj) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "screen");
+    }
+    return obj;
+}
+
+static lv_obj_t *create_object(lv_obj_t *parent, const char *name)
+{
+    if (!parent) {
+        ESP_LOGE(TAG, "%s parent missing", name ? name : "object");
+        return NULL;
+    }
+    lv_obj_t *obj = lv_obj_create(parent);
+    if (!obj) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "object");
+    }
+    return obj;
+}
+
+static lv_obj_t *create_label_object(lv_obj_t *parent, const char *name)
+{
+    if (!parent) {
+        ESP_LOGE(TAG, "%s parent missing", name ? name : "label");
+        return NULL;
+    }
+    lv_obj_t *label = lv_label_create(parent);
+    if (!label) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "label");
+    }
+    return label;
+}
+
+static lv_obj_t *create_textarea(lv_obj_t *parent, const char *name)
+{
+    if (!parent) {
+        ESP_LOGE(TAG, "%s parent missing", name ? name : "textarea");
+        return NULL;
+    }
+    lv_obj_t *textarea = lv_textarea_create(parent);
+    if (!textarea) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "textarea");
+    }
+    return textarea;
+}
+
+static lv_obj_t *create_keyboard(lv_obj_t *parent, const char *name)
+{
+    if (!parent) {
+        ESP_LOGE(TAG, "%s parent missing", name ? name : "keyboard");
+        return NULL;
+    }
+    lv_obj_t *keyboard = lv_keyboard_create(parent);
+    if (!keyboard) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "keyboard");
+    }
+    return keyboard;
+}
+
+#if LV_USE_QRCODE
+static lv_obj_t *create_qrcode(lv_obj_t *parent, lv_coord_t size,
+                               lv_color_t dark, lv_color_t light, const char *name)
+{
+    if (!parent) {
+        ESP_LOGE(TAG, "%s parent missing", name ? name : "qrcode");
+        return NULL;
+    }
+    lv_obj_t *qr = lv_qrcode_create(parent, size, dark, light);
+    if (!qr) {
+        ESP_LOGE(TAG, "%s allocation failed", name ? name : "qrcode");
+    }
+    return qr;
+}
+#endif
+
 static lv_obj_t *create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
     if (!parent || !text) {
         return NULL;
     }
-    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_t *label = create_label_object(parent, "label");
     if (!label) {
-        ESP_LOGE(TAG, "label allocation failed");
         return NULL;
     }
     lv_label_set_text(label, text);
@@ -386,9 +465,8 @@ static lv_obj_t *create_panel(lv_obj_t *parent, int x, int y, int w, int h)
     if (!parent) {
         return NULL;
     }
-    lv_obj_t *panel = lv_obj_create(parent);
+    lv_obj_t *panel = create_object(parent, "panel");
     if (!panel) {
-        ESP_LOGE(TAG, "panel allocation failed");
         return NULL;
     }
     lv_obj_set_size(panel, w, h);
@@ -419,7 +497,7 @@ static lv_obj_t *create_button(lv_obj_t *parent, const char *text, int x, int y,
     lv_obj_set_style_bg_color(button, lv_color_hex(0x1E2A36), 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x263545), LV_STATE_PRESSED);
     lv_obj_set_style_shadow_width(button, 0, 0);
-    lv_obj_t *label = lv_label_create(button);
+    lv_obj_t *label = create_label_object(button, "button label");
     if (label) {
         lv_label_set_text(label, text);
         lv_obj_set_style_text_color(label, lv_color_hex(0xF4F7FB), 0);
@@ -791,7 +869,7 @@ static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
                                         lv_coord_t x, lv_coord_t y,
                                         lv_coord_t width)
 {
-    lv_obj_t *badge = lv_obj_create(parent);
+    lv_obj_t *badge = create_object(parent, "node role badge");
     if (!badge) {
         return NULL;
     }
@@ -1359,8 +1437,14 @@ static void render_contact_export_sheet(void)
     }
 
 #if LV_USE_QRCODE
-    lv_obj_t *qr = lv_qrcode_create(s_contact_export_sheet, 166,
-                                    lv_color_hex(0x02060A), lv_color_hex(0xF8FAFC));
+    lv_obj_t *qr = create_qrcode(s_contact_export_sheet, 166,
+                                 lv_color_hex(0x02060A), lv_color_hex(0xF8FAFC),
+                                 "contact export qr");
+    if (!qr) {
+        lv_obj_t *qr_error = create_label(s_contact_export_sheet, "QR allocation failed", 0xF87171);
+        lv_obj_set_pos(qr_error, 24, 132);
+        return;
+    }
     lv_obj_set_pos(qr, 12, 74);
     lv_obj_set_style_border_width(qr, 5, 0);
     lv_obj_set_style_border_color(qr, lv_color_hex(0xF8FAFC), 0);
@@ -1624,7 +1708,10 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(best_label, 392);
     lv_obj_set_pos(best_label, 8, 104);
 
-    lv_obj_t *list = lv_obj_create(s_route_trace_sheet);
+    lv_obj_t *list = create_object(s_route_trace_sheet, "route trace list");
+    if (!list) {
+        return;
+    }
     lv_obj_set_size(list, 400, 126);
     lv_obj_set_pos(list, 8, 134);
     lv_obj_set_style_bg_color(list, lv_color_hex(0x0B111B), 0);
@@ -1637,7 +1724,11 @@ static void render_route_trace_sheet(void)
     int y = 0;
     for (size_t i = 0; i < route_count; ++i) {
         const d1l_route_entry_t *entry = &s_route_trace_entries[i];
-        lv_obj_t *row = lv_obj_create(list);
+        lv_obj_t *row = create_object(list, "route trace row");
+        if (!row) {
+            y += 58;
+            continue;
+        }
         lv_obj_set_size(row, 360, 50);
         lv_obj_set_pos(row, 0, y);
         lv_obj_set_style_bg_color(row, lv_color_hex(ui_route_trace_is_direct(entry) ? 0x132A32 : 0x182230), 0);
@@ -2575,7 +2666,10 @@ static void render_public_history_sheet(void)
     lv_obj_set_width(meta, 392);
     lv_obj_set_pos(meta, 8, 42);
 
-    lv_obj_t *list = lv_obj_create(s_public_history_sheet);
+    lv_obj_t *list = create_object(s_public_history_sheet, "public history list");
+    if (!list) {
+        return;
+    }
     lv_obj_set_size(list, 424, 206);
     lv_obj_set_pos(list, 0, 70);
     lv_obj_set_style_radius(list, 6, 0);
@@ -2772,7 +2866,10 @@ static void render_dm_thread_sheet(void)
     lv_obj_set_width(meta, 392);
     lv_obj_set_pos(meta, 8, 42);
 
-    lv_obj_t *list = lv_obj_create(s_dm_thread_sheet);
+    lv_obj_t *list = create_object(s_dm_thread_sheet, "dm thread list");
+    if (!list) {
+        return;
+    }
     lv_obj_set_size(list, 424, 196);
     lv_obj_set_pos(list, 0, 68);
     lv_obj_set_style_radius(list, 6, 0);
@@ -3838,7 +3935,10 @@ static void refresh_timer_cb(lv_timer_t *timer)
 
 static void create_top_bar(lv_obj_t *screen)
 {
-    lv_obj_t *bar = lv_obj_create(screen);
+    lv_obj_t *bar = create_object(screen, "top bar");
+    if (!bar) {
+        return;
+    }
     lv_obj_set_size(bar, 480, 56);
     lv_obj_set_pos(bar, 0, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(0x071018), 0);
@@ -3865,7 +3965,10 @@ static void create_top_bar(lv_obj_t *screen)
 
 static void create_dock(lv_obj_t *screen)
 {
-    lv_obj_t *dock = lv_obj_create(screen);
+    lv_obj_t *dock = create_object(screen, "dock");
+    if (!dock) {
+        return;
+    }
     lv_obj_set_size(dock, 480, 62);
     lv_obj_set_pos(dock, 0, 418);
     lv_obj_set_style_bg_color(dock, lv_color_hex(0x09131D), 0);
@@ -3882,7 +3985,10 @@ static void create_dock(lv_obj_t *screen)
 
 static void create_toast(lv_obj_t *screen)
 {
-    s_toast = lv_label_create(screen);
+    s_toast = create_label_object(screen, "toast");
+    if (!s_toast) {
+        return;
+    }
     lv_obj_set_size(s_toast, 420, 42);
     lv_obj_set_pos(s_toast, 30, 366);
     lv_obj_set_style_radius(s_toast, 8, 0);
@@ -3898,7 +4004,10 @@ static void create_toast(lv_obj_t *screen)
 
 static void create_sheet(lv_obj_t *screen)
 {
-    s_sheet = lv_obj_create(screen);
+    s_sheet = create_object(screen, "advert sheet");
+    if (!s_sheet) {
+        return;
+    }
     lv_obj_set_size(s_sheet, 440, 160);
     lv_obj_set_pos(s_sheet, 20, 250);
     lv_obj_set_style_radius(s_sheet, 8, 0);
@@ -3917,7 +4026,10 @@ static void create_sheet(lv_obj_t *screen)
 
 static void create_compose_sheet(lv_obj_t *screen)
 {
-    s_compose_sheet = lv_obj_create(screen);
+    s_compose_sheet = create_object(screen, "compose sheet");
+    if (!s_compose_sheet) {
+        return;
+    }
     lv_obj_set_size(s_compose_sheet, 448, 344);
     lv_obj_set_pos(s_compose_sheet, 16, 64);
     lv_obj_set_style_radius(s_compose_sheet, 8, 0);
@@ -3937,7 +4049,11 @@ static void create_compose_sheet(lv_obj_t *screen)
     create_button(s_compose_sheet, "Clear", 298, 0, 64, 40, clear_compose_event_cb, NULL);
     create_button(s_compose_sheet, "Close", 370, 0, 58, 40, close_compose_event_cb, NULL);
 
-    s_compose_textarea = lv_textarea_create(s_compose_sheet);
+    s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
+    if (!s_compose_textarea) {
+        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_compose_textarea, 424, 68);
     lv_obj_set_pos(s_compose_textarea, 0, 50);
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
@@ -3957,7 +4073,11 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_width(s_compose_counter, 86);
     lv_obj_set_pos(s_compose_counter, 338, 120);
 
-    s_compose_keyboard = lv_keyboard_create(s_compose_sheet);
+    s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
+    if (!s_compose_keyboard) {
+        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_compose_keyboard, 424, 202);
     lv_obj_set_pos(s_compose_keyboard, 0, 128);
     lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
@@ -3969,7 +4089,10 @@ static void create_compose_sheet(lv_obj_t *screen)
 
 static void create_public_history_sheet(lv_obj_t *screen)
 {
-    s_public_history_sheet = lv_obj_create(screen);
+    s_public_history_sheet = create_object(screen, "public history sheet");
+    if (!s_public_history_sheet) {
+        return;
+    }
     lv_obj_set_size(s_public_history_sheet, 448, 304);
     lv_obj_set_pos(s_public_history_sheet, 16, 88);
     lv_obj_set_style_radius(s_public_history_sheet, 8, 0);
@@ -3983,7 +4106,10 @@ static void create_public_history_sheet(lv_obj_t *screen)
 
 static void create_message_detail_sheet(lv_obj_t *screen)
 {
-    s_message_detail_sheet = lv_obj_create(screen);
+    s_message_detail_sheet = create_object(screen, "message detail sheet");
+    if (!s_message_detail_sheet) {
+        return;
+    }
     lv_obj_set_size(s_message_detail_sheet, 448, 286);
     lv_obj_set_pos(s_message_detail_sheet, 16, 100);
     lv_obj_set_style_radius(s_message_detail_sheet, 8, 0);
@@ -3997,7 +4123,10 @@ static void create_message_detail_sheet(lv_obj_t *screen)
 
 static void create_public_search_sheet(lv_obj_t *screen)
 {
-    s_public_search_sheet = lv_obj_create(screen);
+    s_public_search_sheet = create_object(screen, "public search sheet");
+    if (!s_public_search_sheet) {
+        return;
+    }
     lv_obj_set_size(s_public_search_sheet, 448, 320);
     lv_obj_set_pos(s_public_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_public_search_sheet, 8, 0);
@@ -4018,7 +4147,11 @@ static void create_public_search_sheet(lv_obj_t *screen)
     create_button(s_public_search_sheet, "Close", 358, 0, 66, 40,
                   close_public_search_event_cb, NULL);
 
-    s_public_search_textarea = lv_textarea_create(s_public_search_sheet);
+    s_public_search_textarea = create_textarea(s_public_search_sheet, "public search textarea");
+    if (!s_public_search_textarea) {
+        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_public_search_textarea, 424, 48);
     lv_obj_set_pos(s_public_search_textarea, 0, 54);
     lv_textarea_set_one_line(s_public_search_textarea, true);
@@ -4031,7 +4164,11 @@ static void create_public_search_sheet(lv_obj_t *screen)
     lv_obj_set_style_text_color(s_public_search_textarea, lv_color_hex(0x8EA0AE),
                                 LV_PART_TEXTAREA_PLACEHOLDER);
 
-    s_public_search_keyboard = lv_keyboard_create(s_public_search_sheet);
+    s_public_search_keyboard = create_keyboard(s_public_search_sheet, "public search keyboard");
+    if (!s_public_search_keyboard) {
+        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_public_search_keyboard, 424, 194);
     lv_obj_set_pos(s_public_search_keyboard, 0, 114);
     lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
@@ -4045,7 +4182,10 @@ static void create_public_search_sheet(lv_obj_t *screen)
 
 static void create_dm_thread_sheet(lv_obj_t *screen)
 {
-    s_dm_thread_sheet = lv_obj_create(screen);
+    s_dm_thread_sheet = create_object(screen, "dm thread sheet");
+    if (!s_dm_thread_sheet) {
+        return;
+    }
     lv_obj_set_size(s_dm_thread_sheet, 448, 300);
     lv_obj_set_pos(s_dm_thread_sheet, 16, 92);
     lv_obj_set_style_radius(s_dm_thread_sheet, 8, 0);
@@ -4059,7 +4199,10 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
 
 static void create_radio_settings_sheet(lv_obj_t *screen)
 {
-    s_radio_settings_sheet = lv_obj_create(screen);
+    s_radio_settings_sheet = create_object(screen, "radio settings sheet");
+    if (!s_radio_settings_sheet) {
+        return;
+    }
     lv_obj_set_size(s_radio_settings_sheet, 448, 320);
     lv_obj_set_pos(s_radio_settings_sheet, 16, 82);
     lv_obj_set_style_radius(s_radio_settings_sheet, 8, 0);
@@ -4073,7 +4216,10 @@ static void create_radio_settings_sheet(lv_obj_t *screen)
 
 static void create_storage_sheet(lv_obj_t *screen)
 {
-    s_storage_sheet = lv_obj_create(screen);
+    s_storage_sheet = create_object(screen, "storage sheet");
+    if (!s_storage_sheet) {
+        return;
+    }
     lv_obj_set_size(s_storage_sheet, 448, 320);
     lv_obj_set_pos(s_storage_sheet, 16, 82);
     lv_obj_set_style_radius(s_storage_sheet, 8, 0);
@@ -4087,7 +4233,10 @@ static void create_storage_sheet(lv_obj_t *screen)
 
 static void create_map_location_sheet(lv_obj_t *screen)
 {
-    s_map_location_sheet = lv_obj_create(screen);
+    s_map_location_sheet = create_object(screen, "map location sheet");
+    if (!s_map_location_sheet) {
+        return;
+    }
     lv_obj_set_size(s_map_location_sheet, 448, 320);
     lv_obj_set_pos(s_map_location_sheet, 16, 82);
     lv_obj_set_style_radius(s_map_location_sheet, 8, 0);
@@ -4101,7 +4250,10 @@ static void create_map_location_sheet(lv_obj_t *screen)
 
 static void create_contact_detail_sheet(lv_obj_t *screen)
 {
-    s_contact_detail_sheet = lv_obj_create(screen);
+    s_contact_detail_sheet = create_object(screen, "contact detail sheet");
+    if (!s_contact_detail_sheet) {
+        return;
+    }
     lv_obj_set_size(s_contact_detail_sheet, 448, 276);
     lv_obj_set_pos(s_contact_detail_sheet, 16, 116);
     lv_obj_set_style_radius(s_contact_detail_sheet, 8, 0);
@@ -4115,7 +4267,10 @@ static void create_contact_detail_sheet(lv_obj_t *screen)
 
 static void create_node_detail_sheet(lv_obj_t *screen)
 {
-    s_node_detail_sheet = lv_obj_create(screen);
+    s_node_detail_sheet = create_object(screen, "node detail sheet");
+    if (!s_node_detail_sheet) {
+        return;
+    }
     lv_obj_set_size(s_node_detail_sheet, 448, 286);
     lv_obj_set_pos(s_node_detail_sheet, 16, 100);
     lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
@@ -4132,9 +4287,8 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     if (!screen || s_contact_edit_sheet) {
         return;
     }
-    s_contact_edit_sheet = lv_obj_create(screen);
+    s_contact_edit_sheet = create_object(screen, "contact edit sheet");
     if (!s_contact_edit_sheet) {
-        ESP_LOGE(TAG, "contact edit sheet allocation failed");
         return;
     }
     lv_obj_set_size(s_contact_edit_sheet, 448, 320);
@@ -4168,9 +4322,8 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     }
     lv_obj_set_pos(meta, 8, 46);
 
-    s_contact_edit_textarea = lv_textarea_create(s_contact_edit_sheet);
+    s_contact_edit_textarea = create_textarea(s_contact_edit_sheet, "contact edit textarea");
     if (!s_contact_edit_textarea) {
-        ESP_LOGE(TAG, "contact edit textarea allocation failed");
         goto fail;
     }
     lv_obj_set_size(s_contact_edit_textarea, 424, 48);
@@ -4185,9 +4338,8 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     lv_obj_set_style_text_color(s_contact_edit_textarea, lv_color_hex(0x8EA0AE),
                                 LV_PART_TEXTAREA_PLACEHOLDER);
 
-    s_contact_edit_keyboard = lv_keyboard_create(s_contact_edit_sheet);
+    s_contact_edit_keyboard = create_keyboard(s_contact_edit_sheet, "contact edit keyboard");
     if (!s_contact_edit_keyboard) {
-        ESP_LOGE(TAG, "contact edit keyboard allocation failed");
         goto fail;
     }
     lv_obj_set_size(s_contact_edit_keyboard, 424, 178);
@@ -4213,7 +4365,10 @@ fail:
 
 static void create_contact_export_sheet(lv_obj_t *screen)
 {
-    s_contact_export_sheet = lv_obj_create(screen);
+    s_contact_export_sheet = create_object(screen, "contact export sheet");
+    if (!s_contact_export_sheet) {
+        return;
+    }
     lv_obj_set_size(s_contact_export_sheet, 448, 320);
     lv_obj_set_pos(s_contact_export_sheet, 16, 82);
     lv_obj_set_style_radius(s_contact_export_sheet, 8, 0);
@@ -4227,7 +4382,10 @@ static void create_contact_export_sheet(lv_obj_t *screen)
 
 static void create_route_detail_sheet(lv_obj_t *screen)
 {
-    s_route_detail_sheet = lv_obj_create(screen);
+    s_route_detail_sheet = create_object(screen, "route detail sheet");
+    if (!s_route_detail_sheet) {
+        return;
+    }
     lv_obj_set_size(s_route_detail_sheet, 448, 250);
     lv_obj_set_pos(s_route_detail_sheet, 16, 132);
     lv_obj_set_style_radius(s_route_detail_sheet, 8, 0);
@@ -4241,7 +4399,10 @@ static void create_route_detail_sheet(lv_obj_t *screen)
 
 static void create_route_trace_sheet(lv_obj_t *screen)
 {
-    s_route_trace_sheet = lv_obj_create(screen);
+    s_route_trace_sheet = create_object(screen, "route trace sheet");
+    if (!s_route_trace_sheet) {
+        return;
+    }
     lv_obj_set_size(s_route_trace_sheet, 448, 326);
     lv_obj_set_pos(s_route_trace_sheet, 16, 76);
     lv_obj_set_style_radius(s_route_trace_sheet, 8, 0);
@@ -4255,7 +4416,10 @@ static void create_route_trace_sheet(lv_obj_t *screen)
 
 static void create_packet_detail_sheet(lv_obj_t *screen)
 {
-    s_packet_detail_sheet = lv_obj_create(screen);
+    s_packet_detail_sheet = create_object(screen, "packet detail sheet");
+    if (!s_packet_detail_sheet) {
+        return;
+    }
     lv_obj_set_size(s_packet_detail_sheet, 448, 286);
     lv_obj_set_pos(s_packet_detail_sheet, 16, 100);
     lv_obj_set_style_radius(s_packet_detail_sheet, 8, 0);
@@ -4269,7 +4433,10 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
 
 static void create_packet_search_sheet(lv_obj_t *screen)
 {
-    s_packet_search_sheet = lv_obj_create(screen);
+    s_packet_search_sheet = create_object(screen, "packet search sheet");
+    if (!s_packet_search_sheet) {
+        return;
+    }
     lv_obj_set_size(s_packet_search_sheet, 448, 320);
     lv_obj_set_pos(s_packet_search_sheet, 16, 82);
     lv_obj_set_style_radius(s_packet_search_sheet, 8, 0);
@@ -4287,7 +4454,11 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     create_button(s_packet_search_sheet, "Clear", 286, 0, 64, 40, clear_packet_search_event_cb, NULL);
     create_button(s_packet_search_sheet, "Close", 358, 0, 66, 40, close_packet_search_event_cb, NULL);
 
-    s_packet_search_textarea = lv_textarea_create(s_packet_search_sheet);
+    s_packet_search_textarea = create_textarea(s_packet_search_sheet, "packet search textarea");
+    if (!s_packet_search_textarea) {
+        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_packet_search_textarea, 424, 48);
     lv_obj_set_pos(s_packet_search_textarea, 0, 54);
     lv_textarea_set_one_line(s_packet_search_textarea, true);
@@ -4299,7 +4470,11 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0xF4F7FB), 0);
     lv_obj_set_style_text_color(s_packet_search_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
 
-    s_packet_search_keyboard = lv_keyboard_create(s_packet_search_sheet);
+    s_packet_search_keyboard = create_keyboard(s_packet_search_sheet, "packet search keyboard");
+    if (!s_packet_search_keyboard) {
+        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_packet_search_keyboard, 424, 194);
     lv_obj_set_pos(s_packet_search_keyboard, 0, 114);
     lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
@@ -4311,7 +4486,10 @@ static void create_packet_search_sheet(lv_obj_t *screen)
 
 static void create_mesh_roles_sheet(lv_obj_t *screen)
 {
-    s_mesh_roles_sheet = lv_obj_create(screen);
+    s_mesh_roles_sheet = create_object(screen, "mesh roles sheet");
+    if (!s_mesh_roles_sheet) {
+        return;
+    }
     lv_obj_set_size(s_mesh_roles_sheet, 448, 320);
     lv_obj_set_pos(s_mesh_roles_sheet, 16, 82);
     lv_obj_set_style_radius(s_mesh_roles_sheet, 8, 0);
@@ -4325,7 +4503,10 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
 
 static void create_onboarding_sheet(lv_obj_t *screen)
 {
-    s_onboarding_sheet = lv_obj_create(screen);
+    s_onboarding_sheet = create_object(screen, "onboarding sheet");
+    if (!s_onboarding_sheet) {
+        return;
+    }
     lv_obj_set_size(s_onboarding_sheet, 456, 430);
     lv_obj_set_pos(s_onboarding_sheet, 12, 25);
     lv_obj_set_style_radius(s_onboarding_sheet, 8, 0);
@@ -4345,7 +4526,11 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_t *name_label = create_label(s_onboarding_sheet, "Node name", 0x8EA0AE);
     lv_obj_set_pos(name_label, 8, 68);
 
-    s_onboarding_name_textarea = lv_textarea_create(s_onboarding_sheet);
+    s_onboarding_name_textarea = create_textarea(s_onboarding_sheet, "onboarding name textarea");
+    if (!s_onboarding_name_textarea) {
+        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_onboarding_name_textarea, 424, 48);
     lv_obj_set_pos(s_onboarding_name_textarea, 8, 92);
     lv_textarea_set_one_line(s_onboarding_name_textarea, true);
@@ -4374,7 +4559,11 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     create_button(s_onboarding_sheet, "Use Defaults", 136, 210, 146, 40,
                   onboarding_defaults_event_cb, NULL);
 
-    s_onboarding_keyboard = lv_keyboard_create(s_onboarding_sheet);
+    s_onboarding_keyboard = create_keyboard(s_onboarding_sheet, "onboarding keyboard");
+    if (!s_onboarding_keyboard) {
+        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_obj_set_size(s_onboarding_keyboard, 424, 160);
     lv_obj_set_pos(s_onboarding_keyboard, 8, 258);
     lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea);
@@ -4387,7 +4576,10 @@ static void create_onboarding_sheet(lv_obj_t *screen)
 
 static void create_lock_overlay(lv_obj_t *screen)
 {
-    s_lock_overlay = lv_obj_create(screen);
+    s_lock_overlay = create_object(screen, "lock overlay");
+    if (!s_lock_overlay) {
+        return;
+    }
     lv_obj_set_size(s_lock_overlay, 480, 480);
     lv_obj_set_pos(s_lock_overlay, 0, 0);
     lv_obj_set_style_bg_color(s_lock_overlay, lv_color_hex(0x02060A), 0);
@@ -4434,14 +4626,20 @@ static void touch_poll_task(void *arg)
 
 esp_err_t d1l_ui_phase1_show_home(void)
 {
-    s_screen = lv_obj_create(NULL);
+    s_screen = create_screen_object("root screen");
+    if (!s_screen) {
+        return ESP_ERR_NO_MEM;
+    }
     lv_obj_set_style_bg_color(s_screen, lv_color_hex(0x071018), 0);
     lv_obj_set_style_pad_all(s_screen, 0, 0);
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     create_top_bar(s_screen);
 
-    s_content = lv_obj_create(s_screen);
+    s_content = create_object(s_screen, "content root");
+    if (!s_content) {
+        return ESP_ERR_NO_MEM;
+    }
     lv_obj_set_size(s_content, 480, 362);
     lv_obj_set_pos(s_content, 0, 56);
     configure_content_scroll_root(s_content);
@@ -4518,9 +4716,9 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    xTaskCreatePinnedToCore(touch_poll_task, "d1l_touch", 4096, NULL, 4,
+    xTaskCreatePinnedToCore(touch_poll_task, "d1l_touch", D1L_TOUCH_TASK_STACK_BYTES, NULL, 4,
                             &s_touch_task_handle, D1L_UI_TASK_CORE);
-    xTaskCreatePinnedToCore(ui_task, "d1l_ui", 4096, NULL, 5,
+    xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES, NULL, 5,
                             &s_ui_task_handle, D1L_UI_TASK_CORE);
     d1l_health_monitor_register_ui_task(s_ui_task_handle);
     d1l_app_model_get()->ui_ready = true;

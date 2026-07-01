@@ -1170,9 +1170,9 @@ Final package must include:
 
 - [x] Add `ui_tab_abuse_d1l.py`.
 - [x] Add `scroll_probe_d1l.py` or serial UI test commands.
-- [ ] Split `ui_phase1.c` or establish wrappers before deeper feature work.
-- [ ] Increase/measure UI task stack.
-- [ ] Add allocation guards to all LVGL object creation.
+- [x] Split `ui_phase1.c` or establish wrappers before deeper feature work.
+- [x] Increase/measure UI task stack.
+- [x] Add allocation guards to all LVGL object creation.
 - [x] Replace fixed non-scrollable `s_content` with per-screen scroll roots.
 - [ ] Verify `Msg`, `Nodes`, `Pkts` no longer crash.
 

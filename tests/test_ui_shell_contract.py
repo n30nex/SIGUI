@@ -285,6 +285,25 @@ def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
     assert "snapshot->onboarding_complete" in source
 
 
+def test_ui_allocation_wrappers_and_stack_budget_are_hardened():
+    source = read("main/ui/ui_phase1.c")
+    assert "#define D1L_UI_TASK_STACK_BYTES 6144U" in source
+    assert "#define D1L_TOUCH_TASK_STACK_BYTES 4096U" in source
+    assert 'xTaskCreatePinnedToCore(ui_task, "d1l_ui", D1L_UI_TASK_STACK_BYTES' in source
+    assert "ui_task_stack_free_words" in source
+    assert "create_screen_object" in source
+    assert "create_object" in source
+    assert "create_label_object" in source
+    assert "create_textarea" in source
+    assert "create_keyboard" in source
+    assert "create_qrcode" in source
+    assert 's_screen = create_screen_object("root screen")' in source
+    assert 's_content = create_object(s_screen, "content root")' in source
+    assert 's_compose_textarea = create_textarea(s_compose_sheet, "compose textarea")' in source
+    assert 's_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard")' in source
+    assert 'create_qrcode(s_contact_export_sheet' in source
+
+
 def test_public_composer_uses_lvgl_textarea_keyboard():
     source = read("main/ui/ui_phase1.c")
     assert "create_compose_sheet" in source
