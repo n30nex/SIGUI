@@ -104,7 +104,11 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert f"constexpr size_t FILE_PATH_MAX = {MAX_FILE_PATH_CHARS};" in sketch
     assert f"constexpr size_t FILE_CHUNK_MAX = {MAX_FILE_CHUNK_BYTES};" in sketch
     assert "drop_until_newline = true" in sketch
-    assert "if (drop_until_newline)" in sketch
+    assert "if (rx.drop_until_newline)" in sketch
+    assert "poll_stream(Serial1, Serial1, bridge_rx)" in sketch
+    assert "poll_stream(Serial, Serial, usb_rx)" in sketch
+    assert "Stream *reply_stream = &Serial1;" in sketch
+    assert "send_snapshot(*reply_stream" in sketch
     assert "validate_relative_path" in sketch
     assert "decode_base64url" in sketch
     assert "encode_base64url" in sketch

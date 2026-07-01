@@ -68,9 +68,15 @@ struct CardProbe {
     uint8_t options;
 };
 
-char rx_line[RX_LINE_MAX];
-size_t rx_len = 0;
-bool drop_until_newline = false;
+struct LineRx {
+    char line[RX_LINE_MAX];
+    size_t len;
+    bool drop_until_newline;
+};
+
+LineRx bridge_rx = {{0}, 0, false};
+LineRx usb_rx = {{0}, 0, false};
+Stream *reply_stream = &Serial1;
 bool s_sd_power_high = true;
 uint8_t s_sd_spi_options = DEDICATED_SPI;
 
@@ -222,53 +228,34 @@ SdSnapshot current_status() {
         0,
     };
 
+    CardProbe probes[] = {
+        probe_card(DEDICATED_SPI, true),
+        probe_card(SHARED_SPI, true),
+        probe_card(DEDICATED_SPI, false),
+        probe_card(SHARED_SPI, false),
+    };
+    const CardProbe *probe = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
+    if (!probe) {
+        probe = &probes[0];
+    }
+    apply_probe_to_snapshot(snapshot, *probe);
+    if (!probe->present) {
+        s_sd_power_high = true;
+        s_sd_spi_options = DEDICATED_SPI;
+        configure_sd_bus();
+        return snapshot;
+    }
+
+    s_sd_power_high = probe->power_high;
+    s_sd_spi_options = probe->options;
     if (!mount_sd()) {
-        CardProbe probes[] = {
-            probe_card(DEDICATED_SPI, true),
-            probe_card(SHARED_SPI, true),
-            probe_card(DEDICATED_SPI, false),
-            probe_card(SHARED_SPI, false),
-        };
-        const CardProbe *probe = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-        if (!probe) {
-            probe = &probes[0];
-        }
-        apply_probe_to_snapshot(snapshot, *probe);
-        if (probe->present) {
-            s_sd_power_high = probe->power_high;
-            s_sd_spi_options = probe->options;
-            if (mount_sd()) {
-                snapshot.state = "setup_required";
-                snapshot.present = true;
-                snapshot.mounted = true;
-                snapshot.deskos = false;
-                snapshot.fs = fat_label();
-                snapshot.format_required = false;
-                snapshot.format_supported = true;
-                snapshot.note = "deskos_root_missing";
-                fill_capacity(snapshot);
-                if (SD.exists(DESKOS_ROOT) || SD.mkdir(DESKOS_ROOT)) {
-                    snapshot.state = "ready";
-                    snapshot.deskos = true;
-                    snapshot.note = "ready";
-                } else {
-                    snapshot.state = "error";
-                    snapshot.note = "deskos_root_unavailable";
-                }
-                return snapshot;
-            }
-            snapshot.state = "setup_required";
-            snapshot.present = true;
-            snapshot.fs = "unknown";
-            snapshot.format_required = true;
-            snapshot.format_supported = true;
-            snapshot.capacity_kb = probe->capacity_kb;
-            snapshot.note = "format_required";
-        } else {
-            s_sd_power_high = true;
-            s_sd_spi_options = DEDICATED_SPI;
-            configure_sd_bus();
-        }
+        snapshot.state = "setup_required";
+        snapshot.present = true;
+        snapshot.fs = "unknown";
+        snapshot.format_required = true;
+        snapshot.format_supported = true;
+        snapshot.capacity_kb = probe->capacity_kb;
+        snapshot.note = "format_required";
         return snapshot;
     }
 
@@ -721,11 +708,11 @@ void send_diag() {
     append_probe_tokens(line, "hs", high_shared);
     append_probe_tokens(line, "ld", low_dedicated);
     append_probe_tokens(line, "ls", low_shared);
-    Serial1.println(line);
+    reply_stream->println(line);
 }
 
 void send_status() {
-    send_snapshot(Serial1, STATUS_REPLY, current_status());
+    send_snapshot(*reply_stream, STATUS_REPLY, current_status());
 }
 
 void send_format_result(const char *phrase) {
@@ -733,7 +720,7 @@ void send_format_result(const char *phrase) {
         SdSnapshot refused = current_status();
         refused.state = "confirmation_required";
         refused.note = "confirmation_required";
-        send_snapshot(Serial1, FORMAT_REPLY, refused);
+        send_snapshot(*reply_stream, FORMAT_REPLY, refused);
         return;
     }
 
@@ -748,7 +735,7 @@ void send_format_result(const char *phrase) {
         if (formatted.free_kb == 0 && formatted.capacity_kb > 0) {
             formatted.free_kb = formatted.capacity_kb;
         }
-        send_snapshot(Serial1, FORMAT_REPLY, formatted);
+        send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
         return;
     }
 
@@ -769,7 +756,7 @@ void send_format_result(const char *phrase) {
         0,
         0,
     };
-    send_snapshot(Serial1, FORMAT_REPLY, failed);
+    send_snapshot(*reply_stream, FORMAT_REPLY, failed);
 }
 
 void send_file_error(uint32_t request_id, const char *op, const char *err) {
@@ -782,7 +769,7 @@ void send_file_error(uint32_t request_id, const char *op, const char *err) {
     line += err;
     line += " note=";
     line += err;
-    Serial1.println(line);
+    reply_stream->println(line);
 }
 
 bool parse_file_header(const char *line, uint32_t *request_id, char *op, size_t op_size) {
@@ -846,7 +833,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " ok=1 op=stat exists=";
     if (!SD.exists(full_path)) {
         out += "0 kind=none size=0 note=ok";
-        Serial1.println(out);
+        reply_stream->println(out);
         return;
     }
 
@@ -861,7 +848,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += String(static_cast<unsigned long>(file.isDirectory() ? 0 : file.size()));
     out += " note=ok";
     file.close();
-    Serial1.println(out);
+    reply_stream->println(out);
 }
 
 void handle_file_read(uint32_t request_id, const char *line) {
@@ -925,7 +912,7 @@ void handle_file_read(uint32_t request_id, const char *line) {
     out += " crc=";
     out += crc32_token(data, used);
     out += " note=ok";
-    Serial1.println(out);
+    reply_stream->println(out);
 }
 
 void handle_file_write(uint32_t request_id, const char *line, bool append_mode) {
@@ -1015,7 +1002,7 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     out += " size=";
     out += String(static_cast<unsigned long>(new_size));
     out += " note=ok";
-    Serial1.println(out);
+    reply_stream->println(out);
 }
 
 void handle_file_delete(uint32_t request_id, const char *line) {
@@ -1038,7 +1025,7 @@ void handle_file_delete(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=delete note=ok";
-    Serial1.println(out);
+    reply_stream->println(out);
 }
 
 void handle_file_rename(uint32_t request_id, const char *line) {
@@ -1083,7 +1070,7 @@ void handle_file_rename(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=rename note=ok";
-    Serial1.println(out);
+    reply_stream->println(out);
 }
 
 void handle_file_line(const char *line) {
@@ -1171,35 +1158,45 @@ void handle_line(char *line) {
         0,
         0,
     };
-    send_snapshot(Serial1, STATUS_REPLY, unsupported);
+    send_snapshot(*reply_stream, STATUS_REPLY, unsupported);
 }
 
-void poll_bridge_uart() {
-    while (Serial1.available() > 0) {
-        const char c = static_cast<char>(Serial1.read());
+void handle_line_for_stream(char *line, Stream &out) {
+    Stream *previous = reply_stream;
+    reply_stream = &out;
+    handle_line(line);
+    reply_stream = previous;
+}
+
+void poll_stream(Stream &in, Stream &out, LineRx &rx) {
+    while (in.available() > 0) {
+        const char c = static_cast<char>(in.read());
         if (c == '\r') {
             continue;
         }
         if (c == '\n') {
-            if (!drop_until_newline) {
-                rx_line[rx_len] = '\0';
-                if (rx_len > 0) {
-                    handle_line(rx_line);
+            if (!rx.drop_until_newline) {
+                rx.line[rx.len] = '\0';
+                if (rx.len > 0) {
+                    handle_line_for_stream(rx.line, out);
                 }
             }
-            rx_len = 0;
-            drop_until_newline = false;
+            rx.len = 0;
+            rx.drop_until_newline = false;
             continue;
         }
-        if (drop_until_newline) {
+        if (rx.drop_until_newline) {
             continue;
         }
-        if (rx_len + 1 < sizeof(rx_line)) {
-            rx_line[rx_len++] = c;
+        if (rx.len + 1 < sizeof(rx.line)) {
+            rx.line[rx.len++] = c;
         } else {
-            rx_len = 0;
-            drop_until_newline = true;
+            rx.len = 0;
+            rx.drop_until_newline = true;
+            Stream *previous = reply_stream;
+            reply_stream = &out;
             send_file_error(0, "unknown", "line_too_long");
+            reply_stream = previous;
         }
     }
 }
@@ -1217,6 +1214,7 @@ void setup() {
 }
 
 void loop() {
-    poll_bridge_uart();
+    poll_stream(Serial1, Serial1, bridge_rx);
+    poll_stream(Serial, Serial, usb_rx);
     delay(1);
 }
