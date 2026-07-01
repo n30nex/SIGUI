@@ -184,6 +184,7 @@ static bool s_packet_detail_advanced;
 
 static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
+static void render_packet_detail_sheet(void);
 static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
 static void render_wifi_sheet(void);
