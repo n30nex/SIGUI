@@ -95,3 +95,24 @@ def test_generated_flash_scripts_require_explicit_port(tmp_path):
     assert "FULL-FLASH-$Port" in full_ps1
     assert "COM7" not in ps1
     assert "COM11" not in ps1
+
+
+def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
+    def fake_git_value(root, *args):
+        if args == ("status", "--porcelain"):
+            return " m third_party/sensecap_indicator_esp32"
+        if args == ("rev-parse", "HEAD"):
+            return "abc123"
+        if args == ("rev-parse", "--short", "HEAD"):
+            return "abc123"
+        if args == ("branch", "--show-current"):
+            return "feature/test"
+        return None
+
+    monkeypatch.setattr(package_release_d1l, "git_value", fake_git_value)
+    monkeypatch.setattr(package_release_d1l, "expected_bsp_patch_applied", lambda root: True)
+
+    info = package_release_d1l.git_info(tmp_path)
+
+    assert info["dirty"] is False
+    assert info["source_patches"] == ["patches/sensecap_indicator_touch_fix.patch"]

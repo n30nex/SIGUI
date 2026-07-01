@@ -16,6 +16,8 @@ from pathlib import Path
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
+EXPECTED_BSP_PATCH = Path("patches/sensecap_indicator_touch_fix.patch")
+EXPECTED_BSP_SUBMODULE = Path("third_party/sensecap_indicator_esp32")
 
 
 def utc_stamp() -> str:
@@ -49,13 +51,53 @@ def git_value(root: Path, *args: str) -> str | None:
     return result.stdout.strip() or None
 
 
+def command_succeeds(cwd: Path, args: list[str]) -> bool:
+    try:
+        subprocess.run(
+            args,
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+def expected_bsp_patch_applied(root: Path) -> bool:
+    patch = root / EXPECTED_BSP_PATCH
+    submodule = root / EXPECTED_BSP_SUBMODULE
+    if not patch.exists() or not submodule.exists():
+        return False
+    return command_succeeds(
+        submodule,
+        ["git", "apply", "--unidiff-zero", "--reverse", "--check", str(patch)],
+    )
+
+
+def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], list[str]]:
+    entries = [line for line in status.splitlines() if line.strip()]
+    if not entries:
+        return [], []
+
+    expected_submodule = EXPECTED_BSP_SUBMODULE.as_posix()
+    if all(line[3:] == expected_submodule for line in entries) and expected_bsp_patch_applied(root):
+        return [], [EXPECTED_BSP_PATCH.as_posix()]
+
+    return entries, []
+
+
 def git_info(root: Path) -> dict:
     status = git_value(root, "status", "--porcelain") or ""
+    dirty_entries, source_patches = clean_release_status_entries(root, status)
     return {
         "commit": git_value(root, "rev-parse", "HEAD"),
         "short_commit": git_value(root, "rev-parse", "--short", "HEAD"),
         "branch": git_value(root, "branch", "--show-current"),
-        "dirty": bool(status),
+        "dirty": bool(dirty_entries),
+        "source_patches": source_patches,
     }
 
 
