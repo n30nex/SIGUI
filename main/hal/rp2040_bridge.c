@@ -937,7 +937,7 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
         return ESP_ERR_INVALID_SIZE;
     }
 
-    const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX, D1L_RP2040_SD_REPLY_PREFIX};
+    const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX};
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_sd_status(out_status, ESP_ERR_TIMEOUT);
@@ -953,11 +953,7 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
         return ret;
     }
 
-    if (line_has_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX)) {
-        ret = parse_sd_format_line(line, out_status);
-    } else {
-        ret = parse_sd_status_line(line, out_status);
-    }
+    ret = parse_sd_format_line(line, out_status);
     out_status->response_truncated = truncated;
     out_status->last_error = ret;
     return ret;

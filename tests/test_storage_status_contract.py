@@ -121,6 +121,18 @@ def test_storage_format_request_is_guarded_before_bridge_command():
     assert '"retained_history_sd_enabled"' in source
 
 
+def test_rp2040_format_command_waits_for_format_reply_only():
+    source = read("main/hal/rp2040_bridge.c")
+    format_body = source.split("esp_err_t d1l_rp2040_bridge_format_sd", 1)[1].split(
+        "esp_err_t d1l_rp2040_bridge_file_stat", 1
+    )[0]
+
+    assert "const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX};" in format_body
+    assert "D1L_RP2040_SD_REPLY_PREFIX" not in format_body
+    assert "parse_sd_status_line(line, out_status)" not in format_body
+    assert "parse_sd_format_line(line, out_status)" in format_body
+
+
 def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
