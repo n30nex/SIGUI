@@ -106,8 +106,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   Formatting first selects the same rail/SPI mode proven by the bounded raw
   probe, then uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
   wrapper is avoided because that wrapper does not preserve the configured SPI
-  object on this board. Every confirmed format attempt must reply with a
-  `DESKOS_SD_FORMAT ...` line, including explicit failure notes such as
+  object on this board. During a long FAT initialization it may stream SdFat
+  progress text before the final protocol reply; ESP32 callers must ignore that
+  unprefixed progress and continue waiting for the terminal
+  `DESKOS_SD_FORMAT ...` line. Every confirmed format attempt must end with
+  that reply, including explicit failure notes such as
   `format_card_init_failed`, `format_sector_count_failed`, or
   `post_format_mount_failed` when the card is electrically present but not
   usable through the filesystem path.

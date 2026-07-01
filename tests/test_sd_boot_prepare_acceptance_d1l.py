@@ -79,6 +79,13 @@ def storage_setup_line(*, requested: bool = False, performed: bool = False) -> s
     )
 
 
+def storage_setup_timeout_line() -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"storage setup","code":"ESP_ERR_TIMEOUT",'
+        '"hint":"RP2040 SD format command timed out; no format confirmation was received"}\n'
+    )
+
+
 def filecanary_success_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage filecanary",'
@@ -130,7 +137,7 @@ def test_confirmed_format_uses_extended_timeout(monkeypatch):
 
     boot_accept.send_with_timeout(object(), "storage setup confirm FORMAT-DESKOS-SD", 5.0)
 
-    assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 130.0)]
+    assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 660.0)]
 
 
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
@@ -157,6 +164,8 @@ def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
     assert report["classification"] == "ready_sd_file_gate"
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
+    assert report["format_command_sent"] is False
+    assert report["format_confirmed"] is False
     assert ser.writes == [
         "rp2040 ping\n",
         "storage status\n",
@@ -190,6 +199,8 @@ def test_unformatted_default_requires_confirmation_without_format(monkeypatch):
     assert report["ok"] is True
     assert report["classification"] == "setup_requires_confirmation"
     assert report["formats_sd"] is False
+    assert report["format_command_sent"] is False
+    assert report["format_confirmed"] is False
     assert "storage setup confirm FORMAT-DESKOS-SD\n" not in ser.writes
 
 
@@ -221,4 +232,38 @@ def test_unformatted_allow_format_confirms_and_requires_ready_card(monkeypatch):
     assert report["classification"] == "format_confirmed_ready"
     assert report["format_allowed"] is True
     assert report["formats_sd"] is True
+    assert report["format_command_sent"] is True
+    assert report["format_confirmed"] is True
     assert "storage setup confirm FORMAT-DESKOS-SD\n" in ser.writes
+
+
+def test_unformatted_allow_format_timeout_is_not_confirmed(monkeypatch):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            setup_required_storage_line(),
+            storage_mount_line("setup_required"),
+            setup_required_storage_line(),
+            storage_setup_line(),
+            storage_setup_timeout_line(),
+            setup_required_storage_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="unformatted",
+        allow_format_confirm=True,
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "format_confirmed_not_ready"
+    assert report["format_allowed"] is True
+    assert report["format_command_sent"] is True
+    assert report["format_confirmed"] is False
+    assert report["formats_sd"] is False
+    assert report["filecanary"] is None

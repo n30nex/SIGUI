@@ -735,7 +735,7 @@ SdSnapshot format_card() {
 
     FatFormatter fat_formatter;
     uint8_t sector_buffer[512];
-    const bool formatted = fat_formatter.format(card, sector_buffer, nullptr);
+    const bool formatted = fat_formatter.format(card, sector_buffer, reply_stream);
     snapshot.probe_error = card->errorCode();
     snapshot.probe_data = card->errorData();
     delete card;

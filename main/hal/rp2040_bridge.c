@@ -393,10 +393,12 @@ static bool encode_path(const char *path, char *encoded, size_t encoded_size)
            base64url_encode((const uint8_t *)path, strlen(path), encoded, encoded_size);
 }
 
-static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
-                                        const char *const *prefixes, size_t prefix_count,
-                                        char *line, size_t line_size, uint32_t timeout_ms,
-                                        bool *response_truncated)
+static esp_err_t exchange_prefixed_line_internal(const char *command, size_t command_len,
+                                                 const char *const *prefixes, size_t prefix_count,
+                                                 char *line, size_t line_size,
+                                                 uint32_t timeout_ms,
+                                                 bool extend_timeout_on_rx,
+                                                 bool *response_truncated)
 {
     if (!s_status.uart_ready) {
         return s_status.init_result;
@@ -415,7 +417,8 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
         return ESP_FAIL;
     }
 
-    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
+    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
+    int64_t deadline_us = esp_timer_get_time() + timeout_us;
     size_t used = 0;
     bool dropping = false;
     while (esp_timer_get_time() < deadline_us) {
@@ -423,6 +426,9 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
         int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
         if (len <= 0) {
             continue;
+        }
+        if (extend_timeout_on_rx) {
+            deadline_us = esp_timer_get_time() + timeout_us;
         }
         if (ch == '\r') {
             continue;
@@ -454,6 +460,16 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
         }
     }
     return ESP_ERR_TIMEOUT;
+}
+
+static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
+                                        const char *const *prefixes, size_t prefix_count,
+                                        char *line, size_t line_size, uint32_t timeout_ms,
+                                        bool *response_truncated)
+{
+    return exchange_prefixed_line_internal(command, command_len, prefixes, prefix_count,
+                                           line, line_size, timeout_ms, false,
+                                           response_truncated);
 }
 
 static esp_err_t parse_sd_line_with_prefix(const char *line,
@@ -941,8 +957,9 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_sd_status(out_status, ESP_ERR_TIMEOUT);
-    esp_err_t ret = exchange_prefixed_line(command, (size_t)command_len, prefixes, 1,
-                                           line, sizeof(line), timeout_ms, &truncated);
+    esp_err_t ret = exchange_prefixed_line_internal(command, (size_t)command_len, prefixes, 1,
+                                                    line, sizeof(line), timeout_ms, true,
+                                                    &truncated);
     out_status->response_truncated = truncated;
     if (ret != ESP_OK) {
         out_status->last_error = ret;

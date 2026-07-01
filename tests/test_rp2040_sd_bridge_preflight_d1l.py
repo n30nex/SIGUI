@@ -103,6 +103,17 @@ def no_card_storage_line() -> str:
     )
 
 
+def raw_card_present_mount_failed_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"setup_required","present":true,"mounted":false,'
+        '"data_root_ready":false,"format_required":true,'
+        '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
+        '"file_ops":false,"atomic_rename":false,"last_error":"ESP_OK"},'
+        '"data_backend":"nvs","export_backend":"serial"}\n'
+    )
+
+
 def storage_mount_pending_line() -> str:
     return (
         '{"schema":1,"ok":false,"cmd":"storage mount","code":"ESP_ERR_TIMEOUT",'
@@ -467,6 +478,43 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
     assert report["storage_diag_ok"] is True
     assert report["ready_for_sd_acceptance"] is True
     assert report["classification"]["state"] == "sd_bridge_ready"
+
+
+def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
+            rp2040_ping_line(),
+            raw_card_present_mount_failed_line(),
+            storage_mount_noop_line(),
+            raw_card_present_mount_failed_line(),
+            '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
+            '"mount_selected":false,"note":"raw_card_present_mount_failed",'
+            '"public_rf_tx":false,"formats_sd":false}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is True
+    assert report["ready_for_sd_acceptance"] is False
+    assert report["classification"]["state"] == "raw_card_present_mount_failed"
+    assert report["classification"]["next_action"] == "run_guarded_format_or_swap_known_good_sd_card"
 
 
 def test_run_preflight_polls_safe_status_while_mount_pending(monkeypatch):

@@ -28,7 +28,7 @@ FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
-FORMAT_COMMAND_TIMEOUT_SECONDS = 130.0
+FORMAT_COMMAND_TIMEOUT_SECONDS = 660.0
 
 
 def command_plan(scenario: str, *, allow_format_confirm: bool = False) -> list[str]:
@@ -335,6 +335,14 @@ def run_acceptance(
         health = run_command(ser, "health")
 
     public_rf_tx = any_flag(results, "public_rf_tx")
+    format_command_sent = any(
+        command == "storage setup confirm FORMAT-DESKOS-SD" for command in commands
+    )
+    format_confirmed = (
+        isinstance(format_result, dict)
+        and format_result.get("ok") is True
+        and format_result.get("format_performed") is True
+    )
     formats_sd = any_flag(results, "formats_sd") or any(
         result.get("format_performed") is True for result in results
     )
@@ -367,6 +375,8 @@ def run_acceptance(
         "commands": commands,
         "public_rf_tx": public_rf_tx,
         "formats_sd": formats_sd,
+        "format_command_sent": format_command_sent,
+        "format_confirmed": format_confirmed,
         "format_allowed": allow_format_confirm,
         "commands_safe": commands_safe,
         "scenario_passed": scenario_ok,

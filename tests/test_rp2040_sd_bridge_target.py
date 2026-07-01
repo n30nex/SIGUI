@@ -70,7 +70,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "\n        probe_card(SHARED_SPI, true)" not in format_body
     assert "delete card" in sketch
     assert "FatFormatter fat_formatter" in sketch
-    assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
+    assert "fat_formatter.format(card, sector_buffer, reply_stream)" in sketch
     assert "SDFS.format()" not in sketch
     send_format_body = sketch.split("void send_format_result", 1)[1].split(
         "void send_file_error", 1

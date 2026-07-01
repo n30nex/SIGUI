@@ -1134,25 +1134,28 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28550779389` for commit `540319d` rebuilt the
+Current evidence: Actions run `28551321662` for commit `8150b7b` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
 firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
 flashed to COM12 passed current-commit smoke in
-`artifacts/hardware/com12/smoke_540319d.json`. The RP2040 UF2 checksum is
+`artifacts/hardware/com12/smoke_8150b7b.json`. The RP2040 UF2 checksum is
 `032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`, but
-`artifacts/hardware/com12/rp2040_uf2_volumes_540319d_after_esp32_flash.json`
-found no mounted UF2 bootloader volume, so the new RP2040 bridge was not copied.
-The preflight
-`artifacts/hardware/com12/rp2040_preflight_540319d_after_esp32_flash.json` proves the
-RP2040 UART, ping, protocol, and diag paths respond, and the inserted card
-reaches `sd.state="setup_required"` with NVS fallback. The guarded
-operator-approved format attempt in
-`artifacts/hardware/com12/sd_boot_prepare_unformatted_540319d.json` remained
-safe (`public_rf_tx=false`) but timed out before a ready file-operation gate, so
-the firmware and host runner now allow a longer format window before the next
-Actions-built flash/retest. Full SD auto-prepare, retained-history, export,
-map-tile, and reboot/remount proof remain open until guarded format and file
-canaries pass on the device SD card.
+`artifacts/hardware/com12/rp2040_uf2_volumes_8150b7b_after_esp32_flash.json`
+found no mounted UF2 bootloader volume, so the RP2040 bridge could not be copied
+without physical UF2/BOOTSEL action. The settle preflight
+`artifacts/hardware/com12/rp2040_preflight_8150b7b_after_format_timeout_settle.json`
+proves the RP2040 UART, ping, protocol, and diag paths respond, and the inserted
+card reaches `sd.state="setup_required"` with raw-card-present/mount-failed
+diagnostics. The guarded operator-approved format attempt in
+`artifacts/hardware/com12/sd_boot_prepare_unformatted_8150b7b.json` remained
+safe (`public_rf_tx=false`) but timed out before a confirmed
+`DESKOS_SD_FORMAT` reply or ready file-operation gate. The next Actions-built
+slice streams SdFat progress from the RP2040 formatter, keeps the ESP32 format
+exchange alive only while progress bytes arrive, and records whether a guarded
+format command was sent versus confirmed. Full SD auto-prepare,
+retained-history, export, map-tile, and reboot/remount proof remain open until
+the next Actions-built firmware is flashed, the guarded format returns ready,
+and all SD canaries pass on the device SD card.
 
 ### 13.5 Soak
 
@@ -1196,12 +1199,12 @@ Final gate audit:
 python .\scripts\release_gate_audit_d1l.py --github-run-id <run-id> --commit <commit-sha> --d1l-port <D1L_PORT> --meshbot-port <BOT_PORT> --hardware-dir artifacts\hardware\<d1l-port-folder> --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-<commit>.json --fail-on-open-p0
 ```
 
-The latest local audit for `540319d` reports `ready_for_public_release=false`
-with four P0 gates still open after current-commit COM12 smoke passed: SD
-acceptance matrix, 12-hour idle/listening soak, manual physical UI/photos, and
-full inbound/ACK/PATH/direct-route RF proof. Any later commit must be rebuilt by
-GitHub Actions, flashed to COM12, and smoked before it can become the final
-release commit.
+The latest local audit for `8150b7b` reports `ready_for_public_release=false`
+with four P0 gates still open after current-commit COM12 smoke and outbound DM
+proof passed: SD acceptance matrix, 12-hour idle/listening soak, manual physical
+UI/photos, and full inbound/ACK/PATH/direct-route RF proof. Any later commit
+must be rebuilt by GitHub Actions, flashed to COM12, and smoked before it can
+become the final release commit.
 
 ---
 
@@ -1265,22 +1268,21 @@ entries.
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
-Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_fc08f59.json`
-proved the guarded unformatted-card path stays safe and no longer wedges the
-ESP32 (`classification=format_confirmed_not_ready`, `format_allowed=true`,
-`public_rf_tx=false`, `formats_sd=false`, health ready), but the older RP2040
-bridge timed out before reporting a concrete format result. Commit `b841621`
-hardened RP2040 format replies, and Actions run `28549761003` for commit
-`68350bf` rebuilt a verified RP2040 UF2 with SHA256
-`032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`; however,
-`artifacts/hardware/com12/rp2040_uf2_volumes_68350bf_after_reset.json` found
-`candidate_volumes=[]` even after a safe `rp2040 reset`, so that bridge firmware
-has not yet been copied to the RP2040.
-`artifacts/hardware/com12/rp2040_preflight_68350bf_after_reset.json` shows the
-current COM12 bridge still responds to ping/protocol/diag and detects the
-inserted card as `setup_required`, but `ready_for_sd_acceptance=false`.
-Full SD auto-prepare, retained-history, export, map-tile, and reboot/remount
-proof remain open until the RP2040 UF2 is flashed and the SD matrix is rerun.
+Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_8150b7b.json`
+proved the guarded unformatted-card path stays safe (`classification=format_confirmed_not_ready`,
+`format_allowed=true`, `public_rf_tx=false`, `formats_sd=false`, health ready),
+but the RP2040 bridge timed out before reporting a confirmed format result.
+Actions run `28551321662` for commit `8150b7b` rebuilt a verified RP2040 UF2
+with SHA256 `032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`;
+however, `artifacts/hardware/com12/rp2040_uf2_volumes_8150b7b_after_esp32_flash.json`
+found `candidate_volumes=[]`, so the bridge cannot be copied until the RP2040 is
+placed in UF2/BOOTSEL mode. `artifacts/hardware/com12/rp2040_preflight_8150b7b_after_format_timeout_settle.json`
+shows the current COM12 bridge still responds to ping/protocol/diag and detects
+the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`. The
+current follow-up patch streams SdFat progress and records `format_command_sent`
+separately from `format_confirmed`; full SD auto-prepare, retained-history,
+export, map-tile, and reboot/remount proof remain open until the next
+Actions-built image is flashed and the SD matrix is rerun.
 
 ### Map
 

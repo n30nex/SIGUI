@@ -80,8 +80,8 @@
 - [x] Touch `Set Pin`/`Move Pin` Map picker added: it pans/zooms a manual D1L pin, persists through the app model/settings path shared with `map center set`, and does not send Public RF or touch/format SD.
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
-- [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `68350bf` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
-- [ ] Flash the verified `68350bf` RP2040 UF2 (`032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`) after the RP2040 is placed in UF2/BOOTSEL mode; `artifacts/hardware/com12/rp2040_uf2_volumes_68350bf_after_reset.json` currently reports `candidate_volumes=[]`.
+- [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `8150b7b` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
+- [ ] Flash the next verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; latest copied-candidate evidence `artifacts/hardware/com12/rp2040_uf2_volumes_8150b7b_after_esp32_flash.json` reports `candidate_volumes=[]`, and the current follow-up patch must be built by GitHub Actions before the next copy attempt.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
@@ -121,7 +121,7 @@
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
 - [x] Evidence-based release gate audit script added and uploaded by CI; current local audit reports `ready_for_public_release=false` until all P0 evidence is present.
-- [x] COM12 smoke captured for `540319d` after flashing the verified Actions package from run `28550779389`; follow-up SD guarded format timed out before the file-operation gate became ready.
+- [x] COM12 smoke captured for `8150b7b` after flashing the verified Actions package from run `28551321662`; follow-up SD guarded format timed out before the file-operation gate became ready.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit.
 - [ ] Physical screen photos captured.
 - [ ] Final full-duration soak evidence added.

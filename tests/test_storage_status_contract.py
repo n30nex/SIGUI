@@ -128,7 +128,8 @@ def test_rp2040_format_command_waits_for_format_reply_only():
     )[0]
 
     assert "const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX};" in format_body
-    assert "prefixes, 1," in format_body
+    assert "exchange_prefixed_line_internal(command, (size_t)command_len, prefixes, 1," in format_body
+    assert "timeout_ms, true," in format_body
     assert "prefixes, 2," not in format_body
     assert "D1L_RP2040_SD_REPLY_PREFIX" not in format_body
     assert "parse_sd_status_line(line, out_status)" not in format_body
