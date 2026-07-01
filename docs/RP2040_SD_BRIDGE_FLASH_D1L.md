@@ -22,12 +22,21 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
 ```
 
-The latest verified UF2 from Actions run `28490556715` for commit
-`1afd4043ce2473dddeaa66f23fafb667d2a98b88` is:
+The latest verified UF2 from Actions run `28495545520` for commit
+`e05264098a106f1ba0adcf766a1262d12e73448c` is:
 
 ```text
-05A2D728EC5EC59875C67EC2EC926B31F6032DAB1CBCD88DCA19AF54E655CC94
+AFB6B12EE3518C48811F6C2876717B9BFAF43C1ABFE02E9BF693D95F977E16E5
 ```
+
+Earlier Actions artifact `28494746866` was copied once after the RP2040 UF2
+volume mounted as `RPI-RP2` at `G:\`. Post-copy COM12 preflight then reported
+`state="rp2040_protocol_pending"` and `storage status` / `storage diag`
+timeouts, so the follow-up `e052640` bridge changes were built by Actions. As
+of `artifacts/hardware/com12/rp2040_sd_preflight_mount_blocked_28495545520.json`,
+the fixed UF2 is verified but not flashed yet because no UF2 mass-storage volume
+is mounted and the RP2040 CDC port `COM16` is stuck access-denied/hanging on
+host open attempts.
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
