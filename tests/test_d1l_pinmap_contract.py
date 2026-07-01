@@ -57,6 +57,33 @@ def test_phase1_lvgl_uses_basic_flush_path():
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
 
 
+def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
+    ui_source = (ROOT / "main" / "ui" / "ui_phase1.c").read_text(encoding="utf-8")
+    board_source = (ROOT / "main" / "hal" / "indicator_board.c").read_text(encoding="utf-8")
+    seeed_patch = (ROOT / "patches" / "sensecap_indicator_touch_fix.patch").read_text(encoding="utf-8")
+    console_source = (ROOT / "main" / "comms" / "usb_console.c").read_text(encoding="utf-8")
+
+    assert "uint8_t btn_val = 0;" in seeed_patch
+    assert "bool pressed = (tp_num > 0) || (btn_val != 0);" in seeed_patch
+    assert "sample.pressed" in ui_source
+    assert "last_x" in ui_source
+    assert "tp_dev_id = 0;" in seeed_patch
+    assert "d1l_board_touch_read" in board_source
+    assert '\\"pressed\\":%s' in console_source
+    assert '\\"coordinate_valid\\":%s' in console_source
+
+
+def test_cmake_applies_parent_owned_seeed_touch_patch():
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    patch = (ROOT / "patches" / "sensecap_indicator_touch_fix.patch").read_text(encoding="utf-8")
+
+    assert "SEEED_BSP_TOUCH_PATCH" in cmake
+    assert "git apply --unidiff-zero --check" in cmake
+    assert "git apply --unidiff-zero --reverse --check" in cmake
+    assert "components/bsp/src/indev/indev.c" in patch
+    assert "data->btn_val = pressed ? 1 : 0;" in patch
+
+
 def test_build_script_is_host_only_and_rewrites_stale_unsafe_lcd_config():
     script = (ROOT / "scripts" / "build_d1l.ps1").read_text(encoding="utf-8")
     assert "Set-D1lSafeSdkconfig" in script

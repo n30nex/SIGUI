@@ -153,14 +153,18 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *colo
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     (void)drv;
+    static lv_coord_t last_x = 0;
+    static lv_coord_t last_y = 0;
     indev_data_t sample = {0};
-    if (indev_get_major_value(&sample) == ESP_OK && sample.btn_val) {
+    if (indev_get_major_value(&sample) == ESP_OK && sample.pressed) {
         data->state = LV_INDEV_STATE_PRESSED;
-        data->point.x = sample.x;
-        data->point.y = sample.y;
+        last_x = sample.x < 0 ? 0 : (sample.x > 479 ? 479 : sample.x);
+        last_y = sample.y < 0 ? 0 : (sample.y > 479 ? 479 : sample.y);
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
+    data->point.x = last_x;
+    data->point.y = last_y;
 }
 
 static void label_set_fmt(lv_obj_t *label, const char *fmt, ...)

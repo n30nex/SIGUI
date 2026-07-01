@@ -499,16 +499,19 @@ static void cmd_display_test(void)
 
 static void cmd_touch_test(void)
 {
-    uint8_t touches = 0;
-    uint16_t x = 0;
-    uint16_t y = 0;
-    esp_err_t ret = d1l_board_touch_sample(&touches, &x, &y);
+    d1l_board_touch_state_t touch = {0};
+    esp_err_t ret = d1l_board_touch_read(&touch);
     if (ret != ESP_OK) {
         err_result("touch test", esp_err_to_name(ret), "touch sample requires initialized D1L touch controller");
         return;
     }
     ok_begin("touch test");
-    printf(",\"touches\":%u,\"x\":%u,\"y\":%u,\"manual_confirm\":true}\n", touches, x, y);
+    printf(",\"touches\":%u,\"pressed\":%s,\"x\":%u,\"y\":%u,\"raw_x\":%ld,\"raw_y\":%ld,"
+           "\"coordinate_valid\":%s,\"controller\":\"FT5x06\",\"i2c_address\":\"0x48\","
+           "\"manual_confirm\":true}\n",
+           touch.touches, bool_json(touch.pressed), touch.x, touch.y,
+           (long)touch.raw_x, (long)touch.raw_y,
+           bool_json(touch.coordinate_valid));
 }
 
 static void cmd_button(void)

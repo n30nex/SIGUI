@@ -21,6 +21,17 @@ static d1l_board_status_t s_status = {
     .i2c_count = 0,
 };
 
+static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value >= max) {
+        return (uint16_t)(max - 1);
+    }
+    return (uint16_t)value;
+}
+
 esp_err_t d1l_board_init(void)
 {
     esp_err_t ret = bsp_board_init();
@@ -101,14 +112,44 @@ esp_err_t d1l_board_touch_sample(uint8_t *touches, uint16_t *x, uint16_t *y)
     if (!s_status.ready || !touches || !x || !y) {
         return ESP_ERR_INVALID_STATE;
     }
-    indev_data_t data = {0};
-    esp_err_t ret = indev_get_major_value(&data);
+    d1l_board_touch_state_t state = {0};
+    esp_err_t ret = d1l_board_touch_read(&state);
     if (ret != ESP_OK) {
         return ret;
     }
-    *touches = data.btn_val ? 1 : 0;
-    *x = (uint16_t)data.x;
-    *y = (uint16_t)data.y;
+    *touches = state.touches;
+    *x = state.pressed ? state.x : 0;
+    *y = state.pressed ? state.y : 0;
+    return ESP_OK;
+}
+
+esp_err_t d1l_board_touch_read(d1l_board_touch_state_t *out_state)
+{
+    if (!out_state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_state, 0, sizeof(*out_state));
+    out_state->read_result = ESP_ERR_INVALID_STATE;
+    if (!s_status.ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    indev_data_t data = {0};
+    esp_err_t ret = indev_get_major_value(&data);
+    out_state->read_result = ret;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    out_state->pressed = data.pressed;
+    out_state->touches = data.pressed ? 1 : 0;
+    out_state->raw_x = data.x;
+    out_state->raw_y = data.y;
+    out_state->coordinate_valid = data.pressed &&
+                                  data.x >= 0 && data.x < 480 &&
+                                  data.y >= 0 && data.y < 480;
+    out_state->x = data.pressed ? clamp_touch_coord(data.x, 480) : 0;
+    out_state->y = data.pressed ? clamp_touch_coord(data.y, 480) : 0;
     return ESP_OK;
 }
 

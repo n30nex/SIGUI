@@ -1,0 +1,82 @@
+diff --git a/components/bsp/src/indev/indev.c b/components/bsp/src/indev/indev.c
+index 2b8aa91..6a82a4f 100644
+--- a/components/bsp/src/indev/indev.c
++++ b/components/bsp/src/indev/indev.c
+@@ -71,2 +71,4 @@ esp_err_t indev_get_major_value(indev_data_t *data)
+-    uint16_t x, y;
+-    uint8_t tp_num, btn_val;
++    uint16_t x = 0;
++    uint16_t y = 0;
++    uint8_t tp_num = 0;
++    uint8_t btn_val = 0;
+@@ -79,0 +82 @@ esp_err_t indev_get_major_value(indev_data_t *data)
++            bool pressed = (tp_num > 0) || (btn_val != 0);
+@@ -82,6 +85,2 @@ esp_err_t indev_get_major_value(indev_data_t *data)
+-            data->btn_val = btn_val;
+-            if (tp_num > 0) {
+-                data->pressed = true;
+-            } else {
+-                data->pressed = false;
+-            }
++            data->btn_val = pressed ? 1 : 0;
++            data->pressed = pressed;
+@@ -90,0 +90,2 @@ esp_err_t indev_get_major_value(indev_data_t *data)
++            data->btn_val = 0;
++            data->pressed = false;
+diff --git a/components/bsp/src/indev/indev_tp.c b/components/bsp/src/indev/indev_tp.c
+index b57ece5..d3f6dd3 100644
+--- a/components/bsp/src/indev/indev_tp.c
++++ b/components/bsp/src/indev/indev_tp.c
+@@ -56 +56 @@ static esp_err_t tp_prob(int *tp_dev_id)
+-                *tp_dev_id = tp_dev_list[i].dev_vendor;
++                *tp_dev_id = (int)i;
+@@ -63 +63 @@ static esp_err_t tp_prob(int *tp_dev_id)
+-            *tp_dev_id = tp_dev_list[i].dev_vendor;
++            *tp_dev_id = (int)i;
+@@ -80 +80,5 @@ esp_err_t indev_tp_init(void)
+-    tp_dev_id = TP_VENDOR_FT;
++    if (ESP_OK == bsp_i2c_probe_addr(tp_dev_list[0].dev_addr)) {
++        tp_dev_id = 0;
++        ESP_LOGI(TAG, "Detected touch panel at 0x%02X. Vendor : %s",
++                 tp_dev_list[0].dev_addr, tp_dev_list[0].dev_name);
++    }
+@@ -84 +88,4 @@ esp_err_t indev_tp_init(void)
+-        ret_val |= tp_prob(&tp_dev_id);
++        ret_val = tp_prob(&tp_dev_id);
++        if (ret_val != ESP_OK) {
++            return ret_val;
++        }
+diff --git a/components/i2c_devices/touch_panel/ft5x06.c b/components/i2c_devices/touch_panel/ft5x06.c
+index ee52cb8..4a77847 100644
+--- a/components/i2c_devices/touch_panel/ft5x06.c
++++ b/components/i2c_devices/touch_panel/ft5x06.c
+@@ -105 +105 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THGROUP, 70);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THGROUP, 70);
+@@ -108 +108 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THPEAK, 60);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THPEAK, 60);
+@@ -111 +111 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THCAL, 16);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THCAL, 16);
+@@ -114 +114 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THWATER, 60);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THWATER, 60);
+@@ -117 +117 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THTEMP, 10);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THTEMP, 10);
+@@ -120 +120 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THDIFF, 20);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THDIFF, 20);
+@@ -123 +123 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_TIME_ENTER_MONITOR, 2);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_TIME_ENTER_MONITOR, 2);
+@@ -126 +126 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODACTIVE, 12);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODACTIVE, 12);
+@@ -129 +129 @@ esp_err_t ft5x06_init(void)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODMONITOR, 40);
++    ret_val |= i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODMONITOR, 40);
+@@ -131 +131 @@ esp_err_t ft5x06_init(void)
+-    return ESP_OK;
++    return ret_val;
