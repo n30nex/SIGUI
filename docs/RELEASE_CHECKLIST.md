@@ -94,7 +94,8 @@
 - [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
 - [x] Per-thread DM read cursors are persisted, exposed through serial diagnostics, and surfaced in the DM thread sheet.
 - [x] DM thread sheet renders bounded scrollable retained history and `messages dm <fingerprint>` filters one retained thread; host/simulator, COM7 smoke, targeted serial, and active Public RF regression pass.
-- [ ] Full DM workflow: manual touch review, controlled ACK/PATH RF proof, direct-route RF proof, and controlled inbound DM proof.
+- [x] Full RF acceptance runner added for the COM12 D1L plus local COM11 Meshcorebot path: `scripts/rf_full_acceptance_d1l.py` writes one release-gate artifact covering identity, Meshcorebot status, outbound DM, controlled inbound DM, ACK/PATH, direct route, health, and no-Public-command checks.
+- [ ] Full DM workflow: manual touch review plus a passing newest `artifacts/hardware/com12/rf_full_acceptance_*.json` from the COM11-controlled inbound/ACK/PATH/direct-route proof.
 
 ## Phase 7 Polish And Soak
 

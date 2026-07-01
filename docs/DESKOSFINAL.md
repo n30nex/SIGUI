@@ -1115,6 +1115,22 @@ COM12 against the local COM11 Meshcorebot with `send_ok=true`,
 checkpoint. Controlled inbound DM, ACK/PATH, direct-route RF proof, and manual
 touch DM workflow review remain open.
 
+Repeatable full RF acceptance is now handled by a single D1L-port runner. Keep
+the runner on the D1L serial port only; do not open the COM11 Meshcorebot port
+directly. After the runner prints the Discord command, send that command through
+the Meshcorebot control channel to produce the controlled inbound DM:
+
+```powershell
+$env:D1L_PORT = "COM12"
+python .\scripts\rf_full_acceptance_d1l.py --port $env:D1L_PORT --commit <short> --token rf_accept_<short> --bot-status F:\Meshcorebot\logs\meshcorebot.status.json --bot-port COM11 --out artifacts\hardware\com12\rf_full_acceptance_<short>.json
+```
+
+The resulting artifact must be the newest matching RF gate file and must report
+`ok=true` with `identity_public_key_matches`, `meshbot_on_expected_port`,
+`outbound_dm`, `inbound_dm`, `ack_path`, `direct_route`, `health_ready`, and
+`no_public_commands` all true. The runner sends only targeted DMs and records
+`public_rf_transmit=false`.
+
 ### 13.4 SD proof
 
 Run scenario matrix from Chunk 5 and archive JSON artifacts.

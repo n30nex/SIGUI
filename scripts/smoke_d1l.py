@@ -114,6 +114,7 @@ def expected_command_name(command: str) -> str:
         "contacts rename ",
         "contacts delete ",
         "messages dm ",
+        "mesh send dm ",
         "routes trace ",
         "packets filter ",
         "packets search ",

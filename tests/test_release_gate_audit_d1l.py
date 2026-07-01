@@ -175,3 +175,23 @@ def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp
     gates = gate_by_id(report)
 
     assert gates["full_duration_idle_soak"]["ok"] is True
+
+
+def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_json(
+        tmp_path / "artifacts" / "hardware" / "com12" / "rf_full_acceptance_68350bf.json",
+        {
+            "ok": True,
+            "checks": {
+                "inbound_dm": True,
+                "ack_path": True,
+                "direct_route": True,
+            },
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["full_rf_dm_acceptance"]["ok"] is True

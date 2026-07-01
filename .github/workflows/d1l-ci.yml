@@ -58,6 +58,9 @@ jobs:
       - name: SD boot prepare acceptance dry run
         run: python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 
+      - name: RF full acceptance dry run
+        run: python ./scripts/rf_full_acceptance_d1l.py --dry-run --commit ci-dry-run
+
       - name: UI simulator screenshots
         run: |
           python ./tools/ui_simulator.py --out artifacts/ui-sim

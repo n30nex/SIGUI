@@ -216,6 +216,22 @@ python .\scripts\probe_d1l_dm.py --port $env:D1L_PORT --bot-status F:\Meshcorebo
 
 Success requires `public_rf_transmit=false`, no command beginning with `mesh send public`, `mesh send dm` returning `ok=true`, `messages dm <fingerprint>` and `packets search <token>` retaining the token, `routes trace <fingerprint>` matching the target, `health` ready, and the COM11 Meshcorebot status showing at least `rx_contact_total +1`.
 
+Repeatable full COM11-controlled RF acceptance:
+
+```powershell
+$env:D1L_PORT = "COM12"
+python .\scripts\rf_full_acceptance_d1l.py --port $env:D1L_PORT --commit <short> --token rf_accept_<short> --bot-status F:\Meshcorebot\logs\meshcorebot.status.json --bot-port COM11 --out artifacts\hardware\com12\rf_full_acceptance_<short>.json
+```
+
+Keep the runner attached only to the D1L serial port. When it prints the
+`+dm <D1L public key> rf_accept_<short>_in` Discord command, send that command
+through the Meshcorebot control channel to create the controlled inbound DM. Do
+not open the COM11 Meshcorebot serial port directly. Success requires one
+complete newest `rf_full_acceptance_*.json` hardware artifact with
+`identity_public_key_matches`, `meshbot_on_expected_port`, `outbound_dm`,
+`inbound_dm`, `ack_path`, `direct_route`, `health_ready`, and
+`no_public_commands` all true, plus `public_rf_transmit=false`.
+
 ## Touch DM Compose
 
 For Phase 4 touch direct-message compose validation:
