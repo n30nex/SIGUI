@@ -15,13 +15,39 @@
 #include "mesh/route_store.h"
 
 #define D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U
-#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U
+#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U
 #define D1L_APP_SNAPSHOT_DM_PREVIEW 5U
 #define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U
 #define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U
 #define D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U
-#define D1L_APP_SNAPSHOT_ROOM_PREVIEW 4U
-#define D1L_APP_SNAPSHOT_REPEATER_PREVIEW 4U
+#define D1L_APP_SNAPSHOT_ROOM_PREVIEW D1L_ROOM_SERVER_PREVIEW_CAPACITY
+#define D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY
+#define D1L_HOME_MESSAGE_PREVIEW 5U
+#define D1L_HOME_REPEATER_PREVIEW 3U
+
+typedef struct {
+    bool is_dm;
+    bool unread;
+    char sender[D1L_MESSAGE_AUTHOR_LEN];
+    char target_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    char direction[4];
+    char status[16];
+    uint32_t age_sec;
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hops;
+} d1l_home_message_preview_t;
+
+typedef struct {
+    char label[D1L_ROUTE_LABEL_LEN];
+    char route[D1L_ROUTE_NAME_LEN];
+    char kind[D1L_ROUTE_KIND_LEN];
+    uint32_t age_sec;
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hops;
+} d1l_home_repeater_preview_t;
 
 typedef struct {
     bool board_ready;
@@ -64,6 +90,7 @@ typedef struct {
     bool storage_setup_supported;
     bool storage_data_enabled;
     bool storage_response_truncated;
+    bool time_available;
     bool map_page_supported;
     bool map_tile_cache_ready;
     bool map_tile_download_supported;
@@ -96,6 +123,7 @@ typedef struct {
     const char *storage_format_action;
     const char *storage_note;
     esp_err_t storage_last_error;
+    char time_label[8];
     char node_name[32];
     char identity_fingerprint[17];
     const char *reset_reason;
@@ -159,6 +187,10 @@ typedef struct {
     size_t recent_dm_count;
     d1l_packet_log_entry_t recent_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
     size_t recent_packet_count;
+    d1l_home_message_preview_t home_messages[D1L_HOME_MESSAGE_PREVIEW];
+    size_t home_message_count;
+    d1l_home_repeater_preview_t home_repeaters[D1L_HOME_REPEATER_PREVIEW];
+    size_t home_repeater_count;
 } d1l_app_snapshot_t;
 
 d1l_app_model_t *d1l_app_model_get(void);

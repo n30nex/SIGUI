@@ -85,6 +85,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     report = ui_simulator.generate(tmp_path)
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
 
+    assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
     assert {"Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
@@ -238,6 +239,7 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "Pillow" in workflow
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in workflow
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
+    assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in workflow
     assert "python .\\tools\\ui_simulator.py --out artifacts\\ui-sim" in test_plan
     assert "python .\\tools\\ui_simulator.py --scenario large-mesh --out artifacts\\ui-sim-large" in test_plan
     assert "tools/ui_simulator.py" in roadmap

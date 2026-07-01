@@ -8,7 +8,9 @@
 
 #define D1L_MESSAGE_STORE_ID D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES
 #define D1L_MESSAGE_STORE_KEY "public"
-#define D1L_MESSAGE_STORE_SCHEMA 1U
+#define D1L_MESSAGE_STORE_SCHEMA 2U
+#define D1L_MESSAGE_STORE_SCHEMA_V1 1U
+#define D1L_MESSAGE_TEXT_LEN_V1 96U
 
 typedef struct {
     uint32_t schema;
@@ -20,6 +22,29 @@ typedef struct {
     d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
 } d1l_message_store_blob_t;
 
+typedef struct {
+    uint32_t seq;
+    uint32_t uptime_ms;
+    char direction[4];
+    char author[D1L_MESSAGE_AUTHOR_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN_V1];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool delivered;
+} d1l_message_entry_v1_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    d1l_message_entry_v1_t entries[D1L_MESSAGE_STORE_CAPACITY];
+} d1l_message_store_blob_v1_t;
+
 static d1l_message_entry_t s_entries[D1L_MESSAGE_STORE_CAPACITY];
 static size_t s_head;
 static size_t s_count;
@@ -28,6 +53,9 @@ static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_message_store_blob_t s_blob_scratch;
+static d1l_message_store_blob_v1_t s_blob_v1_scratch;
+
+static void load_valid_blob_into_ram(void);
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -119,6 +147,59 @@ static bool blob_is_valid(const d1l_message_store_blob_t *blob, size_t len)
            blob->next_seq > 0;
 }
 
+static bool blob_v1_is_valid(const d1l_message_store_blob_v1_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_MESSAGE_STORE_SCHEMA_V1 &&
+           blob->head < D1L_MESSAGE_STORE_CAPACITY &&
+           blob->count <= D1L_MESSAGE_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
+static void load_v1_blob_into_ram(const d1l_message_store_blob_v1_t *blob)
+{
+    memset(s_entries, 0, sizeof(s_entries));
+    for (size_t i = 0; i < D1L_MESSAGE_STORE_CAPACITY; ++i) {
+        s_entries[i].seq = blob->entries[i].seq;
+        s_entries[i].uptime_ms = blob->entries[i].uptime_ms;
+        sanitize_ascii(s_entries[i].direction, sizeof(s_entries[i].direction),
+                       blob->entries[i].direction);
+        sanitize_ascii(s_entries[i].author, sizeof(s_entries[i].author),
+                       blob->entries[i].author);
+        sanitize_ascii(s_entries[i].text, sizeof(s_entries[i].text),
+                       blob->entries[i].text);
+        s_entries[i].rssi_dbm = blob->entries[i].rssi_dbm;
+        s_entries[i].snr_tenths = blob->entries[i].snr_tenths;
+        s_entries[i].path_hash_bytes = blob->entries[i].path_hash_bytes;
+        s_entries[i].path_hops = blob->entries[i].path_hops;
+        s_entries[i].delivered = blob->entries[i].delivered;
+    }
+    s_head = blob->head;
+    s_count = blob->count;
+    s_next_seq = blob->next_seq;
+    s_total_written = blob->total_written;
+    s_dropped_oldest = blob->dropped_oldest;
+}
+
+static esp_err_t try_load_v1_blob(bool fallback)
+{
+    size_t len = sizeof(s_blob_v1_scratch);
+    esp_err_t ret = fallback ?
+        d1l_retained_blob_store_read_fallback(D1L_MESSAGE_STORE_ID,
+                                              D1L_MESSAGE_STORE_KEY,
+                                              &s_blob_v1_scratch,
+                                              &len) :
+        d1l_retained_blob_store_read(D1L_MESSAGE_STORE_ID,
+                                     D1L_MESSAGE_STORE_KEY,
+                                     &s_blob_v1_scratch,
+                                     &len);
+    if (ret != ESP_OK || !blob_v1_is_valid(&s_blob_v1_scratch, len)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    load_v1_blob_into_ram(&s_blob_v1_scratch);
+    return persist_store();
+}
+
 static esp_err_t try_load_blob_from_fallback(void)
 {
     size_t len = sizeof(s_blob_scratch);
@@ -126,10 +207,11 @@ static esp_err_t try_load_blob_from_fallback(void)
                                                           D1L_MESSAGE_STORE_KEY,
                                                           &s_blob_scratch,
                                                           &len);
-    if (ret != ESP_OK || !blob_is_valid(&s_blob_scratch, len)) {
-        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
+        load_valid_blob_into_ram();
+        return ESP_OK;
     }
-    return ESP_OK;
+    return try_load_v1_blob(true);
 }
 
 static void load_valid_blob_into_ram(void)
@@ -155,10 +237,11 @@ esp_err_t d1l_message_store_init(void)
         ret = ESP_OK;
     } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
         load_valid_blob_into_ram();
+    } else if (ret == ESP_OK && try_load_v1_blob(false) == ESP_OK) {
+        ret = ESP_OK;
     } else if (ret == ESP_OK) {
         if (d1l_retained_blob_store_uses_sd(D1L_MESSAGE_STORE_ID) &&
             try_load_blob_from_fallback() == ESP_OK) {
-            load_valid_blob_into_ram();
             ret = persist_store();
         } else {
             clear_ram();

@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""Operator-assisted scroll probe for MeshCore DeskOS D1L screens."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    from smoke_d1l import send_console_command
+except ModuleNotFoundError:
+    from scripts.smoke_d1l import send_console_command
+
+
+DEFAULT_SCREENS = ("messages", "nodes", "packets", "settings", "map")
+VALID_SCREENS = ("home", "messages", "nodes", "map", "packets", "settings")
+
+
+def utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def parse_screens(value: str) -> list[str]:
+    screens = [item.strip().lower() for item in value.split(",") if item.strip()]
+    invalid = [screen for screen in screens if screen not in VALID_SCREENS]
+    if invalid:
+        raise ValueError(f"invalid screen(s): {', '.join(invalid)}")
+    return screens
+
+
+def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> dict:
+    return {
+        "schema": 1,
+        "mode": "dry-run",
+        "ok": True,
+        "hardware_required": False,
+        "explicit_port_required": True,
+        "manual_touch": manual_touch,
+        "dwell_sec": dwell_sec,
+        "screens": screens,
+        "commands": [*[f"ui tab {screen}" for screen in screens], "ui status", "health", "crashlog"],
+    }
+
+
+def crashlog_has_entries(row: dict) -> bool:
+    entries = row.get("entries")
+    return isinstance(entries, list) and len(entries) > 0
+
+
+def run_scroll_probe(
+    *,
+    port: str,
+    baud: int,
+    timeout: float,
+    screens: list[str],
+    dwell_sec: float,
+    manual_touch: bool,
+    clear_crashlog_before_start: bool,
+) -> dict:
+    try:
+        import serial
+    except ImportError as exc:
+        raise SystemExit("pyserial is required for hardware scroll probe: python -m pip install pyserial") from exc
+
+    setup_events: list[dict] = []
+    events: list[dict] = []
+    started_at = datetime.now(timezone.utc)
+
+    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        time.sleep(1.0)
+        ser.reset_input_buffer()
+
+        if clear_crashlog_before_start:
+            setup_events.append(
+                {"cmd": "crashlog clear", "result": send_console_command(ser, "crashlog clear", timeout)}
+            )
+
+        for screen in screens:
+            request = send_console_command(ser, f"ui tab {screen}", timeout)
+            time.sleep(dwell_sec)
+            if manual_touch:
+                print(f"Manual check: scroll the {screen} screen, then press Enter.")
+                input()
+            status = send_console_command(ser, "ui status", timeout)
+            health = send_console_command(ser, "health", timeout)
+            crashlog = send_console_command(ser, "crashlog", timeout)
+            events.append(
+                {
+                    "screen": screen,
+                    "request": request,
+                    "status": status,
+                    "health": health,
+                    "crashlog": crashlog,
+                    "manual_touch_confirmed": manual_touch,
+                }
+            )
+
+    ended_at = datetime.now(timezone.utc)
+    failures = [
+        {
+            "screen": event["screen"],
+            "request_ok": event["request"].get("ok"),
+            "active_tab": event["status"].get("active_tab"),
+            "health_ok": event["health"].get("ok"),
+            "crashlog_entries": crashlog_has_entries(event["crashlog"]),
+        }
+        for event in events
+        if not event["request"].get("ok")
+        or event["status"].get("active_tab") != event["screen"]
+        or not event["health"].get("ok")
+        or crashlog_has_entries(event["crashlog"])
+    ]
+    setup_failures = [
+        event for event in setup_events if not event.get("result", {}).get("ok")
+    ]
+    return {
+        "schema": 1,
+        "mode": "hardware",
+        "port": port,
+        "baud": baud,
+        "started_at": started_at.isoformat().replace("+00:00", "Z"),
+        "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
+        "screens": screens,
+        "dwell_sec": dwell_sec,
+        "manual_touch": manual_touch,
+        "clear_crashlog_before_start": clear_crashlog_before_start,
+        "ok": not failures and not setup_failures,
+        "failure_count": len(failures) + len(setup_failures),
+        "failures": failures,
+        "setup_events": setup_events,
+        "events": events,
+    }
+
+
+def resolve_out_path(out_arg: str | None, mode: str) -> Path:
+    root = Path(__file__).resolve().parents[1]
+    if out_arg:
+        out_path = Path(out_arg)
+        if not out_path.is_absolute():
+            out_path = root / out_path
+        return out_path
+    return root / "artifacts" / "scroll-probe" / f"d1l-scroll-probe-{mode}-{utc_stamp()}.json"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
+    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--screens", default=",".join(DEFAULT_SCREENS))
+    parser.add_argument("--dwell-sec", type=float, default=0.5)
+    parser.add_argument("--manual-touch", action="store_true")
+    parser.add_argument("--clear-crashlog-before-start", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--out", default=None)
+    args = parser.parse_args()
+
+    if args.dwell_sec < 0:
+        parser.error("--dwell-sec cannot be negative")
+    try:
+        screens = parse_screens(args.screens)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if not screens:
+        parser.error("--screens must include at least one screen")
+
+    if args.dry_run:
+        report = dry_run_report(screens, args.dwell_sec, args.manual_touch)
+        mode = "dry-run"
+    else:
+        if not args.port:
+            parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+        report = run_scroll_probe(
+            port=args.port,
+            baud=args.baud,
+            timeout=args.timeout,
+            screens=screens,
+            dwell_sec=args.dwell_sec,
+            manual_touch=args.manual_touch,
+            clear_crashlog_before_start=args.clear_crashlog_before_start,
+        )
+        mode = "hardware"
+
+    out_path = resolve_out_path(args.out, mode)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, indent=2), encoding="ascii")
+    print(json.dumps(report))
+    return 0 if report.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

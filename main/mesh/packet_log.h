@@ -6,8 +6,13 @@
 
 #include "esp_err.h"
 
-#define D1L_PACKET_LOG_CAPACITY 32U
-#define D1L_PACKET_LOG_PERSIST_CAPACITY 8U
+#define D1L_PACKET_LOG_RAM_CAPACITY 128U
+#define D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY 8U
+#define D1L_PACKET_LOG_SD_CAPACITY 2048U
+#define D1L_PACKET_LOG_CAPACITY D1L_PACKET_LOG_RAM_CAPACITY
+#define D1L_PACKET_LOG_PERSIST_CAPACITY D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY
+#define D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD 16U
+#define D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS 5000U
 #define D1L_PACKET_LOG_NOTE_LEN 48U
 #define D1L_PACKET_LOG_RAW_PREVIEW_BYTES 32U
 #define D1L_PACKET_LOG_RAW_HEX_LEN ((D1L_PACKET_LOG_RAW_PREVIEW_BYTES * 2U) + 1U)
@@ -42,6 +47,7 @@ esp_err_t d1l_packet_log_clear(void);
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry);
 bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
                                size_t raw_len);
+esp_err_t d1l_packet_log_flush(void);
 d1l_packet_log_stats_t d1l_packet_log_stats(void);
 size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t max_entries);
 size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,

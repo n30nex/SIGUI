@@ -65,6 +65,113 @@ static void radio_edit_from_settings(const d1l_settings_t *settings,
     profile->rx_boost = src->rx_boost;
 }
 
+static uint32_t age_seconds(uint32_t now_ms, uint32_t event_ms)
+{
+    if (event_ms == 0 || now_ms <= event_ms) {
+        return 0;
+    }
+    return (now_ms - event_ms) / 1000U;
+}
+
+static void populate_home_messages(d1l_app_snapshot_t *snapshot)
+{
+    bool public_used[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW] = {0};
+    bool dm_used[D1L_APP_SNAPSHOT_DM_PREVIEW] = {0};
+    snapshot->home_message_count = 0;
+
+    while (snapshot->home_message_count < D1L_HOME_MESSAGE_PREVIEW) {
+        bool found_public = false;
+        size_t public_index = 0;
+        uint32_t public_uptime = 0;
+        for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
+            if (!public_used[i] && (!found_public ||
+                                   snapshot->recent_messages[i].uptime_ms > public_uptime)) {
+                found_public = true;
+                public_index = i;
+                public_uptime = snapshot->recent_messages[i].uptime_ms;
+            }
+        }
+
+        bool found_dm = false;
+        size_t dm_index = 0;
+        uint32_t dm_uptime = 0;
+        for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
+            if (!dm_used[i] && (!found_dm || snapshot->recent_dms[i].uptime_ms > dm_uptime)) {
+                found_dm = true;
+                dm_index = i;
+                dm_uptime = snapshot->recent_dms[i].uptime_ms;
+            }
+        }
+
+        if (!found_public && !found_dm) {
+            break;
+        }
+
+        d1l_home_message_preview_t *preview =
+            &snapshot->home_messages[snapshot->home_message_count++];
+        if (found_dm && (!found_public || dm_uptime >= public_uptime)) {
+            const d1l_dm_entry_t *entry = &snapshot->recent_dms[dm_index];
+            dm_used[dm_index] = true;
+            preview->is_dm = true;
+            preview->unread = snapshot->recent_dm_unread[dm_index];
+            snprintf(preview->sender, sizeof(preview->sender), "%s",
+                     entry->contact_alias[0] ? entry->contact_alias : "Direct");
+            snprintf(preview->target_fingerprint, sizeof(preview->target_fingerprint), "%s",
+                     entry->contact_fingerprint);
+            snprintf(preview->direction, sizeof(preview->direction), "%s", entry->direction);
+            snprintf(preview->status, sizeof(preview->status), "%s",
+                     preview->unread ? "new DM" :
+                     (entry->acked ? "acked" :
+                      (entry->direction[0] == 't' ? "sent" : "direct")));
+            snprintf(preview->text, sizeof(preview->text), "%s", entry->text);
+            preview->age_sec = age_seconds(snapshot->uptime_ms, entry->uptime_ms);
+            preview->rssi_dbm = entry->rssi_dbm;
+            preview->snr_tenths = entry->snr_tenths;
+            preview->path_hops = entry->path_hops;
+        } else {
+            const d1l_message_entry_t *entry = &snapshot->recent_messages[public_index];
+            public_used[public_index] = true;
+            preview->is_dm = false;
+            preview->unread = entry->direction[0] == 'r' &&
+                              entry->seq > snapshot->last_public_read_seq;
+            snprintf(preview->sender, sizeof(preview->sender), "%s",
+                     entry->author[0] ? entry->author : "Public");
+            preview->target_fingerprint[0] = '\0';
+            snprintf(preview->direction, sizeof(preview->direction), "%s", entry->direction);
+            snprintf(preview->status, sizeof(preview->status), "%s",
+                     preview->unread ? "new" :
+                     (entry->direction[0] == 't' ? "sent" : "public"));
+            snprintf(preview->text, sizeof(preview->text), "%s", entry->text);
+            preview->age_sec = age_seconds(snapshot->uptime_ms, entry->uptime_ms);
+            preview->rssi_dbm = entry->rssi_dbm;
+            preview->snr_tenths = entry->snr_tenths;
+            preview->path_hops = entry->path_hops;
+        }
+    }
+}
+
+static void populate_home_repeaters(d1l_app_snapshot_t *snapshot)
+{
+    snapshot->home_repeater_count = 0;
+    for (size_t i = 0;
+         i < snapshot->recent_repeater_count && snapshot->home_repeater_count < D1L_HOME_REPEATER_PREVIEW;
+         ++i) {
+        const d1l_mesh_repeater_candidate_t *src = &snapshot->recent_repeaters[i];
+        d1l_home_repeater_preview_t *dest =
+            &snapshot->home_repeaters[snapshot->home_repeater_count++];
+        snprintf(dest->label, sizeof(dest->label), "%s",
+                 src->label[0] ? src->label : src->target);
+        snprintf(dest->route, sizeof(dest->route), "%s",
+                 src->route[0] ? src->route : "unknown");
+        snprintf(dest->kind, sizeof(dest->kind), "%s",
+                 src->kind[0] ? src->kind : "repeater");
+        dest->age_sec = age_seconds(snapshot->uptime_ms, src->last_seen_ms);
+        dest->rssi_dbm = src->rssi_dbm;
+        dest->snr_tenths = src->snr_tenths;
+        dest->path_hops = src->path_hops;
+    }
+}
+
 d1l_app_model_t *d1l_app_model_get(void)
 {
     return &s_model;
@@ -156,6 +263,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_setup_action = storage.setup_action;
     snapshot->storage_format_action = storage.format_action;
     snapshot->storage_note = storage.note;
+    snapshot->time_available = false;
+    snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--");
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
     if (settings->identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),
@@ -218,6 +327,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     }
     snapshot->recent_packet_count =
         d1l_packet_log_copy_recent(snapshot->recent_packets, D1L_APP_SNAPSHOT_PACKET_PREVIEW);
+    populate_home_messages(snapshot);
+    populate_home_repeaters(snapshot);
 }
 
 esp_err_t d1l_app_model_send_public_test(void)

@@ -370,6 +370,34 @@ esp_err_t d1l_retained_blob_store_write(d1l_retained_blob_store_id_t store_id,
     return nvs_write_blob(config, key, src, len);
 }
 
+esp_err_t d1l_retained_blob_store_write_split(d1l_retained_blob_store_id_t store_id,
+                                              const char *key,
+                                              const void *primary_src,
+                                              size_t primary_len,
+                                              const void *fallback_src,
+                                              size_t fallback_len)
+{
+    const d1l_retained_blob_store_config_t *config = find_store(store_id);
+    const bool has_primary = primary_src && primary_len > 0;
+    const bool has_fallback = fallback_src && fallback_len > 0;
+    if (!config || !key || (!has_primary && !has_fallback)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const void *nvs_src = has_fallback ? fallback_src : primary_src;
+    const size_t nvs_len = has_fallback ? fallback_len : primary_len;
+    if (!store_sd_enabled(config) || !has_primary) {
+        return nvs_write_blob(config, key, nvs_src, nvs_len);
+    }
+
+    esp_err_t sd_ret = sd_write_blob(config, key, primary_src, primary_len);
+    esp_err_t nvs_ret = nvs_write_blob(config, key, nvs_src, nvs_len);
+    if (sd_ret == ESP_OK) {
+        return nvs_ret;
+    }
+    return nvs_ret == ESP_OK ? ESP_OK : sd_ret;
+}
+
 esp_err_t d1l_retained_blob_store_erase(d1l_retained_blob_store_id_t store_id,
                                         const char *key)
 {

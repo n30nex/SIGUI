@@ -24,6 +24,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
+    assert "d1l_storage_boot_prepare" in header
     assert "d1l_storage_status_refresh" in header
     assert "rp2040_sd_protocol_supported" in header
     assert "setup_action" in header
@@ -35,6 +36,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("d1l_storage_boot_prepare") < app_main.index("d1l_message_store_init()")
     assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
@@ -45,6 +47,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"mount_pending"' in source
     assert '"wait_for_storage_mount"' in source
     assert "d1l_rp2040_bridge_probe_sd(&sd, timeout_ms)" in source
+    assert "d1l_storage_boot_prepare" in source
+    assert 'strcmp(s_status.sd_state, "mount_required")' in source
     assert "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)" in source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in source
     assert '"format_confirmation_required"' in source
@@ -83,6 +87,12 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert '"sd_diagnostic_exports_ready" : "serial"' in source
     assert "bsp_sdcard_init" not in source
     assert "format_if_mount_failed" not in source
+    boot_prepare = source.split("esp_err_t d1l_storage_boot_prepare", 1)[1].split(
+        "esp_err_t d1l_storage_status_mount", 1
+    )[0]
+    assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
+    assert "d1l_storage_format_sd_confirmed" not in boot_prepare
+    assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():

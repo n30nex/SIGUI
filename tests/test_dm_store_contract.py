@@ -24,6 +24,9 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
     assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
+    assert "D1L_DM_STORE_SCHEMA 2U" in source
+    assert "D1L_DM_STORE_SCHEMA_V1 1U" in source
+    assert "load_v1_blob_into_ram" in source
     assert 'D1L_DM_STORE_KEY "threads"' in source
     assert '#include "storage/retained_blob_store.h"' in source
     assert "d1l_retained_blob_store_read(D1L_DM_STORE_ID" in source

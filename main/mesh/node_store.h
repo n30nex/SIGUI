@@ -6,11 +6,15 @@
 
 #include "esp_err.h"
 
-#define D1L_NODE_STORE_CAPACITY 16U
+#define D1L_NODE_RAM_ACTIVE_CAPACITY 64U
+#define D1L_NODE_NVS_FALLBACK_CAPACITY 16U
+#define D1L_NODE_SD_HISTORY_CAPACITY 512U
+#define D1L_NODE_STORE_CAPACITY D1L_NODE_RAM_ACTIVE_CAPACITY
 #define D1L_NODE_FINGERPRINT_LEN 17U
 #define D1L_NODE_PUBLIC_KEY_HEX_LEN 65U
 #define D1L_HEARD_NODE_NAME_LEN 24U
 #define D1L_NODE_TYPE_LEN 8U
+#define D1L_NODE_ROLE_LEN 12U
 
 typedef struct {
     uint32_t seq;
@@ -27,6 +31,41 @@ typedef struct {
     uint8_t path_hash_bytes;
     uint8_t path_hops;
 } d1l_node_entry_t;
+
+typedef enum {
+    D1L_NODE_FILTER_ALL = 0,
+    D1L_NODE_FILTER_COMPANION,
+    D1L_NODE_FILTER_REPEATER,
+    D1L_NODE_FILTER_ROOM,
+    D1L_NODE_FILTER_SENSOR,
+    D1L_NODE_FILTER_FAVORITE,
+} d1l_node_filter_t;
+
+typedef enum {
+    D1L_NODE_SORT_LAST_HEARD = 0,
+    D1L_NODE_SORT_SIGNAL,
+    D1L_NODE_SORT_NAME,
+    D1L_NODE_SORT_ROLE,
+    D1L_NODE_SORT_FAVORITE,
+} d1l_node_sort_t;
+
+typedef struct {
+    d1l_node_filter_t filter;
+    d1l_node_sort_t sort;
+    const char *text;
+    bool keyed_only;
+    bool reachable_only;
+} d1l_node_query_t;
+
+typedef struct {
+    d1l_node_entry_t node;
+    char display_name[D1L_HEARD_NODE_NAME_LEN];
+    char role[D1L_NODE_ROLE_LEN];
+    bool favorite;
+    bool muted;
+    bool keyed;
+    bool reachable;
+} d1l_node_view_t;
 
 typedef struct {
     uint32_t next_seq;
@@ -45,3 +84,5 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
 d1l_node_store_stats_t d1l_node_store_stats(void);
 bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_t *out_entry);
 size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries);
+size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
+                            size_t max_entries);

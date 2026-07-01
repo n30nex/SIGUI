@@ -22,6 +22,15 @@ jobs:
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
 
+      - name: UI tab abuse dry run
+        run: python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 100
+
+      - name: UI scroll probe dry run
+        run: python ./scripts/scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map
+
+      - name: Soak dry run
+        run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
+
       - name: SD file canary dry run
         run: python ./scripts/sd_file_canary_d1l.py --dry-run
 
@@ -43,10 +52,14 @@ jobs:
       - name: RP2040 SD bridge preflight dry run
         run: python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge
 
+      - name: SD boot prepare acceptance dry run
+        run: python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
+
       - name: UI simulator screenshots
         run: |
           python ./tools/ui_simulator.py --out artifacts/ui-sim
           python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large
+          python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage
 
       - name: Verify checksums
         run: python ./scripts/verify_checksums.py artifacts
@@ -117,6 +130,11 @@ jobs:
         shell: bash
         run: |
           python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}"
+
+      - name: Verify firmware and release checksums
+        run: |
+          python scripts/verify_checksums.py artifacts/firmware
+          python scripts/verify_checksums.py artifacts/release
 
       - uses: actions/upload-artifact@v7
         with:

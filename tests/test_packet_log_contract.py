@@ -16,8 +16,13 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     app_main = read("main/app_main.c")
     blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
-    assert "D1L_PACKET_LOG_CAPACITY 32U" in header
-    assert "D1L_PACKET_LOG_PERSIST_CAPACITY 8U" in header
+    assert "D1L_PACKET_LOG_RAM_CAPACITY 128U" in header
+    assert "D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY 8U" in header
+    assert "D1L_PACKET_LOG_SD_CAPACITY 2048U" in header
+    assert "D1L_PACKET_LOG_CAPACITY D1L_PACKET_LOG_RAM_CAPACITY" in header
+    assert "D1L_PACKET_LOG_PERSIST_CAPACITY D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY" in header
+    assert "D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD 16U" in header
+    assert "D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS 5000U" in header
     assert 'D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"' in blob_store
     assert 'D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"' in blob_store
     assert 'D1L_PACKET_LOG_KEY "ring"' in source
@@ -30,15 +35,18 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert '#include "storage/retained_blob_store.h"' in source
     assert "d1l_retained_blob_store_read" in source
     assert "d1l_retained_blob_store_read_fallback" in source
-    assert "d1l_retained_blob_store_write" in source
+    assert "d1l_retained_blob_store_write_split" in source
     assert "d1l_retained_blob_store_erase" in source
     assert "d1l_retained_blob_store_uses_sd" in source
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
     assert '"storage/retained_blob_store.c"' in cmake
-    assert "static d1l_packet_log_blob_t s_blob_scratch" in source
-    assert "D1L_PACKET_LOG_PERSIST_CAPACITY" in source
+    assert "static d1l_packet_log_primary_blob_t s_primary_blob_scratch" in source
+    assert "static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch" in source
+    assert "D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY" in source
+    assert "D1L_PACKET_LOG_RAM_CAPACITY" in source
     assert "sanitize_ascii" in source
     assert "d1l_packet_log_find_by_seq" in header
+    assert "d1l_packet_log_flush" in header
     assert "D1L_PACKET_LOG_RAW_PREVIEW_BYTES 32U" in header
     assert "D1L_PACKET_LOG_RAW_HEX_LEN" in header
     assert "raw_hex" in header
@@ -47,9 +55,12 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "d1l_packet_log_query" in header
     assert "raw_to_hex_preview" in source
     assert "packet_matches" in source
-    assert "D1L_PACKET_LOG_SCHEMA 2U" in source
+    assert "D1L_PACKET_LOG_SCHEMA 3U" in source
+    assert "D1L_PACKET_LOG_SCHEMA_V2 2U" in source
+    assert "fallback_blob_v2_is_valid" in source
+    assert "persist_store(bool flush_primary)" in source
+    assert "s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD" in source
     assert "ESP_ERR_NOT_FOUND" in source
-    assert "try_load_blob_from_fallback" in source
     assert '\\"packet_log_backend\\"' in read("main/comms/usb_console.c")
     assert "esp_err_t packet_log_ret = d1l_packet_log_init()" in app_main
 

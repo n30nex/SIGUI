@@ -24,6 +24,7 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_read" in header
     assert "d1l_retained_blob_store_read_fallback" in header
     assert "d1l_retained_blob_store_write" in header
+    assert "d1l_retained_blob_store_write_split" in header
     assert "d1l_retained_blob_store_erase" in header
     assert '"storage/retained_blob_store.c"' in cmake
 
@@ -68,6 +69,12 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "nvs_commit(handle)" in source
     assert "ESP_ERR_NVS_NOT_FOUND" in source
     assert "(void)nvs_write_blob(config, key, src, len)" in source
+    assert "d1l_retained_blob_store_write_split" in source
+    assert "const bool has_primary = primary_src && primary_len > 0" in source
+    assert "const bool has_fallback = fallback_src && fallback_len > 0" in source
+    assert "sd_write_blob(config, key, primary_src, primary_len)" in source
+    assert "nvs_write_blob(config, key, nvs_src, nvs_len)" in source
+    assert "return nvs_ret == ESP_OK ? ESP_OK : sd_ret;" in source
     assert "return sd_ret == ESP_ERR_NOT_FOUND ? nvs_ret : sd_ret;" in source
 
 
@@ -94,5 +101,5 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert 'status->packet_log_backend = "nvs"' not in storage_status
     assert "d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
     assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_write(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
+    assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
     assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log

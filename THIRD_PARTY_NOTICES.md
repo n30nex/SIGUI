@@ -9,10 +9,12 @@ Portions of this project's architecture, touch-input behavior, and test strategy
 - Copyright: Copyright (C) 2025 Ben
 - License: GPL-3.0-or-later
 - Source: https://github.com/hermes-gadget/SigurdOS-tdeck
-- Source commit reviewed: `784b1fb26e8c4b733581ca1617f1a627778f3577`
+- Source commit reviewed: `e7e7b12ee771edd2b15e64e1a6569b7b18f84423`
 - Permission: used with maintainer permission and attribution.
 
-The reviewed upstream touch implementation targets LilyGo T-Deck GT911 hardware. MeshCore DeskOS D1L keeps the D1L touch path on the Seeed SenseCAP Indicator FT5x06/GX BSP driver and adapts the proven input architecture concepts to the D1L hardware.
+MeshCore DeskOS D1L is informed by and may adapt concepts from SigurdOS T-Deck by hermes-gadget, GPL-3.0-or-later, reviewed at commit `e7e7b12ee771edd2b15e64e1a6569b7b18f84423`: https://github.com/hermes-gadget/SigurdOS-tdeck. SigurdOS T-Deck builds on MeshCore by meshcore-dev, MIT, reviewed as submodule commit `60ea4a91bf14363e837037a79ce1bff7fa37483f`: https://github.com/meshcore-dev/MeshCore.
+
+The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore DeskOS D1L keeps the D1L touch path on the Seeed SenseCAP Indicator FT5x06/GX BSP driver and uses SigurdOS-TDeck as an attributed reference for product architecture, navigation, storage/map concepts, packet visibility, and validation behavior rather than copying device-specific code.
 
 ## Seeed SenseCAP Indicator
 

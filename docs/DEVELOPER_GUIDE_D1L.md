@@ -17,8 +17,13 @@
 ```powershell
 python -m pytest -q
 python .\tools\ui_simulator.py --out artifacts\ui-sim
+python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
+python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-storage
 python .\scripts\smoke_d1l.py --dry-run
-python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1
+python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 100
+python .\scripts\scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
+python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 ```
 
 ## Firmware Build
@@ -65,7 +70,11 @@ $env:D1L_PORT = "COMx"
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 ```
 
-For current local validation, COM7 has been the D1L and COM11 has been a local MeshCore bot. Do not bake those ports into scripts or defaults.
+For current local validation, `COM12` is the D1L and `COM11` has been a local MeshCore bot. Re-check Windows serial enumeration after replugging, and do not bake those ports into scripts or defaults.
+
+The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
+
+The operator has allowed formatting the SD card inserted in the D1L for production SD validation. Use only an unformatted or sacrificial test card, and perform that destructive proof through `sd_boot_prepare_acceptance_d1l.py --scenario unformatted --allow-format-confirm` or the guarded `storage setup confirm FORMAT-DESKOS-SD` path after status reports a present setup-required card.
 
 ## GitHub Actions
 

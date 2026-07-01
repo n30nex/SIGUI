@@ -37,7 +37,11 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python -m pytest tests -q" in host
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
+    assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in host
     assert "python ./scripts/smoke_d1l.py --dry-run" in host
+    assert "python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 100" in host
+    assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map" in host
+    assert "python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test" in host
     assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in host
@@ -45,6 +49,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge" in host
+    assert "python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all" in host
     assert "python ./scripts/verify_checksums.py artifacts" in host
 
 
@@ -64,5 +69,16 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "path: artifacts/rp2040-sd-bridge/**" in job
     assert "if-no-files-found: error" in job
     assert "--upload" not in job
+    assert "--port" not in job
+    assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
+
+
+def test_ci_verifies_firmware_and_release_checksums_after_packaging():
+    job = job_block("firmware-build")
+
+    assert "idf.py build" in job
+    assert "python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release" in job
+    assert "python scripts/verify_checksums.py artifacts/firmware" in job
+    assert "python scripts/verify_checksums.py artifacts/release" in job
     assert "--port" not in job
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)

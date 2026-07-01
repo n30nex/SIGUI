@@ -15,12 +15,22 @@ def test_heard_node_store_is_bounded_and_nvs_backed():
     source = read("main/mesh/node_store.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
-    assert "D1L_NODE_STORE_CAPACITY 16U" in header
+    assert "D1L_NODE_RAM_ACTIVE_CAPACITY 64U" in header
+    assert "D1L_NODE_NVS_FALLBACK_CAPACITY 16U" in header
+    assert "D1L_NODE_SD_HISTORY_CAPACITY 512U" in header
+    assert "D1L_NODE_STORE_CAPACITY D1L_NODE_RAM_ACTIVE_CAPACITY" in header
     assert "D1L_NODE_PUBLIC_KEY_HEX_LEN 65U" in header
     assert "D1L_HEARD_NODE_NAME_LEN 24U" in header
-    assert "D1L_NODE_STORE_SCHEMA 2U" in source
+    assert "D1L_NODE_STORE_SCHEMA 3U" in source
+    assert "D1L_NODE_STORE_SCHEMA_V2 2U" in source
+    assert "D1L_NODE_STORE_LEGACY_CAPACITY D1L_NODE_NVS_FALLBACK_CAPACITY" in source
     assert "d1l_node_store_blob_v1_t" in source
+    assert "d1l_node_store_blob_v2_t" in source
     assert "migrate_v1_blob" in source
+    assert "migrate_v2_blob" in source
+    assert "entries[D1L_NODE_NVS_FALLBACK_CAPACITY]" in source
+    assert "D1L_NODE_NVS_FALLBACK_CAPACITY ?" in source
+    assert "blob->entries[out] = s_entries[best]" in source
     assert 'D1L_NODE_STORE_NAMESPACE "d1l_nodes"' in source
     assert 'D1L_NODE_STORE_KEY "heard"' in source
     assert "nvs_get_blob" in source
@@ -30,6 +40,38 @@ def test_heard_node_store_is_bounded_and_nvs_backed():
     assert "oldest_index" in source
     assert '"mesh/node_store.c"' in cmake
     assert "d1l_node_store_init()" in app_main
+
+
+def test_heard_node_query_supports_production_sort_filter_rows():
+    header = read("main/mesh/node_store.h")
+    source = read("main/mesh/node_store.c")
+
+    assert "D1L_NODE_FILTER_COMPANION" in header
+    assert "D1L_NODE_FILTER_REPEATER" in header
+    assert "D1L_NODE_FILTER_ROOM" in header
+    assert "D1L_NODE_FILTER_SENSOR" in header
+    assert "D1L_NODE_FILTER_FAVORITE" in header
+    assert "D1L_NODE_SORT_LAST_HEARD" in header
+    assert "D1L_NODE_SORT_SIGNAL" in header
+    assert "D1L_NODE_SORT_NAME" in header
+    assert "D1L_NODE_SORT_ROLE" in header
+    assert "D1L_NODE_SORT_FAVORITE" in header
+    assert "d1l_node_query_t" in header
+    assert "d1l_node_view_t" in header
+    assert "display_name[D1L_HEARD_NODE_NAME_LEN]" in header
+    assert "role[D1L_NODE_ROLE_LEN]" in header
+    assert "bool favorite" in header
+    assert "bool keyed" in header
+    assert "bool reachable" in header
+    assert "d1l_node_store_query" in header
+    assert '#include "mesh/contact_store.h"' in source
+    assert "static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY]" in source
+    assert "node_role_name" in source
+    assert 'return "sensor";' in source
+    assert "node_view_matches_filter" in source
+    assert "node_view_better" in source
+    assert "contains_casefold" in source
+    assert "d1l_contact_store_find_by_fingerprint" in source
 
 
 def test_verified_adverts_upsert_heard_nodes():
@@ -56,7 +98,13 @@ def test_ui_console_and_smoke_expose_heard_nodes():
     assert 'ok_begin("nodes")' in console
     assert 'strcmp(line, "nodes")' in console
     assert 'strcmp(line, "nodes clear")' in console
+    assert "d1l_node_store_query(&query, entries, 8)" in console
     assert '\\"public_key\\"' in console
+    assert '\\"display_name\\"' in console
+    assert '\\"role\\"' in console
+    assert '\\"favorite\\"' in console
+    assert '\\"keyed\\"' in console
+    assert '\\"reachable\\"' in console
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
     assert "Verified MeshCore adverts populate this bounded heard-node store" in console
     assert "nodes" in SMOKE_COMMANDS

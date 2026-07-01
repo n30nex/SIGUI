@@ -35,5 +35,11 @@ esp_err_t d1l_retained_blob_store_write(d1l_retained_blob_store_id_t store_id,
                                         const char *key,
                                         const void *src,
                                         size_t len);
+esp_err_t d1l_retained_blob_store_write_split(d1l_retained_blob_store_id_t store_id,
+                                              const char *key,
+                                              const void *primary_src,
+                                              size_t primary_len,
+                                              const void *fallback_src,
+                                              size_t fallback_len);
 esp_err_t d1l_retained_blob_store_erase(d1l_retained_blob_store_id_t store_id,
                                         const char *key);

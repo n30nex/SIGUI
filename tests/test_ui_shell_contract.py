@@ -18,8 +18,12 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "D1L_APP_SNAPSHOT_NODE_PREVIEW 4U" in header
     assert "D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "D1L_APP_SNAPSHOT_ROUTE_PREVIEW 2U" in header
-    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW 4U" in header
-    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW 4U" in header
+    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW D1L_ROOM_SERVER_PREVIEW_CAPACITY" in header
+    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY" in header
+    assert "D1L_HOME_MESSAGE_PREVIEW 5U" in header
+    assert "D1L_HOME_REPEATER_PREVIEW 3U" in header
+    assert "d1l_home_message_preview_t" in header
+    assert "d1l_home_repeater_preview_t" in header
     assert "d1l_app_snapshot_t" in header
     assert "d1l_app_model_snapshot" in header
     assert "static d1l_app_snapshot_t s_snapshot" in read("main/ui/ui_phase1.c")
@@ -61,6 +65,13 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "radio_tx_power_dbm" in header
     assert "radio_rx_boost" in header
     assert "radio_tcxo" in header
+    assert "time_available" in header
+    assert "time_label[8]" in header
+    assert "home_messages[D1L_HOME_MESSAGE_PREVIEW]" in header
+    assert "home_repeaters[D1L_HOME_REPEATER_PREVIEW]" in header
+    assert "populate_home_messages(snapshot)" in source
+    assert "populate_home_repeaters(snapshot)" in source
+    assert 'snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--")' in source
     assert "d1l_app_model_save_radio_profile" in header
     assert "d1l_app_model_default_radio_profile" in header
     assert "d1l_app_model_current_radio_profile" in header
@@ -83,6 +94,59 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_lock_overlay" in source
     assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
+
+
+def test_home_screen_is_user_first_companion_dashboard():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/app/app_model.h")
+
+    assert "home_sd_state" in source
+    assert "render_home_chip" in source
+    assert '"Time"' in source
+    assert '"Wi-Fi"' in source
+    assert '"BLE"' in source
+    assert '"SD"' in source
+    assert '"Public"' in source
+    assert '"DMs"' in source
+    assert '"Last Messages"' in source
+    assert '"Local Repeaters"' in source
+    assert "render_home_message_preview" in source
+    assert "render_home_repeater_preview" in source
+    assert "snapshot->public_unread_count" in source
+    assert "snapshot->dm_unread_count" in source
+    assert "snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW" in source
+    assert "snapshot->home_repeater_count && i < D1L_HOME_REPEATER_PREVIEW" in source
+    assert "open_home_dm_preview_event_cb" in source
+    assert "request_tab_event_cb" in source
+    assert "open_storage_sheet_event_cb" in source
+    home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
+        "static void render_storage_line", 1
+    )[0]
+    assert "RF Packets" not in home_body
+    assert "System" not in home_body
+    assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
+    assert "#define D1L_HOME_MESSAGE_PREVIEW 5U" in header
+    assert "#define D1L_HOME_REPEATER_PREVIEW 3U" in header
+
+
+def test_main_content_root_is_scrollable_and_serial_tab_switchable():
+    source = read("main/ui/ui_phase1.c")
+    header = read("main/ui/ui_phase1.h")
+    console = read("main/comms/usb_console.c")
+
+    assert "configure_content_scroll_root" in source
+    assert "lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in source
+    assert "lv_obj_set_scroll_dir(root, LV_DIR_VER)" in source
+    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO)" in source
+    assert "configure_content_scroll_root(s_content)" in source
+    assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
+    assert "lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE)" not in source
+    assert "d1l_ui_phase1_request_tab" in header
+    assert "d1l_ui_phase1_active_tab_name" in header
+    assert "cmd_ui_status" in console
+    assert "cmd_ui_tab" in console
+    assert '"ui status"' in console
+    assert "ui tab <home|messages|nodes|map|packets|settings>" in console
 
 
 def test_touch_ui_actions_route_through_app_model():
@@ -303,7 +367,7 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
 def test_messages_screen_renders_bounded_preview_rows():
     source = read("main/ui/ui_phase1.c")
     header = read("main/app/app_model.h")
-    assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U" in header
+    assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
     assert "#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "i < snapshot->recent_message_count && y <= 188" in source
     assert "i < snapshot->recent_dm_count && y <= 302" in source

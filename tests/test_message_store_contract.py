@@ -16,7 +16,11 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     blob_store = read("main/storage/retained_blob_store.c")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_MESSAGE_STORE_CAPACITY 16U" in header
-    assert "D1L_MESSAGE_TEXT_LEN 96U" in header
+    assert "D1L_MESSAGE_MAX_CHARS 138U" in header
+    assert "D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_CHARS + 1U)" in header
+    assert "D1L_MESSAGE_STORE_SCHEMA 2U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA_V1 1U" in source
+    assert "load_v1_blob_into_ram" in source
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"' in blob_store
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"' in blob_store
     assert "D1L_MESSAGE_STORE_ID D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
@@ -50,12 +54,13 @@ def test_ui_and_console_expose_persistent_public_messages():
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     console = read("main/comms/usb_console.c")
-    assert "D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 4U" in app_header
+    assert "D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in app_header
     assert "recent_messages" in app_header
     assert "d1l_app_model_query_public_messages" in app_header
     assert "d1l_message_store_copy_recent" in app_source
     assert "d1l_message_store_query(out_entries, max_entries, query)" in app_source
     assert "render_message_row" in ui
+    assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
     assert "No stored messages" in ui
     assert "static lv_obj_t *s_public_history_sheet" in ui
     assert "static lv_obj_t *s_public_search_sheet" in ui

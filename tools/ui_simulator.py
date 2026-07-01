@@ -358,6 +358,7 @@ def manual_location_snapshot() -> Snapshot:
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
+    "storage-states": storage_ready_pending_migration_snapshot,
     "storage-no-card": storage_no_card_snapshot,
     "storage-format-required": storage_format_required_snapshot,
     "storage-root-missing": storage_root_missing_snapshot,
@@ -586,10 +587,8 @@ def draw_top_bar(s: Surface, snap: Snapshot):
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
     s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
-    s.text("RF ready", (202, 10, 280, 28), 12, GREEN, True, "center")
-    s.text("Mesh ready", (286, 10, 380, 28), 12, ACCENT, True, "center")
-    s.text(f"RX {snap.rx_total} TX {snap.tx_total}", (386, 10, 464, 28), 12, BLUE, True, "right")
-    s.text("USB ok  Wi-Fi off  BLE off", (202, 31, 464, 49), 11, MUTED, align="right")
+    s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
+    s.text(f"Wi-Fi off  BLE off  SD {snap.storage_state}", (202, 31, 464, 49), 11, MUTED, align="right")
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -656,6 +655,24 @@ def draw_button(
     )
 
 
+def draw_chip(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    value: str,
+    color: tuple[int, int, int] = ACCENT,
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+):
+    x0, y0, x1, y1 = box
+    s.round_rect(box, SURFACE_2, BORDER, 8)
+    s.text(title, (x0 + 8, y0 + 5, x1 - 8, y0 + 20), 10, MUTED, True)
+    s.text(value, (x0 + 8, y0 + 20, x1 - 8, y1 - 5), 12, color, True)
+    if action or destination:
+        s.touch_target(title, box, kind="chip", action=action, destination=destination)
+
+
 def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
     x0, y0, x1, y1 = box
     s.rect(box, (248, 250, 252), (248, 250, 252))
@@ -713,18 +730,39 @@ def draw_row(
 
 
 def draw_home_body(s: Surface, snap: Snapshot):
-    draw_metric(s, (16, 68, 230, 144), "Radio", "US/CAN", snap.radio_profile, ACCENT)
-    draw_metric(s, (250, 68, 464, 144), "Mesh", snap.mesh_state, f"{snap.latest_signal} latest", GREEN)
-    draw_metric(s, (16, 156, 230, 232), "Identity", snap.node_name, snap.fingerprint, BLUE)
-    draw_metric(s, (250, 156, 464, 232), "Unread", f"Public {snap.unread_public}", f"DM {snap.unread_dm}, tap Messages", AMBER)
-    s.round_rect((16, 244, 464, 318), SURFACE, BORDER, 8)
-    s.text("Latest Public", (28, 252, 180, 272), 13, MUTED, True)
-    s.text("YKF Corebot: Public test reply received", (28, 276, 452, 300), 16, TEXT, True)
-    s.text("RX new  RSSI -41  route direct", (28, 300, 452, 316), 11, MUTED)
-    draw_button(s, (16, 332, 120, 388), "Send", action="open_public_compose", destination="compose_sheet")
-    draw_button(s, (128, 332, 232, 388), "Advert", action="open_advert_sheet", destination="advert_sheet")
-    draw_button(s, (248, 332, 352, 388), "Nodes", BLUE, action="open_nodes_tab", destination="nodes")
-    draw_button(s, (360, 332, 464, 388), "Packets", AMBER, action="open_packets_tab", destination="packets")
+    draw_chip(s, (16, 64, 108, 108), "Time", "--:--", MUTED)
+    draw_chip(s, (116, 64, 212, 108), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="settings")
+    draw_chip(s, (220, 64, 316, 108), "BLE", "off", MUTED, action="open_ble_settings", destination="settings")
+    draw_chip(s, (324, 64, 464, 108), "SD", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else MUTED, action="open_storage_setup", destination="storage_setup_sheet")
+
+    draw_metric(s, (16, 120, 230, 184), "Public", str(snap.unread_public), "Public unread", AMBER if snap.unread_public else GREEN, action="open_messages_public", destination="messages")
+    draw_metric(s, (250, 120, 464, 184), "DMs", str(snap.unread_dm), "Direct messages", AMBER if snap.unread_dm else GREEN, action="open_messages_dm", destination="messages")
+
+    s.text("Last Messages", (16, 194, 210, 216), 17, TEXT, True)
+    previews: list[Message] = [*snap.public_messages, *snap.dm_messages][:5]
+    y = 222
+    for msg in previews:
+        draw_row(
+            s,
+            (16, y, 464, y + 28),
+            f"{msg.source}: {msg.text}",
+            msg.meta,
+            "new" if msg.unread else None,
+        )
+        y += 32
+
+    s.text("Local Repeaters", (16, 382, 220, 402), 16, TEXT, True)
+    if snap.repeaters:
+        node = snap.repeaters[0]
+        draw_row(
+            s,
+            (16, 402, 464, 418),
+            node.name,
+            f"{node.meta}  {node.signal}",
+            None,
+        )
+    else:
+        s.text("No repeaters heard yet", (16, 402, 464, 418), 11, MUTED)
 
 
 def render_home(s: Surface, snap: Snapshot):
@@ -1284,7 +1322,18 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 }
 
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
-    "home": ("MeshCore DeskOS", "Home", "Radio", "US/CAN", "Mesh", "Identity", "Unread", "Send", "Advert"),
+    "home": (
+        "MeshCore DeskOS",
+        "Home",
+        "Time",
+        "Wi-Fi",
+        "BLE",
+        "SD",
+        "Public",
+        "DMs",
+        "Last Messages",
+        "Local Repeaters",
+    ),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),

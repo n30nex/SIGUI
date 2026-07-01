@@ -119,12 +119,26 @@ low/dedicated, and `ls` low/shared. For each probe, `_p` is present, `_e` is
 the SdFat error code, `_d` is error data, and `_kb` is detected capacity. The
 command does not format, copy UF2 files, or send RF.
 
+## Boot Prepare Contract
+
+`d1l_storage_boot_prepare()` runs before retained stores initialize. It may use
+safe status and the explicit non-formatting mount path so a ready card can
+enable SD-backed retained history before store load. It must stay bounded by the
+boot timeout, must not send `DESKOS_SD_FORMAT`, and must leave onboard NVS
+fallback active if the bridge is unavailable, the card is absent, the mount is
+still pending, or the ready file-operation gate is not available.
+
 ## Confirmed Format Request
 
 Formatting is never sent during boot, `storage status`, `storage mount`,
 `storage diag`, or plain `storage setup`. It is sent only after the user enters
 the exact confirmation phrase and only if the latest status/mount result
 reported `present=1`, `format_supported=1`, and setup is required.
+
+For production validation, the operator has allowed formatting the SD card
+inserted in the D1L. That permission applies only to the guarded confirmation
+flow on an unformatted or sacrificial test card, not to boot/status/mount or
+incidental UI polling.
 
 ESP32 sends:
 

@@ -9,6 +9,8 @@
 #define D1L_MESH_INSPECTOR_LABEL_LEN 24U
 #define D1L_MESH_INSPECTOR_KIND_LEN 16U
 #define D1L_MESH_INSPECTOR_SOURCE_LEN 12U
+#define D1L_REPEATER_PREVIEW_CAPACITY 8U
+#define D1L_ROOM_SERVER_PREVIEW_CAPACITY 8U
 
 typedef struct {
     uint32_t sample_count;
@@ -59,4 +61,3 @@ void d1l_mesh_inspector_signal_summary(d1l_mesh_signal_summary_t *out_summary);
 size_t d1l_mesh_inspector_copy_room_servers(d1l_mesh_room_server_t *out_entries, size_t max_entries);
 size_t d1l_mesh_inspector_copy_repeater_candidates(d1l_mesh_repeater_candidate_t *out_entries,
                                                    size_t max_entries);
-

@@ -8,7 +8,8 @@
 #include "storage/retained_blob_store.h"
 
 #define D1L_PACKET_LOG_KEY "ring"
-#define D1L_PACKET_LOG_SCHEMA 2U
+#define D1L_PACKET_LOG_SCHEMA_V2 2U
+#define D1L_PACKET_LOG_SCHEMA 3U
 
 typedef struct {
     uint32_t schema;
@@ -17,8 +18,18 @@ typedef struct {
     uint32_t dropped_oldest;
     uint32_t head;
     uint32_t count;
-    d1l_packet_log_entry_t entries[D1L_PACKET_LOG_PERSIST_CAPACITY];
-} d1l_packet_log_blob_t;
+    d1l_packet_log_entry_t entries[D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY];
+} d1l_packet_log_fallback_blob_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    d1l_packet_log_entry_t entries[D1L_PACKET_LOG_RAM_CAPACITY];
+} d1l_packet_log_primary_blob_t;
 
 static d1l_packet_log_entry_t s_entries[D1L_PACKET_LOG_CAPACITY];
 static size_t s_head;
@@ -26,8 +37,11 @@ static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
+static uint32_t s_sd_dirty_count;
+static uint32_t s_last_sd_flush_ms;
 static bool s_loaded;
-static d1l_packet_log_blob_t s_blob_scratch;
+static d1l_packet_log_primary_blob_t s_primary_blob_scratch;
+static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -143,18 +157,20 @@ static void clear_ram(void)
     s_next_seq = 1;
     s_total_written = 0;
     s_dropped_oldest = 0;
+    s_sd_dirty_count = 0;
+    s_last_sd_flush_ms = 0;
 }
 
-static void fill_blob(d1l_packet_log_blob_t *blob)
+static void fill_entries(d1l_packet_log_entry_t *dest, size_t dest_capacity,
+                         uint32_t *out_head, uint32_t *out_count)
 {
-    memset(blob, 0, sizeof(*blob));
-    blob->schema = D1L_PACKET_LOG_SCHEMA;
-    blob->next_seq = s_next_seq;
-    blob->total_written = s_total_written;
-    blob->dropped_oldest = s_dropped_oldest;
-    const size_t n = s_count < D1L_PACKET_LOG_PERSIST_CAPACITY ? s_count : D1L_PACKET_LOG_PERSIST_CAPACITY;
-    blob->head = (uint32_t)(n % D1L_PACKET_LOG_PERSIST_CAPACITY);
-    blob->count = (uint32_t)n;
+    if (!dest || dest_capacity == 0 || !out_head || !out_count) {
+        return;
+    }
+    memset(dest, 0, dest_capacity * sizeof(dest[0]));
+    const size_t n = s_count < dest_capacity ? s_count : dest_capacity;
+    *out_head = (uint32_t)(n % dest_capacity);
+    *out_count = (uint32_t)n;
 
     if (n > 0) {
         size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
@@ -162,76 +178,164 @@ static void fill_blob(d1l_packet_log_blob_t *blob)
             oldest = (oldest + (s_count - n)) % D1L_PACKET_LOG_CAPACITY;
         }
         for (size_t i = 0; i < n; ++i) {
-            blob->entries[i] = s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+            dest[i] = s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
         }
     }
 }
 
-static esp_err_t persist_store(void)
+static void fill_fallback_blob(d1l_packet_log_fallback_blob_t *blob)
 {
-    fill_blob(&s_blob_scratch);
-    return d1l_retained_blob_store_write(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
-                                         D1L_PACKET_LOG_KEY,
-                                         &s_blob_scratch,
-                                         sizeof(s_blob_scratch));
+    memset(blob, 0, sizeof(*blob));
+    blob->schema = D1L_PACKET_LOG_SCHEMA;
+    blob->next_seq = s_next_seq;
+    blob->total_written = s_total_written;
+    blob->dropped_oldest = s_dropped_oldest;
+    fill_entries(blob->entries, D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY,
+                 &blob->head, &blob->count);
 }
 
-static bool blob_is_valid(const d1l_packet_log_blob_t *blob, size_t len)
+static void fill_primary_blob(d1l_packet_log_primary_blob_t *blob)
+{
+    memset(blob, 0, sizeof(*blob));
+    blob->schema = D1L_PACKET_LOG_SCHEMA;
+    blob->next_seq = s_next_seq;
+    blob->total_written = s_total_written;
+    blob->dropped_oldest = s_dropped_oldest;
+    fill_entries(blob->entries, D1L_PACKET_LOG_RAM_CAPACITY,
+                 &blob->head, &blob->count);
+}
+
+static esp_err_t persist_store(bool flush_primary)
+{
+    fill_fallback_blob(&s_fallback_blob_scratch);
+    if (flush_primary) {
+        fill_primary_blob(&s_primary_blob_scratch);
+        esp_err_t ret =
+            d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                                D1L_PACKET_LOG_KEY,
+                                                &s_primary_blob_scratch,
+                                                sizeof(s_primary_blob_scratch),
+                                                &s_fallback_blob_scratch,
+                                                sizeof(s_fallback_blob_scratch));
+        if (ret == ESP_OK) {
+            s_sd_dirty_count = 0;
+            s_last_sd_flush_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+        }
+        return ret;
+    }
+
+    return d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                               D1L_PACKET_LOG_KEY,
+                                               NULL,
+                                               0,
+                                               &s_fallback_blob_scratch,
+                                               sizeof(s_fallback_blob_scratch));
+}
+
+static bool fallback_blob_is_valid(const d1l_packet_log_fallback_blob_t *blob, size_t len)
 {
     return blob && len == sizeof(*blob) &&
            blob->schema == D1L_PACKET_LOG_SCHEMA &&
-           blob->head < D1L_PACKET_LOG_PERSIST_CAPACITY &&
-           blob->count <= D1L_PACKET_LOG_PERSIST_CAPACITY &&
+           blob->head < D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY &&
+           blob->count <= D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY &&
            blob->next_seq > 0;
 }
 
-static esp_err_t try_load_blob_from_fallback(void)
+static bool fallback_blob_v2_is_valid(const d1l_packet_log_fallback_blob_t *blob, size_t len)
 {
-    size_t len = sizeof(s_blob_scratch);
-    esp_err_t ret = d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
-                                                          D1L_PACKET_LOG_KEY,
-                                                          &s_blob_scratch,
-                                                          &len);
-    if (ret != ESP_OK || !blob_is_valid(&s_blob_scratch, len)) {
-        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
-    }
-    return ESP_OK;
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_PACKET_LOG_SCHEMA_V2 &&
+           blob->head < D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY &&
+           blob->count <= D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY &&
+           blob->next_seq > 0;
 }
 
-static void load_valid_blob_into_ram(void)
+static bool primary_blob_is_valid(const d1l_packet_log_primary_blob_t *blob, size_t len)
 {
-    memcpy(s_entries, s_blob_scratch.entries,
-           s_blob_scratch.count * sizeof(s_blob_scratch.entries[0]));
-    s_head = s_blob_scratch.count % D1L_PACKET_LOG_CAPACITY;
-    s_count = s_blob_scratch.count;
-    s_next_seq = s_blob_scratch.next_seq;
-    s_total_written = s_blob_scratch.total_written;
-    s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_PACKET_LOG_SCHEMA &&
+           blob->head < D1L_PACKET_LOG_RAM_CAPACITY &&
+           blob->count <= D1L_PACKET_LOG_RAM_CAPACITY &&
+           blob->next_seq > 0;
+}
+
+static void load_fallback_blob_into_ram(void)
+{
+    memcpy(s_entries, s_fallback_blob_scratch.entries,
+           s_fallback_blob_scratch.count * sizeof(s_fallback_blob_scratch.entries[0]));
+    s_head = s_fallback_blob_scratch.count % D1L_PACKET_LOG_CAPACITY;
+    s_count = s_fallback_blob_scratch.count;
+    s_next_seq = s_fallback_blob_scratch.next_seq;
+    s_total_written = s_fallback_blob_scratch.total_written;
+    s_dropped_oldest = s_fallback_blob_scratch.dropped_oldest;
+    s_sd_dirty_count = 0;
+}
+
+static void load_primary_blob_into_ram(void)
+{
+    memcpy(s_entries, s_primary_blob_scratch.entries,
+           s_primary_blob_scratch.count * sizeof(s_primary_blob_scratch.entries[0]));
+    s_head = s_primary_blob_scratch.count % D1L_PACKET_LOG_CAPACITY;
+    s_count = s_primary_blob_scratch.count;
+    s_next_seq = s_primary_blob_scratch.next_seq;
+    s_total_written = s_primary_blob_scratch.total_written;
+    s_dropped_oldest = s_primary_blob_scratch.dropped_oldest;
+    s_sd_dirty_count = 0;
 }
 
 esp_err_t d1l_packet_log_init(void)
 {
     clear_ram();
 
-    size_t len = sizeof(s_blob_scratch);
-    esp_err_t ret = d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
-                                                 D1L_PACKET_LOG_KEY,
-                                                 &s_blob_scratch,
-                                                 &len);
-    if (ret == ESP_ERR_NOT_FOUND) {
-        ret = ESP_OK;
-    } else if (ret == ESP_OK && blob_is_valid(&s_blob_scratch, len)) {
-        load_valid_blob_into_ram();
-    } else if (ret == ESP_OK) {
-        if (d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG) &&
-            try_load_blob_from_fallback() == ESP_OK) {
-            load_valid_blob_into_ram();
-            ret = persist_store();
-        } else {
+    const bool use_sd = d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    esp_err_t ret;
+    if (use_sd) {
+        size_t len = sizeof(s_primary_blob_scratch);
+        ret = d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                           D1L_PACKET_LOG_KEY,
+                                           &s_primary_blob_scratch,
+                                           &len);
+        if (ret == ESP_OK && primary_blob_is_valid(&s_primary_blob_scratch, len)) {
+            load_primary_blob_into_ram();
+            s_loaded = true;
+            return ESP_OK;
+        }
+        if (ret == ESP_ERR_NOT_FOUND) {
+            ret = ESP_OK;
+        } else if (ret == ESP_OK) {
+            ret = ESP_ERR_INVALID_STATE;
+        }
+    } else {
+        ret = ESP_ERR_NOT_FOUND;
+    }
+
+    size_t len = sizeof(s_fallback_blob_scratch);
+    esp_err_t fallback_ret =
+        d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                              D1L_PACKET_LOG_KEY,
+                                              &s_fallback_blob_scratch,
+                                              &len);
+    if (fallback_ret == ESP_ERR_NOT_FOUND) {
+        if (ret == ESP_ERR_INVALID_STATE) {
             clear_ram();
             ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
                                                 D1L_PACKET_LOG_KEY);
+        } else {
+            ret = ESP_OK;
         }
+    } else if (fallback_ret == ESP_OK &&
+               fallback_blob_v2_is_valid(&s_fallback_blob_scratch, len)) {
+        s_fallback_blob_scratch.schema = D1L_PACKET_LOG_SCHEMA;
+        load_fallback_blob_into_ram();
+        ret = persist_store(use_sd);
+    } else if (fallback_ret == ESP_OK &&
+               fallback_blob_is_valid(&s_fallback_blob_scratch, len)) {
+        load_fallback_blob_into_ram();
+        ret = ESP_OK;
+    } else if (fallback_ret != ESP_ERR_NOT_FOUND) {
+        clear_ram();
+        ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                            D1L_PACKET_LOG_KEY);
     }
     s_loaded = (ret == ESP_OK);
     return ret;
@@ -290,7 +394,27 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
         s_dropped_oldest++;
     }
     s_total_written++;
-    return persist_store() == ESP_OK;
+    if (d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
+        s_sd_dirty_count++;
+    }
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    const bool flush_primary =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG) &&
+        (s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD ||
+         s_last_sd_flush_ms == 0 ||
+         now_ms - s_last_sd_flush_ms >= D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS);
+    return persist_store(flush_primary) == ESP_OK;
+}
+
+esp_err_t d1l_packet_log_flush(void)
+{
+    if (!s_loaded) {
+        esp_err_t ret = d1l_packet_log_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    return persist_store(d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG));
 }
 
 d1l_packet_log_stats_t d1l_packet_log_stats(void)

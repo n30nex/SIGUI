@@ -15,6 +15,8 @@ def test_mesh_inspector_is_bounded_and_read_only():
     source = read("main/mesh/mesh_inspector.c")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_MESH_INSPECTOR_LABEL_LEN 24U" in header
+    assert "D1L_REPEATER_PREVIEW_CAPACITY 8U" in header
+    assert "D1L_ROOM_SERVER_PREVIEW_CAPACITY 8U" in header
     assert "d1l_mesh_signal_summary_t" in header
     assert "d1l_mesh_room_server_t" in header
     assert "d1l_mesh_repeater_candidate_t" in header
@@ -52,8 +54,8 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
-    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW 4U" in header
-    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW 4U" in header
+    assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW D1L_ROOM_SERVER_PREVIEW_CAPACITY" in header
+    assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY" in header
     assert "signal_summary" in header
     assert "recent_rooms" in header
     assert "recent_repeaters" in header

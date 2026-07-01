@@ -282,6 +282,25 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     return ret;
 }
 
+esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms)
+{
+    esp_err_t ret = d1l_storage_status_refresh(timeout_ms);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    if (strcmp(s_status.sd_state, "mount_required") != 0) {
+        return ret;
+    }
+
+    ret = d1l_storage_status_mount(timeout_ms);
+    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
+        return ret;
+    }
+
+    return ret;
+}
+
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
 {
     if (!s_status.initialized) {
