@@ -941,7 +941,7 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_sd_status(out_status, ESP_ERR_TIMEOUT);
-    esp_err_t ret = exchange_prefixed_line(command, (size_t)command_len, prefixes, 2,
+    esp_err_t ret = exchange_prefixed_line(command, (size_t)command_len, prefixes, 1,
                                            line, sizeof(line), timeout_ms, &truncated);
     out_status->response_truncated = truncated;
     if (ret != ESP_OK) {

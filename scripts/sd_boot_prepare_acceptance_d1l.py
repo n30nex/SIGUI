@@ -28,6 +28,7 @@ FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+FORMAT_COMMAND_TIMEOUT_SECONDS = 35.0
 
 
 def command_plan(scenario: str, *, allow_format_confirm: bool = False) -> list[str]:
@@ -262,7 +263,12 @@ def boot_prepare_passed(
 
 
 def send_with_timeout(ser, command: str, timeout: float) -> dict:
-    command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage filecanary"} else timeout
+    if command == "storage setup confirm FORMAT-DESKOS-SD":
+        command_timeout = max(timeout, FORMAT_COMMAND_TIMEOUT_SECONDS)
+    elif command in {"storage mount", "storage filecanary"}:
+        command_timeout = max(timeout, 15.0)
+    else:
+        command_timeout = timeout
     return send_console_command(ser, command, command_timeout)
 
 

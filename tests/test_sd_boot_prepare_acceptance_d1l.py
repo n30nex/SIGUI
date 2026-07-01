@@ -119,6 +119,20 @@ def test_dry_run_unformatted_can_show_explicit_format_plan():
     assert "storage setup confirm FORMAT-DESKOS-SD" in report["commands"]
 
 
+def test_confirmed_format_uses_extended_timeout(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {"schema": 1, "ok": True, "cmd": command}
+
+    monkeypatch.setattr(boot_accept, "send_console_command", fake_send)
+
+    boot_accept.send_with_timeout(object(), "storage setup confirm FORMAT-DESKOS-SD", 5.0)
+
+    assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 35.0)]
+
+
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
     ser = FakeSerial(
         [

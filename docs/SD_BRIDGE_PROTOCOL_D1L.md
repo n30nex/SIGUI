@@ -152,7 +152,9 @@ RP2040 should reply with the post-format status, preferably using the format pre
 DESKOS_SD_FORMAT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31166976 note=format_complete
 ```
 
-The ESP32 parser also accepts a `DESKOS_SD_STATUS ...` line after a format request, but `DESKOS_SD_FORMAT ...` is preferred for traceability.
+After a format request, the ESP32 waits for a `DESKOS_SD_FORMAT ...` reply. A
+generic `DESKOS_SD_STATUS ...` line is intentionally ignored so stale status
+polls cannot be mistaken for confirmed format completion.
 
 ## Generic File Operations
 
