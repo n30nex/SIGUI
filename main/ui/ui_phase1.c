@@ -25,6 +25,10 @@ static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
 static TaskHandle_t s_ui_task_handle;
+static TaskHandle_t s_touch_task_handle;
+static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
+static d1l_board_touch_state_t s_touch_state;
+static bool s_touch_state_ready = false;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_content;
@@ -170,6 +174,28 @@ static bool touch_sample_has_valid_point(const d1l_board_touch_state_t *sample)
            sample->y < CONFIG_LCD_EVB_SCREEN_HEIGHT;
 }
 
+static void publish_touch_state(const d1l_board_touch_state_t *sample)
+{
+    portENTER_CRITICAL(&s_touch_lock);
+    s_touch_state = *sample;
+    s_touch_state_ready = true;
+    portEXIT_CRITICAL(&s_touch_lock);
+}
+
+static bool read_cached_touch_state(d1l_board_touch_state_t *out_sample)
+{
+    bool ready;
+
+    portENTER_CRITICAL(&s_touch_lock);
+    ready = s_touch_state_ready;
+    if (ready) {
+        *out_sample = s_touch_state;
+    }
+    portEXIT_CRITICAL(&s_touch_lock);
+
+    return ready;
+}
+
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     (void)drv;
@@ -182,7 +208,7 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     data->point.y = last_y;
 
     memset(&sample, 0, sizeof(sample));
-    if (d1l_board_touch_read(&sample) != ESP_OK) {
+    if (!read_cached_touch_state(&sample)) {
         return;
     }
     if (sample.pressed && touch_sample_has_valid_point(&sample)) {
@@ -3335,6 +3361,20 @@ static void ui_task(void *arg)
     }
 }
 
+static void touch_poll_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        d1l_board_touch_state_t sample = {0};
+        if (d1l_board_touch_read(&sample) != ESP_OK) {
+            sample.pressed = false;
+            sample.coordinate_valid = false;
+        }
+        publish_touch_state(&sample);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
 esp_err_t d1l_ui_phase1_show_home(void)
 {
     s_screen = lv_obj_create(NULL);
@@ -3421,6 +3461,7 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
+    xTaskCreate(touch_poll_task, "d1l_touch", 4096, NULL, 4, &s_touch_task_handle);
     xTaskCreate(ui_task, "d1l_ui", 4096, NULL, 5, &s_ui_task_handle);
     d1l_health_monitor_register_ui_task(s_ui_task_handle);
     d1l_app_model_get()->ui_ready = true;
