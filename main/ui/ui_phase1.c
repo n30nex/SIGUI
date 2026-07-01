@@ -86,8 +86,14 @@ static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
 static char s_packet_search_text[D1L_PACKET_LOG_QUERY_TEXT_LEN];
 static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
-static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 10U;
-static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 40U;
+static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
+static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
+
+#if CONFIG_FREERTOS_UNICORE
+#define D1L_UI_TASK_CORE 0
+#else
+#define D1L_UI_TASK_CORE 1
+#endif
 
 static void render_active_tab(void);
 static void render_contact_detail_sheet(void);
@@ -3468,8 +3474,10 @@ esp_err_t d1l_ui_phase1_start(void)
     ESP_ERROR_CHECK(esp_timer_start_periodic(tick_timer, 5000));
 
     ESP_RETURN_ON_ERROR(d1l_ui_phase1_show_home(), TAG, "home screen failed");
-    xTaskCreate(touch_poll_task, "d1l_touch", 4096, NULL, 4, &s_touch_task_handle);
-    xTaskCreate(ui_task, "d1l_ui", 4096, NULL, 5, &s_ui_task_handle);
+    xTaskCreatePinnedToCore(touch_poll_task, "d1l_touch", 4096, NULL, 4,
+                            &s_touch_task_handle, D1L_UI_TASK_CORE);
+    xTaskCreatePinnedToCore(ui_task, "d1l_ui", 4096, NULL, 5,
+                            &s_ui_task_handle, D1L_UI_TASK_CORE);
     d1l_health_monitor_register_ui_task(s_ui_task_handle);
     d1l_app_model_get()->ui_ready = true;
     s_started = true;
