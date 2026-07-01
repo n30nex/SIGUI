@@ -130,7 +130,7 @@ def test_confirmed_format_uses_extended_timeout(monkeypatch):
 
     boot_accept.send_with_timeout(object(), "storage setup confirm FORMAT-DESKOS-SD", 5.0)
 
-    assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 35.0)]
+    assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 130.0)]
 
 
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):

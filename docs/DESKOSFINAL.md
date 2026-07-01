@@ -1134,22 +1134,25 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28549761003` for commit `68350bf` rebuilt the
+Current evidence: Actions run `28550779389` for commit `540319d` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
-firmware, and RP2040 checksum manifests verified, and the latest ESP32 package
-flashed to COM12 still has `artifacts/hardware/com12/smoke_b841621.json` as the
-current passing hardware smoke. The RP2040 UF2 checksum is
+firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
+flashed to COM12 passed current-commit smoke in
+`artifacts/hardware/com12/smoke_540319d.json`. The RP2040 UF2 checksum is
 `032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`, but
-`artifacts/hardware/com12/rp2040_uf2_volumes_68350bf_after_reset.json` found no
-mounted UF2 bootloader volume even after a safe `rp2040 reset`, so the new
-RP2040 bridge was not copied. The preflight
-`artifacts/hardware/com12/rp2040_preflight_68350bf_after_reset.json` proves the
+`artifacts/hardware/com12/rp2040_uf2_volumes_540319d_after_esp32_flash.json`
+found no mounted UF2 bootloader volume, so the new RP2040 bridge was not copied.
+The preflight
+`artifacts/hardware/com12/rp2040_preflight_540319d_after_esp32_flash.json` proves the
 RP2040 UART, ping, protocol, and diag paths respond, and the inserted card
-reaches `sd.state="setup_required"` with NVS fallback, but
-`ready_for_sd_acceptance=false` because the SD file gate is not ready. Full SD
-auto-prepare, retained-history, export, map-tile, and reboot/remount proof remain
-blocked until the RP2040 is placed in UF2/BOOTSEL mode and the verified
-`deskos_sd_bridge.ino.uf2` is copied.
+reaches `sd.state="setup_required"` with NVS fallback. The guarded
+operator-approved format attempt in
+`artifacts/hardware/com12/sd_boot_prepare_unformatted_540319d.json` remained
+safe (`public_rf_tx=false`) but timed out before a ready file-operation gate, so
+the firmware and host runner now allow a longer format window before the next
+Actions-built flash/retest. Full SD auto-prepare, retained-history, export,
+map-tile, and reboot/remount proof remain open until guarded format and file
+canaries pass on the device SD card.
 
 ### 13.5 Soak
 
@@ -1193,10 +1196,12 @@ Final gate audit:
 python .\scripts\release_gate_audit_d1l.py --github-run-id <run-id> --commit <commit-sha> --d1l-port <D1L_PORT> --meshbot-port <BOT_PORT> --hardware-dir artifacts\hardware\<d1l-port-folder> --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-<commit>.json --fail-on-open-p0
 ```
 
-The current local audit reports `ready_for_public_release=false` until five P0
-gates are closed: current-commit D1L smoke, SD acceptance matrix, 12-hour
-idle/listening soak, manual physical UI/photos, and full
-inbound/ACK/PATH/direct-route RF proof.
+The latest local audit for `540319d` reports `ready_for_public_release=false`
+with four P0 gates still open after current-commit COM12 smoke passed: SD
+acceptance matrix, 12-hour idle/listening soak, manual physical UI/photos, and
+full inbound/ACK/PATH/direct-route RF proof. Any later commit must be rebuilt by
+GitHub Actions, flashed to COM12, and smoked before it can become the final
+release commit.
 
 ---
 

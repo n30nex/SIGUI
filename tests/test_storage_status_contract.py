@@ -20,7 +20,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
     assert "D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 10000U" in header
     assert "D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U" in header
-    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 30000U" in header
+    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 120000U" in header
     assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header

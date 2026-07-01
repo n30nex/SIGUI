@@ -28,7 +28,7 @@ FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
-FORMAT_COMMAND_TIMEOUT_SECONDS = 35.0
+FORMAT_COMMAND_TIMEOUT_SECONDS = 130.0
 
 
 def command_plan(scenario: str, *, allow_format_confirm: bool = False) -> list[str]:
