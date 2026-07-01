@@ -384,6 +384,31 @@ Do not use `COM11` or `COM29` for this D1L target.
   - The repeatable DM proof used `public_rf_transmit=false` and sent no `mesh send public` command.
   - The local release package `artifacts/release/d1l-release-route-trace-local` passed `scripts/verify_checksums.py`.
 
+## 2026-07-01 COM12 GitHub-Built Touch Recovery
+
+- GitHub Actions run `28510825288` passed `host-checks`, `rp2040-sd-bridge-build`, and `firmware-build` for commit `c214ca1dbb3e5aeeac53f112b4e54a5c9c5f642c`.
+- The release package `artifacts/github/28510825288/d1l-release-package/d1l-release-c214ca1dbb3e5aeeac53f112b4e54a5c9c5f642c` was flashed to `COM12` using `flash_project.ps1`; esptool verified bootloader, partition table, and app hashes.
+- Post-flash smoke passed in `artifacts/smoke/d1l-smoke-after-dock-deferral-COM12-28510825288.json`.
+  - `i2c` detected `0x20` and `0x48`.
+  - `touch test` reported controller `FT5x06` at `0x48`.
+  - `board_ready=true`, `ui_ready=true`, and MeshCore reported `state=ready`.
+- Bottom dock tap monitor passed in `artifacts/smoke/d1l-bottom-dock-tap-monitor-COM12-28510825288.json`.
+  - 8 health samples were collected while bottom dock taps were requested.
+  - Uptime stayed monotonic from `56962` ms to `117131` ms.
+  - Crashlog stayed empty and no panic/watchdog/boot markers were observed.
+- Bottom dock touch sampler passed in `artifacts/smoke/d1l-bottom-dock-touch-sampler-COM12-28510825288.json`.
+  - 90 `touch test` samples included 9 pressed samples with valid coordinates.
+  - Uptime stayed monotonic from `161856` ms to `236862` ms.
+  - Crashlog stayed empty and no panic/watchdog/boot markers were observed.
+- Software reboot capture passed in `artifacts/smoke/d1l-software-reboot-capture-COM12-28510825288.json` with raw log `artifacts/smoke/d1l-software-reboot-capture-COM12-28510825288.log`.
+  - The reboot stream showed `RTC_SW_SYS_RST`, no backtrace, no watchdog, and no panic.
+  - Post-reboot `health` reported `reset_reason=SW`, `board_ready=true`, and `ui_ready=true`.
+  - Crashlog contained one non-crash `SW` reset entry.
+- Clean-baseline idle soak passed in `artifacts/soak/d1l-post-dock-deferral-idle-clean-COM12-28510825288.json`.
+  - 3 minutes, 6 samples, monotonic uptime, ready board/UI/mesh, and no threshold failures.
+  - Crashlog stayed empty after start clear.
+  - One transient `health` timeout recovered on retry; no unrecovered command failures.
+
 ## Still Pending
 
 - Manual visual confirmation of display bars and touch target movement by a human looking at the device.

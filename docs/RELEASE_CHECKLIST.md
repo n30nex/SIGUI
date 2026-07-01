@@ -12,6 +12,7 @@
 - [x] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
 - [x] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
 - [x] `touch test` reports coordinates.
+- [x] COM12 GitHub-built touch recovery validated from run `28510825288` / commit `c214ca1`: FT touch coordinates were sampled, bottom dock taps did not reboot, and post-fix idle soak stayed crash-free.
 - [x] `backlight <0-100>` accepts dim/restore commands.
 - [x] `radiohw` reports SX1262 status or exact wiring failure.
 - [x] `radio get` reports US/CAN 910.525/BW62.5/SF7/CR5/20 dBm/TCXO NONE.
@@ -36,6 +37,7 @@
 - [x] Simulator touch-flow report passes expected-flow, 44x44 touch-target, RF/destructive flag, and no-format storage checks.
 - [x] Offline Map tab, serial-configured manual center, and SD tile-cache policy are covered by simulator required-label and flow checks.
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
+- [x] Bottom dock tab taps validated on D1L `COM12` after the deferred tab-switch fix; monitored touch samples and crashlog stayed clean.
 - [ ] Manual visual review of the physical shell.
 - [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
 
@@ -94,6 +96,7 @@
 - [x] Health telemetry reports heap/PSRAM, LVGL, reset reason, board/UI readiness, and task stack watermarks.
 - [x] Repeatable idle/active soak runner added with JSON artifact output.
 - [x] Short active Public `test` soak passed on `COM7`.
+- [x] Post-touch-fix 3-minute idle soak passed on `COM12` with monotonic uptime, ready board/UI/mesh, and empty crashlog after start clear.
 - [ ] 12-hour idle/listening soak without crash.
 - [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
 
