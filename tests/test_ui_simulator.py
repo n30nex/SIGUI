@@ -97,9 +97,11 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
     assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
     assert {"Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Routes", "Packet Feed"} <= labels_by_view["packets"]
-    assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
+    assert {"Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics", "About"} <= labels_by_view["settings"]
     assert {"Wi-Fi Setup", "Network features are optional", "Scan", "Save", "Clear"} <= labels_by_view["wifi_setup_sheet"]
     assert {"BLE Setup", "Companion pairing status", "Enable", "Pair", "Forget"} <= labels_by_view["ble_setup_sheet"]
+    assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
+    assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
     assert {"Compose Public", "Public message", "20/138", "Send", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
@@ -157,6 +159,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "packet_filters_search_and_details",
         "mesh_roles_browser",
         "settings_radio_storage_and_advert",
+        "settings_display_and_diagnostics",
     } <= flow_names
 
     assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
@@ -181,6 +184,12 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"
+    assert actions_by_view["settings"]["open_wifi_settings"]["destination"] == "wifi_setup_sheet"
+    assert actions_by_view["settings"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
+    assert actions_by_view["settings"]["open_display_settings"]["destination"] == "display_settings_sheet"
+    assert actions_by_view["settings"]["open_diagnostics"]["destination"] == "diagnostics_sheet"
+    assert actions_by_view["display_settings_sheet"]["close_display_settings"]["destination"] == "settings"
+    assert actions_by_view["diagnostics_sheet"]["close_diagnostics"]["destination"] == "settings"
     assert actions_by_view["packets"]["pause_packet_feed"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["packet_detail_sheet"]["toggle_packet_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
@@ -219,7 +228,7 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         assert report["touch_target_issue_count"] == 0, scenario
         assert report["flow_report"]["format_actions"] == [], scenario
         assert report["required_labels_missing"] == [], scenario
-        assert {"Settings", "Radio", "Advert", "Storage"} <= labels_by_view["settings"]
+        assert {"Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics"} <= labels_by_view["settings"]
         assert {
             "Storage Setup",
             "Backends",

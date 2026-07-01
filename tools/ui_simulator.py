@@ -701,6 +701,26 @@ def draw_chip(
         s.touch_target(title, box, kind="chip", action=action, destination=destination)
 
 
+def draw_settings_group(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    value: str,
+    detail: str,
+    color: tuple[int, int, int] = ACCENT,
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+):
+    x0, y0, x1, y1 = box
+    s.round_rect(box, SURFACE, BORDER, 8)
+    s.text(title, (x0 + 10, y0 + 6, x0 + 150, y0 + 25), 12, color, True)
+    s.text(value, (x0 + 150, y0 + 6, x1 - 10, y0 + 25), 13, TEXT, True, "right")
+    s.text(detail, (x0 + 10, y0 + 29, x1 - 10, y1 - 6), 11, MUTED)
+    if action or destination:
+        s.touch_target(title, box, kind="settings_group", action=action, destination=destination)
+
+
 def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
     x0, y0, x1, y1 = box
     s.rect(box, (248, 250, 252), (248, 250, 252))
@@ -1091,13 +1111,47 @@ def render_packets(s: Surface, snap: Snapshot):
 def render_settings(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Settings", (16, 64, 150, 92), 22, TEXT, True)
-    draw_metric(s, (16, 104, 464, 166), "Radio", snap.radio_profile, "TX 20 dBm, TCXO NONE", ACCENT)
-    draw_metric(s, (16, 176, 464, 238), "Identity", snap.node_name, snap.fingerprint, BLUE)
-    draw_metric(s, (16, 248, 464, 310), "Companion", "USB ready", "Wi-Fi off, BLE off, offline-first", GREEN)
-    draw_metric(s, (16, 320, 230, 394), "Storage", snap.storage_backend, snap.storage_detail, AMBER)
-    draw_button(s, (44, 356, 202, 386), "Storage", AMBER, action="open_storage_setup", destination="storage_setup_sheet")
-    draw_button(s, (250, 320, 354, 394), "Radio", ACCENT, action="open_radio_settings", destination="radio_settings_sheet")
-    draw_button(s, (364, 320, 464, 394), "Advert", ACCENT, action="open_advert_sheet", destination="advert_sheet")
+    s.text("About", (332, 66, 464, 84), 12, MUTED, True, "right")
+    s.text(snap.node_name, (250, 84, 464, 102), 11, MUTED, align="right")
+
+    draw_settings_group(s, (16, 104, 464, 158), "Wireless", "Wi-Fi off / BLE off", "USB companion ready, offline-first", GREEN)
+    draw_button(s, (328, 108, 390, 152), "Wi-Fi", GREEN, action="open_wifi_settings", destination="wifi_setup_sheet")
+    draw_button(s, (400, 108, 452, 152), "BLE", GREEN, action="open_ble_settings", destination="ble_setup_sheet")
+
+    draw_settings_group(s, (16, 166, 464, 220), "MeshCore", "US/CAN profile", "910.525 MHz, BW62.5, SF7, CR5", BLUE)
+    draw_button(s, (304, 170, 366, 214), "Radio", ACCENT, action="open_radio_settings", destination="radio_settings_sheet")
+    draw_button(s, (374, 170, 452, 214), "Advert", ACCENT, action="open_advert_sheet", destination="advert_sheet")
+
+    draw_settings_group(
+        s,
+        (16, 228, 464, 282),
+        "Storage",
+        snap.storage_backend,
+        snap.storage_detail,
+        AMBER,
+        action="open_storage_setup",
+        destination="storage_setup_sheet",
+    )
+    draw_settings_group(
+        s,
+        (16, 290, 464, 344),
+        "Display",
+        "Backlight / Night",
+        "Brightness, night mode, contrast, timeout",
+        GREEN,
+        action="open_display_settings",
+        destination="display_settings_sheet",
+    )
+    draw_settings_group(
+        s,
+        (16, 352, 464, 406),
+        "Diagnostics",
+        "Health / Crashlog",
+        "Heap, reset reason, exports, soak evidence",
+        VIOLET,
+        action="open_diagnostics",
+        destination="diagnostics_sheet",
+    )
     draw_dock(s, "Settings")
 
 
@@ -1283,6 +1337,35 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
     s.text(f"format {snap.storage_format_action}", (44, 328, 436, 350), 13, MUTED)
     s.text("No automatic format. Confirmation required before SD setup.", (44, 358, 436, 380), 12, AMBER)
+    draw_dock(s, "Settings")
+
+
+def render_display_settings_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Display", "Screen controls")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_display_settings", destination="settings")
+    s.text("Screen controls", (44, 154, 436, 178), 15, GREEN, True)
+    s.text("Brightness, night mode, contrast, and timeout belong here.", (44, 194, 436, 236), 13, TEXT)
+    s.text("Touch display controls are staged until backlight/runtime persistence is wired.", (44, 252, 436, 294), 13, AMBER)
+    draw_button(s, (44, 318, 160, 360), "Brightness", BLUE, action="display_brightness")
+    draw_button(s, (172, 318, 260, 360), "Night", BLUE, action="display_night")
+    draw_button(s, (272, 318, 386, 360), "Contrast", BLUE, action="display_contrast")
+    s.text("Timeout", (44, 374, 160, 402), 12, MUTED, True)
+    draw_dock(s, "Settings")
+
+
+def render_diagnostics_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Diagnostics", "Advanced health")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_diagnostics", destination="settings")
+    s.text("Health", (44, 154, 160, 174), 13, GREEN, True)
+    s.text("reset poweron  uptime 122s", (44, 178, 436, 200), 13, TEXT)
+    s.text("heap 184K free  min 169K  largest 80K", (44, 206, 436, 228), 12, MUTED)
+    s.text("LVGL heap backed  ui stack 3052 words", (44, 234, 436, 256), 12, MUTED)
+    s.text("packets rx 128 tx 34  rejected 0", (44, 262, 436, 284), 12, BLUE)
+    s.text("Crashlog  Exports  Serial", (44, 300, 436, 322), 13, TEXT, True)
+    s.text("Advanced details stay here so normal screens remain simple.", (44, 326, 436, 350), 12, AMBER)
+    draw_button(s, (44, 358, 156, 390), "Crashlog", AMBER, action="diagnostics_crashlog")
+    draw_button(s, (168, 358, 264, 390), "Export", BLUE, action="diagnostics_export")
+    draw_button(s, (276, 358, 362, 390), "Soak", GREEN, action="diagnostics_soak")
     draw_dock(s, "Settings")
 
 
@@ -1490,6 +1573,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
+    "display_settings_sheet": render_display_settings_sheet,
+    "diagnostics_sheet": render_diagnostics_sheet,
     "wifi_setup_sheet": render_wifi_setup_sheet,
     "ble_setup_sheet": render_ble_setup_sheet,
     "advert_sheet": render_advert_sheet,
@@ -1527,7 +1612,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
     "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
-    "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
+    "settings": ("Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics", "About"),
     "compose_sheet": ("Compose Public", "Public message", "20/138", "Send", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
@@ -1553,6 +1638,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "SD Card",
         "Backends",
         "No automatic format. Confirmation required before SD setup.",
+        "Close",
+    ),
+    "display_settings_sheet": (
+        "Display",
+        "Screen controls",
+        "Brightness",
+        "Night",
+        "Contrast",
+        "Timeout",
+        "Close",
+    ),
+    "diagnostics_sheet": (
+        "Diagnostics",
+        "Advanced health",
+        "Health",
+        "Crashlog",
+        "Export",
+        "Crashlog  Exports  Serial",
         "Close",
     ),
     "wifi_setup_sheet": (
@@ -1743,6 +1846,15 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "advert_sheet", "action": "send_advert_zero", "rf_tx": True},
             {"view": "advert_sheet", "action": "send_advert_flood", "rf_tx": True},
             {"view": "advert_sheet", "action": "close_advert_sheet", "destination": "settings"},
+        ),
+    },
+    {
+        "name": "settings_display_and_diagnostics",
+        "steps": (
+            {"view": "settings", "action": "open_display_settings", "destination": "display_settings_sheet"},
+            {"view": "display_settings_sheet", "action": "close_display_settings", "destination": "settings"},
+            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "diagnostics_sheet", "action": "close_diagnostics", "destination": "settings"},
         ),
     },
 )

@@ -51,6 +51,8 @@ static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_storage_sheet;
 static lv_obj_t *s_wifi_sheet;
 static lv_obj_t *s_ble_sheet;
+static lv_obj_t *s_display_sheet;
+static lv_obj_t *s_diagnostics_sheet;
 static lv_obj_t *s_map_location_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_contact_edit_sheet;
@@ -137,6 +139,8 @@ static void open_radio_settings_event_cb(lv_event_t *event);
 static void open_storage_sheet_event_cb(lv_event_t *event);
 static void open_wifi_sheet_event_cb(lv_event_t *event);
 static void open_ble_sheet_event_cb(lv_event_t *event);
+static void open_display_sheet_event_cb(lv_event_t *event);
+static void open_diagnostics_sheet_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -189,6 +193,8 @@ static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
 static void render_wifi_sheet(void);
 static void render_ble_sheet(void);
+static void render_display_sheet(void);
+static void render_diagnostics_sheet(void);
 static void render_map_location_sheet(void);
 static void create_contact_edit_sheet(lv_obj_t *screen);
 static void hide_node_detail_sheet(void);
@@ -629,6 +635,20 @@ static void hide_ble_sheet(void)
 {
     if (s_ble_sheet) {
         lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_display_sheet(void)
+{
+    if (s_display_sheet) {
+        lv_obj_add_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_diagnostics_sheet(void)
+{
+    if (s_diagnostics_sheet) {
+        lv_obj_add_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -3414,6 +3434,8 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_storage_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -3804,6 +3826,8 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_storage_sheet();
     hide_wifi_sheet();
     hide_ble_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -3845,20 +3869,21 @@ static void render_storage_sheet(void)
     lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
     lv_obj_set_width(state, 408);
     lv_obj_set_pos(state, 8, 48);
+    render_storage_line(s_storage_sheet, 70, &s_snapshot);
 
     lv_obj_t *card = create_label(s_storage_sheet, "", 0xE5EDF5);
     label_set_fmt(card, "card %s  mounted %s  root %s",
                   s_snapshot.storage_sd_present ? "present" : "absent",
                   s_snapshot.storage_sd_mounted ? "yes" : "no",
                   s_snapshot.storage_sd_data_root_ready ? "ready" : "pending");
-    lv_obj_set_pos(card, 8, 78);
+    lv_obj_set_pos(card, 8, 96);
 
     lv_obj_t *space = create_label(s_storage_sheet, "", 0x8EA0AE);
     label_set_fmt(space, "fs %s  free %luK / %luK",
                   s_snapshot.storage_sd_filesystem ? s_snapshot.storage_sd_filesystem : "unknown",
                   (unsigned long)s_snapshot.storage_free_kb,
                   (unsigned long)s_snapshot.storage_capacity_kb);
-    lv_obj_set_pos(space, 8, 106);
+    lv_obj_set_pos(space, 8, 124);
 
     lv_obj_t *backend = create_label(s_storage_sheet, "", 0x8EA0AE);
     label_set_fmt(backend, "messages %s  packets %s  routes %s",
@@ -3867,7 +3892,7 @@ static void render_storage_sheet(void)
                   s_snapshot.route_store_backend ? s_snapshot.route_store_backend : "nvs");
     lv_label_set_long_mode(backend, LV_LABEL_LONG_DOT);
     lv_obj_set_width(backend, 408);
-    lv_obj_set_pos(backend, 8, 134);
+    lv_obj_set_pos(backend, 8, 152);
 
     lv_obj_t *action = create_label(s_storage_sheet, "", 0xFBBF24);
     label_set_fmt(action, "setup %s  format %s",
@@ -3875,7 +3900,7 @@ static void render_storage_sheet(void)
                   s_snapshot.storage_format_action ? s_snapshot.storage_format_action : "not_available");
     lv_label_set_long_mode(action, LV_LABEL_LONG_DOT);
     lv_obj_set_width(action, 408);
-    lv_obj_set_pos(action, 8, 168);
+    lv_obj_set_pos(action, 8, 184);
 
     lv_obj_t *note = create_label(s_storage_sheet,
                                   s_snapshot.storage_note ? s_snapshot.storage_note :
@@ -3883,14 +3908,14 @@ static void render_storage_sheet(void)
                                   0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 408);
-    lv_obj_set_pos(note, 8, 202);
+    lv_obj_set_pos(note, 8, 216);
 
     lv_obj_t *safety = create_label(s_storage_sheet,
                                     "No automatic format. Formatting will require explicit confirmation.",
                                     0xFBBF24);
     lv_label_set_long_mode(safety, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(safety, 408);
-    lv_obj_set_pos(safety, 8, 260);
+    lv_obj_set_pos(safety, 8, 268);
 }
 
 static void open_storage_sheet_event_cb(lv_event_t *event)
@@ -3904,6 +3929,8 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_radio_settings_sheet();
     hide_wifi_sheet();
     hide_ble_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -3929,6 +3956,18 @@ static void close_ble_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_ble_sheet();
+}
+
+static void close_display_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_display_sheet();
+}
+
+static void close_diagnostics_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_diagnostics_sheet();
 }
 
 static void render_wifi_sheet(void)
@@ -4039,6 +4078,132 @@ static void render_ble_sheet(void)
     lv_obj_set_pos(note, 8, 264);
 }
 
+static void render_display_sheet(void)
+{
+    if (!s_display_sheet) {
+        return;
+    }
+    lv_obj_clean(s_display_sheet);
+
+    lv_obj_t *title = create_label(s_display_sheet, "Display", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_display_sheet, "Close", 340, 0, 76, 40,
+                  close_display_sheet_event_cb, NULL);
+
+    lv_obj_t *state = create_label(s_display_sheet, "Screen controls", 0x5EEAD4);
+    lv_obj_set_pos(state, 8, 54);
+    lv_obj_t *summary = create_label(s_display_sheet,
+                                     "Brightness, night mode, contrast, and timeout belong here.",
+                                     0xE5EDF5);
+    lv_label_set_long_mode(summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(summary, 408);
+    lv_obj_set_pos(summary, 8, 88);
+
+    lv_obj_t *brightness = create_button(s_display_sheet, "Brightness", 8, 144, 126, 44, NULL, NULL);
+    lv_obj_t *night = create_button(s_display_sheet, "Night", 144, 144, 86, 44, NULL, NULL);
+    lv_obj_t *contrast = create_button(s_display_sheet, "Contrast", 240, 144, 106, 44, NULL, NULL);
+    lv_obj_t *timeout = create_button(s_display_sheet, "Timeout", 8, 196, 126, 44, NULL, NULL);
+    if (brightness) {
+        lv_obj_add_state(brightness, LV_STATE_DISABLED);
+    }
+    if (night) {
+        lv_obj_add_state(night, LV_STATE_DISABLED);
+    }
+    if (contrast) {
+        lv_obj_add_state(contrast, LV_STATE_DISABLED);
+    }
+    if (timeout) {
+        lv_obj_add_state(timeout, LV_STATE_DISABLED);
+    }
+
+    lv_obj_t *note = create_label(s_display_sheet,
+                                  "Touch display controls are staged until backlight/runtime persistence is wired.",
+                                  0xFBBF24);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, 408);
+    lv_obj_set_pos(note, 8, 260);
+}
+
+static void render_diagnostics_sheet(void)
+{
+    if (!s_diagnostics_sheet) {
+        return;
+    }
+    d1l_app_model_snapshot(&s_snapshot);
+    lv_obj_clean(s_diagnostics_sheet);
+
+    lv_obj_t *title = create_label(s_diagnostics_sheet, "Diagnostics", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_diagnostics_sheet, "Close", 340, 0, 76, 40,
+                  close_diagnostics_sheet_event_cb, NULL);
+
+    lv_obj_t *health = create_label(s_diagnostics_sheet, "Health", 0x5EEAD4);
+    lv_obj_set_pos(health, 8, 50);
+    render_health_line(s_diagnostics_sheet, 76, &s_snapshot);
+
+    lv_obj_t *uptime = create_label(s_diagnostics_sheet, "", 0xE5EDF5);
+    label_set_fmt(uptime, "uptime %lus  mesh %s",
+                  (unsigned long)(s_snapshot.uptime_ms / 1000U),
+                  s_snapshot.mesh_state ? s_snapshot.mesh_state : "unknown");
+    label_set_dot_width(uptime, 408);
+    lv_obj_set_pos(uptime, 8, 104);
+
+    lv_obj_t *heap = create_label(s_diagnostics_sheet, "", 0x8EA0AE);
+    label_set_fmt(heap, "heap %luK free  min %luK  largest %luK",
+                  (unsigned long)(s_snapshot.heap_free / 1024U),
+                  (unsigned long)(s_snapshot.heap_min_free / 1024U),
+                  (unsigned long)(s_snapshot.heap_largest_free / 1024U));
+    label_set_dot_width(heap, 408);
+    lv_obj_set_pos(heap, 8, 132);
+
+    lv_obj_t *lvgl = create_label(s_diagnostics_sheet, "", 0x8EA0AE);
+    label_set_fmt(lvgl, "LVGL free %lu  largest %lu  used %u%%",
+                  (unsigned long)s_snapshot.lvgl_free_bytes,
+                  (unsigned long)s_snapshot.lvgl_largest_free_bytes,
+                  s_snapshot.lvgl_used_pct);
+    label_set_dot_width(lvgl, 408);
+    lv_obj_set_pos(lvgl, 8, 160);
+
+    lv_obj_t *stack = create_label(s_diagnostics_sheet, "", 0x8EA0AE);
+    label_set_fmt(stack, "ui stack %lu words  console stack %lu",
+                  (unsigned long)s_snapshot.ui_task_stack_free_words,
+                  (unsigned long)s_snapshot.current_task_stack_free_words);
+    label_set_dot_width(stack, 408);
+    lv_obj_set_pos(stack, 8, 188);
+
+    lv_obj_t *mesh = create_label(s_diagnostics_sheet, "", 0x93C5FD);
+    label_set_fmt(mesh, "packets rx %lu tx %lu  rejected %lu",
+                  (unsigned long)s_snapshot.rx_packets,
+                  (unsigned long)s_snapshot.tx_packets,
+                  (unsigned long)s_snapshot.rejected_commands);
+    label_set_dot_width(mesh, 408);
+    lv_obj_set_pos(mesh, 8, 216);
+
+    lv_obj_t *stores = create_label(s_diagnostics_sheet, "Crashlog  Exports  Serial", 0xF4F7FB);
+    lv_obj_set_pos(stores, 8, 246);
+    lv_obj_t *note = create_label(s_diagnostics_sheet,
+                                  "Advanced details stay here so normal screens remain simple.",
+                                  0xFBBF24);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, 408);
+    lv_obj_set_pos(note, 8, 268);
+
+    lv_obj_t *crashlog = create_button(s_diagnostics_sheet, "Crashlog", 8, 316, 112, 44, NULL, NULL);
+    lv_obj_t *export = create_button(s_diagnostics_sheet, "Export", 132, 316, 96, 44, NULL, NULL);
+    lv_obj_t *soak = create_button(s_diagnostics_sheet, "Soak", 240, 316, 86, 44, NULL, NULL);
+    if (crashlog) {
+        lv_obj_add_state(crashlog, LV_STATE_DISABLED);
+    }
+    if (export) {
+        lv_obj_add_state(export, LV_STATE_DISABLED);
+    }
+    if (soak) {
+        lv_obj_add_state(soak, LV_STATE_DISABLED);
+    }
+}
+
 static void open_wifi_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -4051,6 +4216,8 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
     hide_radio_settings_sheet();
     hide_storage_sheet();
     hide_ble_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -4078,6 +4245,8 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     hide_radio_settings_sheet();
     hide_storage_sheet();
     hide_wifi_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -4090,6 +4259,64 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     if (s_ble_sheet) {
         lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_ble_sheet);
+    }
+}
+
+static void open_display_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
+    hide_diagnostics_sheet();
+    hide_map_location_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_display_sheet();
+    if (s_display_sheet) {
+        lv_obj_clear_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_display_sheet);
+    }
+}
+
+static void open_diagnostics_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
+    hide_display_sheet();
+    hide_map_location_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_diagnostics_sheet();
+    if (s_diagnostics_sheet) {
+        lv_obj_clear_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_diagnostics_sheet);
     }
 }
 
@@ -4122,6 +4349,8 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_storage_sheet();
         hide_wifi_sheet();
         hide_ble_sheet();
+        hide_display_sheet();
+        hide_diagnostics_sheet();
         hide_map_location_sheet();
         hide_contact_detail_sheet();
         hide_contact_export_sheet();
@@ -4140,6 +4369,34 @@ static void close_sheet_event_cb(lv_event_t *event)
     hide_sheet();
 }
 
+static lv_obj_t *render_settings_row(lv_obj_t *parent, int y, const char *title,
+                                     const char *value, const char *detail,
+                                     uint32_t accent, lv_event_cb_t cb)
+{
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 70);
+    if (!row) {
+        return NULL;
+    }
+    lv_obj_set_style_pad_all(row, 10, 0);
+    if (cb) {
+        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    lv_obj_t *title_label = create_label(row, title, accent);
+    label_set_dot_width(title_label, 150);
+    lv_obj_set_pos(title_label, 0, 0);
+
+    lv_obj_t *value_label = create_label(row, value, 0xF4F7FB);
+    label_set_dot_width(value_label, 220);
+    lv_obj_set_pos(value_label, 172, 0);
+
+    lv_obj_t *detail_label = create_label(row, detail, 0x8EA0AE);
+    label_set_dot_width(detail_label, 392);
+    lv_obj_set_pos(detail_label, 0, 34);
+    return row;
+}
+
 static void render_settings(const d1l_app_snapshot_t *snapshot)
 {
     d1l_app_radio_profile_edit_t profile = {
@@ -4153,45 +4410,65 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     char profile_line[80];
     format_radio_profile_line(profile_line, sizeof(profile_line), &profile);
 
-    lv_obj_t *radio = create_panel(s_content, 18, 16, 424, 82);
-    create_label(radio, profile_line, 0xF4F7FB);
-    lv_obj_t *path = create_label(radio, "", 0x8EA0AE);
-    label_set_fmt(path, "TX %d dBm  RX boost %s  TCXO %s",
-                  snapshot->radio_tx_power_dbm,
-                  snapshot->radio_rx_boost ? "on" : "off",
-                  snapshot->radio_tcxo ? snapshot->radio_tcxo : "NONE");
-    lv_obj_align(path, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *title = create_label(s_content, "Settings", 0xF4F7FB);
+    obj_set_style_text_font_if(title, &lv_font_montserrat_24);
+    obj_set_pos_if(title, 18, 16);
 
-    lv_obj_t *identity = create_panel(s_content, 18, 114, 424, 82);
-    create_label(identity, snapshot->node_name, 0xF4F7FB);
-    lv_obj_t *id = create_label(identity, "", 0x8EA0AE);
-    label_set_fmt(id, "identity %.16s", snapshot->identity_fingerprint[0] ?
-                  snapshot->identity_fingerprint : "not generated");
-    lv_obj_align(id, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *wireless = create_panel(s_content, 18, 54, 424, 82);
+    if (wireless) {
+        create_label(wireless, "Wireless", 0x5EEAD4);
+        lv_obj_t *state = create_label(wireless, "", 0xF4F7FB);
+        label_set_fmt(state, "Wi-Fi %s  BLE %s",
+                      snapshot->wifi_state ? snapshot->wifi_state : "off",
+                      snapshot->ble_state ? snapshot->ble_state : "off");
+        label_set_dot_width(state, 260);
+        lv_obj_set_pos(state, 0, 28);
+        lv_obj_t *policy = create_label(wireless, "", 0x8EA0AE);
+        label_set_fmt(policy, "USB ready  %s",
+                      snapshot->coexistence_policy ? snapshot->coexistence_policy : "offline first");
+        label_set_dot_width(policy, 250);
+        lv_obj_set_pos(policy, 0, 54);
+        create_button(wireless, "Wi-Fi", 270, 4, 62, 44, open_wifi_sheet_event_cb, NULL);
+        create_button(wireless, "BLE", 340, 4, 52, 44, open_ble_sheet_event_cb, NULL);
+    }
 
-    lv_obj_t *companion = create_panel(s_content, 18, 212, 424, 104);
-    create_label(companion, "Companion", 0xF4F7FB);
-    lv_obj_t *wireless = create_label(companion, "", 0x8EA0AE);
-    label_set_fmt(wireless, "Wi-Fi %s  BLE %s",
-                  snapshot->wifi_state ? snapshot->wifi_state : "off",
-                  snapshot->ble_state ? snapshot->ble_state : "off");
-    lv_obj_set_pos(wireless, 0, 30);
-    lv_obj_t *policy = create_label(companion, "", 0x8EA0AE);
-    label_set_fmt(policy, "USB ready  %s",
-                  snapshot->coexistence_policy ? snapshot->coexistence_policy : "offline first");
-    lv_label_set_long_mode(policy, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(policy, 390);
-    lv_obj_set_pos(policy, 0, 54);
-    render_health_line(companion, 76, snapshot);
+    lv_obj_t *mesh = create_panel(s_content, 18, 150, 424, 92);
+    if (mesh) {
+        create_label(mesh, "MeshCore", 0x93C5FD);
+        lv_obj_t *mesh_profile = create_label(mesh, profile_line, 0xF4F7FB);
+        label_set_dot_width(mesh_profile, 260);
+        lv_obj_set_pos(mesh_profile, 0, 28);
+        lv_obj_t *rf = create_label(mesh, "", 0x8EA0AE);
+        label_set_fmt(rf, "TX %d dBm  RX boost %s  TCXO %s",
+                      snapshot->radio_tx_power_dbm,
+                      snapshot->radio_rx_boost ? "on" : "off",
+                      snapshot->radio_tcxo ? snapshot->radio_tcxo : "NONE");
+        label_set_dot_width(rf, 250);
+        lv_obj_set_pos(rf, 0, 56);
+        create_button(mesh, "Radio", 270, 0, 72, 44, open_radio_settings_event_cb, NULL);
+        create_button(mesh, "Advert", 270, 48, 90, 44, open_sheet_event_cb, NULL);
+    }
 
-    create_button(s_content, "Radio", 18, 332, 130, 48, open_radio_settings_event_cb, NULL);
-    create_button(s_content, "Advert", 160, 332, 130, 48, open_sheet_event_cb, NULL);
-    lv_obj_t *storage = create_panel(s_content, 302, 332, 140, 48);
-    lv_obj_set_style_pad_all(storage, 8, 0);
-    lv_obj_add_flag(storage, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(storage, open_storage_sheet_event_cb, LV_EVENT_CLICKED, NULL);
-    create_label(storage, "Storage", 0xF4F7FB);
-    render_storage_line(storage, 22, snapshot);
+    char storage_detail[96];
+    snprintf(storage_detail, sizeof(storage_detail), "SD %s  %s",
+             home_sd_state(snapshot),
+             snapshot->storage_note ? snapshot->storage_note : "onboard fallback");
+    render_settings_row(s_content, 256, "Storage",
+                        snapshot->storage_backend ? snapshot->storage_backend : "NVS fallback",
+                        storage_detail, 0xFBBF24, open_storage_sheet_event_cb);
+    render_settings_row(s_content, 340, "Display", "Backlight / Night",
+                        "Brightness, night mode, high contrast, timeout",
+                        0xA7F3D0, open_display_sheet_event_cb);
+    render_settings_row(s_content, 424, "Diagnostics", "Health / Crashlog",
+                        "Heap, reset reason, exports, soak evidence",
+                        0xC4B5FD, open_diagnostics_sheet_event_cb);
+
+    char about_detail[96];
+    snprintf(about_detail, sizeof(about_detail), "Identity %.16s",
+             snapshot->identity_fingerprint[0] ? snapshot->identity_fingerprint : "not generated");
+    render_settings_row(s_content, 508, "About",
+                        snapshot->node_name[0] ? snapshot->node_name : "MeshCore DeskOS D1L",
+                        about_detail, 0x8EA0AE, NULL);
 }
 
 static void render_active_tab(void)
@@ -4284,6 +4561,8 @@ static void process_pending_tab_switch(void)
     hide_storage_sheet();
     hide_wifi_sheet();
     hide_ble_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -4653,6 +4932,40 @@ static void create_ble_sheet(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_ble_sheet, 12, 0);
     lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_display_sheet(lv_obj_t *screen)
+{
+    s_display_sheet = create_object(screen, "display settings sheet");
+    if (!s_display_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_display_sheet, 448, 320);
+    lv_obj_set_pos(s_display_sheet, 16, 82);
+    lv_obj_set_style_radius(s_display_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_display_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_display_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_display_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_display_sheet, 12, 0);
+    lv_obj_clear_flag(s_display_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_diagnostics_sheet(lv_obj_t *screen)
+{
+    s_diagnostics_sheet = create_object(screen, "diagnostics sheet");
+    if (!s_diagnostics_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_diagnostics_sheet, 448, 320);
+    lv_obj_set_pos(s_diagnostics_sheet, 16, 82);
+    lv_obj_set_style_radius(s_diagnostics_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_diagnostics_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_diagnostics_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_diagnostics_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_diagnostics_sheet, 12, 0);
+    lv_obj_set_scrollbar_mode(s_diagnostics_sheet, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_map_location_sheet(lv_obj_t *screen)
@@ -5079,6 +5392,8 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_storage_sheet(s_screen);
     create_wifi_sheet(s_screen);
     create_ble_sheet(s_screen);
+    create_display_sheet(s_screen);
+    create_diagnostics_sheet(s_screen);
     create_map_location_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_contact_export_sheet(s_screen);

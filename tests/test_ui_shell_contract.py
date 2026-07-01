@@ -257,6 +257,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
         "save_radio_profile": "radio_save_event_cb",
         "open_storage_setup": "open_storage_sheet_event_cb",
+        "open_display_settings": "open_display_sheet_event_cb",
+        "open_diagnostics": "open_diagnostics_sheet_event_cb",
         "open_advert_sheet": "open_sheet_event_cb",
         "send_advert_zero": "advert_zero_event_cb",
         "send_advert_flood": "advert_flood_event_cb",
@@ -609,21 +611,35 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_state" in header
     assert "ble_state" in header
     assert "coexistence_policy" in header
-    assert '"Companion"' in source
+    assert '"Wireless"' in source
+    assert '"MeshCore"' in source
+    assert '"About"' in source
     assert '"Wi-Fi %s  BLE %s"' in source
     assert '"USB ready  %s"' in source
     assert "static lv_obj_t *s_wifi_sheet" in source
     assert "static lv_obj_t *s_ble_sheet" in source
+    assert "static lv_obj_t *s_display_sheet" in source
+    assert "static lv_obj_t *s_diagnostics_sheet" in source
     assert "create_wifi_sheet" in source
     assert "create_ble_sheet" in source
+    assert "create_display_sheet" in source
+    assert "create_diagnostics_sheet" in source
     assert "render_wifi_sheet" in source
     assert "render_ble_sheet" in source
+    assert "render_display_sheet" in source
+    assert "render_diagnostics_sheet" in source
     assert "open_wifi_sheet_event_cb" in source
     assert "open_ble_sheet_event_cb" in source
+    assert "open_display_sheet_event_cb" in source
+    assert "open_diagnostics_sheet_event_cb" in source
     assert '"Wi-Fi Setup"' in source
     assert '"BLE Setup"' in source
+    assert '"Display"' in source
+    assert '"Diagnostics"' in source
     assert '"Network scan/connect/save is not enabled in this build yet."' in source
     assert '"Enable/disable and pairing controls are pending runtime support."' in source
+    assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in source
+    assert '"Advanced details stay here so normal screens remain simple."' in source
     assert "render_health_line" in source
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in source
 
@@ -642,7 +658,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_defaults_event_cb" in source
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" in source
-    assert 'create_button(s_content, "Radio"' in source
+    assert 'create_button(mesh, "Radio"' in source
     assert '"Radio Settings"' in source
     assert '"Saved profile applies after reboot; live RF unchanged"' in source
     assert '"US/CAN"' in source

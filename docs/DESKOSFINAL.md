@@ -1174,7 +1174,15 @@ Final package must include:
 - [x] Increase/measure UI task stack.
 - [x] Add allocation guards to all LVGL object creation.
 - [x] Replace fixed non-scrollable `s_content` with per-screen scroll roots.
-- [ ] Verify `Msg`, `Nodes`, `Pkts` no longer crash.
+- [x] Verify `Msg`, `Nodes`, `Pkts` no longer crash.
+
+2026-07-01 COM12 evidence after the Actions-built `86e5e0e` package:
+`artifacts/hardware/com12/smoke_86e5e0e.json` passed with board/UI ready,
+`artifacts/hardware/com12/ui_tab_abuse_86e5e0e.json` passed 100 cycles across
+`home,messages,nodes,map,packets,settings` with `failure_count=0` and no
+crashlog entries, and `artifacts/hardware/com12/scroll_probe_86e5e0e.json`
+passed `messages,nodes,packets,settings,map` with no failures or crashlog
+entries.
 
 ### Home
 
@@ -1216,6 +1224,13 @@ Final package must include:
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
+Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_86e5e0e.json`
+used the operator-approved guarded unformatted-card confirmation path, reported
+`format_allowed=true`, `public_rf_tx=false`, and `formats_sd=false`, but ended
+`classification=format_confirmed_not_ready` because the RP2040 bridge returned
+`ESP_ERR_NOT_FOUND` with `no SD card is reported by the RP2040 bridge; no format
+was performed`. Full SD auto-prepare and retained-history proof remain open.
+
 ### Map
 
 - [x] First-open location picker.
@@ -1238,13 +1253,13 @@ Final package must include:
 
 ### Settings
 
-- [ ] Plain-language settings groups.
+- [x] Plain-language settings groups.
 - [ ] Wi-Fi scan/connect/save/clear.
 - [ ] BLE support state/enable flow.
 - [ ] Time sync.
 - [ ] Display settings.
-- [ ] Friendly storage setup.
-- [ ] Advanced diagnostics.
+- [x] Friendly storage setup.
+- [x] Advanced diagnostics.
 
 ---
 
