@@ -60,9 +60,13 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     views = {view["name"]: view for view in report["views"]}
     messages = views["messages"]["metrics"]
     assert messages["public_source_count"] == 48
-    assert messages["public_rendered_count"] <= 4
+    assert messages["public_rendered_count"] <= 5
     assert messages["dm_source_count"] == 32
-    assert messages["dm_rendered_count"] <= 3
+    assert messages["dm_rendered_count"] == 0
+    messages_dm = views["messages_dm"]["metrics"]
+    assert messages_dm["messages_mode"] == "dms"
+    assert messages_dm["dm_source_count"] == 32
+    assert messages_dm["dm_rendered_count"] <= 5
 
     nodes = views["nodes"]["metrics"]
     assert nodes["contacts_source_count"] == 18
@@ -86,7 +90,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
 
     assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
-    assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
+    assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
+    assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
     assert {"Map", "Set Pin", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
@@ -152,8 +157,11 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     } <= flow_names
 
     assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
+    assert actions_by_view["messages"]["open_messages_public"]["destination"] == "messages"
+    assert actions_by_view["messages"]["open_messages_dm"]["destination"] == "messages_dm"
     assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
     assert actions_by_view["messages"]["open_message_detail"]["destination"] == "message_detail_sheet"
+    assert actions_by_view["messages_dm"]["open_dm_thread"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"

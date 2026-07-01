@@ -9,6 +9,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
+- Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
 - Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.

@@ -1178,24 +1178,24 @@ Final package must include:
 
 ### Home
 
-- [ ] Add time state to app snapshot.
-- [ ] Add Wi-Fi/BLE/SD status chips.
+- [x] Add time state to app snapshot.
+- [x] Add Wi-Fi/BLE/SD status chips.
 - [ ] Add tappable chips routing to setup sheets.
-- [ ] Add unread Public/DM cards.
-- [ ] Add last 5 message previews.
-- [ ] Add local repeater panel.
-- [ ] Remove developer metrics from normal Home.
+- [x] Add unread Public/DM cards.
+- [x] Add last 5 message previews.
+- [x] Add local repeater panel.
+- [x] Remove developer metrics from normal Home.
 
 ### Messages
 
 - [x] Change max message length to 138 chars.
 - [x] Update Public/DM stores and serialization.
-- [ ] Build default Public channel screen.
-- [ ] Build compose bar/sheet with keyboard and visible Send.
+- [x] Build default Public channel screen.
+- [x] Build compose bar/sheet with keyboard and visible Send.
 - [x] Add char counter.
 - [x] Add reply-from-message tap behavior.
 - [x] Add message detail with sender/path.
-- [ ] Add DM conversation list and thread.
+- [x] Add DM conversation list and thread.
 
 ### Nodes
 

@@ -67,7 +67,8 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "static lv_obj_t *s_compose_counter" in ui
     assert "update_compose_counter()" in ui
     assert "LV_EVENT_VALUE_CHANGED" in ui
-    assert "No stored messages" in ui
+    assert "No Public messages" in ui
+    assert "No direct messages" in ui
     assert "static lv_obj_t *s_public_history_sheet" in ui
     assert "static lv_obj_t *s_public_search_sheet" in ui
     assert "d1l_app_model_query_public_messages(s_public_history_entries" in ui

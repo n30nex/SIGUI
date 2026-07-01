@@ -105,4 +105,4 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in ui
     assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in ui
     assert '"DM"' in ui
-    assert "No stored messages" in ui
+    assert "No direct messages" in ui

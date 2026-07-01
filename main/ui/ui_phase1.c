@@ -71,6 +71,7 @@ static lv_obj_t *s_onboarding_keyboard;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
+static bool s_messages_show_dms;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_picker_lat_e7 = 436532000L;
@@ -111,6 +112,8 @@ static void render_node_detail_sheet(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
+static void open_messages_public_event_cb(lv_event_t *event);
+static void open_messages_dm_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
@@ -973,8 +976,7 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                                                snapshot->public_unread_count ? 0xFBBF24 : 0x5EEAD4);
     if (public_card) {
         lv_obj_add_flag(public_card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(public_card, request_tab_event_cb, LV_EVENT_CLICKED,
-                            (void *)(uintptr_t)D1L_UI_TAB_MESSAGES);
+        lv_obj_add_event_cb(public_card, open_messages_public_event_cb, LV_EVENT_CLICKED, NULL);
     }
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
@@ -983,8 +985,7 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                                            snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0);
     if (dm_card) {
         lv_obj_add_flag(dm_card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(dm_card, request_tab_event_cb, LV_EVENT_CLICKED,
-                            (void *)(uintptr_t)D1L_UI_TAB_MESSAGES);
+        lv_obj_add_event_cb(dm_card, open_messages_dm_event_cb, LV_EVENT_CLICKED, NULL);
     }
 
     lv_obj_t *messages_title = create_label(s_content, "Last Messages", 0xF4F7FB);
@@ -2860,6 +2861,29 @@ static void open_dm_thread_event_cb(lv_event_t *event)
                        entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint);
 }
 
+static void set_messages_mode(bool show_dms)
+{
+    s_messages_show_dms = show_dms;
+    if (s_active_tab == D1L_UI_TAB_MESSAGES) {
+        render_active_tab();
+        return;
+    }
+    s_pending_tab = D1L_UI_TAB_MESSAGES;
+    s_tab_switch_pending = true;
+}
+
+static void open_messages_public_event_cb(lv_event_t *event)
+{
+    (void)event;
+    set_messages_mode(false);
+}
+
+static void open_messages_dm_event_cb(lv_event_t *event)
+{
+    (void)event;
+    set_messages_mode(true);
+}
+
 static void render_messages(const d1l_app_snapshot_t *snapshot)
 {
     lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
@@ -2883,28 +2907,33 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     create_button(header, "History", 292, 10, 76, 44, open_public_history_event_cb, NULL);
     create_button(header, "Test", 376, 10, 48, 44, public_test_event_cb, NULL);
 
-    int y = 98;
-    if (snapshot->recent_message_count > 0) {
-        lv_obj_t *public_label = create_label(s_content, "Public", 0x8EA0AE);
-        lv_obj_set_pos(public_label, 26, y);
-        y += 22;
-    }
-    for (size_t i = 0; i < snapshot->recent_message_count && y <= 188; ++i) {
-        render_message_row(s_content, y, &snapshot->recent_messages[i]);
-        y += 60;
-    }
-    if (snapshot->recent_dm_count > 0) {
-        lv_obj_t *dm_label = create_label(s_content, "DM", 0x8EA0AE);
-        lv_obj_set_pos(dm_label, 26, y + 2);
-        y += 26;
-    }
-    for (size_t i = 0; i < snapshot->recent_dm_count && y <= 302; ++i) {
-        render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
-        y += 60;
-    }
-    if (snapshot->recent_message_count == 0 && snapshot->recent_dm_count == 0) {
-        lv_obj_t *empty = create_label(s_content, "No stored messages", 0x8EA0AE);
-        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 130);
+    create_button(s_content, "Public", 18, 98, 96, 40, open_messages_public_event_cb, NULL);
+    create_button(s_content, "DMs", 122, 98, 80, 40, open_messages_dm_event_cb, NULL);
+
+    lv_obj_t *mode_label = create_label(s_content,
+                                        s_messages_show_dms ? "DM Conversations" : "Public Channel",
+                                        s_messages_show_dms ? 0xA7F3D0 : 0x5EEAD4);
+    lv_obj_set_pos(mode_label, 26, 150);
+
+    int y = 180;
+    if (s_messages_show_dms) {
+        for (size_t i = 0; i < snapshot->recent_dm_count && y <= 350; ++i) {
+            render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
+            y += 60;
+        }
+        if (snapshot->recent_dm_count == 0) {
+            lv_obj_t *empty = create_label(s_content, "No direct messages", 0x8EA0AE);
+            lv_obj_set_pos(empty, 26, y);
+        }
+    } else {
+        for (size_t i = 0; i < snapshot->recent_message_count && y <= 350; ++i) {
+            render_message_row(s_content, y, &snapshot->recent_messages[i]);
+            y += 60;
+        }
+        if (snapshot->recent_message_count == 0) {
+            lv_obj_t *empty = create_label(s_content, "No Public messages", 0x8EA0AE);
+            lv_obj_set_pos(empty, 26, y);
+        }
     }
 }
 

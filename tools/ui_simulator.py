@@ -799,23 +799,33 @@ def render_home(s: Surface, snap: Snapshot):
     draw_dock(s, "Home")
 
 
-def render_messages(s: Surface, snap: Snapshot):
+def render_messages_mode(s: Surface, snap: Snapshot, *, show_dms: bool = False):
     draw_top_bar(s, snap)
     s.text("Messages", (16, 64, 150, 92), 22, TEXT, True)
     draw_button(s, (172, 64, 226, 100), "Read", GREEN, action="mark_messages_read")
     draw_button(s, (234, 64, 316, 100), "Compose", ACCENT, action="open_public_compose", destination="compose_sheet")
     draw_button(s, (324, 64, 400, 100), "History", BLUE, action="open_public_history", destination="public_history_sheet")
     draw_button(s, (408, 64, 464, 100), "Test", AMBER, action="send_public_test", public_rf_tx=True)
-    s.round_rect((16, 112, 464, 258))
-    s.text("Public", (28, 120, 150, 142), 14, MUTED, True)
-    y = 148
+    draw_button(s, (16, 112, 126, 150), "Public", GREEN if not show_dms else MUTED, action="open_messages_public", destination="messages")
+    draw_button(s, (138, 112, 236, 150), "DMs", GREEN if show_dms else MUTED, action="open_messages_dm", destination="messages_dm")
+    if show_dms:
+        render_messages_dm_list(s, snap)
+    else:
+        render_messages_public_list(s, snap)
+    draw_dock(s, "Messages")
+
+
+def render_messages_public_list(s: Surface, snap: Snapshot):
+    s.round_rect((16, 162, 464, 402))
+    s.text("Public Channel", (28, 170, 210, 192), 14, MUTED, True)
+    y = 198
     public_rendered = 0
     for msg in snap.public_messages:
-        if y + 30 > 252:
+        if y + 34 > 396:
             break
         draw_row(
             s,
-            (28, y, 452, y + 30),
+            (28, y, 452, y + 34),
             f"{msg.source}: {msg.text}",
             msg.meta,
             "new" if msg.unread else None,
@@ -823,11 +833,23 @@ def render_messages(s: Surface, snap: Snapshot):
             action="open_message_detail",
             destination="message_detail_sheet",
         )
-        y += 34
+        y += 38
         public_rendered += 1
-    s.round_rect((16, 270, 464, 402))
-    s.text("Direct", (28, 278, 150, 300), 14, MUTED, True)
-    y = 306
+    s.metrics.update(
+        {
+            "messages_mode": "public",
+            "public_source_count": len(snap.public_messages),
+            "public_rendered_count": public_rendered,
+            "dm_source_count": len(snap.dm_messages),
+            "dm_rendered_count": 0,
+        }
+    )
+
+
+def render_messages_dm_list(s: Surface, snap: Snapshot):
+    s.round_rect((16, 162, 464, 402))
+    s.text("DM Conversations", (28, 170, 230, 192), 14, MUTED, True)
+    y = 198
     dm_rendered = 0
     for msg in snap.dm_messages:
         if y + 34 > 396:
@@ -846,13 +868,21 @@ def render_messages(s: Surface, snap: Snapshot):
         dm_rendered += 1
     s.metrics.update(
         {
+            "messages_mode": "dms",
             "public_source_count": len(snap.public_messages),
-            "public_rendered_count": public_rendered,
+            "public_rendered_count": 0,
             "dm_source_count": len(snap.dm_messages),
             "dm_rendered_count": dm_rendered,
         }
     )
-    draw_dock(s, "Messages")
+
+
+def render_messages(s: Surface, snap: Snapshot):
+    render_messages_mode(s, snap, show_dms=False)
+
+
+def render_messages_dm(s: Surface, snap: Snapshot):
+    render_messages_mode(s, snap, show_dms=True)
 
 
 def render_nodes(s: Surface, snap: Snapshot):
@@ -1414,6 +1444,7 @@ def render_onboarding_sheet(s: Surface, snap: Snapshot):
 RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "home": render_home,
     "messages": render_messages,
+    "messages_dm": render_messages_dm,
     "nodes": render_nodes,
     "map": render_map,
     "map_location_sheet": render_map_location_sheet,
@@ -1453,7 +1484,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Last Messages",
         "Local Repeaters",
     ),
-    "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
+    "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"),
+    "messages_dm": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "DM Conversations"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"),
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
     "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
@@ -1537,6 +1569,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "public_history_search",
         "steps": (
             {"view": "messages", "action": "mark_messages_read"},
+            {"view": "messages", "action": "open_messages_public", "destination": "messages"},
             {"view": "messages", "action": "open_public_history", "destination": "public_history_sheet"},
             {"view": "public_history_sheet", "action": "open_public_search", "destination": "public_search_sheet"},
             {"view": "public_search_sheet", "action": "edit_public_search"},
@@ -1560,7 +1593,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "dm_thread_read_and_reply",
         "steps": (
-            {"view": "messages", "action": "open_dm_thread", "destination": "dm_thread_sheet"},
+            {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
+            {"view": "messages_dm", "action": "open_dm_thread", "destination": "dm_thread_sheet"},
             {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
             {"view": "dm_thread_sheet", "action": "mark_dm_thread_read"},
             {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages"},

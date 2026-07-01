@@ -121,6 +121,8 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "snapshot->dm_unread_count" in source
     assert "snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW" in source
     assert "snapshot->home_repeater_count && i < D1L_HOME_REPEATER_PREVIEW" in source
+    assert "open_messages_public_event_cb" in source
+    assert "open_messages_dm_event_cb" in source
     assert "open_home_dm_preview_event_cb" in source
     assert "request_tab_event_cb" in source
     assert "open_storage_sheet_event_cb" in source
@@ -218,6 +220,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "edit_public_message": "s_compose_textarea",
         "send_public_text": "send_compose_text",
         "mark_messages_read": "mark_messages_read_event_cb",
+        "open_messages_public": "open_messages_public_event_cb",
+        "open_messages_dm": "open_messages_dm_event_cb",
         "open_public_history": "open_public_history_event_cb",
         "open_public_search": "open_public_search_event_cb",
         "open_message_detail": "open_message_detail_event_cb",
@@ -456,8 +460,13 @@ def test_messages_screen_renders_bounded_preview_rows():
     header = read("main/app/app_model.h")
     assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
     assert "#define D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
-    assert "i < snapshot->recent_message_count && y <= 188" in source
-    assert "i < snapshot->recent_dm_count && y <= 302" in source
+    assert "static bool s_messages_show_dms" in source
+    assert "set_messages_mode(false)" in source
+    assert "set_messages_mode(true)" in source
+    assert '"Public Channel"' in source
+    assert '"DM Conversations"' in source
+    assert "i < snapshot->recent_message_count && y <= 350" in source
+    assert "i < snapshot->recent_dm_count && y <= 350" in source
     assert "snapshot->message_count" in source
     assert "snapshot->dm_count" in source
     assert "snapshot->public_unread_count" in source
