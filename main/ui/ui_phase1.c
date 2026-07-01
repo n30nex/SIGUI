@@ -79,8 +79,6 @@ static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
 static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY];
-static bool s_tab_switch_pending = false;
-static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
@@ -142,6 +140,8 @@ typedef enum {
 } d1l_radio_edit_action_t;
 
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
+static bool s_tab_switch_pending = false;
+static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 
 static void render_dm_thread_sheet(void);

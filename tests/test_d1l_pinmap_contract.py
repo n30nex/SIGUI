@@ -78,6 +78,7 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     assert "xTaskCreatePinnedToCore(ui_task" in ui_source
     assert "s_tab_switch_pending = true;" in ui_source
     assert "process_pending_tab_switch();" in ui_source
+    assert ui_source.index("typedef enum {\n    D1L_UI_TAB_HOME") < ui_source.index("static d1l_ui_tab_t s_pending_tab")
     assert "sample.pressed" in ui_source
     assert "data->state = LV_INDEV_STATE_REL;" in ui_source
     assert "touch_sample_has_valid_point(&sample)" in ui_source
