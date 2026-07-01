@@ -1233,6 +1233,7 @@ void send_format_result(const char *phrase) {
 
     SdSnapshot formatted = format_card();
     (void)cache_status(formatted);
+    reply_stream->println();
     send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
 }
 

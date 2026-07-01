@@ -81,7 +81,7 @@
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
 - [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `8150b7b` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
-- [ ] Flash the next verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; latest copied-candidate evidence `artifacts/hardware/com12/rp2040_uf2_volumes_8150b7b_after_esp32_flash.json` reports `candidate_volumes=[]`, and the current follow-up patch must be built by GitHub Actions before the next copy attempt.
+- [ ] Flash the next verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; current COM12 evidence `artifacts/hardware/com12/rp2040_preflight_736ccfc_after_format_timeout_settle.json` reports `ready_for_sd_acceptance=false`, and the current follow-up patch must be built by GitHub Actions before the next copy/format attempt.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
@@ -122,7 +122,7 @@
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
 - [x] Evidence-based release gate audit script added and uploaded by CI; current local audit reports `ready_for_public_release=false` until all P0 evidence is present.
-- [x] COM12 smoke captured for `8150b7b` after flashing the verified Actions package from run `28551321662`; follow-up SD guarded format timed out before the file-operation gate became ready.
+- [x] COM12 smoke captured for `736ccfc` after flashing the verified Actions package from run `28553272721`; follow-up SD guarded format timed out before the file-operation gate became ready.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit.
 - [ ] Physical screen photos captured.
 - [ ] Final full-duration soak evidence added.

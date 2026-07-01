@@ -244,6 +244,9 @@ def test_storage_edge_scenarios_and_constants_match_c_contract():
     assert PING_REQUEST in rp2040_sketch
     assert FORMAT_REQUEST in rp2040_sketch
     assert FORMAT_CONFIRMATION in rp2040_sketch
+    assert "FatFormatter fat_formatter;" in rp2040_sketch
+    assert "fat_formatter.format(card, sector_buffer, reply_stream)" in rp2040_sketch
+    assert "reply_stream->println();\n    send_snapshot(*reply_stream, FORMAT_REPLY, formatted);" in rp2040_sketch
     for field in STATUS_FIELDS:
         assert f"{field}=" in rp2040_sketch
     for field in FILE_CAPABILITY_FIELDS:

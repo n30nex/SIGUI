@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from scripts import sd_boot_prepare_acceptance_d1l as boot_accept
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class FakeSerial:
@@ -138,6 +142,12 @@ def test_confirmed_format_uses_extended_timeout(monkeypatch):
     boot_accept.send_with_timeout(object(), "storage setup confirm FORMAT-DESKOS-SD", 5.0)
 
     assert calls == [("storage setup confirm FORMAT-DESKOS-SD", 660.0)]
+
+
+def test_firmware_format_timeout_matches_acceptance_window():
+    header = (ROOT / "main/storage/storage_status.h").read_text(encoding="utf-8")
+
+    assert "#define D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 660000U" in header
 
 
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
