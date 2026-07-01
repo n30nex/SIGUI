@@ -14,6 +14,7 @@
 
 static d1l_settings_t s_current;
 static bool s_loaded;
+static uint32_t s_mesh_timestamp_last = D1L_SETTINGS_MESH_TIMESTAMP_BASE;
 
 typedef struct {
     uint32_t schema_version;
@@ -63,6 +64,23 @@ typedef struct {
 static uint16_t bandwidth_to_tenths(float khz)
 {
     return (uint16_t)((khz * 10.0f) + 0.5f);
+}
+
+static bool mesh_timestamp_can_fallback(esp_err_t ret)
+{
+    return ret == ESP_ERR_NVS_NOT_ENOUGH_SPACE || ret == ESP_ERR_NVS_NO_FREE_PAGES;
+}
+
+static uint32_t next_ram_mesh_timestamp(uint32_t candidate)
+{
+    if (candidate <= s_mesh_timestamp_last && s_mesh_timestamp_last < UINT32_MAX) {
+        candidate = s_mesh_timestamp_last + 1U;
+    }
+    if (candidate < D1L_SETTINGS_MESH_TIMESTAMP_BASE) {
+        candidate = D1L_SETTINGS_MESH_TIMESTAMP_BASE + 1U;
+    }
+    s_mesh_timestamp_last = candidate;
+    return candidate;
 }
 
 void d1l_settings_defaults(d1l_settings_t *settings)
@@ -377,6 +395,10 @@ esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_SETTINGS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        if (mesh_timestamp_can_fallback(ret)) {
+            *timestamp = next_ram_mesh_timestamp(D1L_SETTINGS_MESH_TIMESTAMP_BASE + 1U);
+            return ESP_OK;
+        }
         return ret;
     }
 
@@ -392,6 +414,9 @@ esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)
     }
 
     if (ret == ESP_OK) {
+        next = next_ram_mesh_timestamp(next);
+    }
+    if (ret == ESP_OK) {
         ret = nvs_set_u32(handle, D1L_SETTINGS_MESH_TIMESTAMP_KEY, next);
     }
     if (ret == ESP_OK) {
@@ -399,6 +424,10 @@ esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)
     }
     nvs_close(handle);
 
+    if (mesh_timestamp_can_fallback(ret)) {
+        *timestamp = next;
+        return ESP_OK;
+    }
     if (ret == ESP_OK) {
         *timestamp = next;
     }

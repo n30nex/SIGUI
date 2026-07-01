@@ -121,7 +121,7 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; current local audit reports `ready_for_public_release=false` until all P0 evidence is present.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is commit-strict so stale tab/scroll/DM/SD/RF/manual/soak artifacts cannot pass a final release audit, and current local audit reports `ready_for_public_release=false` until all P0 evidence is present.
 - [x] COM12 smoke captured for `736ccfc` after flashing the verified Actions package from run `28553272721`; follow-up SD guarded format timed out before the file-operation gate became ready.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit.
 - [ ] Physical screen photos captured.

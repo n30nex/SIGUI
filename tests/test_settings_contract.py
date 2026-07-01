@@ -36,6 +36,11 @@ def test_settings_model_defaults_and_nvs_contract():
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
     assert 'D1L_SETTINGS_KEY "settings"' in source
     assert 'D1L_SETTINGS_MESH_TIMESTAMP_KEY "mesh_ts"' in source
+    assert "static uint32_t s_mesh_timestamp_last" in source
+    assert "mesh_timestamp_can_fallback" in source
+    assert "ESP_ERR_NVS_NOT_ENOUGH_SPACE" in source
+    assert "ESP_ERR_NVS_NO_FREE_PAGES" in source
+    assert "*timestamp = next_ram_mesh_timestamp" in source
     assert 'snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk")' in source
     assert "settings->wifi_enabled = false" in source
     assert "settings->ble_companion_enabled = false" in source

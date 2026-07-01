@@ -156,7 +156,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
     write_core_evidence(tmp_path)
     write_json(
-        tmp_path / "artifacts" / "soak" / "d1l-12h-soak.json",
+        tmp_path / "artifacts" / "soak" / "d1l-12h-soak_68350bf.json",
         {
             "ok": True,
             "mode": "hardware",
@@ -175,6 +175,22 @@ def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp
     gates = gate_by_id(report)
 
     assert gates["full_duration_idle_soak"]["ok"] is True
+
+
+def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    write_json(
+        hardware / "ui_tab_abuse_deadbee.json",
+        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0},
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_tab_abuse"]["ok"] is False
+    assert gates["ui_tab_abuse"]["details"]["path_found"] is False
 
 
 def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):

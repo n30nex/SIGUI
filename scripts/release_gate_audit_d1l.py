@@ -93,6 +93,44 @@ def commit_file(root: Path, commit: str | None, *patterns: str) -> Path | None:
     return newest_file(root, *commit_patterns)
 
 
+def artifact_commit_matches(path: Path, data: dict, commit: str | None) -> bool:
+    if not commit:
+        return True
+    full = commit.lower()
+    short = full[:7]
+    if short in path.name.lower() or full in path.name.lower():
+        return True
+
+    values: list[Any] = [
+        data.get("commit"),
+        data.get("head_sha"),
+        data.get("headSha"),
+        data.get("head_sha256"),
+    ]
+    git = data.get("git") if isinstance(data.get("git"), dict) else {}
+    values.extend([git.get("commit"), git.get("head_sha"), git.get("headSha")])
+    artifact = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
+    values.extend([artifact.get("commit"), artifact.get("head_sha"), artifact.get("headSha")])
+
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        lowered = value.lower()
+        if lowered == full or lowered.startswith(short):
+            return True
+    return False
+
+
+def newest_commit_json(root: Path, commit: str | None, *patterns: str) -> Path | None:
+    files: list[Path] = []
+    for pattern in patterns:
+        files.extend(path for path in root.glob(pattern) if path.is_file())
+    for candidate in sorted(set(files), key=lambda path: path.stat().st_mtime, reverse=True):
+        if artifact_commit_matches(candidate, read_json(candidate), commit):
+            return candidate
+    return None
+
+
 def find_release_package(github_run_dir: Path | None) -> Path | None:
     if not github_run_dir:
         return None
@@ -253,8 +291,11 @@ def full_soak_ok(data: dict) -> bool:
     )
 
 
-def full_soak_gate(soak_root: Path, root: Path) -> GateResult:
-    candidates = sorted(soak_root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+def full_soak_gate(soak_root: Path, root: Path, commit: str | None) -> GateResult:
+    candidates = [
+        path for path in sorted(soak_root.glob("*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+        if artifact_commit_matches(path, read_json(path), commit)
+    ]
     for candidate in candidates:
         data = read_json(candidate)
         if full_soak_ok(data):
@@ -280,8 +321,8 @@ def full_soak_gate(soak_root: Path, root: Path) -> GateResult:
     )
 
 
-def manual_evidence_gate(hardware_dir: Path, root: Path) -> GateResult:
-    review = newest_file(hardware_dir, "manual_touch_review*.json", "*manual*ui*review*.json")
+def manual_evidence_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResult:
+    review = newest_commit_json(hardware_dir, commit, "manual_touch_review*.json", "*manual*ui*review*.json")
     photos = [path for pattern in ("photos/*", "screen_photos/*", "*screen_photo*") for path in hardware_dir.glob(pattern) if path.is_file()]
     data = read_json(review)
     ok = bool(review and data.get("ok") is True and photos)
@@ -301,9 +342,9 @@ def manual_evidence_gate(hardware_dir: Path, root: Path) -> GateResult:
     )
 
 
-def full_rf_gate(hardware_dir: Path, root: Path) -> GateResult:
+def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResult:
     candidates = [
-        newest_file(hardware_dir, "rf_full_acceptance*.json", "*ack_path*.json", "*direct_route*.json", "*inbound_dm*.json")
+        newest_commit_json(hardware_dir, commit, "rf_full_acceptance*.json", "*ack_path*.json", "*direct_route*.json", "*inbound_dm*.json")
     ]
     evidence_paths = [path for path in candidates if path]
     passing = False
@@ -381,7 +422,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "ui_tab_abuse",
             "100-cycle D1L tab abuse",
-            newest_file(hardware_dir, "ui_tab_abuse_*.json"),
+            newest_commit_json(hardware_dir, args.commit, "ui_tab_abuse_*.json"),
             root,
             lambda data: ui_tab_abuse_ok(data, args.d1l_port),
             "100-cycle D1L tab abuse artifact passes.",
@@ -392,7 +433,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "ui_scroll_probe",
             "D1L scroll probe",
-            newest_file(hardware_dir, "scroll_probe_*.json"),
+            newest_commit_json(hardware_dir, args.commit, "scroll_probe_*.json"),
             root,
             lambda data: scroll_probe_ok(data, args.d1l_port),
             "D1L scroll probe artifact passes.",
@@ -403,17 +444,17 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "outbound_dm_com11",
             "D1L outbound DM proof against meshbot",
-            newest_file(hardware_dir, "dm_probe_*.json"),
+            newest_commit_json(hardware_dir, args.commit, "dm_probe_*.json"),
             root,
             lambda data: dm_probe_ok(data, args.d1l_port, args.meshbot_port),
             "Outbound D1L-to-meshbot DM proof passes.",
             "No passing outbound D1L-to-meshbot DM proof artifact was found.",
         )
     )
-    gates.append(sd_gate(newest_file(hardware_dir, "rp2040_preflight_*.json", "rp2040_sd_preflight_*.json"), root))
-    gates.append(full_soak_gate(soak_dir, root))
-    gates.append(manual_evidence_gate(hardware_dir, root))
-    gates.append(full_rf_gate(hardware_dir, root))
+    gates.append(sd_gate(newest_commit_json(hardware_dir, args.commit, "rp2040_preflight_*.json", "rp2040_sd_preflight_*.json"), root))
+    gates.append(full_soak_gate(soak_dir, root, args.commit))
+    gates.append(manual_evidence_gate(hardware_dir, root, args.commit))
+    gates.append(full_rf_gate(hardware_dir, root, args.commit))
     gates.append(docs_freshness_gate(root, args.commit, args.github_run_id))
 
     p0_failed = [gate for gate in gates if gate.severity == "P0" and not gate.ok]

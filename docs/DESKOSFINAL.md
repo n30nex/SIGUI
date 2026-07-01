@@ -1115,6 +1115,16 @@ COM12 against the local COM11 Meshcorebot with `send_ok=true`,
 checkpoint. Controlled inbound DM, ACK/PATH, direct-route RF proof, and manual
 touch DM workflow review remain open.
 
+2026-07-01 `db23416` refresh: after flashing the verified Actions package from
+run `28554444594`, `artifacts/hardware/com12/dm_probe_db23416.json` passed the
+targeted outbound COM12-to-COM11 DM proof. The first full RF run
+`artifacts/hardware/com12/rf_full_acceptance_db23416.json` intentionally remains
+failed: no controlled inbound trigger was observed, and the second DM send
+exposed an onboard NVS capacity failure while persisting the MeshCore TX
+timestamp. The follow-up patch makes timestamp persistence pressure non-fatal
+by falling back to a monotonic RAM timestamp; it still requires a fresh
+Actions-built firmware flash before rerunning full RF acceptance.
+
 Repeatable full RF acceptance is now handled by a single D1L-port runner. Keep
 the runner on the D1L serial port only; do not open the COM11 Meshcorebot port
 directly. After the runner prints the Discord command, send that command through
@@ -1213,6 +1223,12 @@ Final gate audit:
 ```powershell
 python .\scripts\release_gate_audit_d1l.py --github-run-id <run-id> --commit <commit-sha> --d1l-port <D1L_PORT> --meshbot-port <BOT_PORT> --hardware-dir artifacts\hardware\<d1l-port-folder> --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-<commit>.json --fail-on-open-p0
 ```
+
+The audit is intentionally commit-strict for hardware evidence. Smoke, tab
+abuse, scroll probe, outbound DM, RP2040/SD preflight, full RF, manual review,
+and soak artifacts must either include the audited short/full commit in the
+filename or embed matching commit metadata. Stale passing artifacts from an
+older firmware flash must fail closed.
 
 The latest local audit for `736ccfc` reports `ready_for_public_release=false`
 with four P0 gates still open after current-commit COM12 smoke and outbound DM
