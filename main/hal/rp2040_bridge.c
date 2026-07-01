@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 
 #include "hal/indicator_pins.h"
+#include "tca9535.h"
 
 #define D1L_RP2040_UART_BUF_SIZE 1024
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
@@ -709,6 +710,33 @@ esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status)
     }
     *out_status = s_status;
     return s_status.init_result;
+}
+
+esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
+{
+    const d1l_rp2040_pins_t *pins = d1l_rp2040_pins();
+    const uint32_t hold = hold_ms > 0 ? hold_ms : 100U;
+    const uint32_t settle = settle_ms > 0 ? settle_ms : 500U;
+
+    esp_err_t ret = tca9535_set_direction(pins->expander_reset, true);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = tca9535_set_level(pins->expander_reset, false);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    vTaskDelay(pdMS_TO_TICKS(hold));
+    ret = tca9535_set_level(pins->expander_reset, true);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    if (s_status.uart_ready) {
+        uart_flush_input((uart_port_t)s_status.uart_port);
+    }
+    vTaskDelay(pdMS_TO_TICKS(settle));
+    return ESP_OK;
 }
 
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms)
