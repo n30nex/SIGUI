@@ -329,8 +329,16 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
         d1l_contact_store_copy_recent(snapshot->recent_contacts, D1L_APP_SNAPSHOT_CONTACT_PREVIEW);
     snapshot->recent_route_count =
         d1l_route_store_copy_recent(snapshot->recent_routes, D1L_APP_SNAPSHOT_ROUTE_PREVIEW);
+    const d1l_node_query_t node_query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+        .text = NULL,
+        .keyed_only = false,
+        .reachable_only = false,
+    };
     snapshot->recent_node_count =
-        d1l_node_store_copy_recent(snapshot->recent_nodes, D1L_APP_SNAPSHOT_NODE_PREVIEW);
+        d1l_app_model_query_nodes(&node_query, snapshot->recent_nodes,
+                                  D1L_APP_SNAPSHOT_NODE_PREVIEW);
     snapshot->recent_message_count =
         d1l_message_store_copy_recent(snapshot->recent_messages, D1L_APP_SNAPSHOT_MESSAGE_PREVIEW);
     snapshot->recent_dm_count =
@@ -419,6 +427,12 @@ size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t
                                       size_t max_entries)
 {
     return d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries);
+}
+
+size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
+                                 size_t max_entries)
+{
+    return d1l_node_store_query(query, out_entries, max_entries);
 }
 
 esp_err_t d1l_app_model_mark_messages_read(void)

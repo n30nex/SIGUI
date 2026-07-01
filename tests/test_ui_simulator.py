@@ -87,7 +87,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
 
     assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
-    assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
+    assert {"Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
     assert {"Map", "Set Pin", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
     assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
@@ -107,6 +107,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
     assert {"Contact Detail", "Trace", "Edit", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
+    assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Edit Contact", "Contact alias", "Save", "Forget", "Close"} <= labels_by_view["contact_edit_sheet"]
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
     assert {"DM Thread", "Thread 2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
@@ -137,6 +138,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "public_compose_and_send",
         "public_history_search",
         "dm_thread_read_and_reply",
+        "node_detail_inspection",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
         "map_page_policy",
@@ -152,6 +154,8 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["map_location_sheet"]["drop_d1l_pin"]["destination"] == "map"
     assert actions_by_view["map_location_sheet"]["skip_map_location"]["destination"] == "map"
     assert actions_by_view["map_location_sheet"]["clear_d1l_pin"]["destination"] == "map"
+    assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
+    assert actions_by_view["node_detail_sheet"]["close_node_detail"]["destination"] == "nodes"
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"

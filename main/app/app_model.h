@@ -178,7 +178,7 @@ typedef struct {
     size_t recent_contact_count;
     d1l_route_entry_t recent_routes[D1L_APP_SNAPSHOT_ROUTE_PREVIEW];
     size_t recent_route_count;
-    d1l_node_entry_t recent_nodes[D1L_APP_SNAPSHOT_NODE_PREVIEW];
+    d1l_node_view_t recent_nodes[D1L_APP_SNAPSHOT_NODE_PREVIEW];
     size_t recent_node_count;
     d1l_message_entry_t recent_messages[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW];
     size_t recent_message_count;
@@ -211,6 +211,8 @@ esp_err_t d1l_app_model_delete_contact(const char *fingerprint, d1l_contact_entr
 esp_err_t d1l_app_model_export_contact_uri(const char *fingerprint, char *dest, size_t dest_size);
 size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t *out_entries,
                                       size_t max_entries);
+size_t d1l_app_model_query_nodes(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
+                                 size_t max_entries);
 esp_err_t d1l_app_model_mark_messages_read(void);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);

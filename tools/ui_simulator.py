@@ -30,6 +30,7 @@ GREEN = (167, 243, 208)
 AMBER = (251, 191, 36)
 RED = (248, 113, 113)
 BLUE = (147, 197, 253)
+VIOLET = (196, 181, 253)
 DIM = (5, 8, 13)
 SAMPLE_PUBLIC_KEY = "0BF0A701D5AE2DB660B6ABA17831F883937D290883817CBD1122334455667788"
 
@@ -175,7 +176,7 @@ def large_mesh_snapshot() -> Snapshot:
         Node(
             f"Large Mesh Heard Node With Long Name {i:03d}",
             f"937D290883{i:06X}",
-            "Room" if i % 5 == 0 else "Chat",
+            "Room" if i % 5 == 0 else ("Repeater" if i % 5 == 1 else "Chat"),
             f"-{42 + (i % 20)} dBm / {18 + (i % 12)} dB",
             f"{i % 4} hop, signed advert, seen {i + 1}",
         )
@@ -583,6 +584,32 @@ def format_e7(value: int) -> str:
     return f"{sign}{scaled // 10_000_000}.{scaled % 10_000_000:07d}"
 
 
+def role_badge_text(role: str) -> str:
+    normalized = role.lower()
+    if "room" in normalized:
+        return "ROOM"
+    if "repeat" in normalized:
+        return "RPT"
+    if "sensor" in normalized:
+        return "SNS"
+    if "companion" in normalized:
+        return "CMP"
+    return "NODE"
+
+
+def role_badge_color(role: str) -> tuple[int, int, int]:
+    normalized = role.lower()
+    if "room" in normalized:
+        return GREEN
+    if "repeat" in normalized:
+        return AMBER
+    if "sensor" in normalized:
+        return VIOLET
+    if "companion" in normalized:
+        return ACCENT
+    return BLUE
+
+
 def draw_top_bar(s: Surface, snap: Snapshot):
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
     s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
@@ -706,6 +733,7 @@ def draw_row(
     detail: str,
     badge: str | None = None,
     *,
+    badge_color: tuple[int, int, int] = GREEN,
     target_label: str | None = None,
     action: str | None = None,
     destination: str | None = None,
@@ -725,8 +753,8 @@ def draw_row(
     else:
         s.text(title, (x0 + 10, y0 + 3, title_right, y1 - 3), 10, TEXT, True)
     if badge:
-        s.round_rect((x1 - 62, y0 + 9, x1 - 10, y0 + 31), (43, 58, 42), (80, 107, 77), 8)
-        s.text(badge, (x1 - 58, y0 + 10, x1 - 14, y0 + 30), 11, GREEN, True, "center")
+        s.round_rect((x1 - 62, y0 + 9, x1 - 10, y0 + 31), (22, 39, 49), badge_color, 8)
+        s.text(badge, (x1 - 58, y0 + 10, x1 - 14, y0 + 30), 11, badge_color, True, "center")
 
 
 def draw_home_body(s: Surface, snap: Snapshot):
@@ -831,9 +859,10 @@ def render_nodes(s: Surface, snap: Snapshot):
         draw_row(
             s,
             (28, y, 374, y + 34),
-            f"{node.name}  {node.role}",
+            node.name,
             f"{node.fingerprint}  {node.signal}",
-            None,
+            role_badge_text(node.role),
+            badge_color=role_badge_color(node.role),
             target_label=f"Contact row {node.name}",
             action="open_contact_detail",
             destination="contact_detail_sheet",
@@ -841,15 +870,25 @@ def render_nodes(s: Surface, snap: Snapshot):
         draw_button(s, (384, y, 452, y + 34), "DM", GREEN, action="open_dm_compose", destination="compose_sheet")
         y += 40
         contacts_rendered += 1
-    s.round_rect((16, 240, 464, 402))
+    s.round_rect((16, 240, 464, 416))
     s.text("Heard Nodes", (28, 248, 180, 270), 14, MUTED, True)
     y = 276
     heard_rendered = 0
     for node in snap.heard:
-        if y + 32 > 396:
+        if y + 44 > 416:
             break
-        draw_row(s, (28, y, 452, y + 32), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}", None)
-        y += 36
+        draw_row(
+            s,
+            (28, y, 452, y + 44),
+            node.name,
+            f"{node.meta}  {node.signal}",
+            role_badge_text(node.role),
+            badge_color=role_badge_color(node.role),
+            target_label=f"Heard node {node.name}",
+            action="open_node_detail",
+            destination="node_detail_sheet",
+        )
+        y += 48
         heard_rendered += 1
     s.metrics.update(
         {
@@ -1114,6 +1153,27 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     draw_dock(s, "Nodes")
 
 
+def render_node_detail_sheet(s: Surface, snap: Snapshot):
+    node = snap.heard[0]
+    draw_sheet_frame(s, "Node Detail", node.name)
+    s.round_rect((44, 150, 118, 176), (22, 39, 49), role_badge_color(node.role), 8)
+    s.text(role_badge_text(node.role), (50, 152, 112, 174), 11, role_badge_color(node.role), True, "center")
+    s.text("Role", (132, 150, 210, 170), 13, MUTED, True)
+    s.text(node.role, (210, 150, 436, 174), 15, role_badge_color(node.role), True)
+    s.text("Fingerprint", (44, 188, 180, 208), 13, MUTED, True)
+    s.text(node.fingerprint, (44, 210, 436, 232), 16, TEXT)
+    s.text("Public key", (44, 246, 180, 266), 13, MUTED, True)
+    s.text("retained  reachable  normal", (166, 246, 436, 266), 14, GREEN, True)
+    s.text("Signal", (44, 282, 130, 302), 13, MUTED, True)
+    s.text(node.signal, (132, 282, 270, 302), 14, GREEN, True)
+    s.text("Path", (280, 282, 336, 302), 13, MUTED, True)
+    s.text(node.meta, (336, 282, 436, 302), 12, MUTED)
+    s.text("Last heard", (44, 318, 150, 338), 13, MUTED, True)
+    s.text("12s ago  heard 24", (152, 318, 436, 338), 14, TEXT)
+    draw_button(s, (44, 358, 200, 392), "Close", MUTED, action="close_node_detail", destination="nodes")
+    draw_dock(s, "Nodes")
+
+
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
     draw_sheet_frame(s, "Edit Contact", contact.name)
@@ -1340,6 +1400,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "storage_setup_sheet": render_storage_setup_sheet,
     "advert_sheet": render_advert_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
+    "node_detail_sheet": render_node_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
@@ -1366,7 +1427,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Local Repeaters",
     ),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
-    "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
+    "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"),
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
     "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
@@ -1400,6 +1461,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Edit", "Export", "Fav", "Mute", "Close"),
+    "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
@@ -1460,6 +1522,13 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
             {"view": "dm_thread_sheet", "action": "mark_dm_thread_read"},
             {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages"},
+        ),
+    },
+    {
+        "name": "node_detail_inspection",
+        "steps": (
+            {"view": "nodes", "action": "open_node_detail", "destination": "node_detail_sheet"},
+            {"view": "node_detail_sheet", "action": "close_node_detail", "destination": "nodes"},
         ),
     },
     {

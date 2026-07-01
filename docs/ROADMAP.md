@@ -266,6 +266,7 @@ Implement:
 - Favorites/pinned nodes.
 - Node actions: DM, ping, trace/path, request telemetry, copy/export contact QR.
 - Role badges: Companion, Repeater, Room Server, Sensor/Telemetry, Unknown.
+- Status: implemented first-pass compact role badges (`CMP`, `RPT`, `ROOM`, `SNS`, `NODE`) and a read-only heard-node detail sheet backed by `d1l_node_view_t`; promoted-contact DM/edit/export actions remain on the contact detail workflow.
 - Sort modes: last heard, signal, name, role, favorites.
 
 ### 6.4 Repeaters, routes, and room servers
@@ -763,8 +764,8 @@ Cover:
 Where feasible:
 
 - Run UI with fake mesh events.
-- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Map, Packets, Settings, compose/Public-history/Public-search/map-location/advert/radio settings/contact/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding; `tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large` renders the same UI against oversized node/message stores, and `tools/ui_simulator.py --scenario manual-location --out artifacts/ui-sim-manual-location` renders the Map page with a persisted manual center.
-- Assert required labels and button surfaces are present. Status: schema-v2 `ui-sim-report.json` now includes a touch-target map with expanded 44x44 boxes and expected flow coverage for onboarding, lock/unlock, Public compose/history/search, DM thread read/reply, contact detail/edit/export/trace, Map policy/location picker/manual center, packet search/detail/routes, Mesh Roles, Radio, Storage, and Advert paths.
+- Generate screenshots for every main screen. Status: `tools/ui_simulator.py --out artifacts/ui-sim` renders Home, Messages, Nodes, Map, Packets, Settings, compose/Public-history/Public-search/map-location/advert/radio settings/contact/node/DM/route/packet/mesh-role sheets, lock overlay, and first-boot onboarding; `tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large` renders the same UI against oversized node/message stores, and `tools/ui_simulator.py --scenario manual-location --out artifacts/ui-sim-manual-location` renders the Map page with a persisted manual center.
+- Assert required labels and button surfaces are present. Status: schema-v2 `ui-sim-report.json` now includes a touch-target map with expanded 44x44 boxes and expected flow coverage for onboarding, lock/unlock, Public compose/history/search, DM thread read/reply, node detail, contact detail/edit/export/trace, Map policy/location picker/manual center, packet search/detail/routes, Mesh Roles, Radio, Storage, and Advert paths.
 - Assert RF/destructive/format-capable UI actions are clearly flagged in simulator reports. Status: Public send/test and advert actions are marked RF-bearing, promoted-contact Forget is marked destructive, and Storage Setup remains `formats_sd=false`.
 - Assert measured text stays inside its assigned 480x480 layout boxes.
 - Assert screen construction does not leak obvious objects.

@@ -14,6 +14,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
 - Mesh visibility summaries for signal, room servers, and repeater candidates.
+- Nodes tab role badges for companions, repeaters, room servers, sensors, and unknown nodes, plus a read-only heard-node detail sheet for role, fingerprint, public-key state, signal, path, and heard-count evidence.
 - Read-only route trace helper for promoted contacts or known fingerprints, backed by retained route/contact evidence.
 - Contact export for promoted contacts with retained public keys, using MeshCore-compatible `meshcore://contact/add?...` serial output and a touch QR sheet.
 - USB serial diagnostics, smoke test, and soak test tooling.

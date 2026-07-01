@@ -642,6 +642,8 @@ Row:
 role badge • last heard • RSSI/SNR • hops/path • key badge
 ```
 
+Current implementation note: Nodes now renders compact ASCII role badges (`CMP`, `RPT`, `ROOM`, `SNS`, `NODE`) from `d1l_node_view_t` rows, preserving the existing bounded preview cap while avoiding new font/icon assets.
+
 ### 8.3 Node detail
 
 Actions:
@@ -661,6 +663,8 @@ Normal details:
 - Path/hops.
 - Public key/keyed state.
 - Heard count.
+
+Current implementation note: generic heard-node detail is read-only and opens from heard-node rows. It shows role, fingerprint, public-key state, favorite/mute/reachable flags, RSSI/SNR, path hash/hops, advert timestamp, first/last-heard timestamps, and heard count. DM/edit/export actions remain on promoted contacts.
 
 ### 8.4 Local repeaters panel
 
@@ -1195,9 +1199,9 @@ Final package must include:
 
 - [x] Expand node active capacity safely.
 - [x] Add sort/filter state.
-- [ ] Add role icons/badges.
+- [x] Add role icons/badges.
 - [x] Add repeaters/room server filters.
-- [ ] Add node detail sheet.
+- [x] Add node detail sheet.
 - [x] Add Home repeater data source.
 
 ### SD

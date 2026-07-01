@@ -54,6 +54,7 @@ static lv_obj_t *s_contact_edit_title;
 static lv_obj_t *s_contact_edit_textarea;
 static lv_obj_t *s_contact_edit_keyboard;
 static lv_obj_t *s_contact_export_sheet;
+static lv_obj_t *s_node_detail_sheet;
 static lv_obj_t *s_route_detail_sheet;
 static lv_obj_t *s_route_trace_sheet;
 static lv_obj_t *s_packet_detail_sheet;
@@ -76,6 +77,7 @@ static uint8_t s_map_picker_zoom = 10U;
 static bool s_map_location_prompt_seen;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
+static d1l_node_view_t s_node_detail_node;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_packet_log_entry_t s_packet_detail_packet;
@@ -102,12 +104,14 @@ static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 
 static void render_active_tab(void);
 static void render_contact_detail_sheet(void);
+static void render_node_detail_sheet(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
+static void open_node_detail_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
@@ -165,6 +169,7 @@ static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
 static void render_map_location_sheet(void);
 static void create_contact_edit_sheet(lv_obj_t *screen);
+static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
 static void open_map_location_sheet_event_cb(lv_event_t *event);
 static const char *home_sd_state(const d1l_app_snapshot_t *snapshot);
@@ -529,6 +534,7 @@ static void hide_contact_detail_sheet(void)
         lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
     }
     hide_contact_edit_sheet();
+    hide_node_detail_sheet();
     memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
 }
 
@@ -539,6 +545,14 @@ static void hide_contact_export_sheet(void)
     }
     memset(&s_contact_export_contact, 0, sizeof(s_contact_export_contact));
     s_contact_export_uri[0] = '\0';
+}
+
+static void hide_node_detail_sheet(void)
+{
+    if (s_node_detail_sheet) {
+        lv_obj_add_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+    memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
 }
 
 static void hide_route_detail_sheet(void)
@@ -696,6 +710,89 @@ static void format_radio_profile_line(char *dest, size_t dest_size,
              ((double)profile->frequency_hz) / 1000000.0,
              ((double)profile->bandwidth_tenths_khz) / 10.0,
              profile->spreading_factor, profile->coding_rate);
+}
+
+static const char *node_role_badge_text(const char *role)
+{
+    if (!role || role[0] == '\0') {
+        return "NODE";
+    }
+    if (strcmp(role, "room") == 0) {
+        return "ROOM";
+    }
+    if (strcmp(role, "repeater") == 0) {
+        return "RPT";
+    }
+    if (strcmp(role, "sensor") == 0) {
+        return "SNS";
+    }
+    if (strcmp(role, "companion") == 0) {
+        return "CMP";
+    }
+    return "NODE";
+}
+
+static const char *node_role_display_label(const char *role)
+{
+    if (!role || role[0] == '\0') {
+        return "Node";
+    }
+    if (strcmp(role, "room") == 0) {
+        return "Room Server";
+    }
+    if (strcmp(role, "repeater") == 0) {
+        return "Repeater";
+    }
+    if (strcmp(role, "sensor") == 0) {
+        return "Sensor";
+    }
+    if (strcmp(role, "companion") == 0) {
+        return "Companion";
+    }
+    return role;
+}
+
+static uint32_t node_role_color(const char *role)
+{
+    if (!role || role[0] == '\0') {
+        return 0x93C5FD;
+    }
+    if (strcmp(role, "room") == 0) {
+        return 0xA7F3D0;
+    }
+    if (strcmp(role, "repeater") == 0) {
+        return 0xFBBF24;
+    }
+    if (strcmp(role, "sensor") == 0) {
+        return 0xC4B5FD;
+    }
+    if (strcmp(role, "companion") == 0) {
+        return 0x5EEAD4;
+    }
+    return 0x93C5FD;
+}
+
+static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
+                                        lv_coord_t x, lv_coord_t y,
+                                        lv_coord_t width)
+{
+    lv_obj_t *badge = lv_obj_create(parent);
+    if (!badge) {
+        return NULL;
+    }
+    lv_obj_set_size(badge, width, 24);
+    lv_obj_set_pos(badge, x, y);
+    lv_obj_set_style_radius(badge, 6, 0);
+    lv_obj_set_style_bg_color(badge, lv_color_hex(0x10202A), 0);
+    lv_obj_set_style_border_color(badge, lv_color_hex(node_role_color(role)), 0);
+    lv_obj_set_style_border_width(badge, 1, 0);
+    lv_obj_set_style_pad_all(badge, 0, 0);
+    lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = create_label(badge, node_role_badge_text(role), node_role_color(role));
+    label_set_dot_width(label, width - 6);
+    obj_align_if(label, LV_ALIGN_CENTER, 0, 0);
+    return badge;
 }
 
 static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
@@ -1025,22 +1122,31 @@ static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *e
     obj_align_if(signal, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
-static void render_node_row(lv_obj_t *parent, int y, const d1l_node_entry_t *entry)
+static void render_node_row(lv_obj_t *parent, int y, const d1l_node_view_t *view)
 {
+    if (!view) {
+        return;
+    }
+    const d1l_node_entry_t *entry = &view->node;
     lv_obj_t *row = create_panel(parent, 18, y, 424, 56);
     if (!row) {
         return;
     }
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(row, open_node_detail_event_cb, LV_EVENT_CLICKED, (void *)view);
     lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *name = create_label(row, entry->name, 0xF4F7FB);
-    label_set_dot_width(name, 190);
+    lv_obj_t *name = create_label(row,
+                                  view->display_name[0] ? view->display_name :
+                                  (entry->name[0] ? entry->name : entry->fingerprint),
+                                  0xF4F7FB);
+    label_set_dot_width(name, 240);
     obj_align_if(name, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *type = create_label(row, entry->type, 0x5EEAD4);
-    obj_align_if(type, LV_ALIGN_TOP_RIGHT, 0, 0);
+    render_node_role_badge(row, view->role, 336, 0, 68);
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
     const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    label_set_fmt(meta, "%.8s  %s  rssi %d  snr %s%d.%d",
-                  entry->fingerprint, entry->public_key_hex[0] ? "key" : "no key",
+    label_set_fmt(meta, "%.8s  %s  %s  rssi %d  snr %s%d.%d",
+                  entry->fingerprint, view->keyed ? "key" : "no key",
+                  view->reachable ? "reachable" : "quiet",
                   entry->rssi_dbm,
                   entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
     label_set_dot_width(meta, 392);
@@ -1659,10 +1765,120 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     hide_contact_export_sheet();
+    hide_node_detail_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
         lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_contact_detail_sheet);
+    }
+}
+
+static void close_node_detail_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_node_detail_sheet();
+}
+
+static void render_node_detail_sheet(void)
+{
+    if (!s_node_detail_sheet) {
+        return;
+    }
+    lv_obj_clean(s_node_detail_sheet);
+
+    const d1l_node_view_t *view = &s_node_detail_node;
+    const d1l_node_entry_t *entry = &view->node;
+    const char *name = view->display_name[0] ? view->display_name :
+                       (entry->name[0] ? entry->name : entry->fingerprint);
+
+    lv_obj_t *title = create_label(s_node_detail_sheet, "Node Detail", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 220);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_node_detail_sheet, "Close", 316, 0, 76, 40,
+                  close_node_detail_event_cb, NULL);
+
+    lv_obj_t *name_label = create_label(s_node_detail_sheet, name, 0xE5EDF5);
+    lv_label_set_long_mode(name_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(name_label, 392);
+    lv_obj_set_pos(name_label, 8, 48);
+
+    render_node_role_badge(s_node_detail_sheet, view->role, 8, 78, 74);
+    lv_obj_t *role = create_label(s_node_detail_sheet, "", node_role_color(view->role));
+    label_set_fmt(role, "Role %s", node_role_display_label(view->role));
+    lv_label_set_long_mode(role, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(role, 300);
+    lv_obj_set_pos(role, 94, 82);
+
+    lv_obj_t *fingerprint = create_label(s_node_detail_sheet, "", 0xE5EDF5);
+    label_set_fmt(fingerprint, "Fingerprint %.16s", entry->fingerprint[0] ? entry->fingerprint : "-");
+    lv_label_set_long_mode(fingerprint, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(fingerprint, 392);
+    lv_obj_set_pos(fingerprint, 8, 116);
+
+    lv_obj_t *key = create_label(s_node_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(key, "Public key %s  %s  %s",
+                  view->keyed ? "retained" : "missing",
+                  view->favorite ? "favorite" : "normal",
+                  view->muted ? "muted" : "audible");
+    lv_label_set_long_mode(key, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(key, 392);
+    lv_obj_set_pos(key, 8, 150);
+
+    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
+    lv_obj_t *signal = create_label(s_node_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(signal, "Signal rssi %d  snr %s%d.%d  %s",
+                  entry->rssi_dbm,
+                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10,
+                  view->reachable ? "reachable" : "quiet");
+    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(signal, 392);
+    lv_obj_set_pos(signal, 8, 184);
+
+    lv_obj_t *path = create_label(s_node_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(path, "Path hops %u  hash %u byte  advert %lums",
+                  entry->path_hops, entry->path_hash_bytes,
+                  (unsigned long)entry->advert_timestamp);
+    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(path, 392);
+    lv_obj_set_pos(path, 8, 218);
+
+    lv_obj_t *heard = create_label(s_node_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(heard, "Last heard %lums  first %lums  count %lu",
+                  (unsigned long)entry->last_heard_ms,
+                  (unsigned long)entry->first_heard_ms,
+                  (unsigned long)entry->heard_count);
+    lv_label_set_long_mode(heard, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(heard, 392);
+    lv_obj_set_pos(heard, 8, 252);
+}
+
+static void open_node_detail_event_cb(lv_event_t *event)
+{
+    const d1l_node_view_t *view = (const d1l_node_view_t *)lv_event_get_user_data(event);
+    if (!view || view->node.fingerprint[0] == '\0') {
+        show_toast("Node", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    s_node_detail_node = *view;
+    render_node_detail_sheet();
+    if (s_node_detail_sheet) {
+        lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_node_detail_sheet);
     }
 }
 
@@ -3678,6 +3894,20 @@ static void create_contact_detail_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_node_detail_sheet(lv_obj_t *screen)
+{
+    s_node_detail_sheet = lv_obj_create(screen);
+    lv_obj_set_size(s_node_detail_sheet, 448, 286);
+    lv_obj_set_pos(s_node_detail_sheet, 16, 100);
+    lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_node_detail_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_node_detail_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_node_detail_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_node_detail_sheet, 12, 0);
+    lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_contact_edit_sheet(lv_obj_t *screen)
 {
     if (!screen || s_contact_edit_sheet) {
@@ -4008,6 +4238,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_map_location_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_contact_export_sheet(s_screen);
+    create_node_detail_sheet(s_screen);
     create_route_detail_sheet(s_screen);
     create_route_trace_sheet(s_screen);
     create_packet_detail_sheet(s_screen);

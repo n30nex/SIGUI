@@ -29,7 +29,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "static d1l_app_snapshot_t s_snapshot" in read("main/ui/ui_phase1.c")
     assert "d1l_contact_store_copy_recent" in source
     assert "d1l_route_store_copy_recent" in source
-    assert "d1l_node_store_copy_recent" in source
+    assert "d1l_app_model_query_nodes(&node_query" in source
     assert "d1l_packet_log_copy_recent" in source
     assert "d1l_dm_store_copy_recent" in source
     assert "d1l_app_model_copy_dm_thread" in header
@@ -201,6 +201,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "public_compose_and_send",
         "public_history_search",
         "dm_thread_read_and_reply",
+        "node_detail_inspection",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
         "map_page_policy",
@@ -225,6 +226,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_dm_reply": "reply_dm_thread_event_cb",
         "mark_dm_thread_read": "read_dm_thread_event_cb",
         "open_contact_detail": "open_contact_detail_event_cb",
+        "open_node_detail": "open_node_detail_event_cb",
+        "close_node_detail": "close_node_detail_event_cb",
         "open_contact_edit": "open_contact_edit_event_cb",
         "edit_contact_alias": "s_contact_edit_textarea",
         "save_contact_alias": "save_contact_edit_event_cb",
@@ -329,10 +332,19 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
 def test_nodes_screen_renders_heard_node_rows():
     source = read("main/ui/ui_phase1.c")
     header = read("main/app/app_model.h")
+    model = read("main/app/app_model.c")
     assert "render_node_row" in source
     assert "render_contact_row" in source
     assert "recent_node_count" in source
     assert "recent_nodes" in source
+    assert "d1l_node_view_t recent_nodes" in header
+    assert "d1l_app_model_query_nodes" in header
+    assert "d1l_node_store_query(query, out_entries, max_entries)" in model
+    assert "d1l_node_query_t node_query" in model
+    assert "node_role_badge_text" in source
+    assert "node_role_color" in source
+    assert "render_node_role_badge" in source
+    assert "lv_obj_add_event_cb(row, open_node_detail_event_cb, LV_EVENT_CLICKED" in source
     assert "recent_contact_count" in source
     assert "recent_contacts" in source
     assert "No heard nodes yet" in source
@@ -343,6 +355,26 @@ def test_nodes_screen_renders_heard_node_rows():
     assert "#define D1L_APP_SNAPSHOT_CONTACT_PREVIEW 2U" in header
     assert "i < snapshot->recent_contact_count && y <= 190" in source
     assert "i < snapshot->recent_node_count && y <= 300" in source
+
+
+def test_node_detail_sheet_opens_from_heard_node_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_node_detail_sheet" in source
+    assert "static d1l_node_view_t s_node_detail_node" in source
+    assert "create_node_detail_sheet" in source
+    assert "render_node_detail_sheet" in source
+    assert "open_node_detail_event_cb" in source
+    assert "close_node_detail_event_cb" in source
+    assert "hide_node_detail_sheet()" in source
+    assert 'create_label(s_node_detail_sheet, "Node Detail"' in source
+    assert '"Role %s"' in source
+    assert '"Fingerprint %.16s"' in source
+    assert '"Public key %s  %s  %s"' in source
+    assert '"Signal rssi %d  snr %s%d.%d  %s"' in source
+    assert '"Path hops %u  hash %u byte  advert %lums"' in source
+    assert '"Last heard %lums  first %lums  count %lu"' in source
+    assert 'create_button(s_node_detail_sheet, "Close"' in source
+    assert "create_node_detail_sheet(s_screen)" in source
 
 
 def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
