@@ -49,3 +49,10 @@ def test_verify_sha256_manifest_rejects_bad_digest(tmp_path: Path):
     manifest.write_text(f"{hashlib.sha256(b'other').hexdigest()}  ./firmware.bin\n", encoding="ascii")
 
     assert not verify_sha256_manifest(manifest)
+
+
+def test_checksum_verifier_stays_python38_compatible():
+    source = Path("scripts/verify_checksums.py").read_text(encoding="utf-8")
+
+    assert ".removeprefix(" not in source
+    assert ".removesuffix(" not in source

@@ -16,6 +16,10 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def strip_leading_current_dir(filename: str) -> str:
+    return filename[2:] if filename.startswith("./") else filename
+
+
 def verify_sha256_file(path: Path) -> bool:
     text = path.read_text(encoding="ascii").strip()
     expected, filename = text.split(maxsplit=1)
@@ -29,7 +33,7 @@ def verify_sha256_manifest(path: Path) -> bool:
         if not line:
             continue
         expected, filename = line.split(maxsplit=1)
-        filename = filename.removeprefix("./")
+        filename = strip_leading_current_dir(filename)
         target = path.parent / filename
         if not target.exists() or sha256_file(target).lower() != expected.lower():
             return False
