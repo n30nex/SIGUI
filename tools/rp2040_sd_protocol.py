@@ -39,6 +39,37 @@ MAP_TILE_CANARY_START_ID = 80
 MAP_TILE_CANARY_DEFAULT_TOKEN = "map1"
 DATA_EXPORT_START_ID = 120
 DATA_EXPORT_DEFAULT_TOKEN = "data1"
+DESKOS_MANIFEST_PATH = "manifest.json"
+DESKOS_MAP_MANIFEST_PATH = "map/manifest.json"
+DESKOS_MANIFEST_PAYLOAD = (
+    b'{"name":"MeshCore DeskOS D1L SD","schema":1,'
+    b'"created_by":"MeshCore DeskOS D1L",'
+    b'"device":"seeed-indicator-d1l",'
+    b'"stores":["messages","dm","nodes","routes","packets","map_tiles"]}\n'
+)
+DESKOS_MAP_MANIFEST_PAYLOAD = (
+    b'{"schema":1,"kind":"map_cache",'
+    b'"tile_template":"map/tiles/z{z}/x{x}/y{y}.tile",'
+    b'"download_supported":false}\n'
+)
+DESKOS_REQUIRED_DIRS = (
+    "stores",
+    "stores/messages",
+    "stores/messages/public",
+    "stores/messages/dm",
+    "stores/nodes",
+    "stores/contacts",
+    "stores/routes",
+    "stores/packet_log",
+    "map",
+    "map/tiles",
+    "map/packs",
+    "exports",
+    "exports/diagnostics",
+    "exports/data",
+    "tmp",
+    "logs",
+)
 STATUS_FIELDS = (
     "state",
     "present",
@@ -311,6 +342,69 @@ def formatted_scenario(scenario: SdScenario) -> SdScenario:
     )
 
 
+def manifest_valid(fs: SdFileSystem) -> bool:
+    payload = fs.files.get(DESKOS_MANIFEST_PATH)
+    return (
+        payload is not None
+        and len(payload) <= 512
+        and b'"schema":1' in payload
+        and b'"name":"MeshCore DeskOS D1L SD"' in payload
+        and b'"device":"seeed-indicator-d1l"' in payload
+        and b'"map_tiles"' in payload
+    )
+
+
+def map_manifest_valid(fs: SdFileSystem) -> bool:
+    payload = fs.files.get(DESKOS_MAP_MANIFEST_PATH)
+    return (
+        payload is not None
+        and len(payload) <= 512
+        and b'"schema":1' in payload
+        and b'"kind":"map_cache"' in payload
+        and b'"tile_template":"map/tiles/z{z}/x{x}/y{y}.tile"' in payload
+    )
+
+
+def prepare_deskos_filesystem(fs: SdFileSystem) -> bool:
+    fs.dirs.update(DESKOS_REQUIRED_DIRS)
+    if DESKOS_MANIFEST_PATH in fs.files:
+        if not manifest_valid(fs):
+            return False
+    else:
+        fs.files[DESKOS_MANIFEST_PATH] = DESKOS_MANIFEST_PAYLOAD
+    if DESKOS_MAP_MANIFEST_PATH in fs.files:
+        if not map_manifest_valid(fs):
+            return False
+    else:
+        fs.files[DESKOS_MAP_MANIFEST_PATH] = DESKOS_MAP_MANIFEST_PAYLOAD
+    return True
+
+
+def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
+    if not scenario.present:
+        return replace(scenario, state="no_card", note="no_card")
+    if scenario.format_required:
+        return scenario
+    if not scenario.mounted:
+        return scenario
+    if not prepare_deskos_filesystem(fs):
+        note = (
+            "deskos_manifest_invalid"
+            if DESKOS_MANIFEST_PATH in fs.files and not manifest_valid(fs)
+            else "deskos_map_manifest_invalid"
+        )
+        return replace(scenario, state="setup_required", deskos=False, note=note)
+    note = "structure_created" if not scenario.deskos else scenario.note
+    return replace(
+        scenario,
+        state="ready",
+        mounted=True,
+        deskos=True,
+        format_required=False,
+        note=note,
+    )
+
+
 def parse_tokens(request: str) -> tuple[str, dict[str, str]]:
     parts = request.strip().split()
     if not parts:
@@ -556,7 +650,7 @@ def reply_for_request(
     if request == STATUS_REQUEST:
         return status_line(scenario)
     if request == MOUNT_REQUEST:
-        return status_line(scenario, MOUNT_REPLY)
+        return status_line(mounted_scenario(scenario, fs), MOUNT_REPLY)
     if request == DIAG_REQUEST:
         return diag_line(scenario)
     if request.startswith(FORMAT_REQUEST + " "):
@@ -566,7 +660,10 @@ def reply_for_request(
             return status_line(refused, FORMAT_REPLY)
         fs.files.clear()
         fs.dirs = {"."}
-        return status_line(formatted_scenario(scenario), FORMAT_REPLY)
+        formatted = formatted_scenario(scenario)
+        if formatted.present and formatted.deskos:
+            prepare_deskos_filesystem(fs)
+        return status_line(formatted, FORMAT_REPLY)
     if request.startswith(FILE_REQUEST):
         return file_reply_for_request(request, scenario, fs)
     raise ValueError(f"unsupported request: {request}")
@@ -916,6 +1013,35 @@ def map_tile_canary_transcript(
     fs = SdFileSystem()
     transcript = []
     for request in map_tile_canary_requests(token, request_id_start):
+        transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
+    return transcript
+
+
+def map_tile_check_requests(
+    token: str,
+    request_id_start: int = MAP_TILE_CANARY_START_ID + 20,
+) -> list[str]:
+    _tmp_path, final_path = map_tile_canary_paths(token)
+    final = encode_path(final_path)
+    payload = map_tile_canary_payload(token)
+    return [
+        file_request_line(request_id_start, "stat", path=final),
+        file_request_line(request_id_start + 1, "read", path=final, off=0, len=len(payload)),
+    ]
+
+
+def map_tile_check_transcript(
+    scenario: SdScenario,
+    token: str = MAP_TILE_CANARY_DEFAULT_TOKEN,
+    request_id_start: int = MAP_TILE_CANARY_START_ID + 20,
+) -> list[dict[str, str]]:
+    fs = SdFileSystem()
+    _tmp_path, final_path = map_tile_canary_paths(token)
+    if file_ready(scenario):
+        ensure_parent_dirs(final_path, fs)
+        fs.files[final_path] = map_tile_canary_payload(token)
+    transcript = []
+    for request in map_tile_check_requests(token, request_id_start):
         transcript.append({"request": request, "reply": reply_for_request(request, scenario, fs)})
     return transcript
 

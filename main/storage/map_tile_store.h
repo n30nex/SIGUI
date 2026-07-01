@@ -44,3 +44,6 @@ bool d1l_map_tile_store_path(uint8_t z, uint32_t x, uint32_t y,
 esp_err_t d1l_map_tile_store_write_canary(const char *token,
                                           const d1l_storage_status_t *status,
                                           d1l_map_tile_canary_result_t *out_result);
+esp_err_t d1l_map_tile_store_check_canary(const char *token,
+                                          const d1l_storage_status_t *status,
+                                          d1l_map_tile_canary_result_t *out_result);

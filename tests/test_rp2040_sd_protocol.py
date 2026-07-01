@@ -35,6 +35,11 @@ from tools.rp2040_sd_protocol import (
     EXPORT_CANARY_START_ID,
     DIAGNOSTIC_EXPORT_DEFAULT_TOKEN,
     DIAGNOSTIC_EXPORT_START_ID,
+    DESKOS_MANIFEST_PATH,
+    DESKOS_MANIFEST_PAYLOAD,
+    DESKOS_MAP_MANIFEST_PATH,
+    DESKOS_MAP_MANIFEST_PAYLOAD,
+    DESKOS_REQUIRED_DIRS,
     MAP_TILE_CANARY_DEFAULT_TOKEN,
     MAP_TILE_CANARY_START_ID,
     data_export_paths,
@@ -50,6 +55,7 @@ from tools.rp2040_sd_protocol import (
     map_tile_canary_paths,
     map_tile_canary_payload,
     map_tile_canary_transcript,
+    map_tile_check_transcript,
     reply_for_request,
     validate_relative_path,
 )
@@ -104,6 +110,8 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     status = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["mount-required"]))
     pending = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["mount-pending"]))
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"]))
+    fs = SdFileSystem()
+    root_prepared = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["root-missing"], fs))
 
     assert status["prefix"] == STATUS_REPLY
     assert status["state"] == "mount_required"
@@ -116,6 +124,36 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     assert mounted["present"] == "1"
     assert mounted["mounted"] == "1"
     assert mounted["file_ops"] == "1"
+    assert root_prepared["prefix"] == MOUNT_REPLY
+    assert root_prepared["state"] == "ready"
+    assert root_prepared["deskos"] == "1"
+    assert root_prepared["format_required"] == "0"
+    assert root_prepared["file_ops"] == "1"
+    assert DESKOS_MANIFEST_PATH in fs.files
+    assert DESKOS_MAP_MANIFEST_PATH in fs.files
+    assert set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
+    assert b'"map_tiles"' in fs.files[DESKOS_MANIFEST_PATH]
+    assert b'"kind":"map_cache"' in fs.files[DESKOS_MAP_MANIFEST_PATH]
+    manifest_stat = parse_tokens(
+        reply_for_request(
+            file_request(20, "stat", path=encode_path(DESKOS_MANIFEST_PATH)),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    assert manifest_stat["ok"] == "1"
+    assert manifest_stat["exists"] == "1"
+    assert manifest_stat["size"] == str(len(DESKOS_MANIFEST_PAYLOAD))
+    map_manifest_stat = parse_tokens(
+        reply_for_request(
+            file_request(22, "stat", path=encode_path(DESKOS_MAP_MANIFEST_PATH)),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    assert map_manifest_stat["ok"] == "1"
+    assert map_manifest_stat["exists"] == "1"
+    assert map_manifest_stat["size"] == str(len(DESKOS_MAP_MANIFEST_PAYLOAD))
 
 
 def test_diag_protocol_reports_probe_matrix_without_formatting():
@@ -132,9 +170,10 @@ def test_diag_protocol_reports_probe_matrix_without_formatting():
 
 
 def test_format_protocol_requires_exact_confirmation():
+    fs = SdFileSystem()
     bad = parse_tokens(reply_for_request(f"{FORMAT_REQUEST} WRONG", SCENARIOS["format-required"]))
     good = parse_tokens(
-        reply_for_request(f"{FORMAT_REQUEST} {FORMAT_CONFIRMATION}", SCENARIOS["format-required"])
+        reply_for_request(f"{FORMAT_REQUEST} {FORMAT_CONFIRMATION}", SCENARIOS["format-required"], fs)
     )
 
     assert bad["prefix"] == FORMAT_REPLY
@@ -146,6 +185,31 @@ def test_format_protocol_requires_exact_confirmation():
     assert good["deskos"] == "1"
     assert good["format_required"] == "0"
     assert good["note"] == "format_complete"
+    assert fs.files[DESKOS_MANIFEST_PATH] == DESKOS_MANIFEST_PAYLOAD
+    assert fs.files[DESKOS_MAP_MANIFEST_PATH] == DESKOS_MAP_MANIFEST_PAYLOAD
+    assert set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
+
+
+def test_manifest_invalid_blocks_file_ops_without_formatting():
+    fs = SdFileSystem(files={DESKOS_MANIFEST_PATH: b'{"schema":99}\n'})
+
+    mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"], fs))
+    stat = parse_tokens(
+        reply_for_request(
+            file_request(21, "stat", path=encode_path(DESKOS_MANIFEST_PATH)),
+            SCENARIOS["root-missing"],
+            fs,
+        )
+    )
+
+    assert mounted["prefix"] == MOUNT_REPLY
+    assert mounted["state"] == "setup_required"
+    assert mounted["deskos"] == "0"
+    assert mounted["format_required"] == "0"
+    assert mounted["note"] == "deskos_manifest_invalid"
+    assert fs.files[DESKOS_MANIFEST_PATH] == b'{"schema":99}\n'
+    assert stat["ok"] == "0"
+    assert stat["err"] == "not_ready"
 
 
 def test_storage_edge_scenarios_and_constants_match_c_contract():
@@ -758,6 +822,35 @@ def test_map_tile_canary_transcript_fails_safely_without_ready_card():
         replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
         assert {reply["ok"] for reply in replies} == {"0"}
         assert {reply["err"] for reply in replies} == {expected_error}
+
+
+def test_map_tile_check_transcript_is_read_only_after_remount():
+    token = MAP_TILE_CANARY_DEFAULT_TOKEN
+    transcript = map_tile_check_transcript(SCENARIOS["ready"], token)
+    requests = [exchange["request"] for exchange in transcript]
+    replies = [parse_tokens(exchange["reply"]) for exchange in transcript]
+    _tmp, final = map_tile_canary_paths(token)
+    payload = map_tile_canary_payload(token)
+
+    assert requests == [
+        file_request(MAP_TILE_CANARY_START_ID + 20, "stat", path=encode_path(final)),
+        file_request(
+            MAP_TILE_CANARY_START_ID + 21,
+            "read",
+            path=encode_path(final),
+            off=0,
+            len=len(payload),
+        ),
+    ]
+    assert replies[0]["ok"] == "1"
+    assert replies[0]["exists"] == "1"
+    assert replies[0]["kind"] == "file"
+    assert replies[0]["size"] == str(len(payload))
+    assert replies[1]["ok"] == "1"
+    assert replies[1]["data"] == b64url(payload)
+    assert all(" op=write " not in request for request in requests)
+    assert all(" op=rename " not in request for request in requests)
+    assert all(" op=delete " not in request for request in requests)
 
 
 def test_retained_history_blob_paths_support_atomic_commit_cycle():

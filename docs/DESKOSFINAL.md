@@ -1114,6 +1114,7 @@ python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenar
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenario unformatted --allow-format-confirm
 python .\scripts\sd_retained_history_acceptance_d1l.py --port $env:D1L_PORT --token prod
 python .\scripts\sd_map_tile_canary_d1l.py --port $env:D1L_PORT --token prod
+python .\scripts\sd_reboot_remount_acceptance_d1l.py --port $env:D1L_PORT --token prod
 python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 ```
 
@@ -1201,13 +1202,13 @@ Final package must include:
 
 ### SD
 
-- [ ] Implement `d1l_storage_boot_prepare()`.
-- [ ] Add `/deskos/manifest.json` schema.
-- [ ] Create structure without format when FS is valid.
+- [x] Implement `d1l_storage_boot_prepare()` with bounded async-mount polling before retained stores initialize.
+- [x] Add `/deskos/manifest.json` schema.
+- [x] Create structure without format when FS is valid.
 - [ ] Auto-prepare unformatted/new cards according to production policy.
-- [ ] Never format correct DeskOS cards.
-- [ ] Require confirmation for ambiguous/existing-data formats.
-- [ ] Add reboot/remount acceptance script.
+- [x] Never format correct DeskOS cards.
+- [x] Require confirmation for ambiguous/existing-data formats.
+- [x] Add reboot/remount acceptance script.
 
 ### Map
 

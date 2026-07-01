@@ -69,6 +69,29 @@ static void result_step(d1l_map_tile_canary_result_t *result,
     }
 }
 
+static esp_err_t build_canary_payload(const char *token,
+                                      uint8_t *payload,
+                                      size_t payload_size,
+                                      size_t *payload_len)
+{
+    if (!token || !payload || !payload_len) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int len = snprintf((char *)payload, payload_size,
+                             "{\"schema\":1,\"kind\":\"map_tile_cache_canary\","
+                             "\"token\":\"%s\",\"z\":%u,\"x\":%lu,\"y\":%lu,"
+                             "\"public_rf_tx\":false,\"formats_sd\":false}\n",
+                             token,
+                             (unsigned)D1L_MAP_TILE_CANARY_Z,
+                             (unsigned long)D1L_MAP_TILE_CANARY_X,
+                             (unsigned long)D1L_MAP_TILE_CANARY_Y);
+    if (len <= 0 || (size_t)len >= payload_size) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    *payload_len = (size_t)len;
+    return ESP_OK;
+}
+
 bool d1l_map_tile_store_token_valid(const char *token)
 {
     if (!token || token[0] == '\0') {
@@ -133,20 +156,14 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
     }
 
     uint8_t payload[D1L_RP2040_FILE_CHUNK_MAX];
-    const int payload_len = snprintf((char *)payload, sizeof(payload),
-                                     "{\"schema\":1,\"kind\":\"map_tile_cache_canary\","
-                                     "\"token\":\"%s\",\"z\":%u,\"x\":%lu,\"y\":%lu,"
-                                     "\"public_rf_tx\":false,\"formats_sd\":false}\n",
-                                     token,
-                                     (unsigned)D1L_MAP_TILE_CANARY_Z,
-                                     (unsigned long)D1L_MAP_TILE_CANARY_X,
-                                     (unsigned long)D1L_MAP_TILE_CANARY_Y);
-    if (payload_len <= 0 || (size_t)payload_len >= sizeof(payload)) {
-        result_step(&result, "payload", ESP_ERR_INVALID_SIZE, NULL);
+    size_t payload_len = 0;
+    esp_err_t payload_ret = build_canary_payload(token, payload, sizeof(payload), &payload_len);
+    if (payload_ret != ESP_OK) {
+        result_step(&result, "payload", payload_ret, NULL);
         *out_result = result;
-        return ESP_ERR_INVALID_SIZE;
+        return payload_ret;
     }
-    result.bytes = (size_t)payload_len;
+    result.bytes = payload_len;
 
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX] = {0};
     d1l_rp2040_file_result_t file = {0};
@@ -200,6 +217,71 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
                                       (size_t)payload_len, &file, 3000U);
     if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
         memcmp(read_buf, payload, (size_t)payload_len) != 0) {
+        result_step(&result, "read_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
+        *out_result = result;
+        return result.last_error;
+    }
+    result.read_final = true;
+    result_step(&result, "ok", ESP_OK, &file);
+    *out_result = result;
+    return ESP_OK;
+}
+
+esp_err_t d1l_map_tile_store_check_canary(const char *token,
+                                          const d1l_storage_status_t *status,
+                                          d1l_map_tile_canary_result_t *out_result)
+{
+    if (!token || !out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_map_tile_canary_result_t result = {
+        .public_rf_tx = false,
+        .formats_sd = false,
+        .last_error = ESP_OK,
+    };
+    if (!d1l_map_tile_store_token_valid(token)) {
+        result_step(&result, "token", ESP_ERR_INVALID_ARG, NULL);
+        *out_result = result;
+        return ESP_ERR_INVALID_ARG;
+    }
+    snprintf(result.token, sizeof(result.token), "%s", token);
+    if (!result_path_set(&result, token)) {
+        result_step(&result, "path", ESP_ERR_INVALID_SIZE, NULL);
+        *out_result = result;
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (!d1l_map_tile_store_sd_ready(status)) {
+        result_step(&result, "preflight", ESP_ERR_NOT_SUPPORTED, NULL);
+        *out_result = result;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    uint8_t payload[D1L_RP2040_FILE_CHUNK_MAX];
+    size_t payload_len = 0;
+    esp_err_t payload_ret = build_canary_payload(token, payload, sizeof(payload), &payload_len);
+    if (payload_ret != ESP_OK) {
+        result_step(&result, "payload", payload_ret, NULL);
+        *out_result = result;
+        return payload_ret;
+    }
+    result.bytes = payload_len;
+
+    d1l_rp2040_file_result_t file = {0};
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(result.path, &file, 3000U);
+    if (ret != ESP_OK || !file.exists || file.is_directory ||
+        file.size != (uint32_t)payload_len) {
+        result_step(&result, "stat_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
+        *out_result = result;
+        return result.last_error;
+    }
+    result.stat_final = true;
+
+    uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX] = {0};
+    ret = d1l_rp2040_bridge_file_read(result.path, 0U, read_buf, payload_len,
+                                      &file, 3000U);
+    if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
+        memcmp(read_buf, payload, payload_len) != 0) {
         result_step(&result, "read_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
         *out_result = result;
         return result.last_error;

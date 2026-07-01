@@ -40,6 +40,9 @@ jobs:
       - name: SD map tile canary dry run
         run: python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run
 
+      - name: SD reboot remount acceptance dry run
+        run: python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run
+
       - name: SD export canary dry run
         run: python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run
 

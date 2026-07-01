@@ -91,6 +91,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "esp_err_t d1l_storage_status_mount", 1
     )[0]
     assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
+    assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in boot_prepare
+    assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in boot_prepare
+    assert 'strcmp(s_status.sd_state, "mount_pending")' in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
 
@@ -414,6 +417,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_map_tile_store_coord_valid" in store_header
     assert "d1l_map_tile_store_path" in store_header
     assert "d1l_map_tile_store_write_canary" in store_header
+    assert "d1l_map_tile_store_check_canary" in store_header
     assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
     assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
@@ -425,13 +429,17 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_rp2040_bridge_file_stat(result.path" in store_source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_map_tile_canary" in console
+    assert "cmd_storage_map_tile_check" in console
     assert "cmd_storage_map_policy" in console
     assert "storage map-policy" in console
     assert "map_tile_policy" in console
     assert "d1l_map_tile_store_path(0U, 0U, 0U" in console
     assert "storage map-tile-canary <token>" in console
+    assert "storage map-tile-check <token>" in console
     assert "d1l_map_tile_store_write_canary" in console
+    assert "d1l_map_tile_store_check_canary" in console
     assert "Map tile SD cache canary committed" in console
+    assert "Map tile SD cache canary verified read-only" in console
     assert "storage map-tile-canary" in runner
     assert "map_tile_backend_ready" in runner
     assert "mesh send public" not in runner
@@ -439,8 +447,10 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "COM11" not in runner
     assert "COM29" not in runner
     assert "map_tile_canary_transcript" in protocol
+    assert "map_tile_check_transcript" in protocol
     assert "MAP_TILE_CANARY_START_ID" in protocol
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in workflow
+    assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "sd_map_tile_canary_d1l.py" in docs
 
 

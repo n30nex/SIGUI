@@ -68,6 +68,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
     assert "SDFS.format()" not in sketch
     assert "/deskos" in sketch
+    assert "/deskos/manifest.json" in sketch
+    assert "/deskos/map/manifest.json" in sketch
+    assert "MeshCore DeskOS D1L SD" in sketch
+    assert "map_cache" in sketch
+    assert "prepare_deskos_structure" in sketch
 
     for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch
@@ -99,6 +104,9 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "mount_in_progress",
         "card_detected_mounting",
         "deskos_root_missing",
+        "deskos_manifest_invalid",
+        "deskos_map_manifest_invalid",
+        "structure_created",
         "format_required",
         "format_complete",
         "confirmation_required",

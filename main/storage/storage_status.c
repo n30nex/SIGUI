@@ -5,10 +5,17 @@
 
 #include "sdkconfig.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 #include "hal/rp2040_bridge.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
+
+#define D1L_STORAGE_BOOT_POLL_INTERVAL_MS 150U
+#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 250U
+#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 10U
 
 static d1l_storage_status_t s_status;
 
@@ -294,11 +301,28 @@ esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms)
     }
 
     ret = d1l_storage_status_mount(timeout_ms);
-    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
+    if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
         return ret;
     }
 
-    return ret;
+    esp_err_t last_ret = ret;
+    for (uint32_t attempt = 0; attempt < D1L_STORAGE_BOOT_POLL_ATTEMPTS; ++attempt) {
+        if (strcmp(s_status.sd_state, "mount_pending") != 0) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_BOOT_POLL_INTERVAL_MS));
+        esp_err_t poll_ret =
+            d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS);
+        if (poll_ret != ESP_OK && poll_ret != ESP_ERR_TIMEOUT) {
+            return poll_ret;
+        }
+        last_ret = poll_ret;
+    }
+
+    if (last_ret == ESP_ERR_TIMEOUT && strcmp(s_status.sd_state, "mount_pending") != 0) {
+        return ESP_OK;
+    }
+    return last_ret;
 }
 
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)

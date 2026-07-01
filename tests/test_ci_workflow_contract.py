@@ -45,6 +45,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in host
+    assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run" in host

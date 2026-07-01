@@ -1363,14 +1363,16 @@ static void print_storage_export_error(const char *cmd,
     printf("}\n");
 }
 
-static void print_storage_map_tile_error(const char *step,
+static void print_storage_map_tile_error(const char *cmd,
+                                         const char *step,
                                          esp_err_t ret,
                                          const d1l_storage_status_t *status,
                                          const d1l_map_tile_canary_result_t *canary,
                                          const char *hint)
 {
-    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage map-tile-canary\",\"code\":\"%s\",\"step\":",
-           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":", D1L_CONSOLE_SCHEMA);
+    print_json_string(cmd ? cmd : "storage map-tile-canary");
+    printf(",\"code\":\"%s\",\"step\":", esp_err_to_name(ret));
     print_json_string(step ? step : "unknown");
     printf(",\"sd_state\":");
     print_json_string(status && status->sd_state ? status->sd_state : "unknown");
@@ -1408,7 +1410,7 @@ static void cmd_storage_map_tile_canary(const char *line)
     esp_err_t ret = d1l_map_tile_store_write_canary(token, &status, &canary);
     if (ret != ESP_OK) {
         print_storage_map_tile_error(
-            canary.step, ret, &status, &canary,
+            "storage map-tile-canary", canary.step, ret, &status, &canary,
             "requires a ready RP2040 SD bridge with file_ops and atomic rename; no Public RF or format command was used");
         return;
     }
@@ -1433,6 +1435,47 @@ static void cmd_storage_map_tile_canary(const char *line)
            bool_json(canary.read_final));
     print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
     printf(",\"note\":\"Map tile SD cache canary committed by temp write and atomic rename; no Public RF or format command was used\"}\n");
+}
+
+static void cmd_storage_map_tile_check(const char *line)
+{
+    static const char prefix[] = "storage map-tile-check ";
+    char token[D1L_MAP_TILE_CANARY_TOKEN_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("storage map-tile-check", "INVALID_TOKEN",
+                   "usage: storage map-tile-check <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+
+    d1l_map_tile_canary_result_t canary = {0};
+    esp_err_t ret = d1l_map_tile_store_check_canary(token, &status, &canary);
+    if (ret != ESP_OK) {
+        print_storage_map_tile_error(
+            "storage map-tile-check", canary.step, ret, &status, &canary,
+            "requires the previous map tile canary to survive SD reboot/remount; no Public RF or format command was used");
+        return;
+    }
+
+    d1l_storage_status(&status);
+    ok_begin("storage map-tile-check");
+    printf(",\"token\":");
+    print_json_string(canary.token);
+    printf(",\"path\":");
+    print_json_string(canary.path);
+    printf(",\"z\":%u,\"x\":%lu,\"y\":%lu,\"bytes\":%u,\"stat_final\":%s,\"read_final\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"map_tile_backend\":",
+           (unsigned)canary.z,
+           (unsigned long)canary.x,
+           (unsigned long)canary.y,
+           (unsigned)canary.bytes,
+           bool_json(canary.stat_final),
+           bool_json(canary.read_final));
+    print_json_string(status.map_tile_backend ? status.map_tile_backend : "unavailable");
+    printf(",\"note\":\"Map tile SD cache canary verified read-only after remount; no Public RF or format command was used\"}\n");
 }
 
 static void cmd_storage_export_canary(const char *line)
@@ -3487,7 +3530,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3583,6 +3626,8 @@ static void handle_line(const char *line)
         cmd_storage_filecanary();
     } else if (strncmp(line, "storage map-tile-canary ", strlen("storage map-tile-canary ")) == 0) {
         cmd_storage_map_tile_canary(line);
+    } else if (strncmp(line, "storage map-tile-check ", strlen("storage map-tile-check ")) == 0) {
+        cmd_storage_map_tile_check(line);
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {

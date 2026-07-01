@@ -33,6 +33,35 @@ constexpr uint8_t SD_POWER_PIN = 18;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
 constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr const char *DESKOS_ROOT = "/deskos";
+constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
+constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
+constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
+    "{\"name\":\"MeshCore DeskOS D1L SD\",\"schema\":1,"
+    "\"created_by\":\"MeshCore DeskOS D1L\","
+    "\"device\":\"seeed-indicator-d1l\","
+    "\"stores\":[\"messages\",\"dm\",\"nodes\",\"routes\",\"packets\",\"map_tiles\"]}\n";
+constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
+    "{\"schema\":1,\"kind\":\"map_cache\","
+    "\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\","
+    "\"download_supported\":false}\n";
+constexpr const char *DESKOS_REQUIRED_DIRS[] = {
+    "/deskos/stores",
+    "/deskos/stores/messages",
+    "/deskos/stores/messages/public",
+    "/deskos/stores/messages/dm",
+    "/deskos/stores/nodes",
+    "/deskos/stores/contacts",
+    "/deskos/stores/routes",
+    "/deskos/stores/packet_log",
+    "/deskos/map",
+    "/deskos/map/tiles",
+    "/deskos/map/packs",
+    "/deskos/exports",
+    "/deskos/exports/diagnostics",
+    "/deskos/exports/data",
+    "/deskos/tmp",
+    "/deskos/logs",
+};
 
 constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
@@ -432,6 +461,133 @@ void fill_capacity(SdSnapshot &snapshot) {
     }
 }
 
+bool path_is_directory(const char *path) {
+    File file = SD.open(path, "r");
+    const bool is_dir = file && file.isDirectory();
+    if (file) {
+        file.close();
+    }
+    return is_dir;
+}
+
+bool ensure_directory(const char *path) {
+    if (SD.exists(path)) {
+        return path_is_directory(path);
+    }
+    return SD.mkdir(path) && path_is_directory(path);
+}
+
+bool manifest_valid() {
+    if (!SD.exists(DESKOS_MANIFEST)) {
+        return false;
+    }
+    File file = SD.open(DESKOS_MANIFEST, "r");
+    if (!file || file.isDirectory()) {
+        if (file) {
+            file.close();
+        }
+        return false;
+    }
+    if (file.size() == 0 || file.size() > 512) {
+        file.close();
+        return false;
+    }
+    String text = file.readString();
+    file.close();
+    return text.indexOf("\"schema\":1") >= 0 &&
+           text.indexOf("\"name\":\"MeshCore DeskOS D1L SD\"") >= 0 &&
+           text.indexOf("\"device\":\"seeed-indicator-d1l\"") >= 0 &&
+           text.indexOf("\"map_tiles\"") >= 0;
+}
+
+bool map_manifest_valid() {
+    if (!SD.exists(DESKOS_MAP_MANIFEST)) {
+        return false;
+    }
+    File file = SD.open(DESKOS_MAP_MANIFEST, "r");
+    if (!file || file.isDirectory()) {
+        if (file) {
+            file.close();
+        }
+        return false;
+    }
+    if (file.size() == 0 || file.size() > 512) {
+        file.close();
+        return false;
+    }
+    String text = file.readString();
+    file.close();
+    return text.indexOf("\"schema\":1") >= 0 &&
+           text.indexOf("\"kind\":\"map_cache\"") >= 0 &&
+           text.indexOf("\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\"") >= 0;
+}
+
+bool write_text_file(const char *path, const char *payload) {
+    File file = SD.open(path, "w");
+    if (!file) {
+        return false;
+    }
+    const size_t written = file.print(payload);
+    file.flush();
+    file.close();
+    return written == strlen(payload);
+}
+
+bool write_manifest() {
+    return write_text_file(DESKOS_MANIFEST, DESKOS_MANIFEST_PAYLOAD) && manifest_valid();
+}
+
+bool write_map_manifest() {
+    return write_text_file(DESKOS_MAP_MANIFEST, DESKOS_MAP_MANIFEST_PAYLOAD) &&
+           map_manifest_valid();
+}
+
+bool prepare_deskos_structure(const char **note) {
+    bool created = false;
+    if (!SD.exists(DESKOS_ROOT)) {
+        created = true;
+    }
+    if (!ensure_directory(DESKOS_ROOT)) {
+        *note = "deskos_root_unavailable";
+        return false;
+    }
+    for (size_t i = 0; i < sizeof(DESKOS_REQUIRED_DIRS) / sizeof(DESKOS_REQUIRED_DIRS[0]); ++i) {
+        if (!SD.exists(DESKOS_REQUIRED_DIRS[i])) {
+            created = true;
+        }
+        if (!ensure_directory(DESKOS_REQUIRED_DIRS[i])) {
+            *note = "deskos_structure_unavailable";
+            return false;
+        }
+    }
+    if (SD.exists(DESKOS_MANIFEST)) {
+        if (!manifest_valid()) {
+            *note = "deskos_manifest_invalid";
+            return false;
+        }
+    } else {
+        created = true;
+        if (!write_manifest()) {
+            *note = "deskos_manifest_unavailable";
+            return false;
+        }
+    }
+    if (SD.exists(DESKOS_MAP_MANIFEST)) {
+        if (!map_manifest_valid()) {
+            *note = "deskos_map_manifest_invalid";
+            return false;
+        }
+    } else {
+        created = true;
+        if (!write_map_manifest()) {
+            *note = "deskos_map_manifest_unavailable";
+            return false;
+        }
+    }
+    *note = created ? "structure_created" : "ready";
+    return true;
+}
+
 SdSnapshot mount_status_blocking() {
     SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
@@ -498,13 +654,14 @@ SdSnapshot mount_status_blocking() {
     snapshot.note = "deskos_root_missing";
     fill_capacity(snapshot);
 
-    if (SD.exists(DESKOS_ROOT) || SD.mkdir(DESKOS_ROOT)) {
+    const char *prepare_note = "ready";
+    if (prepare_deskos_structure(&prepare_note)) {
         snapshot.state = "ready";
         snapshot.deskos = true;
-        snapshot.note = "ready";
+        snapshot.note = prepare_note;
     } else {
-        snapshot.state = "error";
-        snapshot.note = "deskos_root_unavailable";
+        snapshot.state = "setup_required";
+        snapshot.note = prepare_note;
     }
 
     return snapshot;
@@ -558,7 +715,8 @@ bool format_card() {
     if (!formatted) {
         return false;
     }
-    return mount_sd() && (SD.exists(DESKOS_ROOT) || SD.mkdir(DESKOS_ROOT));
+    const char *prepare_note = "ready";
+    return mount_sd() && prepare_deskos_structure(&prepare_note);
 }
 
 DiagSnapshot pending_diag_snapshot() {
