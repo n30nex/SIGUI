@@ -68,7 +68,6 @@ esp_err_t d1l_board_init(void)
     if (ret == ESP_OK) {
         d1l_backlight_set_percent(70);
         d1l_board_i2c_scan(&s_status);
-        d1l_board_touch_ensure_ready();
     }
     return ret;
 }

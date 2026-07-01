@@ -65,7 +65,10 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
 
     assert "uint8_t btn_val = 0;" in seeed_patch
     assert "bool pressed = (tp_num > 0) || (btn_val != 0);" in seeed_patch
+    assert "indev_get_major_value(&sample)" in ui_source
     assert "sample.pressed" in ui_source
+    assert "CONFIG_LCD_EVB_SCREEN_WIDTH - sample.x" in ui_source
+    assert "CONFIG_LCD_EVB_SCREEN_HEIGHT - sample.y" in ui_source
     assert "last_x" in ui_source
     assert "tp_dev_id = 0;" in seeed_patch
     assert "d1l_board_touch_read" in board_source

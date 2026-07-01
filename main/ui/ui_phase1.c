@@ -17,7 +17,8 @@
 #include "bsp_lcd.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
-#include "hal/indicator_board.h"
+#include "indev/indev.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
 static lv_disp_draw_buf_t s_draw_buf;
@@ -155,13 +156,16 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     (void)drv;
     static lv_coord_t last_x = 0;
     static lv_coord_t last_y = 0;
-    d1l_board_touch_state_t sample = {0};
-    if (d1l_board_touch_read(&sample) == ESP_OK && sample.pressed) {
-        data->state = LV_INDEV_STATE_PRESSED;
-        last_x = sample.x;
-        last_y = sample.y;
+    indev_data_t sample = {0};
+    if (indev_get_major_value(&sample) != ESP_OK) {
+        return;
+    }
+    if (sample.pressed) {
+        data->state = LV_INDEV_STATE_PR;
+        last_x = CONFIG_LCD_EVB_SCREEN_WIDTH - sample.x;
+        last_y = CONFIG_LCD_EVB_SCREEN_HEIGHT - sample.y;
     } else {
-        data->state = LV_INDEV_STATE_RELEASED;
+        data->state = LV_INDEV_STATE_REL;
     }
     data->point.x = last_x;
     data->point.y = last_y;
