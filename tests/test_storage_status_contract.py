@@ -94,6 +94,7 @@ def test_storage_format_request_is_guarded_before_bridge_command():
         "!s_status.format_supported",
         "!s_status.setup_required",
         "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)",
+        "!sd.data_ready",
     ]
 
     positions = [source.index(token) for token in guard_order]

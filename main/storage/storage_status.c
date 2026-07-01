@@ -329,6 +329,10 @@ esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t tim
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms);
     apply_rp2040_sd_status(&sd);
+    if (ret == ESP_OK && !sd.data_ready) {
+        s_status.last_error = sd.card_present ? ESP_FAIL : ESP_ERR_NOT_FOUND;
+        return s_status.last_error;
+    }
     return ret;
 }
 
