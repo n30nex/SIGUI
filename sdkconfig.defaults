@@ -8,6 +8,8 @@ CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 
 CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L=y
+CONFIG_SENSECAP_INDICATOR_SCREEN_GX=y
+# CONFIG_SENSECAP_INDICATOR_SCREEN_DX is not set
 CONFIG_LCD_EVB_SCREEN_ROTATION_0=y
 # Keep Phase 1 LVGL flushing on the BSP draw_bitmap path. Seeed direct mode
 # requires extra callbacks; without them the BSP dereferences a null callback.

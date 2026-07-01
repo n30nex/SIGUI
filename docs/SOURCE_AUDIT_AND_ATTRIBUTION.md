@@ -19,9 +19,13 @@ This project uses references for architecture and feature parity, but Phase 1 so
 ## Reference Repositories
 
 - SigurdOS T-Deck: https://github.com/hermes-gadget/SigurdOS-tdeck
-  - License: GPL-3.0.
-  - Use: Architecture and UX reference only unless GPL licensing is intentionally accepted.
-  - Risk: Copying code would impose GPL obligations on distributed firmware/source. Current Phase 1 reimplements patterns rather than copying.
+  - Source commit reviewed: `784b1fb26e8c4b733581ca1617f1a627778f3577` on `dev`.
+  - License: GPL-3.0-or-later.
+  - Upstream copyright headers reviewed: `Copyright (C) 2025 Ben`.
+  - Permission: maintainers gave this project permission to use the work with attribution.
+  - Files reviewed for the D1L touch/input slice: `src/hal/tdeck_pins.h`, `src/hal/tdeck_board.h`, `src/hal/touch.h`, `src/hal/touch.cpp`, `src/hal/display.cpp`, `src/main.cpp`, and `test/test_touch/test_touch.cpp`.
+  - Use: primary production firmware reference for touch-first MeshCore UX and input architecture. The current D1L implementation adapts its cached-state, validation/clamping, deterministic-release, and test-coverage ideas onto the Seeed BSP/FT5x06 path.
+  - Risk: copying/adapting GPL source would impose GPL obligations on distributed firmware/source unless separate written terms grant otherwise. The current D1L touch work keeps controller code on the Seeed FT5x06 BSP path instead of porting SigurdOS's GT911 driver.
 
 - LimitlezzOS: https://github.com/ItsLimitlezz/LimitlezzOS
   - License: no top-level license found in the shallow audit. Treat as all-rights-reserved unless proven otherwise.
@@ -50,6 +54,6 @@ This project uses references for architecture and feature parity, but Phase 1 so
 
 ## Attribution Policy
 
-Keep third-party code in submodules or clearly attributed components. New MeshCore DeskOS files should use original implementations and avoid proprietary icons, Apple assets, copied SigurdOS GPL code, and unlicensed LimitlezzOS source.
+Keep third-party code in submodules or clearly attributed components. New MeshCore DeskOS files should use original implementations and avoid proprietary icons, Apple assets, untracked copied SigurdOS GPL code, and unlicensed LimitlezzOS source.
 
-If this firmware later copies/adapts SigurdOS code, the project should be treated as GPL-compatible and release obligations must be updated. The current Phase 1 path uses original source plus permissive submodules.
+If this firmware later copies/adapts SigurdOS source code rather than architecture/behavior, the project should be treated as GPL-compatible and release obligations must be updated, including per-file SPDX/modification notices and public source availability for distributed binaries.

@@ -151,21 +151,47 @@ static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *colo
     lv_disp_flush_ready(drv);
 }
 
+static lv_coord_t clamp_touch_coord(int32_t value, lv_coord_t max_value)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value > max_value) {
+        return max_value;
+    }
+    return (lv_coord_t)value;
+}
+
+static bool touch_sample_has_valid_point(const indev_data_t *sample)
+{
+    return sample &&
+           sample->x != UINT16_MAX &&
+           sample->y != UINT16_MAX &&
+           sample->x < CONFIG_LCD_EVB_SCREEN_WIDTH &&
+           sample->y < CONFIG_LCD_EVB_SCREEN_HEIGHT;
+}
+
 static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
 {
     (void)drv;
     static lv_coord_t last_x = 0;
     static lv_coord_t last_y = 0;
-    indev_data_t sample = {0};
+    static indev_data_t sample;
+
+    data->state = LV_INDEV_STATE_REL;
+    data->point.x = last_x;
+    data->point.y = last_y;
+
+    memset(&sample, 0, sizeof(sample));
     if (indev_get_major_value(&sample) != ESP_OK) {
         return;
     }
-    if (sample.pressed) {
+    if (sample.pressed && touch_sample_has_valid_point(&sample)) {
         data->state = LV_INDEV_STATE_PR;
-        last_x = CONFIG_LCD_EVB_SCREEN_WIDTH - sample.x;
-        last_y = CONFIG_LCD_EVB_SCREEN_HEIGHT - sample.y;
-    } else {
-        data->state = LV_INDEV_STATE_REL;
+        last_x = clamp_touch_coord((int32_t)CONFIG_LCD_EVB_SCREEN_WIDTH - 1 - (int32_t)sample.x,
+                                   CONFIG_LCD_EVB_SCREEN_WIDTH - 1);
+        last_y = clamp_touch_coord((int32_t)CONFIG_LCD_EVB_SCREEN_HEIGHT - 1 - (int32_t)sample.y,
+                                   CONFIG_LCD_EVB_SCREEN_HEIGHT - 1);
     }
     data->point.x = last_x;
     data->point.y = last_y;

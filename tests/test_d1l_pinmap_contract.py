@@ -52,6 +52,8 @@ def test_console_exposes_explicit_rp2040_reset_command():
 
 def test_phase1_lvgl_uses_basic_flush_path():
     defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
+    assert "CONFIG_SENSECAP_INDICATOR_SCREEN_GX=y" in defaults
+    assert "# CONFIG_SENSECAP_INDICATOR_SCREEN_DX is not set" in defaults
     assert "CONFIG_LCD_AVOID_TEAR=y" not in defaults
     assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" not in defaults
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
@@ -67,8 +69,11 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     assert "bool pressed = (tp_num > 0) || (btn_val != 0);" in seeed_patch
     assert "indev_get_major_value(&sample)" in ui_source
     assert "sample.pressed" in ui_source
-    assert "CONFIG_LCD_EVB_SCREEN_WIDTH - sample.x" in ui_source
-    assert "CONFIG_LCD_EVB_SCREEN_HEIGHT - sample.y" in ui_source
+    assert "data->state = LV_INDEV_STATE_REL;" in ui_source
+    assert "touch_sample_has_valid_point(&sample)" in ui_source
+    assert "CONFIG_LCD_EVB_SCREEN_WIDTH - 1 - (int32_t)sample.x" in ui_source
+    assert "CONFIG_LCD_EVB_SCREEN_HEIGHT - 1 - (int32_t)sample.y" in ui_source
+    assert "clamp_touch_coord" in ui_source
     assert "last_x" in ui_source
     assert "tp_dev_id = 0;" in seeed_patch
     assert "d1l_board_touch_read" in board_source

@@ -41,6 +41,10 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-in
 
 Current bench D1L validation uses COM12. Do not use COM11 or COM29 for D1L flashing/testing.
 
+## Licensing and Attribution
+
+This firmware uses Seeed SenseCAP Indicator BSP/examples and design references from SigurdOS-TDeck with permission. See [docs/ATTRIBUTIONS.md](docs/ATTRIBUTIONS.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [docs/SOURCE_AUDIT_AND_ATTRIBUTION.md](docs/SOURCE_AUDIT_AND_ATTRIBUTION.md) before public release packaging or redistributing source/binaries.
+
 ## Roadmap
 
 The implementation follows [docs/ROADMAP.md](docs/ROADMAP.md). The framework decision is recorded in [docs/D1L_BUILD_DECISION.md](docs/D1L_BUILD_DECISION.md).
