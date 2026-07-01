@@ -409,11 +409,7 @@ static void persist_map_location_from_args(const char *cmd, const char *arg)
         return;
     }
 
-    d1l_settings_t settings = *d1l_settings_current();
-    settings.map_location_set = true;
-    settings.map_lat_e7 = lat_e7;
-    settings.map_lon_e7 = lon_e7;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_app_model_set_map_location(lat_e7, lon_e7);
     if (ret != ESP_OK) {
         err_result(cmd, esp_err_to_name(ret), "could not persist map location");
         return;
@@ -423,11 +419,7 @@ static void persist_map_location_from_args(const char *cmd, const char *arg)
 
 static void clear_map_location(const char *cmd)
 {
-    d1l_settings_t settings = *d1l_settings_current();
-    settings.map_location_set = false;
-    settings.map_lat_e7 = 0;
-    settings.map_lon_e7 = 0;
-    esp_err_t ret = d1l_settings_save(&settings);
+    esp_err_t ret = d1l_app_model_clear_map_location();
     if (ret != ESP_OK) {
         err_result(cmd, esp_err_to_name(ret), "could not clear map location");
         return;

@@ -1211,8 +1211,8 @@ Final package must include:
 
 ### Map
 
-- [ ] First-open location picker.
-- [ ] D1L pin persistence.
+- [x] First-open location picker.
+- [x] D1L pin persistence.
 - [ ] Nearby GPS node pins.
 - [ ] Tile cache renderer from SD.
 - [ ] Free/user-configurable tile source.

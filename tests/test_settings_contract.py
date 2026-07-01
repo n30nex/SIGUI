@@ -103,8 +103,8 @@ def test_console_exposes_phase2_foundation_commands():
     assert "strtod(text, &end)" in console
     assert '\\"map_location\\"' in console
     assert "print_map_location_result" in console
-    assert "settings.map_location_set = true" in console
-    assert "settings.map_location_set = false" in console
+    assert "d1l_app_model_set_map_location(lat_e7, lon_e7)" in console
+    assert "d1l_app_model_clear_map_location()" in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

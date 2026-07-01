@@ -77,6 +77,10 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "d1l_app_model_default_radio_profile" in header
     assert "d1l_app_model_current_radio_profile" in header
     assert "valid_radio_edit" in source
+    assert "d1l_app_model_set_map_location" in header
+    assert "d1l_app_model_clear_map_location" in header
+    assert "settings.map_location_set = true" in source
+    assert "settings.map_location_set = false" in source
 
 
 def test_phase3_shell_replaces_diagnostic_tile_home():
@@ -160,6 +164,8 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_app_model_request_advert(false)" in source
     assert "d1l_app_model_request_advert(true)" in source
     assert "d1l_app_model_complete_onboarding(name)" in source
+    assert "d1l_app_model_set_map_location(s_map_picker_lat_e7" in source
+    assert "d1l_app_model_clear_map_location()" in source
     assert "d1l_app_model_send_public_text" in header
     assert "d1l_app_model_send_dm_text" in header
     assert "d1l_app_model_complete_onboarding" in header
@@ -176,6 +182,7 @@ def test_touch_ui_actions_route_through_app_model():
     assert "d1l_route_store_copy_for_target(fingerprint, out_entries, max_entries)" in model
     assert "d1l_meshcore_service_request_advert(flood)" in model
     assert "d1l_settings_complete_onboarding(node_name, false, false, false)" in model
+    assert "d1l_settings_save(&settings)" in model
     assert "d1l_meshcore_service_ensure_identity()" in model
 
 
@@ -223,6 +230,11 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "save_contact_alias": "save_contact_edit_event_cb",
         "forget_contact": "forget_contact_edit_event_cb",
         "open_map": "dock_event_cb",
+        "open_map_location_picker": "open_map_location_sheet_event_cb",
+        "map_picker_north": "map_picker_adjust_event_cb",
+        "map_zoom_in": "map_picker_adjust_event_cb",
+        "drop_d1l_pin": "map_location_save_event_cb",
+        "skip_map_location": "close_map_location_sheet_event_cb",
         "open_contact_export": "contact_detail_export_event_cb",
         "open_route_trace": "open_route_trace_event_cb",
         "open_packet_search": "open_packet_search_event_cb",
@@ -341,6 +353,12 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert "D1L_UI_TAB_MAP" in source
     assert "render_map" in source
     assert '"Map"' in source
+    assert '"Set Pin"' in source
+    assert '"Move Pin"' in source
+    assert '"Set D1L Location"' in source
+    assert '"Map needs your D1L location"' in source
+    assert '"Manual Picker"' in source
+    assert '"Drop Pin"' in source
     assert '"Tile Cache"' in source
     assert '"Downloads"' in source
     assert '"Offline Cache"' in source
@@ -354,6 +372,11 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert "snapshot->map_tile_cache_path_template" in source
     assert "snapshot->map_tile_download_requires" in source
     assert "snapshot->map_location_set" in source
+    assert "s_map_location_prompt_seen" in source
+    assert "create_map_location_sheet(s_screen)" in source
+    assert "open_map_location_sheet_event_cb" in source
+    assert "map_picker_adjust_event_cb" in source
+    assert "map_location_save_event_cb" in source
     assert "format_coord_e7" in source
     assert "render_metric_card(s_content, 18, 48" in source
     assert "render_metric_card(s_content, 238, 48" in source

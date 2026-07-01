@@ -36,6 +36,7 @@
 - [x] Simulator layout report passes required-label and text-overflow checks.
 - [x] Simulator touch-flow report passes expected-flow, 44x44 touch-target, RF/destructive flag, and no-format storage checks.
 - [x] Offline Map tab, serial-configured manual center, and SD tile-cache policy are covered by simulator required-label and flow checks.
+- [x] First-open touch Map location picker and persisted D1L pin flow are covered by simulator required-label and flow checks.
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
 - [x] Bottom dock tab taps validated on D1L `COM12` after the deferred tab-switch fix; monitored touch samples and crashlog stayed clean.
 - [ ] Manual visual review of the physical shell.
@@ -75,6 +76,7 @@
 - [x] Serial-only sampled data export SD bundle added: `storage export-data <token>` commits bounded chunked user-data JSON to `exports/data/data-export-<token>.json`, includes recent messages/DMs/routes/packets/contacts/nodes/read-state, excludes private identity material, and `scripts/sd_data_export_d1l.py` proves the path without Public RF or formatting.
 - [x] Serial-only map tile cache SD canary added: `storage map-tile-canary <token>` commits `map/tiles/z12/x1/y2-<token>.tile` through temp write/read plus atomic rename and `scripts/sd_map_tile_canary_d1l.py` proves the path without Public RF or formatting.
 - [x] First offline Map tab, serial `storage map-policy`, and `map center` commands added: they expose `map/tiles/z{z}/x{x}/y{y}.tile`, current cache readiness/backend, optional manual center, and disabled live-download state without Public RF or formatting.
+- [x] Touch `Set Pin`/`Move Pin` Map picker added: it pans/zooms a manual D1L pin, persists through the app model/settings path shared with `map center set`, and does not send Public RF or touch/format SD.
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
 - [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; the current inserted-card attempt still reports `sd.state=no_card`, and confirmed formatting is refused with `ESP_ERR_NOT_FOUND` and `format_performed=false`. A follow-up `DESKOS_SD_DIAG`/`storage diag` probe matrix is implemented but still needs Actions artifact flash and COM12 hardware proof.

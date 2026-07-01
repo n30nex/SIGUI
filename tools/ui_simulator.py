@@ -865,6 +865,14 @@ def render_nodes(s: Surface, snap: Snapshot):
 def render_map(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Map", (16, 64, 150, 92), 22, TEXT, True)
+    draw_button(
+        s,
+        (344, 62, 456, 102),
+        "Move Pin" if snap.map_location_set else "Set Pin",
+        GREEN,
+        action="open_map_location_picker",
+        destination="map_location_sheet",
+    )
     draw_metric(
         s,
         (16, 104, 230, 176),
@@ -917,6 +925,28 @@ def render_map(s: Surface, snap: Snapshot):
             "map_route_count": len(snap.routes),
         }
     )
+    draw_dock(s, "Map")
+
+
+def render_map_location_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Set D1L Location", "Map needs your D1L location")
+    lat = snap.map_lat_e7 if snap.map_location_set else 436532000
+    lon = snap.map_lon_e7 if snap.map_location_set else -793832000
+    s.round_rect((44, 152, 436, 238))
+    s.text("Manual Picker", (58, 160, 220, 182), 14, TEXT, True)
+    s.text(f"Lat {format_e7(lat)}", (58, 190, 300, 212), 15, TEXT, True)
+    s.text(f"Lon {format_e7(lon)}", (58, 214, 300, 234), 15, TEXT, True)
+    s.text("+", (366, 184, 408, 222), 24, GREEN, True, "center")
+    draw_button(s, (112, 252, 168, 296), "N", GREEN, action="map_picker_north")
+    draw_button(s, (112, 304, 168, 348), "S", GREEN, action="map_picker_south")
+    draw_button(s, (50, 278, 106, 322), "W", GREEN, action="map_picker_west")
+    draw_button(s, (174, 278, 230, 322), "E", GREEN, action="map_picker_east")
+    s.text("Zoom 10", (262, 252, 364, 274), 13, MUTED, True)
+    draw_button(s, (260, 282, 316, 326), "-", BLUE, action="map_zoom_out")
+    draw_button(s, (326, 282, 382, 326), "+", BLUE, action="map_zoom_in")
+    draw_button(s, (44, 358, 156, 398), "Drop Pin", GREEN, action="drop_d1l_pin", destination="map")
+    draw_button(s, (170, 358, 270, 398), "Clear", AMBER, action="clear_d1l_pin", destination="map")
+    draw_button(s, (316, 94, 436, 134), "Skip", MUTED, action="skip_map_location", destination="map")
     draw_dock(s, "Map")
 
 
@@ -1300,6 +1330,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "messages": render_messages,
     "nodes": render_nodes,
     "map": render_map,
+    "map_location_sheet": render_map_location_sheet,
     "packets": render_packets,
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
@@ -1337,6 +1368,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
+    "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
@@ -1455,6 +1487,11 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "map_page_policy",
         "steps": (
             {"view": "home", "action": "open_map", "destination": "map"},
+            {"view": "map", "action": "open_map_location_picker", "destination": "map_location_sheet"},
+            {"view": "map_location_sheet", "action": "map_picker_north"},
+            {"view": "map_location_sheet", "action": "map_zoom_in"},
+            {"view": "map_location_sheet", "action": "drop_d1l_pin", "destination": "map"},
+            {"view": "map_location_sheet", "action": "skip_map_location", "destination": "map"},
         ),
     },
     {

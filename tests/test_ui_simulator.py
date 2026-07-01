@@ -88,8 +88,9 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
-    assert {"Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
+    assert {"Map", "Set Pin", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
+    assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
@@ -147,6 +148,10 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
     assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
+    assert actions_by_view["map"]["open_map_location_picker"]["destination"] == "map_location_sheet"
+    assert actions_by_view["map_location_sheet"]["drop_d1l_pin"]["destination"] == "map"
+    assert actions_by_view["map_location_sheet"]["skip_map_location"]["destination"] == "map"
+    assert actions_by_view["map_location_sheet"]["clear_d1l_pin"]["destination"] == "map"
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"

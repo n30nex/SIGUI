@@ -214,6 +214,8 @@ size_t d1l_app_model_copy_route_trace(const char *fingerprint, d1l_route_entry_t
 esp_err_t d1l_app_model_mark_messages_read(void);
 esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
+esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
+esp_err_t d1l_app_model_clear_map_location(void);
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile);
 void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile);
 esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *profile);

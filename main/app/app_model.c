@@ -436,6 +436,31 @@ esp_err_t d1l_app_model_request_advert(bool flood)
     return d1l_meshcore_service_request_advert(flood);
 }
 
+esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7)
+{
+    if (lat_e7 < D1L_MAP_LOCATION_LAT_E7_MIN ||
+        lat_e7 > D1L_MAP_LOCATION_LAT_E7_MAX ||
+        lon_e7 < D1L_MAP_LOCATION_LON_E7_MIN ||
+        lon_e7 > D1L_MAP_LOCATION_LON_E7_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_location_set = true;
+    settings.map_lat_e7 = lat_e7;
+    settings.map_lon_e7 = lon_e7;
+    return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_app_model_clear_map_location(void)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_location_set = false;
+    settings.map_lat_e7 = 0;
+    settings.map_lon_e7 = 0;
+    return d1l_settings_save(&settings);
+}
+
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile)
 {
     radio_edit_from_settings(d1l_settings_current(), profile);
