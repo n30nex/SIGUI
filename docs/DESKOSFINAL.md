@@ -1107,6 +1107,14 @@ With a known-good MeshCore node/bot:
 - Packet log captures each event.
 - UI updates without manual refresh.
 
+Current evidence: `artifacts/hardware/com12/dm_probe_b841621c.json` passed on
+COM12 against the local COM11 Meshcorebot with `send_ok=true`,
+`messages_dm_has_token=true`, `packets_search_has_token=true`,
+`route_trace_has_target=true`, `meshbot_rx_contact_delta=true`, and
+`no_public_commands=true`. Treat outbound DM-to-peer proof as closed for this
+checkpoint. Controlled inbound DM, ACK/PATH, direct-route RF proof, and manual
+touch DM workflow review remain open.
+
 ### 13.4 SD proof
 
 Run scenario matrix from Chunk 5 and archive JSON artifacts.
@@ -1125,6 +1133,21 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 ```
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
+
+Current evidence: Actions run `28549189659` built the `b841621` ESP32 release
+package and RP2040 SD bridge UF2. The release package checksums verified and the
+ESP32 package flashed to COM12; `artifacts/hardware/com12/smoke_b841621.json`
+passed. The RP2040 UF2 checksum is
+`032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`, but
+`artifacts/hardware/com12/rp2040_uf2_volumes_b841621.json` found no mounted UF2
+bootloader volume, so the new RP2040 bridge was not copied. The preflight
+`artifacts/hardware/com12/rp2040_preflight_b841621_uf2_not_mounted.json` proves
+the RP2040 UART, ping, protocol, and diag paths respond, and the inserted card
+reaches `sd.state="setup_required"` with NVS fallback, but
+`ready_for_sd_acceptance=false` because the SD file gate is not ready. Full SD
+auto-prepare, retained-history, export, map-tile, and reboot/remount proof
+remain blocked until the RP2040 is placed in UF2/BOOTSEL mode and the verified
+`deskos_sd_bridge.ino.uf2` is copied.
 
 ### 13.5 Soak
 
@@ -1224,12 +1247,21 @@ entries.
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
-Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_86e5e0e.json`
-used the operator-approved guarded unformatted-card confirmation path, reported
-`format_allowed=true`, `public_rf_tx=false`, and `formats_sd=false`, but ended
-`classification=format_confirmed_not_ready` because the RP2040 bridge returned
-`ESP_ERR_NOT_FOUND` with `no SD card is reported by the RP2040 bridge; no format
-was performed`. Full SD auto-prepare and retained-history proof remain open.
+Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_fc08f59.json`
+proved the guarded unformatted-card path stays safe and no longer wedges the
+ESP32 (`classification=format_confirmed_not_ready`, `format_allowed=true`,
+`public_rf_tx=false`, `formats_sd=false`, health ready), but the older RP2040
+bridge timed out before reporting a concrete format result. Commit `b841621`
+hardened RP2040 format replies and Actions run `28549189659` produced a verified
+RP2040 UF2 with SHA256
+`032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`; however,
+`artifacts/hardware/com12/rp2040_uf2_volumes_b841621.json` found
+`candidate_volumes=[]`, so that bridge firmware has not yet been copied to the
+RP2040. `artifacts/hardware/com12/rp2040_preflight_b841621_uf2_not_mounted.json`
+shows the current COM12 bridge still responds to ping/protocol/diag and detects
+the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`.
+Full SD auto-prepare, retained-history, export, map-tile, and reboot/remount
+proof remain open until the RP2040 UF2 is flashed and the SD matrix is rerun.
 
 ### Map
 

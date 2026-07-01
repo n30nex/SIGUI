@@ -30,7 +30,7 @@ def test_dm_probe_report_checks_d1l_and_meshbot_evidence():
     steps = [
         {"command": "mesh send dm 0BF0A701D5AE2DB6 unit_token", "result": {"ok": True, "cmd": "mesh send dm"}},
         {
-            "command": "messages dm 0BF0A701D5AE2DB6",
+            "command": "messages dm",
             "result": {"ok": True, "cmd": "messages dm", "entries": [{"text": "unit_token"}]},
         },
         {
@@ -67,5 +67,6 @@ def test_dm_probe_report_checks_d1l_and_meshbot_evidence():
 
 def test_dm_send_prefix_matches_console_response_name():
     assert expected_command_name("mesh send dm 0BF0A701D5AE2DB6 hello") == "mesh send dm"
+    assert expected_command_name("messages dm") == "messages dm"
     assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"
     assert expected_command_name("messages dm clear") == "messages dm clear"

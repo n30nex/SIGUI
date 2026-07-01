@@ -38,7 +38,7 @@ def build_probe_commands(fingerprint: str, token: str) -> list[str]:
         "contacts",
         "mesh status",
         f"mesh send dm {fingerprint} {token}",
-        f"messages dm {fingerprint}",
+        "messages dm",
         f"packets search {token}",
         f"routes trace {fingerprint}",
         "mesh status",
@@ -157,7 +157,7 @@ def build_report(
     min_contact_delta: int,
 ) -> dict:
     send_step = find_step(steps, "mesh send dm ")
-    messages_step = find_step(steps, "messages dm ")
+    messages_step = find_step(steps, "messages dm")
     packets_step = find_step(steps, "packets search ")
     route_step = find_step(steps, "routes trace ")
     health_step = find_step(steps, "health")

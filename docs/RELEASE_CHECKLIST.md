@@ -49,7 +49,7 @@
 - [x] `messages public` serial diagnostic added to smoke coverage.
 - [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
 - [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
-- [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions.
+- [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions; `artifacts/hardware/com12/dm_probe_b841621c.json` passed COM12-to-COM11 outbound DM proof with retained DM, packet, route, meshbot receive-counter, health, and no-Public-command checks all true.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
 - [x] Public message store survives reboot on `COM7`.
 - [x] Free-text Public composer implemented, built, flashed, and RF-regression tested.
@@ -80,7 +80,8 @@
 - [x] Touch `Set Pin`/`Move Pin` Map picker added: it pans/zooms a manual D1L pin, persists through the app model/settings path shared with `map center set`, and does not send Public RF or touch/format SD.
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
-- [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; the current inserted-card attempt still reports `sd.state=no_card`, and confirmed formatting is refused with `ESP_ERR_NOT_FOUND` and `format_performed=false`. A follow-up `DESKOS_SD_DIAG`/`storage diag` probe matrix is implemented but still needs Actions artifact flash and COM12 hardware proof.
+- [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `b841621` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
+- [ ] Flash the verified `b841621` RP2040 UF2 (`032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`) after the RP2040 is placed in UF2/BOOTSEL mode; `artifacts/hardware/com12/rp2040_uf2_volumes_b841621.json` currently reports `candidate_volumes=[]`.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
@@ -113,6 +114,7 @@
 - [x] Release package artifact generation added to GitHub Actions.
 - [x] RP2040 SD bridge artifact generation added to GitHub Actions.
 - [x] Release package includes normal flash set, app update image, full 8MB image, manifest, checksums, and explicit-port flash helpers.
+- [x] Release package includes third-party notices and source attribution documents for upstream material, including the permitted SigurdOS-derived work.
 - [x] First user guide added.
 - [x] First developer guide added.
 - [x] Known limitations updated.
