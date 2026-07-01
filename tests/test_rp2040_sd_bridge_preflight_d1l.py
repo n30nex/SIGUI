@@ -160,6 +160,29 @@ def test_preflight_classifies_ready_storage_gate():
     assert report["storage_file_gate_ready"] is True
 
 
+def test_preflight_classifies_no_card_with_diag_pending_as_bridge_flash_needed():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "no_card",
+                "present": False,
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+            },
+        },
+        [],
+        {"ok": True},
+        {"ok": False, "cmd": "storage diag", "diag_supported": False},
+    )
+
+    assert report["state"] == "sd_card_not_present_diag_pending"
+    assert report["next_action"] == "put_rp2040_in_uf2_bootloader"
+    assert report["rp2040_diag_supported"] is False
+
+
 def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     ser = FakeSerial(
         [

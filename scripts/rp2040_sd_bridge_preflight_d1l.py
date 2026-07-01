@@ -96,6 +96,7 @@ def classify_preflight(
     storage_status: dict,
     uf2_candidates: list[dict],
     artifact: dict,
+    storage_diag: dict | None = None,
 ) -> dict:
     sd = storage_status.get("sd") if isinstance(storage_status.get("sd"), dict) else {}
     artifact_ok = artifact.get("ok") is True or artifact.get("ok") is None
@@ -103,6 +104,8 @@ def classify_preflight(
     protocol_supported = sd.get("rp2040_protocol_supported") is True
     file_gate_ready = storage_file_gate_ready(storage_status)
     uf2_volume_available = len(uf2_candidates) == 1
+    diag_attempted = isinstance(storage_diag, dict) and bool(storage_diag)
+    diag_supported = storage_diag.get("diag_supported") is True if diag_attempted else False
 
     if file_gate_ready:
         state = "sd_bridge_ready"
@@ -117,8 +120,15 @@ def classify_preflight(
         state = "rp2040_uart_unavailable"
         next_action = "check_d1l_power_cable_and_rp2040_uart"
     elif protocol_supported and sd.get("present") is not True:
-        state = "sd_card_not_present"
-        next_action = "insert_empty_or_sacrificial_sd_card"
+        if diag_attempted and not diag_supported and artifact_ok:
+            state = "sd_card_not_present_diag_pending"
+            next_action = (
+                "dry_run_then_copy_rp2040_uf2" if uf2_volume_available
+                else "put_rp2040_in_uf2_bootloader"
+            )
+        else:
+            state = "sd_card_not_present"
+            next_action = "insert_empty_or_sacrificial_sd_card"
     else:
         state = "sd_not_ready"
         next_action = "inspect_storage_status_and_run_sd_file_canary"
@@ -130,6 +140,7 @@ def classify_preflight(
         "uf2_volume_available": uf2_volume_available,
         "rp2040_uart_ready": bridge_uart_ready,
         "rp2040_protocol_supported": protocol_supported,
+        "rp2040_diag_supported": diag_supported,
         "storage_file_gate_ready": file_gate_ready,
         "sd_state": sd.get("state"),
         "sd_last_error": sd.get("last_error"),
@@ -163,7 +174,9 @@ def run_preflight(
     storage_status = results[1] if len(results) > 1 else {}
     storage_diag = results[2] if len(results) > 2 else {}
     health = results[3] if len(results) > 3 else {}
-    classification = classify_preflight(rp2040_status, storage_status, uf2_candidates, artifact)
+    classification = classify_preflight(
+        rp2040_status, storage_status, uf2_candidates, artifact, storage_diag
+    )
     storage_ok = storage_status.get("ok") is True
     health_ok = health.get("ok") is True
     storage_diag_ok = storage_diag.get("ok") is True
