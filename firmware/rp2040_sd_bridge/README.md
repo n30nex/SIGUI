@@ -103,9 +103,14 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
   does not write to the card.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
-  Formatting uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
+  Formatting first selects the same rail/SPI mode proven by the bounded raw
+  probe, then uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
   wrapper is avoided because that wrapper does not preserve the configured SPI
-  object on this board.
+  object on this board. Every confirmed format attempt must reply with a
+  `DESKOS_SD_FORMAT ...` line, including explicit failure notes such as
+  `format_card_init_failed`, `format_sector_count_failed`, or
+  `post_format_mount_failed` when the card is electrically present but not
+  usable through the filesystem path.
 - `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under
   `/deskos`: `stat`, `read`, `write`, `append`, `delete`, and `rename`. Payloads
   use base64url without padding, CRC32 checks, sanitized relative paths, and

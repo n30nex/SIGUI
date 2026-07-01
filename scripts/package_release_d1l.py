@@ -178,6 +178,29 @@ def copy_optional_debug_files(build_dir: Path, package_dir: Path) -> list[dict]:
     return copied
 
 
+def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
+    notice_specs = [
+        ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
+        ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
+        ("docs/SOURCE_AUDIT_AND_ATTRIBUTION.md", "SOURCE_AUDIT_AND_ATTRIBUTION.md"),
+    ]
+    notices_dir = package_dir / "notices"
+    copied = []
+    for source_rel, dest_name in notice_specs:
+        source = root / source_rel
+        if not source.exists():
+            continue
+        notices_dir.mkdir(parents=True, exist_ok=True)
+        dest = notices_dir / dest_name
+        shutil.copy2(source, dest)
+        copied.append({
+            "path": dest.relative_to(package_dir).as_posix(),
+            "source": source_rel,
+            "sha256": sha256_file(dest),
+        })
+    return copied
+
+
 def app_entry(entries: list[dict]) -> dict:
     for entry in entries:
         if entry["role"] == "app":
@@ -335,6 +358,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
 - `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
+- `notices/` contains third-party notices, source audit notes, and attributions for public distribution.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash
@@ -385,6 +409,7 @@ def create_release_package(root: Path, build_dir: Path, out_dir: Path, package_n
     update_image = copy_update_image(package_dir, firmware_dir, app)
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
     debug_files = copy_optional_debug_files(build_dir, package_dir)
+    notice_files = copy_notice_files(root, package_dir)
     scripts = write_flash_scripts(package_dir, entries, flasher_args, full_image)
 
     manifest = {
@@ -399,6 +424,7 @@ def create_release_package(root: Path, build_dir: Path, out_dir: Path, package_n
         "update_image": update_image,
         "full_flash_image": full_image,
         "debug_files": debug_files,
+        "notice_files": notice_files,
         "scripts": scripts,
         "notes": [
             "Project flash scripts require D1L_PORT or an explicit -Port.",

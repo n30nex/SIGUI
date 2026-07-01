@@ -59,14 +59,25 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sd_command(0, 0, 0x95" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
-    assert "probe_card(DEDICATED_SPI, true)" in sketch
-    assert "probe_card(SHARED_SPI, true)" in sketch
-    assert "probe_card(DEDICATED_SPI, false)" in sketch
-    assert "probe_card(SHARED_SPI, false)" in sketch
+    format_body = sketch.split("SdSnapshot format_card()", 1)[1].split(
+        "DiagSnapshot pending_diag_snapshot", 1
+    )[0]
+    assert "manual_probe_card(DEDICATED_SPI, true)" in format_body
+    assert "manual_probe_card(SHARED_SPI, true)" in format_body
+    assert "manual_probe_card(DEDICATED_SPI, false)" in format_body
+    assert "manual_probe_card(SHARED_SPI, false)" in format_body
+    assert "\n        probe_card(DEDICATED_SPI, true)" not in format_body
+    assert "\n        probe_card(SHARED_SPI, true)" not in format_body
     assert "delete card" in sketch
     assert "FatFormatter fat_formatter" in sketch
     assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
     assert "SDFS.format()" not in sketch
+    send_format_body = sketch.split("void send_format_result", 1)[1].split(
+        "void send_file_error", 1
+    )[0]
+    assert "SdSnapshot formatted = format_card();" in send_format_body
+    assert "mount_status_blocking()" not in send_format_body
+    assert 'formatted.state = "ready"' not in send_format_body
     assert "/deskos" in sketch
     assert "/deskos/manifest.json" in sketch
     assert "/deskos/map/manifest.json" in sketch
@@ -111,6 +122,9 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "format_complete",
         "confirmation_required",
         "format_failed",
+        "format_card_init_failed",
+        "format_sector_count_failed",
+        "post_format_mount_failed",
         "unsupported_request",
         "line_too_long",
         "bad_path",

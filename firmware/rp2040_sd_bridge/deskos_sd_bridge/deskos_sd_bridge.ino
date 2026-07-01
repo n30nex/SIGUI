@@ -680,43 +680,109 @@ SdSnapshot mount_status() {
     return cache_status(pending_snapshot(s_worker_busy ? "mount_in_progress" : "mount_queued"));
 }
 
-bool format_card() {
-    CardProbe selected = default_probe();
-    if (!selected.present) {
-        CardProbe probes[] = {
-            probe_card(DEDICATED_SPI, true),
-            probe_card(SHARED_SPI, true),
-            probe_card(DEDICATED_SPI, false),
-            probe_card(SHARED_SPI, false),
-        };
-        const CardProbe *probe = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-        if (!probe) {
-            return false;
-        }
-        selected = *probe;
-        s_sd_power_high = selected.power_high;
-        s_sd_spi_options = selected.options;
+SdSnapshot format_card() {
+    SdSnapshot snapshot = make_snapshot("error", "format_failed");
+    CardProbe probes[] = {
+        manual_probe_card(DEDICATED_SPI, true),
+        manual_probe_card(SHARED_SPI, true),
+        manual_probe_card(DEDICATED_SPI, false),
+        manual_probe_card(SHARED_SPI, false),
+    };
+    const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
+    if (!selected) {
+        apply_probe_to_snapshot(snapshot, probes[0]);
+        snapshot.state = "no_card";
+        snapshot.note = "no_card";
+        return snapshot;
     }
+
+    s_sd_power_high = selected->power_high;
+    s_sd_spi_options = selected->options;
+    apply_probe_to_snapshot(snapshot, *selected);
+    snapshot.state = "setup_required";
+    snapshot.present = true;
+    snapshot.fs = "unknown";
+    snapshot.format_required = true;
+    snapshot.format_supported = true;
+    snapshot.capacity_kb = selected->capacity_kb;
+
     configure_sd_bus(s_sd_power_high);
+    SPI1.begin();
     SD.end(false);
     SdCardFactory card_factory;
     SdCard *card = card_factory.newCard(sd_spi_config(s_sd_spi_options));
-    if (!card || card->errorCode()) {
-        if (card) {
-            delete card;
-        }
-        return false;
+    if (!card) {
+        snapshot.note = "format_card_init_failed";
+        return snapshot;
     }
+    snapshot.probe_error = card->errorCode();
+    snapshot.probe_data = card->errorData();
+    if (snapshot.probe_error != 0) {
+        snapshot.note = "format_card_init_failed";
+        delete card;
+        return snapshot;
+    }
+
+    const uint32_t sectors = card->sectorCount();
+    snapshot.probe_error = card->errorCode();
+    snapshot.probe_data = card->errorData();
+    if (sectors == 0 || snapshot.probe_error != 0) {
+        snapshot.note = "format_sector_count_failed";
+        delete card;
+        return snapshot;
+    }
+    snapshot.capacity_kb = clamp_kb(static_cast<uint64_t>(sectors) * 512ULL);
 
     FatFormatter fat_formatter;
     uint8_t sector_buffer[512];
     const bool formatted = fat_formatter.format(card, sector_buffer, nullptr);
+    snapshot.probe_error = card->errorCode();
+    snapshot.probe_data = card->errorData();
     delete card;
     if (!formatted) {
-        return false;
+        snapshot.note = "format_failed";
+        return snapshot;
     }
+
+    SD.end(false);
+    if (!mount_sd()) {
+        snapshot.note = "post_format_mount_failed";
+        return snapshot;
+    }
+
+    CardProbe mounted_probe = {
+        true,
+        snapshot.capacity_kb,
+        0,
+        0,
+        power_token(s_sd_power_high),
+        "mount",
+        s_sd_power_high,
+        s_sd_spi_options,
+    };
+    apply_probe_to_snapshot(snapshot, mounted_probe);
+    snapshot.state = "setup_required";
+    snapshot.mounted = true;
+    snapshot.deskos = false;
+    snapshot.fs = fat_label();
+    snapshot.format_required = false;
+    snapshot.format_supported = true;
+    snapshot.note = "deskos_root_missing";
+    fill_capacity(snapshot);
+
     const char *prepare_note = "ready";
-    return mount_sd() && prepare_deskos_structure(&prepare_note);
+    if (prepare_deskos_structure(&prepare_note)) {
+        snapshot.state = "ready";
+        snapshot.deskos = true;
+        snapshot.note = "format_complete";
+        if (snapshot.free_kb == 0 && snapshot.capacity_kb > 0) {
+            snapshot.free_kb = snapshot.capacity_kb;
+        }
+    } else {
+        snapshot.state = "setup_required";
+        snapshot.note = prepare_note;
+    }
+    return snapshot;
 }
 
 DiagSnapshot pending_diag_snapshot() {
@@ -1165,40 +1231,9 @@ void send_format_result(const char *phrase) {
         return;
     }
 
-    if (format_card()) {
-        SdSnapshot formatted = mount_status_blocking();
-        formatted.state = "ready";
-        formatted.mounted = true;
-        formatted.deskos = true;
-        formatted.format_required = false;
-        formatted.format_supported = true;
-        formatted.note = "format_complete";
-        if (formatted.free_kb == 0 && formatted.capacity_kb > 0) {
-            formatted.free_kb = formatted.capacity_kb;
-        }
-        (void)cache_status(formatted);
-        send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
-        return;
-    }
-
-    SdSnapshot failed = {
-        "error",
-        true,
-        false,
-        false,
-        "unknown",
-        true,
-        true,
-        0,
-        0,
-        "format_failed",
-        power_token(s_sd_power_high),
-        spi_mode_token(s_sd_spi_options),
-        false,
-        0,
-        0,
-    };
-    send_snapshot(*reply_stream, FORMAT_REPLY, failed);
+    SdSnapshot formatted = format_card();
+    (void)cache_status(formatted);
+    send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
 }
 
 void send_file_error(uint32_t request_id, const char *op, const char *err) {

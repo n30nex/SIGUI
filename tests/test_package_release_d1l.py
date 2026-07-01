@@ -32,11 +32,19 @@ def write_fake_build(build: Path) -> None:
     )
 
 
+def write_fake_notices(root: Path) -> None:
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "THIRD_PARTY_NOTICES.md").write_text("third party notices\n", encoding="ascii")
+    (root / "docs" / "ATTRIBUTIONS.md").write_text("attributions\n", encoding="ascii")
+    (root / "docs" / "SOURCE_AUDIT_AND_ATTRIBUTION.md").write_text("source audit\n", encoding="ascii")
+
+
 def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
     root = tmp_path
     build = root / "build"
     out = root / "artifacts" / "release"
     write_fake_build(build)
+    write_fake_notices(root)
 
     manifest = package_release_d1l.create_release_package(
         root=root,
@@ -53,6 +61,16 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
     assert (package_dir / "firmware" / "partition-table.bin").read_bytes() == b"PART"
     assert (package_dir / "firmware" / "meshcore_deskos_d1l.bin").read_bytes() == b"APP"
     assert (package_dir / "update" / "meshcore_deskos_d1l-app.bin").read_bytes() == b"APP"
+    assert (package_dir / "notices" / "THIRD_PARTY_NOTICES.md").read_text(encoding="ascii") == "third party notices\n"
+    assert (package_dir / "notices" / "ATTRIBUTIONS.md").read_text(encoding="ascii") == "attributions\n"
+    assert (
+        package_dir / "notices" / "SOURCE_AUDIT_AND_ATTRIBUTION.md"
+    ).read_text(encoding="ascii") == "source audit\n"
+    assert [item["path"] for item in manifest["notice_files"]] == [
+        "notices/THIRD_PARTY_NOTICES.md",
+        "notices/ATTRIBUTIONS.md",
+        "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
+    ]
 
     full = package_dir / manifest["full_flash_image"]["path"]
     image = full.read_bytes()
@@ -66,8 +84,10 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
     assert "./firmware/meshcore_deskos_d1l.bin" in sha_text
     assert "./full-flash/meshcore_deskos_d1l-full-8mb.bin" in sha_text
     assert "./manifest.json" in sha_text
+    assert "./notices/THIRD_PARTY_NOTICES.md" in sha_text
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
+    assert "`notices/` contains third-party notices" in readme
 
 
 def test_generated_flash_scripts_require_explicit_port(tmp_path):

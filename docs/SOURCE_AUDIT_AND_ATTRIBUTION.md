@@ -19,7 +19,7 @@ This project uses references for architecture and feature parity, but Phase 1 so
 ## Reference Repositories
 
 - SigurdOS T-Deck: https://github.com/hermes-gadget/SigurdOS-tdeck
-  - Source commit reviewed: `784b1fb26e8c4b733581ca1617f1a627778f3577` on `dev`.
+  - Source commit reviewed: `e7e7b12ee771edd2b15e64e1a6569b7b18f84423` on `dev`.
   - License: GPL-3.0-or-later.
   - Upstream copyright headers reviewed: `Copyright (C) 2025 Ben`.
   - Permission: maintainers gave this project permission to use the work with attribution.
