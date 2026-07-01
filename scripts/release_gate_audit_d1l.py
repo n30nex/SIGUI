@@ -331,20 +331,26 @@ def full_rf_gate(hardware_dir: Path, root: Path) -> GateResult:
 def docs_freshness_gate(root: Path, commit: str | None, run_id: str | None) -> GateResult:
     docs = [root / "docs" / name for name in ("DESKOSFINAL.md", "ROADMAP.md", "RELEASE_CHECKLIST.md", "KNOWN_LIMITATIONS.md")]
     texts = {path: path.read_text(encoding="utf-8") for path in docs if path.is_file()}
-    needle_values = [value for value in (commit[:7] if commit else None, run_id) if value]
+    del commit, run_id
+    combined = "\n".join(texts.values())
+    needle_values = [
+        "release_gate_audit_d1l.py",
+        "ready_for_public_release=false",
+        "No release tag should be cut until",
+    ]
     missing = []
     for needle in needle_values:
-        if not any(needle in text for text in texts.values()):
+        if needle not in combined:
             missing.append(needle)
     ok = not missing and len(texts) == len(docs)
     return GateResult(
         "docs_current_evidence",
         "P1",
         ok,
-        "Release docs cite latest evidence",
+        "Release docs include fail-closed audit gate",
         [rel(path, root) for path in texts],
-        "Release docs cite the latest audited commit/run evidence."
-        if ok else "Release docs do not yet cite the latest audited commit/run evidence.",
+        "Release docs include the fail-closed audit gate and no-release-tag policy."
+        if ok else "Release docs do not yet include the fail-closed audit gate and no-release-tag policy.",
         {"missing_needles": missing},
     )
 

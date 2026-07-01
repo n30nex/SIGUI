@@ -120,8 +120,8 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; current local audit `artifacts/release-gate/release-gate-audit-68350bf.json` reports `ready_for_public_release=false`.
-- [ ] Current-commit COM12 smoke artifact captured for `68350bf`.
+- [x] Evidence-based release gate audit script added and uploaded by CI; current local audit reports `ready_for_public_release=false` until all P0 evidence is present.
+- [ ] Current-commit COM12 smoke artifact captured for the final release commit.
 - [ ] Physical screen photos captured.
 - [ ] Final full-duration soak evidence added.
 - [ ] Final manual touch review added.

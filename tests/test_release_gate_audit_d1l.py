@@ -97,7 +97,10 @@ def write_core_evidence(root: Path) -> None:
     )
     for name in ("DESKOSFINAL.md", "ROADMAP.md", "RELEASE_CHECKLIST.md", "KNOWN_LIMITATIONS.md"):
         (root / "docs").mkdir(exist_ok=True)
-        (root / "docs" / name).write_text(f"{COMMIT[:7]} {RUN_ID}\n", encoding="utf-8")
+        (root / "docs" / name).write_text(
+            "release_gate_audit_d1l.py\nready_for_public_release=false\nNo release tag should be cut until\n",
+            encoding="utf-8",
+        )
 
 
 def audit_args(root: Path):

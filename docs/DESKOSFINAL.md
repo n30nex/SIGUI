@@ -1190,13 +1190,13 @@ Final package must include:
 Final gate audit:
 
 ```powershell
-python .\scripts\release_gate_audit_d1l.py --github-run-id 28549761003 --commit 68350bf9f3fabfd2db4110ec6ffc36068056a060 --hardware-dir artifacts\hardware\com12 --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-68350bf.json --fail-on-open-p0
+python .\scripts\release_gate_audit_d1l.py --github-run-id <run-id> --commit <commit-sha> --d1l-port <D1L_PORT> --meshbot-port <BOT_PORT> --hardware-dir artifacts\hardware\<d1l-port-folder> --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-<commit>.json --fail-on-open-p0
 ```
 
-Current audit artifact `artifacts/release-gate/release-gate-audit-68350bf.json`
-reports `ready_for_public_release=false` with five open P0 gates:
-current-commit COM12 smoke, SD acceptance matrix, 12-hour idle/listening soak,
-manual physical UI/photos, and full inbound/ACK/PATH/direct-route RF proof.
+The current local audit reports `ready_for_public_release=false` until five P0
+gates are closed: current-commit D1L smoke, SD acceptance matrix, 12-hour
+idle/listening soak, manual physical UI/photos, and full
+inbound/ACK/PATH/direct-route RF proof.
 
 ---
 

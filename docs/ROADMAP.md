@@ -677,7 +677,7 @@ Tasks:
 - Developer guide. Status: first `docs/DEVELOPER_GUIDE_D1L.md` added.
 - Known limitations. Status: `docs/KNOWN_LIMITATIONS.md` is updated through the Phase 7 soak harness.
 - Screenshots/photos. Status: host simulator screenshots are generated locally and by GitHub Actions under `artifacts/ui-sim`; physical screen photos/manual visual review are still pending.
-- Final test report. Status: hardware validation notes are current through the 1-hour active Public soak, release package checkpoint, release-package sanity smoke, COM12 outbound DM proof against the COM11 Meshcorebot, and the current SD/RP2040 UF2 blocker; `scripts/release_gate_audit_d1l.py` now produces `artifacts/release-gate/release-gate-audit-68350bf.json`, which fails closed with five open P0 gates. Final full-release report is pending current-commit COM12 smoke, the SD matrix, 12-hour idle/listening soak, manual UI review/photos, and full inbound/ACK/PATH/direct-route RF proof.
+- Final test report. Status: hardware validation notes are current through the 1-hour active Public soak, release package checkpoint, release-package sanity smoke, COM12 outbound DM proof against the COM11 Meshcorebot, and the current SD/RP2040 UF2 blocker; `scripts/release_gate_audit_d1l.py` now produces a fail-closed release gate artifact with `ready_for_public_release=false` while P0 evidence is missing. Final full-release report is pending current-commit COM12 smoke, the SD matrix, 12-hour idle/listening soak, manual UI review/photos, and full inbound/ACK/PATH/direct-route RF proof.
 
 Acceptance:
 
