@@ -39,6 +39,7 @@ static lv_obj_t *s_sheet;
 static lv_obj_t *s_compose_sheet;
 static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
+static lv_obj_t *s_compose_counter;
 static lv_obj_t *s_compose_keyboard;
 static lv_obj_t *s_public_history_sheet;
 static lv_obj_t *s_public_search_sheet;
@@ -1179,6 +1180,20 @@ static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_
     obj_align_if(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static void update_compose_counter(void)
+{
+    if (!s_compose_counter) {
+        return;
+    }
+    const char *text = s_compose_textarea ? lv_textarea_get_text(s_compose_textarea) : "";
+    const size_t used = text ? strlen(text) : 0;
+    label_set_fmt(s_compose_counter, "%u/%u",
+                  (unsigned)used, (unsigned)D1L_MESSAGE_MAX_CHARS);
+    lv_obj_set_style_text_color(s_compose_counter,
+                                lv_color_hex(used >= D1L_MESSAGE_MAX_CHARS ? 0xFBBF24 : 0x8EA0AE),
+                                0);
+}
+
 static void public_test_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -1224,6 +1239,7 @@ static void open_compose_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_compose_textarea, "");
         lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        update_compose_counter();
     }
 }
 
@@ -1263,6 +1279,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         lv_textarea_set_text(s_compose_textarea, "");
         lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        update_compose_counter();
     }
 }
 
@@ -2271,6 +2288,7 @@ static void clear_compose_event_cb(lv_event_t *event)
     if (s_compose_textarea) {
         lv_textarea_set_text(s_compose_textarea, "");
     }
+    update_compose_counter();
 }
 
 static void send_compose_text(void)
@@ -2285,6 +2303,7 @@ static void send_compose_text(void)
     show_toast(s_compose_dm ? "DM" : "Public message", ret);
     if (ret == ESP_OK) {
         lv_textarea_set_text(s_compose_textarea, "");
+        update_compose_counter();
         hide_compose_sheet();
         render_active_tab();
     }
@@ -2303,6 +2322,13 @@ static void compose_keyboard_event_cb(lv_event_t *event)
         send_compose_text();
     } else if (code == LV_EVENT_CANCEL) {
         hide_compose_sheet();
+    }
+}
+
+static void compose_textarea_event_cb(lv_event_t *event)
+{
+    if (lv_event_get_code(event) == LV_EVENT_VALUE_CHANGED) {
+        update_compose_counter();
     }
 }
 
@@ -3751,6 +3777,13 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_compose_textarea, lv_color_hex(0x263241), 0);
     lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0xF4F7FB), 0);
     lv_obj_set_style_text_color(s_compose_textarea, lv_color_hex(0x8EA0AE), LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_add_event_cb(s_compose_textarea, compose_textarea_event_cb,
+                        LV_EVENT_VALUE_CHANGED, NULL);
+
+    s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
+    lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(s_compose_counter, 86);
+    lv_obj_set_pos(s_compose_counter, 338, 120);
 
     s_compose_keyboard = lv_keyboard_create(s_compose_sheet);
     lv_obj_set_size(s_compose_keyboard, 424, 202);

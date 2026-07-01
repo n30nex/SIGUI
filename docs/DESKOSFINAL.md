@@ -560,6 +560,8 @@ Requirements:
 - DM send uses retained public key/route backend.
 - On send, close keyboard only after queue success or show friendly error.
 
+Current implementation note: Public/DM text is capped by `D1L_MESSAGE_MAX_CHARS = 138` and the touch compose sheet now shows a live `<used>/138` counter that resets for new Public or DM compose sessions.
+
 ### 7.4 DM list and thread
 
 Messages screen can have a segmented control:
@@ -1166,12 +1168,12 @@ Final package must include:
 
 ### P0 fixes
 
-- [ ] Add `ui_tab_abuse_d1l.py`.
-- [ ] Add `scroll_probe_d1l.py` or serial UI test commands.
+- [x] Add `ui_tab_abuse_d1l.py`.
+- [x] Add `scroll_probe_d1l.py` or serial UI test commands.
 - [ ] Split `ui_phase1.c` or establish wrappers before deeper feature work.
 - [ ] Increase/measure UI task stack.
 - [ ] Add allocation guards to all LVGL object creation.
-- [ ] Replace fixed non-scrollable `s_content` with per-screen scroll roots.
+- [x] Replace fixed non-scrollable `s_content` with per-screen scroll roots.
 - [ ] Verify `Msg`, `Nodes`, `Pkts` no longer crash.
 
 ### Home
@@ -1186,11 +1188,11 @@ Final package must include:
 
 ### Messages
 
-- [ ] Change max message length to 138 chars.
-- [ ] Update Public/DM stores and serialization.
+- [x] Change max message length to 138 chars.
+- [x] Update Public/DM stores and serialization.
 - [ ] Build default Public channel screen.
 - [ ] Build compose bar/sheet with keyboard and visible Send.
-- [ ] Add char counter.
+- [x] Add char counter.
 - [ ] Add reply-from-message tap behavior.
 - [ ] Add message detail with sender/path.
 - [ ] Add DM conversation list and thread.

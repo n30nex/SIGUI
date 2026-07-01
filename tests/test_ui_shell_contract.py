@@ -284,8 +284,14 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "create_compose_sheet" in source
     assert "open_compose_event_cb" in source
     assert "send_compose_text" in source
+    assert "static lv_obj_t *s_compose_counter" in source
+    assert "update_compose_counter" in source
+    assert 'label_set_fmt(s_compose_counter, "%u/%u"' in source
+    assert "D1L_MESSAGE_MAX_CHARS" in source
     assert "lv_textarea_create" in source
     assert "lv_textarea_set_max_length" in source
+    assert "LV_EVENT_VALUE_CHANGED" in source
+    assert "compose_textarea_event_cb" in source
     assert "lv_textarea_get_text" in source
     assert "lv_keyboard_create" in source
     assert "lv_keyboard_set_textarea" in source

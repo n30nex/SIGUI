@@ -9,6 +9,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Public MeshCore `test` send/receive against local bots.
 - Signed advert receive/transmit.
 - Persisted recent Public messages, bounded Public History/Search, DM rows, heard nodes, contacts, routes, packet evidence, unread state, and reset history.
+- Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.

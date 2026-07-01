@@ -61,6 +61,9 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "d1l_message_store_query(out_entries, max_entries, query)" in app_source
     assert "render_message_row" in ui
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
+    assert "static lv_obj_t *s_compose_counter" in ui
+    assert "update_compose_counter()" in ui
+    assert "LV_EVENT_VALUE_CHANGED" in ui
     assert "No stored messages" in ui
     assert "static lv_obj_t *s_public_history_sheet" in ui
     assert "static lv_obj_t *s_public_search_sheet" in ui

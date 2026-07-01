@@ -1073,6 +1073,7 @@ def render_compose_sheet(s: Surface, snap: Snapshot):
     s.touch_target("Public message", (44, 158, 436, 228), kind="text_field", action="edit_public_message")
     s.text("Public message", (56, 166, 220, 188), 13, MUTED, True)
     s.text("test from DeskOS D1L", (56, 194, 424, 222), 18, TEXT)
+    s.text("20/138", (352, 230, 436, 250), 12, MUTED, True, "right")
     for i, label in enumerate(("Quick", "Clear", "Send")):
         draw_button(
             s,
@@ -1432,7 +1433,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
-    "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),
+    "compose_sheet": ("Compose Public", "Public message", "20/138", "Send", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "radio_settings_sheet": (

@@ -93,6 +93,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
+    assert {"Compose Public", "Public message", "20/138", "Send", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
         "Storage Setup",
