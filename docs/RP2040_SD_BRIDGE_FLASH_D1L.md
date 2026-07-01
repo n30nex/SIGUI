@@ -22,10 +22,11 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
 ```
 
-The UF2 from Actions run `28445509629` was previously verified as:
+The latest verified UF2 from Actions run `28490556715` for commit
+`1afd4043ce2473dddeaa66f23fafb667d2a98b88` is:
 
 ```text
-689F85820F118C8F6EA06F0E13ED469D18391231D689720AB8625AD228298AEF
+05A2D728EC5EC59875C67EC2EC926B31F6032DAB1CBCD88DCA19AF54E655CC94
 ```
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
@@ -33,7 +34,8 @@ provided, lists UF2 bootloader volumes, queries only the selected D1L serial
 port with `rp2040 status`, `storage status`, optional `storage diag`, and
 `health`, and reports the next safe action as JSON. `storage diag` is
 non-formatting and may be unavailable on older bridge firmware. If preflight
-reports `state="rp2040_protocol_pending"` and no UF2 volume is available, put
+reports `state="rp2040_protocol_pending"` or
+`state="sd_card_not_present_diag_pending"` and no UF2 volume is available, put
 the RP2040 into UF2/BOOTSEL mode before running the copy helper.
 
 ## Flash

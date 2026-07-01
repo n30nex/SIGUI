@@ -30,15 +30,17 @@ This checkpoint advances optional SD-card data storage without making boot or re
 
 ## Hardware Evidence
 
-- GitHub Actions run `28478756887` for commit `d26f345dd02e5debfb33e42db0111a7fa663efb4` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. Its checksum manifests were verified locally before flashing.
-- The D1L ESP32 on COM12 and RP2040 bridge on COM16 were flashed only from that Actions run. RP2040 UF2 SHA-256 was `E81196310680F4CA282574E6EBB9608542575C44EEDB32BAD866AFF576AAB4A2`.
-- `artifacts/hardware/com12/rp2040_sd_bridge_preflight_after_sd_bus_harden.json` proves the ESP32/RP2040 protocol is live: `rp2040_protocol_supported=true`, UART2 GPIO19/GPIO20 at 921600 baud, file protocol limits are advertised, and no Public RF, formatting, or UF2 copying occurred during preflight.
-- The same preflight reports `sd.state=no_card`, `present=false`, `mounted=false`, and `format_supported=false`. `artifacts/hardware/com12/storage_setup_after_sd_bus_harden.json` confirms `storage setup confirm FORMAT-DESKOS-SD` was refused with `ESP_ERR_NOT_FOUND` and `format_performed=false`.
-- Result: protocol/no-card fallback is hardware-validated, but SD acceptance cannot be completed until the RP2040 reports an electrically present card. The next hardware step is to reseat or replace the card, then rerun preflight and only use the guarded format command if status reports `setup_required` with `format_supported=true`.
+- GitHub Actions run `28490556715` for commit `1afd4043ce2473dddeaa66f23fafb667d2a98b88` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. Its checksum manifests were verified locally before hardware use.
+- The D1L ESP32 was flashed on COM12 only from that Actions release package. COM12 smoke passed after flashing.
+- The Actions-built RP2040 UF2 artifact is verified and ready, with SHA-256 `05A2D728EC5EC59875C67EC2EC926B31F6032DAB1CBCD88DCA19AF54E655CC94`, but it has not been copied because Windows did not expose an RP2040 UF2/BOOTSEL mass-storage volume.
+- `artifacts/hardware/com12/rp2040_sd_preflight_continue_20260701.json` is the current non-destructive hardware evidence. It reports `state="sd_card_not_present_diag_pending"`, `next_action="put_rp2040_in_uf2_bootloader"`, `artifact_ready=true`, `uf2_volume_available=false`, `rp2040_uart_ready=true`, `rp2040_protocol_supported=true`, `rp2040_diag_supported=false`, `storage_file_gate_ready=false`, and `sd_state="no_card"`.
+- The same preflight proves no Public RF, no formatting, and no UF2 copy occurred. `storage diag` timed out with `diag_supported=false`, which is expected until the RP2040 bridge UF2 is flashed.
+- Result: ESP32-side firmware and host acceptance gates are current, but physical SD acceptance cannot be completed until the RP2040 is put into UF2/BOOTSEL mode and the verified bridge UF2 is copied. After that flash, rerun COM12 preflight and only use the guarded format command if status reports `setup_required` with `format_supported=true`.
 
 ## Remaining SD Work
 
-- Reseat or replace the D1L microSD card until the RP2040 bridge reports `present=true`; then validate the guarded format path if setup is required.
+- Put the D1L RP2040 into UF2/BOOTSEL mass-storage mode, copy the verified GitHub Actions UF2 with `scripts/flash_rp2040_sd_bridge_uf2.py`, and rerun COM12 preflight.
+- With the inserted D1L microSD card, use `storage diag` after the RP2040 flash to prove which power/SPI probe sees the card; only validate the guarded format path if setup is required and the bridge reports `format_supported=true`.
 - Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Complete hardware proof for retained Public/DM history, route history, packet history, diagnostic exports, sampled data exports, and map-tile cache once a card is electrically detected.
 - Implement the full map page/tile download policy on top of the SD cache path.

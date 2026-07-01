@@ -340,7 +340,7 @@ Use `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the RP2040 UF2 flash and post-flash
 13. When configured later, verify the full map page/tile download/cache policy writes to SD-backed stores and survives reboot/card remount; the current diagnostic export bundle reports map tile cache readiness but does not bundle actual tiles, and `storage export-data <token>` covers sampled user data rather than map tiles.
 14. Verify settings, identity, and minimum boot-critical state remain available from onboard storage if the card is removed.
 15. Verify the `rp2040-sd-bridge-firmware` artifact checksum manifest before any RP2040 hardware flash attempt.
-16. Before copying the RP2040 UF2, run `python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json`. If it reports `rp2040_protocol_pending` and no UF2 volume, put the RP2040 into UF2/BOOTSEL mode. If it reports `sd_bridge_ready`, proceed directly to the SD file/export canaries.
+16. Before copying the RP2040 UF2, run `python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json`. If it reports `rp2040_protocol_pending` or `sd_card_not_present_diag_pending` and no UF2 volume, put the RP2040 into UF2/BOOTSEL mode. If it reports `sd_bridge_ready`, proceed directly to the SD file/export canaries.
 
 ## Mesh Visibility
 
