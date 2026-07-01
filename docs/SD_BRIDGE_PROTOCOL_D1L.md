@@ -20,7 +20,7 @@ DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 format_requir
 
 Required tokens:
 
-- `state`: stable machine state. Use `no_card`, `ready`, `setup_required`, `unformatted`, or `error` when possible.
+- `state`: stable machine state. Use `mount_required`, `no_card`, `ready`, `setup_required`, `unformatted`, or `error` when possible.
 - `present`: `1` when a card is electrically present.
 - `mounted`: `1` when the filesystem is mounted and usable.
 - `deskos`: `1` when the `/deskos` data root exists or has been created.
@@ -42,15 +42,36 @@ Required tokens:
 
 Values must not contain spaces. Use underscores in `note`.
 
-On the D1L RP2040 bridge, status first tries the expected high-power,
-dedicated-`SPI1` FAT mount. If that mount fails, status uses one raw SdFat
-presence probe on the same expected D1L bus before reporting `no_card` or a
-guarded setup-required state. Exhaustive high/low and dedicated/shared probing
-is reserved for the manual diagnostic request below. If no card responds, the
-bridge reports `state=no_card` and `format_supported=0`. If a card responds but
-the filesystem is unusable, the bridge reports `state=setup_required present=1
-mounted=0 format_required=1 format_supported=1 note=format_required`; the ESP32
-may then show the guarded format confirmation path.
+On the D1L RP2040 bridge, status is safe to call from boot and UI polling. It
+does not probe, mount, format, or write SD. Before any explicit mount result is
+cached, the bridge reports `state=mount_required note=mount_not_checked`. After
+`DESKOS_SD_MOUNT`, format, or file operations, status returns the cached latest
+SD state.
+
+## Mount Request
+
+ESP32 sends this explicit SD-touch command when the operator runs
+`storage mount`:
+
+```text
+DESKOS_SD_MOUNT
+```
+
+RP2040 replies with one status-shaped line using the mount prefix:
+
+```text
+DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+```
+
+The D1L bridge tries the expected high-power, dedicated-`SPI1` FAT mount first.
+If that mount fails, it uses one raw SdFat presence probe on the same expected
+D1L bus before reporting `no_card` or a guarded setup-required state.
+Exhaustive high/low and dedicated/shared probing is reserved for the manual
+diagnostic request below. If no card responds, the bridge reports
+`state=no_card` and `format_supported=0`. If a card responds but the filesystem
+is unusable, the bridge reports `state=setup_required present=1 mounted=0
+format_required=1 format_supported=1 note=format_required`; the ESP32 may then
+show the guarded format confirmation path.
 
 ## Ping Request
 
@@ -91,7 +112,10 @@ command does not format, copy UF2 files, or send RF.
 
 ## Confirmed Format Request
 
-Formatting is never sent during boot, `storage status`, or plain `storage setup`. It is sent only after the user enters the exact confirmation phrase and only if the latest status reported `present=1`, `format_supported=1`, and setup is required.
+Formatting is never sent during boot, `storage status`, `storage mount`,
+`storage diag`, or plain `storage setup`. It is sent only after the user enters
+the exact confirmation phrase and only if the latest status/mount result
+reported `present=1`, `format_supported=1`, and setup is required.
 
 ESP32 sends:
 

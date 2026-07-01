@@ -62,9 +62,10 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
 ```
 
 The preflight sends `rp2040 ping` before `storage status`, so UART protocol
-health can be proven without touching SD. It sends `storage diag` as optional
-non-destructive evidence when the flashed bridge supports `DESKOS_SD_DIAG`. The
-canary sends `storage status`, `storage filecanary`, `storage status`,
+health can be proven without touching SD. It then uses explicit `storage mount`
+for the SD-touch attempt and sends `storage diag` as optional non-destructive
+evidence when the flashed bridge supports `DESKOS_SD_DIAG`. The canary sends
+`storage status`, `storage filecanary`, `storage status`,
 `packets`, and `health`. It does not send Public RF and does not issue
 `DESKOS_SD_FORMAT`. The SD-aware soak repeats `storage status` and
 `storage filecanary` during a passive stability window. The retained-history
@@ -77,16 +78,20 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 
 ## Runtime Notes
 
-- `DESKOS_SD_STATUS` mounts the card if possible and creates `/deskos` when the
-  filesystem is usable. Ready cards also advertise `file_ops=1`,
-  `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
-  `atomic_rename=1`. The status path tries the D1L expected high-power,
-  dedicated-`SPI1` mount first; if that fails, it uses one raw presence probe
-  before reporting `no_card` or guarded setup-required state. No electrical card
-  still reports `no_card`, while an inserted card with an unusable filesystem
-  reports `setup_required`, `format_required=1`, and `format_supported=1`.
-  Status replies include optional probe diagnostics:
+- `DESKOS_SD_STATUS` is safe to call during boot and UI polling. It does not
+  probe, mount, format, or write SD. Before an explicit mount it reports
+  `state=mount_required`; after `DESKOS_SD_MOUNT`, format, or file operations,
+  it returns the cached latest SD state. Ready cached cards advertise
+  `file_ops=1`, `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
+  `atomic_rename=1`. Status replies include optional cached probe diagnostics:
   `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and `probe_data`.
+- `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
+  It tries the D1L expected high-power, dedicated-`SPI1` mount first and creates
+  `/deskos` when the filesystem is usable. If that mount fails, it uses one raw
+  presence probe before reporting `no_card` or guarded setup-required state.
+  No electrical card reports `no_card`; an inserted card with an unusable
+  filesystem reports `setup_required`, `format_required=1`, and
+  `format_supported=1`.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.
@@ -104,7 +109,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   192-byte chunks so each newline-delimited request remains under the 512-byte
   line cap. `rename replace=1` uses a backup/rollback step when replacing an
   existing final file so ordinary rename failures do not erase the old final.
-- No formatting happens at boot or during status checks.
+- No formatting happens at boot, ping, status, mount, diagnostics, or file
+  checks.
 - Retained Public message history, DM history, route history, and packet history
   can use the SD file protocol once the ESP32 sees a ready card, file
   operations, and atomic rename. The ESP32 keeps onboard NVS mirrors for these retained

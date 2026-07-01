@@ -99,6 +99,9 @@ static const char *stable_sd_state(const char *state)
     if (strcmp(state, "error") == 0) {
         return "error";
     }
+    if (strcmp(state, "mount_required") == 0) {
+        return "mount_required";
+    }
     if (strcmp(state, "protocol_pending") == 0) {
         return "protocol_pending";
     }
@@ -171,6 +174,10 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.setup_action = "bridge_protocol_pending";
         s_status.format_action = "not_available";
         s_status.note = "RP2040 UART is ready, but the DeskOS SD status protocol is not implemented on the bridge yet";
+    } else if (strcmp(s_status.sd_state, "mount_required") == 0) {
+        s_status.setup_action = "run_storage_mount";
+        s_status.format_action = "not_available";
+        s_status.note = "RP2040 SD bridge is ready; run storage mount to check the inserted card before enabling SD data storage";
     } else if (!sd->card_present) {
         s_status.setup_action = "insert_card";
         s_status.format_action = "not_available";
@@ -264,6 +271,23 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
 
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_probe_sd(&sd, timeout_ms);
+    apply_rp2040_sd_status(&sd);
+    return ret;
+}
+
+esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
+{
+    if (!s_status.initialized) {
+        (void)d1l_storage_status_init();
+    }
+
+    if (!s_status.rp2040_bridge_required) {
+        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    d1l_rp2040_sd_status_t sd = {0};
+    esp_err_t ret = d1l_rp2040_bridge_mount_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
     return ret;
 }

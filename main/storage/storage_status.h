@@ -58,5 +58,6 @@ typedef struct {
 esp_err_t d1l_storage_status_init(void);
 void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result);
 esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms);
+esp_err_t d1l_storage_status_mount(uint32_t timeout_ms);
 esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t timeout_ms);
 void d1l_storage_status(d1l_storage_status_t *out_status);

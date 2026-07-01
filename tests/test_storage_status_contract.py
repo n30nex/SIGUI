@@ -139,12 +139,14 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'ok_begin("storage status")' in console
     assert 'ok_begin("storage map-policy")' in console
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert 'cmd_storage_diag' in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
     assert 'ok_begin("storage map-tile-canary")' in console
     assert 'ok_begin("storage export-canary")' in console
     assert '"storage status"' in console
+    assert '"storage mount"' in console
     assert '"storage diag"' in console
     assert '"storage setup"' in console
     assert "storage setup confirm FORMAT-DESKOS-SD" in console
@@ -153,6 +155,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage map-tile-canary <token>" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
+    assert 'strcmp(line, "storage mount")' in console
     assert 'strcmp(line, "storage diag")' in console
     assert 'strcmp(line, "storage map-policy")' in console
     assert 'strcmp(line, "storage setup")' in console
@@ -184,6 +187,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_header
     assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
+    assert "d1l_rp2040_bridge_mount_sd" in rp2040_header
     assert "d1l_rp2040_bridge_format_sd" in rp2040_header
     assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
     assert "D1L_RP2040_FILE_CHUNK_MAX 192U" in rp2040_header
@@ -194,6 +198,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_rp2040_bridge_file_append" in rp2040_header
     assert "d1l_rp2040_bridge_file_rename" in rp2040_header
     assert "DESKOS_SD_STATUS" in rp2040_source
+    assert "DESKOS_SD_MOUNT" in rp2040_source
     assert "DESKOS_SD_PING" in rp2040_source
     assert "DESKOS_SD_FORMAT" in rp2040_source
     assert "DESKOS_SD_FILE" in rp2040_source

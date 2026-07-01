@@ -18,15 +18,15 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Kept an onboard NVS mirror for the packet-log canary and retained NVS fallback on no-card, timeout, missing file support, missing atomic rename, insufficient limits, and invalid SD blob cases.
 - Added serial-only diagnostic export, sampled data export, and map-tile cache canaries. Diagnostic exports commit under `exports/diagnostics/`, sampled data exports commit under `exports/data/`, and the map-tile cache canary commits a synthetic tile under `map/tiles/`. They use temp write/read plus `rename replace=1`, leave the final artifact present for inspection, and do not send Public RF or format.
 - Kept settings, identity, contacts, read-state, crashlog, and the full map page/tile download policy on onboard/fallback storage or pending; no card-dependent boot state is claimed in this slice.
-- Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added a raw SdFat card probe plus SPI1-aware formatter, and kept the ESP32 runtime SD probe window long enough for slow card status replies while boot probing stays short.
-- Follow-up pending hardware proof: the RP2040 bridge now has `DESKOS_SD_DIAG`, and ESP32 exposes `storage diag` plus additive `storage status` probe fields. This is intended to diagnose physically inserted cards that still report `no_card` by comparing high/dedicated, high/shared, low/dedicated, and low/shared non-formatting raw probes.
+- Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added safe/cached `DESKOS_SD_STATUS`, explicit `DESKOS_SD_MOUNT`, raw SdFat diagnostics, and an SPI1-aware formatter.
+- Follow-up pending hardware proof: the RP2040 bridge now has `DESKOS_SD_PING`, safe `DESKOS_SD_STATUS`, explicit `DESKOS_SD_MOUNT`, and `DESKOS_SD_DIAG`; ESP32 exposes `rp2040 ping`, `storage status`, `storage mount`, and `storage diag`. This is intended to keep boot/UI polling non-blocking while giving the operator a deliberate mount path for physically inserted cards.
 
 ## Validation Rules
 
 - Do not run firmware builds on the Windows host. Firmware artifacts must come from GitHub Actions.
 - Local verification for this slice is limited to host tests, simulator generation, dry-run smoke, diff checks, and GitHub Actions status.
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
-- After the RP2040 bridge is flashed, run `storage diag` and preflight first, then use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof once the ready file gate is available. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
+- After the RP2040 bridge is flashed, run preflight first so it captures `rp2040 ping`, safe `storage status`, explicit `storage mount`, safe `storage status`, optional `storage diag`, and `health`. Use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` only once the ready file gate is available, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
 
 ## Hardware Evidence
 
@@ -36,13 +36,14 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Post-copy COM12 proof in `artifacts/hardware/com12/rp2040_sd_preflight_after_uf2_copy_28494746866.json` failed safely with `state="rp2040_protocol_pending"`: ESP32 UART2 to RP2040 was ready, but `storage status` and `storage diag` timed out. No Public RF or formatting occurred.
 - The likely bridge-side cause was fixed by commit `e05264098a106f1ba0adcf766a1262d12e73448c`: the RP2040 status path now runs raw SdFat probes before any FAT mount attempt and can answer the same line protocol on USB serial for debugging.
 - GitHub Actions run `28495545520` passed for that commit. The current verified RP2040 UF2 SHA-256 is `AFB6B12EE3518C48811F6C2876717B9BFAF43C1ABFE02E9BF693D95F977E16E5`.
-- The fixed UF2 has not been copied yet. Current evidence `artifacts/hardware/com12/rp2040_sd_preflight_mount_blocked_28495545520.json` reports `state="rp2040_protocol_pending"`, `next_action="put_rp2040_in_uf2_bootloader"`, `artifact_ready=true`, `uf2_volume_available=false`, `rp2040_uart_ready=true`, `rp2040_protocol_supported=false`, `rp2040_diag_supported=false`, and `storage_file_gate_ready=false`.
-- Host-side mount attempts found `COM16` as the RP2040 CDC device but no UF2 volume. Bounded 1200-baud touch attempts did not mount the volume; `COM16` then returned `Access is denied` or hung on open, and non-elevated USB device reset failed. The next hardware step is physical RP2040 BOOTSEL/replug/power-cycle to expose the UF2 mass-storage volume, then copy the verified `28495545520` UF2 and rerun COM12 preflight. Only use the guarded format command if status reports a present setup-required card with `format_supported=true`.
+- Actions run `28499319258` for commit `a8268073ae290567e26f27491c8ffa167f6f8d57` flashed the ESP32 on COM12 and copied the RP2040 UF2 with SHA-256 `AA71CD32C9433F1D57B1C3F243ABB2A7535728E6A3905C6A424A1E77D5F3E57E`.
+- COM12 evidence `artifacts/hardware/com12/rp2040_sd_preflight_ping_status_28499319258.json` proves `rp2040 ping` works with `protocol_supported=true`, `sd_touched=false`, file limits, and `atomic_rename=true`; the same run still timed out on SD-touching `storage status` and `storage diag`.
+- The follow-up implementation keeps status safe/cached and introduces explicit `storage mount`. The next hardware step is GitHub Actions build, ESP32 flash, RP2040 UF2 copy, COM12 preflight, and guarded canaries only if mount reports a ready file gate. Only use the guarded format command if status/mount reports a present setup-required card with `format_supported=true`.
 
 ## Remaining SD Work
 
-- Put the D1L RP2040 back into UF2/BOOTSEL mass-storage mode, copy the verified GitHub Actions run `28495545520` UF2 with `scripts/flash_rp2040_sd_bridge_uf2.py`, and rerun COM12 preflight.
-- With the inserted D1L microSD card, use `storage diag` after the RP2040 flash to prove which power/SPI probe sees the card; only validate the guarded format path if setup is required and the bridge reports `format_supported=true`.
+- Build the safe-status/explicit-mount follow-up in GitHub Actions, flash/copy those artifacts, and rerun COM12 preflight.
+- With the inserted D1L microSD card, use `storage mount` after the RP2040 flash to attempt the real mount, then `storage diag` if mount is still not ready; only validate the guarded format path if setup is required and the bridge reports `format_supported=true`.
 - Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Complete hardware proof for retained Public/DM history, route history, packet history, diagnostic exports, sampled data exports, and map-tile cache once a card is electrically detected.
 - Implement the full map page/tile download policy on top of the SD cache path.

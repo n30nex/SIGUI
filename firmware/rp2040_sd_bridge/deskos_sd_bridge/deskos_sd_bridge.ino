@@ -8,6 +8,8 @@ namespace {
 
 constexpr const char *STATUS_REQUEST = "DESKOS_SD_STATUS";
 constexpr const char *STATUS_REPLY = "DESKOS_SD_STATUS";
+constexpr const char *MOUNT_REQUEST = "DESKOS_SD_MOUNT";
+constexpr const char *MOUNT_REPLY = "DESKOS_SD_MOUNT";
 constexpr const char *PING_REQUEST = "DESKOS_SD_PING";
 constexpr const char *PING_REPLY = "DESKOS_SD_PING";
 constexpr const char *FORMAT_REQUEST = "DESKOS_SD_FORMAT";
@@ -81,6 +83,8 @@ LineRx usb_rx = {{0}, 0, false};
 Stream *reply_stream = &Serial1;
 bool s_sd_power_high = true;
 uint8_t s_sd_spi_options = DEDICATED_SPI;
+SdSnapshot s_cached_snapshot = {};
+bool s_cached_snapshot_valid = false;
 
 uint32_t clamp_kb(uint64_t bytes) {
     const uint64_t kb = bytes / 1024ULL;
@@ -185,6 +189,40 @@ void apply_probe_to_snapshot(SdSnapshot &snapshot, const CardProbe &probe) {
     snapshot.probe_data = probe.error_data;
 }
 
+SdSnapshot make_snapshot(const char *state, const char *note) {
+    SdSnapshot snapshot = {
+        state,
+        false,
+        false,
+        false,
+        "none",
+        false,
+        false,
+        0,
+        0,
+        note,
+        power_token(s_sd_power_high),
+        spi_mode_token(s_sd_spi_options),
+        false,
+        0,
+        0,
+    };
+    return snapshot;
+}
+
+SdSnapshot current_status() {
+    if (s_cached_snapshot_valid) {
+        return s_cached_snapshot;
+    }
+    return make_snapshot("mount_required", "mount_not_checked");
+}
+
+SdSnapshot cache_status(const SdSnapshot &snapshot) {
+    s_cached_snapshot = snapshot;
+    s_cached_snapshot_valid = true;
+    return snapshot;
+}
+
 const char *fat_label() {
     switch (SD.fatType()) {
     case 12:
@@ -211,25 +249,8 @@ void fill_capacity(SdSnapshot &snapshot) {
     }
 }
 
-SdSnapshot current_status() {
-    SdSnapshot snapshot = {
-        "no_card",
-        false,
-        false,
-        false,
-        "none",
-        false,
-        false,
-        0,
-        0,
-        "no_card",
-        power_token(s_sd_power_high),
-        spi_mode_token(s_sd_spi_options),
-        false,
-        0,
-        0,
-    };
-
+SdSnapshot mount_status() {
+    SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
     if (!mount_sd()) {
@@ -239,7 +260,7 @@ SdSnapshot current_status() {
             s_sd_power_high = true;
             s_sd_spi_options = DEDICATED_SPI;
             configure_sd_bus();
-            return snapshot;
+            return cache_status(snapshot);
         }
 
         snapshot.state = "setup_required";
@@ -249,7 +270,7 @@ SdSnapshot current_status() {
         snapshot.format_supported = true;
         snapshot.capacity_kb = probe.capacity_kb;
         snapshot.note = "format_required";
-        return snapshot;
+        return cache_status(snapshot);
     }
 
     CardProbe mounted_probe = {
@@ -282,7 +303,7 @@ SdSnapshot current_status() {
         snapshot.note = "deskos_root_unavailable";
     }
 
-    return snapshot;
+    return cache_status(snapshot);
 }
 
 bool format_card() {
@@ -708,6 +729,10 @@ void send_status() {
     send_snapshot(*reply_stream, STATUS_REPLY, current_status());
 }
 
+void send_mount_status() {
+    send_snapshot(*reply_stream, MOUNT_REPLY, mount_status());
+}
+
 void send_ping() {
     String line(PING_REPLY);
     line += " v=1";
@@ -733,7 +758,7 @@ void send_format_result(const char *phrase) {
     }
 
     if (format_card()) {
-        SdSnapshot formatted = current_status();
+        SdSnapshot formatted = mount_status();
         formatted.state = "ready";
         formatted.mounted = true;
         formatted.deskos = true;
@@ -743,6 +768,7 @@ void send_format_result(const char *phrase) {
         if (formatted.free_kb == 0 && formatted.capacity_kb > 0) {
             formatted.free_kb = formatted.capacity_kb;
         }
+        (void)cache_status(formatted);
         send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
         return;
     }
@@ -1089,7 +1115,7 @@ void handle_file_line(const char *line) {
         return;
     }
 
-    SdSnapshot status = current_status();
+    SdSnapshot status = mount_status();
     if (!status.present) {
         send_file_error(request_id, op, "no_card");
         return;
@@ -1132,6 +1158,11 @@ void handle_line(char *line) {
 
     if (strcmp(line, STATUS_REQUEST) == 0) {
         send_status();
+        return;
+    }
+
+    if (strcmp(line, MOUNT_REQUEST) == 0) {
+        send_mount_status();
         return;
     }
 

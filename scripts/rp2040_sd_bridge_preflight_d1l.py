@@ -26,6 +26,8 @@ PREFLIGHT_COMMANDS = [
     "rp2040 status",
     "rp2040 ping",
     "storage status",
+    "storage mount",
+    "storage status",
     "storage diag",
     "health",
 ]
@@ -99,6 +101,7 @@ def classify_preflight(
     uf2_candidates: list[dict],
     artifact: dict,
     storage_diag: dict | None = None,
+    storage_mount: dict | None = None,
 ) -> dict:
     sd = storage_status.get("sd") if isinstance(storage_status.get("sd"), dict) else {}
     artifact_ok = artifact.get("ok") is True or artifact.get("ok") is None
@@ -113,10 +116,18 @@ def classify_preflight(
     uf2_volume_available = len(uf2_candidates) == 1
     diag_attempted = isinstance(storage_diag, dict) and bool(storage_diag)
     diag_supported = storage_diag.get("diag_supported") is True if diag_attempted else False
+    mount_attempted = isinstance(storage_mount, dict) and bool(storage_mount)
+    mount_ok = storage_mount.get("ok") is True if mount_attempted else None
 
     if file_gate_ready:
         state = "sd_bridge_ready"
         next_action = "run_sd_file_and_export_acceptance"
+    elif mount_attempted and mount_ok is False:
+        state = "sd_mount_pending"
+        next_action = "inspect_rp2040_sd_mount_timeout_and_reset_bridge"
+    elif protocol_supported and sd.get("state") == "mount_required":
+        state = "sd_mount_required"
+        next_action = "run_storage_mount"
     elif bridge_uart_ready and ping_supported and not protocol_supported:
         state = "sd_status_pending"
         next_action = "inspect_storage_status_and_run_storage_diag"
@@ -153,6 +164,7 @@ def classify_preflight(
         "rp2040_ping_sd_touched": rp2040_ping.get("sd_touched"),
         "rp2040_protocol_supported": protocol_supported,
         "rp2040_diag_supported": diag_supported,
+        "storage_mount_ok": mount_ok,
         "storage_file_gate_ready": file_gate_ready,
         "sd_state": sd.get("state"),
         "sd_last_error": sd.get("last_error"),
@@ -179,18 +191,27 @@ def run_preflight(
         time.sleep(1.0)
         ser.reset_input_buffer()
         for command in PREFLIGHT_COMMANDS:
-            command_timeout = max(timeout, 12.0) if command == "storage diag" else timeout
+            command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
             results.append(send_console_command(ser, command, command_timeout))
 
     rp2040_status = results[0] if len(results) > 0 else {}
     rp2040_ping = results[1] if len(results) > 1 else {}
-    storage_status = results[2] if len(results) > 2 else {}
-    storage_diag = results[3] if len(results) > 3 else {}
-    health = results[4] if len(results) > 4 else {}
+    initial_storage_status = results[2] if len(results) > 2 else {}
+    storage_mount = results[3] if len(results) > 3 else {}
+    storage_status = results[4] if len(results) > 4 else initial_storage_status
+    storage_diag = results[5] if len(results) > 5 else {}
+    health = results[6] if len(results) > 6 else {}
     classification = classify_preflight(
-        rp2040_status, rp2040_ping, storage_status, uf2_candidates, artifact, storage_diag
+        rp2040_status,
+        rp2040_ping,
+        storage_status,
+        uf2_candidates,
+        artifact,
+        storage_diag,
+        storage_mount,
     )
     storage_ok = storage_status.get("ok") is True
+    storage_mount_ok = storage_mount.get("ok") is True
     health_ok = health.get("ok") is True
     storage_diag_ok = storage_diag.get("ok") is True
     rp2040_status_ok = rp2040_status.get("ok") is True
@@ -212,6 +233,7 @@ def run_preflight(
         "rp2040_status_ok": rp2040_status_ok,
         "rp2040_ping_ok": rp2040_ping_ok,
         "rp2040_status_optional_ok": rp2040_status_optional_ok,
+        "storage_mount_ok": storage_mount_ok,
         "storage_diag_ok": storage_diag_ok,
         "ready_for_sd_acceptance": classification["storage_file_gate_ready"],
         "classification": classification,
@@ -219,6 +241,8 @@ def run_preflight(
         "candidate_volumes": uf2_candidates,
         "rp2040_status": rp2040_status,
         "rp2040_ping": rp2040_ping,
+        "initial_storage_status": initial_storage_status,
+        "storage_mount": storage_mount,
         "storage_status": storage_status,
         "storage_diag": storage_diag,
         "health": health,

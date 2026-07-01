@@ -12,6 +12,8 @@ from dataclasses import dataclass, field, replace
 
 STATUS_REQUEST = "DESKOS_SD_STATUS"
 STATUS_REPLY = "DESKOS_SD_STATUS"
+MOUNT_REQUEST = "DESKOS_SD_MOUNT"
+MOUNT_REPLY = "DESKOS_SD_MOUNT"
 PING_REQUEST = "DESKOS_SD_PING"
 PING_REPLY = "DESKOS_SD_PING"
 FORMAT_REQUEST = "DESKOS_SD_FORMAT"
@@ -165,6 +167,18 @@ SCENARIOS: dict[str, SdScenario] = {
         capacity_kb=31166976,
         free_kb=31090000,
         note="deskos_root_missing",
+    ),
+    "mount-required": SdScenario(
+        state="mount_required",
+        present=False,
+        mounted=False,
+        deskos=False,
+        fs="none",
+        format_required=False,
+        format_supported=False,
+        capacity_kb=0,
+        free_kb=0,
+        note="mount_not_checked",
     ),
 }
 
@@ -529,6 +543,8 @@ def reply_for_request(
         return ping_line()
     if request == STATUS_REQUEST:
         return status_line(scenario)
+    if request == MOUNT_REQUEST:
+        return status_line(scenario, MOUNT_REPLY)
     if request == DIAG_REQUEST:
         return diag_line(scenario)
     if request.startswith(FORMAT_REQUEST + " "):

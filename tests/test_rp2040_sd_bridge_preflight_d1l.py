@@ -73,6 +73,34 @@ def ready_storage_line() -> str:
     )
 
 
+def mount_required_storage_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"mount_required","present":false,"mounted":false,'
+        '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
+        '"last_error":"ESP_OK"},'
+        '"data_backend":"nvs","export_backend":"serial"}\n'
+    )
+
+
+def storage_mount_pending_line() -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"storage mount","code":"ESP_ERR_TIMEOUT",'
+        '"sd":{"state":"protocol_pending","rp2040_bridge_ready":true,'
+        '"rp2040_protocol_supported":false,"last_error":"ESP_ERR_TIMEOUT"},'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
+def storage_mount_noop_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage mount",'
+        '"sd":{"state":"protocol_pending","rp2040_bridge_ready":true,'
+        '"rp2040_protocol_supported":false,"last_error":"ESP_OK"},'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
 def rp2040_ping_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"rp2040 ping","bridge_ready":true,'
@@ -93,12 +121,14 @@ def test_preflight_dry_run_is_non_destructive():
         "rp2040 status",
         "rp2040 ping",
         "storage status",
+        "storage mount",
+        "storage status",
         "storage diag",
         "health",
     ]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
-    assert 'command_timeout = max(timeout, 12.0) if command == "storage diag" else timeout' in (
+    assert 'command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout' in (
         preflight.Path(preflight.__file__).read_text(encoding="utf-8")
     )
 
@@ -201,6 +231,53 @@ def test_preflight_classifies_ping_ok_but_status_pending_separately():
     assert report["rp2040_ping_sd_touched"] is False
 
 
+def test_preflight_classifies_safe_status_needing_explicit_mount():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "mount_required",
+                "present": False,
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+            },
+        },
+        [],
+        {"ok": True},
+    )
+
+    assert report["state"] == "sd_mount_required"
+    assert report["next_action"] == "run_storage_mount"
+
+
+def test_preflight_classifies_explicit_mount_timeout():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "mount_required",
+                "present": False,
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+            },
+        },
+        [],
+        {"ok": True},
+        None,
+        {"ok": False, "cmd": "storage mount", "code": "ESP_ERR_TIMEOUT"},
+    )
+
+    assert report["state"] == "sd_mount_pending"
+    assert report["next_action"] == "inspect_rp2040_sd_mount_timeout_and_reset_bridge"
+    assert report["storage_mount_ok"] is False
+
+
 def test_preflight_classifies_no_card_with_diag_pending_as_bridge_flash_needed():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
@@ -230,6 +307,8 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
             rp2040_ping_line(),
+            protocol_pending_storage_line(),
+            storage_mount_noop_line(),
             protocol_pending_storage_line(),
             '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
@@ -262,6 +341,8 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
         "rp2040 status\n",
         "rp2040 ping\n",
         "storage status\n",
+        "storage mount\n",
+        "storage status\n",
         "storage diag\n",
         "health\n",
     ]
@@ -271,7 +352,8 @@ def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridg
     ser = CommandAwareSerial(
         {
             "rp2040 ping": [rp2040_ping_line()],
-            "storage status": [protocol_pending_storage_line()],
+            "storage status": [protocol_pending_storage_line(), protocol_pending_storage_line()],
+            "storage mount": [storage_mount_noop_line()],
             "storage diag": [
                 '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n'
             ],
@@ -308,6 +390,11 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
             rp2040_ping_line(),
+            ready_storage_line(),
+            '{"schema":1,"ok":true,"cmd":"storage mount","public_rf_tx":false,"formats_sd":false,'
+            '"sd":{"state":"ready","present":true,"mounted":true,"data_root_ready":true,'
+            '"rp2040_protocol_supported":true,"file_ops":true,"atomic_rename":true,'
+            '"file_line_max":512,"file_chunk_max":192,"path_max":96}}\n',
             ready_storage_line(),
             '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
             '"mount_selected":true,"public_rf_tx":false,"formats_sd":false}\n',

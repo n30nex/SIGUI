@@ -9,6 +9,7 @@ from tools.rp2040_sd_protocol import (
     MAX_FILE_CHUNK_BYTES,
     MAX_FILE_PATH_CHARS,
     DIAG_REQUEST,
+    MOUNT_REQUEST,
     PING_REQUEST,
     STATUS_FIELDS,
     STATUS_REQUEST,
@@ -59,7 +60,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SDFS.format()" not in sketch
     assert "/deskos" in sketch
 
-    for token in [STATUS_REQUEST, PING_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, DIAG_REQUEST, FILE_REQUEST]:
+    for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch
         assert token in readme
 
@@ -75,6 +76,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "no_card",
         "ready",
         "setup_required",
+        "mount_required",
         "confirmation_required",
         "error",
     ]:
@@ -82,6 +84,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
     for note in [
         "no_card",
         "ready",
+        "mount_not_checked",
         "deskos_root_missing",
         "format_required",
         "format_complete",
@@ -110,6 +113,7 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "poll_stream(Serial, Serial, usb_rx)" in sketch
     assert "Stream *reply_stream = &Serial1;" in sketch
     assert "send_ping" in sketch
+    assert "send_mount_status" in sketch
     assert "sd_touch=0" in sketch
     assert "send_snapshot(*reply_stream" in sketch
     assert "validate_relative_path" in sketch

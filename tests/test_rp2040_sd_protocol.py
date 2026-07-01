@@ -11,6 +11,8 @@ from tools.rp2040_sd_protocol import (
     FILE_REQUEST,
     DIAG_REPLY,
     DIAG_REQUEST,
+    MOUNT_REPLY,
+    MOUNT_REQUEST,
     PING_FIELDS,
     PING_REPLY,
     PING_REQUEST,
@@ -98,6 +100,20 @@ def test_ping_protocol_is_fast_and_never_touches_sd():
     assert set(PING_FIELDS).issubset(ping.keys())
 
 
+def test_mount_protocol_is_explicit_sd_touch_request():
+    status = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["mount-required"]))
+    mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"]))
+
+    assert status["prefix"] == STATUS_REPLY
+    assert status["state"] == "mount_required"
+    assert status["present"] == "0"
+    assert mounted["prefix"] == MOUNT_REPLY
+    assert mounted["state"] == "ready"
+    assert mounted["present"] == "1"
+    assert mounted["mounted"] == "1"
+    assert mounted["file_ops"] == "1"
+
+
 def test_diag_protocol_reports_probe_matrix_without_formatting():
     diag = parse_tokens(reply_for_request(DIAG_REQUEST, SCENARIOS["no-card"]))
 
@@ -151,10 +167,12 @@ def test_storage_edge_scenarios_and_constants_match_c_contract():
         ROOT / "firmware/rp2040_sd_bridge/deskos_sd_bridge/deskos_sd_bridge.ino"
     ).read_text(encoding="utf-8")
     assert STATUS_REQUEST in c_source
+    assert MOUNT_REQUEST in c_source
     assert PING_REQUEST in c_source
     assert FORMAT_REQUEST in c_source
     assert FORMAT_CONFIRMATION in c_header
     assert STATUS_REQUEST in rp2040_sketch
+    assert MOUNT_REQUEST in rp2040_sketch
     assert PING_REQUEST in rp2040_sketch
     assert FORMAT_REQUEST in rp2040_sketch
     assert FORMAT_CONFIRMATION in rp2040_sketch

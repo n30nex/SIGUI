@@ -22,33 +22,39 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
 ```
 
-The latest verified UF2 from Actions run `28495545520` for commit
-`e05264098a106f1ba0adcf766a1262d12e73448c` is:
+The last hardware-tested UF2 before the safe-status/explicit-mount follow-up was
+from Actions run `28499319258` for commit
+`a8268073ae290567e26f27491c8ffa167f6f8d57`:
 
 ```text
-AFB6B12EE3518C48811F6C2876717B9BFAF43C1ABFE02E9BF693D95F977E16E5
+AA71CD32C9433F1D57B1C3F243ABB2A7535728E6A3905C6A424A1E77D5F3E57E
 ```
 
 Earlier Actions artifact `28494746866` was copied once after the RP2040 UF2
 volume mounted as `RPI-RP2` at `G:\`. Post-copy COM12 preflight then reported
 `state="rp2040_protocol_pending"` and `storage status` / `storage diag`
-timeouts, so the follow-up bridge changes were built by Actions. Later run
-`28498333005` also flashed the ESP32 image and copied the RP2040 UF2 after the
-ESP32 `rp2040 reset` command cleared the RP2040 USB/CDC wedge, but SD status
-still timed out. Current preflight therefore includes `rp2040 ping` to prove the
-flashed bridge app answers without touching SD before diagnosing status/mount.
+timeouts, so follow-up bridge changes were built by Actions. Run `28499319258`
+flashed the ESP32 image and copied the RP2040 UF2 after the ESP32
+`rp2040 reset` command cleared the RP2040 USB/CDC wedge; COM12 then proved
+`rp2040 ping` works with `sd_touched=false`, but the SD-touching status/diag
+path still timed out. Current preflight therefore includes `rp2040 ping` to
+prove the flashed bridge app answers without touching SD, then uses explicit
+`storage mount` for the SD-touch attempt.
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
-port with `rp2040 status`, `rp2040 ping`, `storage status`, optional
-`storage diag`, and `health`, and reports the next safe action as JSON.
-`rp2040 ping` must report `sd_touched=false`; `storage diag` is non-formatting
-and may be unavailable on older bridge firmware. If preflight reports
+port with `rp2040 status`, `rp2040 ping`, safe `storage status`, explicit
+`storage mount`, safe `storage status`, optional `storage diag`, and `health`,
+and reports the next safe action as JSON. `rp2040 ping` must report
+`sd_touched=false`; `storage mount` and `storage diag` are non-formatting and
+may be unavailable on older bridge firmware. If preflight reports
 `state="rp2040_protocol_pending"` or `state="sd_card_not_present_diag_pending"`
 and no UF2 volume is available, put the RP2040 into UF2/BOOTSEL mode before
-running the copy helper. If it reports `state="sd_status_pending"` after a
-successful ping, keep the current UF2 installed and inspect the status/mount
-path instead of copying the same UF2 again.
+running the copy helper. If it reports `state="sd_mount_required"`, run the
+explicit mount path. If it reports `state="sd_mount_pending"` or
+`state="sd_status_pending"` after a successful ping, keep the current UF2
+installed and inspect the status/mount path instead of copying the same UF2
+again.
 
 ## Flash
 
@@ -92,6 +98,8 @@ python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-se
 Expected proof with a ready card:
 
 - `storage status` reports `sd.rp2040_protocol_supported=true`.
+- `storage mount` returns `ok=true` and a ready SD state before file canaries
+  are attempted.
 - `rp2040 ping` reports `ok=true`, `protocol_supported=true`,
   `sd_touched=false`, `public_rf_tx=false`, and `formats_sd=false`.
 - `sd.file_ops=true`, `sd.atomic_rename=true`, `sd.file_line_max >= 512`,

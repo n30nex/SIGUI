@@ -16,6 +16,8 @@
 #define D1L_RP2040_PING_REPLY_PREFIX "DESKOS_SD_PING"
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
+#define D1L_RP2040_SD_MOUNT_QUERY "DESKOS_SD_MOUNT\n"
+#define D1L_RP2040_SD_MOUNT_REPLY_PREFIX "DESKOS_SD_MOUNT"
 #define D1L_RP2040_SD_DIAG_QUERY "DESKOS_SD_DIAG\n"
 #define D1L_RP2040_SD_DIAG_REPLY_PREFIX "DESKOS_SD_DIAG"
 #define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
@@ -513,6 +515,11 @@ static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_REPLY_PREFIX, status);
 }
 
+static esp_err_t parse_sd_mount_line(const char *line, d1l_rp2040_sd_status_t *status)
+{
+    return parse_sd_line_with_prefix(line, D1L_RP2040_SD_MOUNT_REPLY_PREFIX, status);
+}
+
 static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *status)
 {
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
@@ -831,6 +838,40 @@ esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_
         return ret;
     }
     ret = parse_sd_status_line(line, out_status);
+    out_status->response_truncated = truncated;
+    out_status->last_error = ret;
+    return ret;
+}
+
+esp_err_t d1l_rp2040_bridge_mount_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms)
+{
+    if (out_status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_sd_status(out_status, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    const char *prefixes[] = {D1L_RP2040_SD_MOUNT_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    init_sd_status(out_status, ESP_ERR_TIMEOUT);
+    esp_err_t ret = exchange_prefixed_line(D1L_RP2040_SD_MOUNT_QUERY,
+                                           strlen(D1L_RP2040_SD_MOUNT_QUERY),
+                                           prefixes, 1, line, sizeof(line),
+                                           timeout_ms, &truncated);
+    out_status->response_truncated = truncated;
+    if (ret != ESP_OK) {
+        out_status->last_error = ret;
+        if (ret != ESP_ERR_TIMEOUT) {
+            snprintf(out_status->state, sizeof(out_status->state), "query_failed");
+            snprintf(out_status->note, sizeof(out_status->note),
+                     "Could not write SD mount query to RP2040 UART");
+        }
+        return ret;
+    }
+    ret = parse_sd_mount_line(line, out_status);
     out_status->response_truncated = truncated;
     out_status->last_error = ret;
     return ret;
