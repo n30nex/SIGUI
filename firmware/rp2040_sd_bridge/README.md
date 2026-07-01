@@ -89,10 +89,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and `probe_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
-  report `state=mount_pending`, and creates `/deskos` when the filesystem is
-  usable. No electrical card reports `no_card`; an inserted card with an
-  unusable filesystem reports `setup_required`, `format_required=1`, and
-  `format_supported=1`.
+  report `state=mount_pending`, and runs a bounded raw SPI CMD0/CMD8/ACMD41
+  probe before any Arduino/SdFat filesystem mount call. No electrical card
+  reports `no_card`; an inserted card with an unusable filesystem reports
+  `setup_required`, `format_required=1`, and `format_supported=1`.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.
@@ -100,7 +100,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   reports the pin contract, selected rail/SPI mode, and the high/dedicated,
   high/shared, low/dedicated, and low/shared raw probe result. It returns a
   pending-shaped diagnostic line instead of blocking the UART while another SD
-  worker is running, is non-formatting, and does not write to the card.
+  worker is running, uses only the bounded raw SPI probe, is non-formatting, and
+  does not write to the card.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
   Formatting uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
   wrapper is avoided because that wrapper does not preserve the configured SPI

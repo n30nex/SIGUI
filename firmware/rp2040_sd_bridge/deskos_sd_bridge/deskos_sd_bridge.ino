@@ -31,6 +31,7 @@ constexpr uint8_t SD_MOSI_PIN = 11;
 constexpr uint8_t SD_MISO_PIN = 12;
 constexpr uint8_t SD_POWER_PIN = 18;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
+constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr const char *DESKOS_ROOT = "/deskos";
 
 constexpr size_t FILE_LINE_MAX = 512;
@@ -169,6 +170,102 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         power_high,
         options,
     };
+    return probe;
+}
+
+uint8_t sd_spi_transfer(uint8_t value) {
+    return SPI1.transfer(value);
+}
+
+uint8_t sd_wait_ready(uint32_t timeout_ms) {
+    const uint32_t start = millis();
+    uint8_t value = 0xFF;
+    do {
+        value = sd_spi_transfer(0xFF);
+        if (value == 0xFF) {
+            return value;
+        }
+        delay(1);
+    } while (millis() - start < timeout_ms);
+    return value;
+}
+
+uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len) {
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_spi_transfer(0xFF);
+    digitalWrite(SD_CS_PIN, LOW);
+    (void)sd_wait_ready(50);
+    (void)sd_spi_transfer(0x40U | command);
+    (void)sd_spi_transfer(static_cast<uint8_t>(argument >> 24));
+    (void)sd_spi_transfer(static_cast<uint8_t>(argument >> 16));
+    (void)sd_spi_transfer(static_cast<uint8_t>(argument >> 8));
+    (void)sd_spi_transfer(static_cast<uint8_t>(argument));
+    (void)sd_spi_transfer(crc);
+    uint8_t response = 0xFF;
+    for (uint8_t i = 0; i < 16; ++i) {
+        response = sd_spi_transfer(0xFF);
+        if ((response & 0x80U) == 0) {
+            break;
+        }
+    }
+    for (size_t i = 0; i < extra_len; ++i) {
+        extra[i] = sd_spi_transfer(0xFF);
+    }
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_spi_transfer(0xFF);
+    return response;
+}
+
+CardProbe manual_probe_card(uint8_t options, bool power_high) {
+    CardProbe probe = empty_probe(power_token(power_high), spi_mode_token(options), power_high, options);
+    configure_sd_bus(power_high);
+    SPI1.begin();
+    SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(SD_CS_PIN, HIGH);
+    for (uint8_t i = 0; i < 10; ++i) {
+        (void)sd_spi_transfer(0xFF);
+    }
+
+    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0);
+    if (cmd0 == 0xFF) {
+        probe.error_code = 1;
+        SPI1.endTransaction();
+        return probe;
+    }
+    if ((cmd0 & 0x01U) == 0) {
+        probe.present = true;
+        probe.error_code = 0;
+        SPI1.endTransaction();
+        return probe;
+    }
+
+    uint8_t cmd8_extra[4] = {0, 0, 0, 0};
+    const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra));
+    const bool sd_v2 = (cmd8 & 0x04U) == 0;
+    const uint32_t init_start = millis();
+    uint8_t acmd41 = 0xFF;
+    do {
+        (void)sd_command(55, 0, 0x65, nullptr, 0);
+        acmd41 = sd_command(41, sd_v2 ? 0x40000000UL : 0, 0x77, nullptr, 0);
+        if (acmd41 == 0) {
+            probe.present = true;
+            probe.error_code = 0;
+            break;
+        }
+        delay(10);
+    } while (millis() - init_start < 750);
+
+    if (!probe.present) {
+        probe.error_code = acmd41 == 0xFF ? 2 : acmd41;
+        probe.error_data = cmd8;
+        SPI1.endTransaction();
+        return probe;
+    }
+
+    uint8_t ocr[4] = {0, 0, 0, 0};
+    (void)sd_command(58, 0, 0xFD, ocr, sizeof(ocr));
+    probe.error_data = ocr[0];
+    SPI1.endTransaction();
     return probe;
 }
 
@@ -338,13 +435,13 @@ SdSnapshot mount_status_blocking() {
     SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
-    CardProbe probe = default_probe();
+    CardProbe probe = manual_probe_card(DEDICATED_SPI, true);
     if (!probe.present) {
         CardProbe probes[] = {
             probe,
-            probe_card(SHARED_SPI, true),
-            probe_card(DEDICATED_SPI, false),
-            probe_card(SHARED_SPI, false),
+            manual_probe_card(SHARED_SPI, true),
+            manual_probe_card(DEDICATED_SPI, false),
+            manual_probe_card(SHARED_SPI, false),
         };
         const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
         if (!selected) {
@@ -479,10 +576,10 @@ DiagSnapshot pending_diag_snapshot() {
 
 DiagSnapshot diag_status_blocking() {
     DiagSnapshot diag = pending_diag_snapshot();
-    diag.high_dedicated = probe_card(DEDICATED_SPI, true);
-    diag.high_shared = probe_card(SHARED_SPI, true);
-    diag.low_dedicated = probe_card(DEDICATED_SPI, false);
-    diag.low_shared = probe_card(SHARED_SPI, false);
+    diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true);
+    diag.high_shared = manual_probe_card(SHARED_SPI, true);
+    diag.low_dedicated = manual_probe_card(DEDICATED_SPI, false);
+    diag.low_shared = manual_probe_card(SHARED_SPI, false);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
@@ -494,7 +591,7 @@ DiagSnapshot diag_status_blocking() {
     }
     diag.selected_power = power_token(s_sd_power_high);
     diag.selected_mode = spi_mode_token(s_sd_spi_options);
-    diag.mount_selected = selected ? mount_sd() : false;
+    diag.mount_selected = false;
     diag.valid = true;
     if (!selected) {
         configure_sd_bus();

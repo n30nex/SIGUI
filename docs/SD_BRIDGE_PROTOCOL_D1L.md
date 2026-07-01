@@ -64,6 +64,10 @@ If the SD stack is still probing or mounting the card, the line may report
 `DESKOS_SD_STATUS` until the cached state becomes `ready`, `setup_required`,
 `no_card`, or `error`.
 
+The RP2040 bridge must use a bounded raw SPI presence probe before entering the
+Arduino/SdFat filesystem mount path. An electrically absent or non-responsive
+card should report `no_card` rather than wedging the UART bridge.
+
 ```text
 DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```

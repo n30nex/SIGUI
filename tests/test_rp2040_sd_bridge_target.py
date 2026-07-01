@@ -34,6 +34,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t RP2040_ESP32_RX_PIN = 17;" in sketch
     assert "constexpr uint8_t RP2040_ESP32_TX_PIN = 16;" in sketch
     assert "constexpr uint32_t ESP32_BRIDGE_BAUD = 921600;" in sketch
+    assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in sketch
     assert "constexpr uint8_t SD_CS_PIN = 13;" in sketch
     assert "constexpr uint8_t SD_SCK_PIN = 10;" in sketch
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
@@ -50,6 +51,13 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
+    assert "manual_probe_card(DEDICATED_SPI, true)" in sketch
+    assert "manual_probe_card(SHARED_SPI, true)" in sketch
+    assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
+    assert "manual_probe_card(SHARED_SPI, false)" in sketch
+    assert "sd_command(0, 0, 0x95" in sketch
+    assert "sd_command(8, 0x1AA, 0x87" in sketch
+    assert "sd_command(41" in sketch
     assert "probe_card(DEDICATED_SPI, true)" in sketch
     assert "probe_card(SHARED_SPI, true)" in sketch
     assert "probe_card(DEDICATED_SPI, false)" in sketch
