@@ -84,12 +84,17 @@ def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], li
         return [], []
 
     expected_submodule = EXPECTED_BSP_SUBMODULE.as_posix()
-    expected_entries = [line for line in entries if line[3:] == expected_submodule]
-    other_entries = [line for line in entries if line[3:] != expected_submodule]
+    expected_entries = [line for line in entries if status_path(line) == expected_submodule]
+    other_entries = [line for line in entries if status_path(line) != expected_submodule]
     if expected_entries and expected_bsp_patch_applied(root):
         return other_entries, [EXPECTED_BSP_PATCH.as_posix()]
 
     return entries, []
+
+
+def status_path(status_line: str) -> str:
+    parts = status_line.split(maxsplit=1)
+    return parts[1] if len(parts) == 2 else ""
 
 
 def git_info(root: Path) -> dict:

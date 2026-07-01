@@ -100,7 +100,7 @@ def test_generated_flash_scripts_require_explicit_port(tmp_path):
 def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
     def fake_git_value(root, *args):
         if args == ("status", "--porcelain"):
-            return " m third_party/sensecap_indicator_esp32"
+            return "M third_party/sensecap_indicator_esp32"
         if args == ("rev-parse", "HEAD"):
             return "abc123"
         if args == ("rev-parse", "--short", "HEAD"):
