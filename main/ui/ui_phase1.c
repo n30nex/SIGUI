@@ -1207,25 +1207,8 @@ static void update_compose_counter(void)
                                 0);
 }
 
-static void public_test_event_cb(lv_event_t *event)
+static void show_public_compose_sheet(const char *title, const char *placeholder)
 {
-    (void)event;
-    show_toast("Public test", d1l_app_model_send_public_test());
-}
-
-static void mark_messages_read_event_cb(lv_event_t *event)
-{
-    (void)event;
-    esp_err_t ret = d1l_app_model_mark_messages_read();
-    show_toast("Read", ret);
-    if (ret == ESP_OK) {
-        render_active_tab();
-    }
-}
-
-static void open_compose_event_cb(lv_event_t *event)
-{
-    (void)event;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -1243,7 +1226,7 @@ static void open_compose_event_cb(lv_event_t *event)
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
-        lv_label_set_text(s_compose_title, "Public");
+        lv_label_set_text(s_compose_title, title && title[0] ? title : "Public");
     }
     if (s_compose_sheet) {
         lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -1251,9 +1234,32 @@ static void open_compose_event_cb(lv_event_t *event)
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
-        lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
+        lv_textarea_set_placeholder_text(s_compose_textarea,
+                                         placeholder && placeholder[0] ? placeholder : "Public message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
         update_compose_counter();
+    }
+}
+
+static void public_test_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_toast("Public test", d1l_app_model_send_public_test());
+}
+
+static void open_compose_event_cb(lv_event_t *event)
+{
+    (void)event;
+    show_public_compose_sheet("Public", "Public message");
+}
+
+static void mark_messages_read_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_mark_messages_read();
+    show_toast("Read", ret);
+    if (ret == ESP_OK) {
+        render_active_tab();
     }
 }
 
@@ -2025,6 +2031,21 @@ static const char *message_delivery_label(const d1l_message_entry_t *entry)
     return entry->seq > s_snapshot.last_public_read_seq ? "new" : "received";
 }
 
+static void reply_message_detail_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const d1l_message_entry_t entry = s_message_detail_message;
+    if (entry.seq == 0 || entry.author[0] == '\0') {
+        show_toast("Reply", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    char title[48];
+    char placeholder[64];
+    snprintf(title, sizeof(title), "Reply %.32s", entry.author);
+    snprintf(placeholder, sizeof(placeholder), "Reply to %.48s", entry.author);
+    show_public_compose_sheet(title, placeholder);
+}
+
 static void render_message_detail_sheet(void)
 {
     if (!s_message_detail_sheet) {
@@ -2039,6 +2060,9 @@ static void render_message_detail_sheet(void)
     lv_obj_set_width(title, 260);
     lv_obj_set_pos(title, 8, 4);
 
+    if (entry->direction[0] != 't') {
+        create_button(s_message_detail_sheet, "Reply", 232, 0, 76, 40, reply_message_detail_event_cb, NULL);
+    }
     create_button(s_message_detail_sheet, "Close", 316, 0, 76, 40, close_message_detail_event_cb, NULL);
 
     lv_obj_t *sender_title = create_label(s_message_detail_sheet, "Sender", 0x5EEAD4);

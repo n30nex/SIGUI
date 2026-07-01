@@ -1193,7 +1193,7 @@ Final package must include:
 - [ ] Build default Public channel screen.
 - [ ] Build compose bar/sheet with keyboard and visible Send.
 - [x] Add char counter.
-- [ ] Add reply-from-message tap behavior.
+- [x] Add reply-from-message tap behavior.
 - [x] Add message detail with sender/path.
 - [ ] Add DM conversation list and thread.
 

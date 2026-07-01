@@ -1144,6 +1144,7 @@ def render_message_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Path", (44, 330, 160, 350), 13, MUTED, True)
     s.text("hash 2 byte  hops 1  retained locally", (44, 352, 436, 372), 14, BLUE)
     draw_button(s, (44, 382, 200, 412), "Close", MUTED, action="close_message_detail", destination="messages")
+    draw_button(s, (216, 382, 372, 412), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
     draw_dock(s, "Messages")
 
 
@@ -1490,7 +1491,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
-    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Close"),
+    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Reply", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"),
@@ -1547,6 +1548,13 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": (
             {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
             {"view": "message_detail_sheet", "action": "close_message_detail", "destination": "messages"},
+        ),
+    },
+    {
+        "name": "public_message_reply",
+        "steps": (
+            {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {"view": "message_detail_sheet", "action": "open_public_reply", "destination": "compose_sheet"},
         ),
     },
     {

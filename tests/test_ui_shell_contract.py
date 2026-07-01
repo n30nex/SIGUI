@@ -221,6 +221,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_public_history": "open_public_history_event_cb",
         "open_public_search": "open_public_search_event_cb",
         "open_message_detail": "open_message_detail_event_cb",
+        "open_public_reply": "reply_message_detail_event_cb",
         "edit_public_search": "s_public_search_textarea",
         "apply_public_search": "apply_public_search_event_cb",
         "open_dm_thread": "open_dm_thread_event_cb",
@@ -284,6 +285,7 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     source = read("main/ui/ui_phase1.c")
     assert "create_compose_sheet" in source
     assert "open_compose_event_cb" in source
+    assert "show_public_compose_sheet" in source
     assert "send_compose_text" in source
     assert "static lv_obj_t *s_compose_counter" in source
     assert "update_compose_counter" in source
@@ -343,10 +345,15 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert "render_message_detail_sheet" in source
     assert "open_message_detail_event_cb" in source
     assert "close_message_detail_event_cb" in source
+    assert "reply_message_detail_event_cb" in source
     assert "create_message_detail_sheet" in source
     assert "lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED" in source
     assert '"Message Detail"' in source
     assert '"Sender"' in source
+    assert 'create_button(s_message_detail_sheet, "Reply"' in source
+    assert 'snprintf(title, sizeof(title), "Reply %.32s"' in source
+    assert 'snprintf(placeholder, sizeof(placeholder), "Reply to %.48s"' in source
+    assert "show_public_compose_sheet(title, placeholder)" in source
     assert '"Signal rssi %d  snr %s%d.%d"' in source
     assert '"Path hash %u byte  hops %u  uptime %lums"' in source
     assert "message_delivery_label" in source
