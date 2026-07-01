@@ -69,6 +69,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "time_label[8]" in header
     assert "home_messages[D1L_HOME_MESSAGE_PREVIEW]" in header
     assert "home_repeaters[D1L_HOME_REPEATER_PREVIEW]" in header
+    assert "static void copy_cstr(char *dest, size_t dest_size, const char *src)" in source
     assert "populate_home_messages(snapshot)" in source
     assert "populate_home_repeaters(snapshot)" in source
     assert 'snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--")' in source

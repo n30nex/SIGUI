@@ -73,6 +73,19 @@ static uint32_t age_seconds(uint32_t now_ms, uint32_t event_ms)
     return (now_ms - event_ms) / 1000U;
 }
 
+static void copy_cstr(char *dest, size_t dest_size, const char *src)
+{
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    size_t i = 0;
+    while (src && src[i] && i + 1U < dest_size) {
+        dest[i] = src[i];
+        i++;
+    }
+    dest[i] = '\0';
+}
+
 static void populate_home_messages(d1l_app_snapshot_t *snapshot)
 {
     bool public_used[D1L_APP_SNAPSHOT_MESSAGE_PREVIEW] = {0};
@@ -114,16 +127,16 @@ static void populate_home_messages(d1l_app_snapshot_t *snapshot)
             dm_used[dm_index] = true;
             preview->is_dm = true;
             preview->unread = snapshot->recent_dm_unread[dm_index];
-            snprintf(preview->sender, sizeof(preview->sender), "%s",
-                     entry->contact_alias[0] ? entry->contact_alias : "Direct");
-            snprintf(preview->target_fingerprint, sizeof(preview->target_fingerprint), "%s",
-                     entry->contact_fingerprint);
-            snprintf(preview->direction, sizeof(preview->direction), "%s", entry->direction);
-            snprintf(preview->status, sizeof(preview->status), "%s",
-                     preview->unread ? "new DM" :
-                     (entry->acked ? "acked" :
-                      (entry->direction[0] == 't' ? "sent" : "direct")));
-            snprintf(preview->text, sizeof(preview->text), "%s", entry->text);
+            copy_cstr(preview->sender, sizeof(preview->sender),
+                      entry->contact_alias[0] ? entry->contact_alias : "Direct");
+            copy_cstr(preview->target_fingerprint, sizeof(preview->target_fingerprint),
+                      entry->contact_fingerprint);
+            copy_cstr(preview->direction, sizeof(preview->direction), entry->direction);
+            copy_cstr(preview->status, sizeof(preview->status),
+                      preview->unread ? "new DM" :
+                      (entry->acked ? "acked" :
+                       (entry->direction[0] == 't' ? "sent" : "direct")));
+            copy_cstr(preview->text, sizeof(preview->text), entry->text);
             preview->age_sec = age_seconds(snapshot->uptime_ms, entry->uptime_ms);
             preview->rssi_dbm = entry->rssi_dbm;
             preview->snr_tenths = entry->snr_tenths;
@@ -134,14 +147,14 @@ static void populate_home_messages(d1l_app_snapshot_t *snapshot)
             preview->is_dm = false;
             preview->unread = entry->direction[0] == 'r' &&
                               entry->seq > snapshot->last_public_read_seq;
-            snprintf(preview->sender, sizeof(preview->sender), "%s",
-                     entry->author[0] ? entry->author : "Public");
+            copy_cstr(preview->sender, sizeof(preview->sender),
+                      entry->author[0] ? entry->author : "Public");
             preview->target_fingerprint[0] = '\0';
-            snprintf(preview->direction, sizeof(preview->direction), "%s", entry->direction);
-            snprintf(preview->status, sizeof(preview->status), "%s",
-                     preview->unread ? "new" :
-                     (entry->direction[0] == 't' ? "sent" : "public"));
-            snprintf(preview->text, sizeof(preview->text), "%s", entry->text);
+            copy_cstr(preview->direction, sizeof(preview->direction), entry->direction);
+            copy_cstr(preview->status, sizeof(preview->status),
+                      preview->unread ? "new" :
+                      (entry->direction[0] == 't' ? "sent" : "public"));
+            copy_cstr(preview->text, sizeof(preview->text), entry->text);
             preview->age_sec = age_seconds(snapshot->uptime_ms, entry->uptime_ms);
             preview->rssi_dbm = entry->rssi_dbm;
             preview->snr_tenths = entry->snr_tenths;
@@ -159,12 +172,12 @@ static void populate_home_repeaters(d1l_app_snapshot_t *snapshot)
         const d1l_mesh_repeater_candidate_t *src = &snapshot->recent_repeaters[i];
         d1l_home_repeater_preview_t *dest =
             &snapshot->home_repeaters[snapshot->home_repeater_count++];
-        snprintf(dest->label, sizeof(dest->label), "%s",
-                 src->label[0] ? src->label : src->target);
-        snprintf(dest->route, sizeof(dest->route), "%s",
-                 src->route[0] ? src->route : "unknown");
-        snprintf(dest->kind, sizeof(dest->kind), "%s",
-                 src->kind[0] ? src->kind : "repeater");
+        copy_cstr(dest->label, sizeof(dest->label),
+                  src->label[0] ? src->label : src->target);
+        copy_cstr(dest->route, sizeof(dest->route),
+                  src->route[0] ? src->route : "unknown");
+        copy_cstr(dest->kind, sizeof(dest->kind),
+                  src->kind[0] ? src->kind : "repeater");
         dest->age_sec = age_seconds(snapshot->uptime_ms, src->last_seen_ms);
         dest->rssi_dbm = src->rssi_dbm;
         dest->snr_tenths = src->snr_tenths;
