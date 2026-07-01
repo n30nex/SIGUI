@@ -36,6 +36,42 @@ static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
     return (uint16_t)value;
 }
 
+static bool raw_touch_has_valid_point(const d1l_board_touch_raw_state_t *raw)
+{
+    return raw &&
+           raw->touch_count > 0 &&
+           raw->raw_x < 480 &&
+           raw->raw_y < 480;
+}
+
+static void apply_raw_touch_state(d1l_board_touch_state_t *out_state,
+                                  const d1l_board_touch_raw_state_t *raw)
+{
+    out_state->pressed = true;
+    out_state->touches = raw->touch_count;
+    out_state->raw_x = raw->raw_x;
+    out_state->raw_y = raw->raw_y;
+    out_state->coordinate_valid = true;
+    out_state->x = clamp_touch_coord(raw->raw_x, 480);
+    out_state->y = clamp_touch_coord(raw->raw_y, 480);
+    out_state->read_result = raw->read_result;
+}
+
+static void populate_raw_touch_fields(d1l_board_touch_raw_state_t *out_state)
+{
+    out_state->touch_points_raw = out_state->registers_00_1f[0x02];
+    out_state->touch_count = out_state->touch_points_raw & 0x0FU;
+    if (out_state->touch_count > 5U) {
+        out_state->touch_count = 0;
+    }
+    out_state->event_flag = (out_state->registers_00_1f[0x03] >> 6) & 0x03U;
+    out_state->touch_id = (out_state->registers_00_1f[0x05] >> 4) & 0x0FU;
+    out_state->raw_x = (uint16_t)(((out_state->registers_00_1f[0x03] & 0x0FU) << 8) |
+                                  out_state->registers_00_1f[0x04]);
+    out_state->raw_y = (uint16_t)(((out_state->registers_00_1f[0x05] & 0x0FU) << 8) |
+                                  out_state->registers_00_1f[0x06]);
+}
+
 static esp_err_t d1l_board_touch_ensure_ready(void)
 {
     if (!s_status.ready) {
@@ -73,6 +109,41 @@ static esp_err_t d1l_board_touch_raw_handle(i2c_bus_device_handle_t *out_handle)
         return ESP_FAIL;
     }
     *out_handle = s_touch_raw_handle;
+    return ESP_OK;
+}
+
+static esp_err_t d1l_board_touch_raw_position_read(d1l_board_touch_raw_state_t *out_state)
+{
+    if (!out_state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_state, 0, sizeof(*out_state));
+    out_state->init_result = ESP_ERR_INVALID_STATE;
+    out_state->read_result = ESP_ERR_INVALID_STATE;
+    if (!s_status.ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t init_ret = d1l_board_touch_ensure_ready();
+    out_state->init_result = init_ret;
+    out_state->init_attempts = s_touch_init_attempts;
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
+
+    i2c_bus_device_handle_t handle = NULL;
+    uint8_t point_registers[5] = {0};
+    esp_err_t ret = d1l_board_touch_raw_handle(&handle);
+    if (ret == ESP_OK) {
+        ret = i2c_bus_read_bytes(handle, 0x02, sizeof(point_registers), point_registers);
+    }
+    out_state->read_result = ret;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    memcpy(&out_state->registers_00_1f[0x02], point_registers, sizeof(point_registers));
+    populate_raw_touch_fields(out_state);
     return ESP_OK;
 }
 
@@ -200,19 +271,30 @@ esp_err_t d1l_board_touch_read(d1l_board_touch_state_t *out_state)
         }
     }
     out_state->read_result = ret;
+    if (ret == ESP_OK) {
+        out_state->pressed = data.pressed;
+        out_state->touches = data.pressed ? 1 : 0;
+        out_state->raw_x = data.x;
+        out_state->raw_y = data.y;
+        out_state->coordinate_valid = data.pressed &&
+                                      data.x >= 0 && data.x < 480 &&
+                                      data.y >= 0 && data.y < 480;
+        out_state->x = data.pressed ? clamp_touch_coord(data.x, 480) : 0;
+        out_state->y = data.pressed ? clamp_touch_coord(data.y, 480) : 0;
+        if (out_state->pressed && out_state->coordinate_valid) {
+            return ESP_OK;
+        }
+    }
+
+    d1l_board_touch_raw_state_t raw = {0};
+    esp_err_t raw_ret = d1l_board_touch_raw_position_read(&raw);
+    if (raw_ret == ESP_OK && raw_touch_has_valid_point(&raw)) {
+        apply_raw_touch_state(out_state, &raw);
+        return ESP_OK;
+    }
     if (ret != ESP_OK) {
         return ret;
     }
-
-    out_state->pressed = data.pressed;
-    out_state->touches = data.pressed ? 1 : 0;
-    out_state->raw_x = data.x;
-    out_state->raw_y = data.y;
-    out_state->coordinate_valid = data.pressed &&
-                                  data.x >= 0 && data.x < 480 &&
-                                  data.y >= 0 && data.y < 480;
-    out_state->x = data.pressed ? clamp_touch_coord(data.x, 480) : 0;
-    out_state->y = data.pressed ? clamp_touch_coord(data.y, 480) : 0;
     return ESP_OK;
 }
 
@@ -250,17 +332,7 @@ esp_err_t d1l_board_touch_raw_read(d1l_board_touch_raw_state_t *out_state)
         return ret;
     }
 
-    out_state->touch_points_raw = out_state->registers_00_1f[0x02];
-    out_state->touch_count = out_state->touch_points_raw & 0x0FU;
-    if (out_state->touch_count > 5U) {
-        out_state->touch_count = 0;
-    }
-    out_state->event_flag = (out_state->registers_00_1f[0x03] >> 6) & 0x03U;
-    out_state->touch_id = (out_state->registers_00_1f[0x05] >> 4) & 0x0FU;
-    out_state->raw_x = (uint16_t)(((out_state->registers_00_1f[0x03] & 0x0FU) << 8) |
-                                  out_state->registers_00_1f[0x04]);
-    out_state->raw_y = (uint16_t)(((out_state->registers_00_1f[0x05] & 0x0FU) << 8) |
-                                  out_state->registers_00_1f[0x06]);
+    populate_raw_touch_fields(out_state);
     return ESP_OK;
 }
 

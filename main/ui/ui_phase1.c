@@ -17,7 +17,7 @@
 #include "bsp_lcd.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
-#include "indev/indev.h"
+#include "hal/indicator_board.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
@@ -162,11 +162,10 @@ static lv_coord_t clamp_touch_coord(int32_t value, lv_coord_t max_value)
     return (lv_coord_t)value;
 }
 
-static bool touch_sample_has_valid_point(const indev_data_t *sample)
+static bool touch_sample_has_valid_point(const d1l_board_touch_state_t *sample)
 {
     return sample &&
-           sample->x != UINT16_MAX &&
-           sample->y != UINT16_MAX &&
+           sample->coordinate_valid &&
            sample->x < CONFIG_LCD_EVB_SCREEN_WIDTH &&
            sample->y < CONFIG_LCD_EVB_SCREEN_HEIGHT;
 }
@@ -176,14 +175,14 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     (void)drv;
     static lv_coord_t last_x = 0;
     static lv_coord_t last_y = 0;
-    static indev_data_t sample;
+    static d1l_board_touch_state_t sample;
 
     data->state = LV_INDEV_STATE_REL;
     data->point.x = last_x;
     data->point.y = last_y;
 
     memset(&sample, 0, sizeof(sample));
-    if (indev_get_major_value(&sample) != ESP_OK) {
+    if (d1l_board_touch_read(&sample) != ESP_OK) {
         return;
     }
     if (sample.pressed && touch_sample_has_valid_point(&sample)) {
