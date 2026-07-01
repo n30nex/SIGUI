@@ -156,7 +156,8 @@ def run_preflight(
         time.sleep(1.0)
         ser.reset_input_buffer()
         for command in PREFLIGHT_COMMANDS:
-            results.append(send_console_command(ser, command, timeout))
+            command_timeout = max(timeout, 12.0) if command == "storage diag" else timeout
+            results.append(send_console_command(ser, command, command_timeout))
 
     rp2040_status = results[0] if len(results) > 0 else {}
     storage_status = results[1] if len(results) > 1 else {}

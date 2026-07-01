@@ -83,6 +83,9 @@ def test_preflight_dry_run_is_non_destructive():
     assert report["commands"] == ["rp2040 status", "storage status", "storage diag", "health"]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
+    assert 'command_timeout = max(timeout, 12.0) if command == "storage diag" else timeout' in (
+        preflight.Path(preflight.__file__).read_text(encoding="utf-8")
+    )
 
 
 def test_preflight_classifies_protocol_pending_without_uf2_volume():
