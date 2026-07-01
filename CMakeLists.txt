@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
 
+if(NOT DEFINED PROJECT_VER)
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
+        OUTPUT_VARIABLE D1L_GIT_SHORT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(D1L_GIT_SHORT_SHA)
+        set(PROJECT_VER "${D1L_GIT_SHORT_SHA}")
+    endif()
+endif()
+
 set(SEEED_BSP_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party/sensecap_indicator_esp32")
 set(SEEED_BSP_TOUCH_PATCH "${CMAKE_CURRENT_LIST_DIR}/patches/sensecap_indicator_touch_fix.patch")
 

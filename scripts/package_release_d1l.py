@@ -67,6 +67,7 @@ def command_succeeds(cwd: Path, args: list[str]) -> bool:
 
 
 def expected_bsp_patch_applied(root: Path) -> bool:
+    root = root.resolve()
     patch = root / EXPECTED_BSP_PATCH
     submodule = root / EXPECTED_BSP_SUBMODULE
     if not patch.exists() or not submodule.exists():
@@ -83,13 +84,16 @@ def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], li
         return [], []
 
     expected_submodule = EXPECTED_BSP_SUBMODULE.as_posix()
-    if all(line[3:] == expected_submodule for line in entries) and expected_bsp_patch_applied(root):
-        return [], [EXPECTED_BSP_PATCH.as_posix()]
+    expected_entries = [line for line in entries if line[3:] == expected_submodule]
+    other_entries = [line for line in entries if line[3:] != expected_submodule]
+    if expected_entries and expected_bsp_patch_applied(root):
+        return other_entries, [EXPECTED_BSP_PATCH.as_posix()]
 
     return entries, []
 
 
 def git_info(root: Path) -> dict:
+    root = root.resolve()
     status = git_value(root, "status", "--porcelain") or ""
     dirty_entries, source_patches = clean_release_status_entries(root, status)
     return {
@@ -97,6 +101,7 @@ def git_info(root: Path) -> dict:
         "short_commit": git_value(root, "rev-parse", "--short", "HEAD"),
         "branch": git_value(root, "branch", "--show-current"),
         "dirty": bool(dirty_entries),
+        "dirty_entries": dirty_entries,
         "source_patches": source_patches,
     }
 

@@ -77,6 +77,8 @@ def test_cmake_applies_parent_owned_seeed_touch_patch():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     patch = (ROOT / "patches" / "sensecap_indicator_touch_fix.patch").read_text(encoding="utf-8")
 
+    assert 'COMMAND git rev-parse --short HEAD' in cmake
+    assert 'set(PROJECT_VER "${D1L_GIT_SHORT_SHA}")' in cmake
     assert "SEEED_BSP_TOUCH_PATCH" in cmake
     assert "git apply --unidiff-zero --check" in cmake
     assert "git apply --unidiff-zero --reverse --check" in cmake

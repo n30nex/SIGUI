@@ -115,4 +115,5 @@ def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
     info = package_release_d1l.git_info(tmp_path)
 
     assert info["dirty"] is False
+    assert info["dirty_entries"] == []
     assert info["source_patches"] == ["patches/sensecap_indicator_touch_fix.patch"]
