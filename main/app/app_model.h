@@ -68,6 +68,9 @@ typedef struct {
     bool map_tile_cache_ready;
     bool map_tile_download_supported;
     bool map_tile_sideload_supported;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
     const char *wifi_state;

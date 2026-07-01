@@ -24,6 +24,29 @@ typedef struct {
     bool observer_enabled;
     bool high_contrast;
     bool night_mode;
+    bool onboarding_complete;
+    uint8_t path_hash_bytes;
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} d1l_settings_v3_t;
+
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
     uint8_t path_hash_bytes;
     uint32_t frequency_hz;
     uint16_t bandwidth_tenths_khz;
@@ -65,6 +88,9 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->tx_power_dbm = D1L_RADIO_TX_POWER_DBM;
     settings->rx_boost = true;
     settings->tcxo_mode = D1L_TCXO_NONE;
+    settings->map_location_set = false;
+    settings->map_lat_e7 = 0;
+    settings->map_lon_e7 = 0;
     settings->identity_ready = false;
     memset(settings->identity_public_key, 0, sizeof(settings->identity_public_key));
     memset(settings->identity_private_key, 0, sizeof(settings->identity_private_key));
@@ -115,6 +141,16 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         settings->tx_power_dbm = -9;
     }
     settings->tcxo_mode = D1L_TCXO_NONE;
+    settings->map_location_set = settings->map_location_set ? true : false;
+    if (!settings->map_location_set ||
+        settings->map_lat_e7 < D1L_MAP_LOCATION_LAT_E7_MIN ||
+        settings->map_lat_e7 > D1L_MAP_LOCATION_LAT_E7_MAX ||
+        settings->map_lon_e7 < D1L_MAP_LOCATION_LON_E7_MIN ||
+        settings->map_lon_e7 > D1L_MAP_LOCATION_LON_E7_MAX) {
+        settings->map_location_set = false;
+        settings->map_lat_e7 = 0;
+        settings->map_lon_e7 = 0;
+    }
     if (settings->identity_ready) {
         bool pub_all_zero = true;
         bool prv_all_zero = true;
@@ -167,6 +203,42 @@ static void migrate_v2_settings(d1l_settings_t *dest, const d1l_settings_v2_t *s
     d1l_settings_sanitize(dest);
 }
 
+static void migrate_v3_settings(d1l_settings_t *dest, const d1l_settings_v3_t *src)
+{
+    if (!dest) {
+        return;
+    }
+    d1l_settings_defaults(dest);
+    if (!src || src->schema_version != 3U) {
+        return;
+    }
+    memcpy(dest->node_name, src->node_name, sizeof(dest->node_name));
+    dest->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
+    dest->role = src->role;
+    dest->wifi_enabled = src->wifi_enabled;
+    dest->ble_companion_enabled = src->ble_companion_enabled;
+    dest->observer_enabled = src->observer_enabled;
+    dest->high_contrast = src->high_contrast;
+    dest->night_mode = src->night_mode;
+    dest->onboarding_complete = src->onboarding_complete;
+    dest->path_hash_bytes = src->path_hash_bytes;
+    dest->frequency_hz = src->frequency_hz;
+    dest->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    dest->spreading_factor = src->spreading_factor;
+    dest->coding_rate = src->coding_rate;
+    dest->tx_power_dbm = src->tx_power_dbm;
+    dest->rx_boost = src->rx_boost;
+    dest->tcxo_mode = src->tcxo_mode;
+    dest->map_location_set = false;
+    dest->map_lat_e7 = 0;
+    dest->map_lon_e7 = 0;
+    dest->identity_ready = src->identity_ready;
+    memcpy(dest->identity_public_key, src->identity_public_key, sizeof(dest->identity_public_key));
+    memcpy(dest->identity_private_key, src->identity_private_key, sizeof(dest->identity_private_key));
+    dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
+    d1l_settings_sanitize(dest);
+}
+
 esp_err_t d1l_settings_load(void)
 {
     d1l_settings_defaults(&s_current);
@@ -189,7 +261,12 @@ esp_err_t d1l_settings_load(void)
         ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &s_current, &len);
         if (ret == ESP_OK) {
             const uint32_t loaded_schema = s_current.schema_version;
-            if (loaded_schema == 2U) {
+            if (loaded_schema == 3U) {
+                d1l_settings_v3_t old_settings = {0};
+                memcpy(&old_settings, &s_current, sizeof(old_settings));
+                migrate_v3_settings(&s_current, &old_settings);
+                should_save = true;
+            } else if (loaded_schema == 2U) {
                 d1l_settings_v2_t old_settings = {0};
                 memcpy(&old_settings, &s_current, sizeof(old_settings));
                 migrate_v2_settings(&s_current, &old_settings);
@@ -198,6 +275,21 @@ esp_err_t d1l_settings_load(void)
                 d1l_settings_sanitize(&s_current);
                 should_save = loaded_schema != D1L_SETTINGS_SCHEMA_VERSION;
             }
+        }
+    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v3_t)) {
+        d1l_settings_v3_t old_settings = {0};
+        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
+        if (ret == ESP_OK) {
+            if (old_settings.schema_version == 3U) {
+                migrate_v3_settings(&s_current, &old_settings);
+            } else if (old_settings.schema_version == 2U) {
+                d1l_settings_v2_t old_v2 = {0};
+                memcpy(&old_v2, &old_settings, sizeof(old_v2));
+                migrate_v2_settings(&s_current, &old_v2);
+            } else {
+                d1l_settings_defaults(&s_current);
+            }
+            should_save = true;
         }
     } else if (ret == ESP_OK && len == sizeof(d1l_settings_v2_t)) {
         d1l_settings_v2_t old_settings = {0};

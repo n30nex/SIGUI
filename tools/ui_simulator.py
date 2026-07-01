@@ -93,6 +93,10 @@ class Snapshot:
     map_tile_download_requires: str
     map_tile_download_supported: bool
     map_tile_sideload_supported: bool
+    map_location_set: bool
+    map_lat_e7: int
+    map_lon_e7: int
+    map_center_source: str
 
 
 def sample_snapshot() -> Snapshot:
@@ -147,6 +151,10 @@ def sample_snapshot() -> Snapshot:
         map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
         map_tile_download_supported=False,
         map_tile_sideload_supported=True,
+        map_location_set=False,
+        map_lat_e7=0,
+        map_lon_e7=0,
+        map_center_source="unset",
     )
 
 
@@ -244,6 +252,10 @@ def large_mesh_snapshot() -> Snapshot:
         map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
         map_tile_download_supported=False,
         map_tile_sideload_supported=True,
+        map_location_set=False,
+        map_lat_e7=0,
+        map_lon_e7=0,
+        map_center_source="unset",
     )
 
 
@@ -333,6 +345,16 @@ def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
     )
 
 
+def manual_location_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        map_location_set=True,
+        map_lat_e7=436532000,
+        map_lon_e7=-793832000,
+        map_center_source="manual",
+    )
+
+
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
@@ -343,6 +365,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
     "storage-ready-retained-history-sd": storage_ready_retained_history_sd_snapshot,
     "storage-ready-map-tiles-sd": storage_ready_map_tiles_sd_snapshot,
+    "manual-location": manual_location_snapshot,
 }
 
 
@@ -551,6 +574,12 @@ class Surface:
 
 def normalize_action(label: str) -> str:
     return "tap_" + "".join(ch.lower() if ch.isalnum() else "_" for ch in label).strip("_")
+
+
+def format_e7(value: int) -> str:
+    sign = "-" if value < 0 else ""
+    scaled = abs(value)
+    return f"{sign}{scaled // 10_000_000}.{scaled % 10_000_000:07d}"
 
 
 def draw_top_bar(s: Surface, snap: Snapshot):
@@ -819,20 +848,34 @@ def render_map(s: Surface, snap: Snapshot):
     s.text(snap.map_tile_cache_policy, (28, 224, 452, 246), 16, TEXT, True)
     s.text(snap.map_tile_cache_path_template, (28, 250, 452, 270), 11, MUTED)
     s.round_rect((16, 290, 464, 402))
-    s.text("Routes", (28, 298, 160, 320), 14, MUTED, True)
+    s.text("Center", (28, 298, 160, 320), 14, MUTED, True)
+    s.text("Routes", (330, 298, 452, 320), 14, MUTED, True)
+    if snap.map_location_set:
+        s.text("Manual", (28, 322, 122, 346), 16, TEXT, True)
+        s.text(
+            f"{format_e7(snap.map_lat_e7)}, {format_e7(snap.map_lon_e7)}",
+            (128, 322, 452, 346),
+            15,
+            TEXT,
+            True,
+        )
+    else:
+        s.text("Unset", (28, 322, 452, 346), 16, AMBER, True)
     s.text(
-        f"retained {len(snap.routes)} routes  heard {len(snap.heard)} nodes",
-        (28, 322, 452, 346),
-        16,
-        TEXT,
-        True,
+        f"Routes {len(snap.routes)}  heard {len(snap.heard)} nodes",
+        (28, 350, 452, 372),
+        11,
+        MUTED,
     )
-    s.text(snap.map_tile_download_requires, (28, 350, 452, 372), 11, MUTED)
     s.text("No network tile download until Wi-Fi runtime", (28, 374, 452, 394), 11, AMBER, True)
     s.metrics.update(
         {
             "map_tile_cache_ready": snap.map_tile_cache_ready,
             "map_tile_download_supported": snap.map_tile_download_supported,
+            "map_location_set": snap.map_location_set,
+            "map_center_source": snap.map_center_source,
+            "map_center_lat_e7": snap.map_lat_e7,
+            "map_center_lon_e7": snap.map_lon_e7,
             "map_route_count": len(snap.routes),
         }
     )
@@ -1244,7 +1287,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": ("MeshCore DeskOS", "Home", "Radio", "US/CAN", "Mesh", "Identity", "Unread", "Send", "Advert"),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "Direct"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM"),
-    "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Routes", "No network tile download until Wi-Fi runtime"),
+    "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
     "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "Send", "Close"),

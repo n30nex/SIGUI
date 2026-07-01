@@ -131,6 +131,9 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_download_supported = false;
     snapshot->map_tile_sideload_supported = true;
+    snapshot->map_location_set = settings->map_location_set;
+    snapshot->map_lat_e7 = settings->map_lat_e7;
+    snapshot->map_lon_e7 = settings->map_lon_e7;
     snapshot->storage_capacity_kb = storage.capacity_kb;
     snapshot->storage_free_kb = storage.free_kb;
     snapshot->storage_last_error = storage.last_error;

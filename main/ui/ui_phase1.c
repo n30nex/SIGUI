@@ -450,6 +450,19 @@ static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
              snr_abs / 10, snr_abs % 10);
 }
 
+static void format_coord_e7(char *dest, size_t dest_size, int32_t value)
+{
+    int64_t scaled = value;
+    const char *sign = "";
+    if (scaled < 0) {
+        sign = "-";
+        scaled = -scaled;
+    }
+    snprintf(dest, dest_size, "%s%lld.%07lld", sign,
+             (long long)(scaled / 10000000LL),
+             (long long)(scaled % 10000000LL));
+}
+
 static void format_radio_profile_line(char *dest, size_t dest_size,
                                       const d1l_app_radio_profile_edit_t *profile)
 {
@@ -2135,6 +2148,8 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[96];
+    char lat[20];
+    char lon[20];
     lv_obj_t *title = create_label(s_content, "Map", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 18, 8);
@@ -2169,24 +2184,37 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
     lv_obj_set_width(path, 390);
     lv_obj_set_pos(path, 0, 50);
 
-    lv_obj_t *routes = create_panel(s_content, 18, 266, 424, 94);
-    create_label(routes, "Routes", 0xF4F7FB);
-    lv_obj_t *counts = create_label(routes, "", 0x8EA0AE);
-    label_set_fmt(counts, "retained %u  nodes %u  latest RSSI %d",
+    lv_obj_t *center = create_panel(s_content, 18, 266, 424, 94);
+    create_label(center, "Center", 0xF4F7FB);
+    lv_obj_t *routes_label = create_label(center, "Routes", 0x8EA0AE);
+    lv_obj_set_pos(routes_label, 320, 0);
+    lv_obj_t *location = create_label(center, "", 0x8EA0AE);
+    if (snapshot->map_location_set) {
+        format_coord_e7(lat, sizeof(lat), snapshot->map_lat_e7);
+        format_coord_e7(lon, sizeof(lon), snapshot->map_lon_e7);
+        label_set_fmt(location, "Manual Location  %s, %s", lat, lon);
+    } else {
+        label_set_fmt(location, "Manual Location unset");
+    }
+    lv_label_set_long_mode(location, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(location, 390);
+    lv_obj_set_pos(location, 0, 28);
+    lv_obj_t *counts = create_label(center, "", 0x8EA0AE);
+    label_set_fmt(counts, "Routes %u  nodes %u  latest RSSI %d",
                   (unsigned)snapshot->route_count,
                   (unsigned)snapshot->node_count,
                   snapshot->signal_summary.latest_rssi_dbm);
     lv_label_set_long_mode(counts, LV_LABEL_LONG_DOT);
     lv_obj_set_width(counts, 390);
-    lv_obj_set_pos(counts, 0, 28);
-    lv_obj_t *download = create_label(routes, "", 0x8EA0AE);
+    lv_obj_set_pos(counts, 0, 50);
+    lv_obj_t *download = create_label(center, "", 0x8EA0AE);
     label_set_fmt(download, "%s",
                   snapshot->map_tile_download_requires ?
                   snapshot->map_tile_download_requires :
                   "Wi-Fi runtime plus user opt-in; no background network download");
     lv_label_set_long_mode(download, LV_LABEL_LONG_DOT);
     lv_obj_set_width(download, 390);
-    lv_obj_set_pos(download, 0, 52);
+    lv_obj_set_pos(download, 0, 72);
 }
 
 static const char *packet_filter_direction(void)

@@ -12,9 +12,10 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 
 - Top status bar with MeshCore state, RX/TX counters, identity state, and lock action.
 - Home dashboard cards for mesh readiness, identity, RF packet/route counters, and system memory.
-- Bottom dock navigation for Home, Messages, Nodes, Packets, and Settings.
+- Bottom dock navigation for Home, Messages, Nodes, Map, Packets, and Settings.
 - Public message screen with persisted recent Public rows, a touch `test` send action, and a free-text composer sheet routed through the app model.
 - Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows.
+- Map screen that reports offline SD tile-cache policy/readiness, retained route/node counts, disabled live-download state, and an optional serial-configured manual center.
 - Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
 - Settings screen with live persisted radio profile, identity, companion status, health, radio editor entry point, and advert quick action.
@@ -34,6 +35,6 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 
 - Deeper Public scrollback/search.
 - DMs.
-- Richer contact editing, contact scan/import proof, and route trace/ping helpers.
+- Touch map-center entry, GPS/location-source integration, richer contact editing, contact scan/import proof, and route trace/ping helpers.
 - Packet filtering/search and raw packet hex in developer mode.
 - Diagnostics detail and reset/crash views.

@@ -46,9 +46,13 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "map_tile_cache_path_template" in header
     assert "map_tile_download_state" in header
     assert "map_tile_download_requires" in header
+    assert "map_location_set" in header
+    assert "map_lat_e7" in header
+    assert "map_lon_e7" in header
     assert "d1l_map_tile_store_sd_ready(&storage)" in source
     assert "D1L_MAP_TILE_CACHE_POLICY" in source
     assert "D1L_MAP_TILE_DOWNLOAD_STATE" in source
+    assert "snapshot->map_location_set = settings->map_location_set" in source
     assert "d1l_app_radio_profile_edit_t" in header
     assert "radio_frequency_hz" in header
     assert "radio_bandwidth_tenths_khz" in header
@@ -275,12 +279,17 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert '"Tile Cache"' in source
     assert '"Downloads"' in source
     assert '"Offline Cache"' in source
+    assert '"Center"' in source
+    assert '"Manual Location  %s, %s"' in source
+    assert '"Manual Location unset"' in source
     assert '"Routes"' in source
     assert "snapshot->map_tile_cache_ready" in source
     assert "snapshot->map_tile_download_supported" in source
     assert "snapshot->map_tile_cache_policy" in source
     assert "snapshot->map_tile_cache_path_template" in source
     assert "snapshot->map_tile_download_requires" in source
+    assert "snapshot->map_location_set" in source
+    assert "format_coord_e7" in source
     assert "render_metric_card(s_content, 18, 48" in source
     assert "render_metric_card(s_content, 238, 48" in source
     assert 'const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"}' in source

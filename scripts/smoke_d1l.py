@@ -25,6 +25,7 @@ SMOKE_COMMANDS = [
     "button",
     "radiohw",
     "radio get",
+    "map center",
     "mesh status",
     "companion status",
     "wifi status",

@@ -13,16 +13,25 @@ def read(rel: str) -> str:
 def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 3U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 4U" in header
     assert "identity_public_key" in header
     assert "identity_private_key" in header
     assert "onboarding_complete" in header
+    assert "map_location_set" in header
+    assert "map_lat_e7" in header
+    assert "map_lon_e7" in header
+    assert "D1L_MAP_LOCATION_LAT_E7_MIN" in header
+    assert "D1L_MAP_LOCATION_LON_E7_MAX" in header
     assert "d1l_settings_complete_onboarding" in header
     assert "d1l_settings_reset_onboarding" in header
     assert "d1l_settings_next_mesh_timestamp" in header
     assert "d1l_settings_v2_t" in source
+    assert "d1l_settings_v3_t" in source
     assert "migrate_v2_settings" in source
+    assert "migrate_v3_settings" in source
+    assert "if (loaded_schema == 3U)" in source
     assert "if (loaded_schema == 2U)" in source
+    assert "dest->map_location_set = false" in source
     assert "dest->onboarding_complete = true" in source
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
     assert 'D1L_SETTINGS_KEY "settings"' in source
@@ -32,6 +41,9 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->ble_companion_enabled = false" in source
     assert "settings->observer_enabled = false" in source
     assert "settings->onboarding_complete = false" in source
+    assert "settings->map_location_set = false" in source
+    assert "settings->map_lat_e7 = 0" in source
+    assert "settings->map_lon_e7 = 0" in source
     assert "settings->path_hash_bytes = 1" in source
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
@@ -45,6 +57,11 @@ def test_console_exposes_phase2_foundation_commands():
         "settings reset",
         "settings set name",
         "settings set pathhash",
+        "settings set location",
+        "settings clear location",
+        "map center",
+        "map center set",
+        "map center clear",
         "settings onboarding status",
         "settings onboarding complete",
         "settings onboarding reset",
@@ -82,12 +99,19 @@ def test_console_exposes_phase2_foundation_commands():
     assert "cmd_radio_set_rxboost" in console
     assert "settings.tx_power_dbm = (int8_t)tx_power" in console
     assert "settings.rx_boost = enabled" in console
+    assert "parse_coord_e7" in console
+    assert "strtod(text, &end)" in console
+    assert '\\"map_location\\"' in console
+    assert "print_map_location_result" in console
+    assert "settings.map_location_set = true" in console
+    assert "settings.map_location_set = false" in console
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():
     assert "settings get" in SMOKE_COMMANDS
     assert "identity status" in SMOKE_COMMANDS
     assert "mesh status" in SMOKE_COMMANDS
+    assert "map center" in SMOKE_COMMANDS
     assert "settings onboarding status" in SMOKE_COMMANDS
     assert "wifi status" in SMOKE_COMMANDS
     assert "wifi scan" in SMOKE_COMMANDS

@@ -87,7 +87,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
 
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "Direct"} <= labels_by_view["messages"]
     assert {"Nodes", "Contacts", "Heard Nodes", "DM"} <= labels_by_view["nodes"]
-    assert {"Map", "Tile Cache", "Downloads", "Offline Cache", "Routes"} <= labels_by_view["map"]
+    assert {"Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
     assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
@@ -211,6 +211,22 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         else:
             assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]
         assert storage_view["overflow"] == []
+
+
+def test_ui_simulator_manual_location_scenario_fits(tmp_path):
+    report = ui_simulator.generate(tmp_path / "manual-location", views=("map",), scenario="manual-location")
+    view = report["views"][0]
+    labels = set(view["labels"])
+
+    assert report["ok"] is True
+    assert report["overflow_count"] == 0
+    assert report["touch_target_issue_count"] == 0
+    assert report["required_labels_missing"] == []
+    assert {"Map", "Center", "Manual", "43.6532000, -79.3832000"} <= labels
+    assert view["metrics"]["map_location_set"] is True
+    assert view["metrics"]["map_center_source"] == "manual"
+    assert view["metrics"]["map_center_lat_e7"] == 436532000
+    assert view["metrics"]["map_center_lon_e7"] == -793832000
 
 
 def test_ui_simulator_is_documented_and_run_in_ci():

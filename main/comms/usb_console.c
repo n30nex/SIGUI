@@ -61,6 +61,45 @@ static const char *bool_json(bool value)
     return value ? "true" : "false";
 }
 
+static void print_e7_json(int32_t value)
+{
+    int64_t scaled = value;
+    if (scaled < 0) {
+        putchar('-');
+        scaled = -scaled;
+    }
+    printf("%lld.%07lld", (long long)(scaled / 10000000LL),
+           (long long)(scaled % 10000000LL));
+}
+
+static bool parse_coord_e7(const char *text, const char **out_end,
+                           int32_t min_e7, int32_t max_e7, int32_t *out_value)
+{
+    if (!text || !out_value) {
+        return false;
+    }
+    char *end = NULL;
+    const double value = strtod(text, &end);
+    if (end == text || value != value) {
+        return false;
+    }
+    const double min_value = ((double)min_e7) / 10000000.0;
+    const double max_value = ((double)max_e7) / 10000000.0;
+    if (value < min_value || value > max_value) {
+        return false;
+    }
+    const double scaled = value * 10000000.0;
+    const int64_t rounded = (int64_t)(scaled >= 0 ? scaled + 0.5 : scaled - 0.5);
+    if (rounded < min_e7 || rounded > max_e7) {
+        return false;
+    }
+    *out_value = (int32_t)rounded;
+    if (out_end) {
+        *out_end = end;
+    }
+    return true;
+}
+
 static void print_json_string(const char *text)
 {
     putchar('"');
@@ -186,12 +225,18 @@ static void cmd_settings_get(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
     ok_begin("settings get");
-    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
+    printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"map_location\":{\"set\":%s,\"lat\":",
            settings->node_name, d1l_settings_role_name(settings->role),
            bool_json(settings->onboarding_complete),
            bool_json(settings->wifi_enabled), bool_json(settings->ble_companion_enabled),
            bool_json(settings->observer_enabled), bool_json(settings->high_contrast),
            bool_json(settings->night_mode), settings->path_hash_bytes,
+           bool_json(settings->map_location_set));
+    print_e7_json(settings->map_location_set ? settings->map_lat_e7 : 0);
+    printf(",\"lon\":");
+    print_e7_json(settings->map_location_set ? settings->map_lon_e7 : 0);
+    printf(",\"source\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
+           settings->map_location_set ? "manual" : "unset",
            (unsigned long)settings->frequency_hz,
            ((float)settings->bandwidth_tenths_khz) / 10.0f,
            settings->spreading_factor, settings->coding_rate, settings->tx_power_dbm,
@@ -307,6 +352,106 @@ static void cmd_settings_set_pathhash(const char *line)
     printf(",\"persisted\":true,\"path_hash_bytes\":%u,\"legacy_warning\":%s}\n",
            d1l_settings_current()->path_hash_bytes,
            value > 1 ? "true" : "false");
+}
+
+static void print_map_location_result(const char *cmd, const d1l_settings_t *settings,
+                                      bool persisted)
+{
+    ok_begin(cmd);
+    printf(",\"persisted\":%s,\"map_location\":{\"set\":%s,\"lat\":",
+           bool_json(persisted), bool_json(settings && settings->map_location_set));
+    print_e7_json(settings && settings->map_location_set ? settings->map_lat_e7 : 0);
+    printf(",\"lon\":");
+    print_e7_json(settings && settings->map_location_set ? settings->map_lon_e7 : 0);
+    printf(",\"lat_e7\":%ld,\"lon_e7\":%ld,\"source\":\"%s\"}}\n",
+           (long)(settings && settings->map_location_set ? settings->map_lat_e7 : 0),
+           (long)(settings && settings->map_location_set ? settings->map_lon_e7 : 0),
+           settings && settings->map_location_set ? "manual" : "unset");
+}
+
+static void persist_map_location_from_args(const char *cmd, const char *arg)
+{
+    while (*arg == ' ') {
+        arg++;
+    }
+    int32_t lat_e7 = 0;
+    int32_t lon_e7 = 0;
+    const char *end = NULL;
+    if (!parse_coord_e7(arg, &end, D1L_MAP_LOCATION_LAT_E7_MIN,
+                        D1L_MAP_LOCATION_LAT_E7_MAX, &lat_e7)) {
+        err_result(cmd, "INVALID_LOCATION",
+                   "usage: map center set <lat -90..90> <lon -180..180>");
+        return;
+    }
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (!parse_coord_e7(end, &end, D1L_MAP_LOCATION_LON_E7_MIN,
+                        D1L_MAP_LOCATION_LON_E7_MAX, &lon_e7)) {
+        err_result(cmd, "INVALID_LOCATION",
+                   "usage: map center set <lat -90..90> <lon -180..180>");
+        return;
+    }
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (end && *end != '\0') {
+        err_result(cmd, "INVALID_LOCATION",
+                   "usage: map center set <lat -90..90> <lon -180..180>");
+        return;
+    }
+
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_location_set = true;
+    settings.map_lat_e7 = lat_e7;
+    settings.map_lon_e7 = lon_e7;
+    esp_err_t ret = d1l_settings_save(&settings);
+    if (ret != ESP_OK) {
+        err_result(cmd, esp_err_to_name(ret), "could not persist map location");
+        return;
+    }
+    print_map_location_result(cmd, d1l_settings_current(), true);
+}
+
+static void clear_map_location(const char *cmd)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_location_set = false;
+    settings.map_lat_e7 = 0;
+    settings.map_lon_e7 = 0;
+    esp_err_t ret = d1l_settings_save(&settings);
+    if (ret != ESP_OK) {
+        err_result(cmd, esp_err_to_name(ret), "could not clear map location");
+        return;
+    }
+    print_map_location_result(cmd, d1l_settings_current(), true);
+}
+
+static void cmd_settings_set_location(const char *line)
+{
+    persist_map_location_from_args("settings set location",
+                                   line + strlen("settings set location "));
+}
+
+static void cmd_settings_clear_location(void)
+{
+    clear_map_location("settings clear location");
+}
+
+static void cmd_map_center(void)
+{
+    print_map_location_result("map center", d1l_settings_current(), false);
+}
+
+static void cmd_map_center_set(const char *line)
+{
+    persist_map_location_from_args("map center set",
+                                   line + strlen("map center set "));
+}
+
+static void cmd_map_center_clear(void)
+{
+    clear_map_location("map center clear");
 }
 
 static void cmd_identity_status(void)
@@ -1613,7 +1758,9 @@ static bool build_data_export_payload(const char *token,
                             "\"settings\":{\"role\":\"%s\",\"onboarding_complete\":%s,"
                             "\"region\":\"Canada/USA\",\"radio\":{\"frequency_hz\":%lu,"
                             "\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,"
-                            "\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\"},",
+                            "\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\"},"
+                            "\"map_location\":{\"set\":%s,\"source\":\"%s\","
+                            "\"lat_e7\":%ld,\"lon_e7\":%ld},",
                             d1l_settings_role_name(settings->role),
                             bool_json(settings->onboarding_complete),
                             (unsigned long)settings->frequency_hz,
@@ -1622,7 +1769,11 @@ static bool build_data_export_payload(const char *token,
                             settings->coding_rate,
                             settings->tx_power_dbm,
                             bool_json(settings->rx_boost),
-                            d1l_settings_tcxo_name(settings->tcxo_mode)) ||
+                            d1l_settings_tcxo_name(settings->tcxo_mode),
+                            bool_json(settings->map_location_set),
+                            settings->map_location_set ? "manual" : "unset",
+                            (long)(settings->map_location_set ? settings->map_lat_e7 : 0),
+                            (long)(settings->map_location_set ? settings->map_lon_e7 : 0)) ||
         !append_export_json_string_field(dest, dest_size, &used, "node_name", settings->node_name) ||
         !append_export_json(dest, dest_size, &used, "},")) {
         return false;
@@ -3097,7 +3248,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"storage status\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3116,6 +3267,16 @@ static void handle_line(const char *line)
         cmd_settings_set_name(line);
     } else if (strncmp(line, "settings set pathhash ", 22) == 0) {
         cmd_settings_set_pathhash(line);
+    } else if (strncmp(line, "settings set location ", strlen("settings set location ")) == 0) {
+        cmd_settings_set_location(line);
+    } else if (strcmp(line, "settings clear location") == 0) {
+        cmd_settings_clear_location();
+    } else if (strcmp(line, "map center") == 0) {
+        cmd_map_center();
+    } else if (strncmp(line, "map center set ", strlen("map center set ")) == 0) {
+        cmd_map_center_set(line);
+    } else if (strcmp(line, "map center clear") == 0) {
+        cmd_map_center_clear();
     } else if (strcmp(line, "settings onboarding status") == 0) {
         cmd_settings_onboarding_status();
     } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {

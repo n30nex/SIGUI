@@ -320,6 +320,9 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert '\\"kind\\":\\"data_export\\"' in console
     assert '\\"private_identity_exported\\":false' in console
     assert "identity_private_key" not in console
+    assert '\\"map_location\\":' in console
+    assert '\\"lat_e7\\":%ld' in console
+    assert '\\"lon_e7\\":%ld' in console
     assert '\\"map_tiles\\"' in console
     assert '\\"exported\\":false' in console
     assert '\\"cache_ready\\":%s' in console

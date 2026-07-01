@@ -6,10 +6,14 @@
 #include "esp_err.h"
 #include "mesh/meshcore_radio_profile.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 3U
+#define D1L_SETTINGS_SCHEMA_VERSION 4U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_IDENTITY_PUBLIC_KEY_LEN 32U
 #define D1L_IDENTITY_PRIVATE_KEY_LEN 64U
+#define D1L_MAP_LOCATION_LAT_E7_MIN (-900000000L)
+#define D1L_MAP_LOCATION_LAT_E7_MAX 900000000L
+#define D1L_MAP_LOCATION_LON_E7_MIN (-1800000000L)
+#define D1L_MAP_LOCATION_LON_E7_MAX 1800000000L
 
 typedef enum {
     D1L_ROLE_DESK_COMPANION = 0,
@@ -37,6 +41,9 @@ typedef struct {
     int8_t tx_power_dbm;
     bool rx_boost;
     uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
     bool identity_ready;
     uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
     uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
