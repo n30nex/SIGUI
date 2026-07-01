@@ -67,6 +67,9 @@ jobs:
       - name: Verify checksums
         run: python ./scripts/verify_checksums.py artifacts
 
+      - name: Release gate audit dry run
+        run: python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json
+
       - uses: actions/upload-artifact@v7
         with:
           name: d1l-host-artifacts

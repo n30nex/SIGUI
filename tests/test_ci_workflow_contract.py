@@ -52,6 +52,7 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge" in host
     assert "python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all" in host
     assert "python ./scripts/verify_checksums.py artifacts" in host
+    assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
 
 
 def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():

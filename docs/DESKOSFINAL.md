@@ -1134,19 +1134,21 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28549189659` built the `b841621` ESP32 release
-package and RP2040 SD bridge UF2. The release package checksums verified and the
-ESP32 package flashed to COM12; `artifacts/hardware/com12/smoke_b841621.json`
-passed. The RP2040 UF2 checksum is
+Current evidence: Actions run `28549761003` for commit `68350bf` rebuilt the
+ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
+firmware, and RP2040 checksum manifests verified, and the latest ESP32 package
+flashed to COM12 still has `artifacts/hardware/com12/smoke_b841621.json` as the
+current passing hardware smoke. The RP2040 UF2 checksum is
 `032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`, but
-`artifacts/hardware/com12/rp2040_uf2_volumes_b841621.json` found no mounted UF2
-bootloader volume, so the new RP2040 bridge was not copied. The preflight
-`artifacts/hardware/com12/rp2040_preflight_b841621_uf2_not_mounted.json` proves
-the RP2040 UART, ping, protocol, and diag paths respond, and the inserted card
+`artifacts/hardware/com12/rp2040_uf2_volumes_68350bf_after_reset.json` found no
+mounted UF2 bootloader volume even after a safe `rp2040 reset`, so the new
+RP2040 bridge was not copied. The preflight
+`artifacts/hardware/com12/rp2040_preflight_68350bf_after_reset.json` proves the
+RP2040 UART, ping, protocol, and diag paths respond, and the inserted card
 reaches `sd.state="setup_required"` with NVS fallback, but
 `ready_for_sd_acceptance=false` because the SD file gate is not ready. Full SD
-auto-prepare, retained-history, export, map-tile, and reboot/remount proof
-remain blocked until the RP2040 is placed in UF2/BOOTSEL mode and the verified
+auto-prepare, retained-history, export, map-tile, and reboot/remount proof remain
+blocked until the RP2040 is placed in UF2/BOOTSEL mode and the verified
 `deskos_sd_bridge.ino.uf2` is copied.
 
 ### 13.5 Soak
@@ -1184,6 +1186,17 @@ Final package must include:
 - Final validation report.
 - Physical screen photos.
 - Simulator screenshots.
+
+Final gate audit:
+
+```powershell
+python .\scripts\release_gate_audit_d1l.py --github-run-id 28549761003 --commit 68350bf9f3fabfd2db4110ec6ffc36068056a060 --hardware-dir artifacts\hardware\com12 --soak-dir artifacts\soak --out artifacts\release-gate\release-gate-audit-68350bf.json --fail-on-open-p0
+```
+
+Current audit artifact `artifacts/release-gate/release-gate-audit-68350bf.json`
+reports `ready_for_public_release=false` with five open P0 gates:
+current-commit COM12 smoke, SD acceptance matrix, 12-hour idle/listening soak,
+manual physical UI/photos, and full inbound/ACK/PATH/direct-route RF proof.
 
 ---
 
@@ -1252,14 +1265,15 @@ proved the guarded unformatted-card path stays safe and no longer wedges the
 ESP32 (`classification=format_confirmed_not_ready`, `format_allowed=true`,
 `public_rf_tx=false`, `formats_sd=false`, health ready), but the older RP2040
 bridge timed out before reporting a concrete format result. Commit `b841621`
-hardened RP2040 format replies and Actions run `28549189659` produced a verified
-RP2040 UF2 with SHA256
+hardened RP2040 format replies, and Actions run `28549761003` for commit
+`68350bf` rebuilt a verified RP2040 UF2 with SHA256
 `032FF80A0F94613BB18742E08CB97AA548BFF81BD627FF882C3AFACAF15F5C01`; however,
-`artifacts/hardware/com12/rp2040_uf2_volumes_b841621.json` found
-`candidate_volumes=[]`, so that bridge firmware has not yet been copied to the
-RP2040. `artifacts/hardware/com12/rp2040_preflight_b841621_uf2_not_mounted.json`
-shows the current COM12 bridge still responds to ping/protocol/diag and detects
-the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`.
+`artifacts/hardware/com12/rp2040_uf2_volumes_68350bf_after_reset.json` found
+`candidate_volumes=[]` even after a safe `rp2040 reset`, so that bridge firmware
+has not yet been copied to the RP2040.
+`artifacts/hardware/com12/rp2040_preflight_68350bf_after_reset.json` shows the
+current COM12 bridge still responds to ping/protocol/diag and detects the
+inserted card as `setup_required`, but `ready_for_sd_acceptance=false`.
 Full SD auto-prepare, retained-history, export, map-tile, and reboot/remount
 proof remain open until the RP2040 UF2 is flashed and the SD matrix is rerun.
 
@@ -1363,3 +1377,5 @@ No release tag should be cut until:
 - RF Public + DM proof passes.
 - Final docs match actual behavior.
 - Known limitations are honest and specific.
+- `scripts/release_gate_audit_d1l.py --fail-on-open-p0` passes against the final
+  release evidence bundle.
