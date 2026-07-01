@@ -193,6 +193,13 @@ static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t 
     dest[out] = '\0';
 }
 
+static void print_hex_field(const char *name, const uint8_t *src, size_t src_len)
+{
+    char text[(D1L_TOUCH_RAW_REG_BYTES * 2U) + 1U] = {0};
+    hex_prefix(text, sizeof(text), src, src_len);
+    printf(",\"%s\":\"%s\"", name, text);
+}
+
 static void sanitize_node_name(char *name)
 {
     if (name == NULL) {
@@ -520,6 +527,33 @@ static void cmd_touch_test(void)
            esp_err_to_name(touch.init_result), esp_err_to_name(touch.read_result),
            (unsigned long)touch.init_attempts,
            bool_json(touch.coordinate_valid));
+}
+
+static void cmd_touch_raw(void)
+{
+    d1l_board_touch_raw_state_t raw = {0};
+    esp_err_t ret = d1l_board_touch_raw_read(&raw);
+    if (ret != ESP_OK) {
+        printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"touch raw\",\"code\":\"%s\","
+               "\"init_result\":\"%s\",\"read_result\":\"%s\",\"init_attempts\":%lu,"
+               "\"hint\":\"raw FT5x06 register read failed\"}\n",
+               D1L_CONSOLE_SCHEMA, esp_err_to_name(ret),
+               esp_err_to_name(raw.init_result), esp_err_to_name(raw.read_result),
+               (unsigned long)raw.init_attempts);
+        return;
+    }
+    ok_begin("touch raw");
+    printf(",\"init_result\":\"%s\",\"read_result\":\"%s\",\"init_attempts\":%lu,"
+           "\"controller\":\"FT5x06\",\"i2c_address\":\"0x48\","
+           "\"touch_points_raw\":%u,\"touch_count\":%u,\"event_flag\":%u,"
+           "\"touch_id\":%u,\"raw_x\":%u,\"raw_y\":%u",
+           esp_err_to_name(raw.init_result), esp_err_to_name(raw.read_result),
+           (unsigned long)raw.init_attempts, raw.touch_points_raw, raw.touch_count,
+           raw.event_flag, raw.touch_id, raw.raw_x, raw.raw_y);
+    print_hex_field("registers_00_1f", raw.registers_00_1f, sizeof(raw.registers_00_1f));
+    print_hex_field("config_80_89", raw.config_80_89, sizeof(raw.config_80_89));
+    print_hex_field("id_a1_a9", raw.id_a1_a9, sizeof(raw.id_a1_a9));
+    printf("}\n");
 }
 
 static void cmd_button(void)
@@ -3406,7 +3440,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3449,6 +3483,8 @@ static void handle_line(const char *line)
         cmd_display_test();
     } else if (strcmp(line, "touch test") == 0) {
         cmd_touch_test();
+    } else if (strcmp(line, "touch raw") == 0) {
+        cmd_touch_raw();
     } else if (strcmp(line, "button") == 0) {
         cmd_button();
     } else if (strncmp(line, "backlight ", 10) == 0) {

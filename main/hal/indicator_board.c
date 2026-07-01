@@ -9,6 +9,7 @@
 #include "bsp_i2c.h"
 #include "bsp_lcd.h"
 #include "bsp_btn.h"
+#include "i2c_bus.h"
 #include "indev/indev.h"
 
 #include "app/app_model.h"
@@ -22,6 +23,7 @@ static d1l_board_status_t s_status = {
 };
 static esp_err_t s_touch_init_result = ESP_ERR_INVALID_STATE;
 static uint32_t s_touch_init_attempts = 0;
+static i2c_bus_device_handle_t s_touch_raw_handle = NULL;
 
 static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
 {
@@ -51,6 +53,27 @@ static esp_err_t d1l_board_touch_ensure_ready(void)
                  esp_err_to_name(s_touch_init_result));
     }
     return s_touch_init_result;
+}
+
+static esp_err_t d1l_board_touch_raw_handle(i2c_bus_device_handle_t *out_handle)
+{
+    if (!out_handle) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_touch_raw_handle) {
+        *out_handle = s_touch_raw_handle;
+        return ESP_OK;
+    }
+
+    esp_err_t ret = bsp_i2c_add_device(&s_touch_raw_handle, 0x48);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (!s_touch_raw_handle) {
+        return ESP_FAIL;
+    }
+    *out_handle = s_touch_raw_handle;
+    return ESP_OK;
 }
 
 esp_err_t d1l_board_init(void)
@@ -190,6 +213,54 @@ esp_err_t d1l_board_touch_read(d1l_board_touch_state_t *out_state)
                                   data.y >= 0 && data.y < 480;
     out_state->x = data.pressed ? clamp_touch_coord(data.x, 480) : 0;
     out_state->y = data.pressed ? clamp_touch_coord(data.y, 480) : 0;
+    return ESP_OK;
+}
+
+esp_err_t d1l_board_touch_raw_read(d1l_board_touch_raw_state_t *out_state)
+{
+    if (!out_state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_state, 0, sizeof(*out_state));
+    out_state->init_result = ESP_ERR_INVALID_STATE;
+    out_state->read_result = ESP_ERR_INVALID_STATE;
+    if (!s_status.ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t init_ret = d1l_board_touch_ensure_ready();
+    out_state->init_result = init_ret;
+    out_state->init_attempts = s_touch_init_attempts;
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
+
+    i2c_bus_device_handle_t handle = NULL;
+    esp_err_t ret = d1l_board_touch_raw_handle(&handle);
+    if (ret == ESP_OK) {
+        ret |= i2c_bus_read_bytes(handle, 0x00, sizeof(out_state->registers_00_1f),
+                                  out_state->registers_00_1f);
+        ret |= i2c_bus_read_bytes(handle, 0x80, sizeof(out_state->config_80_89),
+                                  out_state->config_80_89);
+        ret |= i2c_bus_read_bytes(handle, 0xA1, sizeof(out_state->id_a1_a9),
+                                  out_state->id_a1_a9);
+    }
+    out_state->read_result = ret;
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    out_state->touch_points_raw = out_state->registers_00_1f[0x02];
+    out_state->touch_count = out_state->touch_points_raw & 0x0FU;
+    if (out_state->touch_count > 5U) {
+        out_state->touch_count = 0;
+    }
+    out_state->event_flag = (out_state->registers_00_1f[0x03] >> 6) & 0x03U;
+    out_state->touch_id = (out_state->registers_00_1f[0x05] >> 4) & 0x0FU;
+    out_state->raw_x = (uint16_t)(((out_state->registers_00_1f[0x03] & 0x0FU) << 8) |
+                                  out_state->registers_00_1f[0x04]);
+    out_state->raw_y = (uint16_t)(((out_state->registers_00_1f[0x05] & 0x0FU) << 8) |
+                                  out_state->registers_00_1f[0x06]);
     return ESP_OK;
 }
 

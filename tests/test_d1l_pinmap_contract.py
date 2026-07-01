@@ -79,6 +79,10 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     assert "d1l_board_touch_read" in board_source
     assert '\\"pressed\\":%s' in console_source
     assert '\\"coordinate_valid\\":%s' in console_source
+    assert '"touch raw"' in console_source
+    assert "d1l_board_touch_raw_read" in board_source
+    assert "registers_00_1f" in console_source
+    assert "id_a1_a9" in console_source
 
 
 def test_cmake_applies_parent_owned_seeed_touch_patch():
@@ -91,7 +95,10 @@ def test_cmake_applies_parent_owned_seeed_touch_patch():
     assert "git apply --unidiff-zero --check" in cmake
     assert "git apply --unidiff-zero --reverse --check" in cmake
     assert "components/bsp/src/indev/indev.c" in patch
+    assert "components/i2c_devices/touch_panel/ft5x06.c" in patch
     assert "data->btn_val = pressed ? 1 : 0;" in patch
+    assert "ft5x06_write_byte(FT5x06_DEVICE_MODE, 0x00)" in patch
+    assert "ft5x06_write_byte(FT5x06_ID_G_PMODE, 0x00)" in patch
 
 
 def test_build_script_is_host_only_and_rewrites_stale_unsafe_lcd_config():

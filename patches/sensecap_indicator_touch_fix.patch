@@ -52,3 +52,52 @@ index b57ece5..d3f6dd3 100644
 +        if (ret_val != ESP_OK) {
 +            return ret_val;
 +        }
+diff --git a/components/i2c_devices/touch_panel/ft5x06.c b/components/i2c_devices/touch_panel/ft5x06.c
+index dfb2cf1..0b52b7a 100644
+--- a/components/i2c_devices/touch_panel/ft5x06.c
++++ b/components/i2c_devices/touch_panel/ft5x06.c
+@@ -93 +93 @@ esp_err_t ft5x06_init(void)
+-        return ESP_ERR_INVALID_STATE;
++        return ESP_OK;
+@@ -104,26 +104,2 @@ esp_err_t ft5x06_init(void)
+-    // Valid touching detect threshold
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THGROUP, 70);
+-
+-    // valid touching peak detect threshold
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THPEAK, 60);
+-
+-    // Touch focus threshold
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THCAL, 16);
+-
+-    // threshold when there is surface water
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THWATER, 60);
+-
+-    // threshold of temperature compensation
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THTEMP, 10);
+-
+-    // Touch difference threshold
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_THDIFF, 20);
+-
+-    // Delay to enter 'Monitor' status (s)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_TIME_ENTER_MONITOR, 2);
+-
+-    // Period of 'Active' status (ms)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODACTIVE, 12);
+-
+-    // Timer to enter 'idle' when in 'Monitor' (ms)
+-    i2c_bus_write_byte(ft5x06_handle, FT5x06_ID_G_PERIODMONITOR, 40);
++    ret_val |= ft5x06_write_byte(FT5x06_DEVICE_MODE, 0x00);
++    ret_val |= ft5x06_write_byte(FT5x06_ID_G_PMODE, 0x00);
+@@ -131 +107 @@ esp_err_t ft5x06_init(void)
+-    return ESP_OK;
++    return ret_val;
+@@ -136 +112,8 @@ static esp_err_t ft5x06_get_touch_points_num(uint8_t *touch_points_num)
+-    return ft5x06_read_byte(FT5x06_TOUCH_POINTS, touch_points_num);
++    esp_err_t ret = ft5x06_read_byte(FT5x06_TOUCH_POINTS, touch_points_num);
++    if (ret == ESP_OK) {
++        *touch_points_num &= 0x0f;
++        if (*touch_points_num > 5) {
++            *touch_points_num = 0;
++        }
++    }
++    return ret;
