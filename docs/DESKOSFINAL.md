@@ -1180,7 +1180,7 @@ Final package must include:
 
 - [x] Add time state to app snapshot.
 - [x] Add Wi-Fi/BLE/SD status chips.
-- [ ] Add tappable chips routing to setup sheets.
+- [x] Add tappable chips routing to setup sheets.
 - [x] Add unread Public/DM cards.
 - [x] Add last 5 message previews.
 - [x] Add local repeater panel.
@@ -1228,11 +1228,11 @@ Final package must include:
 
 ### Packets
 
-- [ ] Replace packet metric-card page with terminal-style feed.
-- [ ] Add color-coded RX/TX/fail/error rows.
-- [ ] Add pause/resume.
-- [ ] Add filter/search.
-- [ ] Add packet detail normal/advanced split.
+- [x] Replace packet metric-card page with terminal-style feed.
+- [x] Add color-coded RX/TX/fail/error rows.
+- [x] Add pause/resume.
+- [x] Add filter/search.
+- [x] Add packet detail normal/advanced split.
 - [x] Increase packet backing capacity and add split SD/NVS flush foundation.
 - [ ] Prove full SD packet scrollback on hardware after Actions build.
 

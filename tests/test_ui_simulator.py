@@ -96,8 +96,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Map", "Set Pin", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
     assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
     assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
-    assert {"Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Routes", "Packet Feed"} <= labels_by_view["packets"]
+    assert {"Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {"Settings", "Storage", "NVS fallback"} <= labels_by_view["settings"]
+    assert {"Wi-Fi Setup", "Network features are optional", "Scan", "Save", "Clear"} <= labels_by_view["wifi_setup_sheet"]
+    assert {"BLE Setup", "Companion pairing status", "Enable", "Pair", "Forget"} <= labels_by_view["ble_setup_sheet"]
     assert {"Compose Public", "Public message", "20/138", "Send", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
@@ -119,7 +121,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
     assert {"DM Thread", "Thread 2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
     assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
-    assert {"Route Detail", "Packet Detail", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
+    assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
 
@@ -142,6 +144,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert {
         "first_boot_onboarding",
         "lock_overlay_unlock",
+        "home_chip_setup_sheets",
         "public_compose_and_send",
         "public_history_search",
         "public_message_detail",
@@ -164,7 +167,11 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages_dm"]["open_dm_thread"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
+    assert actions_by_view["home"]["open_wifi_settings"]["destination"] == "wifi_setup_sheet"
+    assert actions_by_view["home"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
+    assert actions_by_view["wifi_setup_sheet"]["close_wifi_setup"]["destination"] == "home"
+    assert actions_by_view["ble_setup_sheet"]["close_ble_setup"]["destination"] == "home"
     assert actions_by_view["map"]["open_map_location_picker"]["destination"] == "map_location_sheet"
     assert actions_by_view["map_location_sheet"]["drop_d1l_pin"]["destination"] == "map"
     assert actions_by_view["map_location_sheet"]["skip_map_location"]["destination"] == "map"
@@ -174,6 +181,8 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert actions_by_view["settings"]["open_advert_sheet"]["destination"] == "advert_sheet"
+    assert actions_by_view["packets"]["pause_packet_feed"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert actions_by_view["packet_detail_sheet"]["toggle_packet_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
     assert actions_by_view["advert_sheet"]["send_advert_flood"]["rf_tx"] is True
     assert actions_by_view["contact_edit_sheet"]["forget_contact"]["destructive"] is True

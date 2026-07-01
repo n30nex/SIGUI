@@ -133,6 +133,7 @@ def sample_snapshot() -> Snapshot:
             Packet("Public", "RX", "RSSI -41 SNR 30 hop 1", "YKF Corebot test reply", "80245100A62F34B9"),
             Packet("Advert", "RX", "RSSI -44 SNR 29 hop 0", "YKF Room signed advert", "C0019880BF9B9B1DD605"),
             Packet("DM", "TX", "ack hash 9A2B direct", "YKF Corebot desk check", "41000BF060B6ABA1"),
+            Packet("Retry", "FAIL", "send failed after retry", "route not confirmed", "4100FF00"),
         ),
         routes=(
             Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon", ""),
@@ -759,8 +760,8 @@ def draw_row(
 
 def draw_home_body(s: Surface, snap: Snapshot):
     draw_chip(s, (16, 64, 108, 108), "Time", "--:--", MUTED)
-    draw_chip(s, (116, 64, 212, 108), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="settings")
-    draw_chip(s, (220, 64, 316, 108), "BLE", "off", MUTED, action="open_ble_settings", destination="settings")
+    draw_chip(s, (116, 64, 212, 108), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="wifi_setup_sheet")
+    draw_chip(s, (220, 64, 316, 108), "BLE", "off", MUTED, action="open_ble_settings", destination="ble_setup_sheet")
     draw_chip(s, (324, 64, 464, 108), "SD", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else MUTED, action="open_storage_setup", destination="storage_setup_sheet")
 
     draw_metric(s, (16, 120, 230, 184), "Public", str(snap.unread_public), "Public unread", AMBER if snap.unread_public else GREEN, action="open_messages_public", destination="messages")
@@ -1031,48 +1032,53 @@ def render_map_location_sheet(s: Surface, snap: Snapshot):
 def render_packets(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Packets", (16, 64, 150, 92), 22, TEXT, True)
-    draw_metric(s, (16, 104, 230, 176), "Signal", snap.latest_signal, "3 recent packets", GREEN)
-    draw_metric(
-        s,
-        (250, 104, 464, 176),
-        "Mesh Roles",
-        "1 room / 1 repeater",
-        "tap for role browser",
-        ACCENT,
-        action="open_mesh_roles",
-        destination="mesh_roles_sheet",
-    )
+    s.round_rect((16, 100, 464, 148), (5, 12, 19), BORDER, 8)
+    s.text("live tail  rssi -41  snr 30  avg -46", (28, 108, 452, 128), 12, GREEN, True)
+    s.text("rooms 1  repeaters 1  samples 128", (28, 128, 452, 146), 11, MUTED)
     for i, label in enumerate(("All", "RX", "TX", "Text")):
         draw_button(
             s,
-            (16 + i * 64, 188, 72 + i * 64, 222),
+            (16 + i * 64, 160, 72 + i * 64, 194),
             label,
             GREEN if label == "All" else ACCENT,
             action=f"packet_filter_{label.lower()}",
         )
-    draw_button(s, (286, 188, 366, 222), "Search", BLUE, action="open_packet_search", destination="packet_search_sheet")
-    s.text("find raw/test", (374, 194, 464, 216), 11, AMBER)
-    s.round_rect((16, 232, 464, 326))
-    s.text("Packet Feed", (28, 240, 180, 262), 14, MUTED, True)
-    y = 268
-    for packet in snap.packets[:2]:
+    draw_button(s, (286, 160, 366, 194), "Search", BLUE, action="open_packet_search", destination="packet_search_sheet")
+    draw_button(s, (376, 160, 464, 194), "Pause", AMBER, action="pause_packet_feed")
+    s.text("find raw/test", (28, 200, 464, 218), 11, AMBER)
+    s.text("Packet Feed", (28, 224, 180, 244), 14, MUTED, True)
+    y = 236
+
+    def packet_color(packet: Packet) -> tuple[int, int, int]:
+        fields = f"{packet.kind} {packet.direction} {packet.note}".lower()
+        if "fail" in fields or "error" in fields:
+            return RED
+        if packet.direction.upper() == "TX":
+            return BLUE
+        if packet.direction.upper() == "RX":
+            return GREEN
+        return AMBER
+
+    for packet in (snap.packets[0], snap.packets[2], snap.packets[3]):
+        color = packet_color(packet)
+        s.round_rect((16, y, 464, y + 40), (5, 12, 19), color, 8)
+        s.rect((24, y + 8, 28, y + 32), color)
         draw_row(
             s,
-            (28, y, 452, y + 25),
-            f"{packet.kind} {packet.direction}",
+            (32, y + 2, 452, y + 40),
+            f"{packet.direction} {packet.kind}",
             f"{packet.meta}  {packet.note}",
             target_label=f"Packet row {packet.kind} {packet.direction}",
             action="open_packet_detail",
             destination="packet_detail_sheet",
         )
-        y += 29
-    s.round_rect((16, 336, 464, 402))
-    s.text("Routes", (28, 344, 180, 366), 14, MUTED, True)
-    y = 372
+        y += 44
+    draw_button(s, (16, 420 - 44, 146, 420 - 8), "Mesh Roles", GREEN, action="open_mesh_roles", destination="mesh_roles_sheet")
+    s.text("Routes", (166, 382, 260, 402), 14, MUTED, True)
     for route in snap.routes[:1]:
         draw_row(
             s,
-            (28, y, 452, y + 25),
+            (236, 374, 464, 410),
             f"{route.kind} {route.direction}",
             f"{route.meta}  {route.note}",
             target_label=f"Route row {route.kind} {route.direction}",
@@ -1280,6 +1286,32 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     draw_dock(s, "Settings")
 
 
+def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "Wi-Fi Setup", "Network features are optional")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_wifi_setup", destination="home")
+    s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
+    s.text("Used for time sync, optional tile downloads, and local management.", (44, 194, 436, 236), 13, TEXT)
+    s.text("Network scan/connect/save is pending runtime support.", (44, 252, 436, 294), 13, AMBER)
+    draw_button(s, (44, 318, 132, 360), "Scan", BLUE, action="wifi_scan")
+    draw_button(s, (144, 318, 232, 360), "Save", GREEN, action="wifi_save")
+    draw_button(s, (244, 318, 332, 360), "Clear", AMBER, action="wifi_clear")
+    s.text("Buttons are placeholders until Wi-Fi runtime is wired.", (44, 374, 436, 404), 12, MUTED)
+    draw_dock(s, "Home")
+
+
+def render_ble_setup_sheet(s: Surface, snap: Snapshot):
+    draw_sheet_frame(s, "BLE Setup", "Companion pairing status")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="home")
+    s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
+    s.text("Companion BLE is for official app pairing and local setup when enabled.", (44, 194, 436, 236), 13, TEXT)
+    s.text("Enable/disable and pairing controls are pending runtime support.", (44, 252, 436, 294), 13, AMBER)
+    draw_button(s, (44, 318, 142, 360), "Enable", BLUE, action="ble_enable")
+    draw_button(s, (154, 318, 252, 360), "Pair", GREEN, action="ble_pair")
+    draw_button(s, (264, 318, 362, 360), "Forget", AMBER, action="ble_forget")
+    s.text("USB remains the reliable companion path for production validation.", (44, 374, 436, 404), 12, MUTED)
+    draw_dock(s, "Home")
+
+
 def render_advert_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "Advert", "Share this node with nearby MeshCore clients")
     s.text("Zero-hop advert", (44, 162, 220, 184), 13, MUTED, True)
@@ -1370,15 +1402,18 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
 def render_packet_detail_sheet(s: Surface, snap: Snapshot):
     packet = snap.packets[0]
     draw_sheet_frame(s, "Packet Detail", packet.note)
+    draw_button(s, (214, 94, 316, 134), "Advanced", BLUE, action="toggle_packet_detail_advanced")
+    draw_button(s, (326, 94, 436, 134), "Close", MUTED, action="close_packet_detail", destination="packets")
     s.text("Kind", (44, 154, 160, 174), 13, MUTED, True)
     s.text(f"{packet.kind} {packet.direction}", (44, 176, 436, 200), 18, TEXT)
     s.text("Signal", (44, 210, 160, 230), 13, MUTED, True)
     s.text(packet.meta, (44, 232, 436, 256), 16, GREEN)
     s.text("Payload", (44, 270, 180, 290), 13, MUTED, True)
     s.text("parsed MeshCore text packet", (44, 292, 436, 316), 16, BLUE)
-    s.text("Raw Hex", (44, 324, 180, 344), 13, MUTED, True)
-    s.text(packet.raw_hex, (44, 346, 436, 368), 14, BLUE)
-    draw_button(s, (44, 374, 200, 402), "Close", MUTED, action="close_packet_detail", destination="packets")
+    s.text("Path", (44, 326, 180, 346), 13, MUTED, True)
+    s.text("hash 2 byte  hops 1  uptime 12044ms", (108, 326, 436, 346), 13, TEXT)
+    s.text("Raw Hex", (44, 358, 180, 378), 13, MUTED, True)
+    s.text(packet.raw_hex, (116, 358, 436, 378), 14, BLUE)
     draw_dock(s, "Packets")
 
 
@@ -1455,6 +1490,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
+    "wifi_setup_sheet": render_wifi_setup_sheet,
+    "ble_setup_sheet": render_ble_setup_sheet,
     "advert_sheet": render_advert_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
     "node_detail_sheet": render_node_detail_sheet,
@@ -1489,7 +1526,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"),
     "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
     "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
-    "packets": ("Packets", "Signal", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Packet Feed", "Routes"),
+    "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
     "settings": ("Settings", "Radio", "Identity", "Companion", "Storage", "Advert"),
     "compose_sheet": ("Compose Public", "Public message", "20/138", "Send", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
@@ -1518,6 +1555,24 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "No automatic format. Confirmation required before SD setup.",
         "Close",
     ),
+    "wifi_setup_sheet": (
+        "Wi-Fi Setup",
+        "Network features are optional",
+        "State off  build disabled",
+        "Scan",
+        "Save",
+        "Clear",
+        "Close",
+    ),
+    "ble_setup_sheet": (
+        "BLE Setup",
+        "Companion pairing status",
+        "State off  build disabled",
+        "Enable",
+        "Pair",
+        "Forget",
+        "Close",
+    ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
     "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Edit", "Export", "Fav", "Mute", "Close"),
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
@@ -1527,7 +1582,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"),
-    "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Raw Hex", "Close"),
+    "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
@@ -1555,6 +1610,16 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "lock_overlay_unlock",
         "steps": ({"view": "lock_overlay", "action": "unlock", "destination": "home"},),
+    },
+    {
+        "name": "home_chip_setup_sheets",
+        "steps": (
+            {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
+            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "home"},
+            {"view": "home", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
+            {"view": "ble_setup_sheet", "action": "close_ble_setup", "destination": "home"},
+            {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+        ),
     },
     {
         "name": "public_compose_and_send",
@@ -1646,10 +1711,12 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "packets", "action": "packet_filter_rx"},
             {"view": "packets", "action": "packet_filter_tx"},
             {"view": "packets", "action": "packet_filter_text"},
+            {"view": "packets", "action": "pause_packet_feed"},
             {"view": "packets", "action": "open_packet_search", "destination": "packet_search_sheet"},
             {"view": "packet_search_sheet", "action": "edit_packet_search"},
             {"view": "packet_search_sheet", "action": "apply_packet_search", "destination": "packets"},
             {"view": "packets", "action": "open_packet_detail", "destination": "packet_detail_sheet"},
+            {"view": "packet_detail_sheet", "action": "toggle_packet_detail_advanced"},
             {"view": "packets", "action": "open_route_detail", "destination": "route_detail_sheet"},
         ),
     },

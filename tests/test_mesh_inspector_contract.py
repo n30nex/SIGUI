@@ -69,7 +69,8 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     assert "render_room_server_role_row" in ui
     assert "render_repeater_role_row" in ui
     assert "open_mesh_roles_event_cb" in ui
-    assert "lv_obj_add_event_cb(roles_card, open_mesh_roles_event_cb, LV_EVENT_CLICKED, NULL)" in ui
+    assert 'create_button(s_content, "Mesh Roles"' in ui
+    assert "open_mesh_roles_event_cb" in ui
     assert "create_mesh_roles_sheet(s_screen)" in ui
     assert "LV_SCROLLBAR_MODE_AUTO" in ui
     assert '"rooms %lu  rpt %lu  writes %lu"' in ui

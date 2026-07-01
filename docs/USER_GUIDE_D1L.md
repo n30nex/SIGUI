@@ -12,11 +12,13 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
 - Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
+- Home Wi-Fi and BLE chips open setup/status sheets. They show current build/runtime support honestly and keep scan/connect/pairing controls staged until those runtimes are enabled.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
 - Mesh visibility summaries for signal, room servers, and repeater candidates.
+- Packets is now a terminal-style diagnostic feed with RX/TX/fail/error color treatment, filter/search controls, pause/resume, route evidence, and normal/advanced packet detail.
 - Nodes tab role badges for companions, repeaters, room servers, sensors, and unknown nodes, plus a read-only heard-node detail sheet for role, fingerprint, public-key state, signal, path, and heard-count evidence.
 - Read-only route trace helper for promoted contacts or known fingerprints, backed by retained route/contact evidence.
 - Contact export for promoted contacts with retained public keys, using MeshCore-compatible `meshcore://contact/add?...` serial output and a touch QR sheet.

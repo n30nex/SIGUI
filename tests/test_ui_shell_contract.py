@@ -566,25 +566,39 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "static lv_obj_t *s_packet_search_sheet" in source
     assert "static d1l_packet_log_entry_t s_packet_detail_packet" in source
     assert "static d1l_packet_filter_mode_t s_packet_filter_mode" in source
+    assert "static bool s_packets_paused" in source
+    assert "static bool s_packet_detail_advanced" in source
     assert "render_packet_detail_sheet" in source
     assert "open_packet_detail_event_cb" in source
     assert "open_packet_search_event_cb" in source
     assert "packet_filter_event_cb" in source
+    assert "packet_pause_event_cb" in source
+    assert "packet_detail_mode_event_cb" in source
     assert "create_packet_detail_sheet" in source
     assert "create_packet_search_sheet" in source
     assert "lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_packet_log_query" in source
+    assert "refresh_packet_terminal_rows" in source
+    assert "packet_entry_color" in source
+    assert "packet_entry_status" in source
     assert '"All"' in source
     assert '"RX"' in source
     assert '"TX"' in source
     assert '"Text"' in source
     assert '"Search"' in source
+    assert '"Pause"' in source
+    assert '"Resume"' in source
+    assert '"Packet Feed"' in source
+    assert '"live %s  rssi %d  snr %s  avg %d"' in source
     assert '"Packet Search"' in source
     assert '"Search kind, note, raw hex"' in source
+    assert '"Advanced"' in source
+    assert '"Normal"' in source
     assert '"Raw Hex"' in source
     assert "raw_hex" in source
     assert "recent_packet_count" in source
     assert "s_packet_filtered_packets" in source
+    assert "s_packet_filtered_count" in source
     assert "hide_packet_detail_sheet()" in source
     assert "hide_packet_search_sheet()" in source
 
@@ -598,6 +612,18 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Companion"' in source
     assert '"Wi-Fi %s  BLE %s"' in source
     assert '"USB ready  %s"' in source
+    assert "static lv_obj_t *s_wifi_sheet" in source
+    assert "static lv_obj_t *s_ble_sheet" in source
+    assert "create_wifi_sheet" in source
+    assert "create_ble_sheet" in source
+    assert "render_wifi_sheet" in source
+    assert "render_ble_sheet" in source
+    assert "open_wifi_sheet_event_cb" in source
+    assert "open_ble_sheet_event_cb" in source
+    assert '"Wi-Fi Setup"' in source
+    assert '"BLE Setup"' in source
+    assert '"Network scan/connect/save is not enabled in this build yet."' in source
+    assert '"Enable/disable and pairing controls are pending runtime support."' in source
     assert "render_health_line" in source
     assert '"reset %s  heap %luK/%luK  ui stk %lu"' in source
 

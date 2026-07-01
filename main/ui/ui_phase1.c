@@ -49,6 +49,8 @@ static lv_obj_t *s_message_detail_sheet;
 static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_storage_sheet;
+static lv_obj_t *s_wifi_sheet;
+static lv_obj_t *s_ble_sheet;
 static lv_obj_t *s_map_location_sheet;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_contact_edit_sheet;
@@ -86,6 +88,7 @@ static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
+static size_t s_packet_filtered_count;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
@@ -128,8 +131,12 @@ static void open_message_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
+static void packet_pause_event_cb(lv_event_t *event);
+static void packet_detail_mode_event_cb(lv_event_t *event);
 static void open_radio_settings_event_cb(lv_event_t *event);
 static void open_storage_sheet_event_cb(lv_event_t *event);
+static void open_wifi_sheet_event_cb(lv_event_t *event);
+static void open_ble_sheet_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -172,17 +179,23 @@ static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static bool s_tab_switch_pending = false;
 static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
+static bool s_packets_paused;
+static bool s_packet_detail_advanced;
 
 static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
 static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
+static void render_wifi_sheet(void);
+static void render_ble_sheet(void);
 static void render_map_location_sheet(void);
 static void create_contact_edit_sheet(lv_obj_t *screen);
 static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
 static void open_map_location_sheet_event_cb(lv_event_t *event);
 static const char *home_sd_state(const d1l_app_snapshot_t *snapshot);
+static const char *packet_filter_direction(void);
+static const char *packet_filter_kind(void);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -601,6 +614,20 @@ static void hide_storage_sheet(void)
 {
     if (s_storage_sheet) {
         lv_obj_add_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_wifi_sheet(void)
+{
+    if (s_wifi_sheet) {
+        lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void hide_ble_sheet(void)
+{
+    if (s_ble_sheet) {
+        lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -1038,11 +1065,11 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     render_home_chip(s_content, 118, 12, 96, "Wi-Fi",
                      snapshot->wifi_state ? snapshot->wifi_state : "off",
                      snapshot->wifi_enabled ? 0x5EEAD4 : 0x8EA0AE,
-                     request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
+                     open_wifi_sheet_event_cb, NULL);
     render_home_chip(s_content, 222, 12, 96, "BLE",
                      snapshot->ble_state ? snapshot->ble_state : "off",
                      snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
-                     request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
+                     open_ble_sheet_event_cb, NULL);
     render_home_chip(s_content, 326, 12, 116, "SD", home_sd_state(snapshot),
                      snapshot->storage_data_enabled ? 0x5EEAD4 :
                      (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
@@ -1169,24 +1196,131 @@ static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry, 
     obj_align_if(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static char packet_lower_ascii(char c)
+{
+    return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
+}
+
+static bool packet_text_has_token(const char *text, const char *token)
+{
+    if (!text || !token || token[0] == '\0') {
+        return false;
+    }
+    for (const char *cursor = text; *cursor; ++cursor) {
+        const char *left = cursor;
+        const char *right = token;
+        while (*left && *right && packet_lower_ascii(*left) == packet_lower_ascii(*right)) {
+            ++left;
+            ++right;
+        }
+        if (*right == '\0') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint32_t packet_entry_color(const d1l_packet_log_entry_t *entry)
+{
+    if (!entry) {
+        return 0x8EA0AE;
+    }
+    if (packet_text_has_token(entry->kind, "fail") ||
+        packet_text_has_token(entry->note, "fail") ||
+        packet_text_has_token(entry->kind, "error") ||
+        packet_text_has_token(entry->note, "error")) {
+        return 0xF87171;
+    }
+    if (packet_text_has_token(entry->kind, "raw") ||
+        packet_text_has_token(entry->kind, "control")) {
+        return 0xFBBF24;
+    }
+    if (packet_text_has_token(entry->direction, "tx")) {
+        return 0x93C5FD;
+    }
+    if (packet_text_has_token(entry->direction, "rx")) {
+        return 0x5EEAD4;
+    }
+    return 0xA7F3D0;
+}
+
+static const char *packet_entry_status(const d1l_packet_log_entry_t *entry)
+{
+    if (!entry) {
+        return "UNK";
+    }
+    if (packet_text_has_token(entry->kind, "fail") ||
+        packet_text_has_token(entry->note, "fail")) {
+        return "FAIL";
+    }
+    if (packet_text_has_token(entry->kind, "error") ||
+        packet_text_has_token(entry->note, "error")) {
+        return "ERR";
+    }
+    if (packet_text_has_token(entry->direction, "tx")) {
+        return "TX";
+    }
+    if (packet_text_has_token(entry->direction, "rx")) {
+        return "RX";
+    }
+    return "LOG";
+}
+
+static size_t refresh_packet_terminal_rows(void)
+{
+    if (s_packets_paused) {
+        return s_packet_filtered_count;
+    }
+    s_packet_filtered_count = d1l_packet_log_query(s_packet_filtered_packets,
+                                                   D1L_APP_SNAPSHOT_PACKET_PREVIEW,
+                                                   packet_filter_direction(),
+                                                   packet_filter_kind(),
+                                                   s_packet_search_text);
+    return s_packet_filtered_count;
+}
+
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
 {
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
+    if (!entry) {
+        return;
+    }
+    const uint32_t accent_color = packet_entry_color(entry);
+    char snr[16];
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
+
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 46);
     if (!row) {
         return;
     }
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, open_packet_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *kind = create_label(row, entry->kind, 0x5EEAD4);
-    obj_align_if(kind, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_pad_all(row, 7, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(row, lv_color_hex(accent_color), 0);
+
+    lv_obj_t *accent = create_object(row, "packet row accent");
+    if (accent) {
+        lv_obj_set_size(accent, 4, 30);
+        lv_obj_align(accent, LV_ALIGN_LEFT_MID, -2, 0);
+        lv_obj_set_style_radius(accent, 2, 0);
+        lv_obj_set_style_bg_color(accent, lv_color_hex(accent_color), 0);
+        lv_obj_set_style_border_width(accent, 0, 0);
+    }
+
+    lv_obj_t *status = create_label(row, packet_entry_status(entry), accent_color);
+    label_set_dot_width(status, 38);
+    obj_align_if(status, LV_ALIGN_TOP_LEFT, 8, 0);
+    lv_obj_t *kind = create_label(row, entry->kind[0] ? entry->kind : "packet", 0xF4F7FB);
+    label_set_dot_width(kind, 128);
+    obj_align_if(kind, LV_ALIGN_TOP_LEFT, 54, 0);
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
-    label_set_fmt(meta, "#%lu %s rssi %d", (unsigned long)entry->seq,
-                  entry->direction, entry->rssi_dbm);
+    label_set_fmt(meta, "#%lu  rssi %d  snr %s",
+                  (unsigned long)entry->seq, entry->rssi_dbm, snr);
+    label_set_dot_width(meta, 190);
     obj_align_if(meta, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_t *note = create_label(row, entry->note[0] ? entry->note : "-", 0xE5EDF5);
-    label_set_dot_width(note, 392);
-    obj_align_if(note, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    label_set_dot_width(note, 380);
+    obj_align_if(note, LV_ALIGN_BOTTOM_LEFT, 8, 0);
 }
 
 static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *entry)
@@ -2228,6 +2362,13 @@ static void close_packet_detail_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
 }
 
+static void packet_detail_mode_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_packet_detail_advanced = !s_packet_detail_advanced;
+    render_packet_detail_sheet();
+}
+
 static void render_packet_detail_sheet(void)
 {
     if (!s_packet_detail_sheet) {
@@ -2236,51 +2377,80 @@ static void render_packet_detail_sheet(void)
     lv_obj_clean(s_packet_detail_sheet);
 
     const d1l_packet_log_entry_t *entry = &s_packet_detail_packet;
-    lv_obj_t *title = create_label(s_packet_detail_sheet, entry->kind[0] ? entry->kind : "packet", 0xF4F7FB);
+    const uint32_t accent_color = packet_entry_color(entry);
+    char snr[16];
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
+
+    lv_obj_t *title = create_label(s_packet_detail_sheet, "Packet Detail", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 260);
+    lv_obj_set_width(title, 190);
     lv_obj_set_pos(title, 8, 4);
 
-    create_button(s_packet_detail_sheet, "Close", 316, 0, 76, 40, close_packet_detail_event_cb, NULL);
+    create_button(s_packet_detail_sheet,
+                  s_packet_detail_advanced ? "Normal" : "Advanced",
+                  218, 0, 92, 40, packet_detail_mode_event_cb, NULL);
+    create_button(s_packet_detail_sheet, "Close", 320, 0, 76, 40, close_packet_detail_event_cb, NULL);
 
-    lv_obj_t *meta = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "#%lu  %s  payload %u  raw %u",
-                  (unsigned long)entry->seq,
+    lv_obj_t *kind_title = create_label(s_packet_detail_sheet, "Kind", 0x8EA0AE);
+    lv_obj_set_pos(kind_title, 8, 54);
+    lv_obj_t *kind = create_label(s_packet_detail_sheet, "", accent_color);
+    label_set_fmt(kind, "%s  %s  #%lu",
+                  entry->kind[0] ? entry->kind : "packet",
+                  packet_entry_status(entry),
+                  (unsigned long)entry->seq);
+    label_set_dot_width(kind, 392);
+    lv_obj_set_pos(kind, 8, 76);
+
+    lv_obj_t *signal_title = create_label(s_packet_detail_sheet, "Signal", 0x8EA0AE);
+    lv_obj_set_pos(signal_title, 8, 108);
+    lv_obj_t *signal = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    label_set_fmt(signal, "direction %s  rssi %d  snr %s",
                   entry->direction[0] ? entry->direction : "-",
-                  entry->payload_len, entry->raw_len);
-    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
-    lv_obj_set_pos(meta, 8, 50);
+                  entry->rssi_dbm, snr);
+    label_set_dot_width(signal, 392);
+    lv_obj_set_pos(signal, 8, 130);
 
-    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    lv_obj_t *signal = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(signal, "rssi %d  snr %s%d.%d",
-                  entry->rssi_dbm,
-                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
-    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(signal, 392);
-    lv_obj_set_pos(signal, 8, 84);
+    lv_obj_t *payload_title = create_label(s_packet_detail_sheet, "Payload", 0x8EA0AE);
+    lv_obj_set_pos(payload_title, 8, 162);
+    lv_obj_t *payload = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    label_set_fmt(payload, "%u bytes  raw %u%s",
+                  entry->payload_len,
+                  entry->raw_len,
+                  entry->raw_truncated ? " truncated" : "");
+    label_set_dot_width(payload, 392);
+    lv_obj_set_pos(payload, 8, 184);
 
-    lv_obj_t *path = create_label(s_packet_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(path, "hash %u byte  hops %u  uptime %lums",
-                  entry->path_hash_bytes, entry->path_hops, (unsigned long)entry->uptime_ms);
-    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(path, 392);
-    lv_obj_set_pos(path, 8, 118);
-
-    lv_obj_t *note = create_label(s_packet_detail_sheet, entry->note[0] ? entry->note : "-", 0xE5EDF5);
+    lv_obj_t *note = create_label(s_packet_detail_sheet,
+                                  entry->note[0] ? entry->note : "No packet note",
+                                  0xF4F7FB);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 392);
-    lv_obj_set_pos(note, 8, 156);
+    lv_obj_set_pos(note, 8, 216);
 
-    lv_obj_t *raw_title = create_label(s_packet_detail_sheet, "Raw Hex", 0x5EEAD4);
-    lv_obj_set_pos(raw_title, 8, 190);
+    if (!s_packet_detail_advanced) {
+        lv_obj_t *hint = create_label(s_packet_detail_sheet, "Advanced shows path and raw hex", 0x8EA0AE);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(hint, 392);
+        lv_obj_set_pos(hint, 8, 252);
+        return;
+    }
+
+    lv_obj_t *path_title = create_label(s_packet_detail_sheet, "Path", 0x8EA0AE);
+    lv_obj_set_pos(path_title, 8, 252);
+    lv_obj_t *path = create_label(s_packet_detail_sheet, "", 0xE5EDF5);
+    label_set_fmt(path, "hash %u byte  hops %u  uptime %lums",
+                  entry->path_hash_bytes, entry->path_hops, (unsigned long)entry->uptime_ms);
+    lv_obj_set_width(path, 392);
+    lv_obj_set_pos(path, 8, 274);
+
+    lv_obj_t *raw_title = create_label(s_packet_detail_sheet, "Raw Hex", 0x8EA0AE);
+    lv_obj_set_pos(raw_title, 8, 306);
 
     lv_obj_t *raw = create_label(s_packet_detail_sheet, entry->raw_hex[0] ? entry->raw_hex : "-", 0x93C5FD);
     lv_label_set_long_mode(raw, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(raw, 392);
-    lv_obj_set_pos(raw, 8, 214);
+    lv_obj_set_pos(raw, 8, 328);
 }
 
 static void open_packet_detail_event_cb(lv_event_t *event)
@@ -2291,6 +2461,7 @@ static void open_packet_detail_event_cb(lv_event_t *event)
         return;
     }
     s_packet_detail_packet = *entry;
+    s_packet_detail_advanced = false;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2314,6 +2485,23 @@ static void open_packet_detail_event_cb(lv_event_t *event)
 static void packet_filter_event_cb(lv_event_t *event)
 {
     s_packet_filter_mode = (d1l_packet_filter_mode_t)(uintptr_t)lv_event_get_user_data(event);
+    s_packets_paused = false;
+    render_active_tab();
+}
+
+static void packet_pause_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_packets_paused) {
+        s_packets_paused = false;
+    } else {
+        s_packet_filtered_count = d1l_packet_log_query(s_packet_filtered_packets,
+                                                       D1L_APP_SNAPSHOT_PACKET_PREVIEW,
+                                                       packet_filter_direction(),
+                                                       packet_filter_kind(),
+                                                       s_packet_search_text);
+        s_packets_paused = true;
+    }
     render_active_tab();
 }
 
@@ -2330,6 +2518,7 @@ static void clear_packet_search_event_cb(lv_event_t *event)
     if (s_packet_search_textarea) {
         lv_textarea_set_text(s_packet_search_textarea, "");
     }
+    s_packets_paused = false;
     hide_packet_search_sheet();
     render_active_tab();
 }
@@ -2344,6 +2533,7 @@ static void apply_packet_search_event_cb(lv_event_t *event)
             snprintf(s_packet_search_text, sizeof(s_packet_search_text), "%s", text);
         }
     }
+    s_packets_paused = false;
     hide_packet_search_sheet();
     render_active_tab();
 }
@@ -3342,7 +3532,7 @@ static const char *packet_filter_kind(void)
 static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label, int x,
                                              d1l_packet_filter_mode_t mode)
 {
-    lv_obj_t *button = create_button(parent, label, x, 128, 58, 34, packet_filter_event_cb,
+    lv_obj_t *button = create_button(parent, label, x, 112, 58, 34, packet_filter_event_cb,
                                      (void *)(uintptr_t)mode);
     if (button && s_packet_filter_mode == mode) {
         lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
@@ -3354,67 +3544,83 @@ static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label
 
 static void render_packets(const d1l_app_snapshot_t *snapshot)
 {
-    char value[32];
-    char detail[64];
     char snr[16];
-    snprintf(value, sizeof(value), "%d", snapshot->signal_summary.latest_rssi_dbm);
     format_snr_tenths(snr, sizeof(snr), snapshot->signal_summary.latest_snr_tenths);
-    snprintf(detail, sizeof(detail), "snr %s avg %d", snr,
-             snapshot->signal_summary.avg_rssi_dbm);
-    render_metric_card(s_content, 18, 16, "Signal", value, detail, 0x93C5FD);
-    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->signal_summary.room_server_count);
-    snprintf(detail, sizeof(detail), "repeaters %lu samples %lu",
-             (unsigned long)snapshot->signal_summary.repeater_candidate_count,
-             (unsigned long)snapshot->signal_summary.sample_count);
-    lv_obj_t *roles_card = render_metric_card(s_content, 238, 16, "Mesh Roles", value, detail, 0xA7F3D0);
-    if (roles_card) {
-        lv_obj_add_flag(roles_card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(roles_card, open_mesh_roles_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *title = create_label(s_content, "Packets", 0xF4F7FB);
+    obj_set_style_text_font_if(title, &lv_font_montserrat_24);
+    obj_set_pos_if(title, 18, 16);
+
+    lv_obj_t *terminal = create_panel(s_content, 18, 52, 424, 50);
+    if (terminal) {
+        lv_obj_set_style_pad_all(terminal, 8, 0);
+        lv_obj_set_style_bg_color(terminal, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_border_color(terminal, lv_color_hex(0x334155), 0);
+        lv_obj_t *line1 = create_label(terminal, "", 0x5EEAD4);
+        label_set_fmt(line1, "live %s  rssi %d  snr %s  avg %d",
+                      s_packets_paused ? "paused" : "tail",
+                      snapshot->signal_summary.latest_rssi_dbm,
+                      snr,
+                      snapshot->signal_summary.avg_rssi_dbm);
+        label_set_dot_width(line1, 392);
+        obj_align_if(line1, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_t *line2 = create_label(terminal, "", 0x8EA0AE);
+        label_set_fmt(line2, "rooms %lu  repeaters %lu  samples %lu",
+                      (unsigned long)snapshot->signal_summary.room_server_count,
+                      (unsigned long)snapshot->signal_summary.repeater_candidate_count,
+                      (unsigned long)snapshot->signal_summary.sample_count);
+        label_set_dot_width(line2, 392);
+        obj_align_if(line2, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     }
 
     render_packet_filter_button(s_content, "All", 18, D1L_PACKET_FILTER_ALL);
     render_packet_filter_button(s_content, "RX", 82, D1L_PACKET_FILTER_RX);
     render_packet_filter_button(s_content, "TX", 146, D1L_PACKET_FILTER_TX);
     render_packet_filter_button(s_content, "Text", 210, D1L_PACKET_FILTER_TEXT);
-    create_button(s_content, "Search", 286, 128, 74, 34, open_packet_search_event_cb, NULL);
+    create_button(s_content, "Search", 278, 112, 74, 34, open_packet_search_event_cb, NULL);
+    create_button(s_content, s_packets_paused ? "Resume" : "Pause", 362, 112, 80, 34,
+                  packet_pause_event_cb, NULL);
     if (s_packet_search_text[0]) {
         lv_obj_t *search = create_label(s_content, "", 0xFBBF24);
         label_set_fmt(search, "find %.18s", s_packet_search_text);
         lv_label_set_long_mode(search, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(search, 84);
-        lv_obj_set_pos(search, 366, 135);
+        lv_obj_set_width(search, 408);
+        lv_obj_set_pos(search, 26, 152);
     }
 
-    size_t packet_rows = d1l_packet_log_query(s_packet_filtered_packets,
-                                              D1L_APP_SNAPSHOT_PACKET_PREVIEW,
-                                              packet_filter_direction(),
-                                              packet_filter_kind(),
-                                              s_packet_search_text);
-    int y = 174;
-    if (snapshot->recent_route_count > 0 && packet_rows > 3) {
-        packet_rows = 2;
-    }
-    for (size_t i = 0; i < packet_rows && y <= 286; ++i) {
+    lv_obj_t *feed_title = create_label(s_content, "Packet Feed", 0x8EA0AE);
+    obj_set_pos_if(feed_title, 26, s_packet_search_text[0] ? 176 : 156);
+
+    size_t packet_rows = refresh_packet_terminal_rows();
+    int y = s_packet_search_text[0] ? 204 : 184;
+    for (size_t i = 0; i < packet_rows; ++i) {
         render_packet_row(s_content, y, &s_packet_filtered_packets[i]);
-        y += 56;
+        y += 52;
     }
     if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
         lv_obj_t *empty = create_label(s_content, "No packets match filter", 0x8EA0AE);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
+    } else if (packet_rows == 0) {
+        lv_obj_t *empty = create_label(s_content, "Packet log is empty", 0x8EA0AE);
+        lv_obj_set_pos(empty, 26, y + 8);
+        y += 34;
     }
+
+    y += 10;
+    lv_obj_t *roles = create_button(s_content, "Mesh Roles", 18, y, 130, 36,
+                                    open_mesh_roles_event_cb, NULL);
+    if (roles) {
+        lv_obj_set_style_bg_color(roles, lv_color_hex(0x12362F), 0);
+    }
+    y += 48;
     if (snapshot->recent_route_count > 0) {
         lv_obj_t *routes = create_label(s_content, "Routes", 0x8EA0AE);
-        lv_obj_set_pos(routes, 26, y + 2);
+        lv_obj_set_pos(routes, 26, y);
         y += 24;
-        for (size_t i = 0; i < snapshot->recent_route_count && y <= 304; ++i) {
+        for (size_t i = 0; i < snapshot->recent_route_count; ++i) {
             render_route_row(s_content, y, &snapshot->recent_routes[i]);
             y += 54;
         }
-    }
-    if (snapshot->recent_packet_count == 0 && snapshot->recent_route_count == 0) {
-        lv_obj_t *empty = create_label(s_content, "Packet log is empty", 0x8EA0AE);
-        lv_obj_align(empty, LV_ALIGN_CENTER, 0, -20);
     }
 }
 
@@ -3595,6 +3801,8 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -3693,6 +3901,8 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_compose_sheet();
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -3705,6 +3915,180 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     if (s_storage_sheet) {
         lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_storage_sheet);
+    }
+}
+
+static void close_wifi_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_wifi_sheet();
+}
+
+static void close_ble_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_ble_sheet();
+}
+
+static void render_wifi_sheet(void)
+{
+    if (!s_wifi_sheet) {
+        return;
+    }
+    lv_obj_clean(s_wifi_sheet);
+
+    lv_obj_t *title = create_label(s_wifi_sheet, "Wi-Fi Setup", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_wifi_sheet, "Close", 340, 0, 76, 40, close_wifi_sheet_event_cb, NULL);
+
+    lv_obj_t *state = create_label(s_wifi_sheet, "", s_snapshot.wifi_enabled ? 0x5EEAD4 : 0xFBBF24);
+    label_set_fmt(state, "State %s  build %s",
+                  s_snapshot.wifi_state ? s_snapshot.wifi_state : "off",
+                  s_snapshot.wifi_build_enabled ? "enabled" : "not built");
+    label_set_dot_width(state, 408);
+    lv_obj_set_pos(state, 8, 54);
+
+    lv_obj_t *purpose = create_label(s_wifi_sheet,
+                                     "Used for time sync, optional tile downloads, and local management.",
+                                     0xE5EDF5);
+    lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(purpose, 408);
+    lv_obj_set_pos(purpose, 8, 88);
+
+    lv_obj_t *runtime = create_label(s_wifi_sheet,
+                                     "Network scan/connect/save is not enabled in this build yet.",
+                                     0xFBBF24);
+    lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(runtime, 408);
+    lv_obj_set_pos(runtime, 8, 144);
+
+    lv_obj_t *scan = create_button(s_wifi_sheet, "Scan", 8, 206, 88, 40, NULL, NULL);
+    lv_obj_t *save = create_button(s_wifi_sheet, "Save", 106, 206, 88, 40, NULL, NULL);
+    lv_obj_t *clear = create_button(s_wifi_sheet, "Clear", 204, 206, 88, 40, NULL, NULL);
+    if (scan) {
+        lv_obj_add_state(scan, LV_STATE_DISABLED);
+    }
+    if (save) {
+        lv_obj_add_state(save, LV_STATE_DISABLED);
+    }
+    if (clear) {
+        lv_obj_add_state(clear, LV_STATE_DISABLED);
+    }
+
+    lv_obj_t *note = create_label(s_wifi_sheet,
+                                  "Buttons are placeholders until the Wi-Fi runtime is wired.",
+                                  0x8EA0AE);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, 408);
+    lv_obj_set_pos(note, 8, 264);
+}
+
+static void render_ble_sheet(void)
+{
+    if (!s_ble_sheet) {
+        return;
+    }
+    lv_obj_clean(s_ble_sheet);
+
+    lv_obj_t *title = create_label(s_ble_sheet, "BLE Setup", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_obj_set_pos(title, 8, 4);
+    create_button(s_ble_sheet, "Close", 340, 0, 76, 40, close_ble_sheet_event_cb, NULL);
+
+    lv_obj_t *state = create_label(s_ble_sheet, "", s_snapshot.ble_companion_enabled ? 0xA7F3D0 : 0xFBBF24);
+    label_set_fmt(state, "State %s  build %s",
+                  s_snapshot.ble_state ? s_snapshot.ble_state : "off",
+                  s_snapshot.ble_build_enabled ? "enabled" : "not built");
+    label_set_dot_width(state, 408);
+    lv_obj_set_pos(state, 8, 54);
+
+    lv_obj_t *purpose = create_label(s_ble_sheet,
+                                     "Companion BLE is for official app pairing and local setup when enabled.",
+                                     0xE5EDF5);
+    lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(purpose, 408);
+    lv_obj_set_pos(purpose, 8, 88);
+
+    lv_obj_t *runtime = create_label(s_ble_sheet,
+                                     "Enable/disable and pairing controls are pending runtime support.",
+                                     0xFBBF24);
+    lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(runtime, 408);
+    lv_obj_set_pos(runtime, 8, 144);
+
+    lv_obj_t *enable = create_button(s_ble_sheet, "Enable", 8, 206, 98, 40, NULL, NULL);
+    lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
+    lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
+    if (enable) {
+        lv_obj_add_state(enable, LV_STATE_DISABLED);
+    }
+    if (pair) {
+        lv_obj_add_state(pair, LV_STATE_DISABLED);
+    }
+    if (forget) {
+        lv_obj_add_state(forget, LV_STATE_DISABLED);
+    }
+
+    lv_obj_t *note = create_label(s_ble_sheet,
+                                  "USB remains the reliable companion path for production validation.",
+                                  0x8EA0AE);
+    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(note, 408);
+    lv_obj_set_pos(note, 8, 264);
+}
+
+static void open_wifi_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_storage_sheet();
+    hide_ble_sheet();
+    hide_map_location_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_wifi_sheet();
+    if (s_wifi_sheet) {
+        lv_obj_clear_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_wifi_sheet);
+    }
+}
+
+static void open_ble_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_map_location_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_ble_sheet();
+    if (s_ble_sheet) {
+        lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_ble_sheet);
     }
 }
 
@@ -3734,6 +4118,9 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_public_search_sheet();
         hide_dm_thread_sheet();
         hide_radio_settings_sheet();
+        hide_storage_sheet();
+        hide_wifi_sheet();
+        hide_ble_sheet();
         hide_map_location_sheet();
         hide_contact_detail_sheet();
         hide_contact_export_sheet();
@@ -3894,6 +4281,8 @@ static void process_pending_tab_switch(void)
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
     hide_map_location_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
@@ -4231,6 +4620,40 @@ static void create_storage_sheet(lv_obj_t *screen)
     lv_obj_add_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void create_wifi_sheet(lv_obj_t *screen)
+{
+    s_wifi_sheet = create_object(screen, "wifi setup sheet");
+    if (!s_wifi_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_wifi_sheet, 448, 320);
+    lv_obj_set_pos(s_wifi_sheet, 16, 82);
+    lv_obj_set_style_radius(s_wifi_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_wifi_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_wifi_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_wifi_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_wifi_sheet, 12, 0);
+    lv_obj_clear_flag(s_wifi_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_ble_sheet(lv_obj_t *screen)
+{
+    s_ble_sheet = create_object(screen, "ble setup sheet");
+    if (!s_ble_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_ble_sheet, 448, 320);
+    lv_obj_set_pos(s_ble_sheet, 16, 82);
+    lv_obj_set_style_radius(s_ble_sheet, 8, 0);
+    lv_obj_set_style_bg_color(s_ble_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_ble_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_ble_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_ble_sheet, 12, 0);
+    lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void create_map_location_sheet(lv_obj_t *screen)
 {
     s_map_location_sheet = create_object(screen, "map location sheet");
@@ -4420,14 +4843,14 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
     if (!s_packet_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_packet_detail_sheet, 448, 286);
-    lv_obj_set_pos(s_packet_detail_sheet, 16, 100);
+    lv_obj_set_size(s_packet_detail_sheet, 448, 326);
+    lv_obj_set_pos(s_packet_detail_sheet, 16, 76);
     lv_obj_set_style_radius(s_packet_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_packet_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_packet_detail_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_packet_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_packet_detail_sheet, 12, 0);
-    lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(s_packet_detail_sheet, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -4653,6 +5076,8 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_dm_thread_sheet(s_screen);
     create_radio_settings_sheet(s_screen);
     create_storage_sheet(s_screen);
+    create_wifi_sheet(s_screen);
+    create_ble_sheet(s_screen);
     create_map_location_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_contact_export_sheet(s_screen);
