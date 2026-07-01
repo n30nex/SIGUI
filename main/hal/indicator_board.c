@@ -20,6 +20,8 @@ static d1l_board_status_t s_status = {
     .init_result = ESP_ERR_INVALID_STATE,
     .i2c_count = 0,
 };
+static esp_err_t s_touch_init_result = ESP_ERR_INVALID_STATE;
+static uint32_t s_touch_init_attempts = 0;
 
 static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
 {
@@ -32,11 +34,32 @@ static uint16_t clamp_touch_coord(int32_t value, uint16_t max)
     return (uint16_t)value;
 }
 
+static esp_err_t d1l_board_touch_ensure_ready(void)
+{
+    if (!s_status.ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_touch_init_result == ESP_OK) {
+        return ESP_OK;
+    }
+
+    s_touch_init_attempts++;
+    s_touch_init_result = indev_init_default();
+    if (s_touch_init_result != ESP_OK) {
+        ESP_LOGW(TAG, "touch init attempt %lu failed: %s",
+                 (unsigned long)s_touch_init_attempts,
+                 esp_err_to_name(s_touch_init_result));
+    }
+    return s_touch_init_result;
+}
+
 esp_err_t d1l_board_init(void)
 {
     esp_err_t ret = bsp_board_init();
     s_status.init_result = ret;
     s_status.ready = (ret == ESP_OK);
+    s_touch_init_result = ESP_ERR_INVALID_STATE;
+    s_touch_init_attempts = 0;
 
     d1l_app_model_t *model = d1l_app_model_get();
     model->board_ready = s_status.ready;
@@ -45,6 +68,7 @@ esp_err_t d1l_board_init(void)
     if (ret == ESP_OK) {
         d1l_backlight_set_percent(70);
         d1l_board_i2c_scan(&s_status);
+        d1l_board_touch_ensure_ready();
     }
     return ret;
 }
@@ -129,13 +153,30 @@ esp_err_t d1l_board_touch_read(d1l_board_touch_state_t *out_state)
         return ESP_ERR_INVALID_ARG;
     }
     memset(out_state, 0, sizeof(*out_state));
+    out_state->init_result = ESP_ERR_INVALID_STATE;
     out_state->read_result = ESP_ERR_INVALID_STATE;
     if (!s_status.ready) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    esp_err_t init_ret = d1l_board_touch_ensure_ready();
+    out_state->init_result = init_ret;
+    out_state->init_attempts = s_touch_init_attempts;
+    if (init_ret != ESP_OK) {
+        return init_ret;
+    }
+
     indev_data_t data = {0};
     esp_err_t ret = indev_get_major_value(&data);
+    if (ret == ESP_ERR_INVALID_STATE) {
+        s_touch_init_result = ESP_ERR_INVALID_STATE;
+        init_ret = d1l_board_touch_ensure_ready();
+        out_state->init_result = init_ret;
+        out_state->init_attempts = s_touch_init_attempts;
+        if (init_ret == ESP_OK) {
+            ret = indev_get_major_value(&data);
+        }
+    }
     out_state->read_result = ret;
     if (ret != ESP_OK) {
         return ret;

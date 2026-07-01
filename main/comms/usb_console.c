@@ -502,15 +502,23 @@ static void cmd_touch_test(void)
     d1l_board_touch_state_t touch = {0};
     esp_err_t ret = d1l_board_touch_read(&touch);
     if (ret != ESP_OK) {
-        err_result("touch test", esp_err_to_name(ret), "touch sample requires initialized D1L touch controller");
+        printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"touch test\",\"code\":\"%s\","
+               "\"init_result\":\"%s\",\"read_result\":\"%s\",\"init_attempts\":%lu,"
+               "\"hint\":\"touch sample requires initialized D1L touch controller\"}\n",
+               D1L_CONSOLE_SCHEMA, esp_err_to_name(ret),
+               esp_err_to_name(touch.init_result), esp_err_to_name(touch.read_result),
+               (unsigned long)touch.init_attempts);
         return;
     }
     ok_begin("touch test");
     printf(",\"touches\":%u,\"pressed\":%s,\"x\":%u,\"y\":%u,\"raw_x\":%ld,\"raw_y\":%ld,"
+           "\"init_result\":\"%s\",\"read_result\":\"%s\",\"init_attempts\":%lu,"
            "\"coordinate_valid\":%s,\"controller\":\"FT5x06\",\"i2c_address\":\"0x48\","
            "\"manual_confirm\":true}\n",
            touch.touches, bool_json(touch.pressed), touch.x, touch.y,
            (long)touch.raw_x, (long)touch.raw_y,
+           esp_err_to_name(touch.init_result), esp_err_to_name(touch.read_result),
+           (unsigned long)touch.init_attempts,
            bool_json(touch.coordinate_valid));
 }
 

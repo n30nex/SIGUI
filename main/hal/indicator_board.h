@@ -19,7 +19,9 @@ typedef struct {
     uint16_t y;
     int32_t raw_x;
     int32_t raw_y;
+    esp_err_t init_result;
     esp_err_t read_result;
+    uint32_t init_attempts;
 } d1l_board_touch_state_t;
 
 esp_err_t d1l_board_init(void);

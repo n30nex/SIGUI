@@ -2,6 +2,12 @@ diff --git a/components/bsp/src/indev/indev.c b/components/bsp/src/indev/indev.c
 index 2b8aa91..6a82a4f 100644
 --- a/components/bsp/src/indev/indev.c
 +++ b/components/bsp/src/indev/indev.c
+@@ -45,3 +45,4 @@ esp_err_t indev_init_default(void)
+-        if (ESP_OK == ret) {
++        if (ESP_OK == ret || ESP_ERR_INVALID_STATE == ret) {
+             g_major_dev = BSP_INDEV_TP;
++            ret = ESP_OK;
+         }
 @@ -71,2 +71,4 @@ esp_err_t indev_get_major_value(indev_data_t *data)
 -    uint16_t x, y;
 -    uint8_t tp_num, btn_val;

@@ -17,7 +17,7 @@
 #include "bsp_lcd.h"
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
-#include "indev/indev.h"
+#include "hal/indicator_board.h"
 
 static const char *TAG = "d1l_ui";
 static lv_disp_draw_buf_t s_draw_buf;
@@ -155,11 +155,11 @@ static void touch_read_cb(lv_indev_drv_t *drv, lv_indev_data_t *data)
     (void)drv;
     static lv_coord_t last_x = 0;
     static lv_coord_t last_y = 0;
-    indev_data_t sample = {0};
-    if (indev_get_major_value(&sample) == ESP_OK && sample.pressed) {
+    d1l_board_touch_state_t sample = {0};
+    if (d1l_board_touch_read(&sample) == ESP_OK && sample.pressed) {
         data->state = LV_INDEV_STATE_PRESSED;
-        last_x = sample.x < 0 ? 0 : (sample.x > 479 ? 479 : sample.x);
-        last_y = sample.y < 0 ? 0 : (sample.y > 479 ? 479 : sample.y);
+        last_x = sample.x;
+        last_y = sample.y;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
