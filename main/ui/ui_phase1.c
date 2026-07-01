@@ -86,6 +86,8 @@ static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
 static char s_packet_search_text[D1L_PACKET_LOG_QUERY_TEXT_LEN];
 static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
+static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 10U;
+static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 40U;
 
 static void render_active_tab(void);
 static void render_contact_detail_sheet(void);
@@ -3356,8 +3358,13 @@ static void ui_task(void *arg)
 {
     (void)arg;
     while (true) {
-        lv_timer_handler();
-        vTaskDelay(pdMS_TO_TICKS(5));
+        uint32_t wait_ms = lv_timer_handler();
+        if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
+            wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
+        } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {
+            wait_ms = D1L_UI_TIMER_MAX_SLEEP_MS;
+        }
+        vTaskDelay(pdMS_TO_TICKS(wait_ms));
     }
 }
 
