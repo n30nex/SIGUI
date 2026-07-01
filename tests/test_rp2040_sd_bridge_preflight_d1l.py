@@ -80,7 +80,7 @@ def test_preflight_dry_run_is_non_destructive():
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
     assert report["copies_uf2"] is False
-    assert report["commands"] == ["rp2040 status", "storage status", "health"]
+    assert report["commands"] == ["rp2040 status", "storage status", "storage diag", "health"]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
 
@@ -162,6 +162,7 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
             protocol_pending_storage_line(),
+            '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
     )
@@ -191,6 +192,7 @@ def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     assert ser.writes == [
         "rp2040 status\n",
         "storage status\n",
+        "storage diag\n",
         "health\n",
     ]
 
@@ -199,6 +201,9 @@ def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridg
     ser = CommandAwareSerial(
         {
             "storage status": [protocol_pending_storage_line()],
+            "storage diag": [
+                '{"schema":1,"ok":false,"cmd":"storage diag","code":"ESP_ERR_TIMEOUT","diag_supported":false}\n'
+            ],
             "health": ['{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'],
         }
     )
@@ -231,6 +236,8 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
         [
             '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n',
             ready_storage_line(),
+            '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
+            '"mount_selected":true,"public_rf_tx":false,"formats_sd":false}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
     )
@@ -252,5 +259,6 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
     )
 
     assert report["ok"] is True
+    assert report["storage_diag_ok"] is True
     assert report["ready_for_sd_acceptance"] is True
     assert report["classification"]["state"] == "sd_bridge_ready"

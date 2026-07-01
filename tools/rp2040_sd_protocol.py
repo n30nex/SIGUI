@@ -15,6 +15,8 @@ STATUS_REPLY = "DESKOS_SD_STATUS"
 FORMAT_REQUEST = "DESKOS_SD_FORMAT"
 FORMAT_REPLY = "DESKOS_SD_FORMAT"
 FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD"
+DIAG_REQUEST = "DESKOS_SD_DIAG"
+DIAG_REPLY = "DESKOS_SD_DIAG"
 FILE_REQUEST = "DESKOS_SD_FILE"
 FILE_REPLY = "DESKOS_SD_FILE"
 FILE_PROTOCOL_VERSION = 1
@@ -44,6 +46,11 @@ STATUS_FIELDS = (
     "capacity_kb",
     "free_kb",
     "note",
+    "probe_power",
+    "probe_mode",
+    "probe_present",
+    "probe_err",
+    "probe_data",
 )
 FILE_CAPABILITY_FIELDS = (
     "file_ops",
@@ -200,6 +207,7 @@ def validate_relative_path(path: str) -> bool:
 
 
 def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
+    probe_present = scenario.present
     return (
         f"{prefix} state={scenario.state}"
         f" present={bool_token(scenario.present)}"
@@ -211,11 +219,31 @@ def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
         f" capacity_kb={scenario.capacity_kb}"
         f" free_kb={scenario.free_kb}"
         f" note={scenario.note}"
+        f" probe_power=high"
+        f" probe_mode={'mount' if scenario.mounted else 'dedicated'}"
+        f" probe_present={bool_token(probe_present)}"
+        f" probe_err={0 if probe_present else 254}"
+        f" probe_data=0"
         f" file_ops={bool_token(file_ready(scenario))}"
         f" file_line_max={FILE_LINE_MAX}"
         f" file_chunk_max={MAX_FILE_CHUNK_BYTES}"
         f" path_max={MAX_FILE_PATH_CHARS}"
         f" atomic_rename={bool_token(file_ready(scenario))}"
+    )
+
+
+def diag_line(scenario: SdScenario) -> str:
+    present = bool_token(scenario.present)
+    err = 0 if scenario.present else 254
+    capacity = scenario.capacity_kb if scenario.present else 0
+    return (
+        f"{DIAG_REPLY} pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000"
+        f" selected_power=high selected_mode=dedicated"
+        f" mount_selected={bool_token(scenario.mounted)}"
+        f" hd_p={present} hd_e={err} hd_d=0 hd_kb={capacity}"
+        f" hs_p=0 hs_e=254 hs_d=0 hs_kb=0"
+        f" ld_p=0 ld_e=254 ld_d=0 ld_kb=0"
+        f" ls_p=0 ls_e=254 ls_d=0 ls_kb=0"
     )
 
 
@@ -478,6 +506,8 @@ def reply_for_request(
     fs = fs or SdFileSystem()
     if request == STATUS_REQUEST:
         return status_line(scenario)
+    if request == DIAG_REQUEST:
+        return diag_line(scenario)
     if request.startswith(FORMAT_REQUEST + " "):
         phrase = request[len(FORMAT_REQUEST) + 1 :].strip()
         if phrase != FORMAT_CONFIRMATION:

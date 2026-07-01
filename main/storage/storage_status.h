@@ -33,7 +33,11 @@ typedef struct {
     uint32_t file_line_max;
     uint32_t file_chunk_max;
     uint32_t path_max;
+    uint32_t sd_probe_error;
+    uint32_t sd_probe_data;
     esp_err_t last_error;
+    char sd_probe_power[8];
+    char sd_probe_mode[16];
     const char *sd_state;
     const char *sd_interface;
     const char *sd_filesystem;

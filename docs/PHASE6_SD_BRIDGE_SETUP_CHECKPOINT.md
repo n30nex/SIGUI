@@ -19,13 +19,14 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Added serial-only diagnostic export, sampled data export, and map-tile cache canaries. Diagnostic exports commit under `exports/diagnostics/`, sampled data exports commit under `exports/data/`, and the map-tile cache canary commits a synthetic tile under `map/tiles/`. They use temp write/read plus `rename replace=1`, leave the final artifact present for inspection, and do not send Public RF or format.
 - Kept settings, identity, contacts, read-state, crashlog, and the full map page/tile download policy on onboard/fallback storage or pending; no card-dependent boot state is claimed in this slice.
 - Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added a raw SdFat card probe plus SPI1-aware formatter, and kept the ESP32 runtime SD probe window long enough for slow card status replies while boot probing stays short.
+- Follow-up pending hardware proof: the RP2040 bridge now has `DESKOS_SD_DIAG`, and ESP32 exposes `storage diag` plus additive `storage status` probe fields. This is intended to diagnose physically inserted cards that still report `no_card` by comparing high/dedicated, high/shared, low/dedicated, and low/shared non-formatting raw probes.
 
 ## Validation Rules
 
 - Do not run firmware builds on the Windows host. Firmware artifacts must come from GitHub Actions.
 - Local verification for this slice is limited to host tests, simulator generation, dry-run smoke, diff checks, and GitHub Actions status.
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
-- After the RP2040 bridge is flashed, use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof once the ready file gate is available. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
+- After the RP2040 bridge is flashed, run `storage diag` and preflight first, then use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` for the SD file-operation proof, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof once the ready file gate is available. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
 
 ## Hardware Evidence
 

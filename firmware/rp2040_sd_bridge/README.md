@@ -59,8 +59,9 @@ python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-se
 python .\tools\rp2040_sd_protocol.py --scenario ready --file-canary-transcript
 ```
 
-The canary sends `storage status`, `storage filecanary`, `storage status`,
-`packets`, and `health`. It does not send Public RF and does not issue
+The preflight sends `storage diag` as optional non-destructive evidence when
+the flashed bridge supports `DESKOS_SD_DIAG`. The canary sends `storage status`,
+`storage filecanary`, `storage status`, `packets`, and `health`. It does not send Public RF and does not issue
 `DESKOS_SD_FORMAT`. The SD-aware soak repeats `storage status` and
 `storage filecanary` during a passive stability window. The retained-history
 acceptance runner seeds synthetic Public/DM/route/packet rows without Public RF,
@@ -76,10 +77,15 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   filesystem is usable. Ready cards also advertise `file_ops=1`,
   `file_line_max=512`, `file_chunk_max=192`, `path_max=96`, and
   `atomic_rename=1`. If the FAT mount fails, the bridge probes the raw card on
-  `SPI1` using the same dedicated-SPI card open used by the formatter: no
+  `SPI1` across high/low rail settings and dedicated/shared SPI modes. No
   electrical card still reports `no_card`, while an inserted card with an
   unusable filesystem reports `setup_required`, `format_required=1`, and
-  `format_supported=1`.
+  `format_supported=1`. Status replies include optional probe diagnostics:
+  `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and `probe_data`.
+- `DESKOS_SD_DIAG` is a manual diagnostic request used by `storage diag`. It
+  reports the pin contract, selected rail/SPI mode, and the high/dedicated,
+  high/shared, low/dedicated, and low/shared raw probe result. It is
+  non-formatting and does not write to the card.
 - `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
   Formatting uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
   wrapper is avoided because that wrapper does not preserve the configured SPI

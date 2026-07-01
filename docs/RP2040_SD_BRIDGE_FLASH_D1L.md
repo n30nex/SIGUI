@@ -30,10 +30,11 @@ The UF2 from Actions run `28445509629` was previously verified as:
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
-port with `rp2040 status`, `storage status`, and `health`, and reports the next
-safe action as JSON. If it reports `state="rp2040_protocol_pending"` and no UF2
-volume is available, put the RP2040 into UF2/BOOTSEL mode before running the
-copy helper.
+port with `rp2040 status`, `storage status`, optional `storage diag`, and
+`health`, and reports the next safe action as JSON. `storage diag` is
+non-formatting and may be unavailable on older bridge firmware. If preflight
+reports `state="rp2040_protocol_pending"` and no UF2 volume is available, put
+the RP2040 into UF2/BOOTSEL mode before running the copy helper.
 
 ## Flash
 

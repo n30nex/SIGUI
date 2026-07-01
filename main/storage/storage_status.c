@@ -1,5 +1,6 @@
 #include "storage_status.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "sdkconfig.h"
@@ -71,7 +72,11 @@ static void clear_sd_runtime_fields(d1l_storage_status_t *status)
     status->file_line_max = 0;
     status->file_chunk_max = 0;
     status->path_max = 0;
+    status->sd_probe_error = 0;
+    status->sd_probe_data = 0;
     status->sd_filesystem = "unknown";
+    status->sd_probe_power[0] = '\0';
+    status->sd_probe_mode[0] = '\0';
 }
 
 static const char *stable_sd_state(const char *state)
@@ -141,6 +146,12 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     s_status.file_line_max = sd->file_line_max;
     s_status.file_chunk_max = sd->file_chunk_max;
     s_status.path_max = sd->path_max;
+    s_status.sd_probe_error = sd->probe_error;
+    s_status.sd_probe_data = sd->probe_data;
+    snprintf(s_status.sd_probe_power, sizeof(s_status.sd_probe_power), "%s",
+             sd->probe_power[0] ? sd->probe_power : "unknown");
+    snprintf(s_status.sd_probe_mode, sizeof(s_status.sd_probe_mode), "%s",
+             sd->probe_mode[0] ? sd->probe_mode : "unknown");
     s_status.last_error = sd->last_error;
     s_status.sd_state = stable_sd_state(sd->state);
     s_status.sd_filesystem = stable_filesystem(sd->filesystem);

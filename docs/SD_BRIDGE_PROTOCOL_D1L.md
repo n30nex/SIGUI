@@ -15,7 +15,7 @@ DESKOS_SD_STATUS
 RP2040 replies with one line:
 
 ```text
-DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 Required tokens:
@@ -28,6 +28,9 @@ Required tokens:
 - `format_required`: `1` only when the card is present but cannot be used without setup/format.
 - `format_supported`: `1` only when the RP2040 firmware can perform the confirmed format command.
 - `capacity_kb` and `free_kb`: unsigned decimal kilobytes, `0` when unknown.
+- `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and
+  `probe_data`: non-formatting card-probe diagnostics. Older bridge firmware
+  may omit these tokens; ESP32 treats them as optional.
 - `file_ops`: `1` when the card is ready and the generic file protocol below is available.
 - `file_line_max`: maximum request/reply line length, excluding newline. Current value: `512`.
 - `file_chunk_max`: maximum decoded read/write/append payload size. Current value: `192` bytes.
@@ -39,12 +42,33 @@ Required tokens:
 
 Values must not contain spaces. Use underscores in `note`.
 
-On the D1L RP2040 bridge, a failed FAT mount is followed by a raw SdFat card
-probe on `SPI1`. If no card responds, the bridge reports `state=no_card` and
-`format_supported=0`. If a card responds but the filesystem is unusable, the
-bridge reports `state=setup_required present=1 mounted=0 format_required=1
-format_supported=1 note=format_required`; the ESP32 may then show the guarded
-format confirmation path.
+On the D1L RP2040 bridge, a failed FAT mount is followed by raw SdFat card
+probes on `SPI1` across high/low rail settings and dedicated/shared SPI modes.
+If no card responds, the bridge reports `state=no_card` and `format_supported=0`.
+If a card responds but the filesystem is unusable, the bridge reports
+`state=setup_required present=1 mounted=0 format_required=1 format_supported=1
+note=format_required`; the ESP32 may then show the guarded format confirmation
+path.
+
+## Diagnostic Request
+
+ESP32 sends this manual, non-formatting probe command when the operator runs
+`storage diag`:
+
+```text
+DESKOS_SD_DIAG
+```
+
+RP2040 replies with one compact line:
+
+```text
+DESKOS_SD_DIAG pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000 selected_power=high selected_mode=dedicated mount_selected=0 hd_p=0 hd_e=254 hd_d=0 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_kb=0
+```
+
+Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`
+low/dedicated, and `ls` low/shared. For each probe, `_p` is present, `_e` is
+the SdFat error code, `_d` is error data, and `_kb` is detected capacity. The
+command does not format, copy UF2 files, or send RF.
 
 ## Confirmed Format Request
 

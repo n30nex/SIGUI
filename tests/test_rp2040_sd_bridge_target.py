@@ -8,6 +8,7 @@ from tools.rp2040_sd_protocol import (
     FORMAT_REQUEST,
     MAX_FILE_CHUNK_BYTES,
     MAX_FILE_PATH_CHARS,
+    DIAG_REQUEST,
     STATUS_FIELDS,
     STATUS_REQUEST,
 )
@@ -36,7 +37,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
     assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
-    assert "digitalWrite(SD_POWER_PIN, HIGH)" in sketch
+    assert "digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW)" in sketch
+    assert "bool s_sd_power_high = true;" in sketch
     assert "pinMode(SD_CS_PIN, OUTPUT)" in sketch
     assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
     assert "delay(250)" in sketch
@@ -46,13 +48,17 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
-    assert sketch.count("card_factory.newCard(sd_spi_config(DEDICATED_SPI))") == 2
+    assert "probe_card(DEDICATED_SPI, true)" in sketch
+    assert "probe_card(SHARED_SPI, true)" in sketch
+    assert "probe_card(DEDICATED_SPI, false)" in sketch
+    assert "probe_card(SHARED_SPI, false)" in sketch
+    assert "delete card" in sketch
     assert "FatFormatter fat_formatter" in sketch
     assert "fat_formatter.format(card, sector_buffer, nullptr)" in sketch
     assert "SDFS.format()" not in sketch
     assert "/deskos" in sketch
 
-    for token in [STATUS_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, FILE_REQUEST]:
+    for token in [STATUS_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch
         assert token in readme
 

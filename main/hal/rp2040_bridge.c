@@ -13,6 +13,8 @@
 #define D1L_RP2040_UART_BUF_SIZE 1024
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
+#define D1L_RP2040_SD_DIAG_QUERY "DESKOS_SD_DIAG\n"
+#define D1L_RP2040_SD_DIAG_REPLY_PREFIX "DESKOS_SD_DIAG"
 #define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
 #define D1L_RP2040_SD_FORMAT_REPLY_PREFIX "DESKOS_SD_FORMAT"
 #define D1L_RP2040_FILE_PREFIX "DESKOS_SD_FILE"
@@ -162,6 +164,22 @@ static void init_sd_status(d1l_rp2040_sd_status_t *status, esp_err_t err)
     snprintf(status->note, sizeof(status->note), "%s",
              s_status.uart_ready ?
              "RP2040 UART is ready but DeskOS SD status protocol has not answered" :
+             "RP2040 UART bridge is unavailable");
+    snprintf(status->probe_power, sizeof(status->probe_power), "unknown");
+    snprintf(status->probe_mode, sizeof(status->probe_mode), "unknown");
+}
+
+static void init_sd_diag(d1l_rp2040_sd_diag_t *diag, esp_err_t err)
+{
+    memset(diag, 0, sizeof(*diag));
+    diag->bridge_ready = s_status.uart_ready;
+    diag->last_error = err;
+    snprintf(diag->pins, sizeof(diag->pins), "unknown");
+    snprintf(diag->selected_power, sizeof(diag->selected_power), "unknown");
+    snprintf(diag->selected_mode, sizeof(diag->selected_mode), "unknown");
+    snprintf(diag->note, sizeof(diag->note), "%s",
+             s_status.uart_ready ?
+             "RP2040 UART is ready but SD diagnostics have not answered" :
              "RP2040 UART bridge is unavailable");
 }
 
@@ -447,6 +465,10 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     (void)parse_u32_token(line, "file_line_max", &status->file_line_max);
     (void)parse_u32_token(line, "file_chunk_max", &status->file_chunk_max);
     (void)parse_u32_token(line, "path_max", &status->path_max);
+    (void)parse_u32_token(line, "probe_err", &status->probe_error);
+    (void)parse_u32_token(line, "probe_data", &status->probe_data);
+    parse_word_token(line, "probe_power", status->probe_power, sizeof(status->probe_power));
+    parse_word_token(line, "probe_mode", status->probe_mode, sizeof(status->probe_mode));
 
     if (status->card_present && !status->filesystem_mounted) {
         status->format_required = true;
@@ -480,6 +502,43 @@ static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *
 static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *status)
 {
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
+}
+
+static esp_err_t parse_sd_diag_line(const char *line, d1l_rp2040_sd_diag_t *diag)
+{
+    if (!line || !diag || !line_has_prefix(line, D1L_RP2040_SD_DIAG_REPLY_PREFIX)) {
+        return ESP_FAIL;
+    }
+
+    init_sd_diag(diag, ESP_OK);
+    diag->protocol_supported = true;
+    parse_word_token(line, "pins", diag->pins, sizeof(diag->pins));
+    parse_word_token(line, "selected_power", diag->selected_power, sizeof(diag->selected_power));
+    parse_word_token(line, "selected_mode", diag->selected_mode, sizeof(diag->selected_mode));
+    (void)parse_bool_token(line, "mount_selected", &diag->mount_selected);
+    (void)parse_u32_token(line, "hz", &diag->spi_hz);
+    (void)parse_bool_token(line, "hd_p", &diag->high_dedicated_present);
+    (void)parse_u32_token(line, "hd_e", &diag->high_dedicated_error);
+    (void)parse_u32_token(line, "hd_d", &diag->high_dedicated_data);
+    (void)parse_u32_token(line, "hd_kb", &diag->high_dedicated_capacity_kb);
+    (void)parse_bool_token(line, "hs_p", &diag->high_shared_present);
+    (void)parse_u32_token(line, "hs_e", &diag->high_shared_error);
+    (void)parse_u32_token(line, "hs_d", &diag->high_shared_data);
+    (void)parse_u32_token(line, "hs_kb", &diag->high_shared_capacity_kb);
+    (void)parse_bool_token(line, "ld_p", &diag->low_dedicated_present);
+    (void)parse_u32_token(line, "ld_e", &diag->low_dedicated_error);
+    (void)parse_u32_token(line, "ld_d", &diag->low_dedicated_data);
+    (void)parse_u32_token(line, "ld_kb", &diag->low_dedicated_capacity_kb);
+    (void)parse_bool_token(line, "ls_p", &diag->low_shared_present);
+    (void)parse_u32_token(line, "ls_e", &diag->low_shared_error);
+    (void)parse_u32_token(line, "ls_d", &diag->low_shared_data);
+    (void)parse_u32_token(line, "ls_kb", &diag->low_shared_capacity_kb);
+    snprintf(diag->note, sizeof(diag->note), "%s",
+             diag->mount_selected ? "selected_probe_mounted" :
+             (diag->high_dedicated_present || diag->high_shared_present ||
+              diag->low_dedicated_present || diag->low_shared_present) ?
+             "raw_card_present_mount_failed" : "raw_card_not_detected");
+    return ESP_OK;
 }
 
 static uint16_t next_file_request_id(void)
@@ -683,6 +742,37 @@ esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_
     ret = parse_sd_status_line(line, out_status);
     out_status->response_truncated = truncated;
     out_status->last_error = ret;
+    return ret;
+}
+
+esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t timeout_ms)
+{
+    if (out_diag == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_sd_diag(out_diag, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    const char *prefixes[] = {D1L_RP2040_SD_DIAG_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    init_sd_diag(out_diag, ESP_ERR_TIMEOUT);
+    esp_err_t ret = exchange_prefixed_line(D1L_RP2040_SD_DIAG_QUERY,
+                                           strlen(D1L_RP2040_SD_DIAG_QUERY),
+                                           prefixes, 1, line, sizeof(line),
+                                           timeout_ms, &truncated);
+    out_diag->response_truncated = truncated;
+    if (ret != ESP_OK) {
+        out_diag->last_error = ret;
+        snprintf(out_diag->note, sizeof(out_diag->note),
+                 ret == ESP_ERR_TIMEOUT ? "timeout" : "query_failed");
+        return ret;
+    }
+    ret = parse_sd_diag_line(line, out_diag);
+    out_diag->response_truncated = truncated;
+    out_diag->last_error = ret;
     return ret;
 }
 

@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 PREFLIGHT_COMMANDS = [
     "rp2040 status",
     "storage status",
+    "storage diag",
     "health",
 ]
 
@@ -159,10 +160,12 @@ def run_preflight(
 
     rp2040_status = results[0] if len(results) > 0 else {}
     storage_status = results[1] if len(results) > 1 else {}
-    health = results[2] if len(results) > 2 else {}
+    storage_diag = results[2] if len(results) > 2 else {}
+    health = results[3] if len(results) > 3 else {}
     classification = classify_preflight(rp2040_status, storage_status, uf2_candidates, artifact)
     storage_ok = storage_status.get("ok") is True
     health_ok = health.get("ok") is True
+    storage_diag_ok = storage_diag.get("ok") is True
     rp2040_status_ok = rp2040_status.get("ok") is True
     rp2040_status_optional_ok = rp2040_status_ok or classification["rp2040_uart_ready"]
     command_ok = rp2040_status_optional_ok and storage_ok and health_ok
@@ -180,12 +183,14 @@ def run_preflight(
         "serial_commands_ok": command_ok,
         "rp2040_status_ok": rp2040_status_ok,
         "rp2040_status_optional_ok": rp2040_status_optional_ok,
+        "storage_diag_ok": storage_diag_ok,
         "ready_for_sd_acceptance": classification["storage_file_gate_ready"],
         "classification": classification,
         "artifact": artifact,
         "candidate_volumes": uf2_candidates,
         "rp2040_status": rp2040_status,
         "storage_status": storage_status,
+        "storage_diag": storage_diag,
         "health": health,
         "results": results,
     }

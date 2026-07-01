@@ -52,11 +52,14 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "file_line_max" in header
     assert "file_chunk_max" in header
     assert "path_max" in header
+    assert "sd_probe_power" in header
+    assert "sd_probe_error" in header
     assert "s_status.file_ops_supported = sd->file_ops_supported" in source
     assert "s_status.atomic_rename_supported = sd->atomic_rename_supported" in source
     assert "s_status.file_line_max = sd->file_line_max" in source
     assert "s_status.file_chunk_max = sd->file_chunk_max" in source
     assert "s_status.path_max = sd->path_max" in source
+    assert "s_status.sd_probe_error = sd->probe_error" in source
     assert "D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in source
@@ -136,11 +139,13 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'ok_begin("storage status")' in console
     assert 'ok_begin("storage map-policy")' in console
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert 'cmd_storage_diag' in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
     assert 'ok_begin("storage map-tile-canary")' in console
     assert 'ok_begin("storage export-canary")' in console
     assert '"storage status"' in console
+    assert '"storage diag"' in console
     assert '"storage setup"' in console
     assert "storage setup confirm FORMAT-DESKOS-SD" in console
     assert "storage map-policy" in console
@@ -148,6 +153,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage map-tile-canary <token>" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
+    assert 'strcmp(line, "storage diag")' in console
     assert 'strcmp(line, "storage map-policy")' in console
     assert 'strcmp(line, "storage setup")' in console
     assert 'strcmp(line, "storage filecanary")' in console
@@ -207,6 +213,11 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"file_chunk_max\\":%lu' in console
     assert '\\"path_max\\":%lu' in console
     assert '\\"atomic_rename\\":%s' in console
+    assert '\\"probe_power\\":' in console
+    assert '\\"probe_error\\":%lu' in console
+    assert "d1l_rp2040_bridge_sd_diag" in console
+    assert '\\"formats_sd\\":false' in console
+    assert '\\"public_rf_tx\\":false' in console
     assert "D1L_MAP_TILE_CACHE_POLICY" in console
     assert "D1L_MAP_TILE_CACHE_PATH_TEMPLATE" in console
     assert "D1L_MAP_TILE_DOWNLOAD_STATE" in console

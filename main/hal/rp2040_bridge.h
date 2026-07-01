@@ -40,11 +40,44 @@ typedef struct {
     uint32_t file_line_max;
     uint32_t file_chunk_max;
     uint32_t path_max;
+    uint32_t probe_error;
+    uint32_t probe_data;
     esp_err_t last_error;
     char state[24];
     char filesystem[16];
     char note[96];
+    char probe_power[8];
+    char probe_mode[16];
 } d1l_rp2040_sd_status_t;
+
+typedef struct {
+    bool bridge_ready;
+    bool protocol_supported;
+    bool mount_selected;
+    bool response_truncated;
+    bool high_dedicated_present;
+    bool high_shared_present;
+    bool low_dedicated_present;
+    bool low_shared_present;
+    uint32_t spi_hz;
+    uint32_t high_dedicated_error;
+    uint32_t high_dedicated_data;
+    uint32_t high_dedicated_capacity_kb;
+    uint32_t high_shared_error;
+    uint32_t high_shared_data;
+    uint32_t high_shared_capacity_kb;
+    uint32_t low_dedicated_error;
+    uint32_t low_dedicated_data;
+    uint32_t low_dedicated_capacity_kb;
+    uint32_t low_shared_error;
+    uint32_t low_shared_data;
+    uint32_t low_shared_capacity_kb;
+    esp_err_t last_error;
+    char pins[40];
+    char selected_power[8];
+    char selected_mode[16];
+    char note[64];
+} d1l_rp2040_sd_diag_t;
 
 typedef struct {
     bool bridge_ready;
@@ -68,6 +101,7 @@ typedef struct {
 esp_err_t d1l_rp2040_bridge_init(void);
 esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status);
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
                                        const char *confirmation,
                                        uint32_t timeout_ms);

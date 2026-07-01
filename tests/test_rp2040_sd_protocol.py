@@ -9,6 +9,8 @@ from tools.rp2040_sd_protocol import (
     FILE_LINE_MAX,
     FILE_REPLY,
     FILE_REQUEST,
+    DIAG_REPLY,
+    DIAG_REQUEST,
     FORMAT_CONFIRMATION,
     FORMAT_REQUEST,
     FORMAT_REPLY,
@@ -78,6 +80,19 @@ def test_status_protocol_lines_cover_boot_states():
     assert ready["path_max"] == str(MAX_FILE_PATH_CHARS)
     assert ready["atomic_rename"] == "1"
     assert no_card["file_ops"] == "0"
+
+
+def test_diag_protocol_reports_probe_matrix_without_formatting():
+    diag = parse_tokens(reply_for_request(DIAG_REQUEST, SCENARIOS["no-card"]))
+
+    assert diag["prefix"] == DIAG_REPLY
+    assert diag["pins"] == "cs13-sck10-mosi11-miso12-pwr18"
+    assert diag["selected_power"] == "high"
+    assert diag["selected_mode"] == "dedicated"
+    assert diag["hd_p"] == "0"
+    assert diag["hs_p"] == "0"
+    assert diag["ld_p"] == "0"
+    assert diag["ls_p"] == "0"
 
 
 def test_format_protocol_requires_exact_confirmation():
