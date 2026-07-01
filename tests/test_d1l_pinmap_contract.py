@@ -57,6 +57,7 @@ def test_phase1_lvgl_uses_basic_flush_path():
     assert "CONFIG_LCD_AVOID_TEAR=y" not in defaults
     assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" not in defaults
     assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
+    assert "CONFIG_LV_MEM_CUSTOM=y" in defaults
     assert "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y" in defaults
     assert "# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set" in defaults
 
