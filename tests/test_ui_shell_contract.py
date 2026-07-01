@@ -220,6 +220,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "mark_messages_read": "mark_messages_read_event_cb",
         "open_public_history": "open_public_history_event_cb",
         "open_public_search": "open_public_search_event_cb",
+        "open_message_detail": "open_message_detail_event_cb",
         "edit_public_search": "s_public_search_textarea",
         "apply_public_search": "apply_public_search_event_cb",
         "open_dm_thread": "open_dm_thread_event_cb",
@@ -333,6 +334,23 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "open_dm_compose_for_contact(&contact)" in source
     assert 'create_button(s_dm_thread_sheet, "Reply"' in source
     assert "hide_dm_thread_sheet()" in source
+
+
+def test_public_message_detail_sheet_opens_from_public_rows():
+    source = read("main/ui/ui_phase1.c")
+    assert "static lv_obj_t *s_message_detail_sheet" in source
+    assert "static d1l_message_entry_t s_message_detail_message" in source
+    assert "render_message_detail_sheet" in source
+    assert "open_message_detail_event_cb" in source
+    assert "close_message_detail_event_cb" in source
+    assert "create_message_detail_sheet" in source
+    assert "lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED" in source
+    assert '"Message Detail"' in source
+    assert '"Sender"' in source
+    assert '"Signal rssi %d  snr %s%d.%d"' in source
+    assert '"Path hash %u byte  hops %u  uptime %lums"' in source
+    assert "message_delivery_label" in source
+    assert "hide_message_detail_sheet()" in source
 
 
 def test_nodes_screen_renders_heard_node_rows():

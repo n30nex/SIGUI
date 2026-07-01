@@ -107,6 +107,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
+    assert {"Message Detail", "Sender", "Message", "Signal", "Path", "Close"} <= labels_by_view["message_detail_sheet"]
     assert {"Contact Detail", "Trace", "Edit", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Edit Contact", "Contact alias", "Save", "Forget", "Close"} <= labels_by_view["contact_edit_sheet"]
@@ -138,6 +139,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "lock_overlay_unlock",
         "public_compose_and_send",
         "public_history_search",
+        "public_message_detail",
         "dm_thread_read_and_reply",
         "node_detail_inspection",
         "contact_detail_management",
@@ -150,6 +152,8 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
 
     assert actions_by_view["messages"]["open_public_compose"]["destination"] == "compose_sheet"
     assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
+    assert actions_by_view["messages"]["open_message_detail"]["destination"] == "message_detail_sheet"
+    assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["map"]["open_map_location_picker"]["destination"] == "map_location_sheet"
     assert actions_by_view["map_location_sheet"]["drop_d1l_pin"]["destination"] == "map"

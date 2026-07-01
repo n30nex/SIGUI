@@ -813,7 +813,16 @@ def render_messages(s: Surface, snap: Snapshot):
     for msg in snap.public_messages:
         if y + 30 > 252:
             break
-        draw_row(s, (28, y, 452, y + 30), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
+        draw_row(
+            s,
+            (28, y, 452, y + 30),
+            f"{msg.source}: {msg.text}",
+            msg.meta,
+            "new" if msg.unread else None,
+            target_label=f"Public row {msg.source}",
+            action="open_message_detail",
+            destination="message_detail_sheet",
+        )
         y += 34
         public_rendered += 1
     s.round_rect((16, 270, 464, 402))
@@ -1123,6 +1132,21 @@ def render_public_search_sheet(s: Surface, snap: Snapshot):
     draw_dock(s, "Messages")
 
 
+def render_message_detail_sheet(s: Surface, snap: Snapshot):
+    msg = snap.public_messages[1] if len(snap.public_messages) > 1 else snap.public_messages[0]
+    draw_sheet_frame(s, "Message Detail", msg.source)
+    s.text("Sender", (44, 154, 160, 174), 13, MUTED, True)
+    s.text(f"{msg.source}  {msg.meta}", (44, 176, 436, 200), 17, TEXT)
+    s.text("Message", (44, 212, 160, 232), 13, MUTED, True)
+    s.text(msg.text, (44, 234, 436, 260), 16, TEXT)
+    s.text("Signal", (44, 276, 160, 296), 13, MUTED, True)
+    s.text("RSSI -41  SNR 30", (44, 298, 436, 318), 15, GREEN)
+    s.text("Path", (44, 330, 160, 350), 13, MUTED, True)
+    s.text("hash 2 byte  hops 1  retained locally", (44, 352, 436, 372), 14, BLUE)
+    draw_button(s, (44, 382, 200, 412), "Close", MUTED, action="close_message_detail", destination="messages")
+    draw_dock(s, "Messages")
+
+
 def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
     draw_sheet_frame(s, "Contact Detail", contact.name)
@@ -1404,6 +1428,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "node_detail_sheet": render_node_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
+    "message_detail_sheet": render_message_detail_sheet,
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
@@ -1465,6 +1490,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
+    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"),
@@ -1514,6 +1540,13 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "public_history_sheet", "action": "open_public_search", "destination": "public_search_sheet"},
             {"view": "public_search_sheet", "action": "edit_public_search"},
             {"view": "public_search_sheet", "action": "apply_public_search", "destination": "public_history_sheet"},
+        ),
+    },
+    {
+        "name": "public_message_detail",
+        "steps": (
+            {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {"view": "message_detail_sheet", "action": "close_message_detail", "destination": "messages"},
         ),
     },
     {

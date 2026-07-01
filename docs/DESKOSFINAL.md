@@ -1194,7 +1194,7 @@ Final package must include:
 - [ ] Build compose bar/sheet with keyboard and visible Send.
 - [x] Add char counter.
 - [ ] Add reply-from-message tap behavior.
-- [ ] Add message detail with sender/path.
+- [x] Add message detail with sender/path.
 - [ ] Add DM conversation list and thread.
 
 ### Nodes

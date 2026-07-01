@@ -60,6 +60,9 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "d1l_message_store_copy_recent" in app_source
     assert "d1l_message_store_query(out_entries, max_entries, query)" in app_source
     assert "render_message_row" in ui
+    assert "render_message_detail_sheet" in ui
+    assert "open_message_detail_event_cb" in ui
+    assert "s_message_detail_message = *entry" in ui
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
     assert "static lv_obj_t *s_compose_counter" in ui
     assert "update_compose_counter()" in ui
