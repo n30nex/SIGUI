@@ -83,6 +83,26 @@ def mount_required_storage_line() -> str:
     )
 
 
+def mount_pending_storage_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"mount_pending","present":false,"mounted":false,'
+        '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
+        '"last_error":"ESP_OK"},'
+        '"data_backend":"nvs","export_backend":"serial"}\n'
+    )
+
+
+def no_card_storage_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"no_card","present":false,"mounted":false,'
+        '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
+        '"last_error":"ESP_OK"},'
+        '"data_backend":"nvs","export_backend":"serial"}\n'
+    )
+
+
 def storage_mount_pending_line() -> str:
     return (
         '{"schema":1,"ok":false,"cmd":"storage mount","code":"ESP_ERR_TIMEOUT",'
@@ -278,6 +298,31 @@ def test_preflight_classifies_explicit_mount_timeout():
     assert report["storage_mount_ok"] is False
 
 
+def test_preflight_classifies_async_mount_pending():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "mount_pending",
+                "present": False,
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+            },
+        },
+        [],
+        {"ok": True},
+        None,
+        {"ok": True, "cmd": "storage mount"},
+    )
+
+    assert report["state"] == "sd_mount_pending"
+    assert report["next_action"] == "wait_for_storage_mount_or_reset_rp2040_bridge"
+    assert report["storage_mount_ok"] is True
+
+
 def test_preflight_classifies_no_card_with_diag_pending_as_bridge_flash_needed():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
@@ -422,3 +467,59 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
     assert report["storage_diag_ok"] is True
     assert report["ready_for_sd_acceptance"] is True
     assert report["classification"]["state"] == "sd_bridge_ready"
+
+
+def test_run_preflight_polls_safe_status_while_mount_pending(monkeypatch):
+    ser = CommandAwareSerial(
+        {
+            "rp2040 status": ['{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n'],
+            "rp2040 ping": [rp2040_ping_line()],
+            "storage status": [
+                mount_required_storage_line(),
+                mount_pending_storage_line(),
+                mount_pending_storage_line(),
+                no_card_storage_line(),
+            ],
+            "storage mount": [
+                '{"schema":1,"ok":true,"cmd":"storage mount","public_rf_tx":false,"formats_sd":false,'
+                '"sd":{"state":"mount_pending","rp2040_protocol_supported":true}}\n'
+            ],
+            "storage diag": [
+                '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
+                '"mount_selected":false,"public_rf_tx":false,"formats_sd":false}\n'
+            ],
+            "health": ['{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'],
+        }
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is True
+    assert report["storage_mount_poll_count"] == 2
+    assert report["storage_status"]["sd"]["state"] == "no_card"
+    assert report["classification"]["state"] == "sd_card_not_present"
+    assert ser.writes == [
+        "rp2040 status\n",
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage mount\n",
+        "storage status\n",
+        "storage status\n",
+        "storage status\n",
+        "storage diag\n",
+        "health\n",
+    ]

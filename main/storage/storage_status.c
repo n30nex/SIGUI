@@ -102,6 +102,9 @@ static const char *stable_sd_state(const char *state)
     if (strcmp(state, "mount_required") == 0) {
         return "mount_required";
     }
+    if (strcmp(state, "mount_pending") == 0) {
+        return "mount_pending";
+    }
     if (strcmp(state, "protocol_pending") == 0) {
         return "protocol_pending";
     }
@@ -178,6 +181,10 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.setup_action = "run_storage_mount";
         s_status.format_action = "not_available";
         s_status.note = "RP2040 SD bridge is ready; run storage mount to check the inserted card before enabling SD data storage";
+    } else if (strcmp(s_status.sd_state, "mount_pending") == 0) {
+        s_status.setup_action = "wait_for_storage_mount";
+        s_status.format_action = "not_available";
+        s_status.note = "RP2040 SD bridge is checking the inserted card; onboard NVS remains the default data store until the mount completes";
     } else if (!sd->card_present) {
         s_status.setup_action = "insert_card";
         s_status.format_action = "not_available";

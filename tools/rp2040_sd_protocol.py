@@ -180,6 +180,18 @@ SCENARIOS: dict[str, SdScenario] = {
         free_kb=0,
         note="mount_not_checked",
     ),
+    "mount-pending": SdScenario(
+        state="mount_pending",
+        present=False,
+        mounted=False,
+        deskos=False,
+        fs="none",
+        format_required=False,
+        format_supported=False,
+        capacity_kb=0,
+        free_kb=0,
+        note="mount_in_progress",
+    ),
 }
 
 

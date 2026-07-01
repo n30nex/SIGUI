@@ -31,6 +31,8 @@ PREFLIGHT_COMMANDS = [
     "storage diag",
     "health",
 ]
+MOUNT_POLL_ATTEMPTS = 10
+MOUNT_POLL_INTERVAL_SECONDS = 2.0
 
 
 def dry_run_report(artifact_dir: str | None = None) -> dict:
@@ -94,6 +96,14 @@ def storage_file_gate_ready(storage_status: dict) -> bool:
     )
 
 
+def sd_state(result: dict) -> str | None:
+    sd = result.get("sd")
+    if not isinstance(sd, dict):
+        return None
+    state = sd.get("state")
+    return state if isinstance(state, str) else None
+
+
 def classify_preflight(
     rp2040_status: dict,
     rp2040_ping: dict,
@@ -122,6 +132,9 @@ def classify_preflight(
     if file_gate_ready:
         state = "sd_bridge_ready"
         next_action = "run_sd_file_and_export_acceptance"
+    elif protocol_supported and sd.get("state") == "mount_pending":
+        state = "sd_mount_pending"
+        next_action = "wait_for_storage_mount_or_reset_rp2040_bridge"
     elif mount_attempted and mount_ok is False:
         state = "sd_mount_pending"
         next_action = "inspect_rp2040_sd_mount_timeout_and_reset_bridge"
@@ -187,20 +200,35 @@ def run_preflight(
     artifact = verify_optional_artifact(artifact_dir, expected_sha256)
     uf2_candidates = candidate_volumes()
     results: list[dict] = []
+    commands_run: list[str] = []
+
+    def send_command(ser, command: str, command_timeout: float) -> dict:
+        commands_run.append(command)
+        result = send_console_command(ser, command, command_timeout)
+        results.append(result)
+        return result
+
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
-        for command in PREFLIGHT_COMMANDS:
-            command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
-            results.append(send_console_command(ser, command, command_timeout))
-
-    rp2040_status = results[0] if len(results) > 0 else {}
-    rp2040_ping = results[1] if len(results) > 1 else {}
-    initial_storage_status = results[2] if len(results) > 2 else {}
-    storage_mount = results[3] if len(results) > 3 else {}
-    storage_status = results[4] if len(results) > 4 else initial_storage_status
-    storage_diag = results[5] if len(results) > 5 else {}
-    health = results[6] if len(results) > 6 else {}
+        rp2040_status = send_command(ser, "rp2040 status", timeout)
+        rp2040_ping = send_command(ser, "rp2040 ping", timeout)
+        initial_storage_status = send_command(ser, "storage status", timeout)
+        command = "storage mount"
+        command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
+        storage_mount = send_command(ser, command, command_timeout)
+        storage_status = send_command(ser, "storage status", timeout)
+        post_mount_statuses = [storage_status]
+        for _attempt in range(MOUNT_POLL_ATTEMPTS):
+            if sd_state(storage_status) != "mount_pending":
+                break
+            time.sleep(MOUNT_POLL_INTERVAL_SECONDS)
+            storage_status = send_command(ser, "storage status", timeout)
+            post_mount_statuses.append(storage_status)
+        command = "storage diag"
+        command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
+        storage_diag = send_command(ser, command, command_timeout)
+        health = send_command(ser, "health", timeout)
     classification = classify_preflight(
         rp2040_status,
         rp2040_ping,
@@ -224,7 +252,7 @@ def run_preflight(
         "mode": "hardware-preflight",
         "port": port,
         "baud": baud,
-        "commands": PREFLIGHT_COMMANDS,
+        "commands": commands_run,
         "public_rf_tx": False,
         "formats_sd": False,
         "copies_uf2": False,
@@ -244,6 +272,8 @@ def run_preflight(
         "initial_storage_status": initial_storage_status,
         "storage_mount": storage_mount,
         "storage_status": storage_status,
+        "post_mount_storage_statuses": post_mount_statuses,
+        "storage_mount_poll_count": max(0, len(post_mount_statuses) - 1),
         "storage_diag": storage_diag,
         "health": health,
         "results": results,

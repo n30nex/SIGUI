@@ -102,11 +102,15 @@ def test_ping_protocol_is_fast_and_never_touches_sd():
 
 def test_mount_protocol_is_explicit_sd_touch_request():
     status = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["mount-required"]))
+    pending = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["mount-pending"]))
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"]))
 
     assert status["prefix"] == STATUS_REPLY
     assert status["state"] == "mount_required"
     assert status["present"] == "0"
+    assert pending["prefix"] == STATUS_REPLY
+    assert pending["state"] == "mount_pending"
+    assert pending["file_ops"] == "0"
     assert mounted["prefix"] == MOUNT_REPLY
     assert mounted["state"] == "ready"
     assert mounted["present"] == "1"

@@ -20,7 +20,7 @@ DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 format_requir
 
 Required tokens:
 
-- `state`: stable machine state. Use `mount_required`, `no_card`, `ready`, `setup_required`, `unformatted`, or `error` when possible.
+- `state`: stable machine state. Use `mount_required`, `mount_pending`, `no_card`, `ready`, `setup_required`, `unformatted`, or `error` when possible.
 - `present`: `1` when a card is electrically present.
 - `mounted`: `1` when the filesystem is mounted and usable.
 - `deskos`: `1` when the `/deskos` data root exists or has been created.
@@ -44,9 +44,10 @@ Values must not contain spaces. Use underscores in `note`.
 
 On the D1L RP2040 bridge, status is safe to call from boot and UI polling. It
 does not probe, mount, format, or write SD. Before any explicit mount result is
-cached, the bridge reports `state=mount_required note=mount_not_checked`. After
-`DESKOS_SD_MOUNT`, format, or file operations, status returns the cached latest
-SD state.
+cached, the bridge reports `state=mount_required note=mount_not_checked`. While
+an explicit mount worker is running, status may report `state=mount_pending`.
+After `DESKOS_SD_MOUNT`, format, or file operations complete, status returns the
+cached latest SD state.
 
 ## Mount Request
 
@@ -57,7 +58,11 @@ ESP32 sends this explicit SD-touch command when the operator runs
 DESKOS_SD_MOUNT
 ```
 
-RP2040 replies with one status-shaped line using the mount prefix:
+RP2040 replies immediately with one status-shaped line using the mount prefix.
+If the SD stack is still probing or mounting the card, the line may report
+`state=mount_pending note=mount_started`; the ESP32 should poll safe
+`DESKOS_SD_STATUS` until the cached state becomes `ready`, `setup_required`,
+`no_card`, or `error`.
 
 ```text
 DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1

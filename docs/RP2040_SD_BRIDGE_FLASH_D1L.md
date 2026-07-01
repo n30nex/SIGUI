@@ -44,7 +44,8 @@ prove the flashed bridge app answers without touching SD, then uses explicit
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
 port with `rp2040 status`, `rp2040 ping`, safe `storage status`, explicit
-`storage mount`, safe `storage status`, optional `storage diag`, and `health`,
+`storage mount`, bounded safe-status polling while `state="mount_pending"`,
+optional `storage diag`, and `health`,
 and reports the next safe action as JSON. `rp2040 ping` must report
 `sd_touched=false`; `storage mount` and `storage diag` are non-formatting and
 may be unavailable on older bridge firmware. If preflight reports

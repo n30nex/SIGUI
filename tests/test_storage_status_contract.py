@@ -42,6 +42,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert 's_status.sd_state = "pending_bridge"' in source
     assert '"protocol_pending"' in source
     assert '"bridge_protocol_pending"' in source
+    assert '"mount_pending"' in source
+    assert '"wait_for_storage_mount"' in source
     assert "d1l_rp2040_bridge_probe_sd(&sd, timeout_ms)" in source
     assert "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)" in source
     assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in source

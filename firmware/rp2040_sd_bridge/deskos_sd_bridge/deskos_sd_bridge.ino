@@ -72,10 +72,27 @@ struct CardProbe {
     uint8_t options;
 };
 
+struct DiagSnapshot {
+    CardProbe high_dedicated;
+    CardProbe high_shared;
+    CardProbe low_dedicated;
+    CardProbe low_shared;
+    const char *selected_power;
+    const char *selected_mode;
+    bool mount_selected;
+    bool valid;
+};
+
 struct LineRx {
     char line[RX_LINE_MAX];
     size_t len;
     bool drop_until_newline;
+};
+
+enum SdWorkerRequest : uint8_t {
+    SD_WORKER_NONE = 0,
+    SD_WORKER_MOUNT = 1,
+    SD_WORKER_DIAG = 2,
 };
 
 LineRx bridge_rx = {{0}, 0, false};
@@ -85,6 +102,17 @@ bool s_sd_power_high = true;
 uint8_t s_sd_spi_options = DEDICATED_SPI;
 SdSnapshot s_cached_snapshot = {};
 bool s_cached_snapshot_valid = false;
+SdSnapshot s_worker_snapshot = {};
+DiagSnapshot s_worker_diag = {};
+DiagSnapshot s_cached_diag = {};
+bool s_cached_diag_valid = false;
+volatile uint8_t s_worker_request = SD_WORKER_NONE;
+volatile bool s_worker_busy = false;
+volatile bool s_mount_worker_completed = false;
+volatile uint32_t s_worker_snapshot_revision = 0;
+volatile uint32_t s_worker_diag_revision = 0;
+uint32_t s_seen_snapshot_revision = 0;
+uint32_t s_seen_diag_revision = 0;
 
 uint32_t clamp_kb(uint64_t bytes) {
     const uint64_t kb = bytes / 1024ULL;
@@ -128,6 +156,20 @@ bool mount_sd_with_power(bool power_high) {
 
 bool mount_sd() {
     return mount_sd_with_power(s_sd_power_high);
+}
+
+CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options) {
+    CardProbe probe = {
+        false,
+        0,
+        0xFF,
+        0,
+        power,
+        mode,
+        power_high,
+        options,
+    };
+    return probe;
 }
 
 SdSpiConfig sd_spi_config(uint8_t options) {
@@ -223,6 +265,49 @@ SdSnapshot cache_status(const SdSnapshot &snapshot) {
     return snapshot;
 }
 
+SdSnapshot pending_snapshot(const char *note) {
+    SdSnapshot snapshot = make_snapshot("mount_pending", note);
+    snapshot.probe_power = power_token(s_sd_power_high);
+    snapshot.probe_mode = spi_mode_token(s_sd_spi_options);
+    return snapshot;
+}
+
+void publish_worker_snapshot(const SdSnapshot &snapshot) {
+    s_worker_snapshot = snapshot;
+    ++s_worker_snapshot_revision;
+}
+
+void publish_worker_diag(const DiagSnapshot &diag) {
+    s_worker_diag = diag;
+    ++s_worker_diag_revision;
+}
+
+void refresh_worker_results() {
+    const uint32_t snapshot_revision = s_worker_snapshot_revision;
+    if (s_seen_snapshot_revision != snapshot_revision) {
+        s_seen_snapshot_revision = snapshot_revision;
+        (void)cache_status(s_worker_snapshot);
+    }
+    const uint32_t diag_revision = s_worker_diag_revision;
+    if (s_seen_diag_revision != diag_revision) {
+        s_seen_diag_revision = diag_revision;
+        s_cached_diag = s_worker_diag;
+        s_cached_diag_valid = true;
+    }
+}
+
+bool start_sd_worker(SdWorkerRequest request) {
+    refresh_worker_results();
+    if (request == SD_WORKER_NONE || s_worker_busy || s_worker_request != SD_WORKER_NONE) {
+        return false;
+    }
+    if (request == SD_WORKER_MOUNT) {
+        s_mount_worker_completed = false;
+    }
+    s_worker_request = request;
+    return true;
+}
+
 const char *fat_label() {
     switch (SD.fatType()) {
     case 12:
@@ -249,20 +334,41 @@ void fill_capacity(SdSnapshot &snapshot) {
     }
 }
 
-SdSnapshot mount_status() {
+SdSnapshot mount_status_blocking() {
     SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
-    if (!mount_sd()) {
-        CardProbe probe = default_probe();
-        apply_probe_to_snapshot(snapshot, probe);
-        if (!probe.present) {
+    CardProbe probe = default_probe();
+    if (!probe.present) {
+        CardProbe probes[] = {
+            probe,
+            probe_card(SHARED_SPI, true),
+            probe_card(DEDICATED_SPI, false),
+            probe_card(SHARED_SPI, false),
+        };
+        const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
+        if (!selected) {
+            apply_probe_to_snapshot(snapshot, probe);
             s_sd_power_high = true;
             s_sd_spi_options = DEDICATED_SPI;
             configure_sd_bus();
-            return cache_status(snapshot);
+            return snapshot;
         }
+        probe = *selected;
+    }
 
+    s_sd_power_high = probe.power_high;
+    s_sd_spi_options = probe.options;
+    apply_probe_to_snapshot(snapshot, probe);
+    snapshot.state = "mount_pending";
+    snapshot.present = true;
+    snapshot.fs = "unknown";
+    snapshot.format_supported = true;
+    snapshot.capacity_kb = probe.capacity_kb;
+    snapshot.note = "card_detected_mounting";
+    publish_worker_snapshot(snapshot);
+
+    if (!mount_sd()) {
         snapshot.state = "setup_required";
         snapshot.present = true;
         snapshot.fs = "unknown";
@@ -270,7 +376,7 @@ SdSnapshot mount_status() {
         snapshot.format_supported = true;
         snapshot.capacity_kb = probe.capacity_kb;
         snapshot.note = "format_required";
-        return cache_status(snapshot);
+        return snapshot;
     }
 
     CardProbe mounted_probe = {
@@ -303,7 +409,20 @@ SdSnapshot mount_status() {
         snapshot.note = "deskos_root_unavailable";
     }
 
-    return cache_status(snapshot);
+    return snapshot;
+}
+
+SdSnapshot mount_status() {
+    refresh_worker_results();
+    if (s_mount_worker_completed && !s_worker_busy && s_worker_request == SD_WORKER_NONE &&
+        s_cached_snapshot_valid) {
+        s_mount_worker_completed = false;
+        return s_cached_snapshot;
+    }
+    if (start_sd_worker(SD_WORKER_MOUNT)) {
+        return cache_status(pending_snapshot("mount_started"));
+    }
+    return cache_status(pending_snapshot(s_worker_busy ? "mount_in_progress" : "mount_queued"));
 }
 
 bool format_card() {
@@ -342,6 +461,45 @@ bool format_card() {
         return false;
     }
     return mount_sd() && (SD.exists(DESKOS_ROOT) || SD.mkdir(DESKOS_ROOT));
+}
+
+DiagSnapshot pending_diag_snapshot() {
+    DiagSnapshot diag = {
+        empty_probe("high", "dedicated", true, DEDICATED_SPI),
+        empty_probe("high", "shared", true, SHARED_SPI),
+        empty_probe("low", "dedicated", false, DEDICATED_SPI),
+        empty_probe("low", "shared", false, SHARED_SPI),
+        "pending",
+        "pending",
+        false,
+        false,
+    };
+    return diag;
+}
+
+DiagSnapshot diag_status_blocking() {
+    DiagSnapshot diag = pending_diag_snapshot();
+    diag.high_dedicated = probe_card(DEDICATED_SPI, true);
+    diag.high_shared = probe_card(SHARED_SPI, true);
+    diag.low_dedicated = probe_card(DEDICATED_SPI, false);
+    diag.low_shared = probe_card(SHARED_SPI, false);
+    const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
+    const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
+    if (selected) {
+        s_sd_power_high = selected->power_high;
+        s_sd_spi_options = selected->options;
+    } else {
+        s_sd_power_high = true;
+        s_sd_spi_options = DEDICATED_SPI;
+    }
+    diag.selected_power = power_token(s_sd_power_high);
+    diag.selected_mode = spi_mode_token(s_sd_spi_options);
+    diag.mount_selected = selected ? mount_sd() : false;
+    diag.valid = true;
+    if (!selected) {
+        configure_sd_bus();
+    }
+    return diag;
 }
 
 String bool_token(bool value) {
@@ -689,43 +847,37 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
     line += String(static_cast<unsigned long>(probe.capacity_kb));
 }
 
-void send_diag() {
-    CardProbe high_dedicated = probe_card(DEDICATED_SPI, true);
-    CardProbe high_shared = probe_card(SHARED_SPI, true);
-    CardProbe low_dedicated = probe_card(DEDICATED_SPI, false);
-    CardProbe low_shared = probe_card(SHARED_SPI, false);
-    const CardProbe probes[] = {high_dedicated, high_shared, low_dedicated, low_shared};
-    const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-    if (selected) {
-        s_sd_power_high = selected->power_high;
-        s_sd_spi_options = selected->options;
-    } else {
-        s_sd_power_high = true;
-        s_sd_spi_options = DEDICATED_SPI;
-    }
-    const bool mount_selected = selected ? mount_sd() : false;
-    if (!selected) {
-        configure_sd_bus();
-    }
-
+void send_diag_snapshot(const DiagSnapshot &diag) {
     String line(DIAG_REPLY);
     line += " pins=cs13-sck10-mosi11-miso12-pwr18";
     line += " hz=";
     line += String(static_cast<unsigned long>(SD_SPI_HZ));
     line += " selected_power=";
-    line += power_token(s_sd_power_high);
+    line += diag.selected_power;
     line += " selected_mode=";
-    line += spi_mode_token(s_sd_spi_options);
+    line += diag.selected_mode;
     line += " mount_selected=";
-    line += bool_token(mount_selected);
-    append_probe_tokens(line, "hd", high_dedicated);
-    append_probe_tokens(line, "hs", high_shared);
-    append_probe_tokens(line, "ld", low_dedicated);
-    append_probe_tokens(line, "ls", low_shared);
+    line += bool_token(diag.mount_selected);
+    append_probe_tokens(line, "hd", diag.high_dedicated);
+    append_probe_tokens(line, "hs", diag.high_shared);
+    append_probe_tokens(line, "ld", diag.low_dedicated);
+    append_probe_tokens(line, "ls", diag.low_shared);
     reply_stream->println(line);
 }
 
+void send_diag() {
+    refresh_worker_results();
+    if (s_cached_diag_valid && !s_worker_busy && s_worker_request == SD_WORKER_NONE) {
+        send_diag_snapshot(s_cached_diag);
+        s_cached_diag_valid = false;
+        return;
+    }
+    (void)start_sd_worker(SD_WORKER_DIAG);
+    send_diag_snapshot(pending_diag_snapshot());
+}
+
 void send_status() {
+    refresh_worker_results();
     send_snapshot(*reply_stream, STATUS_REPLY, current_status());
 }
 
@@ -758,7 +910,7 @@ void send_format_result(const char *phrase) {
     }
 
     if (format_card()) {
-        SdSnapshot formatted = mount_status();
+        SdSnapshot formatted = mount_status_blocking();
         formatted.state = "ready";
         formatted.mounted = true;
         formatted.deskos = true;
@@ -1245,6 +1397,24 @@ void poll_stream(Stream &in, Stream &out, LineRx &rx) {
     }
 }
 
+void sd_worker_loop_once() {
+    const uint8_t request = s_worker_request;
+    if (request == SD_WORKER_NONE || s_worker_busy) {
+        delay(2);
+        return;
+    }
+
+    s_worker_busy = true;
+    s_worker_request = SD_WORKER_NONE;
+    if (request == SD_WORKER_MOUNT) {
+        publish_worker_snapshot(mount_status_blocking());
+        s_mount_worker_completed = true;
+    } else if (request == SD_WORKER_DIAG) {
+        publish_worker_diag(diag_status_blocking());
+    }
+    s_worker_busy = false;
+}
+
 } // namespace
 
 void setup() {
@@ -1261,4 +1431,12 @@ void loop() {
     poll_stream(Serial1, Serial1, bridge_rx);
     poll_stream(Serial, Serial, usb_rx);
     delay(1);
+}
+
+void setup1() {
+    delay(100);
+}
+
+void loop1() {
+    sd_worker_loop_once();
 }

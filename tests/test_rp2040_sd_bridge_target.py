@@ -77,6 +77,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "ready",
         "setup_required",
         "mount_required",
+        "mount_pending",
         "confirmation_required",
         "error",
     ]:
@@ -85,6 +86,9 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "no_card",
         "ready",
         "mount_not_checked",
+        "mount_started",
+        "mount_in_progress",
+        "card_detected_mounting",
         "deskos_root_missing",
         "format_required",
         "format_complete",
@@ -111,6 +115,11 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "if (rx.drop_until_newline)" in sketch
     assert "poll_stream(Serial1, Serial1, bridge_rx)" in sketch
     assert "poll_stream(Serial, Serial, usb_rx)" in sketch
+    assert "void setup1()" in sketch
+    assert "void loop1()" in sketch
+    assert "sd_worker_loop_once()" in sketch
+    assert "SD_WORKER_MOUNT" in sketch
+    assert "SD_WORKER_DIAG" in sketch
     assert "Stream *reply_stream = &Serial1;" in sketch
     assert "send_ping" in sketch
     assert "send_mount_status" in sketch
