@@ -677,13 +677,13 @@ Tasks:
 - Developer guide. Status: first `docs/DEVELOPER_GUIDE_D1L.md` added.
 - Known limitations. Status: `docs/KNOWN_LIMITATIONS.md` is updated through the Phase 7 soak harness.
 - Screenshots/photos. Status: host simulator screenshots are generated locally and by GitHub Actions under `artifacts/ui-sim`; physical screen photos/manual visual review are still pending.
-- Final test report. Status: hardware validation notes are current through the 1-hour active Public soak, release package checkpoint, release-package sanity smoke, and COM12 `a1afd4b` evidence from Actions run `28569851955`: smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, supplemental DM route probe, RP2040 preflight, UF2 scan, and partial full RF acceptance. `scripts/release_gate_audit_d1l.py` still produces a fail-closed release gate artifact with `ready_for_public_release=false` while P0 evidence is missing. Final full-release report is pending the SD matrix, 12-hour idle/listening soak, manual UI review/photos, and the controlled inbound DM that turns the current partial RF artifact into a passing full RF artifact.
+- Final test report. Status: hardware validation notes are current through the 1-hour active Public soak, release package checkpoint, release-package sanity smoke, and COM12 `c0c20a2` evidence from Actions run `28593151178`: downloaded artifact checksum verification, esptool-verified flash, current smoke, 100-cycle tab abuse, scroll probe, and RP2040/SD preflight. The preflight is non-formatting but reports the inserted card as not FAT32/unmountable, so the SD matrix remains open. `scripts/release_gate_audit_d1l.py` still produces a fail-closed release gate artifact with `ready_for_public_release=false` while P0 evidence is missing. Final full-release report is pending the SD matrix, outbound/full RF proof, 12-hour idle/listening soak, and manual UI review/photos.
 
 Acceptance:
 
 - A new user can flash using documented steps and a specified COM port. Status: generated package scripts and user guide are in place; final release dry-run from CI artifact is pending.
 - A developer can rebuild from clean checkout. Status: CI builds firmware and packages release artifacts from checkout.
-- Final docs match actual behavior. Status: docs are updated through the `a1afd4b` release-gate audit slice; final audit must pass with `ready_for_public_release=true` before a production tag.
+- Final docs match actual behavior. Status: docs are updated through the `c0c20a2` COM12 release-gate progress slice; final audit must pass with `ready_for_public_release=true` before a production tag.
 
 ---
 

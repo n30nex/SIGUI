@@ -108,7 +108,8 @@
 - [x] Short active Public `test` soak passed on `COM7`.
 - [x] Post-touch-fix 3-minute idle soak passed on `COM12` with monotonic uptime, ready board/UI/mesh, and empty crashlog after start clear.
 - [x] Host-side fix for live-packet UI corruption added: RF-mutated packet/message/DM/node/route/contact stores and mesh-inspector scratch buffers now serialize reads/writes before UI snapshots.
-- [ ] Revalidate live-packet UI stability on COM12 with a downloaded GitHub Actions artifact, tab abuse, scroll probe, active RF traffic, and manual screen photos.
+- [x] Automated COM12 UI stability proof from downloaded Actions artifact `28593151178` / commit `c0c20a2`: current smoke, 100-cycle tab abuse, and scroll probe all pass after flashing the verified release package.
+- [ ] Manual screen photos and physical touch review for the newest COM12 UI stability build.
 - [ ] 12-hour idle/listening soak without crash.
 - [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
 
@@ -128,9 +129,10 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. The SD gate rejects obsolete format-capable preflight guidance and requires no-device-format evidence (`formats_sd=false`). Current working-tree local audit `artifacts/release-gate/d1l-release-gate-audit-phase-d-map-tiles-local.json` reports `ready_for_public_release=false` with six open P0 gates.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. The SD gate rejects obsolete format-capable preflight guidance and requires no-device-format evidence (`formats_sd=false`). Current working-tree local audit `artifacts/release-gate/d1l-release-gate-audit-c0c20a2-COM12-progress.json` reports `ready_for_public_release=false` with five open P0 gates.
 - [x] COM12 smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, supplemental route-probe proof, RP2040 preflight, UF2 scan, full RF partial proof, Actions checksums, and packaged notices captured for `a1afd4b` after flashing the verified Actions package from run `28569851955`.
-- [x] Current-commit COM12 smoke artifact captured for the latest release candidate commit `a1afd4b`; it must be refreshed again if any later commit becomes the final release commit.
+- [x] Current-commit COM12 smoke, 100-cycle tab abuse, and scroll-probe artifacts captured for release candidate commit `c0c20a2` after flashing the verified Actions package from run `28593151178`.
+- [x] Current COM12 RP2040/SD preflight captured for `c0c20a2`; it proves the bridge/protocol path is non-formatting (`formats_sd=false`) but keeps the SD matrix open because the card reports `raw_card_present_mount_failed` and needs FAT32 preparation on a computer.
 - [ ] Physical screen photos captured.
 - [x] Manual physical UI review artifact helper added: `scripts/manual_ui_review_d1l.py` requires current photos plus explicit display/touch/navigation/workflow confirmations before producing an `ok=true` review JSON.
 - [ ] Final full-duration soak evidence added.

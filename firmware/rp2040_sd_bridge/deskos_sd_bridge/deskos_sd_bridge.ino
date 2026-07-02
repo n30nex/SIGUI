@@ -177,8 +177,16 @@ void configure_sd_bus() {
 
 bool mount_sd_with_power(bool power_high) {
     configure_sd_bus(power_high);
+    SPI1.begin();
     SD.end(false);
-    return SD.begin(SD_CS_PIN, SPI1);
+    if (SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)) {
+        return true;
+    }
+    SD.end(false);
+    delay(50);
+    configure_sd_bus(power_high);
+    SPI1.begin();
+    return SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
 }
 
 bool mount_sd() {

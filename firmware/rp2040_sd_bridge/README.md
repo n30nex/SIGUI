@@ -90,7 +90,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
   report `state=mount_pending`, and runs a bounded raw SPI CMD0/CMD8/ACMD41
-  probe before any Arduino/SdFat filesystem mount call. No electrical card
+  probe before any Arduino/SdFat filesystem mount call. The filesystem mount
+  uses the same SPI1 pin map at the bridge's conservative 1 MHz SD clock and
+  retries once after resetting the SD wrapper state. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.
