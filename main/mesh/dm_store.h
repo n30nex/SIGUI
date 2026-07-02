@@ -46,6 +46,12 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
                               uint32_t ack_hash);
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry);
 d1l_dm_store_stats_t d1l_dm_store_stats(void);
+size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_entries,
+                                     size_t skip_newest, size_t *out_total_matches);
 size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries);
+size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
+                                     d1l_dm_entry_t *out_entries,
+                                     size_t max_entries, size_t skip_newest,
+                                     size_t *out_total_matches);
 size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
                                 size_t max_entries);

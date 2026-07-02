@@ -21,6 +21,11 @@
 #include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
+#define D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS 5U
+#define D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP 5U
+#define D1L_DM_THREAD_UI_INITIAL_ROWS 5U
+#define D1L_DM_THREAD_UI_LOAD_OLDER_STEP 5U
+
 static lv_disp_draw_buf_t s_draw_buf;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
@@ -36,6 +41,7 @@ static lv_obj_t *s_status_label;
 static lv_obj_t *s_identity_label;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_sheet;
+static lv_obj_t *s_dock;
 static lv_obj_t *s_compose_sheet;
 static lv_obj_t *s_compose_title;
 static lv_obj_t *s_compose_textarea;
@@ -53,10 +59,20 @@ static lv_obj_t *s_wifi_sheet;
 static lv_obj_t *s_wifi_ssid_textarea;
 static lv_obj_t *s_wifi_password_textarea;
 static lv_obj_t *s_wifi_keyboard;
+static d1l_wifi_scan_result_t s_wifi_scan_result;
+static bool s_wifi_scan_loaded;
 static lv_obj_t *s_ble_sheet;
 static lv_obj_t *s_display_sheet;
 static lv_obj_t *s_diagnostics_sheet;
 static lv_obj_t *s_map_location_sheet;
+static lv_obj_t *s_map_lat_textarea;
+static lv_obj_t *s_map_lon_textarea;
+static lv_obj_t *s_map_location_keyboard;
+static lv_obj_t *s_map_tiles_sheet;
+static lv_obj_t *s_map_tiles_url_textarea;
+static lv_obj_t *s_map_tiles_attribution_textarea;
+static lv_obj_t *s_map_tiles_zoom_label;
+static lv_obj_t *s_map_tiles_keyboard;
 static lv_obj_t *s_contact_detail_sheet;
 static lv_obj_t *s_contact_edit_sheet;
 static lv_obj_t *s_contact_edit_title;
@@ -81,9 +97,9 @@ static bool s_compose_dm;
 static bool s_messages_show_dms;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
-static int32_t s_map_picker_lat_e7 = 436532000L;
-static int32_t s_map_picker_lon_e7 = -793832000L;
-static uint8_t s_map_picker_zoom = 10U;
+static int32_t s_map_location_lat_e7 = 436532000L;
+static int32_t s_map_location_lon_e7 = -793832000L;
+static uint8_t s_map_tile_provider_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
 static bool s_map_location_prompt_seen;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
@@ -92,8 +108,9 @@ static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
-static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_APP_SNAPSHOT_PACKET_PREVIEW];
+static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_PACKET_LOG_CAPACITY];
 static size_t s_packet_filtered_count;
+static d1l_node_view_t s_node_rows[D1L_NODE_STORE_CAPACITY];
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
@@ -107,6 +124,14 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
+static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
+static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
+static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+static size_t s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+static size_t s_packet_row_limit = 100U;
+static size_t s_packet_skip_newest;
+static size_t s_packet_total_matches;
+static bool s_packet_sd_history_page;
 
 #if CONFIG_FREERTOS_UNICORE
 #define D1L_UI_TASK_CORE 0
@@ -129,6 +154,8 @@ static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_dm_thread_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_node_detail_event_cb(lv_event_t *event);
+static void node_detail_dm_event_cb(lv_event_t *event);
+static void open_node_dm_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
@@ -137,6 +164,10 @@ static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
 static void packet_pause_event_cb(lv_event_t *event);
+static void packet_load_older_event_cb(lv_event_t *event);
+static void packet_load_newer_event_cb(lv_event_t *event);
+static void public_history_load_older_event_cb(lv_event_t *event);
+static void dm_thread_load_older_event_cb(lv_event_t *event);
 static void packet_detail_mode_event_cb(lv_event_t *event);
 static void open_radio_settings_event_cb(lv_event_t *event);
 static void open_storage_sheet_event_cb(lv_event_t *event);
@@ -173,24 +204,17 @@ typedef enum {
     D1L_RADIO_EDIT_RX_BOOST,
 } d1l_radio_edit_action_t;
 
-typedef enum {
-    D1L_MAP_PICKER_LAT_UP = 0,
-    D1L_MAP_PICKER_LAT_DOWN,
-    D1L_MAP_PICKER_LON_DOWN,
-    D1L_MAP_PICKER_LON_UP,
-    D1L_MAP_PICKER_ZOOM_OUT,
-    D1L_MAP_PICKER_ZOOM_IN,
-} d1l_map_picker_action_t;
-
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static bool s_tab_switch_pending = false;
 static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
+static bool s_message_detail_advanced;
 
 static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
+static void show_public_history_sheet(void);
 static void render_packet_detail_sheet(void);
 static void render_radio_settings_sheet(void);
 static void render_storage_sheet(void);
@@ -199,13 +223,18 @@ static void render_ble_sheet(void);
 static void render_display_sheet(void);
 static void render_diagnostics_sheet(void);
 static void render_map_location_sheet(void);
+static void render_map_tiles_sheet(void);
 static void create_contact_edit_sheet(lv_obj_t *screen);
 static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
 static void open_map_location_sheet_event_cb(lv_event_t *event);
+static void open_map_tiles_sheet_event_cb(lv_event_t *event);
 static const char *home_sd_state(const d1l_app_snapshot_t *snapshot);
 static const char *packet_filter_direction(void);
 static const char *packet_filter_kind(void);
+static void message_detail_mode_event_cb(lv_event_t *event);
+static void map_location_keyboard_event_cb(lv_event_t *event);
+static void map_tiles_keyboard_event_cb(lv_event_t *event);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -566,6 +595,18 @@ static void show_toast_text(const char *text, bool ok)
     s_toast_until = lv_tick_get() + 3000U;
 }
 
+static void set_dock_hidden(bool hidden)
+{
+    if (!s_dock) {
+        return;
+    }
+    if (hidden) {
+        lv_obj_add_flag(s_dock, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void hide_sheet(void)
 {
     if (s_sheet) {
@@ -578,6 +619,7 @@ static void hide_compose_sheet(void)
     if (s_compose_sheet) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    set_dock_hidden(false);
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
 }
@@ -587,6 +629,7 @@ static void hide_public_history_sheet(void)
     if (s_public_history_sheet) {
         lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
 }
 
 static void hide_public_search_sheet(void)
@@ -601,6 +644,7 @@ static void hide_message_detail_sheet(void)
     if (s_message_detail_sheet) {
         lv_obj_add_flag(s_message_detail_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_message_detail_advanced = false;
     memset(&s_message_detail_message, 0, sizeof(s_message_detail_message));
 }
 
@@ -611,6 +655,7 @@ static void hide_dm_thread_sheet(void)
     }
     s_dm_thread_fingerprint[0] = '\0';
     s_dm_thread_alias[0] = '\0';
+    s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
 }
 
 static void hide_radio_settings_sheet(void)
@@ -632,6 +677,7 @@ static void hide_wifi_sheet(void)
     if (s_wifi_sheet) {
         lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    set_dock_hidden(false);
 }
 
 static void hide_ble_sheet(void)
@@ -660,6 +706,15 @@ static void hide_map_location_sheet(void)
     if (s_map_location_sheet) {
         lv_obj_add_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    set_dock_hidden(false);
+}
+
+static void hide_map_tiles_sheet(void)
+{
+    if (s_map_tiles_sheet) {
+        lv_obj_add_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
+    }
+    set_dock_hidden(false);
 }
 
 static void hide_contact_edit_sheet(void)
@@ -811,37 +866,75 @@ static void format_coord_e7(char *dest, size_t dest_size, int32_t value)
              (long long)(scaled % 10000000LL));
 }
 
-static int32_t clamp_map_coord_e7(int32_t value, int32_t min_value, int32_t max_value)
-{
-    if (value < min_value) {
-        return min_value;
-    }
-    if (value > max_value) {
-        return max_value;
-    }
-    return value;
-}
-
-static int32_t map_picker_step_e7(void)
-{
-    if (s_map_picker_zoom < 8U) {
-        return 1000000L;
-    }
-    if (s_map_picker_zoom < 12U) {
-        return 100000L;
-    }
-    return 10000L;
-}
-
-static void map_picker_from_snapshot(const d1l_app_snapshot_t *snapshot)
+static void map_location_from_snapshot(const d1l_app_snapshot_t *snapshot)
 {
     if (snapshot && snapshot->map_location_set) {
-        s_map_picker_lat_e7 = snapshot->map_lat_e7;
-        s_map_picker_lon_e7 = snapshot->map_lon_e7;
+        s_map_location_lat_e7 = snapshot->map_lat_e7;
+        s_map_location_lon_e7 = snapshot->map_lon_e7;
         return;
     }
-    s_map_picker_lat_e7 = 436532000L;
-    s_map_picker_lon_e7 = -793832000L;
+    s_map_location_lat_e7 = 436532000L;
+    s_map_location_lon_e7 = -793832000L;
+}
+
+static bool parse_coord_text_e7(const char *text, int32_t min_value, int32_t max_value,
+                                int32_t *out_value)
+{
+    if (!text || !out_value) {
+        return false;
+    }
+    while (*text == ' ' || *text == '\t') {
+        ++text;
+    }
+    bool negative = false;
+    if (*text == '-' || *text == '+') {
+        negative = (*text == '-');
+        ++text;
+    }
+
+    int64_t whole = 0;
+    int64_t fraction = 0;
+    uint8_t fraction_digits = 0;
+    bool saw_digit = false;
+    while (*text >= '0' && *text <= '9') {
+        saw_digit = true;
+        whole = (whole * 10) + (*text - '0');
+        if (whole > 180) {
+            return false;
+        }
+        ++text;
+    }
+    if (*text == '.') {
+        ++text;
+        while (*text >= '0' && *text <= '9') {
+            saw_digit = true;
+            if (fraction_digits < 7U) {
+                fraction = (fraction * 10) + (*text - '0');
+                fraction_digits++;
+            }
+            ++text;
+        }
+    }
+    while (fraction_digits < 7U) {
+        fraction *= 10;
+        fraction_digits++;
+    }
+    while (*text == ' ' || *text == '\t') {
+        ++text;
+    }
+    if (!saw_digit || *text != '\0') {
+        return false;
+    }
+
+    int64_t scaled = (whole * 10000000LL) + fraction;
+    if (negative) {
+        scaled = -scaled;
+    }
+    if (scaled < min_value || scaled > max_value) {
+        return false;
+    }
+    *out_value = (int32_t)scaled;
+    return true;
 }
 
 static void format_radio_profile_line(char *dest, size_t dest_size,
@@ -914,6 +1007,24 @@ static uint32_t node_role_color(const char *role)
         return 0x5EEAD4;
     }
     return 0x93C5FD;
+}
+
+static bool node_role_is_managed_service(const char *role)
+{
+    return role && (strcmp(role, "room") == 0 || strcmp(role, "repeater") == 0);
+}
+
+static bool node_view_can_dm(const d1l_node_view_t *view)
+{
+    return view &&
+           view->node.fingerprint[0] != '\0' &&
+           view->node.public_key_hex[0] != '\0' &&
+           !node_role_is_managed_service(view->role);
+}
+
+static bool node_view_management_gated(const d1l_node_view_t *view)
+{
+    return view && node_role_is_managed_service(view->role);
 }
 
 static lv_obj_t *render_node_role_badge(lv_obj_t *parent, const char *role,
@@ -1015,7 +1126,7 @@ static void render_home_message_preview(lv_obj_t *parent,
                                         int y,
                                         const d1l_home_message_preview_t *entry)
 {
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 50);
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 76);
     if (!row || !entry) {
         return;
     }
@@ -1035,17 +1146,20 @@ static void render_home_message_preview(lv_obj_t *parent,
     lv_obj_t *sender = create_label(row, entry->sender[0] ? entry->sender : "Message",
                                     entry->unread ? 0xFBBF24 :
                                     (entry->is_dm ? 0xA7F3D0 : 0x5EEAD4));
-    label_set_dot_width(sender, 190);
-    obj_align_if(sender, LV_ALIGN_TOP_LEFT, 0, 0);
+    label_set_dot_width(sender, 240);
+    lv_obj_set_pos(sender, 8, 4);
     lv_obj_t *badge = create_label(row, entry->status[0] ? entry->status : (entry->is_dm ? "DM" : "Public"),
                                    entry->is_dm ? 0xC4B5FD : 0x8EA0AE);
-    obj_align_if(badge, LV_ALIGN_TOP_RIGHT, 0, 0);
-    snprintf(meta, sizeof(meta), "%s  %s  rssi %d  snr %s  hops %u",
-             entry->text[0] ? entry->text : "No text",
-             age, entry->rssi_dbm, snr, entry->path_hops);
-    lv_obj_t *text = create_label(row, meta, 0xE5EDF5);
+    label_set_dot_width(badge, 118);
+    lv_obj_set_pos(badge, 292, 4);
+    lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "No text", 0xE5EDF5);
     label_set_dot_width(text, 392);
-    obj_align_if(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_pos(text, 8, 28);
+    snprintf(meta, sizeof(meta), "%s ago  rssi %d  snr %s  hops %u",
+             age, entry->rssi_dbm, snr, entry->path_hops);
+    lv_obj_t *details = create_label(row, meta, 0x8EA0AE);
+    label_set_dot_width(details, 392);
+    lv_obj_set_pos(details, 8, 52);
 }
 
 static void render_home_repeater_preview(lv_obj_t *parent,
@@ -1124,7 +1238,7 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     int y = 220;
     for (size_t i = 0; i < snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW; ++i) {
         render_home_message_preview(s_content, y, &snapshot->home_messages[i]);
-        y += 56;
+        y += 84;
     }
     if (snapshot->home_message_count == 0U) {
         lv_obj_t *empty = create_label(s_content, "No messages yet", 0x8EA0AE);
@@ -1173,7 +1287,7 @@ static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t
 
 static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_t *entry)
 {
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 72);
     if (!row) {
         return;
     }
@@ -1181,43 +1295,62 @@ static void render_message_row(lv_obj_t *parent, int y, const d1l_message_entry_
     lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
     const bool unread = entry->direction[0] == 'r' && entry->seq > s_snapshot.last_public_read_seq;
-    lv_obj_t *author = create_label(row, entry->author,
+    char snr[16];
+    char meta[96];
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
+    lv_obj_t *author = create_label(row, entry->author[0] ? entry->author : "unknown",
                                     unread ? 0xFBBF24 :
                                     (entry->direction[0] == 't' ? 0x93C5FD : 0x5EEAD4));
-    obj_align_if(author, LV_ALIGN_TOP_LEFT, 0, 0);
+    label_set_dot_width(author, 250);
+    lv_obj_set_pos(author, 8, 4);
     lv_obj_t *state = create_label(row,
                                    unread ? "new" :
                                    (entry->direction[0] == 't' ? "queued" : "received"),
                                    0x8EA0AE);
-    obj_align_if(state, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+    label_set_dot_width(state, 118);
+    lv_obj_set_pos(state, 292, 4);
+    lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
     label_set_dot_width(text, 392);
-    obj_align_if(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_pos(text, 8, 28);
+    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
+             entry->rssi_dbm, snr, entry->path_hops);
+    lv_obj_t *details = create_label(row, meta, 0x8EA0AE);
+    label_set_dot_width(details, 392);
+    lv_obj_set_pos(details, 8, 50);
 }
 
 static void render_dm_row(lv_obj_t *parent, int y, const d1l_dm_entry_t *entry, bool unread)
 {
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 54);
+    lv_obj_t *row = create_panel(parent, 18, y, 424, 72);
     if (!row) {
         return;
     }
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED, (void *)entry);
     lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *alias = create_label(row, entry->contact_alias,
+    char snr[16];
+    char meta[96];
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
+    lv_obj_t *alias = create_label(row, entry->contact_alias[0] ? entry->contact_alias : entry->contact_fingerprint,
                                     unread ? 0xFBBF24 :
                                     (entry->direction[0] == 't' ? 0xC4B5FD : 0xA7F3D0));
-    label_set_dot_width(alias, 190);
-    obj_align_if(alias, LV_ALIGN_TOP_LEFT, 0, 0);
+    label_set_dot_width(alias, 250);
+    lv_obj_set_pos(alias, 8, 4);
     lv_obj_t *state = create_label(row,
                                    unread ? "new" :
                                    (entry->acked ? "acked" :
                                     (entry->direction[0] == 't' ? "sent" : "received")),
                                    0x8EA0AE);
-    obj_align_if(state, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_t *text = create_label(row, entry->text, 0xE5EDF5);
+    label_set_dot_width(state, 118);
+    lv_obj_set_pos(state, 292, 4);
+    lv_obj_t *text = create_label(row, entry->text[0] ? entry->text : "-", 0xE5EDF5);
     label_set_dot_width(text, 392);
-    obj_align_if(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_pos(text, 8, 28);
+    snprintf(meta, sizeof(meta), "rssi %d  snr %s  hops %u",
+             entry->rssi_dbm, snr, entry->path_hops);
+    lv_obj_t *details = create_label(row, meta, 0x8EA0AE);
+    label_set_dot_width(details, 392);
+    lv_obj_set_pos(details, 8, 50);
 }
 
 static char packet_lower_ascii(char c)
@@ -1295,12 +1428,44 @@ static size_t refresh_packet_terminal_rows(void)
     if (s_packets_paused) {
         return s_packet_filtered_count;
     }
-    s_packet_filtered_count = d1l_packet_log_query(s_packet_filtered_packets,
-                                                   D1L_APP_SNAPSHOT_PACKET_PREVIEW,
-                                                   packet_filter_direction(),
-                                                   packet_filter_kind(),
-                                                   s_packet_search_text);
+    if (s_packet_row_limit < D1L_PACKET_UI_INITIAL_ROWS) {
+        s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
+    }
+    if (s_packet_row_limit > D1L_PACKET_LOG_CAPACITY) {
+        s_packet_row_limit = D1L_PACKET_LOG_CAPACITY;
+    }
+    size_t total_matches = 0;
+    bool sd_used = false;
+    s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
+                                                        s_packet_row_limit,
+                                                        s_packet_skip_newest,
+                                                        packet_filter_direction(),
+                                                        packet_filter_kind(),
+                                                        s_packet_search_text,
+                                                        &total_matches, &sd_used);
+    if (s_packet_filtered_count == 0 && s_packet_skip_newest > 0) {
+        s_packet_skip_newest = 0;
+        s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
+                                                            s_packet_row_limit,
+                                                            s_packet_skip_newest,
+                                                            packet_filter_direction(),
+                                                            packet_filter_kind(),
+                                                            s_packet_search_text,
+                                                            &total_matches, &sd_used);
+    }
+    s_packet_total_matches = total_matches;
+    s_packet_sd_history_page = sd_used;
     return s_packet_filtered_count;
+}
+
+static bool packet_feed_can_load_older(size_t packet_rows)
+{
+    return packet_rows > 0 && s_packet_total_matches > s_packet_skip_newest + packet_rows;
+}
+
+static bool packet_feed_can_load_newer(void)
+{
+    return s_packet_skip_newest > 0;
 }
 
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
@@ -1392,7 +1557,11 @@ static void render_node_row(lv_obj_t *parent, int y, const d1l_node_view_t *view
                                   0xF4F7FB);
     label_set_dot_width(name, 240);
     obj_align_if(name, LV_ALIGN_TOP_LEFT, 0, 0);
-    render_node_role_badge(row, view->role, 336, 0, 68);
+    render_node_role_badge(row, view->role, node_view_can_dm(view) ? 278 : 336, 0,
+                           node_view_can_dm(view) ? 60 : 68);
+    if (node_view_can_dm(view)) {
+        create_button(row, "DM", 350, -1, 52, 34, open_node_dm_event_cb, (void *)view);
+    }
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
     const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
     label_set_fmt(meta, "%.8s  %s  %s  rssi %d  snr %s%d.%d",
@@ -1453,6 +1622,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -1463,9 +1633,10 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     if (s_compose_title) {
-        lv_label_set_text(s_compose_title, title && title[0] ? title : "Public");
+        lv_label_set_text(s_compose_title, title && title[0] ? title : "Compose Public");
     }
     if (s_compose_sheet) {
+        set_dock_hidden(true);
         lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_compose_sheet);
     }
@@ -1487,7 +1658,7 @@ static void public_test_event_cb(lv_event_t *event)
 static void open_compose_event_cb(lv_event_t *event)
 {
     (void)event;
-    show_public_compose_sheet("Public", "Public message");
+    show_public_compose_sheet("Compose Public", "Public message");
 }
 
 static void mark_messages_read_event_cb(lv_event_t *event)
@@ -1515,6 +1686,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     hide_radio_settings_sheet();
     hide_contact_detail_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
     hide_route_trace_sheet();
@@ -1530,6 +1702,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         lv_label_set_text(s_compose_title, title);
     }
     if (s_compose_sheet) {
+        set_dock_hidden(true);
         lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_compose_sheet);
     }
@@ -1545,6 +1718,55 @@ static void open_dm_compose_event_cb(lv_event_t *event)
 {
     const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
     open_dm_compose_for_contact(entry);
+}
+
+static bool contact_from_node_view(const d1l_node_view_t *view, d1l_contact_entry_t *out_contact)
+{
+    if (!node_view_can_dm(view) || !out_contact) {
+        return false;
+    }
+    if (d1l_app_model_find_contact(view->node.fingerprint, out_contact) == ESP_OK &&
+        out_contact->public_key_hex[0] != '\0') {
+        return true;
+    }
+    memset(out_contact, 0, sizeof(*out_contact));
+    snprintf(out_contact->fingerprint, sizeof(out_contact->fingerprint), "%s", view->node.fingerprint);
+    snprintf(out_contact->public_key_hex, sizeof(out_contact->public_key_hex), "%s",
+             view->node.public_key_hex);
+    snprintf(out_contact->alias, sizeof(out_contact->alias), "%s",
+             view->display_name[0] ? view->display_name :
+             (view->node.name[0] ? view->node.name : view->node.fingerprint));
+    snprintf(out_contact->heard_name, sizeof(out_contact->heard_name), "%s",
+             view->node.name[0] ? view->node.name : view->node.fingerprint);
+    snprintf(out_contact->type, sizeof(out_contact->type), "%s",
+             view->node.type[0] ? view->node.type : "node");
+    out_contact->last_rssi_dbm = view->node.rssi_dbm;
+    out_contact->last_snr_tenths = view->node.snr_tenths;
+    out_contact->path_hash_bytes = view->node.path_hash_bytes;
+    out_contact->path_hops = view->node.path_hops;
+    return true;
+}
+
+static void node_detail_dm_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_contact_entry_t contact = {0};
+    if (!contact_from_node_view(&s_node_detail_node, &contact)) {
+        show_toast("DM", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    open_dm_compose_for_contact(&contact);
+}
+
+static void open_node_dm_event_cb(lv_event_t *event)
+{
+    const d1l_node_view_t *view = (const d1l_node_view_t *)lv_event_get_user_data(event);
+    d1l_contact_entry_t contact = {0};
+    if (!contact_from_node_view(view, &contact)) {
+        show_toast("DM", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    open_dm_compose_for_contact(&contact);
 }
 
 static void close_contact_detail_event_cb(lv_event_t *event)
@@ -2100,8 +2322,17 @@ static void render_node_detail_sheet(void)
     lv_obj_t *title = create_label(s_node_detail_sheet, "Node Detail", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 220);
+    lv_obj_set_width(title, 160);
     lv_obj_set_pos(title, 8, 4);
+    if (node_view_can_dm(view)) {
+        create_button(s_node_detail_sheet, "DM", 208, 0, 54, 40,
+                      node_detail_dm_event_cb, NULL);
+    } else if (node_view_management_gated(view)) {
+        lv_obj_t *gated = create_label(s_node_detail_sheet, "Manage locked", 0x8EA0AE);
+        lv_label_set_long_mode(gated, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(gated, 124);
+        lv_obj_set_pos(gated, 178, 12);
+    }
     create_button(s_node_detail_sheet, "Close", 316, 0, 76, 40,
                   close_node_detail_event_cb, NULL);
 
@@ -2325,20 +2556,22 @@ static void render_message_detail_sheet(void)
     lv_obj_t *title = create_label(s_message_detail_sheet, "Message Detail", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 260);
+    lv_obj_set_width(title, 158);
     lv_obj_set_pos(title, 8, 4);
 
+    create_button(s_message_detail_sheet,
+                  s_message_detail_advanced ? "Normal" : "Advanced",
+                  174, 0, 90, 40, message_detail_mode_event_cb, NULL);
     if (entry->direction[0] != 't') {
-        create_button(s_message_detail_sheet, "Reply", 232, 0, 76, 40, reply_message_detail_event_cb, NULL);
+        create_button(s_message_detail_sheet, "Reply", 274, 0, 62, 40, reply_message_detail_event_cb, NULL);
     }
-    create_button(s_message_detail_sheet, "Close", 316, 0, 76, 40, close_message_detail_event_cb, NULL);
+    create_button(s_message_detail_sheet, "Close", 344, 0, 66, 40, close_message_detail_event_cb, NULL);
 
     lv_obj_t *sender_title = create_label(s_message_detail_sheet, "Sender", 0x5EEAD4);
     lv_obj_set_pos(sender_title, 8, 50);
     lv_obj_t *sender = create_label(s_message_detail_sheet, "", 0xE5EDF5);
-    label_set_fmt(sender, "%s  #%lu  %s",
+    label_set_fmt(sender, "%s  %s",
                   entry->author[0] ? entry->author : "unknown",
-                  (unsigned long)entry->seq,
                   message_delivery_label(entry));
     lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
     lv_obj_set_width(sender, 392);
@@ -2361,11 +2594,38 @@ static void render_message_detail_sheet(void)
     lv_obj_set_pos(signal, 8, 190);
 
     lv_obj_t *path = create_label(s_message_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(path, "Path hash %u byte  hops %u  uptime %lums",
-                  entry->path_hash_bytes, entry->path_hops, (unsigned long)entry->uptime_ms);
+    label_set_fmt(path, "Path %u hop%s",
+                  entry->path_hops, entry->path_hops == 1 ? "" : "s");
     lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
     lv_obj_set_width(path, 392);
     lv_obj_set_pos(path, 8, 224);
+
+    if (!s_message_detail_advanced) {
+        lv_obj_t *hint = create_label(s_message_detail_sheet,
+                                      "Advanced shows route details",
+                                      0x8EA0AE);
+        lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(hint, 392);
+        lv_obj_set_pos(hint, 8, 258);
+        return;
+    }
+
+    lv_obj_t *advanced = create_label(s_message_detail_sheet, "Advanced", 0xFBBF24);
+    lv_obj_set_pos(advanced, 8, 258);
+    lv_obj_t *seq = create_label(s_message_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(seq, "seq %lu  uptime %lums  direction %s",
+                  (unsigned long)entry->seq,
+                  (unsigned long)entry->uptime_ms,
+                  entry->direction[0] ? entry->direction : "?");
+    lv_label_set_long_mode(seq, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(seq, 392);
+    lv_obj_set_pos(seq, 8, 282);
+    lv_obj_t *hash = create_label(s_message_detail_sheet, "", 0x8EA0AE);
+    label_set_fmt(hash, "path hash %u byte  delivered %s",
+                  entry->path_hash_bytes, entry->delivered ? "yes" : "no");
+    lv_label_set_long_mode(hash, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(hash, 392);
+    lv_obj_set_pos(hash, 8, 304);
 }
 
 static void open_message_detail_event_cb(lv_event_t *event)
@@ -2376,6 +2636,7 @@ static void open_message_detail_event_cb(lv_event_t *event)
         return;
     }
     s_message_detail_message = *entry;
+    s_message_detail_advanced = false;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -2383,6 +2644,7 @@ static void open_message_detail_event_cb(lv_event_t *event)
     hide_dm_thread_sheet();
     hide_radio_settings_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -2396,6 +2658,13 @@ static void open_message_detail_event_cb(lv_event_t *event)
         lv_obj_clear_flag(s_message_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_message_detail_sheet);
     }
+}
+
+static void message_detail_mode_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_message_detail_advanced = !s_message_detail_advanced;
+    render_message_detail_sheet();
 }
 
 static void close_packet_detail_event_cb(lv_event_t *event)
@@ -2527,6 +2796,8 @@ static void open_packet_detail_event_cb(lv_event_t *event)
 static void packet_filter_event_cb(lv_event_t *event)
 {
     s_packet_filter_mode = (d1l_packet_filter_mode_t)(uintptr_t)lv_event_get_user_data(event);
+    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
+    s_packet_skip_newest = 0;
     s_packets_paused = false;
     render_active_tab();
 }
@@ -2537,13 +2808,42 @@ static void packet_pause_event_cb(lv_event_t *event)
     if (s_packets_paused) {
         s_packets_paused = false;
     } else {
-        s_packet_filtered_count = d1l_packet_log_query(s_packet_filtered_packets,
-                                                       D1L_APP_SNAPSHOT_PACKET_PREVIEW,
-                                                       packet_filter_direction(),
-                                                       packet_filter_kind(),
-                                                       s_packet_search_text);
+        size_t total_matches = 0;
+        bool sd_used = false;
+        s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
+                                                            s_packet_row_limit,
+                                                            s_packet_skip_newest,
+                                                            packet_filter_direction(),
+                                                            packet_filter_kind(),
+                                                            s_packet_search_text,
+                                                            &total_matches, &sd_used);
+        s_packet_total_matches = total_matches;
+        s_packet_sd_history_page = sd_used;
         s_packets_paused = true;
     }
+    render_active_tab();
+}
+
+static void packet_load_older_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_packet_filtered_count > 0 &&
+        s_packet_total_matches > s_packet_skip_newest + s_packet_filtered_count) {
+        s_packet_skip_newest += s_packet_filtered_count;
+    }
+    s_packets_paused = false;
+    render_active_tab();
+}
+
+static void packet_load_newer_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_packet_skip_newest > D1L_PACKET_UI_LOAD_OLDER_STEP) {
+        s_packet_skip_newest -= D1L_PACKET_UI_LOAD_OLDER_STEP;
+    } else {
+        s_packet_skip_newest = 0;
+    }
+    s_packets_paused = false;
     render_active_tab();
 }
 
@@ -2561,6 +2861,8 @@ static void clear_packet_search_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_packet_search_textarea, "");
     }
     s_packets_paused = false;
+    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
+    s_packet_skip_newest = 0;
     hide_packet_search_sheet();
     render_active_tab();
 }
@@ -2576,6 +2878,8 @@ static void apply_packet_search_event_cb(lv_event_t *event)
         }
     }
     s_packets_paused = false;
+    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
+    s_packet_skip_newest = 0;
     hide_packet_search_sheet();
     render_active_tab();
 }
@@ -2859,6 +3163,21 @@ static void close_public_search_event_cb(lv_event_t *event)
     hide_public_search_sheet();
 }
 
+static void public_history_load_older_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_public_history_limit < D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS) {
+        s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+    }
+    if (s_public_history_limit < D1L_MESSAGE_STORE_CAPACITY) {
+        s_public_history_limit += D1L_PUBLIC_HISTORY_UI_LOAD_OLDER_STEP;
+        if (s_public_history_limit > D1L_MESSAGE_STORE_CAPACITY) {
+            s_public_history_limit = D1L_MESSAGE_STORE_CAPACITY;
+        }
+    }
+    show_public_history_sheet();
+}
+
 static void render_public_history_sheet(void)
 {
     if (!s_public_history_sheet) {
@@ -2881,18 +3200,26 @@ static void render_public_history_sheet(void)
     create_button(s_public_history_sheet, "Close", 352, 0, 72, 40,
                   close_public_history_event_cb, NULL);
 
+    if (s_public_history_limit < D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS) {
+        s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+    }
+    if (s_public_history_limit > D1L_MESSAGE_STORE_CAPACITY) {
+        s_public_history_limit = D1L_MESSAGE_STORE_CAPACITY;
+    }
+    size_t total_matches = 0;
     const size_t history_count =
-        d1l_app_model_query_public_messages(s_public_history_entries,
-                                            D1L_MESSAGE_STORE_CAPACITY,
-                                            s_public_search_text);
+        d1l_app_model_query_public_messages_page(s_public_history_entries,
+                                                 s_public_history_limit, 0,
+                                                 s_public_search_text,
+                                                 &total_matches);
     lv_obj_t *meta = create_label(s_public_history_sheet, "", 0x8EA0AE);
     if (s_public_search_text[0]) {
-        label_set_fmt(meta, "retained %u/%u  find %.18s",
-                      (unsigned)history_count, (unsigned)s_snapshot.message_count,
+        label_set_fmt(meta, "showing %u/%u  find %.18s",
+                      (unsigned)history_count, (unsigned)total_matches,
                       s_public_search_text);
     } else {
-        label_set_fmt(meta, "retained %u/%u rows",
-                      (unsigned)history_count, (unsigned)s_snapshot.message_count);
+        label_set_fmt(meta, "showing %u/%u retained",
+                      (unsigned)history_count, (unsigned)total_matches);
     }
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
@@ -2902,7 +3229,7 @@ static void render_public_history_sheet(void)
     if (!list) {
         return;
     }
-    lv_obj_set_size(list, 424, 206);
+    lv_obj_set_size(list, 424, 190);
     lv_obj_set_pos(list, 0, 70);
     lv_obj_set_style_radius(list, 6, 0);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
@@ -2940,6 +3267,10 @@ static void render_public_history_sheet(void)
     } else {
         lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
     }
+    if (history_count < total_matches && s_public_history_limit < D1L_MESSAGE_STORE_CAPACITY) {
+        create_button(s_public_history_sheet, "Load Older", 8, 272, 126, 36,
+                      public_history_load_older_event_cb, NULL);
+    }
 }
 
 static void show_public_history_sheet(void)
@@ -2961,6 +3292,7 @@ static void apply_public_search_event_cb(lv_event_t *event)
             snprintf(s_public_search_text, sizeof(s_public_search_text), "%s", text);
         }
     }
+    s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
     hide_public_search_sheet();
     show_public_history_sheet();
 }
@@ -2972,6 +3304,7 @@ static void clear_public_search_event_cb(lv_event_t *event)
     if (s_public_search_textarea) {
         lv_textarea_set_text(s_public_search_textarea, "");
     }
+    s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
     hide_public_search_sheet();
     show_public_history_sheet();
 }
@@ -3007,6 +3340,7 @@ static void open_public_search_event_cb(lv_event_t *event)
 static void open_public_history_event_cb(lv_event_t *event)
 {
     (void)event;
+    s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
     hide_sheet();
     hide_compose_sheet();
     hide_public_search_sheet();
@@ -3038,6 +3372,28 @@ static void close_dm_thread_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_dm_thread_sheet();
+}
+
+static void dm_thread_load_older_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_dm_thread_fingerprint[0] == '\0') {
+        return;
+    }
+    if (s_dm_thread_limit < D1L_DM_THREAD_UI_INITIAL_ROWS) {
+        s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+    }
+    if (s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
+        s_dm_thread_limit += D1L_DM_THREAD_UI_LOAD_OLDER_STEP;
+        if (s_dm_thread_limit > D1L_DM_STORE_CAPACITY) {
+            s_dm_thread_limit = D1L_DM_STORE_CAPACITY;
+        }
+    }
+    render_dm_thread_sheet();
+    if (s_dm_thread_sheet) {
+        lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_dm_thread_sheet);
+    }
 }
 
 static void reply_dm_thread_event_cb(lv_event_t *event)
@@ -3087,13 +3443,21 @@ static void render_dm_thread_sheet(void)
     create_button(s_dm_thread_sheet, "Read", 270, 0, 56, 40, read_dm_thread_event_cb, NULL);
     create_button(s_dm_thread_sheet, "Close", 334, 0, 76, 40, close_dm_thread_event_cb, NULL);
 
+    if (s_dm_thread_limit < D1L_DM_THREAD_UI_INITIAL_ROWS) {
+        s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+    }
+    if (s_dm_thread_limit > D1L_DM_STORE_CAPACITY) {
+        s_dm_thread_limit = D1L_DM_STORE_CAPACITY;
+    }
+    size_t total_matches = 0;
     const size_t thread_count =
-        d1l_app_model_copy_dm_thread(s_dm_thread_fingerprint, s_dm_thread_entries,
-                                     s_dm_thread_unread, D1L_DM_STORE_CAPACITY);
+        d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint, s_dm_thread_entries,
+                                          s_dm_thread_unread, s_dm_thread_limit,
+                                          0, &total_matches);
 
     lv_obj_t *meta = create_label(s_dm_thread_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.16s  thread %u/%u stored", s_dm_thread_fingerprint,
-                  (unsigned)thread_count, (unsigned)s_snapshot.dm_count);
+    label_set_fmt(meta, "%.16s  showing %u/%u", s_dm_thread_fingerprint,
+                  (unsigned)thread_count, (unsigned)total_matches);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
     lv_obj_set_pos(meta, 8, 42);
@@ -3102,7 +3466,7 @@ static void render_dm_thread_sheet(void)
     if (!list) {
         return;
     }
-    lv_obj_set_size(list, 424, 196);
+    lv_obj_set_size(list, 424, 176);
     lv_obj_set_pos(list, 0, 68);
     lv_obj_set_style_radius(list, 6, 0);
     lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
@@ -3138,6 +3502,10 @@ static void render_dm_thread_sheet(void)
     } else {
         lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
     }
+    if (thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
+        create_button(s_dm_thread_sheet, "Load Older", 8, 260, 126, 36,
+                      dm_thread_load_older_event_cb, NULL);
+    }
 }
 
 static void show_dm_thread_for(const char *fingerprint, const char *alias)
@@ -3149,6 +3517,7 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
     snprintf(s_dm_thread_fingerprint, sizeof(s_dm_thread_fingerprint), "%s", fingerprint);
     snprintf(s_dm_thread_alias, sizeof(s_dm_thread_alias), "%s",
              alias && alias[0] ? alias : fingerprint);
+    s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3215,12 +3584,12 @@ static void open_messages_dm_event_cb(lv_event_t *event)
 
 static void render_messages(const d1l_app_snapshot_t *snapshot)
 {
-    lv_obj_t *header = create_panel(s_content, 18, 16, 424, 70);
+    lv_obj_t *header = create_panel(s_content, 18, 16, 424, 108);
     lv_obj_t *title = create_label(header, "Messages", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 144);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_width(title, 170);
+    lv_obj_set_pos(title, 8, 4);
     lv_obj_t *meta = create_label(header, "", 0x8EA0AE);
     label_set_fmt(meta, "public %u new %lu  dm %u new %lu muted %lu",
                   (unsigned)snapshot->message_count,
@@ -3230,34 +3599,34 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
                   (unsigned long)snapshot->muted_dm_unread_count);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 392);
-    lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 2, 0);
-    create_button(header, "Read", 142, 10, 54, 44, mark_messages_read_event_cb, NULL);
-    create_button(header, "Compose", 202, 10, 82, 44, open_compose_event_cb, NULL);
-    create_button(header, "History", 292, 10, 76, 44, open_public_history_event_cb, NULL);
-    create_button(header, "Test", 376, 10, 48, 44, public_test_event_cb, NULL);
+    lv_obj_set_pos(meta, 8, 34);
+    create_button(header, "Read", 8, 62, 54, 40, mark_messages_read_event_cb, NULL);
+    create_button(header, "Compose", 70, 62, 88, 40, open_compose_event_cb, NULL);
+    create_button(header, "History", 166, 62, 80, 40, open_public_history_event_cb, NULL);
+    create_button(header, "Test", 254, 62, 64, 40, public_test_event_cb, NULL);
 
-    create_button(s_content, "Public", 18, 98, 96, 40, open_messages_public_event_cb, NULL);
-    create_button(s_content, "DMs", 122, 98, 80, 40, open_messages_dm_event_cb, NULL);
+    create_button(s_content, "Public", 18, 136, 96, 40, open_messages_public_event_cb, NULL);
+    create_button(s_content, "DMs", 122, 136, 80, 40, open_messages_dm_event_cb, NULL);
 
     lv_obj_t *mode_label = create_label(s_content,
                                         s_messages_show_dms ? "DM Conversations" : "Public Channel",
                                         s_messages_show_dms ? 0xA7F3D0 : 0x5EEAD4);
-    lv_obj_set_pos(mode_label, 26, 150);
+    lv_obj_set_pos(mode_label, 26, 190);
 
-    int y = 180;
+    int y = 218;
     if (s_messages_show_dms) {
-        for (size_t i = 0; i < snapshot->recent_dm_count && y <= 350; ++i) {
+        for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
             render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
-            y += 60;
+            y += 80;
         }
         if (snapshot->recent_dm_count == 0) {
             lv_obj_t *empty = create_label(s_content, "No direct messages", 0x8EA0AE);
             lv_obj_set_pos(empty, 26, y);
         }
     } else {
-        for (size_t i = 0; i < snapshot->recent_message_count && y <= 350; ++i) {
+        for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
             render_message_row(s_content, y, &snapshot->recent_messages[i]);
-            y += 60;
+            y += 80;
         }
         if (snapshot->recent_message_count == 0) {
             lv_obj_t *empty = create_label(s_content, "No Public messages", 0x8EA0AE);
@@ -3270,6 +3639,15 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[64];
+    const d1l_node_query_t node_query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+        .text = NULL,
+        .keyed_only = false,
+        .reachable_only = false,
+    };
+    const size_t node_rows = d1l_app_model_query_nodes(&node_query, s_node_rows,
+                                                       D1L_NODE_STORE_CAPACITY);
     snprintf(value, sizeof(value), "%u", (unsigned)snapshot->node_count);
     snprintf(detail, sizeof(detail), "rooms %lu  rpt %lu  writes %lu",
              (unsigned long)snapshot->signal_summary.room_server_count,
@@ -3291,54 +3669,17 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
         lv_obj_set_pos(heard, 26, y + 4);
         y += 28;
     }
-    for (size_t i = 0; i < snapshot->recent_node_count && y <= 300; ++i) {
-        render_node_row(s_content, y, &snapshot->recent_nodes[i]);
+    lv_obj_t *all_heard = create_label(s_content, "All Heard", 0x8EA0AE);
+    lv_obj_set_pos(all_heard, 26, y + 4);
+    y += 28;
+    for (size_t i = 0; i < node_rows; ++i) {
+        render_node_row(s_content, y, &s_node_rows[i]);
         y += 62;
     }
-    if (snapshot->recent_node_count == 0) {
+    if (node_rows == 0) {
         lv_obj_t *empty = create_label(s_content, "No heard nodes yet", 0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
     }
-}
-
-static void map_picker_adjust_event_cb(lv_event_t *event)
-{
-    d1l_map_picker_action_t action =
-        (d1l_map_picker_action_t)(uintptr_t)lv_event_get_user_data(event);
-    const int32_t step = map_picker_step_e7();
-    switch (action) {
-    case D1L_MAP_PICKER_LAT_UP:
-        s_map_picker_lat_e7 = clamp_map_coord_e7(s_map_picker_lat_e7 + step,
-                                                 D1L_MAP_LOCATION_LAT_E7_MIN,
-                                                 D1L_MAP_LOCATION_LAT_E7_MAX);
-        break;
-    case D1L_MAP_PICKER_LAT_DOWN:
-        s_map_picker_lat_e7 = clamp_map_coord_e7(s_map_picker_lat_e7 - step,
-                                                 D1L_MAP_LOCATION_LAT_E7_MIN,
-                                                 D1L_MAP_LOCATION_LAT_E7_MAX);
-        break;
-    case D1L_MAP_PICKER_LON_DOWN:
-        s_map_picker_lon_e7 = clamp_map_coord_e7(s_map_picker_lon_e7 - step,
-                                                 D1L_MAP_LOCATION_LON_E7_MIN,
-                                                 D1L_MAP_LOCATION_LON_E7_MAX);
-        break;
-    case D1L_MAP_PICKER_LON_UP:
-        s_map_picker_lon_e7 = clamp_map_coord_e7(s_map_picker_lon_e7 + step,
-                                                 D1L_MAP_LOCATION_LON_E7_MIN,
-                                                 D1L_MAP_LOCATION_LON_E7_MAX);
-        break;
-    case D1L_MAP_PICKER_ZOOM_OUT:
-        if (s_map_picker_zoom > 4U) {
-            s_map_picker_zoom--;
-        }
-        break;
-    case D1L_MAP_PICKER_ZOOM_IN:
-        if (s_map_picker_zoom < 16U) {
-            s_map_picker_zoom++;
-        }
-        break;
-    }
-    render_map_location_sheet();
 }
 
 static void close_map_location_sheet_event_cb(lv_event_t *event)
@@ -3348,14 +3689,45 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
     hide_map_location_sheet();
 }
 
+static void map_location_textarea_event_cb(lv_event_t *event)
+{
+    if (!s_map_location_keyboard) {
+        return;
+    }
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
+        lv_obj_t *textarea = lv_event_get_target(event);
+        if (textarea == s_map_lat_textarea || textarea == s_map_lon_textarea) {
+            lv_keyboard_set_textarea(s_map_location_keyboard, textarea);
+        }
+    }
+}
+
 static void map_location_save_event_cb(lv_event_t *event)
 {
     (void)event;
-    esp_err_t ret = d1l_app_model_set_map_location(s_map_picker_lat_e7,
-                                                   s_map_picker_lon_e7);
+    const char *lat_text = s_map_lat_textarea ? lv_textarea_get_text(s_map_lat_textarea) : "";
+    const char *lon_text = s_map_lon_textarea ? lv_textarea_get_text(s_map_lon_textarea) : "";
+    int32_t lat_e7 = 0;
+    int32_t lon_e7 = 0;
+    if (!parse_coord_text_e7(lat_text, D1L_MAP_LOCATION_LAT_E7_MIN,
+                             D1L_MAP_LOCATION_LAT_E7_MAX, &lat_e7)) {
+        show_toast_text("Latitude must be -90 to 90", false);
+        return;
+    }
+    if (!parse_coord_text_e7(lon_text, D1L_MAP_LOCATION_LON_E7_MIN,
+                             D1L_MAP_LOCATION_LON_E7_MAX, &lon_e7)) {
+        show_toast_text("Longitude must be -180 to 180", false);
+        return;
+    }
+    s_map_location_lat_e7 = lat_e7;
+    s_map_location_lon_e7 = lon_e7;
+    esp_err_t ret = d1l_app_model_set_map_location(s_map_location_lat_e7,
+                                                   s_map_location_lon_e7);
     s_map_location_prompt_seen = true;
     if (ret == ESP_OK) {
         hide_map_location_sheet();
+        hide_map_tiles_sheet();
         render_active_tab();
         show_toast_text("D1L pin saved", true);
     } else {
@@ -3369,7 +3741,7 @@ static void map_location_clear_event_cb(lv_event_t *event)
     esp_err_t ret = d1l_app_model_clear_map_location();
     s_map_location_prompt_seen = true;
     if (ret == ESP_OK) {
-        map_picker_from_snapshot(NULL);
+        map_location_from_snapshot(NULL);
         hide_map_location_sheet();
         render_active_tab();
         show_toast_text("D1L pin cleared", true);
@@ -3384,69 +3756,99 @@ static void render_map_location_sheet(void)
         return;
     }
     lv_obj_clean(s_map_location_sheet);
+    s_map_lat_textarea = NULL;
+    s_map_lon_textarea = NULL;
+    s_map_location_keyboard = NULL;
 
     char lat[20];
     char lon[20];
-    char line[64];
-    format_coord_e7(lat, sizeof(lat), s_map_picker_lat_e7);
-    format_coord_e7(lon, sizeof(lon), s_map_picker_lon_e7);
+    format_coord_e7(lat, sizeof(lat), s_map_location_lat_e7);
+    format_coord_e7(lon, sizeof(lon), s_map_location_lon_e7);
 
     lv_obj_t *title = create_label(s_map_location_sheet, "Set D1L Location", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 260);
-    lv_obj_set_pos(title, 8, 4);
-    create_button(s_map_location_sheet, "Skip", 340, 0, 76, 40,
-                  close_map_location_sheet_event_cb, NULL);
-
-    lv_obj_t *needed = create_label(s_map_location_sheet, "Map needs your D1L location", 0x5EEAD4);
-    lv_obj_set_pos(needed, 8, 48);
-
-    lv_obj_t *picker = create_panel(s_map_location_sheet, 8, 76, 408, 104);
-    create_label(picker, "Manual Picker", 0xF4F7FB);
-    lv_obj_t *lat_label = create_label(picker, "", 0xE5EDF5);
-    label_set_fmt(lat_label, "Lat %s", lat);
-    lv_obj_set_pos(lat_label, 0, 28);
-    lv_obj_t *lon_label = create_label(picker, "", 0xE5EDF5);
-    label_set_fmt(lon_label, "Lon %s", lon);
-    lv_obj_set_pos(lon_label, 0, 52);
-    lv_obj_t *zoom = create_label(picker, "", 0x8EA0AE);
-    snprintf(line, sizeof(line), "Zoom %u  step %.4f deg",
-             (unsigned)s_map_picker_zoom, ((double)map_picker_step_e7()) / 10000000.0);
-    lv_label_set_text(zoom, line);
-    lv_obj_set_pos(zoom, 0, 76);
-    lv_obj_t *crosshair = create_label(picker, "+", 0x5EEAD4);
-    lv_obj_set_style_text_font(crosshair, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(crosshair, 326, 34);
-
-    create_button(s_map_location_sheet, "N", 88, 188, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_LAT_UP);
-    create_button(s_map_location_sheet, "S", 88, 238, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_LAT_DOWN);
-    create_button(s_map_location_sheet, "W", 24, 212, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_LON_DOWN);
-    create_button(s_map_location_sheet, "E", 152, 212, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_LON_UP);
-    create_button(s_map_location_sheet, "-", 248, 194, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_ZOOM_OUT);
-    create_button(s_map_location_sheet, "+", 316, 194, 56, 44, map_picker_adjust_event_cb,
-                  (void *)(uintptr_t)D1L_MAP_PICKER_ZOOM_IN);
-    lv_obj_t *zoom_label = create_label(s_map_location_sheet, "Zoom", 0x8EA0AE);
-    lv_obj_set_pos(zoom_label, 256, 172);
-
-    create_button(s_map_location_sheet, "Drop Pin", 8, 274, 128, 40,
+    lv_obj_set_width(title, 214);
+    lv_obj_set_pos(title, 16, 10);
+    create_button(s_map_location_sheet, "Save", 238, 10, 62, 40,
                   map_location_save_event_cb, NULL);
-    create_button(s_map_location_sheet, "Clear", 148, 274, 104, 40,
+    create_button(s_map_location_sheet, "Clear", 308, 10, 70, 40,
                   map_location_clear_event_cb, NULL);
-    create_button(s_map_location_sheet, "Skip", 264, 274, 104, 40,
+    create_button(s_map_location_sheet, "Skip", 386, 10, 70, 40,
                   close_map_location_sheet_event_cb, NULL);
+
+    lv_obj_t *needed = create_label(s_map_location_sheet,
+                                    "Map needs your D1L location", 0x5EEAD4);
+    lv_obj_set_pos(needed, 16, 58);
+    lv_obj_t *hint = create_label(s_map_location_sheet,
+                                  "Enter decimal degrees", 0x8EA0AE);
+    lv_obj_set_pos(hint, 16, 80);
+
+    lv_obj_t *lat_label = create_label(s_map_location_sheet, "Latitude", 0xF4F7FB);
+    lv_obj_set_pos(lat_label, 16, 108);
+    s_map_lat_textarea = create_textarea(s_map_location_sheet, "map latitude textarea");
+    if (!s_map_lat_textarea) {
+        return;
+    }
+    lv_obj_set_size(s_map_lat_textarea, 448, 44);
+    lv_obj_set_pos(s_map_lat_textarea, 16, 130);
+    lv_textarea_set_one_line(s_map_lat_textarea, true);
+    lv_textarea_set_max_length(s_map_lat_textarea, 14);
+    lv_textarea_set_placeholder_text(s_map_lat_textarea, "43.6532000");
+    lv_textarea_set_text(s_map_lat_textarea, lat);
+    lv_obj_set_style_radius(s_map_lat_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_map_lat_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_map_lat_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_map_lat_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(s_map_lat_textarea, lv_color_hex(0x8EA0AE),
+                                LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_add_event_cb(s_map_lat_textarea, map_location_textarea_event_cb,
+                        LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_map_lat_textarea, map_location_textarea_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *lon_label = create_label(s_map_location_sheet, "Longitude", 0xF4F7FB);
+    lv_obj_set_pos(lon_label, 16, 184);
+    s_map_lon_textarea = create_textarea(s_map_location_sheet, "map longitude textarea");
+    if (!s_map_lon_textarea) {
+        return;
+    }
+    lv_obj_set_size(s_map_lon_textarea, 448, 44);
+    lv_obj_set_pos(s_map_lon_textarea, 16, 206);
+    lv_textarea_set_one_line(s_map_lon_textarea, true);
+    lv_textarea_set_max_length(s_map_lon_textarea, 15);
+    lv_textarea_set_placeholder_text(s_map_lon_textarea, "-79.3832000");
+    lv_textarea_set_text(s_map_lon_textarea, lon);
+    lv_obj_set_style_radius(s_map_lon_textarea, 8, 0);
+    lv_obj_set_style_bg_color(s_map_lon_textarea, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(s_map_lon_textarea, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_text_color(s_map_lon_textarea, lv_color_hex(0xF4F7FB), 0);
+    lv_obj_set_style_text_color(s_map_lon_textarea, lv_color_hex(0x8EA0AE),
+                                LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_add_event_cb(s_map_lon_textarea, map_location_textarea_event_cb,
+                        LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_map_lon_textarea, map_location_textarea_event_cb,
+                        LV_EVENT_CLICKED, NULL);
+
+    s_map_location_keyboard = create_keyboard(s_map_location_sheet,
+                                              "map location keyboard");
+    if (!s_map_location_keyboard) {
+        return;
+    }
+    lv_obj_set_size(s_map_location_keyboard, 448, 164);
+    lv_obj_set_pos(s_map_location_keyboard, 16, 248);
+    lv_keyboard_set_textarea(s_map_location_keyboard, s_map_lat_textarea);
+    lv_obj_add_event_cb(s_map_location_keyboard, map_location_keyboard_event_cb,
+                        LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(s_map_location_keyboard, map_location_keyboard_event_cb,
+                        LV_EVENT_CANCEL, NULL);
 }
 
 static void open_map_location_sheet_event_cb(lv_event_t *event)
 {
     (void)event;
     d1l_app_model_snapshot(&s_snapshot);
-    map_picker_from_snapshot(&s_snapshot);
+    map_location_from_snapshot(&s_snapshot);
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -3458,6 +3860,7 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -3467,8 +3870,278 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_map_location_sheet();
     if (s_map_location_sheet) {
+        set_dock_hidden(true);
         lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_map_location_sheet);
+    }
+}
+
+static void close_map_tiles_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    hide_map_tiles_sheet();
+}
+
+static void map_tiles_from_snapshot(const d1l_app_snapshot_t *snapshot)
+{
+    const uint8_t zoom = snapshot && snapshot->map_tile_zoom ?
+        snapshot->map_tile_zoom : D1L_MAP_TILE_DEFAULT_ZOOM;
+    s_map_tile_provider_zoom = zoom > D1L_MAP_TILE_ZOOM_MAX ?
+        D1L_MAP_TILE_DEFAULT_ZOOM : zoom;
+}
+
+static void update_map_tiles_zoom_label(void)
+{
+    if (s_map_tiles_zoom_label) {
+        label_set_fmt(s_map_tiles_zoom_label, "Zoom %u", (unsigned)s_map_tile_provider_zoom);
+    }
+}
+
+static void map_tiles_textarea_event_cb(lv_event_t *event)
+{
+    if (!s_map_tiles_keyboard) {
+        return;
+    }
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
+        lv_obj_t *target = lv_event_get_target(event);
+        if (target == s_map_tiles_url_textarea ||
+            target == s_map_tiles_attribution_textarea) {
+            lv_keyboard_set_textarea(s_map_tiles_keyboard, target);
+        }
+    }
+}
+
+static void map_tiles_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
+        if (s_map_tiles_keyboard) {
+            lv_keyboard_set_textarea(s_map_tiles_keyboard, NULL);
+        }
+    }
+}
+
+static void map_tiles_zoom_event_cb(lv_event_t *event)
+{
+    const intptr_t delta = (intptr_t)lv_event_get_user_data(event);
+    int next = (int)s_map_tile_provider_zoom + (int)delta;
+    if (next < 1) {
+        next = 1;
+    } else if (next > (int)D1L_MAP_TILE_ZOOM_MAX) {
+        next = (int)D1L_MAP_TILE_ZOOM_MAX;
+    }
+    s_map_tile_provider_zoom = (uint8_t)next;
+    update_map_tiles_zoom_label();
+}
+
+static void map_tiles_save_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *url = s_map_tiles_url_textarea ?
+        lv_textarea_get_text(s_map_tiles_url_textarea) : "";
+    const char *attribution = s_map_tiles_attribution_textarea ?
+        lv_textarea_get_text(s_map_tiles_attribution_textarea) : "";
+    esp_err_t ret = d1l_app_model_save_map_tile_provider(url, attribution,
+                                                         s_map_tile_provider_zoom);
+    if (ret == ESP_OK) {
+        d1l_app_model_snapshot(&s_snapshot);
+        render_map_tiles_sheet();
+        show_toast_text("Tile provider saved", true);
+    } else {
+        show_toast_text("Provider must be allowed HTTPS with attribution", false);
+    }
+}
+
+static void map_tiles_clear_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_clear_map_tile_provider();
+    if (ret == ESP_OK) {
+        d1l_app_model_snapshot(&s_snapshot);
+        map_tiles_from_snapshot(&s_snapshot);
+        render_map_tiles_sheet();
+        show_toast_text("Tile provider cleared", true);
+    } else {
+        show_toast_text("Provider clear failed", false);
+    }
+}
+
+static void map_tiles_download_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *url = s_map_tiles_url_textarea ?
+        lv_textarea_get_text(s_map_tiles_url_textarea) : "";
+    const char *attribution = s_map_tiles_attribution_textarea ?
+        lv_textarea_get_text(s_map_tiles_attribution_textarea) : "";
+    esp_err_t ret = d1l_app_model_save_map_tile_provider(url, attribution,
+                                                         s_map_tile_provider_zoom);
+    if (ret != ESP_OK) {
+        show_toast_text("Provider must be allowed HTTPS with attribution", false);
+        return;
+    }
+
+    d1l_map_tile_download_result_t result = {0};
+    ret = d1l_app_model_download_center_map_tile(&result);
+    d1l_app_model_snapshot(&s_snapshot);
+    render_map_tiles_sheet();
+    if (ret == ESP_OK) {
+        char msg[72];
+        snprintf(msg, sizeof(msg), "Center tile saved %u bytes", (unsigned)result.bytes);
+        show_toast_text(msg, true);
+    } else {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Tile download needs setup: %s",
+                 result.step[0] ? result.step : esp_err_to_name(ret));
+        show_toast_text(msg, false);
+    }
+}
+
+static void render_map_tiles_sheet(void)
+{
+    if (!s_map_tiles_sheet) {
+        return;
+    }
+    lv_obj_clean(s_map_tiles_sheet);
+    s_map_tiles_url_textarea = NULL;
+    s_map_tiles_attribution_textarea = NULL;
+    s_map_tiles_zoom_label = NULL;
+    s_map_tiles_keyboard = NULL;
+
+    lv_obj_t *title = create_label(s_map_tiles_sheet, "Map Tiles", 0xF4F7FB);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 190);
+    lv_obj_set_pos(title, 16, 10);
+    create_button(s_map_tiles_sheet, "Close", 392, 10, 72, 40,
+                  close_map_tiles_sheet_event_cb, NULL);
+
+    lv_obj_t *status = create_label(s_map_tiles_sheet, "", 0x8EA0AE);
+    label_set_fmt(status, "Cache %s  Wi-Fi %s  Provider %s",
+                  s_snapshot.map_tile_cache_ready ? "ready" : "needs SD",
+                  s_snapshot.wifi_connected ? "connected" : "needed",
+                  s_snapshot.map_tile_provider_saved ? "saved" : "needed");
+    label_set_dot_width(status, 448);
+    lv_obj_set_pos(status, 16, 54);
+
+    lv_obj_t *url_label = create_label(s_map_tiles_sheet, "Allowed provider template", 0x5EEAD4);
+    lv_obj_set_pos(url_label, 16, 82);
+    s_map_tiles_url_textarea = create_textarea(s_map_tiles_sheet, "map tile provider textarea");
+    if (s_map_tiles_url_textarea) {
+        lv_obj_set_size(s_map_tiles_url_textarea, 448, 40);
+        lv_obj_set_pos(s_map_tiles_url_textarea, 16, 104);
+        lv_textarea_set_one_line(s_map_tiles_url_textarea, true);
+        lv_textarea_set_max_length(s_map_tiles_url_textarea, D1L_MAP_TILE_URL_TEMPLATE_MAX);
+        lv_textarea_set_placeholder_text(s_map_tiles_url_textarea,
+                                         "https://provider.example/{z}/{x}/{y}.png");
+        lv_textarea_set_text(s_map_tiles_url_textarea, s_snapshot.map_tile_url_template);
+        lv_obj_set_style_radius(s_map_tiles_url_textarea, 8, 0);
+        lv_obj_set_style_bg_color(s_map_tiles_url_textarea, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_border_color(s_map_tiles_url_textarea, lv_color_hex(0x263241), 0);
+        lv_obj_set_style_text_color(s_map_tiles_url_textarea, lv_color_hex(0xF4F7FB), 0);
+        lv_obj_add_event_cb(s_map_tiles_url_textarea, map_tiles_textarea_event_cb,
+                            LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(s_map_tiles_url_textarea, map_tiles_textarea_event_cb,
+                            LV_EVENT_CLICKED, NULL);
+    }
+
+    lv_obj_t *attrib_label = create_label(s_map_tiles_sheet, "Attribution", 0x5EEAD4);
+    lv_obj_set_pos(attrib_label, 16, 150);
+    s_map_tiles_attribution_textarea = create_textarea(s_map_tiles_sheet,
+                                                       "map tile attribution textarea");
+    if (s_map_tiles_attribution_textarea) {
+        lv_obj_set_size(s_map_tiles_attribution_textarea, 448, 40);
+        lv_obj_set_pos(s_map_tiles_attribution_textarea, 16, 172);
+        lv_textarea_set_one_line(s_map_tiles_attribution_textarea, true);
+        lv_textarea_set_max_length(s_map_tiles_attribution_textarea,
+                                   D1L_MAP_TILE_ATTRIBUTION_MAX);
+        lv_textarea_set_placeholder_text(s_map_tiles_attribution_textarea,
+                                         "Provider attribution");
+        lv_textarea_set_text(s_map_tiles_attribution_textarea,
+                             s_snapshot.map_tile_attribution);
+        lv_obj_set_style_radius(s_map_tiles_attribution_textarea, 8, 0);
+        lv_obj_set_style_bg_color(s_map_tiles_attribution_textarea, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_border_color(s_map_tiles_attribution_textarea,
+                                      lv_color_hex(0x263241), 0);
+        lv_obj_set_style_text_color(s_map_tiles_attribution_textarea,
+                                    lv_color_hex(0xF4F7FB), 0);
+        lv_obj_add_event_cb(s_map_tiles_attribution_textarea,
+                            map_tiles_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(s_map_tiles_attribution_textarea,
+                            map_tiles_textarea_event_cb, LV_EVENT_CLICKED, NULL);
+    }
+
+    s_map_tiles_zoom_label = create_label(s_map_tiles_sheet, "", 0xE5EDF5);
+    lv_obj_set_pos(s_map_tiles_zoom_label, 16, 224);
+    update_map_tiles_zoom_label();
+    create_button(s_map_tiles_sheet, "Z-", 116, 216, 54, 36,
+                  map_tiles_zoom_event_cb, (void *)(intptr_t)-1);
+    create_button(s_map_tiles_sheet, "Z+", 178, 216, 54, 36,
+                  map_tiles_zoom_event_cb, (void *)(intptr_t)1);
+    create_button(s_map_tiles_sheet, "Save", 244, 216, 62, 36,
+                  map_tiles_save_event_cb, NULL);
+    create_button(s_map_tiles_sheet, "Clear", 314, 216, 66, 36,
+                  map_tiles_clear_event_cb, NULL);
+    create_button(s_map_tiles_sheet, "Download", 16, 262, 112, 38,
+                  map_tiles_download_event_cb, NULL);
+
+    lv_obj_t *download = create_label(s_map_tiles_sheet,
+                                      "Downloads one center tile for your saved D1L location.",
+                                      0xE5EDF5);
+    lv_label_set_long_mode(download, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(download, 320);
+    lv_obj_set_pos(download, 142, 260);
+    lv_obj_t *policy = create_label(s_map_tiles_sheet,
+                                    "No public OSM bulk tile servers. Visible attribution is required.",
+                                    0xFBBF24);
+    lv_label_set_long_mode(policy, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(policy, 448);
+    lv_obj_set_pos(policy, 16, 304);
+
+    s_map_tiles_keyboard = create_keyboard(s_map_tiles_sheet, "map tile keyboard");
+    if (s_map_tiles_keyboard) {
+        lv_obj_set_size(s_map_tiles_keyboard, 448, 82);
+        lv_obj_set_pos(s_map_tiles_keyboard, 16, 330);
+        if (s_map_tiles_url_textarea) {
+            lv_keyboard_set_textarea(s_map_tiles_keyboard, s_map_tiles_url_textarea);
+        }
+        lv_obj_add_event_cb(s_map_tiles_keyboard, map_tiles_keyboard_event_cb,
+                            LV_EVENT_READY, NULL);
+        lv_obj_add_event_cb(s_map_tiles_keyboard, map_tiles_keyboard_event_cb,
+                            LV_EVENT_CANCEL, NULL);
+    }
+}
+
+static void open_map_tiles_sheet_event_cb(lv_event_t *event)
+{
+    (void)event;
+    d1l_app_model_snapshot(&s_snapshot);
+    map_tiles_from_snapshot(&s_snapshot);
+    hide_sheet();
+    hide_public_history_sheet();
+    hide_public_search_sheet();
+    hide_compose_sheet();
+    hide_message_detail_sheet();
+    hide_dm_thread_sheet();
+    hide_radio_settings_sheet();
+    hide_storage_sheet();
+    hide_wifi_sheet();
+    hide_ble_sheet();
+    hide_display_sheet();
+    hide_diagnostics_sheet();
+    hide_map_location_sheet();
+    hide_contact_detail_sheet();
+    hide_contact_export_sheet();
+    hide_route_detail_sheet();
+    hide_route_trace_sheet();
+    hide_packet_detail_sheet();
+    hide_packet_search_sheet();
+    hide_mesh_roles_sheet();
+    render_map_tiles_sheet();
+    if (s_map_tiles_sheet) {
+        set_dock_hidden(true);
+        lv_obj_clear_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_map_tiles_sheet);
     }
 }
 
@@ -3481,6 +4154,8 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
     lv_obj_t *title = create_label(s_content, "Map", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 18, 8);
+    create_button(s_content, "Tiles", 238, 8, 72, 40,
+                  open_map_tiles_sheet_event_cb, NULL);
     create_button(s_content, snapshot->map_location_set ? "Move Pin" : "Set Pin",
                   318, 8, 124, 40, open_map_location_sheet_event_cb, NULL);
 
@@ -3491,25 +4166,33 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
                        snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24);
 
     snprintf(value, sizeof(value), "%s",
-             snapshot->map_tile_download_supported ? "Ready" : "Pending");
+             snapshot->map_tile_download_supported ? "Ready" : "Setup");
     snprintf(detail, sizeof(detail), "%s",
              snapshot->map_tile_download_state ? snapshot->map_tile_download_state :
-             "wifi_runtime_pending");
+             "provider_required");
     render_metric_card(s_content, 238, 48, "Downloads", value, detail, 0x93C5FD);
 
     lv_obj_t *cache = create_panel(s_content, 18, 168, 424, 82);
-    create_label(cache, "Offline Cache", 0xF4F7FB);
+    create_label(cache, snapshot->map_tile_cache_ready ? "Offline Cache" : "No Offline Tiles", 0xF4F7FB);
     lv_obj_t *policy = create_label(cache, "", 0x8EA0AE);
-    label_set_fmt(policy, "policy %s",
-                  snapshot->map_tile_cache_policy ? snapshot->map_tile_cache_policy :
-                  "sd_offline_cache_when_ready");
+    if (snapshot->map_tile_cache_ready) {
+        label_set_fmt(policy, "policy %s",
+                      snapshot->map_tile_cache_policy ? snapshot->map_tile_cache_policy :
+                      "sd_offline_cache_when_ready");
+    } else {
+        label_set_fmt(policy, "Connect Wi-Fi and download allowed tiles for your area.");
+    }
     lv_label_set_long_mode(policy, LV_LABEL_LONG_DOT);
     lv_obj_set_width(policy, 390);
     lv_obj_set_pos(policy, 0, 28);
     lv_obj_t *path = create_label(cache, "", 0x8EA0AE);
-    label_set_fmt(path, "path %s",
-                  snapshot->map_tile_cache_path_template ?
-                  snapshot->map_tile_cache_path_template : "map/tiles/z{z}/x{x}/y{y}.tile");
+    if (snapshot->map_tile_cache_ready) {
+        label_set_fmt(path, "path %s",
+                      snapshot->map_tile_cache_path_template ?
+                      snapshot->map_tile_cache_path_template : "map/tiles/z{z}/x{x}/y{y}.tile");
+    } else {
+        label_set_fmt(path, "Allowed provider and visible attribution required.");
+    }
     lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
     lv_obj_set_width(path, 390);
     lv_obj_set_pos(path, 0, 50);
@@ -3541,15 +4224,16 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
     label_set_fmt(download, "%s",
                   snapshot->map_tile_download_requires ?
                   snapshot->map_tile_download_requires :
-                  "Wi-Fi runtime plus user opt-in; no background network download");
+                  "Connect Wi-Fi, choose an allowed provider, download only your area");
     lv_label_set_long_mode(download, LV_LABEL_LONG_DOT);
     lv_obj_set_width(download, 390);
     lv_obj_set_pos(download, 0, 72);
 
     if (!snapshot->map_location_set && !s_map_location_prompt_seen) {
-        map_picker_from_snapshot(snapshot);
+        map_location_from_snapshot(snapshot);
         render_map_location_sheet();
         if (s_map_location_sheet) {
+            set_dock_hidden(true);
             lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(s_map_location_sheet);
         }
@@ -3636,6 +4320,16 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
 
     size_t packet_rows = refresh_packet_terminal_rows();
     int y = s_packet_search_text[0] ? 204 : 184;
+    lv_obj_t *feed_count = create_label(s_content, "", 0x8EA0AE);
+    const size_t page_first = packet_rows > 0 ? s_packet_skip_newest + 1U : 0;
+    const size_t page_last = s_packet_skip_newest + packet_rows;
+    label_set_fmt(feed_count, "page %u-%u/%u%s",
+                  (unsigned)page_first, (unsigned)page_last,
+                  (unsigned)s_packet_total_matches,
+                  s_packet_sd_history_page ? " SD" : "");
+    lv_label_set_long_mode(feed_count, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(feed_count, 210);
+    lv_obj_set_pos(feed_count, 218, s_packet_search_text[0] ? 176 : 156);
     for (size_t i = 0; i < packet_rows; ++i) {
         render_packet_row(s_content, y, &s_packet_filtered_packets[i]);
         y += 52;
@@ -3648,6 +4342,20 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
         lv_obj_t *empty = create_label(s_content, "Packet log is empty", 0x8EA0AE);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
+    }
+
+    if (packet_feed_can_load_older(packet_rows)) {
+        create_button(s_content, "Load Older", 18, y + 4, 128, 40,
+                      packet_load_older_event_cb, NULL);
+        if (packet_feed_can_load_newer()) {
+            create_button(s_content, "Newer", 154, y + 4, 92, 40,
+                          packet_load_newer_event_cb, NULL);
+        }
+        y += 54;
+    } else if (packet_feed_can_load_newer()) {
+        create_button(s_content, "Newer", 18, y + 4, 92, 40,
+                      packet_load_newer_event_cb, NULL);
+        y += 54;
     }
 
     y += 10;
@@ -3850,6 +4558,7 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -3878,7 +4587,7 @@ static void render_storage_sheet(void)
     d1l_app_model_snapshot(&s_snapshot);
     lv_obj_clean(s_storage_sheet);
 
-    lv_obj_t *title = create_label(s_storage_sheet, "Storage Setup", 0xF4F7FB);
+    lv_obj_t *title = create_label(s_storage_sheet, "SD Card", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 8, 4);
     create_button(s_storage_sheet, "Close", 340, 0, 76, 40, close_storage_sheet_event_cb, NULL);
@@ -3916,9 +4625,9 @@ static void render_storage_sheet(void)
     lv_obj_set_pos(backend, 8, 152);
 
     lv_obj_t *action = create_label(s_storage_sheet, "", 0xFBBF24);
-    label_set_fmt(action, "setup %s  format %s",
+    label_set_fmt(action, "next step: %s%s",
                   s_snapshot.storage_setup_action ? s_snapshot.storage_setup_action : "not_available",
-                  s_snapshot.storage_format_action ? s_snapshot.storage_format_action : "not_available");
+                  s_snapshot.storage_sd_needs_fat32 ? " (prepare FAT32 on computer)" : "");
     lv_label_set_long_mode(action, LV_LABEL_LONG_DOT);
     lv_obj_set_width(action, 408);
     lv_obj_set_pos(action, 8, 184);
@@ -3932,7 +4641,7 @@ static void render_storage_sheet(void)
     lv_obj_set_pos(note, 8, 216);
 
     lv_obj_t *safety = create_label(s_storage_sheet,
-                                    "No automatic format. Formatting will require explicit confirmation.",
+                                    "Use a FAT32 card prepared on your computer. DeskOS creates its folders automatically and never formats cards on-device.",
                                     0xFBBF24);
     lv_label_set_long_mode(safety, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(safety, 408);
@@ -3953,6 +4662,7 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4024,6 +4734,16 @@ static void wifi_save_event_cb(lv_event_t *event)
     }
 }
 
+static void map_location_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        map_location_save_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        close_map_location_sheet_event_cb(event);
+    }
+}
+
 static void wifi_clear_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -4044,6 +4764,25 @@ static void wifi_toggle_event_cb(lv_event_t *event)
         wifi_refresh_sheet();
         render_active_tab();
     }
+}
+
+static void wifi_scan_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_wifi_scan(&s_wifi_scan_result);
+    s_wifi_scan_loaded = true;
+    show_toast("Wi-Fi scan", ret);
+    wifi_refresh_sheet();
+    render_active_tab();
+}
+
+static void wifi_connect_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_wifi_connect();
+    show_toast("Wi-Fi connect", ret);
+    wifi_refresh_sheet();
+    render_active_tab();
 }
 
 static void wifi_keyboard_event_cb(lv_event_t *event)
@@ -4080,30 +4819,47 @@ static void render_wifi_sheet(void)
 
     lv_obj_t *title = create_label(s_wifi_sheet, "Wi-Fi Setup", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
-    create_button(s_wifi_sheet, "Close", 340, 0, 76, 40, close_wifi_sheet_event_cb, NULL);
+    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(title, 180);
+    lv_obj_set_pos(title, 16, 10);
+    create_button(s_wifi_sheet, "Close", 392, 10, 72, 40, close_wifi_sheet_event_cb, NULL);
+    lv_obj_t *subtitle = create_label(s_wifi_sheet, "Profile and state", 0x8EA0AE);
+    lv_obj_set_pos(subtitle, 16, 36);
 
     lv_obj_t *state = create_label(s_wifi_sheet, "", s_snapshot.wifi_enabled ? 0x5EEAD4 : 0xFBBF24);
     label_set_fmt(state, "State %s  build %s",
                   s_snapshot.wifi_state ? s_snapshot.wifi_state : "off",
                   s_snapshot.wifi_build_enabled ? "enabled" : "not built");
-    label_set_dot_width(state, 408);
-    lv_obj_set_pos(state, 8, 46);
+    label_set_dot_width(state, 448);
+    lv_obj_set_pos(state, 16, 58);
+
+    lv_obj_t *link = create_label(s_wifi_sheet, "", 0x8EA0AE);
+    if (s_snapshot.wifi_connected && s_snapshot.wifi_ip[0]) {
+        label_set_fmt(link, "IP %s  RSSI %d  ch %u",
+                      s_snapshot.wifi_ip,
+                      s_snapshot.wifi_rssi_dbm,
+                      (unsigned)s_snapshot.wifi_channel);
+    } else {
+        label_set_fmt(link, "Last %s",
+                      s_snapshot.wifi_last_error ? s_snapshot.wifi_last_error : "none");
+    }
+    label_set_dot_width(link, 448);
+    lv_obj_set_pos(link, 16, 80);
 
     lv_obj_t *profile = create_label(s_wifi_sheet, "", 0xE5EDF5);
     label_set_fmt(profile, "Profile %s  password %s",
                   s_snapshot.wifi_profile_saved ?
                   (s_snapshot.wifi_ssid[0] ? s_snapshot.wifi_ssid : "saved") : "not saved",
                   s_snapshot.wifi_password_saved ? "saved" : "open/empty");
-    label_set_dot_width(profile, 408);
-    lv_obj_set_pos(profile, 8, 72);
+    label_set_dot_width(profile, 448);
+    lv_obj_set_pos(profile, 16, 102);
 
     lv_obj_t *ssid_label = create_label(s_wifi_sheet, "Network name", 0x5EEAD4);
-    lv_obj_set_pos(ssid_label, 8, 98);
+    lv_obj_set_pos(ssid_label, 16, 130);
     s_wifi_ssid_textarea = create_textarea(s_wifi_sheet, "wifi ssid textarea");
     if (s_wifi_ssid_textarea) {
-        lv_obj_set_size(s_wifi_ssid_textarea, 424, 38);
-        lv_obj_set_pos(s_wifi_ssid_textarea, 0, 118);
+        lv_obj_set_size(s_wifi_ssid_textarea, 448, 36);
+        lv_obj_set_pos(s_wifi_ssid_textarea, 16, 150);
         lv_textarea_set_one_line(s_wifi_ssid_textarea, true);
         lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U);
         lv_textarea_set_placeholder_text(s_wifi_ssid_textarea, "SSID");
@@ -4117,11 +4873,11 @@ static void render_wifi_sheet(void)
     }
 
     lv_obj_t *password_label = create_label(s_wifi_sheet, "Password", 0x5EEAD4);
-    lv_obj_set_pos(password_label, 8, 158);
+    lv_obj_set_pos(password_label, 16, 192);
     s_wifi_password_textarea = create_textarea(s_wifi_sheet, "wifi password textarea");
     if (s_wifi_password_textarea) {
-        lv_obj_set_size(s_wifi_password_textarea, 424, 38);
-        lv_obj_set_pos(s_wifi_password_textarea, 0, 178);
+        lv_obj_set_size(s_wifi_password_textarea, 448, 36);
+        lv_obj_set_pos(s_wifi_password_textarea, 16, 212);
         lv_textarea_set_one_line(s_wifi_password_textarea, true);
         lv_textarea_set_password_mode(s_wifi_password_textarea, true);
         lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U);
@@ -4136,21 +4892,38 @@ static void render_wifi_sheet(void)
         lv_obj_add_event_cb(s_wifi_password_textarea, wifi_textarea_event_cb, LV_EVENT_CLICKED, NULL);
     }
 
+    create_button(s_wifi_sheet, "Save", 16, 258, 62, 38, wifi_save_event_cb, NULL);
+    create_button(s_wifi_sheet, "Clear", 86, 258, 66, 38, wifi_clear_event_cb, NULL);
+    create_button(s_wifi_sheet, "Scan", 160, 258, 62, 38, wifi_scan_event_cb, NULL);
+    create_button(s_wifi_sheet, "Connect", 230, 258, 86, 38, wifi_connect_event_cb, NULL);
+    create_button(s_wifi_sheet, s_snapshot.wifi_enabled ? "Disable" : "Enable",
+                  324, 258, 86, 38, wifi_toggle_event_cb, NULL);
+
+    lv_obj_t *scan = create_label(s_wifi_sheet, "", 0x8EA0AE);
+    if (s_wifi_scan_loaded) {
+        const char *first = s_wifi_scan_result.returned_count > 0U ?
+            s_wifi_scan_result.aps[0].ssid : "none";
+        label_set_fmt(scan, "Scan %s  %u/%u networks  strongest %s",
+                      s_wifi_scan_result.reason ? s_wifi_scan_result.reason : "unknown",
+                      (unsigned)s_wifi_scan_result.returned_count,
+                      (unsigned)s_wifi_scan_result.total_count,
+                      first);
+    } else {
+        label_set_fmt(scan, "Scan to list nearby 2.4 GHz networks");
+    }
+    label_set_dot_width(scan, 448);
+    lv_obj_set_pos(scan, 16, 304);
+
     s_wifi_keyboard = create_keyboard(s_wifi_sheet, "wifi keyboard");
     if (s_wifi_keyboard) {
-        lv_obj_set_size(s_wifi_keyboard, 424, 120);
-        lv_obj_set_pos(s_wifi_keyboard, 0, 222);
+        lv_obj_set_size(s_wifi_keyboard, 448, 82);
+        lv_obj_set_pos(s_wifi_keyboard, 16, 330);
         if (s_wifi_ssid_textarea) {
             lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_ssid_textarea);
         }
         lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_READY, NULL);
         lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
     }
-
-    create_button(s_wifi_sheet, "Save", 8, 346, 88, 38, wifi_save_event_cb, NULL);
-    create_button(s_wifi_sheet, "Clear", 106, 346, 88, 38, wifi_clear_event_cb, NULL);
-    create_button(s_wifi_sheet, s_snapshot.wifi_enabled ? "Disable" : "Enable",
-                  204, 346, 98, 38, wifi_toggle_event_cb, NULL);
 }
 
 static void render_ble_sheet(void)
@@ -4347,6 +5120,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4356,6 +5130,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_wifi_sheet();
     if (s_wifi_sheet) {
+        set_dock_hidden(true);
         lv_obj_clear_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(s_wifi_sheet);
     }
@@ -4376,6 +5151,7 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4405,6 +5181,7 @@ static void open_display_sheet_event_cb(lv_event_t *event)
     hide_ble_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4434,6 +5211,7 @@ static void open_diagnostics_sheet_event_cb(lv_event_t *event)
     hide_ble_sheet();
     hide_display_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4480,6 +5258,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_display_sheet();
         hide_diagnostics_sheet();
         hide_map_location_sheet();
+        hide_map_tiles_sheet();
         hide_contact_detail_sheet();
         hide_contact_export_sheet();
         hide_route_detail_sheet();
@@ -4497,32 +5276,32 @@ static void close_sheet_event_cb(lv_event_t *event)
     hide_sheet();
 }
 
-static lv_obj_t *render_settings_row(lv_obj_t *parent, int y, const char *title,
-                                     const char *value, const char *detail,
-                                     uint32_t accent, lv_event_cb_t cb)
+static lv_obj_t *render_settings_tile(lv_obj_t *parent, int x, int y, const char *title,
+                                      const char *value, const char *detail,
+                                      uint32_t accent, lv_event_cb_t cb, void *user_data)
 {
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 70);
-    if (!row) {
+    lv_obj_t *tile = create_panel(parent, x, y, 204, 54);
+    if (!tile) {
         return NULL;
     }
-    lv_obj_set_style_pad_all(row, 10, 0);
+    lv_obj_set_style_pad_all(tile, 8, 0);
     if (cb) {
-        lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(row, cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(tile, cb, LV_EVENT_CLICKED, user_data);
     }
 
-    lv_obj_t *title_label = create_label(row, title, accent);
-    label_set_dot_width(title_label, 150);
+    lv_obj_t *title_label = create_label(tile, title, accent);
+    label_set_dot_width(title_label, 92);
     lv_obj_set_pos(title_label, 0, 0);
 
-    lv_obj_t *value_label = create_label(row, value, 0xF4F7FB);
-    label_set_dot_width(value_label, 220);
-    lv_obj_set_pos(value_label, 172, 0);
+    lv_obj_t *value_label = create_label(tile, value, 0xF4F7FB);
+    label_set_dot_width(value_label, 96);
+    lv_obj_set_pos(value_label, 96, 0);
 
-    lv_obj_t *detail_label = create_label(row, detail, 0x8EA0AE);
-    label_set_dot_width(detail_label, 392);
-    lv_obj_set_pos(detail_label, 0, 34);
-    return row;
+    lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
+    label_set_dot_width(detail_label, 188);
+    lv_obj_set_pos(detail_label, 0, 28);
+    return tile;
 }
 
 static void render_settings(const d1l_app_snapshot_t *snapshot)
@@ -4541,62 +5320,93 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     lv_obj_t *title = create_label(s_content, "Settings", 0xF4F7FB);
     obj_set_style_text_font_if(title, &lv_font_montserrat_24);
     obj_set_pos_if(title, 18, 16);
+    lv_obj_t *subtitle = create_label(s_content, "Setup Dashboard", 0x8EA0AE);
+    label_set_dot_width(subtitle, 260);
+    obj_set_pos_if(subtitle, 18, 44);
 
-    lv_obj_t *wireless = create_panel(s_content, 18, 54, 424, 82);
-    if (wireless) {
-        create_label(wireless, "Wireless", 0x5EEAD4);
-        lv_obj_t *state = create_label(wireless, "", 0xF4F7FB);
-        label_set_fmt(state, "Wi-Fi %s  BLE %s",
-                      snapshot->wifi_state ? snapshot->wifi_state : "off",
-                      snapshot->ble_state ? snapshot->ble_state : "off");
-        label_set_dot_width(state, 260);
-        lv_obj_set_pos(state, 0, 28);
-        lv_obj_t *policy = create_label(wireless, "", 0x8EA0AE);
-        label_set_fmt(policy, "USB ready  %s",
-                      snapshot->coexistence_policy ? snapshot->coexistence_policy : "offline first");
-        label_set_dot_width(policy, 250);
-        lv_obj_set_pos(policy, 0, 54);
-        create_button(wireless, "Wi-Fi", 270, 4, 62, 44, open_wifi_sheet_event_cb, NULL);
-        create_button(wireless, "BLE", 340, 4, 52, 44, open_ble_sheet_event_cb, NULL);
+    char storage_value[48];
+    char storage_detail[128];
+    char wifi_value[64];
+    char wifi_detail[128];
+    char ble_value[48];
+    char radio_detail[128];
+    char map_value[48];
+    char map_detail[128];
+    char identity_value[48];
+    char identity_detail[128];
+    char about_detail[128];
+
+    snprintf(storage_value, sizeof(storage_value), "%s",
+             snapshot->storage_data_enabled ? "Ready" :
+             (snapshot->storage_setup_required ? "Needs FAT32" : "NVS fallback"));
+    snprintf(storage_detail, sizeof(storage_detail), "SD %s; FAT32 only, no format",
+             home_sd_state(snapshot));
+    render_settings_tile(s_content, 18, 70, "SD Card", storage_value, storage_detail,
+                         snapshot->storage_data_enabled ? 0x5EEAD4 : 0xFBBF24,
+                         open_storage_sheet_event_cb, NULL);
+
+    if (snapshot->wifi_connected && snapshot->wifi_ip[0]) {
+        snprintf(wifi_value, sizeof(wifi_value), "Connected %s", snapshot->wifi_ip);
+    } else {
+        snprintf(wifi_value, sizeof(wifi_value), "%s",
+                 snapshot->wifi_state ? snapshot->wifi_state : "off");
     }
+    snprintf(wifi_detail, sizeof(wifi_detail), "%s; mesh stays offline",
+             snapshot->wifi_build_enabled ? "Scan/connect for tiles" : "Not in this firmware");
+    render_settings_tile(s_content, 238, 70, "Wi-Fi", wifi_value, wifi_detail,
+                         snapshot->wifi_connected ? 0x5EEAD4 :
+                         (snapshot->wifi_enabled ? 0xFBBF24 : 0x8EA0AE),
+                         open_wifi_sheet_event_cb, NULL);
 
-    lv_obj_t *mesh = create_panel(s_content, 18, 150, 424, 92);
-    if (mesh) {
-        create_label(mesh, "MeshCore", 0x93C5FD);
-        lv_obj_t *mesh_profile = create_label(mesh, profile_line, 0xF4F7FB);
-        label_set_dot_width(mesh_profile, 260);
-        lv_obj_set_pos(mesh_profile, 0, 28);
-        lv_obj_t *rf = create_label(mesh, "", 0x8EA0AE);
-        label_set_fmt(rf, "TX %d dBm  RX boost %s  TCXO %s",
-                      snapshot->radio_tx_power_dbm,
-                      snapshot->radio_rx_boost ? "on" : "off",
-                      snapshot->radio_tcxo ? snapshot->radio_tcxo : "NONE");
-        label_set_dot_width(rf, 250);
-        lv_obj_set_pos(rf, 0, 56);
-        create_button(mesh, "Radio", 270, 0, 72, 44, open_radio_settings_event_cb, NULL);
-        create_button(mesh, "Advert", 270, 48, 90, 44, open_sheet_event_cb, NULL);
-    }
+    snprintf(ble_value, sizeof(ble_value), "%s",
+             snapshot->ble_state ? snapshot->ble_state :
+             (snapshot->ble_build_enabled ? "off" : "unavailable"));
+    render_settings_tile(s_content, 18, 128, "BLE", ble_value,
+                         "Companion pairing gated",
+                         snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
+                         open_ble_sheet_event_cb, NULL);
 
-    char storage_detail[96];
-    snprintf(storage_detail, sizeof(storage_detail), "SD %s  %s",
-             home_sd_state(snapshot),
-             snapshot->storage_note ? snapshot->storage_note : "onboard fallback");
-    render_settings_row(s_content, 256, "Storage",
-                        snapshot->storage_backend ? snapshot->storage_backend : "NVS fallback",
-                        storage_detail, 0xFBBF24, open_storage_sheet_event_cb);
-    render_settings_row(s_content, 340, "Display", "Backlight / Night",
-                        "Brightness, night mode, high contrast, timeout",
-                        0xA7F3D0, open_display_sheet_event_cb);
-    render_settings_row(s_content, 424, "Diagnostics", "Health / Crashlog",
-                        "Heap, reset reason, exports, soak evidence",
-                        0xC4B5FD, open_diagnostics_sheet_event_cb);
+    snprintf(radio_detail, sizeof(radio_detail), "%s; TX %d dBm, RX boost %s",
+             profile_line,
+             snapshot->radio_tx_power_dbm,
+             snapshot->radio_rx_boost ? "on" : "off");
+    render_settings_tile(s_content, 238, 128, "Radio", "Mesh profile", radio_detail,
+                         0x93C5FD, open_radio_settings_event_cb, NULL);
 
-    char about_detail[96];
-    snprintf(about_detail, sizeof(about_detail), "Identity %.16s",
+    snprintf(map_value, sizeof(map_value), "%s",
+             snapshot->map_tile_cache_ready ? "Tiles ready" : "Setup");
+    snprintf(map_detail, sizeof(map_detail), "%s",
+             snapshot->map_tile_cache_ready ? "Offline cache ready" :
+             "Wi-Fi and allowed provider");
+    render_settings_tile(s_content, 18, 186, "Map Tiles", map_value, map_detail,
+                         snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24,
+                         open_map_tiles_sheet_event_cb, NULL);
+
+    render_settings_tile(s_content, 238, 186, "Display", "Backlight",
+                         "Brightness, night, contrast",
+                         0xA7F3D0, open_display_sheet_event_cb, NULL);
+
+    snprintf(identity_value, sizeof(identity_value), "%s",
+             snapshot->identity_ready ? "Ready" : "Not set");
+    snprintf(identity_detail, sizeof(identity_detail), "Name %s; fingerprint %.16s",
+             snapshot->node_name[0] ? snapshot->node_name : "D1L Desk",
              snapshot->identity_fingerprint[0] ? snapshot->identity_fingerprint : "not generated");
-    render_settings_row(s_content, 508, "About",
-                        snapshot->node_name[0] ? snapshot->node_name : "MeshCore DeskOS D1L",
-                        about_detail, 0x8EA0AE, NULL);
+    render_settings_tile(s_content, 18, 244, "Identity", identity_value, identity_detail,
+                         snapshot->identity_ready ? 0x5EEAD4 : 0x8EA0AE, NULL, NULL);
+
+    render_settings_tile(s_content, 238, 244, "Diagnostics", "Health",
+                         "Crashlog, exports, soak",
+                         0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
+
+    snprintf(about_detail, sizeof(about_detail), "%s %s",
+             D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION);
+    render_settings_tile(s_content, 18, 302, "About",
+                         snapshot->node_name[0] ? snapshot->node_name : "DeskOS D1L",
+                         about_detail, 0x8EA0AE, NULL, NULL);
+
+    render_settings_tile(s_content, 238, 302, "Advanced", "Hidden tools",
+                         "Raw data and adverts",
+                         0xFCA5A5, open_sheet_event_cb, NULL);
 }
 
 static void render_active_tab(void)
@@ -4692,6 +5502,7 @@ static void process_pending_tab_switch(void)
     hide_display_sheet();
     hide_diagnostics_sheet();
     hide_map_location_sheet();
+    hide_map_tiles_sheet();
     hide_contact_detail_sheet();
     hide_contact_export_sheet();
     hide_route_detail_sheet();
@@ -4762,20 +5573,20 @@ static void create_top_bar(lv_obj_t *screen)
 
 static void create_dock(lv_obj_t *screen)
 {
-    lv_obj_t *dock = create_object(screen, "dock");
-    if (!dock) {
+    s_dock = create_object(screen, "dock");
+    if (!s_dock) {
         return;
     }
-    lv_obj_set_size(dock, 480, 62);
-    lv_obj_set_pos(dock, 0, 418);
-    lv_obj_set_style_bg_color(dock, lv_color_hex(0x09131D), 0);
-    lv_obj_set_style_border_width(dock, 0, 0);
-    lv_obj_set_style_pad_all(dock, 5, 0);
-    lv_obj_clear_flag(dock, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(s_dock, 480, 62);
+    lv_obj_set_pos(s_dock, 0, 418);
+    lv_obj_set_style_bg_color(s_dock, lv_color_hex(0x09131D), 0);
+    lv_obj_set_style_border_width(s_dock, 0, 0);
+    lv_obj_set_style_pad_all(s_dock, 5, 0);
+    lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_SCROLLABLE);
 
     const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"};
     for (int i = 0; i < 6; ++i) {
-        create_button(dock, labels[i], 4 + i * 80, 5, 72, 50, dock_event_cb,
+        create_button(s_dock, labels[i], 4 + i * 80, 5, 72, 50, dock_event_cb,
                       (void *)(uintptr_t)i);
     }
 }
@@ -4827,9 +5638,9 @@ static void create_compose_sheet(lv_obj_t *screen)
     if (!s_compose_sheet) {
         return;
     }
-    lv_obj_set_size(s_compose_sheet, 448, 344);
-    lv_obj_set_pos(s_compose_sheet, 16, 64);
-    lv_obj_set_style_radius(s_compose_sheet, 8, 0);
+    lv_obj_set_size(s_compose_sheet, 480, 424);
+    lv_obj_set_pos(s_compose_sheet, 0, 56);
+    lv_obj_set_style_radius(s_compose_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
@@ -4839,20 +5650,20 @@ static void create_compose_sheet(lv_obj_t *screen)
     s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
     lv_obj_set_style_text_font(s_compose_title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(s_compose_title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_compose_title, 204);
-    lv_obj_set_pos(s_compose_title, 8, 4);
+    lv_obj_set_width(s_compose_title, 210);
+    lv_obj_set_pos(s_compose_title, 16, 10);
 
-    create_button(s_compose_sheet, "Send", 226, 0, 64, 40, send_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Clear", 298, 0, 64, 40, clear_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Close", 370, 0, 58, 40, close_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Send", 252, 10, 62, 40, send_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Clear", 322, 10, 62, 40, clear_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Close", 392, 10, 72, 40, close_compose_event_cb, NULL);
 
     s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
     if (!s_compose_textarea) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_textarea, 424, 68);
-    lv_obj_set_pos(s_compose_textarea, 0, 50);
+    lv_obj_set_size(s_compose_textarea, 448, 82);
+    lv_obj_set_pos(s_compose_textarea, 16, 62);
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
     lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS);
     lv_textarea_set_one_line(s_compose_textarea, false);
@@ -4868,15 +5679,15 @@ static void create_compose_sheet(lv_obj_t *screen)
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_compose_counter, 86);
-    lv_obj_set_pos(s_compose_counter, 338, 120);
+    lv_obj_set_pos(s_compose_counter, 378, 148);
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
     if (!s_compose_keyboard) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_keyboard, 424, 202);
-    lv_obj_set_pos(s_compose_keyboard, 0, 128);
+    lv_obj_set_size(s_compose_keyboard, 448, 244);
+    lv_obj_set_pos(s_compose_keyboard, 16, 168);
     lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
@@ -4890,8 +5701,8 @@ static void create_public_history_sheet(lv_obj_t *screen)
     if (!s_public_history_sheet) {
         return;
     }
-    lv_obj_set_size(s_public_history_sheet, 448, 304);
-    lv_obj_set_pos(s_public_history_sheet, 16, 88);
+    lv_obj_set_size(s_public_history_sheet, 448, 328);
+    lv_obj_set_pos(s_public_history_sheet, 16, 82);
     lv_obj_set_style_radius(s_public_history_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_public_history_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_public_history_sheet, lv_color_hex(0x334155), 0);
@@ -4907,8 +5718,8 @@ static void create_message_detail_sheet(lv_obj_t *screen)
     if (!s_message_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_message_detail_sheet, 448, 286);
-    lv_obj_set_pos(s_message_detail_sheet, 16, 100);
+    lv_obj_set_size(s_message_detail_sheet, 448, 328);
+    lv_obj_set_pos(s_message_detail_sheet, 16, 82);
     lv_obj_set_style_radius(s_message_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_message_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_message_detail_sheet, lv_color_hex(0x334155), 0);
@@ -4983,8 +5794,8 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     if (!s_dm_thread_sheet) {
         return;
     }
-    lv_obj_set_size(s_dm_thread_sheet, 448, 300);
-    lv_obj_set_pos(s_dm_thread_sheet, 16, 92);
+    lv_obj_set_size(s_dm_thread_sheet, 448, 328);
+    lv_obj_set_pos(s_dm_thread_sheet, 16, 82);
     lv_obj_set_style_radius(s_dm_thread_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_dm_thread_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_dm_thread_sheet, lv_color_hex(0x334155), 0);
@@ -5034,9 +5845,9 @@ static void create_wifi_sheet(lv_obj_t *screen)
     if (!s_wifi_sheet) {
         return;
     }
-    lv_obj_set_size(s_wifi_sheet, 448, 392);
-    lv_obj_set_pos(s_wifi_sheet, 16, 44);
-    lv_obj_set_style_radius(s_wifi_sheet, 8, 0);
+    lv_obj_set_size(s_wifi_sheet, 480, 424);
+    lv_obj_set_pos(s_wifi_sheet, 0, 56);
+    lv_obj_set_style_radius(s_wifi_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_wifi_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_wifi_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_wifi_sheet, 1, 0);
@@ -5102,15 +5913,32 @@ static void create_map_location_sheet(lv_obj_t *screen)
     if (!s_map_location_sheet) {
         return;
     }
-    lv_obj_set_size(s_map_location_sheet, 448, 320);
-    lv_obj_set_pos(s_map_location_sheet, 16, 82);
-    lv_obj_set_style_radius(s_map_location_sheet, 8, 0);
+    lv_obj_set_size(s_map_location_sheet, 480, 424);
+    lv_obj_set_pos(s_map_location_sheet, 0, 56);
+    lv_obj_set_style_radius(s_map_location_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_map_location_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_map_location_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_map_location_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_map_location_sheet, 12, 0);
     lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void create_map_tiles_sheet(lv_obj_t *screen)
+{
+    s_map_tiles_sheet = create_object(screen, "map tiles sheet");
+    if (!s_map_tiles_sheet) {
+        return;
+    }
+    lv_obj_set_size(s_map_tiles_sheet, 480, 424);
+    lv_obj_set_pos(s_map_tiles_sheet, 0, 56);
+    lv_obj_set_style_radius(s_map_tiles_sheet, 0, 0);
+    lv_obj_set_style_bg_color(s_map_tiles_sheet, lv_color_hex(0x111923), 0);
+    lv_obj_set_style_border_color(s_map_tiles_sheet, lv_color_hex(0x334155), 0);
+    lv_obj_set_style_border_width(s_map_tiles_sheet, 1, 0);
+    lv_obj_set_style_pad_all(s_map_tiles_sheet, 12, 0);
+    lv_obj_clear_flag(s_map_tiles_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void create_contact_detail_sheet(lv_obj_t *screen)
@@ -5523,6 +6351,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_display_sheet(s_screen);
     create_diagnostics_sheet(s_screen);
     create_map_location_sheet(s_screen);
+    create_map_tiles_sheet(s_screen);
     create_contact_detail_sheet(s_screen);
     create_contact_export_sheet(s_screen);
     create_node_detail_sheet(s_screen);

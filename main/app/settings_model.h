@@ -5,8 +5,9 @@
 
 #include "esp_err.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "storage/map_tile_store.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 5U
+#define D1L_SETTINGS_SCHEMA_VERSION 6U
 #define D1L_NODE_NAME_LEN 32U
 #define D1L_WIFI_SSID_LEN 33U
 #define D1L_WIFI_PASSWORD_LEN 65U
@@ -16,6 +17,9 @@
 #define D1L_MAP_LOCATION_LAT_E7_MAX 900000000L
 #define D1L_MAP_LOCATION_LON_E7_MIN (-1800000000L)
 #define D1L_MAP_LOCATION_LON_E7_MAX 1800000000L
+#define D1L_MAP_TILE_PROVIDER_TEMPLATE_LEN (D1L_MAP_TILE_URL_TEMPLATE_MAX + 1U)
+#define D1L_MAP_TILE_PROVIDER_ATTRIBUTION_LEN (D1L_MAP_TILE_ATTRIBUTION_MAX + 1U)
+#define D1L_MAP_TILE_DEFAULT_ZOOM 12U
 
 typedef enum {
     D1L_ROLE_DESK_COMPANION = 0,
@@ -49,6 +53,10 @@ typedef struct {
     bool map_location_set;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
+    bool map_tile_provider_saved;
+    char map_tile_url_template[D1L_MAP_TILE_PROVIDER_TEMPLATE_LEN];
+    char map_tile_attribution[D1L_MAP_TILE_PROVIDER_ATTRIBUTION_LEN];
+    uint8_t map_tile_zoom;
     bool identity_ready;
     uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
     uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];

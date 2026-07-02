@@ -26,6 +26,35 @@ typedef struct {
     bool high_contrast;
     bool night_mode;
     bool onboarding_complete;
+    bool wifi_profile_saved;
+    uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} d1l_settings_v5_t;
+
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
     uint8_t path_hash_bytes;
     uint32_t frequency_hz;
     uint16_t bandwidth_tenths_khz;
@@ -152,6 +181,10 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->map_location_set = false;
     settings->map_lat_e7 = 0;
     settings->map_lon_e7 = 0;
+    settings->map_tile_provider_saved = false;
+    settings->map_tile_url_template[0] = '\0';
+    settings->map_tile_attribution[0] = '\0';
+    settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
     settings->identity_ready = false;
     memset(settings->identity_public_key, 0, sizeof(settings->identity_public_key));
     memset(settings->identity_private_key, 0, sizeof(settings->identity_private_key));
@@ -219,6 +252,26 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         settings->map_location_set = false;
         settings->map_lat_e7 = 0;
         settings->map_lon_e7 = 0;
+    }
+    settings->map_tile_url_template[D1L_MAP_TILE_PROVIDER_TEMPLATE_LEN - 1U] = '\0';
+    settings->map_tile_attribution[D1L_MAP_TILE_PROVIDER_ATTRIBUTION_LEN - 1U] = '\0';
+    sanitize_printable(settings->map_tile_url_template,
+                       sizeof(settings->map_tile_url_template), false);
+    sanitize_printable(settings->map_tile_attribution,
+                       sizeof(settings->map_tile_attribution), false);
+    if (settings->map_tile_zoom > D1L_MAP_TILE_ZOOM_MAX) {
+        settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
+    }
+    if (settings->map_tile_zoom == 0U) {
+        settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
+    }
+    settings->map_tile_provider_saved =
+        settings->map_tile_provider_saved &&
+        d1l_map_tile_provider_template_allowed(settings->map_tile_url_template) &&
+        d1l_map_tile_attribution_valid(settings->map_tile_attribution);
+    if (!settings->map_tile_provider_saved) {
+        settings->map_tile_url_template[0] = '\0';
+        settings->map_tile_attribution[0] = '\0';
     }
     if (settings->identity_ready) {
         bool pub_all_zero = true;
@@ -308,6 +361,51 @@ static void migrate_v3_settings(d1l_settings_t *dest, const d1l_settings_v3_t *s
     d1l_settings_sanitize(dest);
 }
 
+static void migrate_v5_settings(d1l_settings_t *dest, const d1l_settings_v5_t *src)
+{
+    if (!dest) {
+        return;
+    }
+    d1l_settings_defaults(dest);
+    if (!src || src->schema_version != 5U) {
+        return;
+    }
+    memcpy(dest->node_name, src->node_name, sizeof(dest->node_name));
+    dest->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
+    dest->role = src->role;
+    dest->wifi_enabled = src->wifi_enabled;
+    dest->ble_companion_enabled = src->ble_companion_enabled;
+    dest->observer_enabled = src->observer_enabled;
+    dest->high_contrast = src->high_contrast;
+    dest->night_mode = src->night_mode;
+    dest->onboarding_complete = src->onboarding_complete;
+    dest->wifi_profile_saved = src->wifi_profile_saved;
+    memcpy(dest->wifi_ssid, src->wifi_ssid, sizeof(dest->wifi_ssid));
+    dest->wifi_ssid[D1L_WIFI_SSID_LEN - 1U] = '\0';
+    memcpy(dest->wifi_password, src->wifi_password, sizeof(dest->wifi_password));
+    dest->wifi_password[D1L_WIFI_PASSWORD_LEN - 1U] = '\0';
+    dest->path_hash_bytes = src->path_hash_bytes;
+    dest->frequency_hz = src->frequency_hz;
+    dest->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    dest->spreading_factor = src->spreading_factor;
+    dest->coding_rate = src->coding_rate;
+    dest->tx_power_dbm = src->tx_power_dbm;
+    dest->rx_boost = src->rx_boost;
+    dest->tcxo_mode = src->tcxo_mode;
+    dest->map_location_set = src->map_location_set;
+    dest->map_lat_e7 = src->map_lat_e7;
+    dest->map_lon_e7 = src->map_lon_e7;
+    dest->map_tile_provider_saved = false;
+    dest->map_tile_url_template[0] = '\0';
+    dest->map_tile_attribution[0] = '\0';
+    dest->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
+    dest->identity_ready = src->identity_ready;
+    memcpy(dest->identity_public_key, src->identity_public_key, sizeof(dest->identity_public_key));
+    memcpy(dest->identity_private_key, src->identity_private_key, sizeof(dest->identity_private_key));
+    dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
+    d1l_settings_sanitize(dest);
+}
+
 static void migrate_v4_settings(d1l_settings_t *dest, const d1l_settings_v4_t *src)
 {
     if (!dest) {
@@ -366,7 +464,12 @@ esp_err_t d1l_settings_load(void)
         ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &s_current, &len);
         if (ret == ESP_OK) {
             const uint32_t loaded_schema = s_current.schema_version;
-            if (loaded_schema == 4U) {
+            if (loaded_schema == 5U) {
+                d1l_settings_v5_t old_settings = {0};
+                memcpy(&old_settings, &s_current, sizeof(old_settings));
+                migrate_v5_settings(&s_current, &old_settings);
+                should_save = true;
+            } else if (loaded_schema == 4U) {
                 d1l_settings_v4_t old_settings = {0};
                 memcpy(&old_settings, &s_current, sizeof(old_settings));
                 migrate_v4_settings(&s_current, &old_settings);
@@ -385,6 +488,29 @@ esp_err_t d1l_settings_load(void)
                 d1l_settings_sanitize(&s_current);
                 should_save = loaded_schema != D1L_SETTINGS_SCHEMA_VERSION;
             }
+        }
+    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v5_t)) {
+        d1l_settings_v5_t old_settings = {0};
+        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
+        if (ret == ESP_OK) {
+            if (old_settings.schema_version == 5U) {
+                migrate_v5_settings(&s_current, &old_settings);
+            } else if (old_settings.schema_version == 4U) {
+                d1l_settings_v4_t old_v4 = {0};
+                memcpy(&old_v4, &old_settings, sizeof(old_v4));
+                migrate_v4_settings(&s_current, &old_v4);
+            } else if (old_settings.schema_version == 3U) {
+                d1l_settings_v3_t old_v3 = {0};
+                memcpy(&old_v3, &old_settings, sizeof(old_v3));
+                migrate_v3_settings(&s_current, &old_v3);
+            } else if (old_settings.schema_version == 2U) {
+                d1l_settings_v2_t old_v2 = {0};
+                memcpy(&old_v2, &old_settings, sizeof(old_v2));
+                migrate_v2_settings(&s_current, &old_v2);
+            } else {
+                d1l_settings_defaults(&s_current);
+            }
+            should_save = true;
         }
     } else if (ret == ESP_OK && len == sizeof(d1l_settings_v4_t)) {
         d1l_settings_v4_t old_settings = {0};

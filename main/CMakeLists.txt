@@ -51,6 +51,10 @@ idf_component_register(
         driver
         esp_timer
         esp_system
+        esp_event
+        esp_http_client
+        esp_netif
+        esp_wifi
         heap
         i2c_devices
         lora

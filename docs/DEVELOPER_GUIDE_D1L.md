@@ -74,7 +74,7 @@ For current local validation, `COM12` is the D1L and `COM11` has been a local Me
 
 The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
 
-The operator has allowed formatting the SD card inserted in the D1L for production SD validation. Use only an unformatted or sacrificial test card, and perform that destructive proof through `sd_boot_prepare_acceptance_d1l.py --scenario unformatted --allow-format-confirm` or the guarded `storage setup confirm FORMAT-DESKOS-SD` path after status reports a present setup-required card.
+Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, UI, or scripts. Production validation assumes users provide FAT32 cards prepared on a computer; the current validation device has a fresh FAT32 32 GB card installed. DeskOS may create the `/deskos` folders/manifests on a mounted FAT32 card and otherwise falls back to NVS.
 
 ## GitHub Actions
 

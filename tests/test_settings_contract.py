@@ -13,7 +13,7 @@ def read(rel: str) -> str:
 def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 5U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 6U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
     assert "wifi_profile_saved" in header
@@ -23,6 +23,10 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "identity_private_key" in header
     assert "onboarding_complete" in header
     assert "map_location_set" in header
+    assert "map_tile_provider_saved" in header
+    assert "map_tile_url_template" in header
+    assert "map_tile_attribution" in header
+    assert "map_tile_zoom" in header
     assert "map_lat_e7" in header
     assert "map_lon_e7" in header
     assert "D1L_MAP_LOCATION_LAT_E7_MIN" in header
@@ -33,9 +37,12 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_v2_t" in source
     assert "d1l_settings_v3_t" in source
     assert "d1l_settings_v4_t" in source
+    assert "d1l_settings_v5_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
     assert "migrate_v4_settings" in source
+    assert "migrate_v5_settings" in source
+    assert "if (loaded_schema == 5U)" in source
     assert "if (loaded_schema == 4U)" in source
     assert "if (loaded_schema == 3U)" in source
     assert "if (loaded_schema == 2U)" in source
@@ -66,6 +73,10 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->map_location_set = false" in source
     assert "settings->map_lat_e7 = 0" in source
     assert "settings->map_lon_e7 = 0" in source
+    assert "settings->map_tile_provider_saved = false" in source
+    assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in source
+    assert "d1l_map_tile_provider_template_allowed(settings->map_tile_url_template)" in source
+    assert "d1l_map_tile_attribution_valid(settings->map_tile_attribution)" in source
     assert "settings->path_hash_bytes = 1" in source
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
@@ -97,6 +108,7 @@ def test_console_exposes_phase2_foundation_commands():
         "mesh advert flood",
         "wifi status",
         "wifi save",
+        "wifi connect",
         "wifi clear",
         "wifi off",
         "crashlog",
@@ -120,7 +132,7 @@ def test_console_exposes_phase2_foundation_commands():
     assert "d1l_connectivity_save_wifi_profile(ssid, password_to_save)" in console
     assert "d1l_connectivity_clear_wifi_profile()" in console
     assert "password is not printed" in console
-    assert "disabled_by_setting" in console
+    assert "WIFI_DISABLED" in console
     assert '\\"radio\\":{\\"frequency_hz\\":%lu' in console
     assert "cmd_radio_set_txpower" in console
     assert "cmd_radio_set_rxboost" in console
@@ -129,6 +141,10 @@ def test_console_exposes_phase2_foundation_commands():
     assert "parse_coord_e7" in console
     assert "strtod(text, &end)" in console
     assert '\\"map_location\\"' in console
+    assert '\\"map_tiles\\"' in console
+    assert '\\"provider_saved\\"' in console
+    assert "settings->map_tile_provider_saved" in console
+    assert "D1L_MAP_TILE_PROVIDER_POLICY" in console
     assert "print_map_location_result" in console
     assert "d1l_app_model_set_map_location(lat_e7, lon_e7)" in console
     assert "d1l_app_model_clear_map_location()" in console

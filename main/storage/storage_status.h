@@ -9,7 +9,6 @@
 #define D1L_STORAGE_SD_DATA_ROOT "/sdcard/deskos"
 #define D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 10000U
 #define D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U
-#define D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 660000U
 
 typedef struct {
     bool initialized;
@@ -20,8 +19,7 @@ typedef struct {
     bool sd_present;
     bool sd_mounted;
     bool sd_data_root_ready;
-    bool format_required;
-    bool format_supported;
+    bool sd_needs_fat32;
     bool setup_required;
     bool setup_supported;
     bool data_enabled;
@@ -51,7 +49,6 @@ typedef struct {
     const char *map_tile_backend;
     const char *export_backend;
     const char *setup_action;
-    const char *format_action;
     const char *note;
 } d1l_storage_status_t;
 
@@ -60,5 +57,4 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result);
 esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms);
 esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms);
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms);
-esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t timeout_ms);
 void d1l_storage_status(d1l_storage_status_t *out_status);

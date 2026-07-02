@@ -208,6 +208,67 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert report["p0_failed_count"] == 4
 
 
+def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(
+        hardware / "rp2040_preflight_68350bf.json",
+        {
+            "ok": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "copies_uf2": False,
+            "ready_for_sd_acceptance": True,
+            "candidate_volumes": [],
+            "classification": {
+                "storage_file_gate_ready": True,
+                "sd_state": "ready",
+                "next_action": "run_sd_file_and_export_acceptance",
+            },
+            "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["sd_acceptance_matrix"]["ok"] is True
+    assert gates["sd_acceptance_matrix"]["details"]["formats_sd"] is False
+    assert gates["sd_acceptance_matrix"]["details"]["no_device_format_policy_ok"] is True
+
+
+def test_release_gate_audit_blocks_obsolete_sd_format_guidance_without_echoing_action(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(
+        hardware / "rp2040_preflight_68350bf.json",
+        {
+            "ok": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "copies_uf2": False,
+            "ready_for_sd_acceptance": True,
+            "candidate_volumes": [],
+            "classification": {
+                "storage_file_gate_ready": True,
+                "sd_state": "setup_required",
+                "next_action": "run_guarded_format_or_swap_known_good_sd_card",
+            },
+            "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+    sd_gate = gates["sd_acceptance_matrix"]
+
+    assert sd_gate["ok"] is False
+    assert sd_gate["details"]["no_device_format_policy_ok"] is False
+    assert sd_gate["details"]["obsolete_format_action_blocked"] is True
+    assert sd_gate["details"]["classification"]["next_action"] == "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+    assert "run_guarded_format_or_swap_known_good_sd_card" not in json.dumps(sd_gate)
+
+
 def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_full_rf(tmp_path: Path):
     write_core_evidence(tmp_path)
     write_routes_probe_evidence(tmp_path)

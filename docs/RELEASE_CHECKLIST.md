@@ -3,13 +3,13 @@
 ## Phase 1
 
 - [x] Host tests pass.
-- [x] Firmware builds with ESP-IDF v5.1.x.
+- [x] Firmware builds with ESP-IDF v5.1.x in GitHub Actions; local firmware builds are not part of validation.
 - [ ] Flash backup captured with SHA256. Skipped for current bring-up per operator instruction.
 - [x] D1L flashes using explicit port only.
 - [x] Boot banner includes firmware name/version/schema.
 - [x] `i2c` detects D1L expander/touch.
 - [ ] `display test` shows stable bars. Command passed on hardware; manual visual confirmation is still pending.
-- [x] `wifi status`, `wifi scan`, `wifi save <ssid> [password]`, `wifi clear`, and `ble status` report the supported companion-radio/profile state for the release build without printing saved Wi-Fi passwords.
+- [x] `wifi status`, bounded `wifi scan`, `wifi save <ssid> [password]`, password-safe `wifi connect`, `wifi clear`, and `ble status` report the supported companion-radio/profile state for the release build without printing saved Wi-Fi passwords.
 - [x] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
 - [x] `touch test` reports coordinates.
 - [x] COM12 GitHub-built touch recovery validated from run `28510825288` / commit `c214ca1`: FT touch coordinates were sampled, bottom dock taps did not reboot, and post-fix idle soak stayed crash-free.
@@ -25,18 +25,18 @@
 ## Phase 3 UI Shell
 
 - [x] 480x480 dark shell replaces the bring-up tile home.
-- [x] Top status, home dashboard, bottom dock, packet view, settings view, advert sheet, toast, and lock overlay implemented.
+- [x] Top status, home dashboard, bottom dock, packet view, Settings setup dashboard, advert sheet, toast, and lock overlay implemented.
 - [x] First persisted onboarding sheet implemented with node name, Canada/USA preset, Desk Companion role, offline radio defaults, and identity generation.
 - [x] Touch Public `test` action routes through the app model.
 - [x] Phase 3 shell host contract tests pass.
-- [x] Phase 3 shell local Podman ESP-IDF build passes.
+- [x] Phase 3 shell firmware build passes in GitHub Actions.
 - [x] Phase 3 shell flashed and smoke-tested on `COM7`.
 - [x] Controlled Public `test` RF regression still receives local bot replies.
 - [x] Simulator screenshots captured for the main shell views and current modal sheets.
 - [x] Simulator layout report passes required-label and text-overflow checks.
 - [x] Simulator touch-flow report passes expected-flow, 44x44 touch-target, RF/destructive flag, and no-format storage checks.
-- [x] Offline Map tab, serial-configured manual center, and SD tile-cache policy are covered by simulator required-label and flow checks.
-- [x] First-open touch Map location picker and persisted D1L pin flow are covered by simulator required-label and flow checks.
+- [x] Offline Map tab, serial-configured manual center, and SD tile-cache/provider policy are covered by simulator required-label and flow checks.
+- [x] First-open touch Map latitude/longitude keyboard entry and persisted D1L pin flow are covered by simulator required-label and flow checks.
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
 - [x] Bottom dock tab taps validated on D1L `COM12` after the deferred tab-switch fix; monitored touch samples and crashlog stayed clean.
 - [ ] Manual visual review of the physical shell.
@@ -48,6 +48,7 @@
 - [x] Public TX/RX events append persisted recent message rows.
 - [x] `messages public` serial diagnostic added to smoke coverage.
 - [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
+- [x] Public History and DM Thread retained-history paging implemented with Load Older buttons plus serial `offset <n>` diagnostics and page metadata.
 - [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
 - [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions; `artifacts/hardware/com12/dm_probe_b841621c.json` passed COM12-to-COM11 outbound DM proof with retained DM, packet, route, meshbot receive-counter, health, and no-Public-command checks all true.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
@@ -64,10 +65,10 @@
 - [x] Packet log persists newest 8 rows across reboot and exposes serial/touch packet detail.
 - [x] Packet log filter/search/raw-hex developer mode implemented in serial diagnostics and Packet-tab UI.
 - [x] Packet log active RAM capacity increased to 128 rows with compact 8-row NVS fallback and split SD/NVS flush foundation.
-- [x] First `storage status`/`storage setup` fallback surface implemented: probes the RP2040 SD status protocol, reports protocol/card/root/setup state, never auto-formats, keeps onboard NVS store backends, and has Settings/simulator visibility.
-- [x] ESP32 confirmed-format request guard implemented: `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` can only be sent after exact confirmation plus bridge-reported card presence, format support, and setup-required state.
-- [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS` and guarded `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`.
-- [x] RP2040 guarded format path now emits `DESKOS_SD_FORMAT_PROGRESS step=...` milestones, and the ESP32 timeout note preserves the last observed format step without treating progress as format completion.
+- [x] First `storage status`/`storage setup` fallback surface implemented: probes the RP2040 SD status protocol, reports protocol/card/root/setup state, never auto-formats, keeps onboard NVS store backends, and has SD Card tile/sheet plus simulator visibility.
+- [x] ESP32 SD format request path removed; `storage setup` is policy/status only and reports `policy="no_device_format"`.
+- [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS`, `DESKOS_SD_MOUNT`, `DESKOS_SD_DIAG`, and bounded `DESKOS_SD_FILE` operations with no SD formatting command.
+- [x] FAT32-only SD policy implemented: users prepare FAT32 cards on a computer, and DeskOS only creates missing `/deskos` folders/manifests on mounted FAT32 media.
 - [x] Generic RP2040 SD file-operation protocol foundation added for future SD-backed stores: bounded `DESKOS_SD_FILE v=1` stat/read/write/append/delete/rename with path validation, base64url payloads, CRC32 checks, and simulator coverage.
 - [x] Retained blob-store abstraction can use the RP2040 SD file protocol for retained Public/DM message history, route history, and packet history when a ready card reports file operations and atomic rename; NVS remains mirrored as fallback.
 - [x] Serial-only SD file-operation proof command added: `storage filecanary` performs guarded temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification without Public RF or formatting.
@@ -78,12 +79,12 @@
 - [x] Serial-only map tile cache SD canary added: `storage map-tile-canary <token>` commits `map/tiles/z12/x1/y2-<token>.tile` through temp write/read plus atomic rename and `scripts/sd_map_tile_canary_d1l.py` proves the path without Public RF or formatting.
 - [x] Serial-only SD reboot/remount acceptance runner added: `storage map-tile-check <token>` verifies the previous synthetic tile read-only after remount, and `scripts/sd_reboot_remount_acceptance_d1l.py` proves retained Public/DM/routes/packets plus map-tile cache readback before and after reboot without Public RF or formatting.
 - [x] First offline Map tab, serial `storage map-policy`, and `map center` commands added: they expose `map/tiles/z{z}/x{x}/y{y}.tile`, current cache readiness/backend, optional manual center, and disabled live-download state without Public RF or formatting.
-- [x] Touch `Set Pin`/`Move Pin` Map picker added: it pans/zooms a manual D1L pin, persists through the app model/settings path shared with `map center set`, and does not send Public RF or touch/format SD.
+- [x] Touch `Set Pin`/`Move Pin` Map entry added: it uses decimal latitude/longitude fields with an onscreen keyboard, persists through the app model/settings path shared with `map center set`, and does not send Public RF or touch/format SD.
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
-- [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
+- [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with no format command path.
 - [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `8150b7b` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
 - [ ] Flash the verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; current COM12 evidence `artifacts/hardware/com12/rp2040_preflight_a1afd4b.json` reports `ready_for_sd_acceptance=false`, `raw_card_present_mount_failed`, and `artifacts/hardware/com12/rp2040_uf2_volume_scan_a1afd4b.json` found no mounted UF2 bootloader volume.
-- [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
+- [ ] Optional SD-card data storage implemented: boot detect/validate, FAT32-only auto-provision, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads only after explicit Wi-Fi enablement, allowed provider configuration, visible attribution, and user-scoped area selection. The serial single-tile `storage map-tile-download` primitive and touch Map Tiles provider/center-tile download UX are implemented in code/host tests; hardware acceptance remains open.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
 - [x] Contact export QR-compatible serial command and touch sheet are implemented, host/simulator tested, flashed, smoke-tested, and targeted with a keyed contact on `COM7`.
@@ -92,7 +93,7 @@
 - [x] DM store and serial flood-TX path survive reboot on `COM7`.
 - [x] DM ACK/PATH receive parser and direct-route TX backend implemented, built, flashed, and smoke-tested on `COM7`.
 - [x] First touch DM composer opens from keyed contact rows and routes through the DM backend.
-- [x] First bounded DM thread/detail sheet opens from recent DM rows and offers `Reply`.
+- [x] First paged DM thread/detail sheet opens from recent DM rows and offers Load Older plus `Reply`.
 - [x] Per-thread DM read cursors are persisted, exposed through serial diagnostics, and surfaced in the DM thread sheet.
 - [x] DM thread sheet renders bounded scrollable retained history and `messages dm <fingerprint>` filters one retained thread; host/simulator, COM7 smoke, targeted serial, and active Public RF regression pass.
 - [x] Full RF acceptance runner added for the COM12 D1L plus local COM11 Meshcorebot path: `scripts/rf_full_acceptance_d1l.py` writes one release-gate artifact covering identity, Meshcorebot status, outbound DM, controlled inbound DM, ACK/PATH, direct route, health, and no-Public-command checks.
@@ -106,6 +107,8 @@
 - [x] Repeatable idle/active soak runner added with JSON artifact output.
 - [x] Short active Public `test` soak passed on `COM7`.
 - [x] Post-touch-fix 3-minute idle soak passed on `COM12` with monotonic uptime, ready board/UI/mesh, and empty crashlog after start clear.
+- [x] Host-side fix for live-packet UI corruption added: RF-mutated packet/message/DM/node/route/contact stores and mesh-inspector scratch buffers now serialize reads/writes before UI snapshots.
+- [ ] Revalidate live-packet UI stability on COM12 with a downloaded GitHub Actions artifact, tab abuse, scroll probe, active RF traffic, and manual screen photos.
 - [ ] 12-hour idle/listening soak without crash.
 - [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
 
@@ -125,7 +128,7 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-a1afd4b-fast-hw.json` reports `ready_for_public_release=false` with four open P0 gates.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. The SD gate rejects obsolete format-capable preflight guidance and requires no-device-format evidence (`formats_sd=false`). Current working-tree local audit `artifacts/release-gate/d1l-release-gate-audit-phase-d-map-tiles-local.json` reports `ready_for_public_release=false` with six open P0 gates.
 - [x] COM12 smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, supplemental route-probe proof, RP2040 preflight, UF2 scan, full RF partial proof, Actions checksums, and packaged notices captured for `a1afd4b` after flashing the verified Actions package from run `28569851955`.
 - [x] Current-commit COM12 smoke artifact captured for the latest release candidate commit `a1afd4b`; it must be refreshed again if any later commit becomes the final release commit.
 - [ ] Physical screen photos captured.

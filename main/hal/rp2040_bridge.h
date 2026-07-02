@@ -6,7 +6,6 @@
 
 #include "esp_err.h"
 
-#define D1L_RP2040_SD_FORMAT_CONFIRMATION "FORMAT-DESKOS-SD"
 #define D1L_RP2040_FILE_PROTOCOL_VERSION 1U
 #define D1L_RP2040_FILE_LINE_MAX 512U
 #define D1L_RP2040_FILE_PATH_MAX 96U
@@ -43,8 +42,7 @@ typedef struct {
     bool card_present;
     bool filesystem_mounted;
     bool deskos_root_ready;
-    bool format_required;
-    bool format_supported;
+    bool needs_fat32;
     bool data_ready;
     bool file_ops_supported;
     bool atomic_rename_supported;
@@ -119,9 +117,6 @@ esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_m
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_mount_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t timeout_ms);
-esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
-                                       const char *confirmation,
-                                       uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
                                       d1l_rp2040_file_result_t *out_result,
                                       uint32_t timeout_ms);

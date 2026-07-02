@@ -35,7 +35,7 @@ def test_dry_run_is_serial_only_and_has_no_format_or_public_rf():
     assert "storage retained-canary sdToken1" in report["commands"]
     assert "reboot" in report["commands"]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
-    assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
+    assert not any("setup confirm" in command for command in report["commands"])
     assert not any("COM11" in command or "COM29" in command for command in report["commands"])
 
 

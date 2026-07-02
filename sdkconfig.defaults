@@ -40,6 +40,9 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
 # CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set
 
-# Keep companion radios off by default during Phase 1 hardware bring-up.
-CONFIG_ESP_WIFI_ENABLED=n
+# Build Wi-Fi support for explicit user-enabled setup and map tile downloads.
+# Runtime Wi-Fi remains off by default in DeskOS settings.
+CONFIG_ESP_WIFI_ENABLED=y
 CONFIG_BT_ENABLED=n
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y

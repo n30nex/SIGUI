@@ -134,7 +134,7 @@ def any_flag(results: list[dict], flag: str) -> bool:
 
 
 def run_command(ser, command: str, timeout: float) -> dict:
-    if command.startswith("mesh send public") or "FORMAT-DESKOS-SD" in command:
+    if command.startswith("mesh send public"):
         raise RuntimeError(f"refusing destructive/RF command in SD remount acceptance: {command}")
     command_timeout = (
         max(timeout, 15.0)

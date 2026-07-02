@@ -7,11 +7,10 @@ ESP32-S3 DeskOS firmware flash path.
 
 - Use a GitHub Actions `rp2040-sd-bridge-firmware` artifact. Do not build the
   RP2040 bridge on the Windows host.
-- Use an empty or sacrificial SD card for the first validation. `DESKOS_SD_STATUS`
-  does not format, but a usable card may get a `/deskos` directory.
-- The operator has allowed formatting the SD card inserted in the D1L for
-  production validation. Use only a sacrificial or unformatted card, and format
-  only through the guarded confirmation flow documented below.
+- Use a FAT32 SD card prepared on a computer. `DESKOS_SD_STATUS` does not
+  format, and a usable card may get a `/deskos` directory during explicit mount.
+- Do not format from ESP32 firmware, RP2040 firmware, serial commands, scripts,
+  or UI.
 - Use `COM12` only for post-flash ESP32 serial validation.
 - Do not use COM11 or COM29 for this work.
 - Do not send Public RF.
@@ -92,7 +91,6 @@ python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir a
 python .\scripts\smoke_d1l.py --port COM12 --out artifacts\smoke\d1l-smoke-rp2040-sd-bridge-COM12.json
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario correct-structure --out artifacts\sd-boot-prepare\d1l-sd-boot-correct-structure-COM12.json
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario missing-structure --out artifacts\sd-boot-prepare\d1l-sd-boot-missing-structure-COM12.json
-python .\scripts\sd_boot_prepare_acceptance_d1l.py --port COM12 --scenario unformatted --allow-format-confirm --out artifacts\sd-boot-prepare\d1l-sd-boot-unformatted-format-COM12.json
 python .\scripts\sd_file_canary_d1l.py --port COM12 --out artifacts\sd-canary\d1l-sd-file-canary-COM12.json
 python .\scripts\sd_export_canary_d1l.py --port COM12 --token export1 --out artifacts\sd-export-canary\d1l-sd-export-canary-COM12.json
 python .\scripts\sd_diagnostic_export_d1l.py --port COM12 --token diag1 --out artifacts\sd-diagnostic-export\d1l-sd-diagnostic-export-COM12.json
@@ -108,8 +106,9 @@ Expected proof with a ready card:
 - `storage mount` returns `ok=true` and a ready SD state before file canaries
   are attempted.
 - `sd_boot_prepare_acceptance_d1l.py` reports ready file gates for correct and
-  missing-structure cards without formatting, and reports `format_allowed=true`
-  only for the explicitly authorized unformatted-card format proof.
+  missing-structure FAT32 cards without formatting. Unmountable or non-FAT32
+  media must remain on NVS fallback and tell the user to prepare FAT32 on a
+  computer.
 - `rp2040 ping` reports `ok=true`, `protocol_supported=true`,
   `sd_touched=false`, `public_rf_tx=false`, and `formats_sd=false`.
 - `sd.file_ops=true`, `sd.atomic_rename=true`, `sd.file_line_max >= 512`,

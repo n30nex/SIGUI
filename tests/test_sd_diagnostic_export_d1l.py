@@ -72,7 +72,7 @@ def test_sd_diagnostic_export_dry_run_is_serial_only():
         "crashlog",
     ]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
-    assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
+    assert not any("setup confirm" in command for command in report["commands"])
 
 
 def test_sd_diagnostic_export_allows_pre_flash_unavailable_state(monkeypatch):

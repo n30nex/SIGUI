@@ -15,7 +15,7 @@ index 2b8aa91..6a82a4f 100644
 +    uint16_t y = 0;
 +    uint8_t tp_num = 0;
 +    uint8_t btn_val = 0;
-@@ -79,0 +82 @@ esp_err_t indev_get_major_value(indev_data_t *data)
+@@ -80,0 +84 @@ esp_err_t indev_get_major_value(indev_data_t *data)
 +            bool pressed = (tp_num > 0) || (btn_val != 0);
 @@ -82,6 +85,2 @@ esp_err_t indev_get_major_value(indev_data_t *data)
 -            data->btn_val = btn_val;

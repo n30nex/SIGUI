@@ -40,5 +40,8 @@ esp_err_t d1l_message_store_append_public(const char *direction, const char *aut
                                           bool delivered);
 d1l_message_store_stats_t d1l_message_store_stats(void);
 size_t d1l_message_store_copy_recent(d1l_message_entry_t *out_entries, size_t max_entries);
+size_t d1l_message_store_query_page(d1l_message_entry_t *out_entries, size_t max_entries,
+                                    size_t skip_newest, const char *query,
+                                    size_t *out_total_matches);
 size_t d1l_message_store_query(d1l_message_entry_t *out_entries, size_t max_entries,
                                const char *query);

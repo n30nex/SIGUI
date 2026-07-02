@@ -85,7 +85,6 @@ class Snapshot:
     storage_detail: str
     storage_stores: str
     storage_setup_action: str
-    storage_format_action: str
     map_tile_backend: str
     map_tile_cache_ready: bool
     map_tile_cache_policy: str
@@ -94,6 +93,10 @@ class Snapshot:
     map_tile_download_requires: str
     map_tile_download_supported: bool
     map_tile_sideload_supported: bool
+    map_tile_provider_saved: bool
+    map_tile_url_template: str
+    map_tile_attribution: str
+    map_tile_zoom: int
     map_location_set: bool
     map_lat_e7: int
     map_lon_e7: int
@@ -144,15 +147,18 @@ def sample_snapshot() -> Snapshot:
         storage_detail="RP2040 SD bridge pending",
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
-        storage_format_action="not_available",
         map_tile_backend="unavailable",
         map_tile_cache_ready=False,
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
-        map_tile_download_state="wifi_runtime_pending",
-        map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
+        map_tile_download_state="provider_required",
+        map_tile_download_requires="Connect Wi-Fi, configure an allowed tile provider with attribution, then download only your area",
         map_tile_download_supported=False,
         map_tile_sideload_supported=True,
+        map_tile_provider_saved=False,
+        map_tile_url_template="",
+        map_tile_attribution="",
+        map_tile_zoom=12,
         map_location_set=False,
         map_lat_e7=0,
         map_lon_e7=0,
@@ -209,7 +215,7 @@ def large_mesh_snapshot() -> Snapshot:
             f"stress packet row {i:02d}",
             f"{i:02X}" * 16,
         )
-        for i in range(40)
+        for i in range(128)
     )
     routes = tuple(
         Packet(
@@ -245,15 +251,18 @@ def large_mesh_snapshot() -> Snapshot:
         storage_detail="RP2040 SD bridge pending",
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="bridge_protocol_pending",
-        storage_format_action="not_available",
         map_tile_backend="unavailable",
         map_tile_cache_ready=False,
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
-        map_tile_download_state="wifi_runtime_pending",
-        map_tile_download_requires="Wi-Fi runtime plus user opt-in; no background network download",
+        map_tile_download_state="provider_required",
+        map_tile_download_requires="Connect Wi-Fi, configure an allowed tile provider with attribution, then download only your area",
         map_tile_download_supported=False,
         map_tile_sideload_supported=True,
+        map_tile_provider_saved=False,
+        map_tile_url_template="",
+        map_tile_attribution="",
+        map_tile_zoom=12,
         map_location_set=False,
         map_lat_e7=0,
         map_lon_e7=0,
@@ -269,19 +278,17 @@ def storage_no_card_snapshot() -> Snapshot:
         storage_detail="No SD card reported",
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="insert_card",
-        storage_format_action="not_available",
     )
 
 
-def storage_format_required_snapshot() -> Snapshot:
+def storage_needs_fat32_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="setup required",
+        storage_state="needs FAT32",
         storage_backend="NVS fallback",
-        storage_detail="Card needs confirmed setup",
+        storage_detail="Prepare FAT32 on a computer",
         storage_stores="messages NVS / packets NVS / routes NVS",
-        storage_setup_action="format_confirmation_required",
-        storage_format_action="confirm_required",
+        storage_setup_action="prepare_fat32_on_computer",
     )
 
 
@@ -292,8 +299,7 @@ def storage_root_missing_snapshot() -> Snapshot:
         storage_backend="NVS fallback",
         storage_detail="DeskOS root missing",
         storage_stores="messages NVS / packets NVS / routes NVS",
-        storage_setup_action="manual_format_required",
-        storage_format_action="not_available",
+        storage_setup_action="retry_storage_mount",
     )
 
 
@@ -305,7 +311,6 @@ def storage_ready_pending_migration_snapshot() -> Snapshot:
         storage_detail="SD valid, stores pending",
         storage_stores="messages NVS / packets NVS / routes NVS",
         storage_setup_action="store_migration_pending",
-        storage_format_action="not_needed",
     )
 
 
@@ -317,7 +322,6 @@ def storage_ready_packet_log_sd_snapshot() -> Snapshot:
         storage_detail="SD packet-log canary",
         storage_stores="messages NVS / packets SD / routes NVS",
         storage_setup_action="packet_log_canary_enabled",
-        storage_format_action="not_needed",
     )
 
 
@@ -329,7 +333,6 @@ def storage_ready_retained_history_sd_snapshot() -> Snapshot:
         storage_detail="SD retained-history stores",
         storage_stores="messages SD / packets SD / routes SD",
         storage_setup_action="retained_history_sd_enabled",
-        storage_format_action="not_needed",
     )
 
 
@@ -341,9 +344,10 @@ def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
         storage_detail="SD retained stores + map cache",
         storage_stores="msg/pkt/route/map SD",
         storage_setup_action="retained_history_sd_enabled",
-        storage_format_action="not_needed",
         map_tile_backend="sd_map_tiles_ready",
         map_tile_cache_ready=True,
+        map_tile_download_supported=True,
+        map_tile_download_state="wifi_required",
     )
 
 
@@ -362,7 +366,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "large-mesh": large_mesh_snapshot,
     "storage-states": storage_ready_pending_migration_snapshot,
     "storage-no-card": storage_no_card_snapshot,
-    "storage-format-required": storage_format_required_snapshot,
+    "storage-needs-fat32": storage_needs_fat32_snapshot,
     "storage-root-missing": storage_root_missing_snapshot,
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
@@ -714,9 +718,9 @@ def draw_settings_group(
 ):
     x0, y0, x1, y1 = box
     s.round_rect(box, SURFACE, BORDER, 8)
-    s.text(title, (x0 + 10, y0 + 6, x0 + 150, y0 + 25), 12, color, True)
-    s.text(value, (x0 + 150, y0 + 6, x1 - 10, y0 + 25), 13, TEXT, True, "right")
-    s.text(detail, (x0 + 10, y0 + 29, x1 - 10, y1 - 6), 11, MUTED)
+    s.text(title, (x0 + 8, y0 + 5, x0 + 100, y0 + 24), 11, color, True)
+    s.text(value, (x0 + 104, y0 + 5, x1 - 8, y0 + 24), 11, TEXT, True, "right")
+    s.text(detail, (x0 + 8, y0 + 28, x1 - 8, y1 - 6), 10, MUTED)
     if action or destination:
         s.touch_target(title, box, kind="settings_group", action=action, destination=destination)
 
@@ -791,27 +795,26 @@ def draw_home_body(s: Surface, snap: Snapshot):
     previews: list[Message] = [*snap.public_messages, *snap.dm_messages][:5]
     y = 222
     for msg in previews:
-        draw_row(
-            s,
-            (16, y, 464, y + 28),
-            f"{msg.source}: {msg.text}",
-            msg.meta,
-            "new" if msg.unread else None,
-        )
-        y += 32
+        s.round_rect((16, y, 464, y + 58), SURFACE, BORDER, 8)
+        s.text(msg.source, (28, y + 6, 294, y + 24), 12, AMBER if msg.unread else ACCENT, True)
+        if msg.unread:
+            s.text("new", (332, y + 6, 452, y + 24), 11, AMBER, True, "right")
+        s.text(msg.text, (28, y + 26, 452, y + 42), 12, TEXT, True)
+        s.text(msg.meta, (28, y + 42, 452, y + 56), 10, MUTED, True)
+        y += 66
 
-    s.text("Local Repeaters", (16, 382, 220, 402), 16, TEXT, True)
+    s.text("Local Repeaters", (16, y + 4, 220, y + 24), 16, TEXT, True)
     if snap.repeaters:
         node = snap.repeaters[0]
         draw_row(
             s,
-            (16, 402, 464, 418),
+            (16, y + 30, 464, y + 76),
             node.name,
             f"{node.meta}  {node.signal}",
             None,
         )
     else:
-        s.text("No repeaters heard yet", (16, 402, 464, 418), 11, MUTED)
+        s.text("No repeaters heard yet", (16, y + 30, 464, y + 54), 11, MUTED)
 
 
 def render_home(s: Surface, snap: Snapshot):
@@ -822,13 +825,21 @@ def render_home(s: Surface, snap: Snapshot):
 
 def render_messages_mode(s: Surface, snap: Snapshot, *, show_dms: bool = False):
     draw_top_bar(s, snap)
-    s.text("Messages", (16, 64, 150, 92), 22, TEXT, True)
-    draw_button(s, (172, 64, 226, 100), "Read", GREEN, action="mark_messages_read")
-    draw_button(s, (234, 64, 316, 100), "Compose", ACCENT, action="open_public_compose", destination="compose_sheet")
-    draw_button(s, (324, 64, 400, 100), "History", BLUE, action="open_public_history", destination="public_history_sheet")
-    draw_button(s, (408, 64, 464, 100), "Test", AMBER, action="send_public_test", public_rf_tx=True)
-    draw_button(s, (16, 112, 126, 150), "Public", GREEN if not show_dms else MUTED, action="open_messages_public", destination="messages")
-    draw_button(s, (138, 112, 236, 150), "DMs", GREEN if show_dms else MUTED, action="open_messages_dm", destination="messages_dm")
+    s.round_rect((16, 64, 464, 172), SURFACE, BORDER, 8)
+    s.text("Messages", (28, 72, 210, 98), 22, TEXT, True)
+    s.text(
+        f"public {len(snap.public_messages)} new {snap.unread_public}  dm {len(snap.dm_messages)} new {snap.unread_dm}",
+        (28, 102, 452, 120),
+        11,
+        MUTED,
+        True,
+    )
+    draw_button(s, (28, 126, 82, 166), "Read", GREEN, action="mark_messages_read")
+    draw_button(s, (90, 126, 178, 166), "Compose", ACCENT, action="open_public_compose", destination="compose_sheet")
+    draw_button(s, (186, 126, 266, 166), "History", BLUE, action="open_public_history", destination="public_history_sheet")
+    draw_button(s, (274, 126, 338, 166), "Test", AMBER, action="send_public_test", public_rf_tx=True)
+    draw_button(s, (16, 184, 126, 224), "Public", GREEN if not show_dms else MUTED, action="open_messages_public", destination="messages")
+    draw_button(s, (138, 184, 236, 224), "DMs", GREEN if show_dms else MUTED, action="open_messages_dm", destination="messages_dm")
     if show_dms:
         render_messages_dm_list(s, snap)
     else:
@@ -837,24 +848,25 @@ def render_messages_mode(s: Surface, snap: Snapshot, *, show_dms: bool = False):
 
 
 def render_messages_public_list(s: Surface, snap: Snapshot):
-    s.round_rect((16, 162, 464, 402))
-    s.text("Public Channel", (28, 170, 210, 192), 14, MUTED, True)
-    y = 198
+    s.text("Public Channel", (28, 236, 230, 256), 14, MUTED, True)
+    y = 264
     public_rendered = 0
     for msg in snap.public_messages:
-        if y + 34 > 396:
+        if y + 58 > DOCK_Y:
             break
-        draw_row(
-            s,
-            (28, y, 452, y + 34),
-            f"{msg.source}: {msg.text}",
-            msg.meta,
-            "new" if msg.unread else None,
-            target_label=f"Public row {msg.source}",
+        s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
+        s.text(msg.source, (40, y + 6, 300, y + 24), 12, AMBER if msg.unread else ACCENT, True)
+        s.text("new" if msg.unread else "received", (330, y + 6, 440, y + 24), 11, MUTED if not msg.unread else AMBER, True, "right")
+        s.text(msg.text, (40, y + 26, 440, y + 42), 12, TEXT, True)
+        s.text(msg.meta, (40, y + 42, 440, y + 56), 10, MUTED, True)
+        s.touch_target(
+            f"Public row {msg.source}",
+            (28, y, 452, y + 58),
+            kind="row",
             action="open_message_detail",
             destination="message_detail_sheet",
         )
-        y += 38
+        y += 66
         public_rendered += 1
     s.metrics.update(
         {
@@ -868,24 +880,25 @@ def render_messages_public_list(s: Surface, snap: Snapshot):
 
 
 def render_messages_dm_list(s: Surface, snap: Snapshot):
-    s.round_rect((16, 162, 464, 402))
-    s.text("DM Conversations", (28, 170, 230, 192), 14, MUTED, True)
-    y = 198
+    s.text("DM Conversations", (28, 236, 250, 256), 14, MUTED, True)
+    y = 264
     dm_rendered = 0
     for msg in snap.dm_messages:
-        if y + 34 > 396:
+        if y + 58 > DOCK_Y:
             break
-        draw_row(
-            s,
-            (28, y, 452, y + 34),
-            f"{msg.source}: {msg.text}",
-            msg.meta,
-            "new" if msg.unread else None,
-            target_label=f"DM row {msg.source}",
+        s.round_rect((28, y, 452, y + 58), SURFACE, BORDER, 8)
+        s.text(msg.source, (40, y + 6, 300, y + 24), 12, AMBER if msg.unread else GREEN, True)
+        s.text("new" if msg.unread else "received", (330, y + 6, 440, y + 24), 11, MUTED if not msg.unread else AMBER, True, "right")
+        s.text(msg.text, (40, y + 26, 440, y + 42), 12, TEXT, True)
+        s.text(msg.meta, (40, y + 42, 440, y + 56), 10, MUTED, True)
+        s.touch_target(
+            f"DM row {msg.source}",
+            (28, y, 452, y + 58),
+            kind="row",
             action="open_dm_thread",
             destination="dm_thread_sheet",
         )
-        y += 38
+        y += 66
         dm_rendered += 1
     s.metrics.update(
         {
@@ -932,6 +945,7 @@ def render_nodes(s: Surface, snap: Snapshot):
         contacts_rendered += 1
     s.round_rect((16, 240, 464, 416))
     s.text("Heard Nodes", (28, 248, 180, 270), 14, MUTED, True)
+    s.text("All Heard", (306, 248, 452, 270), 12, MUTED, True, "right")
     y = 276
     heard_rendered = 0
     for node in snap.heard:
@@ -955,6 +969,7 @@ def render_nodes(s: Surface, snap: Snapshot):
             "contacts_source_count": len(snap.contacts),
             "contacts_rendered_count": contacts_rendered,
             "heard_source_count": len(snap.heard),
+            "heard_query_count": len(snap.heard),
             "heard_rendered_count": heard_rendered,
         }
     )
@@ -964,6 +979,7 @@ def render_nodes(s: Surface, snap: Snapshot):
 def render_map(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Map", (16, 64, 150, 92), 22, TEXT, True)
+    draw_button(s, (250, 62, 336, 102), "Tiles", BLUE, action="open_map_tiles", destination="map_tiles_sheet")
     draw_button(
         s,
         (344, 62, 456, 102),
@@ -984,14 +1000,19 @@ def render_map(s: Surface, snap: Snapshot):
         s,
         (250, 104, 464, 176),
         "Downloads",
-        "Ready" if snap.map_tile_download_supported else "Pending",
+        "Ready" if snap.map_tile_download_supported else "Setup",
         snap.map_tile_download_state,
         BLUE,
     )
     s.round_rect((16, 190, 464, 276))
-    s.text("Offline Cache", (28, 198, 180, 220), 14, MUTED, True)
-    s.text(snap.map_tile_cache_policy, (28, 224, 452, 246), 16, TEXT, True)
-    s.text(snap.map_tile_cache_path_template, (28, 250, 452, 270), 11, MUTED)
+    if snap.map_tile_cache_ready:
+        s.text("Offline Cache", (28, 198, 180, 220), 14, MUTED, True)
+        s.text(snap.map_tile_cache_policy, (28, 224, 452, 246), 16, TEXT, True)
+        s.text(snap.map_tile_cache_path_template, (28, 250, 452, 270), 11, MUTED)
+    else:
+        s.text("No Offline Tiles", (28, 198, 220, 220), 14, MUTED, True)
+        s.text("Connect Wi-Fi and download allowed tiles for your area.", (28, 224, 452, 246), 13, TEXT, True)
+        s.text("Allowed provider and visible attribution required.", (28, 250, 452, 270), 11, MUTED)
     s.round_rect((16, 290, 464, 402))
     s.text("Center", (28, 298, 160, 320), 14, MUTED, True)
     s.text("Routes", (330, 298, 452, 320), 14, MUTED, True)
@@ -1012,7 +1033,7 @@ def render_map(s: Surface, snap: Snapshot):
         11,
         MUTED,
     )
-    s.text("No network tile download until Wi-Fi runtime", (28, 374, 452, 394), 11, AMBER, True)
+    s.text("Connect Wi-Fi, choose an allowed provider, download only your area", (28, 374, 452, 394), 11, AMBER, True)
     s.metrics.update(
         {
             "map_tile_cache_ready": snap.map_tile_cache_ready,
@@ -1028,25 +1049,80 @@ def render_map(s: Surface, snap: Snapshot):
 
 
 def render_map_location_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Set D1L Location", "Map needs your D1L location")
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     lat = snap.map_lat_e7 if snap.map_location_set else 436532000
     lon = snap.map_lon_e7 if snap.map_location_set else -793832000
-    s.round_rect((44, 152, 436, 238))
-    s.text("Manual Picker", (58, 160, 220, 182), 14, TEXT, True)
-    s.text(f"Lat {format_e7(lat)}", (58, 190, 300, 212), 15, TEXT, True)
-    s.text(f"Lon {format_e7(lon)}", (58, 214, 300, 234), 15, TEXT, True)
-    s.text("+", (366, 184, 408, 222), 24, GREEN, True, "center")
-    draw_button(s, (112, 252, 168, 296), "N", GREEN, action="map_picker_north")
-    draw_button(s, (112, 304, 168, 348), "S", GREEN, action="map_picker_south")
-    draw_button(s, (50, 278, 106, 322), "W", GREEN, action="map_picker_west")
-    draw_button(s, (174, 278, 230, 322), "E", GREEN, action="map_picker_east")
-    s.text("Zoom 10", (262, 252, 364, 274), 13, MUTED, True)
-    draw_button(s, (260, 282, 316, 326), "-", BLUE, action="map_zoom_out")
-    draw_button(s, (326, 282, 382, 326), "+", BLUE, action="map_zoom_in")
-    draw_button(s, (44, 358, 156, 398), "Drop Pin", GREEN, action="drop_d1l_pin", destination="map")
-    draw_button(s, (170, 358, 270, 398), "Clear", AMBER, action="clear_d1l_pin", destination="map")
-    draw_button(s, (316, 94, 436, 134), "Skip", MUTED, action="skip_map_location", destination="map")
-    draw_dock(s, "Map")
+    s.text("Set D1L Location", (28, 70, 240, 100), 22, TEXT, True)
+    draw_button(s, (238, 66, 300, 106), "Save", GREEN, action="save_map_location", destination="map")
+    draw_button(s, (308, 66, 378, 106), "Clear", AMBER, action="clear_d1l_pin", destination="map")
+    draw_button(s, (386, 66, 456, 106), "Skip", MUTED, action="skip_map_location", destination="map")
+    s.text("Map needs your D1L location", (28, 112, 452, 134), 13, GREEN, True)
+    s.text("Enter decimal degrees", (28, 134, 452, 156), 13, MUTED)
+
+    s.text("Latitude", (28, 160, 220, 182), 13, TEXT, True)
+    s.round_rect((16, 184, 464, 228), SURFACE_2, BORDER, 8)
+    s.touch_target("Latitude", (16, 184, 464, 228), kind="text_field", action="edit_map_latitude")
+    s.text(format_e7(lat), (28, 194, 452, 222), 17, TEXT)
+
+    s.text("Longitude", (28, 236, 220, 258), 13, TEXT, True)
+    s.round_rect((16, 260, 464, 304), SURFACE_2, BORDER, 8)
+    s.touch_target("Longitude", (16, 260, 464, 304), kind="text_field", action="edit_map_longitude")
+    s.text(format_e7(lon), (28, 270, 452, 298), 17, TEXT)
+
+    s.round_rect((16, 312, 464, 468), (10, 16, 24), BORDER, 8)
+    s.text("Keyboard", (28, 322, 452, 344), 13, MUTED, True)
+    keyboard_rows = ("1 2 3 4 5 6 7 8 9 0", "- . backspace", "ready     cancel")
+    y = 352
+    for row in keyboard_rows:
+        s.text(row, (32, y, 448, y + 30), 17, TEXT, False, "center")
+        y += 36
+
+
+def render_map_tiles_sheet(s: Surface, snap: Snapshot):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Map Tiles", (28, 70, 230, 100), 22, TEXT, True)
+    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_map_tiles", destination="map")
+    s.text(
+        f"Cache {'ready' if snap.map_tile_cache_ready else 'needs SD'}  Wi-Fi needed  Provider {'saved' if snap.map_tile_provider_saved else 'needed'}",
+        (28, 112, 452, 134),
+        12,
+        MUTED,
+        True,
+    )
+
+    s.text("Allowed provider template", (28, 148, 452, 170), 13, GREEN, True)
+    s.round_rect((16, 172, 464, 212), SURFACE_2, BORDER, 8)
+    s.touch_target("Allowed provider template", (16, 172, 464, 212), kind="text_field", action="edit_map_tile_provider")
+    s.text(snap.map_tile_url_template or "https://provider.example/{z}/{x}/{y}.png", (28, 181, 452, 206), 12, TEXT, True)
+
+    s.text("Attribution", (28, 220, 452, 242), 13, GREEN, True)
+    s.round_rect((16, 244, 464, 284), SURFACE_2, BORDER, 8)
+    s.touch_target("Attribution", (16, 244, 464, 284), kind="text_field", action="edit_map_tile_attribution")
+    s.text(snap.map_tile_attribution or "Provider attribution", (28, 253, 452, 278), 13, TEXT, True)
+
+    s.text(f"Zoom {snap.map_tile_zoom}", (28, 302, 108, 326), 14, TEXT, True)
+    draw_button(s, (116, 294, 170, 330), "Z-", ACCENT, action="map_tile_zoom_down")
+    draw_button(s, (178, 294, 232, 330), "Z+", ACCENT, action="map_tile_zoom_up")
+    draw_button(s, (244, 294, 306, 330), "Save", GREEN, action="save_map_tile_provider")
+    draw_button(s, (314, 294, 380, 330), "Clear", AMBER, action="clear_map_tile_provider")
+    draw_button(
+        s,
+        (16, 340, 128, 378),
+        "Download",
+        BLUE,
+        action="download_center_tile",
+        destination=None,
+        public_rf_tx=False,
+        formats_sd=False,
+    )
+    s.text("Downloads one center tile for your saved D1L location.", (142, 340, 464, 362), 12, TEXT, True)
+    s.text("No public OSM bulk tile servers. Visible attribution is required.", (28, 382, 452, 408), 11, AMBER, True)
+
+    s.round_rect((16, 416, 464, 470), (10, 16, 24), BORDER, 8)
+    s.text("Keyboard", (28, 422, 452, 444), 13, MUTED, True)
+    s.text("{z} {x} {y}  ready  cancel", (32, 444, 448, 468), 14, TEXT, False, "center")
 
 
 def render_packets(s: Surface, snap: Snapshot):
@@ -1067,6 +1143,8 @@ def render_packets(s: Surface, snap: Snapshot):
     draw_button(s, (376, 160, 464, 194), "Pause", AMBER, action="pause_packet_feed")
     s.text("find raw/test", (28, 200, 464, 218), 11, AMBER)
     s.text("Packet Feed", (28, 224, 180, 244), 14, MUTED, True)
+    packet_query_limit = min(len(snap.packets), 100)
+    s.text(f"page 1-{packet_query_limit}/{len(snap.packets)} SD", (220, 224, 452, 244), 11, MUTED, True, "right")
     y = 236
 
     def packet_color(packet: Packet) -> tuple[int, int, int]:
@@ -1079,7 +1157,8 @@ def render_packets(s: Surface, snap: Snapshot):
             return GREEN
         return AMBER
 
-    for packet in (snap.packets[0], snap.packets[2], snap.packets[3]):
+    visible_packets = snap.packets[: 2 if len(snap.packets) > packet_query_limit else 3]
+    for packet in visible_packets:
         color = packet_color(packet)
         s.round_rect((16, y, 464, y + 40), (5, 12, 19), color, 8)
         s.rect((24, y + 8, 28, y + 32), color)
@@ -1093,6 +1172,9 @@ def render_packets(s: Surface, snap: Snapshot):
             destination="packet_detail_sheet",
         )
         y += 44
+    if len(snap.packets) > packet_query_limit:
+        draw_button(s, (16, y + 4, 146, y + 44), "Load Older", BLUE, action="load_older_packets")
+        y += 50
     draw_button(s, (16, 420 - 44, 146, 420 - 8), "Mesh Roles", GREEN, action="open_mesh_roles", destination="mesh_roles_sheet")
     s.text("Routes", (166, 382, 260, 402), 14, MUTED, True)
     for route in snap.routes[:1]:
@@ -1106,52 +1188,39 @@ def render_packets(s: Surface, snap: Snapshot):
             destination="route_detail_sheet",
         )
     draw_dock(s, "Packets")
+    s.metrics.update(
+        {
+            "packet_source_count": len(snap.packets),
+            "packet_query_limit": packet_query_limit,
+            "packet_total_matches": len(snap.packets),
+            "packet_sd_history_page": True,
+            "packet_rendered_count": len(visible_packets),
+            "packet_load_older_available": len(snap.packets) > packet_query_limit,
+        }
+    )
 
 
 def render_settings(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.text("Settings", (16, 64, 150, 92), 22, TEXT, True)
-    s.text("About", (332, 66, 464, 84), 12, MUTED, True, "right")
-    s.text(snap.node_name, (250, 84, 464, 102), 11, MUTED, align="right")
+    s.text("Setup Dashboard", (18, 92, 260, 110), 12, MUTED)
 
-    draw_settings_group(s, (16, 104, 464, 158), "Wireless", "Wi-Fi off / BLE off", "USB companion ready, offline-first", GREEN)
-    draw_button(s, (328, 108, 390, 152), "Wi-Fi", GREEN, action="open_wifi_settings", destination="wifi_setup_sheet")
-    draw_button(s, (400, 108, 452, 152), "BLE", GREEN, action="open_ble_settings", destination="ble_setup_sheet")
-
-    draw_settings_group(s, (16, 166, 464, 220), "MeshCore", "US/CAN profile", "910.525 MHz, BW62.5, SF7, CR5", BLUE)
-    draw_button(s, (304, 170, 366, 214), "Radio", ACCENT, action="open_radio_settings", destination="radio_settings_sheet")
-    draw_button(s, (374, 170, 452, 214), "Advert", ACCENT, action="open_advert_sheet", destination="advert_sheet")
-
-    draw_settings_group(
-        s,
-        (16, 228, 464, 282),
-        "Storage",
-        snap.storage_backend,
-        snap.storage_detail,
-        AMBER,
-        action="open_storage_setup",
-        destination="storage_setup_sheet",
+    storage_value = "Ready" if snap.storage_state == "ready" else ("Needs FAT32" if "fat32" in snap.storage_setup_action else "NVS fallback")
+    map_value = "Tiles ready" if snap.map_tile_cache_ready else "Setup"
+    rows = (
+        ((16, 116, 236, 170), "SD Card", storage_value, "FAT32 only, no format", AMBER, "open_storage_setup", "storage_setup_sheet"),
+        ((244, 116, 464, 170), "Wi-Fi", "off", "Scan/connect, mesh offline", GREEN, "open_wifi_settings", "wifi_setup_sheet"),
+        ((16, 178, 236, 232), "BLE", "off", "Companion pairing gated", MUTED, "open_ble_settings", "ble_setup_sheet"),
+        ((244, 178, 464, 232), "Radio", "Mesh profile", "US/CAN profile", BLUE, "open_radio_settings", "radio_settings_sheet"),
+        ((16, 240, 236, 294), "Map Tiles", map_value, "Wi-Fi and allowed provider", AMBER, "open_map_tiles", "map_tiles_sheet"),
+        ((244, 240, 464, 294), "Display", "Backlight", "Brightness, night, contrast", GREEN, "open_display_settings", "display_settings_sheet"),
+        ((16, 302, 236, 356), "Identity", "Ready", snap.fingerprint, GREEN, None, None),
+        ((244, 302, 464, 356), "Diagnostics", "Health", "Crashlog, exports, soak", VIOLET, "open_diagnostics", "diagnostics_sheet"),
+        ((16, 364, 236, 418), "About", snap.node_name, "DeskOS D1L 0.1.0-phase1", MUTED, None, None),
+        ((244, 364, 464, 418), "Advanced", "Hidden tools", "Raw data and adverts", RED, "open_advert_sheet", "advert_sheet"),
     )
-    draw_settings_group(
-        s,
-        (16, 290, 464, 344),
-        "Display",
-        "Backlight / Night",
-        "Brightness, night mode, contrast, timeout",
-        GREEN,
-        action="open_display_settings",
-        destination="display_settings_sheet",
-    )
-    draw_settings_group(
-        s,
-        (16, 352, 464, 406),
-        "Diagnostics",
-        "Health / Crashlog",
-        "Heap, reset reason, exports, soak evidence",
-        VIOLET,
-        action="open_diagnostics",
-        destination="diagnostics_sheet",
-    )
+    for box, title, value, detail, color, action, destination in rows:
+        draw_settings_group(s, box, title, value, detail, color, action=action, destination=destination)
     draw_dock(s, "Settings")
 
 
@@ -1167,27 +1236,34 @@ def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
 
 
 def render_compose_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Compose Public", "On-screen keyboard entry surface")
-    s.round_rect((44, 158, 436, 228), SURFACE_2, BORDER, 8)
-    s.touch_target("Public message", (44, 158, 436, 228), kind="text_field", action="edit_public_message")
-    s.text("Public message", (56, 166, 220, 188), 13, MUTED, True)
-    s.text("test from DeskOS D1L", (56, 194, 424, 222), 18, TEXT)
-    s.text("20/138", (352, 230, 436, 250), 12, MUTED, True, "right")
-    for i, label in enumerate(("Quick", "Clear", "Send")):
-        draw_button(
-            s,
-            (44 + i * 132, 248, 164 + i * 132, 300),
-            label,
-            GREEN if label == "Send" else ACCENT,
-            action={"Quick": "insert_quick_text", "Clear": "clear_public_message", "Send": "send_public_text"}[label],
-            public_rf_tx=label == "Send",
-        )
-    draw_button(s, (44, 320, 200, 370), "Close", MUTED, action="close_compose", destination="messages")
-    draw_dock(s, "Messages")
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Compose Public", (28, 70, 240, 100), 22, TEXT, True)
+    draw_button(s, (252, 66, 314, 106), "Send", GREEN, action="send_public_text", public_rf_tx=True)
+    draw_button(s, (322, 66, 384, 106), "Clear", ACCENT, action="clear_public_message")
+    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_compose", destination="messages")
+    s.round_rect((16, 118, 464, 200), SURFACE_2, BORDER, 8)
+    s.touch_target("Public message", (16, 118, 464, 200), kind="text_field", action="edit_public_message")
+    s.text("Public message", (28, 126, 220, 148), 13, MUTED, True)
+    s.text("test from DeskOS D1L", (28, 154, 452, 194), 18, TEXT)
+    s.text("20/138", (374, 204, 464, 226), 12, MUTED, True, "right")
+    s.round_rect((16, 224, 464, 468), (10, 16, 24), BORDER, 8)
+    s.text("Keyboard", (28, 236, 452, 258), 13, MUTED, True)
+    keyboard_rows = ("q w e r t y u i o p", "a s d f g h j k l", "z x c v b n m", "space")
+    y = 270
+    for row in keyboard_rows:
+        s.text(row, (32, y, 448, y + 32), 17, TEXT, False, "center")
+        y += 44
 
 
 def render_public_history_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Public History", f"retained {len(snap.public_messages)} rows")
+    public_page_limit = 5
+    load_older_available = len(snap.public_messages) > public_page_limit
+    draw_sheet_frame(
+        s,
+        "Public History",
+        f"showing {min(len(snap.public_messages), public_page_limit)}/{len(snap.public_messages)} retained",
+    )
     draw_button(s, (204, 94, 282, 134), "Search", BLUE, action="open_public_search", destination="public_search_sheet")
     draw_button(s, (292, 94, 356, 134), "Clear", ACCENT, action="clear_public_search")
     draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_public_history", destination="messages")
@@ -1198,12 +1274,15 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
     for msg in visible_messages:
         draw_row(s, (56, y, 424, y + 34), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 40
-    s.text("Search filters retained author, direction, and text rows.", (44, 332, 436, 354), 12, MUTED)
+    if load_older_available:
+        draw_button(s, (44, 332, 178, 376), "Load Older", BLUE, action="load_older_public_history")
     draw_dock(s, "Messages")
     s.metrics.update(
         {
             "public_history_source_count": len(snap.public_messages),
+            "public_history_page_limit": public_page_limit,
             "public_history_rendered_count": len(visible_messages),
+            "public_history_load_older_available": load_older_available,
         }
     )
 
@@ -1225,16 +1304,17 @@ def render_public_search_sheet(s: Surface, snap: Snapshot):
 def render_message_detail_sheet(s: Surface, snap: Snapshot):
     msg = snap.public_messages[1] if len(snap.public_messages) > 1 else snap.public_messages[0]
     draw_sheet_frame(s, "Message Detail", msg.source)
+    draw_button(s, (214, 94, 316, 134), "Advanced", BLUE, action="toggle_message_detail_advanced")
+    draw_button(s, (326, 94, 436, 134), "Close", MUTED, action="close_message_detail", destination="messages")
     s.text("Sender", (44, 154, 160, 174), 13, MUTED, True)
-    s.text(f"{msg.source}  {msg.meta}", (44, 176, 436, 200), 17, TEXT)
+    s.text(f"{msg.source}  received", (44, 176, 436, 200), 17, TEXT)
     s.text("Message", (44, 212, 160, 232), 13, MUTED, True)
     s.text(msg.text, (44, 234, 436, 260), 16, TEXT)
     s.text("Signal", (44, 276, 160, 296), 13, MUTED, True)
     s.text("RSSI -41  SNR 30", (44, 298, 436, 318), 15, GREEN)
     s.text("Path", (44, 330, 160, 350), 13, MUTED, True)
-    s.text("hash 2 byte  hops 1  retained locally", (44, 352, 436, 372), 14, BLUE)
-    draw_button(s, (44, 382, 200, 412), "Close", MUTED, action="close_message_detail", destination="messages")
-    draw_button(s, (216, 382, 372, 412), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
+    s.text("1 hop", (44, 352, 436, 372), 14, BLUE)
+    draw_button(s, (44, 382, 200, 412), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
     draw_dock(s, "Messages")
 
 
@@ -1330,13 +1410,12 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
 
 
 def render_storage_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Storage Setup", "Optional SD data storage")
+    draw_sheet_frame(s, "SD Card", "FAT32 card required")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_storage_setup", destination="settings")
     draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
     draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
-    s.text(f"format {snap.storage_format_action}", (44, 328, 436, 350), 13, MUTED)
-    s.text("No automatic format. Confirmation required before SD setup.", (44, 358, 436, 380), 12, AMBER)
+    s.text("Prepare FAT32 on a computer; DeskOS only creates folders.", (44, 328, 436, 360), 12, AMBER, True)
     draw_dock(s, "Settings")
 
 
@@ -1370,18 +1449,31 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
 
 
 def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Wi-Fi Setup", "Profile and state")
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_wifi_setup", destination="home")
-    s.text("State off  build enabled", (44, 146, 436, 168), 14, AMBER, True)
-    s.text("Profile not saved  password open/empty", (44, 174, 436, 196), 13, TEXT)
-    s.text("Network name", (44, 208, 200, 228), 13, GREEN, True)
-    s.text("SSID", (54, 238, 420, 260), 14, MUTED)
-    s.text("Password", (44, 272, 200, 292), 13, GREEN, True)
-    s.text("Optional", (54, 302, 420, 324), 14, MUTED)
-    draw_button(s, (44, 360, 132, 400), "Save", GREEN, action="wifi_save")
-    draw_button(s, (144, 360, 232, 400), "Clear", AMBER, action="wifi_clear")
-    draw_button(s, (244, 360, 342, 400), "Enable", BLUE, action="wifi_enable")
-    draw_dock(s, "Home")
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
+    s.text("Wi-Fi Setup", (28, 70, 230, 100), 22, TEXT, True)
+    s.text("Profile and state", (28, 96, 230, 116), 12, MUTED)
+    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="home")
+    s.text("State off  build enabled", (28, 112, 452, 134), 14, AMBER, True)
+    s.text("Last none", (28, 134, 452, 156), 13, MUTED)
+    s.text("Profile not saved  password open/empty", (28, 156, 452, 178), 13, TEXT)
+    s.text("Network name", (28, 186, 220, 206), 13, GREEN, True)
+    s.round_rect((16, 206, 464, 242), SURFACE_2, BORDER, 8)
+    s.touch_target("SSID", (16, 206, 464, 242), kind="text_field", action="edit_wifi_ssid")
+    s.text("SSID", (28, 214, 452, 236), 14, MUTED)
+    s.text("Password", (28, 248, 220, 268), 13, GREEN, True)
+    s.round_rect((16, 268, 464, 304), SURFACE_2, BORDER, 8)
+    s.touch_target("Optional", (16, 268, 464, 304), kind="text_field", action="edit_wifi_password")
+    s.text("Optional", (28, 276, 452, 298), 14, MUTED)
+    draw_button(s, (16, 314, 78, 352), "Save", GREEN, action="wifi_save")
+    draw_button(s, (86, 314, 152, 352), "Clear", AMBER, action="wifi_clear")
+    draw_button(s, (160, 314, 222, 352), "Scan", BLUE, action="wifi_scan")
+    draw_button(s, (230, 314, 316, 352), "Connect", GREEN, action="wifi_connect")
+    draw_button(s, (324, 314, 410, 352), "Enable", BLUE, action="wifi_enable")
+    s.text("Scan to list nearby 2.4 GHz networks", (28, 360, 452, 382), 12, MUTED)
+    s.round_rect((16, 386, 464, 468), (10, 16, 24), BORDER, 8)
+    s.text("Keyboard", (28, 394, 452, 416), 13, MUTED, True)
+    s.text("q w e r t y u i o p", (32, 426, 448, 456), 16, TEXT, False, "center")
 
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
@@ -1425,21 +1517,29 @@ def render_contact_export_sheet(s: Surface, snap: Snapshot):
 
 
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
+    dm_thread_page_limit = 5
+    load_older_available = len(snap.dm_messages) > dm_thread_page_limit
     draw_sheet_frame(s, "DM Thread", "YKF Corebot")
-    s.text(f"Thread {len(snap.dm_messages)} rows", (44, 132, 436, 150), 12, MUTED)
-    visible_messages = snap.dm_messages[-3:]
+    s.text(f"Thread {min(len(snap.dm_messages), dm_thread_page_limit)}/{len(snap.dm_messages)} rows", (44, 132, 436, 150), 12, MUTED)
+    visible_messages = snap.dm_messages[-(2 if load_older_available else 3):]
     y = 154
     for msg in visible_messages:
         draw_row(s, (44, y, 436, y + 42), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
         y += 50
-    draw_button(s, (44, 304, 160, 356), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
-    draw_button(s, (174, 304, 290, 356), "Read", ACCENT, action="mark_dm_thread_read")
-    draw_button(s, (304, 304, 420, 356), "Close", MUTED, action="close_dm_thread", destination="messages")
+    button_y = 304
+    if load_older_available:
+        draw_button(s, (44, 260, 178, 304), "Load Older", BLUE, action="load_older_dm_thread")
+        button_y = 318
+    draw_button(s, (44, button_y, 160, button_y + 52), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
+    draw_button(s, (174, button_y, 290, button_y + 52), "Read", ACCENT, action="mark_dm_thread_read")
+    draw_button(s, (304, button_y, 420, button_y + 52), "Close", MUTED, action="close_dm_thread", destination="messages")
     draw_dock(s, "Messages")
     s.metrics.update(
         {
             "dm_thread_source_count": len(snap.dm_messages),
+            "dm_thread_page_limit": dm_thread_page_limit,
             "dm_thread_rendered_count": len(visible_messages),
+            "dm_thread_load_older_available": load_older_available,
         }
     )
 
@@ -1569,6 +1669,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "nodes": render_nodes,
     "map": render_map,
     "map_location_sheet": render_map_location_sheet,
+    "map_tiles_sheet": render_map_tiles_sheet,
     "packets": render_packets,
     "settings": render_settings,
     "compose_sheet": render_compose_sheet,
@@ -1611,12 +1712,56 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"),
     "messages_dm": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "DM Conversations"),
-    "nodes": ("Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"),
-    "map": ("Map", "Tile Cache", "Downloads", "Offline Cache", "Center", "Routes", "No network tile download until Wi-Fi runtime"),
-    "map_location_sheet": ("Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"),
+    "nodes": ("Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"),
+    "map": (
+        "Map",
+        "Tiles",
+        "Tile Cache",
+        "Downloads",
+        "Center",
+        "Routes",
+        "Connect Wi-Fi, choose an allowed provider, download only your area",
+    ),
+    "map_location_sheet": (
+        "Set D1L Location",
+        "Map needs your D1L location",
+        "Enter decimal degrees",
+        "Latitude",
+        "Longitude",
+        "Keyboard",
+        "Save",
+        "Clear",
+        "Skip",
+    ),
+    "map_tiles_sheet": (
+        "Map Tiles",
+        "Allowed provider template",
+        "Attribution",
+        "Zoom 12",
+        "Save",
+        "Clear",
+        "Download",
+        "Downloads one center tile for your saved D1L location.",
+        "No public OSM bulk tile servers. Visible attribution is required.",
+        "Keyboard",
+        "Close",
+    ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
-    "settings": ("Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics", "About"),
-    "compose_sheet": ("Compose Public", "Public message", "20/138", "Send", "Close"),
+    "settings": (
+        "Settings",
+        "Setup Dashboard",
+        "SD Card",
+        "Wi-Fi",
+        "BLE",
+        "Radio",
+        "Map Tiles",
+        "Display",
+        "Identity",
+        "Diagnostics",
+        "About",
+        "Advanced",
+    ),
+    "compose_sheet": ("Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
     "public_search_sheet": ("Public Search", "Search author or message", "Apply", "Clear", "Close"),
     "radio_settings_sheet": (
@@ -1636,11 +1781,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "storage_setup_sheet": (
-        "Storage Setup",
-        "Optional SD data storage",
+        "SD Card",
+        "FAT32 card required",
         "SD Card",
         "Backends",
-        "No automatic format. Confirmation required before SD setup.",
+        "Prepare FAT32 on a computer; DeskOS only creates folders.",
         "Close",
     ),
     "display_settings_sheet": (
@@ -1665,10 +1810,15 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Wi-Fi Setup",
         "Profile and state",
         "State off  build enabled",
+        "Last none",
         "Network name",
         "Password",
         "SSID",
         "Optional",
+        "Scan",
+        "Connect",
+        "Scan to list nearby 2.4 GHz networks",
+        "Keyboard",
         "Save",
         "Clear",
         "Enable",
@@ -1688,7 +1838,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
-    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Reply", "Close"),
+    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Advanced", "Reply", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Ping", "Close"),
@@ -1725,6 +1875,8 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "home_chip_setup_sheets",
         "steps": (
             {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
+            {"view": "wifi_setup_sheet", "action": "wifi_scan"},
+            {"view": "wifi_setup_sheet", "action": "wifi_connect"},
             {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "home"},
             {"view": "home", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
             {"view": "ble_setup_sheet", "action": "close_ble_setup", "destination": "home"},
@@ -1808,10 +1960,18 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "map_page_policy",
         "steps": (
             {"view": "home", "action": "open_map", "destination": "map"},
+            {"view": "map", "action": "open_map_tiles", "destination": "map_tiles_sheet"},
+            {"view": "map_tiles_sheet", "action": "edit_map_tile_provider"},
+            {"view": "map_tiles_sheet", "action": "edit_map_tile_attribution"},
+            {"view": "map_tiles_sheet", "action": "map_tile_zoom_down"},
+            {"view": "map_tiles_sheet", "action": "map_tile_zoom_up"},
+            {"view": "map_tiles_sheet", "action": "save_map_tile_provider"},
+            {"view": "map_tiles_sheet", "action": "download_center_tile", "public_rf_tx": False, "formats_sd": False},
+            {"view": "map_tiles_sheet", "action": "close_map_tiles", "destination": "map"},
             {"view": "map", "action": "open_map_location_picker", "destination": "map_location_sheet"},
-            {"view": "map_location_sheet", "action": "map_picker_north"},
-            {"view": "map_location_sheet", "action": "map_zoom_in"},
-            {"view": "map_location_sheet", "action": "drop_d1l_pin", "destination": "map"},
+            {"view": "map_location_sheet", "action": "edit_map_latitude"},
+            {"view": "map_location_sheet", "action": "edit_map_longitude"},
+            {"view": "map_location_sheet", "action": "save_map_location", "destination": "map"},
             {"view": "map_location_sheet", "action": "skip_map_location", "destination": "map"},
         ),
     },

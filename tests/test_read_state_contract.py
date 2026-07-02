@@ -87,4 +87,5 @@ def test_console_and_ui_expose_thread_read_controls():
     assert "render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i])" in ui
     assert "dm_row_state(entry, unread)" in ui
 
-    assert 'draw_button(s, (174, 304, 290, 356), "Read", ACCENT, action="mark_dm_thread_read")' in simulator
+    assert 'action="mark_dm_thread_read"' in simulator
+    assert '"Read", ACCENT' in simulator

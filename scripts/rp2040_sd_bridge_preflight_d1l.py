@@ -147,10 +147,10 @@ def classify_preflight(
         protocol_supported
         and sd.get("present") is True
         and sd.get("mounted") is not True
-        and sd.get("format_required") is True
+        and sd.get("needs_fat32") is True
     ):
         state = "raw_card_present_mount_failed"
-        next_action = "run_guarded_format_or_swap_known_good_sd_card"
+        next_action = "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
     elif bridge_uart_ready and ping_supported and not protocol_supported:
         state = "sd_status_pending"
         next_action = "inspect_storage_status_and_run_storage_diag"

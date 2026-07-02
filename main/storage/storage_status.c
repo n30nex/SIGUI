@@ -52,7 +52,6 @@ static void set_store_backends(d1l_storage_status_t *status)
 static void set_default_actions(d1l_storage_status_t *status)
 {
     status->setup_action = "not_available";
-    status->format_action = "not_available";
     status->sd_filesystem = "unknown";
     status->file_ops_supported = false;
     status->atomic_rename_supported = false;
@@ -67,8 +66,7 @@ static void clear_sd_runtime_fields(d1l_storage_status_t *status)
     status->sd_present = false;
     status->sd_mounted = false;
     status->sd_data_root_ready = false;
-    status->format_required = false;
-    status->format_supported = false;
+    status->sd_needs_fat32 = false;
     status->setup_required = false;
     status->setup_supported = false;
     status->file_ops_supported = false;
@@ -98,10 +96,25 @@ static const char *stable_sd_state(const char *state)
         return "no_card";
     }
     if (strcmp(state, "setup_required") == 0) {
-        return "setup_required";
+        return "not_fat32_or_unmountable";
     }
     if (strcmp(state, "unformatted") == 0) {
-        return "unformatted";
+        return "not_fat32_or_unmountable";
+    }
+    if (strcmp(state, "not_fat32_or_unmountable") == 0) {
+        return "not_fat32_or_unmountable";
+    }
+    if (strcmp(state, "deskos_manifest_invalid") == 0) {
+        return "deskos_manifest_invalid";
+    }
+    if (strcmp(state, "creating_deskos_files") == 0) {
+        return "creating_deskos_files";
+    }
+    if (strcmp(state, "fat32_ready") == 0) {
+        return "fat32_ready";
+    }
+    if (strcmp(state, "checking") == 0) {
+        return "checking";
     }
     if (strcmp(state, "error") == 0) {
         return "error";
@@ -145,11 +158,11 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     s_status.sd_present = sd->card_present;
     s_status.sd_mounted = sd->filesystem_mounted;
     s_status.sd_data_root_ready = sd->deskos_root_ready;
-    s_status.format_required = sd->format_required;
-    s_status.format_supported = sd->format_supported;
+    s_status.sd_needs_fat32 = sd->needs_fat32 ||
+                              (sd->card_present && !sd->filesystem_mounted);
     s_status.setup_required = sd->card_present && (!sd->filesystem_mounted ||
                                                     !sd->deskos_root_ready ||
-                                                    sd->format_required);
+                                                    s_status.sd_needs_fat32);
     s_status.setup_supported = sd->protocol_supported && sd->card_present;
     s_status.file_ops_supported = sd->file_ops_supported;
     s_status.atomic_rename_supported = sd->atomic_rename_supported;
@@ -178,34 +191,37 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 
     if (!sd->bridge_ready) {
         s_status.setup_action = "bridge_unavailable";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 UART bridge is unavailable; onboard NVS remains the default data store";
     } else if (!sd->protocol_supported) {
         s_status.setup_action = "bridge_protocol_pending";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 UART is ready, but the DeskOS SD status protocol is not implemented on the bridge yet";
     } else if (strcmp(s_status.sd_state, "mount_required") == 0) {
         s_status.setup_action = "run_storage_mount";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 SD bridge is ready; run storage mount to check the inserted card before enabling SD data storage";
     } else if (strcmp(s_status.sd_state, "mount_pending") == 0) {
         s_status.setup_action = "wait_for_storage_mount";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 SD bridge is checking the inserted card; onboard NVS remains the default data store until the mount completes";
     } else if (!sd->card_present) {
         s_status.setup_action = "insert_card";
-        s_status.format_action = "not_available";
         s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
-    } else if (s_status.setup_required) {
-        s_status.setup_action = sd->format_supported ? "format_confirmation_required" :
-                                "manual_format_required";
-        s_status.format_action = sd->format_supported ? "confirm_required" : "not_available";
+    } else if (s_status.sd_needs_fat32) {
+        s_status.setup_action = "prepare_fat32_on_computer";
         s_status.note =
-            "SD card is present but not ready for DeskOS data; setup must be explicitly confirmed before any format";
+            "SD card is present but not usable; prepare a FAT32 card on a computer and reinsert it";
+    } else if (!sd->deskos_root_ready) {
+        s_status.setup_action =
+            strcmp(s_status.sd_state, "deskos_manifest_invalid") == 0 ?
+            "backup_reformat_fat32_on_computer" : "retry_storage_mount";
+        s_status.note =
+            strcmp(s_status.sd_state, "deskos_manifest_invalid") == 0 ?
+            "DeskOS files are invalid; back up the card and prepare FAT32 on a computer" :
+            "DeskOS files are not ready; retry storage mount to create the required folders";
+    } else if (s_status.setup_required) {
+        s_status.setup_action = "use_nvs_fallback";
+        s_status.note = "SD card is present but not ready; onboard NVS remains active";
     } else {
         s_status.setup_action = s_status.data_enabled ? "retained_history_sd_enabled" :
                                 "store_migration_pending";
-        s_status.format_action = "not_needed";
         s_status.note = s_status.data_enabled ?
             "SD card is valid; retained Public/DM message, route, packet history, diagnostic exports, and map tile cache can use SD with onboard NVS mirrors" :
             "SD card is valid, but retained stores remain on onboard NVS until SD-backed store migration is enabled";
@@ -220,7 +236,6 @@ esp_err_t d1l_storage_status_init(void)
     s_status.initialized = true;
     s_status.mount_point = D1L_STORAGE_SD_MOUNT_POINT;
     s_status.data_root = D1L_STORAGE_SD_DATA_ROOT;
-    s_status.format_supported = false;
     s_status.sd_filesystem = "unknown";
     s_status.last_error = ESP_ERR_NOT_SUPPORTED;
 
@@ -258,7 +273,6 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
         s_status.sd_state = "rp2040_unavailable";
         s_status.last_error = rp2040_init_result;
         s_status.setup_action = "bridge_unavailable";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 bridge is not ready; SD data storage remains on onboard fallback";
     } else if (s_status.rp2040_bridge_required) {
         clear_sd_runtime_fields(&s_status);
@@ -267,7 +281,6 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
         s_status.sd_state = "protocol_pending";
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
         s_status.setup_action = "bridge_protocol_pending";
-        s_status.format_action = "not_available";
         s_status.note = "RP2040 UART is ready; DeskOS SD status protocol is pending on the bridge";
     }
 }
@@ -339,43 +352,6 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_mount_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    return ret;
-}
-
-esp_err_t d1l_storage_format_sd_confirmed(const char *confirmation, uint32_t timeout_ms)
-{
-    if (!s_status.initialized) {
-        (void)d1l_storage_status_init();
-    }
-
-    if (!confirmation || strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION) != 0) {
-        s_status.last_error = ESP_ERR_INVALID_ARG;
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (!s_status.rp2040_bridge_required || !s_status.rp2040_sd_protocol_supported) {
-        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-    if (!s_status.sd_present) {
-        s_status.last_error = ESP_ERR_NOT_FOUND;
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (!s_status.format_supported) {
-        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-    if (!s_status.setup_required) {
-        s_status.last_error = ESP_ERR_INVALID_STATE;
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    d1l_rp2040_sd_status_t sd = {0};
-    esp_err_t ret = d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms);
-    apply_rp2040_sd_status(&sd);
-    if (ret == ESP_OK && !sd.data_ready) {
-        s_status.last_error = sd.card_present ? ESP_FAIL : ESP_ERR_NOT_FOUND;
-        return s_status.last_error;
-    }
     return ret;
 }
 

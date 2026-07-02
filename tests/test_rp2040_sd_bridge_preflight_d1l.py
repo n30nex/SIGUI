@@ -106,8 +106,8 @@ def no_card_storage_line() -> str:
 def raw_card_present_mount_failed_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
-        '"sd":{"state":"setup_required","present":true,"mounted":false,'
-        '"data_root_ready":false,"format_required":true,'
+        '"sd":{"state":"not_fat32_or_unmountable","present":true,"mounted":false,'
+        '"data_root_ready":false,"needs_fat32":true,'
         '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
         '"file_ops":false,"atomic_rename":false,"last_error":"ESP_OK"},'
         '"data_backend":"nvs","export_backend":"serial"}\n'
@@ -158,7 +158,7 @@ def test_preflight_dry_run_is_non_destructive():
         "health",
     ]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
-    assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
+    assert not any("setup confirm" in command for command in report["commands"])
     assert 'command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout' in (
         preflight.Path(preflight.__file__).read_text(encoding="utf-8")
     )
@@ -514,7 +514,7 @@ def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):
     assert report["ok"] is True
     assert report["ready_for_sd_acceptance"] is False
     assert report["classification"]["state"] == "raw_card_present_mount_failed"
-    assert report["classification"]["next_action"] == "run_guarded_format_or_swap_known_good_sd_card"
+    assert report["classification"]["next_action"] == "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
 
 
 def test_run_preflight_polls_safe_status_while_mount_pending(monkeypatch):

@@ -4,6 +4,7 @@
 
 #include "esp_timer.h"
 
+#include "mesh/store_lock.h"
 #include "storage/retained_blob_store.h"
 
 #define D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES
@@ -58,6 +59,7 @@ static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_dm_store_blob_t s_blob_scratch;
 static d1l_dm_store_blob_v1_t s_blob_v1_scratch;
+static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void load_valid_blob_into_ram(void);
 
@@ -230,11 +232,14 @@ esp_err_t d1l_dm_store_init(void)
 
 esp_err_t d1l_dm_store_clear(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     clear_ram();
     s_loaded = true;
 
-    return d1l_retained_blob_store_erase(D1L_DM_STORE_ID,
-                                         D1L_DM_STORE_KEY);
+    esp_err_t ret = d1l_retained_blob_store_erase(D1L_DM_STORE_ID,
+                                                  D1L_DM_STORE_KEY);
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *contact_alias,
@@ -253,6 +258,7 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     d1l_dm_entry_t entry = {
         .seq = s_next_seq++,
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
@@ -279,7 +285,9 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
         s_dropped_oldest++;
     }
     s_total_written++;
-    return persist_store();
+    esp_err_t ret = persist_store();
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry)
@@ -294,6 +302,7 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry)
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0; i < s_count; ++i) {
         d1l_dm_entry_t *entry = &s_entries[i];
         if (entry->ack_hash == ack_hash && strncmp(entry->direction, "tx", sizeof(entry->direction)) == 0) {
@@ -302,14 +311,18 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry)
             if (out_entry) {
                 *out_entry = *entry;
             }
-            return persist_store();
+            esp_err_t ret = persist_store();
+            d1l_store_lock_give(&s_store_lock);
+            return ret;
         }
     }
+    d1l_store_lock_give(&s_store_lock);
     return ESP_ERR_NOT_FOUND;
 }
 
 d1l_dm_store_stats_t d1l_dm_store_stats(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     d1l_dm_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -317,36 +330,70 @@ d1l_dm_store_stats_t d1l_dm_store_stats(void)
         .count = s_count,
         .capacity = D1L_DM_STORE_CAPACITY,
     };
+    d1l_store_lock_give(&s_store_lock);
     return stats;
 }
 
-size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries)
+size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_entries,
+                                     size_t skip_newest, size_t *out_total_matches)
 {
-    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+    if (out_total_matches) {
+        *out_total_matches = 0;
+    }
+    if (out_entries == NULL || max_entries == 0) {
         return 0;
     }
 
-    const size_t n = s_count < max_entries ? s_count : max_entries;
+    d1l_store_lock_take(&s_store_lock);
+    if (s_count == 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
+    if (out_total_matches) {
+        *out_total_matches = s_count;
+    }
+    if (skip_newest >= s_count) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
+    const size_t available = s_count - skip_newest;
+    const size_t n = available < max_entries ? available : max_entries;
     size_t oldest = (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
-    if (s_count > n) {
-        oldest = (oldest + (s_count - n)) % D1L_DM_STORE_CAPACITY;
+    if (s_count > skip_newest + n) {
+        oldest = (oldest + (s_count - skip_newest - n)) % D1L_DM_STORE_CAPACITY;
     }
 
     for (size_t i = 0; i < n; ++i) {
         out_entries[i] = s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
     }
+    d1l_store_lock_give(&s_store_lock);
     return n;
 }
 
-size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
-                                size_t max_entries)
+size_t d1l_dm_store_copy_recent(d1l_dm_entry_t *out_entries, size_t max_entries)
 {
+    return d1l_dm_store_copy_recent_page(out_entries, max_entries, 0, NULL);
+}
+
+size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
+                                     d1l_dm_entry_t *out_entries,
+                                     size_t max_entries, size_t skip_newest,
+                                     size_t *out_total_matches)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0;
+    }
     if (!contact_fingerprint || contact_fingerprint[0] == '\0' ||
-        out_entries == NULL || max_entries == 0 || s_count == 0) {
+        out_entries == NULL || max_entries == 0) {
         return 0;
     }
 
-    size_t matches = 0;
+    d1l_store_lock_take(&s_store_lock);
+    if (s_count == 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
+    size_t total_matches = 0;
     size_t oldest = (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
     for (size_t i = 0; i < s_count; ++i) {
         const d1l_dm_entry_t *entry = &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
@@ -354,14 +401,40 @@ size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t 
                     sizeof(entry->contact_fingerprint)) != 0) {
             continue;
         }
-        if (matches < max_entries) {
-            out_entries[matches] = *entry;
-        } else {
-            memmove(out_entries, out_entries + 1U, sizeof(out_entries[0]) * (max_entries - 1U));
-            out_entries[max_entries - 1U] = *entry;
-        }
-        matches++;
+        total_matches++;
     }
 
-    return matches < max_entries ? matches : max_entries;
+    if (out_total_matches) {
+        *out_total_matches = total_matches;
+    }
+    if (skip_newest >= total_matches) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
+
+    const size_t available = total_matches - skip_newest;
+    const size_t copied = available < max_entries ? available : max_entries;
+    const size_t first_match = total_matches - skip_newest - copied;
+    const size_t last_match = first_match + copied;
+    size_t match_index = 0;
+    size_t out_index = 0;
+    for (size_t i = 0; i < s_count && out_index < copied; ++i) {
+        const d1l_dm_entry_t *entry = &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (strncmp(entry->contact_fingerprint, contact_fingerprint,
+                    sizeof(entry->contact_fingerprint)) != 0) {
+            continue;
+        }
+        if (match_index >= first_match && match_index < last_match) {
+            out_entries[out_index++] = *entry;
+        }
+        match_index++;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return out_index;
+}
+
+size_t d1l_dm_store_copy_thread(const char *contact_fingerprint, d1l_dm_entry_t *out_entries,
+                                size_t max_entries)
+{
+    return d1l_dm_store_copy_thread_page(contact_fingerprint, out_entries, max_entries, 0, NULL);
 }

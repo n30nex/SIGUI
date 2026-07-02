@@ -7,6 +7,7 @@
 #include "nvs.h"
 
 #include "mesh/contact_store.h"
+#include "mesh/store_lock.h"
 
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
 #define D1L_NODE_STORE_KEY "heard"
@@ -65,6 +66,7 @@ static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_node_store_blob_t s_blob_scratch;
 static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY];
+static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -494,12 +496,14 @@ esp_err_t d1l_node_store_init(void)
 
 esp_err_t d1l_node_store_clear(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     clear_ram();
     s_loaded = true;
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_NODE_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        d1l_store_lock_give(&s_store_lock);
         return ret;
     }
     ret = nvs_erase_key(handle, D1L_NODE_STORE_KEY);
@@ -510,6 +514,7 @@ esp_err_t d1l_node_store_clear(void)
         ret = nvs_commit(handle);
     }
     nvs_close(handle);
+    d1l_store_lock_give(&s_store_lock);
     return ret;
 }
 
@@ -528,6 +533,7 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_by_fingerprint(fingerprint);
     size_t index;
     bool is_new = existing < 0;
@@ -567,11 +573,14 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
         sanitize_ascii(entry->name, sizeof(entry->name), entry->fingerprint);
     }
     s_total_written++;
-    return persist_store();
+    esp_err_t ret = persist_store();
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 d1l_node_store_stats_t d1l_node_store_stats(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     d1l_node_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -579,6 +588,7 @@ d1l_node_store_stats_t d1l_node_store_stats(void)
         .count = s_count,
         .capacity = D1L_NODE_STORE_CAPACITY,
     };
+    d1l_store_lock_give(&s_store_lock);
     return stats;
 }
 
@@ -587,22 +597,30 @@ bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_
     if (!s_loaded && d1l_node_store_init() != ESP_OK) {
         return false;
     }
+    d1l_store_lock_take(&s_store_lock);
     int index = find_by_fingerprint(fingerprint);
     if (index < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return false;
     }
     if (out_entry) {
         *out_entry = s_entries[index];
     }
+    d1l_store_lock_give(&s_store_lock);
     return true;
 }
 
 size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries)
 {
-    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+    if (out_entries == NULL || max_entries == 0) {
         return 0;
     }
 
+    d1l_store_lock_take(&s_store_lock);
+    if (s_count == 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
     const size_t n = s_count < max_entries ? s_count : max_entries;
     bool used[D1L_NODE_STORE_CAPACITY] = {0};
     for (size_t out = 0; out < n; ++out) {
@@ -617,6 +635,7 @@ size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entr
         used[best] = true;
         out_entries[out] = s_entries[best];
     }
+    d1l_store_lock_give(&s_store_lock);
     return n;
 }
 
@@ -629,6 +648,7 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
     if (!s_loaded && d1l_node_store_init() != ESP_OK) {
         return 0;
     }
+    d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0; i < s_count; ++i) {
         build_node_view(&s_entries[i], &s_query_scratch[i]);
     }
@@ -654,5 +674,6 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
         used[best] = true;
         out_entries[copied++] = s_query_scratch[best];
     }
+    d1l_store_lock_give(&s_store_lock);
     return copied;
 }

@@ -6,6 +6,8 @@
 #include "esp_timer.h"
 #include "nvs.h"
 
+#include "mesh/store_lock.h"
+
 #define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
 #define D1L_CONTACT_STORE_SCHEMA_V1 1U
@@ -80,6 +82,7 @@ static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_contact_store_blob_t s_blob_scratch;
 static d1l_contact_store_blob_t s_rollback_scratch;
+static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -361,12 +364,14 @@ esp_err_t d1l_contact_store_init(void)
 
 esp_err_t d1l_contact_store_clear(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     clear_ram();
     s_loaded = true;
 
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(D1L_CONTACT_STORE_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        d1l_store_lock_give(&s_store_lock);
         return ret;
     }
     ret = nvs_erase_key(handle, D1L_CONTACT_STORE_KEY);
@@ -377,6 +382,7 @@ esp_err_t d1l_contact_store_clear(void)
         ret = nvs_commit(handle);
     }
     nvs_close(handle);
+    d1l_store_lock_give(&s_store_lock);
     return ret;
 }
 
@@ -393,6 +399,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_index_by_fingerprint(fingerprint);
     fill_blob(&s_rollback_scratch);
     size_t index;
@@ -451,7 +458,9 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
 
     s_total_written++;
-    return persist_store_or_rollback(&s_rollback_scratch);
+    esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
@@ -471,8 +480,10 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -489,7 +500,9 @@ esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *
         memcpy(entry->out_path, path, bytes);
     }
     s_total_written++;
-    return persist_store_or_rollback(&s_rollback_scratch);
+    esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
@@ -505,8 +518,10 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -521,12 +536,14 @@ esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bo
         s_total_written++;
         esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
+            d1l_store_lock_give(&s_store_lock);
             return ret;
         }
     }
     if (out_entry) {
         *out_entry = *entry;
     }
+    d1l_store_lock_give(&s_store_lock);
     return ESP_OK;
 }
 
@@ -543,8 +560,10 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -552,6 +571,7 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
     char sanitized[D1L_CONTACT_ALIAS_LEN] = {0};
     sanitize_ascii(sanitized, sizeof(sanitized), alias);
     if (sanitized[0] == '\0') {
+        d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_INVALID_ARG;
     }
     if (strncmp(entry->alias, sanitized, sizeof(entry->alias)) != 0) {
@@ -563,12 +583,14 @@ esp_err_t d1l_contact_store_rename(const char *fingerprint, const char *alias,
         s_total_written++;
         esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
         if (ret != ESP_OK) {
+            d1l_store_lock_give(&s_store_lock);
             return ret;
         }
     }
     if (out_entry) {
         *out_entry = *entry;
     }
+    d1l_store_lock_give(&s_store_lock);
     return ESP_OK;
 }
 
@@ -584,8 +606,10 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     int existing = find_index_by_fingerprint(fingerprint);
     if (existing < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -601,11 +625,13 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
     s_total_written++;
     esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
     if (ret != ESP_OK) {
+        d1l_store_lock_give(&s_store_lock);
         return ret;
     }
     if (out_entry) {
         *out_entry = removed;
     }
+    d1l_store_lock_give(&s_store_lock);
     return ESP_OK;
 }
 
@@ -671,6 +697,7 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
 
 d1l_contact_store_stats_t d1l_contact_store_stats(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     d1l_contact_store_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
@@ -678,6 +705,7 @@ d1l_contact_store_stats_t d1l_contact_store_stats(void)
         .count = s_count,
         .capacity = D1L_CONTACT_STORE_CAPACITY,
     };
+    d1l_store_lock_give(&s_store_lock);
     return stats;
 }
 
@@ -686,22 +714,30 @@ bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_
     if (!s_loaded && d1l_contact_store_init() != ESP_OK) {
         return false;
     }
+    d1l_store_lock_take(&s_store_lock);
     int index = find_index_by_fingerprint(fingerprint);
     if (index < 0) {
+        d1l_store_lock_give(&s_store_lock);
         return false;
     }
     if (out_entry) {
         *out_entry = s_entries[index];
     }
+    d1l_store_lock_give(&s_store_lock);
     return true;
 }
 
 size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries)
 {
-    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+    if (out_entries == NULL || max_entries == 0) {
         return 0;
     }
 
+    d1l_store_lock_take(&s_store_lock);
+    if (s_count == 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
     const size_t n = s_count < max_entries ? s_count : max_entries;
     bool used[D1L_CONTACT_STORE_CAPACITY] = {0};
     for (size_t out = 0; out < n; ++out) {
@@ -716,5 +752,6 @@ size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t ma
         used[best] = true;
         out_entries[out] = s_entries[best];
     }
+    d1l_store_lock_give(&s_store_lock);
     return n;
 }

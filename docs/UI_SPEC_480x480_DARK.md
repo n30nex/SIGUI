@@ -18,7 +18,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Map screen that reports offline SD tile-cache policy/readiness, retained route/node counts, disabled live-download state, and an optional serial-configured manual center.
 - Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
-- Settings screen with live persisted radio profile, identity, companion status, health, radio editor entry point, and advert quick action.
+- Settings setup dashboard with SD Card, Wi-Fi, BLE, Radio, Map Tiles, Display, Identity, Diagnostics, About, and Advanced tiles.
 - Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and reboot/apply warning.
 - Modal advert sheet for zero-hop/flood actions.
 - Toast feedback for touch actions.
@@ -35,6 +35,6 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 
 - Deeper Public scrollback/search.
 - DMs.
-- Touch map-center entry, GPS/location-source integration, richer contact editing, contact scan/import proof, and route trace/ping helpers.
+- GPS/location-source integration, richer contact editing, contact scan/import proof, and route trace/ping helpers.
 - Packet filtering/search and raw packet hex in developer mode.
 - Diagnostics detail and reset/crash views.

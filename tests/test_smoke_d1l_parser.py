@@ -42,24 +42,11 @@ def test_dry_run_lists_phase1_commands():
     assert not any(command.startswith("mesh send public") for command in report["commands"])
 
 
-def test_storage_setup_confirm_maps_to_storage_setup_response():
-    assert expected_command_name("storage setup confirm FORMAT-DESKOS-SD") == "storage setup"
+def test_storage_utility_commands_map_to_console_responses():
     assert expected_command_name("storage map-tile-check remount1") == "storage map-tile-check"
     assert expected_command_name("storage export-canary exportTest1") == "storage export-canary"
     assert expected_command_name("storage export-diagnostics diagTest1") == "storage export-diagnostics"
     assert expected_command_name("storage export-data dataTest1") == "storage export-data"
-
-    ser = FakeSerial(
-        [
-            '{"schema":1,"ok":false,"cmd":"storage setup","code":"ESP_ERR_NOT_SUPPORTED","hint":"no format was performed"}\n',
-        ]
-    )
-    result = send_console_command(ser, "storage setup confirm FORMAT-DESKOS-SD", timeout=1)
-
-    assert result["cmd"] == "storage setup"
-    assert result["code"] == "ESP_ERR_NOT_SUPPORTED"
-    assert "no format was performed" in result["hint"]
-    assert ser.writes == ["storage setup confirm FORMAT-DESKOS-SD\n"]
 
 
 def test_contact_mutation_commands_map_to_console_responses():

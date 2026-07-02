@@ -1,5 +1,6 @@
 #include "app_model.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -18,6 +19,10 @@ static d1l_app_model_t s_model = {
     .board_error = ESP_ERR_INVALID_STATE,
     .boot_count = 0,
 };
+
+#define D1L_MAP_TILE_MERCATOR_LAT_E7_MIN (-850511288L)
+#define D1L_MAP_TILE_MERCATOR_LAT_E7_MAX 850511288L
+#define D1L_MAP_TILE_PI 3.14159265358979323846
 
 static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t src_len)
 {
@@ -84,6 +89,48 @@ static void copy_cstr(char *dest, size_t dest_size, const char *src)
         i++;
     }
     dest[i] = '\0';
+}
+
+static bool map_center_tile_from_settings(const d1l_settings_t *settings,
+                                          uint8_t zoom,
+                                          uint32_t *out_x,
+                                          uint32_t *out_y)
+{
+    if (!settings || !settings->map_location_set || !out_x || !out_y ||
+        zoom > D1L_MAP_TILE_ZOOM_MAX) {
+        return false;
+    }
+    int32_t lat_e7 = settings->map_lat_e7;
+    if (lat_e7 < D1L_MAP_TILE_MERCATOR_LAT_E7_MIN) {
+        lat_e7 = D1L_MAP_TILE_MERCATOR_LAT_E7_MIN;
+    } else if (lat_e7 > D1L_MAP_TILE_MERCATOR_LAT_E7_MAX) {
+        lat_e7 = D1L_MAP_TILE_MERCATOR_LAT_E7_MAX;
+    }
+
+    const double lat_deg = ((double)lat_e7) / 10000000.0;
+    const double lon_deg = ((double)settings->map_lon_e7) / 10000000.0;
+    const double lat_rad = lat_deg * D1L_MAP_TILE_PI / 180.0;
+    const uint32_t tile_count = 1UL << zoom;
+    double x = ((lon_deg + 180.0) / 360.0) * (double)tile_count;
+    double y = (1.0 - (log(tan(lat_rad) + (1.0 / cos(lat_rad))) / D1L_MAP_TILE_PI)) *
+               0.5 * (double)tile_count;
+
+    if (x < 0.0) {
+        x = 0.0;
+    }
+    if (y < 0.0) {
+        y = 0.0;
+    }
+    const double max_tile = tile_count > 0U ? (double)(tile_count - 1U) : 0.0;
+    if (x > max_tile) {
+        x = max_tile;
+    }
+    if (y > max_tile) {
+        y = max_tile;
+    }
+    *out_x = (uint32_t)x;
+    *out_y = (uint32_t)y;
+    return d1l_map_tile_store_coord_valid(zoom, *out_x, *out_y);
 }
 
 static void populate_home_messages(d1l_app_snapshot_t *snapshot)
@@ -230,10 +277,17 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
     snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
     snapshot->wifi_password_saved = connectivity.wifi_password_saved;
+    snapshot->wifi_scan_supported = connectivity.wifi_scan_supported;
+    snapshot->wifi_stack_active = connectivity.wifi_stack_active;
+    snapshot->wifi_connected = connectivity.wifi_connected;
+    snapshot->wifi_connecting = connectivity.wifi_connecting;
     snapshot->onboarding_complete = settings->onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
     snapshot->wifi_state = connectivity.wifi_state;
+    snapshot->wifi_last_error = connectivity.wifi_last_error;
+    snapshot->wifi_rssi_dbm = connectivity.wifi_rssi_dbm;
+    snapshot->wifi_channel = connectivity.wifi_channel;
     snapshot->ble_state = connectivity.ble_state;
     snapshot->coexistence_policy = connectivity.coexistence_policy;
     snapshot->storage_direct_supported = storage.direct_supported;
@@ -243,19 +297,21 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_sd_present = storage.sd_present;
     snapshot->storage_sd_mounted = storage.sd_mounted;
     snapshot->storage_sd_data_root_ready = storage.sd_data_root_ready;
-    snapshot->storage_format_required = storage.format_required;
-    snapshot->storage_format_supported = storage.format_supported;
+    snapshot->storage_sd_needs_fat32 = storage.sd_needs_fat32;
     snapshot->storage_setup_required = storage.setup_required;
     snapshot->storage_setup_supported = storage.setup_supported;
     snapshot->storage_data_enabled = storage.data_enabled;
     snapshot->storage_response_truncated = storage.response_truncated;
     snapshot->map_page_supported = true;
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
-    snapshot->map_tile_download_supported = false;
+    snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
+                                            snapshot->map_tile_cache_ready;
     snapshot->map_tile_sideload_supported = true;
     snapshot->map_location_set = settings->map_location_set;
+    snapshot->map_tile_provider_saved = settings->map_tile_provider_saved;
     snapshot->map_lat_e7 = settings->map_lat_e7;
     snapshot->map_lon_e7 = settings->map_lon_e7;
+    snapshot->map_tile_zoom = settings->map_tile_zoom;
     snapshot->storage_capacity_kb = storage.capacity_kb;
     snapshot->storage_free_kb = storage.free_kb;
     snapshot->storage_last_error = storage.last_error;
@@ -273,16 +329,27 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->export_backend = storage.export_backend;
     snapshot->map_tile_cache_policy = D1L_MAP_TILE_CACHE_POLICY;
     snapshot->map_tile_cache_path_template = D1L_MAP_TILE_CACHE_PATH_TEMPLATE;
-    snapshot->map_tile_download_state = D1L_MAP_TILE_DOWNLOAD_STATE;
+    snapshot->map_tile_download_state = !snapshot->map_tile_cache_ready ? "sd_cache_required" :
+                                        !connectivity.wifi_connected ? "wifi_required" :
+                                        !settings->map_tile_provider_saved ? "provider_required" :
+                                        !settings->map_location_set ? "location_required" :
+                                        "ready";
     snapshot->map_tile_download_requires = D1L_MAP_TILE_DOWNLOAD_REQUIRES;
+    snapshot->map_tile_provider_policy = D1L_MAP_TILE_PROVIDER_POLICY;
+    snapshot->map_tile_provider_attribution = D1L_MAP_TILE_PROVIDER_ATTRIBUTION;
     snapshot->storage_setup_action = storage.setup_action;
-    snapshot->storage_format_action = storage.format_action;
     snapshot->storage_note = storage.note;
     snapshot->time_available = false;
     snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--");
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
     copy_cstr(snapshot->wifi_ssid, sizeof(snapshot->wifi_ssid),
               connectivity.wifi_ssid ? connectivity.wifi_ssid : "");
+    copy_cstr(snapshot->wifi_ip, sizeof(snapshot->wifi_ip),
+              connectivity.wifi_ip ? connectivity.wifi_ip : "");
+    copy_cstr(snapshot->map_tile_url_template, sizeof(snapshot->map_tile_url_template),
+              settings->map_tile_provider_saved ? settings->map_tile_url_template : "");
+    copy_cstr(snapshot->map_tile_attribution, sizeof(snapshot->map_tile_attribution),
+              settings->map_tile_provider_saved ? settings->map_tile_attribution : "");
     if (settings->identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),
                    settings->identity_public_key, 8U);
@@ -366,10 +433,21 @@ esp_err_t d1l_app_model_send_public_text(const char *text)
     return d1l_meshcore_service_send_public(text);
 }
 
+size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,
+                                                size_t max_entries,
+                                                size_t skip_newest,
+                                                const char *query,
+                                                size_t *out_total_matches)
+{
+    return d1l_message_store_query_page(out_entries, max_entries, skip_newest,
+                                        query, out_total_matches);
+}
+
 size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
                                            size_t max_entries, const char *query)
 {
-    return d1l_message_store_query(out_entries, max_entries, query);
+    return d1l_app_model_query_public_messages_page(out_entries, max_entries, 0,
+                                                    query, NULL);
 }
 
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
@@ -384,16 +462,28 @@ esp_err_t d1l_app_model_request_trace_probe(const char *fingerprint,
     return d1l_meshcore_service_request_trace_probe(fingerprint, out_token, out_token_size);
 }
 
-size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
-                                    bool *out_unread, size_t max_entries)
+size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
+                                         d1l_dm_entry_t *out_entries,
+                                         bool *out_unread, size_t max_entries,
+                                         size_t skip_newest,
+                                         size_t *out_total_matches)
 {
-    const size_t copied = d1l_dm_store_copy_thread(fingerprint, out_entries, max_entries);
+    const size_t copied = d1l_dm_store_copy_thread_page(fingerprint, out_entries,
+                                                       max_entries, skip_newest,
+                                                       out_total_matches);
     if (out_unread) {
         for (size_t i = 0; i < copied; ++i) {
             out_unread[i] = d1l_read_state_dm_entry_is_unread(&out_entries[i]);
         }
     }
     return copied;
+}
+
+size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
+                                    bool *out_unread, size_t max_entries)
+{
+    return d1l_app_model_copy_dm_thread_page(fingerprint, out_entries, out_unread,
+                                             max_entries, 0, NULL);
 }
 
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact)
@@ -486,9 +576,84 @@ esp_err_t d1l_app_model_clear_map_location(void)
     return d1l_settings_save(&settings);
 }
 
+esp_err_t d1l_app_model_save_map_tile_provider(const char *url_template,
+                                               const char *attribution,
+                                               uint8_t zoom)
+{
+    if (!d1l_map_tile_provider_template_allowed(url_template) ||
+        !d1l_map_tile_attribution_valid(attribution) ||
+        zoom == 0U || zoom > D1L_MAP_TILE_ZOOM_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_tile_provider_saved = true;
+    copy_cstr(settings.map_tile_url_template, sizeof(settings.map_tile_url_template),
+              url_template);
+    copy_cstr(settings.map_tile_attribution, sizeof(settings.map_tile_attribution),
+              attribution);
+    settings.map_tile_zoom = zoom;
+    return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_app_model_clear_map_tile_provider(void)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.map_tile_provider_saved = false;
+    settings.map_tile_url_template[0] = '\0';
+    settings.map_tile_attribution[0] = '\0';
+    settings.map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
+    return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_app_model_download_center_map_tile(d1l_map_tile_download_result_t *out_result)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const d1l_settings_t *settings = d1l_settings_current();
+    if (!settings->map_tile_provider_saved) {
+        memset(out_result, 0, sizeof(*out_result));
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t x = 0;
+    uint32_t y = 0;
+    if (!map_center_tile_from_settings(settings, settings->map_tile_zoom, &x, &y)) {
+        memset(out_result, 0, sizeof(*out_result));
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
+    d1l_storage_status_t storage = {0};
+    d1l_storage_status(&storage);
+    return d1l_map_tile_store_download(settings->map_tile_url_template,
+                                       settings->map_tile_attribution,
+                                       settings->map_tile_zoom,
+                                       x, y, &storage,
+                                       connectivity.wifi_connected,
+                                       out_result);
+}
+
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled)
 {
     return d1l_connectivity_set_wifi_enabled(enabled);
+}
+
+esp_err_t d1l_app_model_wifi_scan(d1l_wifi_scan_result_t *out_result)
+{
+    return d1l_connectivity_wifi_scan(out_result);
+}
+
+esp_err_t d1l_app_model_wifi_connect(void)
+{
+    return d1l_connectivity_wifi_connect();
+}
+
+esp_err_t d1l_app_model_wifi_disconnect(void)
+{
+    return d1l_connectivity_wifi_disconnect();
 }
 
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password)

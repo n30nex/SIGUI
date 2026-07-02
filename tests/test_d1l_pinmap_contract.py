@@ -70,6 +70,8 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
 
     assert "uint8_t btn_val = 0;" in seeed_patch
     assert "bool pressed = (tp_num > 0) || (btn_val != 0);" in seeed_patch
+    assert "@@ -80,0 +84 @@" in seeed_patch
+    assert "@@ -79,0 +82 @@" not in seeed_patch
     assert "d1l_board_touch_read(&sample)" in ui_source
     assert "read_cached_touch_state(&sample)" in ui_source
     assert "touch_poll_task" in ui_source

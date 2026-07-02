@@ -1,15 +1,26 @@
 #include "packet_log.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_timer.h"
 
+#include "hal/rp2040_bridge.h"
+#include "mesh/store_lock.h"
 #include "storage/retained_blob_store.h"
 
 #define D1L_PACKET_LOG_KEY "ring"
 #define D1L_PACKET_LOG_SCHEMA_V2 2U
 #define D1L_PACKET_LOG_SCHEMA 3U
+#define D1L_PACKET_LOG_HISTORY_MAGIC 0x314B5044UL
+#define D1L_PACKET_LOG_HISTORY_SCHEMA 1U
+#define D1L_PACKET_LOG_HISTORY_PATH_FMT "stores/packet_log/segments/s%02lu.bin"
+#define D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS 750U
+#define D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES 4U
+
+_Static_assert((D1L_PACKET_LOG_SD_CAPACITY % D1L_PACKET_LOG_SD_SEGMENT_COUNT) == 0,
+               "packet SD history capacity must divide evenly into segments");
 
 typedef struct {
     uint32_t schema;
@@ -31,6 +42,17 @@ typedef struct {
     d1l_packet_log_entry_t entries[D1L_PACKET_LOG_RAM_CAPACITY];
 } d1l_packet_log_primary_blob_t;
 
+typedef struct {
+    uint32_t magic;
+    uint16_t schema;
+    uint16_t entry_len;
+    uint32_t checksum;
+    d1l_packet_log_entry_t entry;
+} d1l_packet_log_history_record_t;
+
+_Static_assert(sizeof(d1l_packet_log_history_record_t) <= D1L_RP2040_FILE_CHUNK_MAX,
+               "packet SD history record must fit in one RP2040 file chunk");
+
 static d1l_packet_log_entry_t s_entries[D1L_PACKET_LOG_CAPACITY];
 static size_t s_head;
 static size_t s_count;
@@ -39,9 +61,12 @@ static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static uint32_t s_sd_dirty_count;
 static uint32_t s_last_sd_flush_ms;
+static uint32_t s_sd_history_records;
+static uint32_t s_sd_history_failed_writes;
 static bool s_loaded;
 static d1l_packet_log_primary_blob_t s_primary_blob_scratch;
 static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch;
+static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -149,6 +174,152 @@ static bool packet_matches(const d1l_packet_log_entry_t *entry, const char *dire
     return true;
 }
 
+static uint32_t history_record_checksum(const d1l_packet_log_entry_t *entry)
+{
+    const uint8_t *data = (const uint8_t *)entry;
+    uint32_t hash = 2166136261UL;
+    for (size_t i = 0; entry && i < sizeof(*entry); ++i) {
+        hash ^= data[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+
+static bool history_segment_path(uint32_t seq, char *dest, size_t dest_size)
+{
+    if (seq == 0 || !dest || dest_size == 0) {
+        return false;
+    }
+    const uint32_t segment =
+        ((seq - 1U) / D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) % D1L_PACKET_LOG_SD_SEGMENT_COUNT;
+    const int written = snprintf(dest, dest_size, D1L_PACKET_LOG_HISTORY_PATH_FMT,
+                                 (unsigned long)segment);
+    return written > 0 && (size_t)written < dest_size;
+}
+
+static void fill_history_record(d1l_packet_log_history_record_t *record,
+                                const d1l_packet_log_entry_t *entry)
+{
+    memset(record, 0, sizeof(*record));
+    record->magic = D1L_PACKET_LOG_HISTORY_MAGIC;
+    record->schema = D1L_PACKET_LOG_HISTORY_SCHEMA;
+    record->entry_len = sizeof(record->entry);
+    record->entry = *entry;
+    record->checksum = history_record_checksum(&record->entry);
+}
+
+static bool history_record_is_valid(const d1l_packet_log_history_record_t *record,
+                                    uint32_t expected_seq)
+{
+    return record &&
+           record->magic == D1L_PACKET_LOG_HISTORY_MAGIC &&
+           record->schema == D1L_PACKET_LOG_HISTORY_SCHEMA &&
+           record->entry_len == sizeof(record->entry) &&
+           record->entry.seq == expected_seq &&
+           record->checksum == history_record_checksum(&record->entry);
+}
+
+static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entry)
+{
+    if (seq == 0 || !out_entry ||
+        !d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
+        return false;
+    }
+
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    if (!history_segment_path(seq, path, sizeof(path))) {
+        return false;
+    }
+    const uint32_t offset =
+        ((seq - 1U) % D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) *
+        (uint32_t)sizeof(d1l_packet_log_history_record_t);
+    d1l_packet_log_history_record_t record = {0};
+    d1l_rp2040_file_result_t result = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_read(path, offset,
+                                                       (uint8_t *)&record,
+                                                       sizeof(record), &result,
+                                                       D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+    if (ret != ESP_OK || result.length != sizeof(record) ||
+        !history_record_is_valid(&record, seq)) {
+        return false;
+    }
+    *out_entry = record.entry;
+    return true;
+}
+
+static void restore_sd_history_count_from_total(void)
+{
+    s_sd_history_records = s_total_written < D1L_PACKET_LOG_SD_CAPACITY ?
+                           s_total_written : D1L_PACKET_LOG_SD_CAPACITY;
+    s_sd_history_failed_writes = 0;
+}
+
+static esp_err_t append_sd_history_locked(const d1l_packet_log_entry_t *entry)
+{
+    if (!entry || !d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
+        return ESP_OK;
+    }
+
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    if (!history_segment_path(entry->seq, path, sizeof(path))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    d1l_packet_log_history_record_t record;
+    fill_history_record(&record, entry);
+    d1l_rp2040_file_result_t result = {0};
+    const bool segment_start =
+        ((entry->seq - 1U) % D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) == 0;
+    esp_err_t ret;
+    if (segment_start) {
+        ret = d1l_rp2040_bridge_file_write(path, 0U, (const uint8_t *)&record,
+                                           sizeof(record), true, &result,
+                                           D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+    } else {
+        ret = d1l_rp2040_bridge_file_append(path, (const uint8_t *)&record,
+                                            sizeof(record), &result,
+                                            D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+    }
+    if (ret != ESP_OK || result.length != sizeof(record)) {
+        return ret == ESP_OK ? ESP_FAIL : ret;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t clear_sd_history_locked(void)
+{
+    if (!d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
+        s_sd_history_records = 0;
+        s_sd_history_failed_writes = 0;
+        return ESP_OK;
+    }
+
+    esp_err_t first_error = ESP_OK;
+    for (uint32_t segment = 0; segment < D1L_PACKET_LOG_SD_SEGMENT_COUNT; ++segment) {
+        char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+        const int written = snprintf(path, sizeof(path), D1L_PACKET_LOG_HISTORY_PATH_FMT,
+                                     (unsigned long)segment);
+        if (written <= 0 || (size_t)written >= sizeof(path)) {
+            if (first_error == ESP_OK) {
+                first_error = ESP_ERR_INVALID_SIZE;
+            }
+            continue;
+        }
+        d1l_rp2040_file_result_t result = {0};
+        esp_err_t ret = d1l_rp2040_bridge_file_delete(path, &result,
+                                                      D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+        if (ret == ESP_ERR_NOT_FOUND || strcmp(result.err, "not_found") == 0) {
+            ret = ESP_OK;
+        }
+        if (ret != ESP_OK && first_error == ESP_OK) {
+            first_error = ret;
+        }
+    }
+    s_sd_history_records = 0;
+    s_sd_history_failed_writes = 0;
+    return first_error;
+}
+
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
@@ -159,6 +330,8 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
     s_sd_dirty_count = 0;
     s_last_sd_flush_ms = 0;
+    s_sd_history_records = 0;
+    s_sd_history_failed_writes = 0;
 }
 
 static void fill_entries(d1l_packet_log_entry_t *dest, size_t dest_capacity,
@@ -269,6 +442,7 @@ static void load_fallback_blob_into_ram(void)
     s_total_written = s_fallback_blob_scratch.total_written;
     s_dropped_oldest = s_fallback_blob_scratch.dropped_oldest;
     s_sd_dirty_count = 0;
+    restore_sd_history_count_from_total();
 }
 
 static void load_primary_blob_into_ram(void)
@@ -281,6 +455,7 @@ static void load_primary_blob_into_ram(void)
     s_total_written = s_primary_blob_scratch.total_written;
     s_dropped_oldest = s_primary_blob_scratch.dropped_oldest;
     s_sd_dirty_count = 0;
+    restore_sd_history_count_from_total();
 }
 
 esp_err_t d1l_packet_log_init(void)
@@ -343,11 +518,15 @@ esp_err_t d1l_packet_log_init(void)
 
 esp_err_t d1l_packet_log_clear(void)
 {
+    d1l_store_lock_take(&s_store_lock);
     clear_ram();
     s_loaded = true;
 
-    return d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
-                                         D1L_PACKET_LOG_KEY);
+    esp_err_t history_ret = clear_sd_history_locked();
+    esp_err_t ret = d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                                  D1L_PACKET_LOG_KEY);
+    d1l_store_lock_give(&s_store_lock);
+    return ret == ESP_OK ? history_ret : ret;
 }
 
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
@@ -365,6 +544,7 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
         return false;
     }
 
+    d1l_store_lock_take(&s_store_lock);
     d1l_packet_log_entry_t copy = *entry;
     copy.seq = s_next_seq++;
     if (copy.uptime_ms == 0) {
@@ -397,13 +577,27 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
     if (d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
         s_sd_dirty_count++;
     }
+    const bool use_sd = d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    esp_err_t history_ret = ESP_OK;
+    if (use_sd) {
+        history_ret = append_sd_history_locked(&copy);
+        if (history_ret == ESP_OK) {
+            if (s_sd_history_records < D1L_PACKET_LOG_SD_CAPACITY) {
+                s_sd_history_records++;
+            }
+        } else {
+            s_sd_history_failed_writes++;
+        }
+    }
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     const bool flush_primary =
-        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG) &&
+        use_sd &&
         (s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD ||
          s_last_sd_flush_ms == 0 ||
          now_ms - s_last_sd_flush_ms >= D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS);
-    return persist_store(flush_primary) == ESP_OK;
+    esp_err_t ret = persist_store(flush_primary);
+    d1l_store_lock_give(&s_store_lock);
+    return ret == ESP_OK;
 }
 
 esp_err_t d1l_packet_log_flush(void)
@@ -414,27 +608,43 @@ esp_err_t d1l_packet_log_flush(void)
             return ret;
         }
     }
-    return persist_store(d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG));
+    d1l_store_lock_take(&s_store_lock);
+    esp_err_t ret = persist_store(d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG));
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 d1l_packet_log_stats_t d1l_packet_log_stats(void)
 {
+    d1l_store_lock_take(&s_store_lock);
+    const bool sd_history_enabled =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
     d1l_packet_log_stats_t stats = {
         .next_seq = s_next_seq,
         .total_written = s_total_written,
         .dropped_oldest = s_dropped_oldest,
+        .sd_history_records = sd_history_enabled ? s_sd_history_records : 0,
+        .sd_history_failed_writes = s_sd_history_failed_writes,
         .count = s_count,
         .capacity = D1L_PACKET_LOG_CAPACITY,
+        .sd_capacity = D1L_PACKET_LOG_SD_CAPACITY,
+        .sd_history_enabled = sd_history_enabled,
     };
+    d1l_store_lock_give(&s_store_lock);
     return stats;
 }
 
 size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t max_entries)
 {
-    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+    if (out_entries == NULL || max_entries == 0) {
         return 0;
     }
 
+    d1l_store_lock_take(&s_store_lock);
+    if (s_count == 0) {
+        d1l_store_lock_give(&s_store_lock);
+        return 0;
+    }
     const size_t n = s_count < max_entries ? s_count : max_entries;
     size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
     if (s_count > n) {
@@ -444,35 +654,204 @@ size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t ma
     for (size_t i = 0; i < n; ++i) {
         out_entries[i] = s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
     }
+    d1l_store_lock_give(&s_store_lock);
     return n;
 }
 
-size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,
-                            const char *direction, const char *kind, const char *search_text)
+static void reverse_entries(d1l_packet_log_entry_t *entries, size_t count)
 {
-    if (out_entries == NULL || max_entries == 0 || s_count == 0) {
+    if (!entries) {
+        return;
+    }
+    for (size_t i = 0; i < count / 2U; ++i) {
+        d1l_packet_log_entry_t tmp = entries[i];
+        entries[i] = entries[count - 1U - i];
+        entries[count - 1U - i] = tmp;
+    }
+}
+
+static bool packet_query_unfiltered(const char *direction, const char *kind,
+                                    const char *search_text)
+{
+    return token_is_any(direction) && token_is_any(kind) && token_is_any(search_text);
+}
+
+static size_t query_ram_locked(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                               size_t skip_newest, const char *direction,
+                               const char *kind, const char *search_text,
+                               size_t *out_total_matches)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0;
+    }
+    if (s_count == 0) {
+        return 0;
+    }
+    size_t total_matches = 0;
+    size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_packet_log_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+        if (packet_matches(entry, direction, kind, search_text)) {
+            total_matches++;
+        }
+    }
+
+    if (out_total_matches) {
+        *out_total_matches = total_matches;
+    }
+    if (skip_newest >= total_matches) {
+        return 0;
+    }
+
+    const size_t available = total_matches - skip_newest;
+    const size_t copied = available < max_entries ? available : max_entries;
+    const size_t first_match = total_matches - skip_newest - copied;
+    const size_t last_match = first_match + copied;
+    size_t match_index = 0;
+    size_t out_index = 0;
+    for (size_t i = 0; i < s_count && out_index < copied; ++i) {
+        const d1l_packet_log_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+        if (!packet_matches(entry, direction, kind, search_text)) {
+            continue;
+        }
+        if (match_index >= first_match && match_index < last_match) {
+            out_entries[out_index++] = *entry;
+        }
+        match_index++;
+    }
+    return out_index;
+}
+
+static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                               size_t skip_newest, const char *direction,
+                               const char *kind, const char *search_text,
+                               uint32_t newest_seq, uint32_t history_records,
+                               size_t *out_total_matches, size_t *out_valid_records)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0;
+    }
+    if (out_valid_records) {
+        *out_valid_records = 0;
+    }
+    if (history_records == 0 || newest_seq == 0) {
+        return 0;
+    }
+
+    size_t copied = 0;
+    size_t total_matches = 0;
+    size_t valid_records = 0;
+    size_t consecutive_misses = 0;
+    const bool unfiltered = packet_query_unfiltered(direction, kind, search_text);
+    if (unfiltered && out_total_matches) {
+        *out_total_matches = history_records;
+    }
+
+    for (uint32_t scanned = 0; scanned < history_records; ++scanned) {
+        if (newest_seq <= scanned) {
+            break;
+        }
+        const uint32_t seq = newest_seq - scanned;
+        d1l_packet_log_entry_t entry = {0};
+        if (!read_sd_history_entry(seq, &entry)) {
+            consecutive_misses++;
+            if (consecutive_misses >= D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES) {
+                break;
+            }
+            continue;
+        }
+        consecutive_misses = 0;
+        valid_records++;
+        if (!packet_matches(&entry, direction, kind, search_text)) {
+            continue;
+        }
+        if (!unfiltered) {
+            total_matches++;
+        }
+        const size_t newest_match_index = unfiltered ? (size_t)scanned : (total_matches - 1U);
+        if (newest_match_index < skip_newest) {
+            continue;
+        }
+        if (copied < max_entries) {
+            out_entries[copied++] = entry;
+        } else if (!out_total_matches) {
+            break;
+        }
+        if (unfiltered && copied >= max_entries) {
+            break;
+        }
+    }
+
+    if (!unfiltered && out_total_matches) {
+        *out_total_matches = total_matches;
+    }
+    if (out_valid_records) {
+        *out_valid_records = valid_records;
+    }
+    reverse_entries(out_entries, copied);
+    return copied;
+}
+
+size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                                 size_t skip_newest, const char *direction,
+                                 const char *kind, const char *search_text,
+                                 size_t *out_total_matches, bool *out_sd_used)
+{
+    if (out_total_matches) {
+        *out_total_matches = 0;
+    }
+    if (out_sd_used) {
+        *out_sd_used = false;
+    }
+    if (out_entries == NULL || max_entries == 0) {
         return 0;
     }
     if (!s_loaded && d1l_packet_log_init() != ESP_OK) {
         return 0;
     }
 
-    size_t copied = 0;
-    size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
-    for (size_t i = 0; i < s_count; ++i) {
-        const d1l_packet_log_entry_t *entry =
-            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
-        if (!packet_matches(entry, direction, kind, search_text)) {
-            continue;
-        }
-        if (copied < max_entries) {
-            out_entries[copied++] = *entry;
-        } else {
-            memmove(out_entries, &out_entries[1], (max_entries - 1U) * sizeof(out_entries[0]));
-            out_entries[max_entries - 1U] = *entry;
-        }
+    d1l_store_lock_take(&s_store_lock);
+    const bool sd_history_enabled =
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    const uint32_t newest_seq = s_next_seq > 0 ? s_next_seq - 1U : 0;
+    const uint32_t history_records = sd_history_enabled ? s_sd_history_records : 0;
+    const bool use_sd = sd_history_enabled && history_records > s_count;
+    if (!use_sd) {
+        const size_t copied = query_ram_locked(out_entries, max_entries, skip_newest,
+                                              direction, kind, search_text,
+                                              out_total_matches);
+        d1l_store_lock_give(&s_store_lock);
+        return copied;
     }
-    return copied;
+    d1l_store_lock_give(&s_store_lock);
+
+    size_t valid_records = 0;
+    const size_t copied = query_sd_history(out_entries, max_entries, skip_newest,
+                                           direction, kind, search_text,
+                                           newest_seq, history_records,
+                                           out_total_matches, &valid_records);
+    if (out_sd_used) {
+        *out_sd_used = valid_records > 0;
+    }
+    if (valid_records > 0 || skip_newest > 0) {
+        return copied;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    const size_t fallback = query_ram_locked(out_entries, max_entries, skip_newest,
+                                            direction, kind, search_text,
+                                            out_total_matches);
+    d1l_store_lock_give(&s_store_lock);
+    return fallback;
+}
+
+size_t d1l_packet_log_query(d1l_packet_log_entry_t *out_entries, size_t max_entries,
+                            const char *direction, const char *kind, const char *search_text)
+{
+    return d1l_packet_log_query_page(out_entries, max_entries, 0, direction, kind,
+                                     search_text, NULL, NULL);
 }
 
 esp_err_t d1l_packet_log_find_by_seq(uint32_t seq, d1l_packet_log_entry_t *out_entry)
@@ -487,11 +866,22 @@ esp_err_t d1l_packet_log_find_by_seq(uint32_t seq, d1l_packet_log_entry_t *out_e
         }
     }
 
+    d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0; i < s_count; ++i) {
         if (s_entries[i].seq == seq) {
             *out_entry = s_entries[i];
+            d1l_store_lock_give(&s_store_lock);
             return ESP_OK;
         }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    const uint32_t newest_seq = stats.next_seq > 0 ? stats.next_seq - 1U : 0;
+    const uint32_t oldest_seq =
+        stats.sd_history_records > newest_seq ? 1U : newest_seq - stats.sd_history_records + 1U;
+    if (stats.sd_history_enabled && seq >= oldest_seq && seq <= newest_seq &&
+        read_sd_history_entry(seq, out_entry)) {
+        return ESP_OK;
     }
     return ESP_ERR_NOT_FOUND;
 }

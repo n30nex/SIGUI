@@ -72,17 +72,32 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert nodes["contacts_source_count"] == 18
     assert nodes["contacts_rendered_count"] <= 2
     assert nodes["heard_source_count"] == 96
+    assert nodes["heard_query_count"] == 96
     assert nodes["heard_rendered_count"] <= 4
+
+    packets = views["packets"]["metrics"]
+    assert packets["packet_source_count"] == 128
+    assert packets["packet_query_limit"] == 100
+    assert packets["packet_total_matches"] == 128
+    assert packets["packet_sd_history_page"] is True
+    assert packets["packet_load_older_available"] is True
+    assert "Load Older" in set(views["packets"]["labels"])
 
     dm_thread = views["dm_thread_sheet"]["metrics"]
     assert dm_thread["dm_thread_source_count"] == 32
     assert dm_thread["dm_thread_rendered_count"] <= 3
+    assert dm_thread["dm_thread_page_limit"] == 5
+    assert dm_thread["dm_thread_load_older_available"] is True
+    assert "Load Older" in set(views["dm_thread_sheet"]["labels"])
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
 
     public_history = views["public_history_sheet"]["metrics"]
     assert public_history["public_history_source_count"] == 48
     assert public_history["public_history_rendered_count"] <= 3
+    assert public_history["public_history_page_limit"] == 5
+    assert public_history["public_history_load_older_available"] is True
+    assert "Load Older" in set(views["public_history_sheet"]["labels"])
 
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
@@ -92,36 +107,87 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
     assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
-    assert {"Nodes", "Contacts", "Heard Nodes", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
-    assert {"Map", "Set Pin", "Tile Cache", "Downloads", "Offline Cache", "Center", "Unset", "Routes"} <= labels_by_view["map"]
-    assert "No network tile download until Wi-Fi runtime" in labels_by_view["map"]
-    assert {"Set D1L Location", "Map needs your D1L location", "Manual Picker", "Drop Pin", "Clear", "Skip"} <= labels_by_view["map_location_sheet"]
+    assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
+    assert {"Map", "Tiles", "Set Pin", "Tile Cache", "Downloads", "No Offline Tiles", "Center", "Unset", "Routes"} <= labels_by_view["map"]
+    assert "Connect Wi-Fi and download allowed tiles for your area." in labels_by_view["map"]
+    assert "Allowed provider and visible attribution required." in labels_by_view["map"]
+    assert {
+        "Map Tiles",
+        "Allowed provider template",
+        "Attribution",
+        "Zoom 12",
+        "Save",
+        "Clear",
+        "Download",
+        "Downloads one center tile for your saved D1L location.",
+        "No public OSM bulk tile servers. Visible attribution is required.",
+        "Keyboard",
+        "Close",
+    } <= labels_by_view["map_tiles_sheet"]
+    assert {
+        "Set D1L Location",
+        "Map needs your D1L location",
+        "Enter decimal degrees",
+        "Latitude",
+        "Longitude",
+        "Keyboard",
+        "Save",
+        "Clear",
+        "Skip",
+    } <= labels_by_view["map_location_sheet"]
     assert {"Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Routes", "Packet Feed"} <= labels_by_view["packets"]
-    assert {"Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics", "About"} <= labels_by_view["settings"]
-    assert {"Wi-Fi Setup", "Profile and state", "Network name", "Password", "SSID", "Optional", "Save", "Clear", "Enable"} <= labels_by_view["wifi_setup_sheet"]
+    assert {
+        "Settings",
+        "Setup Dashboard",
+        "SD Card",
+        "Wi-Fi",
+        "BLE",
+        "Radio",
+        "Map Tiles",
+        "Display",
+        "Identity",
+        "Diagnostics",
+        "About",
+        "Advanced",
+    } <= labels_by_view["settings"]
+    assert {
+        "Wi-Fi Setup",
+        "Profile and state",
+        "Network name",
+        "Password",
+        "SSID",
+        "Optional",
+        "Scan",
+        "Connect",
+        "Scan to list nearby 2.4 GHz networks",
+        "Keyboard",
+        "Save",
+        "Clear",
+        "Enable",
+    } <= labels_by_view["wifi_setup_sheet"]
     assert {"BLE Setup", "Companion state", "Enable", "Pair", "Forget"} <= labels_by_view["ble_setup_sheet"]
     assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
-    assert {"Compose Public", "Public message", "20/138", "Send", "Close"} <= labels_by_view["compose_sheet"]
+    assert {"Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
-        "Storage Setup",
+        "SD Card",
+        "FAT32 card required",
         "SD Card",
         "Backends",
-        "format not_available",
-        "No automatic format. Confirmation required before SD setup.",
+        "Prepare FAT32 on a computer; DeskOS only creates folders.",
     } <= labels_by_view["storage_setup_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"} <= labels_by_view["advert_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
-    assert {"Message Detail", "Sender", "Message", "Signal", "Path", "Reply", "Close"} <= labels_by_view["message_detail_sheet"]
+    assert {"Message Detail", "Sender", "Message", "Signal", "Path", "Advanced", "Reply", "Close"} <= labels_by_view["message_detail_sheet"]
     assert {"Contact Detail", "Trace", "Edit", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Edit Contact", "Contact alias", "Save", "Forget", "Close"} <= labels_by_view["contact_edit_sheet"]
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
-    assert {"DM Thread", "Thread 2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
+    assert {"DM Thread", "Thread 2/2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
     assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
@@ -169,14 +235,32 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages"]["open_message_detail"]["destination"] == "message_detail_sheet"
     assert actions_by_view["messages_dm"]["open_dm_thread"]["destination"] == "dm_thread_sheet"
     assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
+    assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
+    assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert actions_by_view["home"]["open_wifi_settings"]["destination"] == "wifi_setup_sheet"
     assert actions_by_view["home"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
     assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["wifi_setup_sheet"]["close_wifi_setup"]["destination"] == "home"
+    assert actions_by_view["wifi_setup_sheet"]["wifi_scan"]["destination"] is None
+    assert actions_by_view["wifi_setup_sheet"]["wifi_connect"]["destination"] is None
+    assert actions_by_view["wifi_setup_sheet"]["edit_wifi_ssid"]["kind"] == "text_field"
+    assert actions_by_view["wifi_setup_sheet"]["edit_wifi_password"]["kind"] == "text_field"
+    assert not any(target["kind"] == "dock_tab" for target in views["wifi_setup_sheet"]["touch_targets"])
     assert actions_by_view["ble_setup_sheet"]["close_ble_setup"]["destination"] == "home"
+    assert actions_by_view["map"]["open_map_tiles"]["destination"] == "map_tiles_sheet"
+    assert actions_by_view["map_tiles_sheet"]["edit_map_tile_provider"]["kind"] == "text_field"
+    assert actions_by_view["map_tiles_sheet"]["edit_map_tile_attribution"]["kind"] == "text_field"
+    assert actions_by_view["map_tiles_sheet"]["save_map_tile_provider"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert actions_by_view["map_tiles_sheet"]["download_center_tile"]["public_rf_tx"] is False
+    assert actions_by_view["map_tiles_sheet"]["download_center_tile"]["formats_sd"] is False
+    assert actions_by_view["map_tiles_sheet"]["close_map_tiles"]["destination"] == "map"
+    assert actions_by_view["settings"]["open_map_tiles"]["destination"] == "map_tiles_sheet"
+    assert not any(target["kind"] == "dock_tab" for target in views["map_tiles_sheet"]["touch_targets"])
     assert actions_by_view["map"]["open_map_location_picker"]["destination"] == "map_location_sheet"
-    assert actions_by_view["map_location_sheet"]["drop_d1l_pin"]["destination"] == "map"
+    assert actions_by_view["map_location_sheet"]["save_map_location"]["destination"] == "map"
+    assert actions_by_view["map_location_sheet"]["edit_map_latitude"]["kind"] == "text_field"
+    assert actions_by_view["map_location_sheet"]["edit_map_longitude"]["kind"] == "text_field"
     assert actions_by_view["map_location_sheet"]["skip_map_location"]["destination"] == "map"
     assert actions_by_view["map_location_sheet"]["clear_d1l_pin"]["destination"] == "map"
     assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
@@ -209,16 +293,16 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
 
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
     scenarios = {
-        "storage-no-card": ("insert_card", "not_available"),
-        "storage-format-required": ("format_confirmation_required", "confirm_required"),
-        "storage-root-missing": ("manual_format_required", "not_available"),
-        "storage-ready-pending-migration": ("store_migration_pending", "not_needed"),
-        "storage-ready-packet-log-sd": ("packet_log_canary_enabled", "not_needed"),
-        "storage-ready-retained-history-sd": ("retained_history_sd_enabled", "not_needed"),
-        "storage-ready-map-tiles-sd": ("retained_history_sd_enabled", "not_needed"),
+        "storage-no-card": "insert_card",
+        "storage-needs-fat32": "prepare_fat32_on_computer",
+        "storage-root-missing": "retry_storage_mount",
+        "storage-ready-pending-migration": "store_migration_pending",
+        "storage-ready-packet-log-sd": "packet_log_canary_enabled",
+        "storage-ready-retained-history-sd": "retained_history_sd_enabled",
+        "storage-ready-map-tiles-sd": "retained_history_sd_enabled",
     }
 
-    for scenario, (setup_action, format_action) in scenarios.items():
+    for scenario, setup_action in scenarios.items():
         report = ui_simulator.generate(tmp_path / scenario, views=("settings", "storage_setup_sheet"), scenario=scenario)
         labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
         storage_view = next(view for view in report["views"] if view["name"] == "storage_setup_sheet")
@@ -228,28 +312,25 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         assert report["touch_target_issue_count"] == 0, scenario
         assert report["flow_report"]["format_actions"] == [], scenario
         assert report["required_labels_missing"] == [], scenario
-        assert {"Settings", "Wireless", "MeshCore", "Storage", "Display", "Diagnostics"} <= labels_by_view["settings"]
+        assert {"Settings", "Setup Dashboard", "SD Card", "Wi-Fi", "BLE", "Radio", "Map Tiles"} <= labels_by_view["settings"]
         assert {
-            "Storage Setup",
+            "SD Card",
+            "FAT32 card required",
             "Backends",
             f"setup {setup_action}",
-            f"format {format_action}",
-            "No automatic format. Confirmation required before SD setup.",
+            "Prepare FAT32 on a computer; DeskOS only creates folders.",
         } <= labels_by_view["storage_setup_sheet"]
         if scenario == "storage-ready-packet-log-sd":
-            assert "Mixed storage" in labels_by_view["settings"]
             assert "messages NVS / packets SD / routes NVS" in labels_by_view["storage_setup_sheet"]
         elif scenario == "storage-ready-retained-history-sd":
-            assert "Mixed storage" in labels_by_view["settings"]
             assert "messages SD / packets SD / routes SD" in labels_by_view["storage_setup_sheet"]
         elif scenario == "storage-ready-map-tiles-sd":
-            assert "Mixed storage" in labels_by_view["settings"]
             assert "msg/pkt/route/map SD" in labels_by_view["storage_setup_sheet"]
             map_report = ui_simulator.generate(tmp_path / f"{scenario}-map", views=("map",), scenario=scenario)
             map_view = map_report["views"][0]
             assert map_report["ok"] is True, scenario
             assert map_view["metrics"]["map_tile_cache_ready"] is True
-            assert map_view["metrics"]["map_tile_download_supported"] is False
+            assert map_view["metrics"]["map_tile_download_supported"] is True
             assert "sd_map_tiles_ready" in set(map_view["labels"])
         else:
             assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]

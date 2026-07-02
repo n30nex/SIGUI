@@ -95,7 +95,7 @@ def test_dry_run_is_serial_only_and_read_only_after_reboot():
     assert "storage map-tile-check remount1" in report["commands"]
     assert "reboot" in report["commands"]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
-    assert not any("FORMAT-DESKOS-SD" in command for command in report["commands"])
+    assert not any("setup confirm" in command for command in report["commands"])
 
 
 def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monkeypatch):

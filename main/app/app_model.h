@@ -7,6 +7,7 @@
 #include "esp_err.h"
 
 #include "app/settings_model.h"
+#include "comms/connectivity_manager.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
@@ -77,6 +78,10 @@ typedef struct {
     bool observer_enabled;
     bool wifi_profile_saved;
     bool wifi_password_saved;
+    bool wifi_scan_supported;
+    bool wifi_stack_active;
+    bool wifi_connected;
+    bool wifi_connecting;
     bool onboarding_complete;
     bool wifi_build_enabled;
     bool ble_build_enabled;
@@ -87,8 +92,7 @@ typedef struct {
     bool storage_sd_present;
     bool storage_sd_mounted;
     bool storage_sd_data_root_ready;
-    bool storage_format_required;
-    bool storage_format_supported;
+    bool storage_sd_needs_fat32;
     bool storage_setup_required;
     bool storage_setup_supported;
     bool storage_data_enabled;
@@ -99,8 +103,10 @@ typedef struct {
     bool map_tile_download_supported;
     bool map_tile_sideload_supported;
     bool map_location_set;
+    bool map_tile_provider_saved;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
+    uint8_t map_tile_zoom;
     uint32_t storage_capacity_kb;
     uint32_t storage_free_kb;
     const char *wifi_state;
@@ -122,16 +128,23 @@ typedef struct {
     const char *map_tile_cache_path_template;
     const char *map_tile_download_state;
     const char *map_tile_download_requires;
+    const char *map_tile_provider_policy;
+    const char *map_tile_provider_attribution;
     const char *storage_setup_action;
-    const char *storage_format_action;
     const char *storage_note;
     esp_err_t storage_last_error;
     char time_label[8];
     char node_name[32];
     char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_ip[16];
+    char map_tile_url_template[D1L_MAP_TILE_PROVIDER_TEMPLATE_LEN];
+    char map_tile_attribution[D1L_MAP_TILE_PROVIDER_ATTRIBUTION_LEN];
     char identity_fingerprint[17];
     const char *reset_reason;
     const char *mesh_state;
+    const char *wifi_last_error;
+    int8_t wifi_rssi_dbm;
+    uint8_t wifi_channel;
     uint32_t radio_frequency_hz;
     uint16_t radio_bandwidth_tenths_khz;
     uint8_t radio_spreading_factor;
@@ -201,12 +214,22 @@ d1l_app_model_t *d1l_app_model_get(void);
 void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_test(void);
 esp_err_t d1l_app_model_send_public_text(const char *text);
+size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,
+                                                size_t max_entries,
+                                                size_t skip_newest,
+                                                const char *query,
+                                                size_t *out_total_matches);
 size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
                                            size_t max_entries, const char *query);
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
 esp_err_t d1l_app_model_request_trace_probe(const char *fingerprint,
                                             char *out_token,
                                             size_t out_token_size);
+size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,
+                                         d1l_dm_entry_t *out_entries,
+                                         bool *out_unread, size_t max_entries,
+                                         size_t skip_newest,
+                                         size_t *out_total_matches);
 size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
                                     bool *out_unread, size_t max_entries);
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);
@@ -225,7 +248,15 @@ esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_clear_map_location(void);
+esp_err_t d1l_app_model_save_map_tile_provider(const char *url_template,
+                                               const char *attribution,
+                                               uint8_t zoom);
+esp_err_t d1l_app_model_clear_map_tile_provider(void);
+esp_err_t d1l_app_model_download_center_map_tile(d1l_map_tile_download_result_t *out_result);
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled);
+esp_err_t d1l_app_model_wifi_scan(d1l_wifi_scan_result_t *out_result);
+esp_err_t d1l_app_model_wifi_connect(void);
+esp_err_t d1l_app_model_wifi_disconnect(void);
 esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password);
 esp_err_t d1l_app_model_clear_wifi_profile(void);
 esp_err_t d1l_app_model_set_ble_enabled(bool enabled);

@@ -5,10 +5,12 @@
 #include <string.h>
 
 #include "mesh/packet_log.h"
+#include "mesh/store_lock.h"
 
 static d1l_packet_log_entry_t s_packet_scratch[8];
 static d1l_route_entry_t s_route_scratch[D1L_ROUTE_STORE_CAPACITY];
 static d1l_node_entry_t s_node_scratch[D1L_NODE_STORE_CAPACITY];
+static d1l_store_lock_t s_inspector_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static bool is_rx_signal(int rssi_dbm, int snr_tenths)
 {
@@ -82,6 +84,7 @@ void d1l_mesh_inspector_signal_summary(d1l_mesh_signal_summary_t *out_summary)
     if (!out_summary) {
         return;
     }
+    d1l_store_lock_take(&s_inspector_lock);
     memset(out_summary, 0, sizeof(*out_summary));
 
     uint32_t latest_seen_ms = 0;
@@ -133,6 +136,7 @@ void d1l_mesh_inspector_signal_summary(d1l_mesh_signal_summary_t *out_summary)
         out_summary->avg_rssi_dbm = (int)(rssi_sum / (int32_t)out_summary->sample_count);
         out_summary->avg_snr_tenths = (int)(snr_sum / (int32_t)out_summary->sample_count);
     }
+    d1l_store_lock_give(&s_inspector_lock);
 }
 
 size_t d1l_mesh_inspector_copy_room_servers(d1l_mesh_room_server_t *out_entries, size_t max_entries)
@@ -140,6 +144,7 @@ size_t d1l_mesh_inspector_copy_room_servers(d1l_mesh_room_server_t *out_entries,
     if (!out_entries || max_entries == 0) {
         return 0;
     }
+    d1l_store_lock_take(&s_inspector_lock);
     size_t node_count = d1l_node_store_copy_recent(s_node_scratch, D1L_NODE_STORE_CAPACITY);
     size_t copied = 0;
     for (size_t i = 0; i < node_count && copied < max_entries; ++i) {
@@ -158,6 +163,7 @@ size_t d1l_mesh_inspector_copy_room_servers(d1l_mesh_room_server_t *out_entries,
         entry->heard_count = s_node_scratch[i].heard_count;
         entry->last_heard_ms = s_node_scratch[i].last_heard_ms;
     }
+    d1l_store_lock_give(&s_inspector_lock);
     return copied;
 }
 
@@ -167,6 +173,7 @@ size_t d1l_mesh_inspector_copy_repeater_candidates(d1l_mesh_repeater_candidate_t
     if (!out_entries || max_entries == 0) {
         return 0;
     }
+    d1l_store_lock_take(&s_inspector_lock);
     size_t route_count = d1l_route_store_copy_recent(s_route_scratch, D1L_ROUTE_STORE_CAPACITY);
     size_t copied = 0;
     for (size_t i = 0; i < route_count && copied < max_entries; ++i) {
@@ -210,5 +217,6 @@ size_t d1l_mesh_inspector_copy_repeater_candidates(d1l_mesh_repeater_candidate_t
         entry->seen_count = s_node_scratch[i].heard_count;
         entry->last_seen_ms = s_node_scratch[i].last_heard_ms;
     }
+    d1l_store_lock_give(&s_inspector_lock);
     return copied;
 }

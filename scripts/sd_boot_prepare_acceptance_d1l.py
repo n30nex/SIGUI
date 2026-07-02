@@ -28,10 +28,9 @@ FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
-FORMAT_COMMAND_TIMEOUT_SECONDS = 660.0
 
 
-def command_plan(scenario: str, *, allow_format_confirm: bool = False) -> list[str]:
+def command_plan(scenario: str) -> list[str]:
     if scenario == "rp2040-unavailable":
         return ["rp2040 ping", "storage status", "health"]
 
@@ -40,17 +39,11 @@ def command_plan(scenario: str, *, allow_format_confirm: bool = False) -> list[s
         commands.append("storage filecanary")
     if scenario in SETUP_SCENARIOS:
         commands.append("storage setup")
-    if scenario == "unformatted" and allow_format_confirm:
-        commands.extend([
-            "storage setup confirm FORMAT-DESKOS-SD",
-            "storage status",
-            "storage filecanary",
-        ])
     commands.append("health")
     return commands
 
 
-def dry_run_report(scenario: str, *, allow_format_confirm: bool = False) -> dict:
+def dry_run_report(scenario: str) -> dict:
     if scenario == "all":
         return {
             "schema": 1,
@@ -58,17 +51,14 @@ def dry_run_report(scenario: str, *, allow_format_confirm: bool = False) -> dict
             "hardware_required": False,
             "scenarios": {
                 name: {
-                    "commands": command_plan(
-                        name,
-                        allow_format_confirm=allow_format_confirm and name == "unformatted",
-                    ),
+                    "commands": command_plan(name),
                     "public_rf_tx": False,
-                    "formats_sd": allow_format_confirm and name == "unformatted",
+                    "formats_sd": False,
                 }
                 for name in SCENARIOS
             },
             "public_rf_tx": False,
-            "formats_sd": allow_format_confirm,
+            "formats_sd": False,
             "ok": True,
         }
     return {
@@ -76,9 +66,9 @@ def dry_run_report(scenario: str, *, allow_format_confirm: bool = False) -> dict
         "mode": "dry-run",
         "hardware_required": False,
         "scenario": scenario,
-        "commands": command_plan(scenario, allow_format_confirm=allow_format_confirm),
+        "commands": command_plan(scenario),
         "public_rf_tx": False,
-        "formats_sd": allow_format_confirm and scenario == "unformatted",
+        "formats_sd": False,
         "ok": True,
     }
 
@@ -153,22 +143,11 @@ def any_flag(results: list[dict], flag: str) -> bool:
 
 def command_is_destructive(
     command: str,
-    *,
-    scenario: str,
-    allow_format_confirm: bool,
 ) -> bool:
-    format_confirm_allowed = (
-        allow_format_confirm
-        and scenario == "unformatted"
-        and command == "storage setup confirm FORMAT-DESKOS-SD"
-    )
-    return (
-        ("FORMAT-DESKOS-SD" in command and not format_confirm_allowed)
-        or command.startswith("mesh send public")
-    )
+    return command.startswith("mesh send public")
 
 
-def setup_confirmation_guarded(setup: dict | None) -> bool:
+def setup_policy_reported(setup: dict | None) -> bool:
     if not isinstance(setup, dict):
         return False
     return (
@@ -176,7 +155,7 @@ def setup_confirmation_guarded(setup: dict | None) -> bool:
         and setup.get("ok") is True
         and setup.get("will_format") is False
         and setup.get("format_performed") is False
-        and setup.get("confirmation_phrase") == "FORMAT-DESKOS-SD"
+        and setup.get("policy") == "no_device_format"
         and setup.get("fallback") == "nvs"
     )
 
@@ -186,23 +165,20 @@ def boot_prepare_passed(
     *,
     storage_after: dict | None,
     storage_setup: dict | None,
-    format_result: dict | None,
     filecanary: dict | None,
     health: dict | None,
     public_rf_tx: bool,
     formats_sd: bool,
-    allow_format_confirm: bool,
 ) -> tuple[bool, str]:
     if public_rf_tx:
         return False, "public_rf_tx_seen"
-    if formats_sd and not allow_format_confirm:
+    if formats_sd:
         return False, "format_seen"
     if not isinstance(health, dict) or health.get("ok") is not True:
         return False, "health_failed"
 
     state = sd_state(storage_after)
     setup_action = storage_after.get("setup_action") if isinstance(storage_after, dict) else None
-    format_action = storage_after.get("format_action") if isinstance(storage_after, dict) else None
 
     if scenario == "rp2040-unavailable":
         if state in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}:
@@ -222,39 +198,27 @@ def boot_prepare_passed(
         if (
             storage_file_gate_ready(storage_after)
             and retained_store_gate_ready(storage_after)
-            and format_action == "not_needed"
             and filecanary_passed(filecanary)
         ):
             return True, "ready_sd_file_gate"
         return False, "ready_sd_file_gate_missing"
 
     if scenario == "unformatted":
-        if allow_format_confirm:
-            if (
-                isinstance(format_result, dict)
-                and format_result.get("ok") is True
-                and storage_file_gate_ready(storage_after)
-                and filecanary_passed(filecanary)
-            ):
-                return True, "format_confirmed_ready"
-            return False, "format_confirmed_not_ready"
         if state == "ready" and storage_file_gate_ready(storage_after):
             return True, "prepared_ready_without_runner_format"
-        if setup_confirmation_guarded(storage_setup) and (
-            setup_action in {"format_confirmation_required", "manual_format_required"}
-            or format_action in {"confirm_required", "not_available"}
-            or state in {"setup_required", "unformatted"}
+        if setup_policy_reported(storage_setup) and (
+            setup_action in {"prepare_fat32_on_computer", "retry_storage_mount", "use_nvs_fallback"}
+            or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error"}
         ):
-            return True, "setup_requires_confirmation"
+            return True, "computer_fat32_required"
         return False, "unformatted_policy_not_reported"
 
     if scenario == "existing-data":
         if state == "ready" and sd_status(storage_after).get("data_root_ready") is True:
             return True, "existing_data_preserved_ready"
-        if setup_confirmation_guarded(storage_setup) and (
-            setup_action in {"format_confirmation_required", "manual_format_required"}
-            or format_action in {"confirm_required", "not_available"}
-            or state in {"setup_required", "error", "bridge_reported"}
+        if setup_policy_reported(storage_setup) and (
+            setup_action in {"prepare_fat32_on_computer", "retry_storage_mount", "use_nvs_fallback"}
+            or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error", "bridge_reported"}
         ):
             return True, "existing_data_not_wiped"
         return False, "existing_data_policy_not_reported"
@@ -263,9 +227,7 @@ def boot_prepare_passed(
 
 
 def send_with_timeout(ser, command: str, timeout: float) -> dict:
-    if command == "storage setup confirm FORMAT-DESKOS-SD":
-        command_timeout = max(timeout, FORMAT_COMMAND_TIMEOUT_SECONDS)
-    elif command in {"storage mount", "storage filecanary"}:
+    if command in {"storage mount", "storage filecanary"}:
         command_timeout = max(timeout, 15.0)
     else:
         command_timeout = timeout
@@ -278,7 +240,6 @@ def run_acceptance(
     baud: int,
     timeout: float,
     scenario: str,
-    allow_format_confirm: bool = False,
     mount_poll_attempts: int = MOUNT_POLL_ATTEMPTS,
     mount_poll_interval_sec: float = MOUNT_POLL_INTERVAL_SECONDS,
 ) -> dict:
@@ -294,8 +255,6 @@ def run_acceptance(
     def run_command(ser, command: str) -> dict:
         if command_is_destructive(
             command,
-            scenario=scenario,
-            allow_format_confirm=allow_format_confirm,
         ):
             raise RuntimeError(f"refusing destructive command in SD boot acceptance: {command}")
         result = send_with_timeout(ser, command, timeout)
@@ -310,7 +269,6 @@ def run_acceptance(
         initial_storage = run_command(ser, "storage status")
         storage_after = initial_storage
         storage_setup = None
-        format_result = None
         filecanary = None
 
         if scenario != "rp2040-unavailable":
@@ -326,23 +284,12 @@ def run_acceptance(
                 filecanary = run_command(ser, "storage filecanary")
             if scenario in SETUP_SCENARIOS:
                 storage_setup = run_command(ser, "storage setup")
-            if scenario == "unformatted" and allow_format_confirm:
-                format_result = run_command(ser, "storage setup confirm FORMAT-DESKOS-SD")
-                storage_after = run_command(ser, "storage status")
-                if storage_file_gate_ready(storage_after):
-                    filecanary = run_command(ser, "storage filecanary")
 
         health = run_command(ser, "health")
 
     public_rf_tx = any_flag(results, "public_rf_tx")
-    format_command_sent = any(
-        command == "storage setup confirm FORMAT-DESKOS-SD" for command in commands
-    )
-    format_confirmed = (
-        isinstance(format_result, dict)
-        and format_result.get("ok") is True
-        and format_result.get("format_performed") is True
-    )
+    format_command_sent = False
+    format_confirmed = False
     formats_sd = any_flag(results, "formats_sd") or any(
         result.get("format_performed") is True for result in results
     )
@@ -350,18 +297,14 @@ def run_acceptance(
         scenario,
         storage_after=storage_after,
         storage_setup=storage_setup,
-        format_result=format_result,
         filecanary=filecanary,
         health=health,
         public_rf_tx=public_rf_tx,
         formats_sd=formats_sd,
-        allow_format_confirm=allow_format_confirm,
     )
     commands_safe = not any(
         command_is_destructive(
             command,
-            scenario=scenario,
-            allow_format_confirm=allow_format_confirm,
         )
         for command in commands
     )
@@ -377,7 +320,7 @@ def run_acceptance(
         "formats_sd": formats_sd,
         "format_command_sent": format_command_sent,
         "format_confirmed": format_confirmed,
-        "format_allowed": allow_format_confirm,
+        "format_allowed": False,
         "commands_safe": commands_safe,
         "scenario_passed": scenario_ok,
         "classification": classification,
@@ -388,7 +331,7 @@ def run_acceptance(
         "initial_storage": initial_storage,
         "storage_after": storage_after,
         "storage_setup": storage_setup,
-        "format_result": format_result,
+        "format_result": None,
         "filecanary": filecanary,
         "health": health,
         "results": results,
@@ -414,11 +357,6 @@ def main() -> int:
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--scenario", choices=(*SCENARIOS, "all"), default="correct-structure")
-    parser.add_argument(
-        "--allow-format-confirm",
-        action="store_true",
-        help="For --scenario unformatted only, send the guarded FORMAT-DESKOS-SD confirmation to the sacrificial D1L SD card.",
-    )
     parser.add_argument("--mount-poll-attempts", type=int, default=MOUNT_POLL_ATTEMPTS)
     parser.add_argument("--mount-poll-interval-sec", type=float, default=MOUNT_POLL_INTERVAL_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
@@ -431,20 +369,15 @@ def main() -> int:
         for scenario in scenario_names:
             if args.scenario == "all":
                 print(f"# {scenario}")
-            for command in command_plan(
-                scenario,
-                allow_format_confirm=args.allow_format_confirm and scenario == "unformatted",
-            ):
+            for command in command_plan(scenario):
                 print(command)
         return 0
 
     if args.dry_run:
-        report = dry_run_report(args.scenario, allow_format_confirm=args.allow_format_confirm)
+        report = dry_run_report(args.scenario)
     else:
         if args.scenario == "all":
             parser.error("--scenario all is dry-run only; hardware scenarios require card swaps")
-        if args.allow_format_confirm and args.scenario != "unformatted":
-            parser.error("--allow-format-confirm is only valid with --scenario unformatted")
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
         report = run_acceptance(
@@ -452,7 +385,6 @@ def main() -> int:
             baud=args.baud,
             timeout=args.timeout,
             scenario=args.scenario,
-            allow_format_confirm=args.allow_format_confirm,
             mount_poll_attempts=args.mount_poll_attempts,
             mount_poll_interval_sec=args.mount_poll_interval_sec,
         )

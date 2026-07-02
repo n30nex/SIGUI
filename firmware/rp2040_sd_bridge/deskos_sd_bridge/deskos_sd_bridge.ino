@@ -12,10 +12,6 @@ constexpr const char *MOUNT_REQUEST = "DESKOS_SD_MOUNT";
 constexpr const char *MOUNT_REPLY = "DESKOS_SD_MOUNT";
 constexpr const char *PING_REQUEST = "DESKOS_SD_PING";
 constexpr const char *PING_REPLY = "DESKOS_SD_PING";
-constexpr const char *FORMAT_REQUEST = "DESKOS_SD_FORMAT";
-constexpr const char *FORMAT_REPLY = "DESKOS_SD_FORMAT";
-constexpr const char *FORMAT_PROGRESS_REPLY = "DESKOS_SD_FORMAT_PROGRESS";
-constexpr const char *FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD";
 constexpr const char *DIAG_REQUEST = "DESKOS_SD_DIAG";
 constexpr const char *DIAG_REPLY = "DESKOS_SD_DIAG";
 constexpr const char *FILE_REQUEST = "DESKOS_SD_FILE";
@@ -80,8 +76,7 @@ struct SdSnapshot {
     bool mounted;
     bool deskos;
     const char *fs;
-    bool format_required;
-    bool format_supported;
+    bool needs_fat32;
     uint32_t capacity_kb;
     uint32_t free_kb;
     const char *note;
@@ -618,19 +613,17 @@ SdSnapshot mount_status_blocking() {
     snapshot.state = "mount_pending";
     snapshot.present = true;
     snapshot.fs = "unknown";
-    snapshot.format_supported = true;
     snapshot.capacity_kb = probe.capacity_kb;
     snapshot.note = "card_detected_mounting";
     publish_worker_snapshot(snapshot);
 
     if (!mount_sd()) {
-        snapshot.state = "setup_required";
+        snapshot.state = "not_fat32_or_unmountable";
         snapshot.present = true;
         snapshot.fs = "unknown";
-        snapshot.format_required = true;
-        snapshot.format_supported = true;
+        snapshot.needs_fat32 = true;
         snapshot.capacity_kb = probe.capacity_kb;
-        snapshot.note = "format_required";
+        snapshot.note = "needs_fat32_on_computer";
         return snapshot;
     }
 
@@ -645,13 +638,11 @@ SdSnapshot mount_status_blocking() {
         s_sd_spi_options,
     };
     apply_probe_to_snapshot(snapshot, mounted_probe);
-    snapshot.state = "setup_required";
+    snapshot.state = "creating_deskos_files";
     snapshot.present = true;
     snapshot.mounted = true;
     snapshot.deskos = false;
     snapshot.fs = fat_label();
-    snapshot.format_required = false;
-    snapshot.format_supported = true;
     snapshot.note = "deskos_root_missing";
     fill_capacity(snapshot);
 
@@ -661,7 +652,9 @@ SdSnapshot mount_status_blocking() {
         snapshot.deskos = true;
         snapshot.note = prepare_note;
     } else {
-        snapshot.state = "setup_required";
+        snapshot.state = strcmp(prepare_note, "deskos_manifest_invalid") == 0 ||
+                         strcmp(prepare_note, "deskos_map_manifest_invalid") == 0 ?
+                         "deskos_manifest_invalid" : "error";
         snapshot.note = prepare_note;
     }
 
@@ -679,129 +672,6 @@ SdSnapshot mount_status() {
         return cache_status(pending_snapshot("mount_started"));
     }
     return cache_status(pending_snapshot(s_worker_busy ? "mount_in_progress" : "mount_queued"));
-}
-
-void send_format_progress(const char *step) {
-    String line(FORMAT_PROGRESS_REPLY);
-    line += " step=";
-    line += ((step && step[0]) ? step : "unknown");
-    reply_stream->println(line);
-}
-
-SdSnapshot format_card() {
-    send_format_progress("probe_start");
-    SdSnapshot snapshot = make_snapshot("error", "format_failed");
-    CardProbe probes[] = {
-        manual_probe_card(DEDICATED_SPI, true),
-        manual_probe_card(SHARED_SPI, true),
-        manual_probe_card(DEDICATED_SPI, false),
-        manual_probe_card(SHARED_SPI, false),
-    };
-    const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-    if (!selected) {
-        send_format_progress("no_card");
-        apply_probe_to_snapshot(snapshot, probes[0]);
-        snapshot.state = "no_card";
-        snapshot.note = "no_card";
-        return snapshot;
-    }
-
-    send_format_progress("card_selected");
-    s_sd_power_high = selected->power_high;
-    s_sd_spi_options = selected->options;
-    apply_probe_to_snapshot(snapshot, *selected);
-    snapshot.state = "setup_required";
-    snapshot.present = true;
-    snapshot.fs = "unknown";
-    snapshot.format_required = true;
-    snapshot.format_supported = true;
-    snapshot.capacity_kb = selected->capacity_kb;
-
-    configure_sd_bus(s_sd_power_high);
-    SPI1.begin();
-    SD.end(false);
-    SdCardFactory card_factory;
-    SdCard *card = card_factory.newCard(sd_spi_config(s_sd_spi_options));
-    if (!card) {
-        send_format_progress("card_init_failed");
-        snapshot.note = "format_card_init_failed";
-        return snapshot;
-    }
-    snapshot.probe_error = card->errorCode();
-    snapshot.probe_data = card->errorData();
-    if (snapshot.probe_error != 0) {
-        send_format_progress("card_init_failed");
-        snapshot.note = "format_card_init_failed";
-        delete card;
-        return snapshot;
-    }
-
-    const uint32_t sectors = card->sectorCount();
-    snapshot.probe_error = card->errorCode();
-    snapshot.probe_data = card->errorData();
-    if (sectors == 0 || snapshot.probe_error != 0) {
-        send_format_progress("sector_count_failed");
-        snapshot.note = "format_sector_count_failed";
-        delete card;
-        return snapshot;
-    }
-    snapshot.capacity_kb = clamp_kb(static_cast<uint64_t>(sectors) * 512ULL);
-
-    FatFormatter fat_formatter;
-    uint8_t sector_buffer[512];
-    send_format_progress("fat_format_start");
-    const bool formatted = fat_formatter.format(card, sector_buffer, reply_stream);
-    snapshot.probe_error = card->errorCode();
-    snapshot.probe_data = card->errorData();
-    delete card;
-    if (!formatted) {
-        send_format_progress("fat_format_failed");
-        snapshot.note = "format_failed";
-        return snapshot;
-    }
-    send_format_progress("fat_format_done");
-
-    SD.end(false);
-    send_format_progress("post_format_mount");
-    if (!mount_sd()) {
-        snapshot.note = "post_format_mount_failed";
-        return snapshot;
-    }
-
-    CardProbe mounted_probe = {
-        true,
-        snapshot.capacity_kb,
-        0,
-        0,
-        power_token(s_sd_power_high),
-        "mount",
-        s_sd_power_high,
-        s_sd_spi_options,
-    };
-    apply_probe_to_snapshot(snapshot, mounted_probe);
-    snapshot.state = "setup_required";
-    snapshot.mounted = true;
-    snapshot.deskos = false;
-    snapshot.fs = fat_label();
-    snapshot.format_required = false;
-    snapshot.format_supported = true;
-    snapshot.note = "deskos_root_missing";
-    fill_capacity(snapshot);
-
-    send_format_progress("deskos_prepare");
-    const char *prepare_note = "ready";
-    if (prepare_deskos_structure(&prepare_note)) {
-        snapshot.state = "ready";
-        snapshot.deskos = true;
-        snapshot.note = "format_complete";
-        if (snapshot.free_kb == 0 && snapshot.capacity_kb > 0) {
-            snapshot.free_kb = snapshot.capacity_kb;
-        }
-    } else {
-        snapshot.state = "setup_required";
-        snapshot.note = prepare_note;
-    }
-    return snapshot;
 }
 
 DiagSnapshot pending_diag_snapshot() {
@@ -1124,7 +994,7 @@ const char *rename_replace_preserving_old(const char *source_path, const char *t
 
 void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) {
     const bool file_ready = snapshot.present && snapshot.mounted && snapshot.deskos &&
-                            !snapshot.format_required;
+                            !snapshot.needs_fat32;
     String line(prefix);
     line += " state=";
     line += snapshot.state;
@@ -1136,10 +1006,8 @@ void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) 
     line += bool_token(snapshot.deskos);
     line += " fs=";
     line += snapshot.fs;
-    line += " format_required=";
-    line += bool_token(snapshot.format_required);
-    line += " format_supported=";
-    line += bool_token(snapshot.format_supported);
+    line += " needs_fat32=";
+    line += bool_token(snapshot.needs_fat32);
     line += " capacity_kb=";
     line += String(static_cast<unsigned long>(snapshot.capacity_kb));
     line += " free_kb=";
@@ -1239,21 +1107,6 @@ void send_ping() {
     line += bool_token(REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE);
     line += " sd_touch=0";
     reply_stream->println(line);
-}
-
-void send_format_result(const char *phrase) {
-    if (strcmp(phrase, FORMAT_CONFIRMATION) != 0) {
-        SdSnapshot refused = current_status();
-        refused.state = "confirmation_required";
-        refused.note = "confirmation_required";
-        send_snapshot(*reply_stream, FORMAT_REPLY, refused);
-        return;
-    }
-
-    SdSnapshot formatted = format_card();
-    (void)cache_status(formatted);
-    reply_stream->println();
-    send_snapshot(*reply_stream, FORMAT_REPLY, formatted);
 }
 
 void send_file_error(uint32_t request_id, const char *op, const char *err) {
@@ -1583,7 +1436,7 @@ void handle_file_line(const char *line) {
         send_file_error(request_id, op, "no_card");
         return;
     }
-    if (!status.mounted || !status.deskos || status.format_required) {
+    if (!status.mounted || !status.deskos || status.needs_fat32) {
         send_file_error(request_id, op, "not_ready");
         return;
     }
@@ -1631,13 +1484,6 @@ void handle_line(char *line) {
 
     if (strcmp(line, DIAG_REQUEST) == 0) {
         send_diag();
-        return;
-    }
-
-    constexpr size_t format_prefix_len = sizeof(FORMAT_REQUEST) - 1;
-    if (strncmp(line, FORMAT_REQUEST, format_prefix_len) == 0 &&
-        line[format_prefix_len] == ' ') {
-        send_format_result(line + format_prefix_len + 1);
         return;
     }
 

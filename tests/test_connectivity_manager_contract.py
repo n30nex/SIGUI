@@ -12,8 +12,13 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     header = read("main/comms/connectivity_manager.h")
     source = read("main/comms/connectivity_manager.c")
     cmake = read("main/CMakeLists.txt")
+    defaults = read("sdkconfig.defaults")
     assert "d1l_connectivity_status_t" in header
     assert "d1l_connectivity_set_wifi_enabled" in header
+    assert "d1l_connectivity_wifi_scan" in header
+    assert "d1l_connectivity_wifi_connect" in header
+    assert "d1l_connectivity_wifi_disconnect" in header
+    assert "D1L_WIFI_SCAN_MAX" in header
     assert "d1l_connectivity_set_ble_enabled" in header
     assert "d1l_connectivity_save_wifi_profile" in header
     assert "d1l_connectivity_clear_wifi_profile" in header
@@ -29,30 +34,51 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "settings.wifi_enabled = false" in source
     assert "configured_pending_stack" in source
     assert "profile_required" in source
+    assert "connected" in source
+    assert "connecting" in source
     assert "pairing_pending_stack" in source
     assert "d1l_settings_save_wifi_profile(ssid, password)" in source
     assert "d1l_settings_clear_wifi_profile()" in source
+    assert "esp_netif_create_default_wifi_sta" in source
+    assert "esp_wifi_set_mode(WIFI_MODE_STA)" in source
+    assert "esp_wifi_scan_start(NULL, true)" in source
+    assert "esp_wifi_scan_get_ap_records" in source
+    assert "esp_wifi_set_config(WIFI_IF_STA, &config)" in source
+    assert "esp_wifi_connect()" in source
+    assert "WIFI_STORAGE_RAM" in source
     assert "ESP_ERR_NOT_SUPPORTED" in source
     assert "CONFIG_ESP_WIFI_ENABLED" in source
     assert "CONFIG_BT_ENABLED" in source
+    assert "esp_wifi" in cmake
+    assert "esp_netif" in cmake
+    assert "esp_event" in cmake
     assert '"comms/connectivity_manager.c"' in cmake
+    assert "CONFIG_ESP_WIFI_ENABLED=y" in defaults
+    assert "CONFIG_BT_ENABLED=n" in defaults
+    assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in defaults
+    assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y" in defaults
 
 
-def test_console_reports_wifi_ble_status_without_enabling_stacks():
+def test_console_reports_wifi_ble_status_scan_and_connect_without_password_echo():
     console = read("main/comms/usb_console.c")
     assert "cmd_wifi_status" in console
     assert "cmd_wifi_scan" in console
+    assert "cmd_wifi_connect" in console
     assert "cmd_wifi_save" in console
     assert "cmd_wifi_clear" in console
     assert "cmd_ble_status" in console
     assert "WIFI_BUILD_DISABLED" in console
-    assert "WIFI_RUNTIME_PENDING" in console
     assert "BLE_BUILD_DISABLED" in console
     assert "BLE_RUNTIME_PENDING" in console
     assert '\\"profile_saved\\":%s' in console
     assert '\\"password_saved\\":%s' in console
     assert "wifi save <ssid> [password]" in console
+    assert "wifi connect" in console
     assert "password is not printed" in console
-    assert '\\"scan_started\\":false' in console
-    assert '\\"networks\\":[]' in console
+    assert "d1l_connectivity_wifi_scan(&scan)" in console
+    assert "d1l_connectivity_wifi_connect()" in console
+    assert '\\"networks\\":[' in console
+    assert '\\"password_printed\\":false' in console
+    assert '\\"connected\\":%s' in console
+    assert '\\"ip\\":' in console
     assert '\\"coexistence_policy\\"' in console

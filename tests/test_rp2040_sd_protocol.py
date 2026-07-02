@@ -16,9 +16,6 @@ from tools.rp2040_sd_protocol import (
     PING_FIELDS,
     PING_REPLY,
     PING_REQUEST,
-    FORMAT_CONFIRMATION,
-    FORMAT_REQUEST,
-    FORMAT_REPLY,
     MAX_FILE_CHUNK_BYTES,
     MAX_FILE_PATH_CHARS,
     SdFileSystem,
@@ -72,7 +69,7 @@ def parse_tokens(line: str) -> dict[str, str]:
 def test_status_protocol_lines_cover_boot_states():
     no_card = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["no-card"]))
     ready = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["ready"]))
-    setup = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["format-required"]))
+    setup = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["needs-fat32"]))
 
     assert no_card["prefix"] == STATUS_REPLY
     assert no_card["state"] == "no_card"
@@ -81,10 +78,9 @@ def test_status_protocol_lines_cover_boot_states():
     assert ready["present"] == "1"
     assert ready["mounted"] == "1"
     assert ready["deskos"] == "1"
-    assert ready["format_required"] == "0"
-    assert setup["state"] == "setup_required"
-    assert setup["format_required"] == "1"
-    assert setup["format_supported"] == "1"
+    assert ready["needs_fat32"] == "0"
+    assert setup["state"] == "not_fat32_or_unmountable"
+    assert setup["needs_fat32"] == "1"
     assert ready["file_ops"] == "1"
     assert ready["file_line_max"] == str(FILE_LINE_MAX)
     assert ready["file_chunk_max"] == str(MAX_FILE_CHUNK_BYTES)
@@ -127,7 +123,7 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     assert root_prepared["prefix"] == MOUNT_REPLY
     assert root_prepared["state"] == "ready"
     assert root_prepared["deskos"] == "1"
-    assert root_prepared["format_required"] == "0"
+    assert root_prepared["needs_fat32"] == "0"
     assert root_prepared["file_ops"] == "1"
     assert DESKOS_MANIFEST_PATH in fs.files
     assert DESKOS_MAP_MANIFEST_PATH in fs.files
@@ -169,25 +165,16 @@ def test_diag_protocol_reports_probe_matrix_without_formatting():
     assert diag["ls_p"] == "0"
 
 
-def test_format_protocol_requires_exact_confirmation():
-    fs = SdFileSystem()
-    bad = parse_tokens(reply_for_request(f"{FORMAT_REQUEST} WRONG", SCENARIOS["format-required"]))
-    good = parse_tokens(
-        reply_for_request(f"{FORMAT_REQUEST} {FORMAT_CONFIRMATION}", SCENARIOS["format-required"], fs)
-    )
+def test_format_protocol_is_not_exposed():
+    old_request = "DESKOS_SD_" + "FORMAT"
+    old_confirmation = "FORMAT-" + "DESKOS-SD"
 
-    assert bad["prefix"] == FORMAT_REPLY
-    assert bad["state"] == "confirmation_required"
-    assert bad["format_required"] == "1"
-    assert good["prefix"] == FORMAT_REPLY
-    assert good["state"] == "ready"
-    assert good["mounted"] == "1"
-    assert good["deskos"] == "1"
-    assert good["format_required"] == "0"
-    assert good["note"] == "format_complete"
-    assert fs.files[DESKOS_MANIFEST_PATH] == DESKOS_MANIFEST_PAYLOAD
-    assert fs.files[DESKOS_MAP_MANIFEST_PATH] == DESKOS_MAP_MANIFEST_PAYLOAD
-    assert set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
+    try:
+        reply_for_request(f"{old_request} {old_confirmation}", SCENARIOS["needs-fat32"])
+    except ValueError as exc:
+        assert "unsupported request" in str(exc)
+    else:
+        raise AssertionError("old SD format request unexpectedly succeeded")
 
 
 def test_manifest_invalid_blocks_file_ops_without_formatting():
@@ -203,9 +190,9 @@ def test_manifest_invalid_blocks_file_ops_without_formatting():
     )
 
     assert mounted["prefix"] == MOUNT_REPLY
-    assert mounted["state"] == "setup_required"
+    assert mounted["state"] == "deskos_manifest_invalid"
     assert mounted["deskos"] == "0"
-    assert mounted["format_required"] == "0"
+    assert mounted["needs_fat32"] == "0"
     assert mounted["note"] == "deskos_manifest_invalid"
     assert fs.files[DESKOS_MANIFEST_PATH] == b'{"schema":99}\n'
     assert stat["ok"] == "0"
@@ -214,17 +201,11 @@ def test_manifest_invalid_blocks_file_ops_without_formatting():
 
 def test_storage_edge_scenarios_and_constants_match_c_contract():
     root_missing = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["root-missing"]))
-    no_card_after_format = parse_tokens(
-        reply_for_request(f"{FORMAT_REQUEST} {FORMAT_CONFIRMATION}", SCENARIOS["no-card"])
-    )
 
     assert root_missing["present"] == "1"
     assert root_missing["mounted"] == "1"
     assert root_missing["deskos"] == "0"
-    assert root_missing["format_required"] == "0"
-    assert root_missing["format_supported"] == "1"
-    assert no_card_after_format["state"] == "no_card"
-    assert no_card_after_format["present"] == "0"
+    assert root_missing["needs_fat32"] == "0"
 
     for scenario in SCENARIOS.values():
         assert " " not in scenario.note
@@ -237,16 +218,16 @@ def test_storage_edge_scenarios_and_constants_match_c_contract():
     assert STATUS_REQUEST in c_source
     assert MOUNT_REQUEST in c_source
     assert PING_REQUEST in c_source
-    assert FORMAT_REQUEST in c_source
-    assert FORMAT_CONFIRMATION in c_header
     assert STATUS_REQUEST in rp2040_sketch
     assert MOUNT_REQUEST in rp2040_sketch
     assert PING_REQUEST in rp2040_sketch
-    assert FORMAT_REQUEST in rp2040_sketch
-    assert FORMAT_CONFIRMATION in rp2040_sketch
-    assert "FatFormatter fat_formatter;" in rp2040_sketch
-    assert "fat_formatter.format(card, sector_buffer, reply_stream)" in rp2040_sketch
-    assert "reply_stream->println();\n    send_snapshot(*reply_stream, FORMAT_REPLY, formatted);" in rp2040_sketch
+    old_request = "DESKOS_SD_" + "FORMAT"
+    old_confirmation = "FORMAT-" + "DESKOS-SD"
+    assert old_request not in c_source
+    assert old_confirmation not in c_header
+    assert old_request not in rp2040_sketch
+    assert old_confirmation not in rp2040_sketch
+    assert "FatFormatter" not in rp2040_sketch
     for field in STATUS_FIELDS:
         assert f"{field}=" in rp2040_sketch
     for field in FILE_CAPABILITY_FIELDS:
@@ -465,7 +446,7 @@ def test_filecanary_transcript_matches_storage_filecanary_contract():
 def test_filecanary_transcript_fails_safely_without_ready_card():
     for scenario_name, expected_error in {
         "no-card": "no_card",
-        "format-required": "not_ready",
+        "needs-fat32": "not_ready",
         "root-missing": "not_ready",
     }.items():
         transcript = file_canary_transcript(SCENARIOS[scenario_name])
@@ -536,7 +517,7 @@ def test_export_canary_transcript_commits_diagnostic_export_without_delete():
 def test_export_canary_transcript_fails_safely_without_ready_card():
     for scenario_name, expected_error in {
         "no-card": "no_card",
-        "format-required": "not_ready",
+        "needs-fat32": "not_ready",
         "root-missing": "not_ready",
     }.items():
         transcript = export_canary_transcript(SCENARIOS[scenario_name], "ex1")
@@ -635,7 +616,7 @@ def test_diagnostic_export_transcript_chunks_and_commits_without_delete():
 def test_diagnostic_export_transcript_fails_safely_without_ready_card():
     for scenario_name, expected_error in {
         "no-card": "no_card",
-        "format-required": "not_ready",
+        "needs-fat32": "not_ready",
         "root-missing": "not_ready",
     }.items():
         transcript = diagnostic_export_transcript(SCENARIOS[scenario_name], "diag1")
@@ -741,7 +722,7 @@ def test_data_export_transcript_chunks_and_commits_without_delete():
 def test_data_export_transcript_fails_safely_without_ready_card():
     for scenario_name, expected_error in {
         "no-card": "no_card",
-        "format-required": "not_ready",
+        "needs-fat32": "not_ready",
         "root-missing": "not_ready",
     }.items():
         transcript = data_export_transcript(SCENARIOS[scenario_name], "data1")
@@ -818,7 +799,7 @@ def test_map_tile_canary_transcript_commits_nested_cache_tile():
 def test_map_tile_canary_transcript_fails_safely_without_ready_card():
     for scenario_name, expected_error in {
         "no-card": "no_card",
-        "format-required": "not_ready",
+        "needs-fat32": "not_ready",
         "root-missing": "not_ready",
     }.items():
         transcript = map_tile_canary_transcript(SCENARIOS[scenario_name], "map1")

@@ -4,8 +4,6 @@ from tools.rp2040_sd_protocol import (
     FILE_CAPABILITY_FIELDS,
     FILE_LINE_MAX,
     FILE_REQUEST,
-    FORMAT_CONFIRMATION,
-    FORMAT_REQUEST,
     MAX_FILE_CHUNK_BYTES,
     MAX_FILE_PATH_CHARS,
     DIAG_REQUEST,
@@ -59,30 +57,15 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sd_command(0, 0, 0x95" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
-    format_body = sketch.split("SdSnapshot format_card()", 1)[1].split(
-        "DiagSnapshot pending_diag_snapshot", 1
-    )[0]
-    assert "manual_probe_card(DEDICATED_SPI, true)" in format_body
-    assert "manual_probe_card(SHARED_SPI, true)" in format_body
-    assert "manual_probe_card(DEDICATED_SPI, false)" in format_body
-    assert "manual_probe_card(SHARED_SPI, false)" in format_body
-    assert "\n        probe_card(DEDICATED_SPI, true)" not in format_body
-    assert "\n        probe_card(SHARED_SPI, true)" not in format_body
     assert "delete card" in sketch
-    assert 'constexpr const char *FORMAT_PROGRESS_REPLY = "DESKOS_SD_FORMAT_PROGRESS";' in sketch
-    assert "void send_format_progress" in sketch
-    assert "FatFormatter fat_formatter" in sketch
-    assert 'send_format_progress("fat_format_start")' in sketch
-    assert 'send_format_progress("fat_format_done")' in sketch
-    assert 'send_format_progress("deskos_prepare")' in sketch
-    assert "fat_formatter.format(card, sector_buffer, reply_stream)" in sketch
     assert "SDFS.format()" not in sketch
-    send_format_body = sketch.split("void send_format_result", 1)[1].split(
-        "void send_file_error", 1
-    )[0]
-    assert "SdSnapshot formatted = format_card();" in send_format_body
-    assert "mount_status_blocking()" not in send_format_body
-    assert 'formatted.state = "ready"' not in send_format_body
+    old_request = "DESKOS_SD_" + "FORMAT"
+    old_confirmation = "FORMAT-" + "DESKOS-SD"
+    assert old_request not in sketch
+    assert old_confirmation not in sketch
+    assert "FatFormatter" not in sketch
+    assert "format_card" not in sketch
+    assert "send_format_result" not in sketch
     assert "/deskos" in sketch
     assert "/deskos/manifest.json" in sketch
     assert "/deskos/map/manifest.json" in sketch
@@ -90,7 +73,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
 
-    for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, FORMAT_REQUEST, FORMAT_CONFIRMATION, DIAG_REQUEST, FILE_REQUEST]:
+    for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch
         assert token in readme
 
@@ -105,10 +88,11 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
     for state in [
         "no_card",
         "ready",
-        "setup_required",
+        "not_fat32_or_unmountable",
+        "creating_deskos_files",
+        "deskos_manifest_invalid",
         "mount_required",
         "mount_pending",
-        "confirmation_required",
         "error",
     ]:
         assert state in sketch
@@ -123,17 +107,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "deskos_manifest_invalid",
         "deskos_map_manifest_invalid",
         "structure_created",
-        "format_required",
-        "format_complete",
-        "probe_start",
-        "fat_format_start",
-        "fat_format_done",
-        "deskos_prepare",
-        "confirmation_required",
-        "format_failed",
-        "format_card_init_failed",
-        "format_sector_count_failed",
-        "post_format_mount_failed",
+        "needs_fat32_on_computer",
         "unsupported_request",
         "line_too_long",
         "bad_path",

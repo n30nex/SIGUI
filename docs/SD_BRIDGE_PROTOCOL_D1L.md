@@ -15,18 +15,17 @@ DESKOS_SD_STATUS
 RP2040 replies with one line:
 
 ```text
-DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 Required tokens:
 
-- `state`: stable machine state. Use `mount_required`, `mount_pending`, `no_card`, `ready`, `setup_required`, `unformatted`, or `error` when possible.
+- `state`: stable machine state. Use `mount_required`, `mount_pending`, `no_card`, `not_fat32_or_unmountable`, `creating_deskos_files`, `deskos_manifest_invalid`, `ready`, or `error` when possible.
 - `present`: `1` when a card is electrically present.
 - `mounted`: `1` when the filesystem is mounted and usable.
 - `deskos`: `1` when the `/deskos` data root exists or has been created.
 - `fs`: filesystem label such as `fat32`, `fatfs`, `exfat`, `unknown`, or `none`.
-- `format_required`: `1` only when the card is present but cannot be used without setup/format.
-- `format_supported`: `1` only when the RP2040 firmware can perform the confirmed format command.
+- `needs_fat32`: `1` when a card is present but cannot be mounted as a usable FAT32 DeskOS card. Users must fix this on a computer.
 - `capacity_kb` and `free_kb`: unsigned decimal kilobytes, `0` when unknown.
 - `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and
   `probe_data`: non-formatting card-probe diagnostics. Older bridge firmware
@@ -46,8 +45,8 @@ On the D1L RP2040 bridge, status is safe to call from boot and UI polling. It
 does not probe, mount, format, or write SD. Before any explicit mount result is
 cached, the bridge reports `state=mount_required note=mount_not_checked`. While
 an explicit mount worker is running, status may report `state=mount_pending`.
-After `DESKOS_SD_MOUNT`, format, or file operations complete, status returns the
-cached latest SD state.
+After `DESKOS_SD_MOUNT` or file operations complete, status returns the cached
+latest SD state.
 
 ## Mount Request
 
@@ -61,26 +60,26 @@ DESKOS_SD_MOUNT
 RP2040 replies immediately with one status-shaped line using the mount prefix.
 If the SD stack is still probing or mounting the card, the line may report
 `state=mount_pending note=mount_started`; the ESP32 should poll safe
-`DESKOS_SD_STATUS` until the cached state becomes `ready`, `setup_required`,
-`no_card`, or `error`.
+`DESKOS_SD_STATUS` until the cached state becomes `ready`,
+`not_fat32_or_unmountable`, `deskos_manifest_invalid`, `no_card`, or `error`.
 
 The RP2040 bridge must use a bounded raw SPI presence probe before entering the
 Arduino/SdFat filesystem mount path. An electrically absent or non-responsive
 card should report `no_card` rather than wedging the UART bridge.
 
 ```text
-DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 The D1L bridge tries the expected high-power, dedicated-`SPI1` FAT mount first.
 If that mount fails, it uses one raw SdFat presence probe on the same expected
-D1L bus before reporting `no_card` or a guarded setup-required state.
+D1L bus before reporting `no_card` or a FAT32-required state.
 Exhaustive high/low and dedicated/shared probing is reserved for the manual
 diagnostic request below. If no card responds, the bridge reports
-`state=no_card` and `format_supported=0`. If a card responds but the filesystem
-is unusable, the bridge reports `state=setup_required present=1 mounted=0
-format_required=1 format_supported=1 note=format_required`; the ESP32 may then
-show the guarded format confirmation path.
+`state=no_card`. If a card responds but the filesystem is unusable, the bridge
+reports `state=not_fat32_or_unmountable present=1 mounted=0 needs_fat32=1
+note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active and tells the
+user to prepare a FAT32 card on a computer.
 
 ## Ping Request
 
@@ -124,45 +123,19 @@ command does not format, copy UF2 files, or send RF.
 `d1l_storage_boot_prepare()` runs before retained stores initialize. It may use
 safe status and the explicit non-formatting mount path so a ready card can
 enable SD-backed retained history before store load. It must stay bounded by the
-boot timeout, must not send `DESKOS_SD_FORMAT`, and must leave onboard NVS
+boot timeout, must not send any formatting command, and must leave onboard NVS
 fallback active if the bridge is unavailable, the card is absent, the mount is
 still pending, or the ready file-operation gate is not available.
 
-## Confirmed Format Request
+## FAT32-Only Storage Policy
 
-Formatting is never sent during boot, `storage status`, `storage mount`,
-`storage diag`, or plain `storage setup`. It is sent only after the user enters
-the exact confirmation phrase and only if the latest status/mount result
-reported `present=1`, `format_supported=1`, and setup is required.
-
-For production validation, the operator has allowed formatting the SD card
-inserted in the D1L. That permission applies only to the guarded confirmation
-flow on an unformatted or sacrificial test card, not to boot/status/mount or
-incidental UI polling.
-
-ESP32 sends:
-
-```text
-DESKOS_SD_FORMAT FORMAT-DESKOS-SD
-```
-
-RP2040 should reply with the post-format status, preferably using the format prefix:
-
-```text
-DESKOS_SD_FORMAT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31166976 note=format_complete
-```
-
-During FAT initialization the RP2040 may stream progress lines on the same UART:
-
-```text
-DESKOS_SD_FORMAT_PROGRESS step=fat_format_start
-```
-
-The ESP32 treats those lines only as keepalive/progress evidence and continues
-waiting for the terminal `DESKOS_SD_FORMAT ...` reply. If that final reply never
-arrives, timeout notes include the last observed progress step. A generic
-`DESKOS_SD_STATUS ...` line is intentionally ignored so stale status polls
-cannot be mistaken for confirmed format completion.
+There is no RP2040 or ESP32 formatting request. Users must provide a FAT32 SD
+card prepared on a computer. When a FAT32 card mounts and `/deskos` is missing,
+the bridge creates the required DeskOS folders and manifests. When no card is
+present, the ESP32 uses NVS fallback. When a card is not FAT32, unmountable, or
+contains invalid DeskOS manifests, the ESP32 keeps NVS fallback active and
+shows user-facing repair guidance. Do not add developer-only, serial-only, UI,
+or script-only format paths.
 
 ## Generic File Operations
 
@@ -220,7 +193,11 @@ For compacted stores and map tiles, write chunks to a temporary path, then use
 `rename replace=1` as the commit step. Retained history blobs use:
 `stores/messages/public/public.bin`, `stores/messages/dm/threads.bin`,
 `stores/routes/routes.bin`, and `stores/packet_log/ring.bin`, each committed
-through a same-directory `.tmp` path. ESP32 keeps an onboard NVS mirror so
+through a same-directory `.tmp` path. Packet history also keeps a bounded
+append-only SD journal in `stores/packet_log/segments/sNN.bin`: 32 segment files
+with 64 fixed-size records each, for a 4096-record SD window while NVS keeps the
+newest compact fallback rows. The first record in each segment is written with
+`write trunc=1`; later records use `append`. ESP32 keeps an onboard NVS mirror so
 removing or timing out the SD card does not strand message, route, or packet
 history. Do not blindly retry `append` after a timeout unless the higher-level
 record format has its own idempotency key.
@@ -375,10 +352,8 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcri
 
 ## Safety Rules
 
-- No automatic format on boot.
-- No format from incidental touch events.
-- No format when no card is present.
-- No format when the RP2040 did not first report `format_supported=1`.
+- No on-device SD formatting from boot, UI, serial, RP2040 firmware, ESP32 firmware, or scripts.
+- Users must supply FAT32 SD cards prepared on a computer.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`, and the first offline Map page/cache policy is reported through `storage map-policy`. Live network tile downloads remain pending until Wi-Fi runtime and explicit user opt-in are implemented.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`, `storage map-tile-download`, and the touch Map Tiles provider/download sheet. Network tile downloads remain bounded to explicit user action, require connected Wi-Fi, ready SD cache, an allowed non-public-OSM HTTPS provider template, visible attribution, and no Public RF or format action; hardware proof remains pending.

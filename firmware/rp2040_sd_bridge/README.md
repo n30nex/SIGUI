@@ -66,8 +66,8 @@ health can be proven without touching SD. It then uses explicit `storage mount`
 for the SD-touch attempt and sends `storage diag` as optional non-destructive
 evidence when the flashed bridge supports `DESKOS_SD_DIAG`. The canary sends
 `storage status`, `storage filecanary`, `storage status`,
-`packets`, and `health`. It does not send Public RF and does not issue
-`DESKOS_SD_FORMAT`. The SD-aware soak repeats `storage status` and
+`packets`, and `health`. It does not send Public RF or any formatting command.
+The SD-aware soak repeats `storage status` and
 `storage filecanary` during a passive stability window. The retained-history
 acceptance runner seeds synthetic Public/DM/route/packet rows without Public RF,
 reboots, and verifies those rows are still readable. The protocol transcript
@@ -81,8 +81,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_STATUS` is safe to call during boot and UI polling. It does not
   probe, mount, format, or write SD. Before an explicit mount it reports
   `state=mount_required`; while an explicit mount worker is running it may
-  report `state=mount_pending`; after `DESKOS_SD_MOUNT`, format, or file
-  operations, it returns the cached latest SD state. Ready cached cards
+  report `state=mount_pending`; after `DESKOS_SD_MOUNT` or file operations,
+  it returns the cached latest SD state. Ready cached cards
   advertise `file_ops=1`, `file_line_max=512`, `file_chunk_max=192`,
   `path_max=96`, and `atomic_rename=1`. Status replies include optional cached
   probe diagnostics:
@@ -92,7 +92,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   report `state=mount_pending`, and runs a bounded raw SPI CMD0/CMD8/ACMD41
   probe before any Arduino/SdFat filesystem mount call. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports
-  `setup_required`, `format_required=1`, and `format_supported=1`.
+  `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
+  cards on a computer.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.
@@ -102,19 +103,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
   does not write to the card.
-- `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` is the only formatting command.
-  Formatting first selects the same rail/SPI mode proven by the bounded raw
-  probe, then uses SdFat directly on `SPI1`; the Arduino-Pico `SDFS.format()`
-  wrapper is avoided because that wrapper does not preserve the configured SPI
-  object on this board. During a long FAT initialization it may stream
-  `DESKOS_SD_FORMAT_PROGRESS step=...` lines before the final protocol reply;
-  ESP32 callers must treat those lines only as progress evidence and continue
-  waiting for the terminal `DESKOS_SD_FORMAT ...` line. If the final reply times
-  out, the ESP32 note includes the last observed progress step. Every confirmed
-  format attempt must end with that reply, including explicit failure notes such as
-  `format_card_init_failed`, `format_sector_count_failed`, or
-  `post_format_mount_failed` when the card is electrically present but not
-  usable through the filesystem path.
+- The bridge has no SD formatting command. If a FAT32 card is mounted and the
+  `/deskos` structure is missing, the bridge creates the DeskOS directories and
+  manifests. If the card is absent, unmountable, not FAT32, or has invalid
+  DeskOS manifests, the ESP32 keeps NVS fallback active and tells the user what
+  to fix on a computer.
 - `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under
   `/deskos`: `stat`, `read`, `write`, `append`, `delete`, and `rename`. Payloads
   use base64url without padding, CRC32 checks, sanitized relative paths, and

@@ -67,7 +67,7 @@ Current stores are also small:
 - Public messages: 16 rows
 - DM messages: 16 rows
 - nodes: 64 active RAM rows / 16 NVS fallback rows / 512 SD-history target
-- packet log: 128 active RAM rows / 8 NVS fallback rows / 2048 SD-history target
+- packet log: 128 active RAM rows / 8 NVS fallback rows / 4096 SD-history target
 
 These are okay for Phase 1 validation. They are not enough for a desk companion with scrollable lists, packet terminal, local repeater panel, offline map, and SD-backed retention. Production should keep RAM previews bounded, but allow larger SD-backed retained history.
 
@@ -112,7 +112,7 @@ The normal user should be able to:
 - Sort nodes by last heard, signal, role, name, and favorites.
 - See local repeaters with last heard and signal strength.
 - See a local node map after picking the D1L location.
-- Download and cache free/offline map tiles once Wi-Fi is configured.
+- Download and cache allowed attributed map tiles after Wi-Fi, SD cache, D1L location, and provider setup are configured.
 - View live RX/TX packets in a terminal-style diagnostic screen.
 - Configure Wi-Fi/BLE/Radio/SD/Display safely from Settings.
 
@@ -829,19 +829,19 @@ Map first open flow:
 
 ```text
 Map needs your D1L location
-[Use approximate manual picker]
 [Enter lat/lon]
+[Save]
+[Clear]
 [Skip for now]
 ```
 
-Manual picker:
+Manual coordinate entry:
 
 - Starts at a sensible default if no GPS/time/network.
-- User pans with finger.
-- Zoom + / - buttons.
-- Crosshair in center.
-- “Drop D1L Pin” button.
-- Save to settings and SD manifest summary.
+- Uses decimal latitude and longitude fields with the onscreen keyboard.
+- Validates latitude `-90..90` and longitude `-180..180`.
+- Hides the bottom dock while the keyboard is open.
+- Saves to settings only; it must not send RF, write SD, or format storage.
 
 ### 10.2 Map view
 
@@ -946,7 +946,7 @@ Increase RAM ring if memory allows and SD ring when available:
 ```c
 #define D1L_PACKET_LOG_RAM_CAPACITY 128U
 #define D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY 8U
-#define D1L_PACKET_LOG_SD_CAPACITY 2048U
+#define D1L_PACKET_LOG_SD_CAPACITY 4096U
 #define D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD 16U
 #define D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS 5000U
 ```
@@ -1148,14 +1148,14 @@ Required scripts:
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port $env:D1L_PORT --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenario correct-structure
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenario missing-structure
-python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenario unformatted --allow-format-confirm
+python .\scripts\sd_boot_prepare_acceptance_d1l.py --port $env:D1L_PORT --scenario unformatted
 python .\scripts\sd_retained_history_acceptance_d1l.py --port $env:D1L_PORT --token prod
 python .\scripts\sd_map_tile_canary_d1l.py --port $env:D1L_PORT --token prod
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --port $env:D1L_PORT --token prod
 python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 ```
 
-The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
+Users must supply FAT32 cards prepared on a computer. Do not format from ESP32 firmware, RP2040 firmware, serial commands, scripts, or UI. The unformatted scenario must report NVS fallback plus FAT32-on-computer guidance.
 
 Current evidence: Actions run `28569851955` for commit `a1afd4b` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
@@ -1167,16 +1167,14 @@ mounted UF2 bootloader volume was available, so the RP2040 bridge still cannot
 be copied without physical UF2/BOOTSEL action. The latest preflight
 `artifacts/hardware/com12/rp2040_preflight_a1afd4b.json`
 proves the RP2040 UART, ping, protocol, and diag paths respond, but the inserted
-card remains `raw_card_present_mount_failed` with `sd.state="setup_required"`
+card remains `raw_card_present_mount_failed`
 and `ready_for_sd_acceptance=false`. The latest UF2 scan
 `artifacts/hardware/com12/rp2040_uf2_volume_scan_a1afd4b.json` found
-`candidate_volumes=[]`. The prior guarded operator-approved format attempt
-`artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
-sent the explicit confirmation but timed out before confirmed format or a ready
-file-operation gate. Full SD auto-prepare, retained-history, export, map-tile,
-and reboot/remount proof remain open until a known-good/compatible card or
-bridge update reaches the ready file gate and all SD canaries pass on the
-device SD card.
+`candidate_volumes=[]`. Prior guarded-format artifacts are obsolete for release
+readiness because the current public policy forbids on-device SD formatting.
+Full SD auto-prepare, retained-history, export, map-tile, and reboot/remount
+proof remain open until a FAT32 card prepared on a computer reaches the ready
+file gate and all SD canaries pass on the device SD card.
 
 ### 13.5 Soak
 
@@ -1298,24 +1296,10 @@ entries.
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
-Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
-proved the guarded unformatted-card path sends the explicit confirmation only
-when allowed (`format_command_sent=true`, `format_allowed=true`,
-`public_rf_tx=false`, health ready), but the RP2040 bridge timed out before
-reporting a confirmed format result or ready file-operation gate. Actions run
-`28567973708` for commit `9c4c362` rebuilt a verified RP2040 UF2 with SHA256
-`B2FCB1177478908207CBDE2BC0B267C8AE0AF95CE8C1D46BA8E36166DFDD0B40`. The bridge
-cannot be copied until the RP2040 is placed in UF2/BOOTSEL mode.
-`artifacts/hardware/com12/rp2040_preflight_9c4c362.json`
-shows the current COM12 bridge still responds to ping/protocol/diag and detects
-the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`. The
-format path now emits `DESKOS_SD_FORMAT_PROGRESS step=...` milestones while
-the ESP32 still waits for the terminal `DESKOS_SD_FORMAT` result, extends the
-firmware format timeout to 660 seconds, and keeps `format_command_sent`
-separate from `format_confirmed`; full SD auto-prepare, retained-history,
-export, map-tile, and reboot/remount proof remain open until a
-known-good/compatible card or bridge update reaches the ready file gate and the
-SD matrix is rerun.
+Current blocker: fresh FAT32-only SD matrix evidence is still needed. The bridge
+must prove no-card NVS fallback, FAT32 card auto-creation of DeskOS files,
+retained-history/export/map-tile canaries, reboot/remount proof, and clear
+non-FAT32 guidance without any device-side formatting command.
 
 ### Map
 

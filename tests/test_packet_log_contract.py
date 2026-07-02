@@ -18,11 +18,18 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     cmake = read("main/CMakeLists.txt")
     assert "D1L_PACKET_LOG_RAM_CAPACITY 128U" in header
     assert "D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY 8U" in header
-    assert "D1L_PACKET_LOG_SD_CAPACITY 2048U" in header
+    assert "D1L_PACKET_LOG_SD_RETENTION_HOURS 24U" in header
+    assert "D1L_PACKET_LOG_SD_CAPACITY 4096U" in header
+    assert "D1L_PACKET_LOG_SD_SEGMENT_COUNT 64U" in header
+    assert "D1L_PACKET_LOG_SD_SEGMENT_CAPACITY" in header
     assert "D1L_PACKET_LOG_CAPACITY D1L_PACKET_LOG_RAM_CAPACITY" in header
     assert "D1L_PACKET_LOG_PERSIST_CAPACITY D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY" in header
     assert "D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD 16U" in header
     assert "D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS 5000U" in header
+    assert "sd_history_records" in header
+    assert "sd_history_failed_writes" in header
+    assert "sd_capacity" in header
+    assert "sd_history_enabled" in header
     assert 'D1L_RETAINED_PACKET_LOG_NAMESPACE "d1l_packets"' in blob_store
     assert 'D1L_RETAINED_PACKET_LOG_SD_DIR "stores/packet_log"' in blob_store
     assert 'D1L_PACKET_LOG_KEY "ring"' in source
@@ -42,8 +49,23 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert '"storage/retained_blob_store.c"' in cmake
     assert "static d1l_packet_log_primary_blob_t s_primary_blob_scratch" in source
     assert "static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch" in source
+    assert "D1L_PACKET_LOG_HISTORY_PATH_FMT \"stores/packet_log/segments/s%02lu.bin\"" in source
+    assert "d1l_packet_log_history_record_t" in source
+    assert "history_record_checksum" in source
+    assert "history_record_is_valid" in source
+    assert "read_sd_history_entry" in source
+    assert "append_sd_history_locked" in source
+    assert "clear_sd_history_locked" in source
+    assert "d1l_rp2040_bridge_file_append" in source
+    assert "d1l_rp2040_bridge_file_read(path, offset" in source
+    assert "d1l_rp2040_bridge_file_write(path, 0U" in source
+    assert "d1l_rp2040_bridge_file_delete" in source
+    assert "D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS 750U" in source
+    assert "D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES 4U" in source
+    assert "_Static_assert(sizeof(d1l_packet_log_history_record_t) <= D1L_RP2040_FILE_CHUNK_MAX" in source
     assert "D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY" in source
     assert "D1L_PACKET_LOG_RAM_CAPACITY" in source
+    assert "D1L_PACKET_LOG_SD_CAPACITY" in source
     assert "sanitize_ascii" in source
     assert "d1l_packet_log_find_by_seq" in header
     assert "d1l_packet_log_flush" in header
@@ -52,7 +74,13 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "raw_hex" in header
     assert "raw_truncated" in header
     assert "d1l_packet_log_append_raw" in header
+    assert "d1l_packet_log_query_page" in header
     assert "d1l_packet_log_query" in header
+    assert "skip_newest" in source
+    assert "out_total_matches" in source
+    assert "out_sd_used" in source
+    assert "query_sd_history" in source
+    assert "query_ram_locked" in source
     assert "raw_to_hex_preview" in source
     assert "packet_matches" in source
     assert "D1L_PACKET_LOG_SCHEMA 3U" in source
@@ -60,6 +88,7 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "fallback_blob_v2_is_valid" in source
     assert "persist_store(bool flush_primary)" in source
     assert "s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD" in source
+    assert "s_sd_history_records < D1L_PACKET_LOG_SD_CAPACITY" in source
     assert "ESP_ERR_NOT_FOUND" in source
     assert '\\"packet_log_backend\\"' in read("main/comms/usb_console.c")
     assert "esp_err_t packet_log_ret = d1l_packet_log_init()" in app_main
@@ -88,6 +117,9 @@ def test_console_exposes_packet_detail_and_clear():
     assert "packets clear" in console
     assert '\\"persisted\\":true' in console
     assert '\\"raw_hex\\":\\"%s\\"' in console
+    assert '\\"sd_history\\":{\\"enabled\\":%s' in console
+    assert "stats->sd_history_records" in console
+    assert "stats->sd_history_failed_writes" in console
     assert "packets" in SMOKE_COMMANDS
     assert "packets filter any any" in SMOKE_COMMANDS
     assert "packets search test" in SMOKE_COMMANDS

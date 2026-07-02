@@ -5,10 +5,10 @@ This checkpoint advances optional SD-card data storage without making boot or re
 ## Implemented
 
 - Added an ESP32-side RP2040 SD status probe using the line protocol `DESKOS_SD_STATUS`.
-- Added the guarded ESP32 command path for `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`; it is sent only after the bridge has reported a present card, `format_supported=true`, setup is required, and the user typed the exact confirmation phrase.
-- Extended `storage status` with RP2040 protocol, card, filesystem, DeskOS root, capacity/free, setup, and format action fields.
+- Superseded 2026-07-02: the guarded ESP32/RP2040 SD format path has been removed. Users must provide FAT32 cards prepared on a computer.
+- Extended `storage status` with RP2040 protocol, card, filesystem, DeskOS root, capacity/free, setup, and `needs_fat32` fields.
 - Added non-destructive `storage setup`.
-- Kept `storage setup confirm FORMAT-DESKOS-SD` non-destructive on the current D1L bridge, which still does not answer the SD protocol or advertise format support.
+- Kept `storage setup` non-destructive and policy-only.
 - Added a Settings-tab Storage Setup sheet and simulator coverage.
 - Added `tools/rp2040_sd_protocol.py` as the host reference simulator for the RP2040 line protocol.
 - Added `firmware/rp2040_sd_bridge/deskos_sd_bridge` as an original Arduino RP2040 SD bridge target for the D1L internal UART and SD pins.
@@ -18,7 +18,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Kept an onboard NVS mirror for the packet-log canary and retained NVS fallback on no-card, timeout, missing file support, missing atomic rename, insufficient limits, and invalid SD blob cases.
 - Added serial-only diagnostic export, sampled data export, and map-tile cache canaries. Diagnostic exports commit under `exports/diagnostics/`, sampled data exports commit under `exports/data/`, and the map-tile cache canary commits a synthetic tile under `map/tiles/`. They use temp write/read plus `rename replace=1`, leave the final artifact present for inspection, and do not send Public RF or format.
 - Kept settings, identity, contacts, read-state, crashlog, and the full map page/tile download policy on onboard/fallback storage or pending; no card-dependent boot state is claimed in this slice.
-- Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added safe/cached `DESKOS_SD_STATUS`, explicit `DESKOS_SD_MOUNT`, raw SdFat diagnostics, and an SPI1-aware formatter.
+- Matched the Seeed D1L ESP32/RP2040 UART contract at ESP32 UART2 GPIO19/GPIO20 and 921600 baud, enabled the RP2040 SD/sensor rail on GPIO18, added safe/cached `DESKOS_SD_STATUS`, explicit `DESKOS_SD_MOUNT`, and raw SdFat diagnostics.
 - Follow-up pending hardware proof: the RP2040 bridge now has `DESKOS_SD_PING`, safe `DESKOS_SD_STATUS`, explicit async `DESKOS_SD_MOUNT`, async-safe `DESKOS_SD_DIAG`, and a bounded raw SPI presence probe before Arduino/SdFat mount attempts; ESP32 exposes `rp2040 ping`, `storage status`, `storage mount`, and `storage diag`. This is intended to keep boot/UI polling non-blocking while giving the operator a deliberate mount path for physically inserted cards.
 
 ## Validation Rules
@@ -26,7 +26,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Do not run firmware builds on the Windows host. Firmware artifacts must come from GitHub Actions.
 - Local verification for this slice is limited to host tests, simulator generation, dry-run smoke, diff checks, and GitHub Actions status.
 - Do not test RF on Public channel for this slice. Current D1L hardware validation uses COM12 serial only; do not use reserved bot/OpenClaw serial ports during this SD bridge slice.
-- After the RP2040 bridge is flashed, run preflight first so it captures `rp2040 ping`, safe `storage status`, explicit `storage mount`, bounded safe-status polling while `state="mount_pending"`, optional `storage diag`, and `health`. Use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` only once the ready file gate is available, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof. These canaries are serial-only and do not send Public RF or issue `DESKOS_SD_FORMAT`.
+- After the RP2040 bridge is flashed, run preflight first so it captures `rp2040 ping`, safe `storage status`, explicit `storage mount`, bounded safe-status polling while `state="mount_pending"`, optional `storage diag`, and `health`. Use `storage filecanary` or `python .\scripts\sd_file_canary_d1l.py --port COM12` only once the ready file gate is available, then `python .\scripts\sd_map_tile_canary_d1l.py --port COM12 --token map1` for the map-tile cache proof. These canaries are serial-only and do not send Public RF or format SD.
 
 ## Hardware Evidence
 
@@ -41,12 +41,12 @@ This checkpoint advances optional SD-card data storage without making boot or re
 - Actions run `28500532119` for commit `cfb99620ee691097d845fb0e1920c06bbd02d1a5` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. The release package and RP2040 checksum manifests verified locally, then the ESP32 was flashed on COM12 and the RP2040 UF2 with SHA-256 `44F2D152818C3EDDEA60165B268234742D2EAD1281F345F7B059ADBB472E3B9C` was copied through the guarded helper.
 - COM12 evidence `artifacts/hardware/com12/rp2040_sd_preflight_mount_split_28500532119.json` proves `rp2040 ping` works, initial safe `storage status` returns `state="mount_required"` with NVS fallback, and no Public RF or formatting occurred. The same run showed explicit `storage mount` still timed out and made later SD-touching commands unresponsive, so the follow-up implementation moves mount/diag work to the RP2040 core1 worker and reports `state="mount_pending"` while probing.
 - Actions run `28501529179` for commit `0697d61cac2fcf7bb67a54312ec591e91b0ce363` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. COM12 evidence `artifacts/hardware/com12/rp2040_sd_preflight_async_mount_28501529179.json` proves `storage mount` now returns `state="mount_pending"` without formatting or Public RF, but the later Arduino/SdFat mount path still stalled RP2040 status replies; the current follow-up adds a bounded raw SPI presence probe before any filesystem mount attempt.
-- Actions run `28502095977` for commit `552a59df3a5810c5004f496584020d31f5f1dea4` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. COM12 evidence `artifacts/hardware/com12/rp2040_sd_preflight_raw_probe_28502095977.json` proves the bounded raw probe keeps the bridge responsive, detects the inserted card, and reports `setup_required` plus `format_supported=true` without Public RF or formatting; the file-operation gate is still not ready.
-- Actions run `28502609315` for commit `b8d374246310ac761cbd965ae59a0bd0e1b6883f` passed host checks, ESP32 firmware build, and RP2040 SD bridge build; the ESP32 was flashed on COM12. Guarded format evidence `artifacts/hardware/com12/sd_format_guarded_reporting_28502609315.json` shows the firmware allowed `storage setup confirm FORMAT-DESKOS-SD` only after status reported present/setup-required/format-supported, then correctly returned `ok=false`, `code="ESP_ERR_NOT_FOUND"`, and `formats_sd=false` when the RP2040 did not return a ready data state. File-canary evidence `artifacts/hardware/com12/sd_file_canary_blocked_setup_required_28502609315.json` confirms SD writes remain blocked with `ESP_ERR_NOT_SUPPORTED` while `sd.state="setup_required"`.
+- Actions run `28502095977` for commit `552a59df3a5810c5004f496584020d31f5f1dea4` passed host checks, ESP32 firmware build, and RP2040 SD bridge build. COM12 evidence proved the bounded raw probe kept the bridge responsive and detected the inserted card without Public RF or formatting; the file-operation gate was still not ready.
+- Actions run `28502609315` for commit `b8d374246310ac761cbd965ae59a0bd0e1b6883f` is retained as historical evidence only. Its guarded-format path has been superseded by the FAT32-only no-format policy.
 
 ## Remaining SD Work
 
-- Investigate why Arduino/SdFat mount and confirmed format do not produce a ready FAT filesystem even though the bounded raw SPI probe detects the card (`probe_error=0`, `probe_data=192`).
+- Investigate why Arduino/SdFat mount does not produce a ready FAT32 filesystem even though the bounded raw SPI probe detects the card (`probe_error=0`, `probe_data=192`).
 - Keep using COM12 preflight after RP2040/ESP32 changes; only run SD file/export/map canaries once `storage status` reports `state="ready"`, `file_ops=true`, and `atomic_rename=true`.
 - Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Complete hardware proof for retained Public/DM history, route history, packet history, diagnostic exports, sampled data exports, and map-tile cache once a card is electrically detected.

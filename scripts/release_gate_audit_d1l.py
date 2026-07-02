@@ -36,6 +36,8 @@ REQUIRED_ROUTE_PROBE_CHECKS = {
     "routes_trace_has_probe",
     "health_ready",
 }
+SAFE_SD_NEXT_ACTION = "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+OBSOLETE_SD_NEXT_ACTION_TOKENS = ("format", "mkfs", "erase", "wipe")
 TOP_LEVEL_COMMIT_FIELDS = (
     "commit",
     "commit_sha",
@@ -372,25 +374,63 @@ def route_probe_gate(hardware_dir: Path, root: Path, commit: str | None, expecte
     )
 
 
+def sd_next_action(preflight: dict, classification: dict) -> str:
+    value = classification.get("next_action")
+    if value is None:
+        value = preflight.get("next_action")
+    return str(value or "")
+
+
+def sd_next_action_is_obsolete(next_action: str) -> bool:
+    lowered = next_action.lower()
+    return any(token in lowered for token in OBSOLETE_SD_NEXT_ACTION_TOKENS)
+
+
+def sanitized_sd_classification(preflight: dict, classification: dict) -> tuple[dict, bool]:
+    sanitized = dict(classification)
+    raw_next_action = sd_next_action(preflight, classification)
+    obsolete = sd_next_action_is_obsolete(raw_next_action)
+    if obsolete:
+        sanitized["next_action"] = SAFE_SD_NEXT_ACTION
+        sanitized["policy"] = "no_device_format"
+        sanitized["obsolete_format_action_blocked"] = True
+    return sanitized, obsolete
+
+
 def sd_gate(preflight_path: Path | None, root: Path) -> GateResult:
     preflight = read_json(preflight_path)
     classification = preflight.get("classification") if isinstance(preflight.get("classification"), dict) else {}
+    classification, obsolete_format_action = sanitized_sd_classification(preflight, classification)
     ready = preflight.get("ready_for_sd_acceptance") is True and classification.get("storage_file_gate_ready") is True
-    ok = bool(preflight_path and preflight.get("ok") is True and ready)
+    no_device_format_policy_ok = preflight.get("formats_sd") is False and not obsolete_format_action
+    ok = bool(preflight_path and preflight.get("ok") is True and ready and no_device_format_policy_ok)
     details = {
         "ready_for_sd_acceptance": preflight.get("ready_for_sd_acceptance"),
         "classification": classification,
         "candidate_volume_count": len(preflight.get("candidate_volumes") or []),
         "artifact_sha256": (preflight.get("artifact") or {}).get("sha256"),
+        "formats_sd": preflight.get("formats_sd"),
+        "public_rf_tx": preflight.get("public_rf_tx"),
+        "copies_uf2": preflight.get("copies_uf2"),
+        "no_device_format_policy_ok": no_device_format_policy_ok,
+        "obsolete_format_action_blocked": obsolete_format_action,
     }
+    if obsolete_format_action:
+        message = (
+            "SD matrix is not release-ready; stale format-capable SD evidence is obsolete. "
+            "Refresh under the no-device-format policy with a FAT32 card prepared on a computer."
+        )
+    elif ok:
+        message = "SD preflight is ready for acceptance matrix; run and attach the full matrix artifacts."
+    else:
+        message = "SD matrix is not release-ready; RP2040/SD file gate or follow-up matrix evidence is missing."
     return GateResult(
         "sd_acceptance_matrix",
         "P0",
         ok,
         "SD auto-prepare, retained stores, exports, map tiles, and reboot/remount",
         [rel(preflight_path, root)] if preflight_path else [],
-        "SD preflight is ready for acceptance matrix; run and attach the full matrix artifacts."
-        if ok else "SD matrix is not release-ready; RP2040/SD file gate or follow-up matrix evidence is missing.",
+        message,
         details,
     )
 

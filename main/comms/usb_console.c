@@ -38,6 +38,8 @@
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 
+static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
+
 static void trim_line(char *line)
 {
     size_t n = strlen(line);
@@ -243,8 +245,15 @@ static void cmd_settings_get(void)
     print_e7_json(settings->map_location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
     print_e7_json(settings->map_location_set ? settings->map_lon_e7 : 0);
-    printf(",\"source\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
+    printf(",\"source\":\"%s\"},\"map_tiles\":{\"provider_saved\":%s,\"zoom\":%u,\"url_template\":",
            settings->map_location_set ? "manual" : "unset",
+           bool_json(settings->map_tile_provider_saved),
+           (unsigned)settings->map_tile_zoom);
+    print_json_string(settings->map_tile_provider_saved ? settings->map_tile_url_template : "");
+    printf(",\"attribution\":");
+    print_json_string(settings->map_tile_provider_saved ? settings->map_tile_attribution : "");
+    printf(",\"policy\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
+           D1L_MAP_TILE_PROVIDER_POLICY,
            (unsigned long)settings->frequency_hz,
            ((float)settings->bandwidth_tenths_khz) / 10.0f,
            settings->spreading_factor, settings->coding_rate, settings->tx_power_dbm,
@@ -896,7 +905,7 @@ static void cmd_storage_status(void)
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
     printf(",\"filesystem\":");
     print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
-    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"format_required\":%s,\"format_supported\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"mount_point\":",
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"mount_point\":",
            bool_json(status.direct_supported),
            bool_json(status.rp2040_bridge_required),
            bool_json(status.rp2040_bridge_ready),
@@ -904,8 +913,7 @@ static void cmd_storage_status(void)
            bool_json(status.sd_present),
            bool_json(status.sd_mounted),
            bool_json(status.sd_data_root_ready),
-           bool_json(status.format_required),
-           bool_json(status.format_supported),
+           bool_json(status.sd_needs_fat32),
            (unsigned long)status.capacity_kb,
            (unsigned long)status.free_kb,
            bool_json(status.file_ops_supported),
@@ -943,6 +951,10 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
     printf(",\"map_tile_download_supported\":false,\"map_tile_download_state\":");
     print_json_string(D1L_MAP_TILE_DOWNLOAD_STATE);
+    printf(",\"map_tile_provider_policy\":");
+    print_json_string(D1L_MAP_TILE_PROVIDER_POLICY);
+    printf(",\"map_tile_provider_attribution\":");
+    print_json_string(D1L_MAP_TILE_PROVIDER_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
@@ -960,8 +972,6 @@ static void cmd_storage_status(void)
     printf("},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
            bool_json(status.setup_required), bool_json(status.setup_supported));
     print_json_string(status.setup_action ? status.setup_action : "not_available");
-    printf(",\"format_action\":");
-    print_json_string(status.format_action ? status.format_action : "not_available");
     printf(",\"fallback\":\"nvs\",\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
@@ -981,14 +991,13 @@ static void cmd_storage_mount(void)
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
     printf(",\"filesystem\":");
     print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
-    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"format_required\":%s,\"format_supported\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"probe_power\":",
+    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"probe_power\":",
            bool_json(status.rp2040_bridge_ready),
            bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
            bool_json(status.sd_mounted),
            bool_json(status.sd_data_root_ready),
-           bool_json(status.format_required),
-           bool_json(status.format_supported),
+           bool_json(status.sd_needs_fat32),
            (unsigned long)status.capacity_kb,
            (unsigned long)status.free_kb,
            bool_json(status.file_ops_supported),
@@ -1007,8 +1016,6 @@ static void cmd_storage_mount(void)
            bool_json(status.setup_required),
            bool_json(status.setup_supported));
     print_json_string(status.setup_action ? status.setup_action : "not_available");
-    printf(",\"format_action\":");
-    print_json_string(status.format_action ? status.format_action : "not_available");
     printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
@@ -1090,55 +1097,35 @@ static void cmd_storage_map_policy(void)
     print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
     printf(",\"sample_path\":");
     print_json_string(sample_path_ok ? sample_path : "");
-    printf(",\"zoom_max\":%u,\"sideload_supported\":true,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":false,\"live_network_download\":false,\"download_state\":",
+    const bool download_supported = connectivity.wifi_build_enabled && cache_ready;
+    const bool live_network_download = download_supported && connectivity.wifi_connected;
+    const char *download_state = !cache_ready ? "sd_cache_required" :
+                                 !connectivity.wifi_connected ? "wifi_required" :
+                                 D1L_MAP_TILE_DOWNLOAD_STATE;
+    printf(",\"zoom_max\":%u,\"sideload_supported\":true,\"canary_command\":\"storage map-tile-canary <token>\",\"download_command\":\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
            (unsigned)D1L_MAP_TILE_ZOOM_MAX);
-    print_json_string(D1L_MAP_TILE_DOWNLOAD_STATE);
+    print_json_string(download_state);
     printf(",\"download_requires\":");
     print_json_string(D1L_MAP_TILE_DOWNLOAD_REQUIRES);
+    printf(",\"provider_policy\":");
+    print_json_string(D1L_MAP_TILE_PROVIDER_POLICY);
+    printf(",\"provider_attribution\":");
+    print_json_string(D1L_MAP_TILE_PROVIDER_ATTRIBUTION);
     printf(",\"wifi_state\":");
     print_json_string(connectivity.wifi_state ? connectivity.wifi_state : "off");
-    printf(",\"wifi_build_enabled\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Offline map shell and SD cache policy are available; live tile download stays disabled until Wi-Fi runtime and explicit user opt-in are implemented\"}\n",
+    printf(",\"wifi_build_enabled\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Offline map shell and SD cache policy are available; connect Wi-Fi and configure an allowed provider before downloading only the needed area\"}\n",
            bool_json(connectivity.wifi_build_enabled));
 }
 
-static const char *storage_format_hint(esp_err_t ret, const d1l_storage_status_t *status)
-{
-    if (ret == ESP_ERR_INVALID_ARG) {
-        return "type storage setup confirm FORMAT-DESKOS-SD to request SD format";
-    }
-    if (ret == ESP_ERR_NOT_FOUND) {
-        return "no SD card is reported by the RP2040 bridge; no format was performed";
-    }
-    if (ret == ESP_ERR_INVALID_STATE) {
-        return "SD card does not require setup; no format was performed";
-    }
-    if (ret == ESP_ERR_NOT_SUPPORTED && status && !status->rp2040_sd_protocol_supported) {
-        return "RP2040 SD status protocol is not implemented; no format was performed";
-    }
-    if (ret == ESP_ERR_NOT_SUPPORTED && status && !status->format_supported) {
-        return "RP2040 SD format command is not supported; no format was performed";
-    }
-    if (ret == ESP_ERR_TIMEOUT) {
-        return "RP2040 SD format command timed out; no format confirmation was received";
-    }
-    return "SD format request failed; no confirmed format result was recorded";
-}
-
-static void print_storage_setup_payload(const d1l_storage_status_t *status,
-                                        bool format_requested,
-                                        bool format_performed)
+static void print_storage_setup_payload(const d1l_storage_status_t *status)
 {
     printf(",\"available\":%s,\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
            bool_json(status->rp2040_sd_protocol_supported || status->sd_present),
            bool_json(status->setup_required),
            bool_json(status->setup_supported));
     print_json_string(status->setup_action ? status->setup_action : "not_available");
-    printf(",\"format_action\":");
-    print_json_string(status->format_action ? status->format_action : "not_available");
-    printf(",\"confirmation_phrase\":\"%s\",\"will_format\":false,\"format_requested\":%s,\"format_performed\":%s,\"data_backend\":",
-           D1L_RP2040_SD_FORMAT_CONFIRMATION,
-           bool_json(format_requested),
-           bool_json(format_performed));
+    printf(",\"needs_fat32\":%s,\"will_format\":false,\"format_requested\":false,\"format_performed\":false,\"policy\":\"no_device_format\",\"data_backend\":",
+           bool_json(status->sd_needs_fat32));
     print_json_string(status->data_backend ? status->data_backend : "nvs");
     printf(",\"fallback\":\"nvs\",\"note\":");
     print_json_string(status->note ? status->note : "");
@@ -1333,6 +1320,189 @@ static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *
     }
     dest[out] = '\0';
     return out > 0 && *src == '\0';
+}
+
+static bool read_storage_word(const char **cursor, char *dest, size_t dest_size)
+{
+    if (!cursor || !*cursor || !dest || dest_size == 0) {
+        return false;
+    }
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
+    size_t out = 0;
+    while (**cursor != '\0' && **cursor != ' ' && out + 1U < dest_size) {
+        const unsigned char ch = (unsigned char)**cursor;
+        if (ch < 32 || ch > 126 || ch == '"' || ch == '\\') {
+            return false;
+        }
+        dest[out++] = (char)ch;
+        (*cursor)++;
+    }
+    dest[out] = '\0';
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
+    return out > 0;
+}
+
+static bool parse_u32_word(const char *word, uint32_t *out_value)
+{
+    if (!word || !out_value || word[0] == '\0') {
+        return false;
+    }
+    char *end = NULL;
+    unsigned long value = strtoul(word, &end, 10);
+    if (!end || *end != '\0' || value > UINT32_MAX) {
+        return false;
+    }
+    *out_value = (uint32_t)value;
+    return true;
+}
+
+static bool parse_message_offset_clause(const char *arg, size_t *out_offset)
+{
+    if (!arg || !out_offset) {
+        return false;
+    }
+    while (*arg == ' ') {
+        arg++;
+    }
+    if (strncmp(arg, "offset", 6) != 0 ||
+        (arg[6] != ' ' && arg[6] != '\0')) {
+        return false;
+    }
+    arg += 6;
+    while (*arg == ' ') {
+        arg++;
+    }
+    if (*arg == '\0') {
+        return false;
+    }
+    char *end = NULL;
+    unsigned long value = strtoul(arg, &end, 10);
+    if (end == arg) {
+        return false;
+    }
+    while (end && *end == ' ') {
+        end++;
+    }
+    if (!end || *end != '\0') {
+        return false;
+    }
+    *out_offset = (size_t)value;
+    return true;
+}
+
+static bool strip_message_offset_suffix(char *text, size_t *out_offset)
+{
+    if (!text || !out_offset) {
+        return false;
+    }
+    char *candidate = NULL;
+    for (char *p = strstr(text, " offset "); p; p = strstr(p + 1, " offset ")) {
+        candidate = p;
+    }
+    if (!candidate) {
+        return true;
+    }
+    if (!parse_message_offset_clause(candidate + 1, out_offset)) {
+        return false;
+    }
+    *candidate = '\0';
+    trim_line(text);
+    return true;
+}
+
+static void print_storage_map_tile_download_error(const d1l_map_tile_download_result_t *download,
+                                                  esp_err_t ret,
+                                                  const char *hint)
+{
+    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage map-tile-download\",\"code\":\"%s\",\"step\":",
+           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
+    print_json_string(download && download->step[0] ? download->step : "unknown");
+    printf(",\"provider_allowed\":%s,\"wifi_connected\":%s,\"sd_ready\":%s,\"status_code\":%d,\"bytes\":%u,\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":",
+           bool_json(download && download->provider_allowed),
+           bool_json(download && download->wifi_connected),
+           bool_json(download && download->sd_ready),
+           download ? download->status_code : 0,
+           (unsigned)(download ? download->bytes : 0U));
+    print_json_string(hint ? hint :
+                      "requires connected Wi-Fi, ready SD cache, allowed HTTPS provider template, and attribution");
+    printf("}\n");
+}
+
+static void cmd_storage_map_tile_download(const char *line)
+{
+    static const char prefix[] = "storage map-tile-download ";
+    const char *arg = line + strlen(prefix);
+    char z_word[8] = {0};
+    char x_word[12] = {0};
+    char y_word[12] = {0};
+    char url_template[D1L_MAP_TILE_URL_TEMPLATE_MAX + 1U] = {0};
+    char attribution[D1L_MAP_TILE_ATTRIBUTION_MAX + 1U] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !read_storage_word(&arg, z_word, sizeof(z_word)) ||
+        !read_storage_word(&arg, x_word, sizeof(x_word)) ||
+        !read_storage_word(&arg, y_word, sizeof(y_word)) ||
+        !read_storage_word(&arg, url_template, sizeof(url_template)) ||
+        !read_storage_word(&arg, attribution, sizeof(attribution)) ||
+        arg[0] != '\0') {
+        err_result("storage map-tile-download", "INVALID_ARGS",
+                   "usage: storage map-tile-download <z> <x> <y> <https-url-template-with-{z}-{x}-{y}> <attribution>");
+        return;
+    }
+
+    uint32_t z = 0;
+    uint32_t x = 0;
+    uint32_t y = 0;
+    if (!parse_u32_word(z_word, &z) ||
+        !parse_u32_word(x_word, &x) ||
+        !parse_u32_word(y_word, &y) ||
+        z > D1L_MAP_TILE_ZOOM_MAX ||
+        !d1l_map_tile_store_coord_valid((uint8_t)z, x, y)) {
+        err_result("storage map-tile-download", "INVALID_COORD",
+                   "tile coordinate must fit the supported z/x/y range");
+        return;
+    }
+
+    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
+
+    d1l_map_tile_download_result_t download = {0};
+    esp_err_t ret = d1l_map_tile_store_download(
+        url_template, attribution, (uint8_t)z, x, y, &status,
+        connectivity.wifi_connected, &download);
+    if (ret != ESP_OK) {
+        print_storage_map_tile_download_error(&download, ret, NULL);
+        return;
+    }
+
+    ok_begin("storage map-tile-download");
+    printf(",\"z\":%u,\"x\":%lu,\"y\":%lu,\"path\":",
+           (unsigned)download.z,
+           (unsigned long)download.x,
+           (unsigned long)download.y);
+    print_json_string(download.path);
+    printf(",\"tmp_path\":");
+    print_json_string(download.tmp_path);
+    printf(",\"attribution\":");
+    print_json_string(download.attribution);
+    printf(",\"attribution_path\":");
+    print_json_string(download.attribution_path);
+    printf(",\"bytes\":%u,\"status_code\":%d,\"provider_allowed\":%s,\"attribution_saved\":%s,\"wifi_connected\":%s,\"sd_ready\":%s,\"write_tmp\":%s,\"rename_replace\":%s,\"max_bytes\":%u,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Tile downloaded from an allowed HTTPS provider into the SD offline cache with attribution metadata\"}\n",
+           (unsigned)download.bytes,
+           download.status_code,
+           bool_json(download.provider_allowed),
+           bool_json(download.attribution_saved),
+           bool_json(download.wifi_connected),
+           bool_json(download.sd_ready),
+           bool_json(download.write_tmp),
+           bool_json(download.rename_replace),
+           (unsigned)D1L_MAP_TILE_DOWNLOAD_MAX_BYTES);
 }
 
 static void print_storage_export_error(const char *cmd,
@@ -2388,32 +2558,13 @@ static void cmd_storage_retained_canary(const char *line)
 
 static void cmd_storage_setup(const char *line)
 {
+    (void)line;
     (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
-    const char *confirm_prefix = "storage setup confirm ";
-    if (strncmp(line, confirm_prefix, strlen(confirm_prefix)) == 0) {
-        const char *phrase = line + strlen(confirm_prefix);
-        if (strcmp(phrase, D1L_RP2040_SD_FORMAT_CONFIRMATION) != 0) {
-            err_result("storage setup", "CONFIRMATION_REQUIRED",
-                       "type storage setup confirm FORMAT-DESKOS-SD to request SD format after the bridge supports it");
-            return;
-        }
-        esp_err_t ret = d1l_storage_format_sd_confirmed(
-            phrase, D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS);
-        d1l_storage_status(&status);
-        if (ret != ESP_OK) {
-            err_result("storage setup", esp_err_to_name(ret), storage_format_hint(ret, &status));
-            return;
-        }
-        ok_begin("storage setup");
-        print_storage_setup_payload(&status, true, true);
-        return;
-    }
-
     ok_begin("storage setup");
-    print_storage_setup_payload(&status, false, false);
+    print_storage_setup_payload(&status);
 }
 
 static void print_packet_entry_json(const d1l_packet_log_entry_t *e)
@@ -2434,6 +2585,11 @@ static void print_packet_entries_json(const char *cmd, const char *direction, co
     printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu",
            (unsigned)stats->count, (unsigned)stats->capacity,
            (unsigned long)stats->total_written, (unsigned long)stats->dropped_oldest);
+    printf(",\"sd_history\":{\"enabled\":%s,\"records\":%lu,\"capacity\":%u,\"failed_writes\":%lu}",
+           bool_json(stats->sd_history_enabled),
+           (unsigned long)stats->sd_history_records,
+           (unsigned)stats->sd_capacity,
+           (unsigned long)stats->sd_history_failed_writes);
     if (direction || kind || search_text) {
         printf(",\"filter\":{\"direction\":\"%s\",\"kind\":\"%s\",\"search\":\"%s\"}",
                direction ? direction : "any", kind ? kind : "any", search_text ? search_text : "");
@@ -2624,29 +2780,52 @@ static void cmd_messages_public(const char *line)
     static d1l_message_entry_t entries[D1L_MESSAGE_STORE_CAPACITY];
     char search[D1L_MESSAGE_TEXT_LEN] = {0};
     bool filtered = false;
+    size_t offset = 0;
 
-    if (strcmp(line, "messages public") == 0) {
-        /* Full retained history is bounded by D1L_MESSAGE_STORE_CAPACITY. */
-    } else if (strncmp(line, "messages public search ", 23) == 0) {
-        copy_packet_search(search, sizeof(search), line + 23);
+    const char *args = line + strlen("messages public");
+    while (*args == ' ') {
+        args++;
+    }
+    if (*args == '\0') {
+        /* Newest page of retained history. */
+    } else if (strncmp(args, "offset", 6) == 0) {
+        if (!parse_message_offset_clause(args, &offset)) {
+            err_result("messages public", "INVALID_OFFSET",
+                       "usage: messages public [offset <n>] | messages public search <text> [offset <n>]");
+            return;
+        }
+    } else if (strncmp(args, "search ", 7) == 0) {
+        copy_packet_search(search, sizeof(search), args + 7);
+        if (!strip_message_offset_suffix(search, &offset)) {
+            err_result("messages public", "INVALID_OFFSET",
+                       "usage: messages public [offset <n>] | messages public search <text> [offset <n>]");
+            return;
+        }
         if (search[0] == '\0') {
             err_result("messages public", "INVALID_QUERY",
-                       "usage: messages public [search <text>]");
+                       "usage: messages public [offset <n>] | messages public search <text> [offset <n>]");
             return;
         }
         filtered = true;
     } else {
         err_result("messages public", "INVALID_TARGET",
-                   "usage: messages public [search <text>]");
+                   "usage: messages public [offset <n>] | messages public search <text> [offset <n>]");
         return;
     }
 
-    size_t copied = d1l_message_store_query(entries, D1L_MESSAGE_STORE_CAPACITY, search);
+    size_t total_matches = 0;
+    const size_t copied = d1l_message_store_query_page(entries,
+                                                       D1L_CONSOLE_MESSAGE_PAGE_SIZE,
+                                                       offset, search, &total_matches);
+    const bool has_older = total_matches > offset + copied;
+    const size_t next_offset = has_older ? offset + copied : offset;
     ok_begin("messages public");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s",
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
-           bool_json(filtered));
+           bool_json(filtered), (unsigned)offset,
+           (unsigned)D1L_CONSOLE_MESSAGE_PAGE_SIZE, (unsigned)copied,
+           (unsigned)total_matches, bool_json(has_older), (unsigned)next_offset);
     if (filtered) {
         printf(",\"search\":");
         print_json_string(search);
@@ -2656,7 +2835,7 @@ static void cmd_messages_public(const char *line)
         printf("%s", i ? "," : "");
         print_public_message_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows\"}\n");
+    printf("],\"persisted\":true,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n");
 }
 
 static void cmd_messages_clear(void)
@@ -2691,43 +2870,65 @@ static void cmd_messages_dm(const char *line)
     static d1l_dm_entry_t entries[D1L_DM_STORE_CAPACITY];
     char thread_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
     bool filtered = false;
+    size_t offset = 0;
+    size_t total_matches = 0;
     size_t copied = 0;
 
-    if (strcmp(line, "messages dm") == 0) {
-        copied = d1l_dm_store_copy_recent(entries, 8);
-    } else if (strncmp(line, "messages dm ", 12) == 0) {
-        const char *fingerprint = line + 12;
-        while (*fingerprint == ' ') {
-            fingerprint++;
-        }
-        if (!parse_fingerprint_token(fingerprint, thread_fingerprint,
-                                     sizeof(thread_fingerprint))) {
-            err_result("messages dm", "INVALID_FINGERPRINT",
-                       "usage: messages dm [fingerprint]");
+    const char *args = line + strlen("messages dm");
+    while (*args == ' ') {
+        args++;
+    }
+    if (*args == '\0') {
+        copied = d1l_dm_store_copy_recent_page(entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE,
+                                              offset, &total_matches);
+    } else if (strncmp(args, "offset", 6) == 0) {
+        if (!parse_message_offset_clause(args, &offset)) {
+            err_result("messages dm", "INVALID_OFFSET",
+                       "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
             return;
         }
+        copied = d1l_dm_store_copy_recent_page(entries, D1L_CONSOLE_MESSAGE_PAGE_SIZE,
+                                              offset, &total_matches);
+    } else if (parse_fingerprint_token(args, thread_fingerprint,
+                                     sizeof(thread_fingerprint))) {
         filtered = true;
-        copied = d1l_dm_store_copy_thread(thread_fingerprint, entries, D1L_DM_STORE_CAPACITY);
+        args += D1L_NODE_FINGERPRINT_LEN - 1U;
+        while (*args == ' ') {
+            args++;
+        }
+        if (*args != '\0' && !parse_message_offset_clause(args, &offset)) {
+            err_result("messages dm", "INVALID_OFFSET",
+                       "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
+            return;
+        }
+        copied = d1l_dm_store_copy_thread_page(thread_fingerprint, entries,
+                                               D1L_CONSOLE_MESSAGE_PAGE_SIZE,
+                                               offset, &total_matches);
     } else {
-        err_result("messages dm", "INVALID_TARGET", "usage: messages dm [fingerprint]");
+        err_result("messages dm", "INVALID_TARGET",
+                   "usage: messages dm [offset <n>] [fingerprint [offset <n>]]");
         return;
     }
 
+    const bool has_older = total_matches > offset + copied;
+    const size_t next_offset = has_older ? offset + copied : offset;
     ok_begin("messages dm");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s",
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filtered\":%s,\"offset\":%u,\"page_size\":%u,\"page_count\":%u,\"total_matches\":%u,\"has_older\":%s,\"next_offset\":%u",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
-           bool_json(filtered));
+           bool_json(filtered), (unsigned)offset,
+           (unsigned)D1L_CONSOLE_MESSAGE_PAGE_SIZE, (unsigned)copied,
+           (unsigned)total_matches, bool_json(has_older), (unsigned)next_offset);
     if (filtered) {
         printf(",\"fingerprint\":\"%s\",\"thread_count\":%u",
-               thread_fingerprint, (unsigned)copied);
+               thread_fingerprint, (unsigned)total_matches);
     }
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_dm_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread\"}\n");
+    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n");
 }
 
 static void cmd_messages_dm_clear(void)
@@ -3458,32 +3659,26 @@ static void cmd_health(void)
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
 
-static const char *wifi_scan_reason(const d1l_connectivity_status_t *status)
-{
-    if (!status->wifi_enabled_setting) {
-        return "disabled_by_setting";
-    }
-    if (!status->wifi_build_enabled) {
-        return "build_disabled";
-    }
-    if (!status->wifi_profile_saved) {
-        return "profile_required";
-    }
-    return "scan_stack_pending";
-}
-
 static void cmd_wifi_status(void)
 {
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
     ok_begin("wifi status");
-    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
-           bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
-           bool_json(status.wifi_stack_active), bool_json(status.wifi_scan_supported),
-           bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
+    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"connected\":%s,\"connecting\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
+            bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
+            bool_json(status.wifi_stack_active), bool_json(status.wifi_connected),
+            bool_json(status.wifi_connecting), bool_json(status.wifi_scan_supported),
+            bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
     print_json_string(status.wifi_profile_saved ? status.wifi_ssid : "");
-    printf(",\"state\":\"%s\",\"policy\":\"%s\",\"live_network\":false}\n",
-           status.wifi_state, status.coexistence_policy);
+    printf(",\"state\":");
+    print_json_string(status.wifi_state ? status.wifi_state : "off");
+    printf(",\"ip\":");
+    print_json_string(status.wifi_connected && status.wifi_ip ? status.wifi_ip : "");
+    printf(",\"rssi_dbm\":%d,\"channel\":%u,\"last_error\":",
+           status.wifi_rssi_dbm, (unsigned)status.wifi_channel);
+    print_json_string(status.wifi_last_error ? status.wifi_last_error : "none");
+    printf(",\"policy\":\"%s\",\"live_network\":%s}\n",
+           status.coexistence_policy, bool_json(status.wifi_stack_active));
 }
 
 static void cmd_wifi_off(void)
@@ -3509,9 +3704,9 @@ static void cmd_wifi_on(void)
     if (ret != ESP_OK) {
         err_result("wifi on",
                    ret == ESP_ERR_NOT_SUPPORTED ?
-                   (status.wifi_build_enabled ? "WIFI_RUNTIME_PENDING" : "WIFI_BUILD_DISABLED") :
+                   "WIFI_BUILD_DISABLED" :
                    esp_err_to_name(ret),
-                   "Wi-Fi build support is unavailable in this release build");
+                   "Wi-Fi runtime could not be enabled on this release build");
         return;
     }
     cmd_wifi_status();
@@ -3582,13 +3777,63 @@ static void cmd_wifi_clear(void)
 
 static void cmd_wifi_scan(void)
 {
+    d1l_wifi_scan_result_t scan = {0};
+    (void)d1l_connectivity_wifi_scan(&scan);
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
     ok_begin("wifi scan");
-    printf(",\"scan_started\":false,\"networks\":[],\"setting_enabled\":%s,\"build_enabled\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"state\":\"%s\",\"reason\":\"%s\"}\n",
+    printf(",\"scan_started\":%s,\"setting_enabled\":%s,\"build_enabled\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"state\":",
+           bool_json(scan.scan_started),
            bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
-           bool_json(status.wifi_scan_supported), bool_json(status.wifi_profile_saved),
-           status.wifi_state, wifi_scan_reason(&status));
+           bool_json(status.wifi_scan_supported), bool_json(status.wifi_profile_saved));
+    print_json_string(status.wifi_state ? status.wifi_state : "off");
+    printf(",\"reason\":");
+    print_json_string(scan.reason ? scan.reason : "unknown");
+    printf(",\"total_count\":%u,\"returned_count\":%u,\"truncated\":%s,\"networks\":[",
+           (unsigned)scan.total_count, (unsigned)scan.returned_count,
+           bool_json(scan.truncated));
+    for (uint16_t i = 0; i < scan.returned_count; ++i) {
+        if (i > 0U) {
+            printf(",");
+        }
+        printf("{\"ssid\":");
+        print_json_string(scan.aps[i].ssid);
+        printf(",\"rssi_dbm\":%d,\"channel\":%u,\"auth\":",
+               scan.aps[i].rssi_dbm, (unsigned)scan.aps[i].channel);
+        print_json_string(scan.aps[i].auth ? scan.aps[i].auth : "unknown");
+        printf("}");
+    }
+    printf("],\"public_rf_tx\":false,\"password_printed\":false}\n");
+}
+
+static void cmd_wifi_connect(void)
+{
+    esp_err_t ret = d1l_connectivity_wifi_connect();
+    if (ret != ESP_OK) {
+        d1l_connectivity_status_t status = {0};
+        d1l_connectivity_status(&status);
+        const char *code = esp_err_to_name(ret);
+        if (ret == ESP_ERR_INVALID_STATE && !status.wifi_enabled_setting) {
+            code = "WIFI_DISABLED";
+        } else if (ret == ESP_ERR_INVALID_STATE && !status.wifi_profile_saved) {
+            code = "WIFI_PROFILE_REQUIRED";
+        } else if (ret == ESP_ERR_NOT_SUPPORTED) {
+            code = status.wifi_build_enabled ? "WIFI_RUNTIME_UNAVAILABLE" : "WIFI_BUILD_DISABLED";
+        }
+        err_result("wifi connect", code,
+                   "enable Wi-Fi and save a profile before connecting");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi connect");
+    printf(",\"initiated\":true,\"setting_enabled\":%s,\"profile_saved\":%s,\"state\":",
+           bool_json(status.wifi_enabled_setting),
+           bool_json(status.wifi_profile_saved));
+    print_json_string(status.wifi_state ? status.wifi_state : "connecting");
+    printf(",\"ssid\":");
+    print_json_string(status.wifi_profile_saved ? status.wifi_ssid : "");
+    printf(",\"password_printed\":false,\"public_rf_tx\":false}\n");
 }
 
 static void cmd_ble_status(void)
@@ -3635,7 +3880,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3724,8 +3969,7 @@ static void handle_line(const char *line)
         cmd_storage_diag();
     } else if (strcmp(line, "storage map-policy") == 0) {
         cmd_storage_map_policy();
-    } else if (strcmp(line, "storage setup") == 0 ||
-               strncmp(line, "storage setup confirm ", strlen("storage setup confirm ")) == 0) {
+    } else if (strcmp(line, "storage setup") == 0) {
         cmd_storage_setup(line);
     } else if (strcmp(line, "storage filecanary") == 0) {
         cmd_storage_filecanary();
@@ -3733,6 +3977,8 @@ static void handle_line(const char *line)
         cmd_storage_map_tile_canary(line);
     } else if (strncmp(line, "storage map-tile-check ", strlen("storage map-tile-check ")) == 0) {
         cmd_storage_map_tile_check(line);
+    } else if (strncmp(line, "storage map-tile-download ", strlen("storage map-tile-download ")) == 0) {
+        cmd_storage_map_tile_download(line);
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {
@@ -3818,6 +4064,8 @@ static void handle_line(const char *line)
         cmd_wifi_on();
     } else if (strcmp(line, "wifi scan") == 0) {
         cmd_wifi_scan();
+    } else if (strcmp(line, "wifi connect") == 0) {
+        cmd_wifi_connect();
     } else if (strncmp(line, "wifi save ", strlen("wifi save ")) == 0) {
         cmd_wifi_save(line);
     } else if (strcmp(line, "wifi clear") == 0) {

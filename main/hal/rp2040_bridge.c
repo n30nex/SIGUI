@@ -20,9 +20,6 @@
 #define D1L_RP2040_SD_MOUNT_REPLY_PREFIX "DESKOS_SD_MOUNT"
 #define D1L_RP2040_SD_DIAG_QUERY "DESKOS_SD_DIAG\n"
 #define D1L_RP2040_SD_DIAG_REPLY_PREFIX "DESKOS_SD_DIAG"
-#define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
-#define D1L_RP2040_SD_FORMAT_REPLY_PREFIX "DESKOS_SD_FORMAT"
-#define D1L_RP2040_SD_FORMAT_PROGRESS_PREFIX "DESKOS_SD_FORMAT_PROGRESS"
 #define D1L_RP2040_FILE_PREFIX "DESKOS_SD_FILE"
 #define D1L_RP2040_LINE_BUFFER_SIZE (D1L_RP2040_FILE_LINE_MAX + 1U)
 #define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
@@ -507,8 +504,12 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     (void)parse_bool_token(line, "present", &status->card_present);
     (void)parse_bool_token(line, "mounted", &status->filesystem_mounted);
     (void)parse_bool_token(line, "deskos", &status->deskos_root_ready);
-    (void)parse_bool_token(line, "format_required", &status->format_required);
-    (void)parse_bool_token(line, "format_supported", &status->format_supported);
+    bool legacy_format_required = false;
+    (void)parse_bool_token(line, "needs_fat32", &status->needs_fat32);
+    if (parse_bool_token(line, "format_required", &legacy_format_required) &&
+        legacy_format_required) {
+        status->needs_fat32 = true;
+    }
     (void)parse_bool_token(line, "file_ops", &status->file_ops_supported);
     (void)parse_bool_token(line, "atomic_rename", &status->atomic_rename_supported);
     (void)parse_u32_token(line, "capacity_kb", &status->capacity_kb);
@@ -522,16 +523,17 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     parse_word_token(line, "probe_mode", status->probe_mode, sizeof(status->probe_mode));
 
     if (status->card_present && !status->filesystem_mounted) {
-        status->format_required = true;
+        status->needs_fat32 = true;
     }
     status->data_ready = status->card_present &&
                          status->filesystem_mounted &&
                          status->deskos_root_ready &&
-                         !status->format_required;
+                         !status->needs_fat32;
     if (status->state[0] == '\0') {
         snprintf(status->state, sizeof(status->state), "%s",
                  status->data_ready ? "ready" :
-                 status->card_present ? "setup_required" : "no_card");
+                 status->needs_fat32 ? "not_fat32_or_unmountable" :
+                 status->card_present ? "deskos_manifest_invalid" : "no_card");
     }
     if (status->filesystem[0] == '\0') {
         snprintf(status->filesystem, sizeof(status->filesystem), "unknown");
@@ -539,7 +541,7 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     if (status->note[0] == '\0') {
         snprintf(status->note, sizeof(status->note), "%s",
                  status->data_ready ? "SD card is ready for DeskOS data" :
-                 status->format_required ? "SD card requires explicit setup before use" :
+                 status->needs_fat32 ? "Prepare a FAT32 card on a computer before using SD storage" :
                  "SD card is not ready for DeskOS data");
     }
     return ESP_OK;
@@ -553,11 +555,6 @@ static esp_err_t parse_sd_status_line(const char *line, d1l_rp2040_sd_status_t *
 static esp_err_t parse_sd_mount_line(const char *line, d1l_rp2040_sd_status_t *status)
 {
     return parse_sd_line_with_prefix(line, D1L_RP2040_SD_MOUNT_REPLY_PREFIX, status);
-}
-
-static esp_err_t parse_sd_format_line(const char *line, d1l_rp2040_sd_status_t *status)
-{
-    return parse_sd_line_with_prefix(line, D1L_RP2040_SD_FORMAT_REPLY_PREFIX, status);
 }
 
 static esp_err_t parse_ping_line(const char *line, d1l_rp2040_ping_t *ping)
@@ -940,66 +937,6 @@ esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t tim
     ret = parse_sd_diag_line(line, out_diag);
     out_diag->response_truncated = truncated;
     out_diag->last_error = ret;
-    return ret;
-}
-
-esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
-                                       const char *confirmation,
-                                       uint32_t timeout_ms)
-{
-    if (out_status == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (!confirmation || strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION) != 0) {
-        init_sd_status(out_status, ESP_ERR_INVALID_ARG);
-        snprintf(out_status->state, sizeof(out_status->state), "confirmation_required");
-        snprintf(out_status->note, sizeof(out_status->note), "SD format confirmation phrase did not match");
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (!s_status.uart_ready) {
-        init_sd_status(out_status, s_status.init_result);
-        return s_status.init_result;
-    }
-
-    char command[64];
-    const int command_len = snprintf(command, sizeof(command), "%s%s\n",
-                                     D1L_RP2040_SD_FORMAT_QUERY_PREFIX,
-                                     confirmation);
-    if (command_len <= 0 || (size_t)command_len >= sizeof(command)) {
-        init_sd_status(out_status, ESP_ERR_INVALID_SIZE);
-        snprintf(out_status->state, sizeof(out_status->state), "query_failed");
-        snprintf(out_status->note, sizeof(out_status->note), "SD format command was too large");
-        return ESP_ERR_INVALID_SIZE;
-    }
-
-    const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX};
-    char line[D1L_RP2040_LINE_BUFFER_SIZE];
-    bool truncated = false;
-    init_sd_status(out_status, ESP_ERR_TIMEOUT);
-    char last_progress[32] = {0};
-    esp_err_t ret = exchange_prefixed_line_internal(command, (size_t)command_len, prefixes, 1,
-                                                    line, sizeof(line), timeout_ms, true,
-                                                    &truncated,
-                                                    D1L_RP2040_SD_FORMAT_PROGRESS_PREFIX,
-                                                    last_progress, sizeof(last_progress));
-    out_status->response_truncated = truncated;
-    if (ret != ESP_OK) {
-        out_status->last_error = ret;
-        if (ret == ESP_ERR_TIMEOUT && last_progress[0] != '\0') {
-            snprintf(out_status->note, sizeof(out_status->note),
-                     "RP2040 SD format timed out after step %s", last_progress);
-        } else {
-            snprintf(out_status->note, sizeof(out_status->note),
-                     ret == ESP_ERR_TIMEOUT ?
-                     "RP2040 SD format command timed out; no format confirmation received" :
-                     "Could not write SD format command to RP2040 UART");
-        }
-        return ret;
-    }
-
-    ret = parse_sd_format_line(line, out_status);
-    out_status->response_truncated = truncated;
-    out_status->last_error = ret;
     return ret;
 }
 

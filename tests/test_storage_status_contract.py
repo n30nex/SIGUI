@@ -20,15 +20,13 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
     assert "D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 10000U" in header
     assert "D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U" in header
-    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS 660000U" in header
-    assert "d1l_storage_format_sd_confirmed" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
     assert "d1l_storage_boot_prepare" in header
     assert "d1l_storage_status_refresh" in header
     assert "rp2040_sd_protocol_supported" in header
+    assert "sd_needs_fat32" in header
     assert "setup_action" in header
-    assert "format_action" in header
     assert '"storage/storage_status.c"' in cmake
     assert '"storage/export_store.c"' in cmake
     assert '"storage/map_tile_store.c"' in cmake
@@ -49,9 +47,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_rp2040_bridge_probe_sd(&sd, timeout_ms)" in source
     assert "d1l_storage_boot_prepare" in source
     assert 'strcmp(s_status.sd_state, "mount_required")' in source
-    assert "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)" in source
-    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in source
-    assert '"format_confirmation_required"' in source
+    assert "prepare_fat32_on_computer" in source
+    assert "backup_reformat_fat32_on_computer" in source
     assert '"store_migration_pending"' in source
     assert "file_ops_supported" in header
     assert "atomic_rename_supported" in header
@@ -99,19 +96,24 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
+    old_request = "DESKOS_SD_" + "FORMAT"
+    old_confirmation = "D1L_RP2040_SD_" + "FORMAT_CONFIRMATION"
+    old_phrase = "FORMAT-" + "DESKOS-SD"
     source = read("main/storage/storage_status.c")
-    guard_order = [
-        "strcmp(confirmation, D1L_RP2040_SD_FORMAT_CONFIRMATION)",
-        "!s_status.rp2040_bridge_required || !s_status.rp2040_sd_protocol_supported",
-        "!s_status.sd_present",
-        "!s_status.format_supported",
-        "!s_status.setup_required",
-        "d1l_rp2040_bridge_format_sd(&sd, confirmation, timeout_ms)",
-        "!sd.data_ready",
-    ]
+    header = read("main/storage/storage_status.h")
+    bridge_header = read("main/hal/rp2040_bridge.h")
+    bridge_source = read("main/hal/rp2040_bridge.c")
+    console = read("main/comms/usb_console.c")
+    sketch = read("firmware/rp2040_sd_bridge/deskos_sd_bridge/deskos_sd_bridge.ino")
 
-    positions = [source.index(token) for token in guard_order]
-    assert positions == sorted(positions)
+    for text in [source, header, bridge_header, bridge_source, console, sketch]:
+        assert old_request not in text
+        assert old_confirmation not in text
+        assert old_phrase not in text
+        assert "storage setup confirm" not in text
+        assert "d1l_storage_format_sd_confirmed" not in text
+        assert "d1l_rp2040_bridge_format_sd" not in text
+
     assert source.count("set_store_backends(&s_status)") >= 3
     bridge_unavailable_branch = source.split("if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready)", 1)[1].split("} else if", 1)[0]
     assert bridge_unavailable_branch.index("clear_sd_runtime_fields(&s_status)") < bridge_unavailable_branch.index("set_store_backends(&s_status)")
@@ -123,17 +125,10 @@ def test_storage_format_request_is_guarded_before_bridge_command():
 
 def test_rp2040_format_command_waits_for_format_reply_only():
     source = read("main/hal/rp2040_bridge.c")
-    format_body = source.split("esp_err_t d1l_rp2040_bridge_format_sd", 1)[1].split(
-        "esp_err_t d1l_rp2040_bridge_file_stat", 1
-    )[0]
-
-    assert "const char *prefixes[] = {D1L_RP2040_SD_FORMAT_REPLY_PREFIX};" in format_body
-    assert "exchange_prefixed_line_internal(command, (size_t)command_len, prefixes, 1," in format_body
-    assert "timeout_ms, true," in format_body
-    assert "prefixes, 2," not in format_body
-    assert "D1L_RP2040_SD_REPLY_PREFIX" not in format_body
-    assert "parse_sd_status_line(line, out_status)" not in format_body
-    assert "parse_sd_format_line(line, out_status)" in format_body
+    assert '"needs_fat32"' in source
+    assert '"format_required"' in source  # legacy RP2040 status is mapped to needs_fat32.
+    assert "d1l_rp2040_bridge_file_stat" in source
+    assert "d1l_rp2040_bridge_format_sd" not in source
 
 
 def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
@@ -150,7 +145,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
         "storage_sd_interface",
         "storage_rp2040_sd_protocol_supported",
         "storage_setup_action",
-        "storage_format_action",
+        "storage_sd_needs_fat32",
         "storage_backend",
         "message_store_backend",
         "packet_log_backend",
@@ -162,6 +157,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
         "map_tile_cache_path_template",
         "map_tile_download_state",
         "map_tile_download_requires",
+        "map_tile_provider_policy",
+        "map_tile_provider_attribution",
     ]:
         assert field in app_header
         assert field in app_source
@@ -180,10 +177,10 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '"storage mount"' in console
     assert '"storage diag"' in console
     assert '"storage setup"' in console
-    assert "storage setup confirm FORMAT-DESKOS-SD" in console
     assert "storage map-policy" in console
     assert "storage filecanary" in console
     assert "storage map-tile-canary <token>" in console
+    assert "storage map-tile-download <z> <x> <y> <url-template> <attribution>" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
     assert 'strcmp(line, "storage mount")' in console
@@ -192,8 +189,10 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'strcmp(line, "storage setup")' in console
     assert 'strcmp(line, "storage filecanary")' in console
     assert 'strncmp(line, "storage map-tile-canary "' in console
+    assert 'strncmp(line, "storage map-tile-download "' in console
     assert 'strncmp(line, "storage export-canary "' in console
     assert "will_format" in console
+    assert "no_device_format" in console
     assert "false" in console
     assert "ESP_ERR_NOT_SUPPORTED" in console
     assert '\\"fallback\\":\\"nvs\\"' in console
@@ -206,20 +205,20 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "static lv_obj_t *s_storage_sheet" in ui
     assert "render_storage_sheet" in ui
     assert "open_storage_sheet_event_cb" in ui
-    assert '"Storage Setup"' in ui
-    assert '"No automatic format. Formatting will require explicit confirmation."' in ui
-    assert 'snapshot->storage_backend ? snapshot->storage_backend : "nvs"' in ui
-    assert '"Storage"' in simulator
+    assert '"SD Card"' in ui
+    assert "DeskOS creates its folders automatically and never formats cards on-device." in ui
+    assert 'snapshot->storage_data_enabled ? "Ready"' in ui
+    assert "FAT32 only, no format" in ui
+    assert '"SD Card"' in simulator
+    assert "FAT32 only, no format" in simulator
     assert "NVS fallback" in simulator
     assert "storage_setup_sheet" in simulator
-    assert "No automatic format" in simulator
+    assert "Prepare FAT32 on a computer" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
     assert "d1l_rp2040_ping_t" in rp2040_header
-    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_header
     assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
     assert "d1l_rp2040_bridge_mount_sd" in rp2040_header
-    assert "d1l_rp2040_bridge_format_sd" in rp2040_header
     assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
     assert "D1L_RP2040_FILE_CHUNK_MAX 192U" in rp2040_header
     assert "d1l_rp2040_file_result_t" in rp2040_header
@@ -231,9 +230,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "DESKOS_SD_STATUS" in rp2040_source
     assert "DESKOS_SD_MOUNT" in rp2040_source
     assert "DESKOS_SD_PING" in rp2040_source
-    assert "DESKOS_SD_FORMAT" in rp2040_source
     assert "DESKOS_SD_FILE" in rp2040_source
-    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" in rp2040_source
     assert "base64url_encode" in rp2040_source
     assert "base64url_decode" in rp2040_source
     assert "crc32_bytes" in rp2040_source
@@ -244,11 +241,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "uart_read_bytes" in rp2040_source
     assert '"rp2040 ping"' in console
     assert "cmd_rp2040_ping" in console
-    assert "storage_format_hint" in console
     assert "format_requested" in console
     assert "format_performed" in console
-    assert "d1l_storage_format_sd_confirmed(" in console
-    assert "D1L_STORAGE_RP2040_SD_FORMAT_TIMEOUT_MS" in console
     assert '\\"file_ops\\":%s' in console
     assert '\\"file_line_max\\":%lu' in console
     assert '\\"file_chunk_max\\":%lu' in console
@@ -263,8 +257,13 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "D1L_MAP_TILE_CACHE_PATH_TEMPLATE" in console
     assert "D1L_MAP_TILE_DOWNLOAD_STATE" in console
     assert "D1L_MAP_TILE_DOWNLOAD_REQUIRES" in console
-    assert '\\"download_supported\\":false' in console
-    assert '\\"live_network_download\\":false' in console
+    assert "D1L_MAP_TILE_PROVIDER_POLICY" in console
+    assert "D1L_MAP_TILE_PROVIDER_ATTRIBUTION" in console
+    assert "download_supported = connectivity.wifi_build_enabled && cache_ready" in console
+    assert "live_network_download = download_supported && connectivity.wifi_connected" in console
+    assert "cmd_storage_map_tile_download" in console
+    assert "d1l_map_tile_store_download(" in console
+    assert '\\"public_rf_tx\\":false,\\"formats_sd\\":false' in console
 
 
 def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
@@ -297,7 +296,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "cmd_storage_setup" in console
     assert "storage filecanary" in runner
     assert "mesh send public" not in runner
-    assert "FORMAT-DESKOS-SD" not in runner
+    assert "setup confirm" not in runner
     assert "retained_history_backends_ready" in runner
     assert '"message_store_backend"' in runner
     assert '"dm_store_backend"' in runner
@@ -305,7 +304,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert '"packet_log_backend"' in runner
     assert "storage retained-canary" in retained_runner
     assert "mesh send public" not in retained_runner
-    assert "FORMAT-DESKOS-SD" not in retained_runner
+    assert "setup confirm" not in retained_runner
     assert "COM11" not in retained_runner
     assert "COM29" not in retained_runner
     assert "storage filecanary" in docs
@@ -357,7 +356,7 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_rp2040_bridge_file_delete(result->path" not in store_source
     assert "public_rf_tx" in store_source
     assert "formats_sd" in store_source
-    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
+    assert "D1L_RP2040_SD_" + "FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_export_canary" in console
     assert "cmd_storage_export_diagnostics" in console
     assert "cmd_storage_export_data" in console
@@ -389,15 +388,15 @@ def test_storage_export_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "data_export_passed" in data_runner
     assert "private_identity_exported" in data_runner
     assert "mesh send public" not in data_runner
-    assert "FORMAT-DESKOS-SD" not in data_runner
+    assert "setup confirm" not in data_runner
     assert "COM11" not in data_runner
     assert "COM29" not in data_runner
     assert "mesh send public" not in diagnostic_runner
-    assert "FORMAT-DESKOS-SD" not in diagnostic_runner
+    assert "setup confirm" not in diagnostic_runner
     assert "COM11" not in diagnostic_runner
     assert "COM29" not in diagnostic_runner
     assert "mesh send public" not in runner
-    assert "FORMAT-DESKOS-SD" not in runner
+    assert "setup confirm" not in runner
     assert "COM11" not in runner
     assert "COM29" not in runner
     assert "export_canary_transcript" in protocol
@@ -417,6 +416,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     console = read("main/comms/usb_console.c")
     store_header = read("main/storage/map_tile_store.h")
     store_source = read("main/storage/map_tile_store.c")
+    cmake = read("main/CMakeLists.txt")
     runner = read("scripts/sd_map_tile_canary_d1l.py")
     protocol = read("tools/rp2040_sd_protocol.py")
     workflow = read(".github/workflows/d1l-ci.yml")
@@ -426,7 +426,14 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_MAP_TILE_ZOOM_MAX 18U" in store_header
     assert 'D1L_MAP_TILE_CACHE_POLICY "sd_offline_cache_when_ready"' in store_header
     assert 'D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/z{z}/x{x}/y{y}.tile"' in store_header
-    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "wifi_runtime_pending"' in store_header
+    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "provider_required_or_ready_when_wifi_sd_provider_ok"' in store_header
+    assert "D1L_MAP_TILE_URL_TEMPLATE_MAX 192U" in store_header
+    assert "D1L_MAP_TILE_ATTRIBUTION_MAX 64U" in store_header
+    assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_header
+    assert 'D1L_MAP_TILE_PROVIDER_POLICY "provider_config_required_no_public_osm_bulk"' in store_header
+    assert "d1l_map_tile_provider_template_allowed" in store_header
+    assert "d1l_map_tile_attribution_valid" in store_header
+    assert "d1l_map_tile_store_download" in store_header
     assert "d1l_map_tile_store_token_valid" in store_header
     assert "d1l_map_tile_store_sd_ready" in store_header
     assert "d1l_map_tile_store_coord_valid" in store_header
@@ -434,6 +441,24 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_map_tile_store_write_canary" in store_header
     assert "d1l_map_tile_store_check_canary" in store_header
     assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
+    assert 'strncmp(url_template, "https://", strlen("https://")) != 0' in store_source
+    assert 'strstr(url_template, "{z}")' in store_source
+    assert 'strstr(url_template, "{x}")' in store_source
+    assert 'strstr(url_template, "{y}")' in store_source
+    assert 'contains_case_insensitive(url_template, "tile.openstreetmap.org")' in store_source
+    assert 'contains_case_insensitive(url_template, "openstreetmap.org")' in store_source
+    assert '#include "esp_http_client.h"' in store_source
+    assert '#include "esp_crt_bundle.h"' in store_source
+    assert ".crt_bundle_attach = esp_crt_bundle_attach" in store_source
+    assert "esp_http_client_init(&config)" in store_source
+    assert "esp_http_client_open(client, 0)" in store_source
+    assert "esp_http_client_fetch_headers(client)" in store_source
+    assert "esp_http_client_read(client" in store_source
+    assert "esp_http_client_is_complete_data_received(client)" in store_source
+    assert "esp_http_client_cleanup(client)" in store_source
+    assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_source
+    assert "D1L_MAP_TILE_USER_AGENT" in store_source
+    assert "map/tiles/attribution.json" in store_source
     assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
@@ -442,15 +467,18 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_rp2040_bridge_file_read(result.tmp_path" in store_source
     assert "d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true" in store_source
     assert "d1l_rp2040_bridge_file_stat(result.path" in store_source
-    assert "D1L_RP2040_SD_FORMAT_CONFIRMATION" not in store_source
+    assert "D1L_RP2040_SD_" + "FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_map_tile_canary" in console
     assert "cmd_storage_map_tile_check" in console
+    assert "cmd_storage_map_tile_download" in console
     assert "cmd_storage_map_policy" in console
     assert "storage map-policy" in console
     assert "map_tile_policy" in console
     assert "d1l_map_tile_store_path(0U, 0U, 0U" in console
     assert "storage map-tile-canary <token>" in console
     assert "storage map-tile-check <token>" in console
+    assert "storage map-tile-download <z> <x> <y> <url-template> <attribution>" in console
+    assert "d1l_map_tile_store_download" in console
     assert "d1l_map_tile_store_write_canary" in console
     assert "d1l_map_tile_store_check_canary" in console
     assert "Map tile SD cache canary committed" in console
@@ -458,7 +486,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "storage map-tile-canary" in runner
     assert "map_tile_backend_ready" in runner
     assert "mesh send public" not in runner
-    assert "FORMAT-DESKOS-SD" not in runner
+    assert "setup confirm" not in runner
     assert "COM11" not in runner
     assert "COM29" not in runner
     assert "map_tile_canary_transcript" in protocol
@@ -467,6 +495,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run" in workflow
     assert "sd_map_tile_canary_d1l.py" in docs
+    assert "esp_http_client" in cmake
 
 
 def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():

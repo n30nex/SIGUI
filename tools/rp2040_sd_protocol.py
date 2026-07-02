@@ -16,9 +16,6 @@ MOUNT_REQUEST = "DESKOS_SD_MOUNT"
 MOUNT_REPLY = "DESKOS_SD_MOUNT"
 PING_REQUEST = "DESKOS_SD_PING"
 PING_REPLY = "DESKOS_SD_PING"
-FORMAT_REQUEST = "DESKOS_SD_FORMAT"
-FORMAT_REPLY = "DESKOS_SD_FORMAT"
-FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD"
 DIAG_REQUEST = "DESKOS_SD_DIAG"
 DIAG_REPLY = "DESKOS_SD_DIAG"
 FILE_REQUEST = "DESKOS_SD_FILE"
@@ -76,8 +73,7 @@ STATUS_FIELDS = (
     "mounted",
     "deskos",
     "fs",
-    "format_required",
-    "format_supported",
+    "needs_fat32",
     "capacity_kb",
     "free_kb",
     "note",
@@ -137,8 +133,7 @@ class SdScenario:
     mounted: bool
     deskos: bool
     fs: str
-    format_required: bool
-    format_supported: bool
+    needs_fat32: bool
     capacity_kb: int
     free_kb: int
     note: str
@@ -157,8 +152,7 @@ SCENARIOS: dict[str, SdScenario] = {
         mounted=False,
         deskos=False,
         fs="none",
-        format_required=False,
-        format_supported=False,
+        needs_fat32=False,
         capacity_kb=0,
         free_kb=0,
         note="no_card",
@@ -169,23 +163,21 @@ SCENARIOS: dict[str, SdScenario] = {
         mounted=True,
         deskos=True,
         fs="fat32",
-        format_required=False,
-        format_supported=True,
+        needs_fat32=False,
         capacity_kb=31166976,
         free_kb=31100000,
         note="ready",
     ),
-    "format-required": SdScenario(
-        state="setup_required",
+    "needs-fat32": SdScenario(
+        state="not_fat32_or_unmountable",
         present=True,
         mounted=False,
         deskos=False,
         fs="unknown",
-        format_required=True,
-        format_supported=True,
+        needs_fat32=True,
         capacity_kb=31166976,
         free_kb=0,
-        note="format_required",
+        note="needs_fat32_on_computer",
     ),
     "root-missing": SdScenario(
         state="setup_required",
@@ -193,8 +185,7 @@ SCENARIOS: dict[str, SdScenario] = {
         mounted=True,
         deskos=False,
         fs="fat32",
-        format_required=False,
-        format_supported=True,
+        needs_fat32=False,
         capacity_kb=31166976,
         free_kb=31090000,
         note="deskos_root_missing",
@@ -205,8 +196,7 @@ SCENARIOS: dict[str, SdScenario] = {
         mounted=False,
         deskos=False,
         fs="none",
-        format_required=False,
-        format_supported=False,
+        needs_fat32=False,
         capacity_kb=0,
         free_kb=0,
         note="mount_not_checked",
@@ -217,8 +207,7 @@ SCENARIOS: dict[str, SdScenario] = {
         mounted=False,
         deskos=False,
         fs="none",
-        format_required=False,
-        format_supported=False,
+        needs_fat32=False,
         capacity_kb=0,
         free_kb=0,
         note="mount_in_progress",
@@ -281,8 +270,7 @@ def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
         f" mounted={bool_token(scenario.mounted)}"
         f" deskos={bool_token(scenario.deskos)}"
         f" fs={scenario.fs}"
-        f" format_required={bool_token(scenario.format_required)}"
-        f" format_supported={bool_token(scenario.format_supported)}"
+        f" needs_fat32={bool_token(scenario.needs_fat32)}"
         f" capacity_kb={scenario.capacity_kb}"
         f" free_kb={scenario.free_kb}"
         f" note={scenario.note}"
@@ -322,23 +310,6 @@ def diag_line(scenario: SdScenario) -> str:
         f" hs_p=0 hs_e=254 hs_d=0 hs_kb=0"
         f" ld_p=0 ld_e=254 ld_d=0 ld_kb=0"
         f" ls_p=0 ls_e=254 ls_d=0 ls_kb=0"
-    )
-
-
-def formatted_scenario(scenario: SdScenario) -> SdScenario:
-    if not scenario.present:
-        return replace(scenario, state="no_card", note="no_card")
-    if not scenario.format_supported:
-        return replace(scenario, state="unsupported", note="format_unsupported")
-    return replace(
-        scenario,
-        state="ready",
-        mounted=True,
-        deskos=True,
-        fs="fat32",
-        format_required=False,
-        free_kb=scenario.capacity_kb,
-        note="format_complete",
     )
 
 
@@ -383,7 +354,7 @@ def prepare_deskos_filesystem(fs: SdFileSystem) -> bool:
 def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
     if not scenario.present:
         return replace(scenario, state="no_card", note="no_card")
-    if scenario.format_required:
+    if scenario.needs_fat32:
         return scenario
     if not scenario.mounted:
         return scenario
@@ -393,14 +364,14 @@ def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
             if DESKOS_MANIFEST_PATH in fs.files and not manifest_valid(fs)
             else "deskos_map_manifest_invalid"
         )
-        return replace(scenario, state="setup_required", deskos=False, note=note)
+        return replace(scenario, state="deskos_manifest_invalid", deskos=False, note=note)
     note = "structure_created" if not scenario.deskos else scenario.note
     return replace(
         scenario,
         state="ready",
         mounted=True,
         deskos=True,
-        format_required=False,
+        needs_fat32=False,
         note=note,
     )
 
@@ -438,7 +409,7 @@ def parse_bool_token(tokens: dict[str, str], key: str) -> bool:
 
 
 def file_ready(scenario: SdScenario) -> bool:
-    return scenario.present and scenario.mounted and scenario.deskos and not scenario.format_required
+    return scenario.present and scenario.mounted and scenario.deskos and not scenario.needs_fat32
 
 
 def file_line(**tokens: object) -> str:
@@ -653,17 +624,6 @@ def reply_for_request(
         return status_line(mounted_scenario(scenario, fs), MOUNT_REPLY)
     if request == DIAG_REQUEST:
         return diag_line(scenario)
-    if request.startswith(FORMAT_REQUEST + " "):
-        phrase = request[len(FORMAT_REQUEST) + 1 :].strip()
-        if phrase != FORMAT_CONFIRMATION:
-            refused = replace(scenario, state="confirmation_required", note="confirmation_required")
-            return status_line(refused, FORMAT_REPLY)
-        fs.files.clear()
-        fs.dirs = {"."}
-        formatted = formatted_scenario(scenario)
-        if formatted.present and formatted.deskos:
-            prepare_deskos_filesystem(fs)
-        return status_line(formatted, FORMAT_REPLY)
     if request.startswith(FILE_REQUEST):
         return file_reply_for_request(request, scenario, fs)
     raise ValueError(f"unsupported request: {request}")
