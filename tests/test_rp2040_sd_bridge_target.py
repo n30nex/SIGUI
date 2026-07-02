@@ -57,8 +57,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sample_sd_miso_level()" in sketch
     assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
-    assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
-    assert "SPI1.setRX(SD_MISO_PIN)" in sketch
+    assert "SPI1.end()" in sketch
+    assert "SPI1.setMOSI(SD_MOSI_PIN)" in sketch
+    assert "SPI1.setMISO(SD_MISO_PIN)" in sketch
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
     assert "bool s_sd_mounted = false;" in sketch
     assert "SD.begin(SD_CS_PIN, SPI1)" in sketch
@@ -118,9 +119,15 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '"_miso_pull="' in sketch
     assert '"_miso_spi="' in sketch
     assert '"_miso_idle="' in sketch
+    assert '"_idle_ff="' in sketch
+    assert '" pin_sck="' in sketch
+    assert '" pin_mosi="' in sketch
+    assert '" pin_miso="' in sketch
+    assert '" pin_cs="' in sketch
     assert "probe.miso_pullup_level = sample_sd_miso_level()" in sketch
     assert "probe.miso_spi_level = sample_sd_miso_level()" in sketch
     assert "probe.miso_idle_level = sample_sd_miso_level()" in sketch
+    assert "probe.idle_rx_ff = sd_spi_transfer(0xFF)" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
     assert "delete card" in sketch

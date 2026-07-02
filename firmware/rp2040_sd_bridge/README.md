@@ -122,9 +122,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   high/shared, low/dedicated, and low/shared raw probe result. It returns a
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
-  does not write to the card. Probe tokens include raw `CMD0`, `CMD8`, R7 echo
-  bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`), and MISO line samples
-  (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`) so all-zero bus behavior can be
+  does not write to the card. Probe tokens include SPI pin-acceptance flags,
+  raw `CMD0`, `CMD8`, R7 echo bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO
+  line samples (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
+  CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
   separated from a real card echo mismatch.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and

@@ -102,6 +102,7 @@ struct CardProbe {
     uint8_t miso_pullup_level;
     uint8_t miso_spi_level;
     uint8_t miso_idle_level;
+    uint8_t idle_rx_ff;
     const char *power;
     const char *mode;
     bool power_high;
@@ -114,6 +115,10 @@ struct DiagSnapshot {
     CardProbe high_shared;
     CardProbe low_dedicated;
     CardProbe low_shared;
+    bool pin_sck_ok;
+    bool pin_mosi_ok;
+    bool pin_miso_ok;
+    bool pin_cs_ok;
     const char *selected_power;
     const char *selected_mode;
     bool mount_selected;
@@ -146,6 +151,10 @@ DiagSnapshot s_cached_diag = {};
 bool s_cached_diag_valid = false;
 uint8_t s_last_mount_error = 0;
 uint8_t s_last_mount_data = 0;
+bool s_sd_pin_sck_ok = false;
+bool s_sd_pin_mosi_ok = false;
+bool s_sd_pin_miso_ok = false;
+bool s_sd_pin_cs_ok = false;
 volatile uint8_t s_worker_request = SD_WORKER_NONE;
 volatile bool s_worker_busy = false;
 volatile bool s_mount_worker_completed = false;
@@ -189,10 +198,10 @@ void settle_sd_power(bool power_high, bool force_power_cycle) {
 
 void configure_sd_spi_pins() {
     pinMode(SD_MISO_PIN, INPUT_PULLUP);
-    SPI1.setSCK(SD_SCK_PIN);
-    SPI1.setTX(SD_MOSI_PIN);
-    SPI1.setRX(SD_MISO_PIN);
-    SPI1.setCS(SD_CS_PIN);
+    s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
+    s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN);
+    s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN);
+    s_sd_pin_cs_ok = SPI1.setCS(SD_CS_PIN);
 }
 
 void apply_sd_miso_pullup() {
@@ -207,6 +216,7 @@ uint8_t sample_sd_miso_level() {
 
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
     settle_sd_power(power_high, force_power_cycle);
+    SPI1.end();
     pinMode(SD_CS_PIN, OUTPUT);
     digitalWrite(SD_CS_PIN, HIGH);
     configure_sd_spi_pins();
@@ -218,6 +228,7 @@ void configure_sd_bus() {
 
 void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
     settle_sd_power(power_high, force_power_cycle);
+    SPI1.end();
     pinMode(SD_CS_PIN, OUTPUT);
     digitalWrite(SD_CS_PIN, HIGH);
     configure_sd_spi_pins();
@@ -316,6 +327,7 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         0xFF,
         0xFF,
         0xFF,
+        0xFF,
         power,
         mode,
         power_high,
@@ -378,7 +390,8 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     probe.miso_spi_level = sample_sd_miso_level();
     SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
     digitalWrite(SD_CS_PIN, HIGH);
-    for (uint8_t i = 0; i < 10; ++i) {
+    probe.idle_rx_ff = sd_spi_transfer(0xFF);
+    for (uint8_t i = 1; i < 10; ++i) {
         (void)sd_spi_transfer(0xFF);
     }
     probe.miso_idle_level = sample_sd_miso_level();
@@ -453,6 +466,7 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         0xFF,
         0xFF,
         {0, 0, 0, 0},
+        0xFF,
         0xFF,
         0xFF,
         0xFF,
@@ -767,6 +781,7 @@ SdSnapshot mounted_snapshot_from_current_config() {
         sample_sd_miso_level(),
         sample_sd_miso_level(),
         sample_sd_miso_level(),
+        0xFF,
         power_token(s_sd_power_high),
         "mount",
         s_sd_power_high,
@@ -870,6 +885,10 @@ DiagSnapshot pending_diag_snapshot() {
         empty_probe("high", "shared", true, SHARED_SPI),
         empty_probe("low", "dedicated", false, DEDICATED_SPI),
         empty_probe("low", "shared", false, SHARED_SPI),
+        s_sd_pin_sck_ok,
+        s_sd_pin_mosi_ok,
+        s_sd_pin_miso_ok,
+        s_sd_pin_cs_ok,
         "pending",
         "pending",
         false,
@@ -895,6 +914,10 @@ DiagSnapshot diag_status_blocking() {
     }
     diag.selected_power = power_token(s_sd_power_high);
     diag.selected_mode = spi_mode_token(s_sd_spi_options);
+    diag.pin_sck_ok = s_sd_pin_sck_ok;
+    diag.pin_mosi_ok = s_sd_pin_mosi_ok;
+    diag.pin_miso_ok = s_sd_pin_miso_ok;
+    diag.pin_cs_ok = s_sd_pin_cs_ok;
     diag.mount_selected = false;
     diag.valid = true;
     if (!selected) {
@@ -1274,6 +1297,10 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
     line += String(static_cast<unsigned int>(probe.miso_idle_level));
     line += " ";
     line += prefix;
+    line += "_idle_ff=";
+    line += String(static_cast<unsigned int>(probe.idle_rx_ff));
+    line += " ";
+    line += prefix;
     line += "_kb=";
     line += String(static_cast<unsigned long>(probe.capacity_kb));
 }
@@ -1283,6 +1310,14 @@ void send_diag_snapshot(const DiagSnapshot &diag) {
     line += " pins=cs13-sck10-mosi11-miso12-pwr18";
     line += " hz=";
     line += String(static_cast<unsigned long>(SD_SPI_HZ));
+    line += " pin_sck=";
+    line += bool_token(diag.pin_sck_ok);
+    line += " pin_mosi=";
+    line += bool_token(diag.pin_mosi_ok);
+    line += " pin_miso=";
+    line += bool_token(diag.pin_miso_ok);
+    line += " pin_cs=";
+    line += bool_token(diag.pin_cs_ok);
     line += " selected_power=";
     line += diag.selected_power;
     line += " selected_mode=";
