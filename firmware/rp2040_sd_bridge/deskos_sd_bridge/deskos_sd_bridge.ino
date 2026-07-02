@@ -38,6 +38,8 @@ constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;
 constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
 constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
+constexpr uint8_t SD_CMD0_RETRIES = 8;
+constexpr uint8_t SD_CMD0_RECOVERY_CLOCKS = 16;
 constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
@@ -316,12 +318,16 @@ void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
     s_sd_pin_cs_ok = true;
 }
 
-void clock_sd_idle_bytes() {
-    SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
+void clock_sd_cs_high(uint8_t count) {
     digitalWrite(SD_CS_PIN, HIGH);
-    for (uint8_t i = 0; i < 10; ++i) {
+    for (uint8_t i = 0; i < count; ++i) {
         (void)sd_spi_transfer(0xFF);
     }
+}
+
+void clock_sd_idle_bytes() {
+    SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
+    clock_sd_cs_high(10);
     SPI1.endTransaction();
 }
 
@@ -486,7 +492,15 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     }
     probe.miso_idle_level = sample_sd_miso_level();
 
-    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, false);
+    uint8_t cmd0 = 0xFFU;
+    for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
+        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, false);
+        if (cmd0 == 0x01U) {
+            break;
+        }
+        clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS);
+        delay(10);
+    }
     probe.cmd0_response = cmd0;
     if (cmd0 == 0xFF) {
         probe.error_code = 1;
@@ -494,8 +508,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
         return probe;
     }
     const bool cmd0_idle = cmd0 == 0x01U;
-    const bool cmd0_ready = cmd0 == 0x00U;
-    if (!cmd0_idle && !cmd0_ready) {
+    if (!cmd0_idle) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         SPI1.endTransaction();
@@ -504,7 +517,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd8_extra[4] = {0, 0, 0, 0};
     const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra),
-                                    &probe.cmd8_ready_byte, true);
+                                    &probe.cmd8_ready_byte, false);
     probe.cmd8_response = cmd8;
     for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
         probe.cmd8_echo[i] = cmd8_extra[i];

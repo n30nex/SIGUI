@@ -96,17 +96,17 @@ DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 
 The D1L bridge tries a Seeed-style high/dedicated filesystem mount before the
 fallback raw SPI probes for high/dedicated, high/shared, low/dedicated, and
 low/shared candidates. The high/dedicated and high/shared probes preserve the
-already-powered rail state first; force-cycled candidates run after that. The probe accepts
-`CMD0=0x00` only when the following SD v2 `CMD8` echoes `0x1AA`, so a real
-ready-state card can continue without allowing an all-zero stuck bus to look
-present in the fallback matrix. It then tries one matching filesystem mount on each raw-present candidate before
+already-powered rail state first; force-cycled candidates run after that. The
+probe retries `CMD0` with CS-high recovery clocks and requires the SD idle
+response `0x01` before sending `CMD8`, so an all-zero selected-card path cannot
+look present in the fallback matrix. It then tries one matching filesystem mount on each raw-present candidate before
 reporting `no_card` or a FAT32-required state. The first filesystem init
 preserves the already-powered rail state; fallback probes and mounts can toggle
 the selected power-rail level and reclock the card so warm firmware resets do
-not leave the card outside `CMD0` idle detection. The manual probe sends the
-initial `CMD0` immediately after the CS-high idle clocks and CS assertion,
-matching the SD SPI entry sequence instead of waiting with the card selected
-before the reset command. The manual
+not leave the card outside `CMD0` idle detection. The manual probe sends each
+`CMD0` attempt immediately after CS-high idle clocks and CS assertion, matching
+the SD SPI entry sequence instead of waiting with the card selected before the
+reset command. The manual
 diagnostic request below reports the same candidate matrix without filesystem
 writes. If no card
 responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`;
@@ -163,7 +163,7 @@ skipped-wait sentinel before CMD0 (`*_c0r`) and CS-low ready byte before CMD8
 after idle clocks (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), the first
 CS-high idle `SPI1.transfer(0xFF)` byte (`*_idle_ff`), and detected capacity in
 KiB (`*_kb`). These fields are non-formatting diagnostics for distinguishing a
-stuck/all-zero SPI bus from a real card that answers `CMD0` but fails the SD v2
+stuck/all-zero SPI bus from a card that reaches SPI idle but fails the SD v2
 echo check.
 
 Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`

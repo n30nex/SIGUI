@@ -138,15 +138,16 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
     assert "const bool cmd0_idle = cmd0 == 0x01U" in sketch
-    assert "const bool cmd0_ready = cmd0 == 0x00U" in sketch
-    assert "if (!cmd0_idle && !cmd0_ready)" in sketch
+    assert "constexpr uint8_t SD_CMD0_RETRIES = 8;" in sketch
+    assert "clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS)" in sketch
+    assert "if (!cmd0_idle)" in sketch
     assert "probe.error_code = 3" in sketch
     assert "cmd8_echo_ok" in sketch
     assert "probe.error_code = 4" in sketch
     assert "probe.cmd0_response = cmd0" in sketch
     assert "probe.cmd8_response = cmd8" in sketch
     assert "&probe.cmd0_ready_byte, false, false" in sketch
-    assert "&probe.cmd8_ready_byte, true" in sketch
+    assert "&probe.cmd8_ready_byte, false" in sketch
     assert "wait_selected_ready ? sd_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU" in sketch
     assert "ignore_leading_zero && response == 0x00U" in sketch
     assert "for (uint8_t i = 0; i < 64; ++i)" in sketch
