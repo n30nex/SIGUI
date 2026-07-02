@@ -9,7 +9,7 @@
 - [x] Boot banner includes firmware name/version/schema.
 - [x] `i2c` detects D1L expander/touch.
 - [ ] `display test` shows stable bars. Command passed on hardware; manual visual confirmation is still pending.
-- [x] `wifi status`, `wifi scan`, and `ble status` report the supported companion-radio state for the release build.
+- [x] `wifi status`, `wifi scan`, `wifi save <ssid> [password]`, `wifi clear`, and `ble status` report the supported companion-radio/profile state for the release build without printing saved Wi-Fi passwords.
 - [x] `crashlog` and `health` provide reset reason, memory, LVGL, and task stack evidence after reboot.
 - [x] `touch test` reports coordinates.
 - [x] COM12 GitHub-built touch recovery validated from run `28510825288` / commit `c214ca1`: FT touch coordinates were sampled, bottom dock taps did not reboot, and post-fix idle soak stayed crash-free.

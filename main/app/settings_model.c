@@ -34,6 +34,32 @@ typedef struct {
     int8_t tx_power_dbm;
     bool rx_boost;
     uint8_t tcxo_mode;
+    bool map_location_set;
+    int32_t map_lat_e7;
+    int32_t map_lon_e7;
+    bool identity_ready;
+    uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
+    uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
+} d1l_settings_v4_t;
+
+typedef struct {
+    uint32_t schema_version;
+    char node_name[D1L_NODE_NAME_LEN];
+    uint8_t role;
+    bool wifi_enabled;
+    bool ble_companion_enabled;
+    bool observer_enabled;
+    bool high_contrast;
+    bool night_mode;
+    bool onboarding_complete;
+    uint8_t path_hash_bytes;
+    uint32_t frequency_hz;
+    uint16_t bandwidth_tenths_khz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    int8_t tx_power_dbm;
+    bool rx_boost;
+    uint8_t tcxo_mode;
     bool identity_ready;
     uint8_t identity_public_key[D1L_IDENTITY_PUBLIC_KEY_LEN];
     uint8_t identity_private_key[D1L_IDENTITY_PRIVATE_KEY_LEN];
@@ -64,6 +90,20 @@ typedef struct {
 static uint16_t bandwidth_to_tenths(float khz)
 {
     return (uint16_t)((khz * 10.0f) + 0.5f);
+}
+
+static void sanitize_printable(char *text, size_t size, bool allow_quotes)
+{
+    if (!text || size == 0) {
+        return;
+    }
+    text[size - 1U] = '\0';
+    for (size_t i = 0; i < size && text[i] != '\0'; ++i) {
+        const unsigned char c = (unsigned char)text[i];
+        if (c < 32 || c > 126 || (!allow_quotes && (c == '"' || c == '\\'))) {
+            text[i] = '_';
+        }
+    }
 }
 
 static bool mesh_timestamp_can_fallback(esp_err_t ret)
@@ -98,7 +138,10 @@ void d1l_settings_defaults(d1l_settings_t *settings)
     settings->high_contrast = false;
     settings->night_mode = false;
     settings->onboarding_complete = false;
+    settings->wifi_profile_saved = false;
     settings->path_hash_bytes = 1;
+    settings->wifi_ssid[0] = '\0';
+    settings->wifi_password[0] = '\0';
     settings->frequency_hz = D1L_RADIO_FREQ_HZ;
     settings->bandwidth_tenths_khz = bandwidth_to_tenths(D1L_RADIO_BW_KHZ);
     settings->spreading_factor = D1L_RADIO_SF;
@@ -127,16 +170,24 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
     if (settings->node_name[0] == '\0') {
         snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk");
     }
-    for (size_t i = 0; i < D1L_NODE_NAME_LEN && settings->node_name[i] != '\0'; ++i) {
-        const unsigned char c = (unsigned char)settings->node_name[i];
-        if (c < 32 || c > 126 || c == '"' || c == '\\') {
-            settings->node_name[i] = '_';
-        }
+    sanitize_printable(settings->node_name, sizeof(settings->node_name), false);
+    sanitize_printable(settings->wifi_ssid, sizeof(settings->wifi_ssid), false);
+    sanitize_printable(settings->wifi_password, sizeof(settings->wifi_password), true);
+    settings->wifi_profile_saved = settings->wifi_profile_saved ? true : false;
+    if (settings->wifi_ssid[0] == '\0') {
+        settings->wifi_profile_saved = false;
+        settings->wifi_password[0] = '\0';
     }
     if (settings->role != D1L_ROLE_DESK_COMPANION) {
         settings->role = D1L_ROLE_DESK_COMPANION;
     }
     settings->onboarding_complete = settings->onboarding_complete ? true : false;
+    settings->wifi_enabled = settings->wifi_enabled ? true : false;
+    settings->ble_companion_enabled = settings->ble_companion_enabled ? true : false;
+    if (settings->wifi_enabled && settings->ble_companion_enabled) {
+        settings->ble_companion_enabled = false;
+    }
+    settings->observer_enabled = settings->observer_enabled ? true : false;
     if (settings->path_hash_bytes < 1 || settings->path_hash_bytes > 3) {
         settings->path_hash_bytes = 1;
     }
@@ -257,6 +308,42 @@ static void migrate_v3_settings(d1l_settings_t *dest, const d1l_settings_v3_t *s
     d1l_settings_sanitize(dest);
 }
 
+static void migrate_v4_settings(d1l_settings_t *dest, const d1l_settings_v4_t *src)
+{
+    if (!dest) {
+        return;
+    }
+    d1l_settings_defaults(dest);
+    if (!src || src->schema_version != 4U) {
+        return;
+    }
+    memcpy(dest->node_name, src->node_name, sizeof(dest->node_name));
+    dest->node_name[D1L_NODE_NAME_LEN - 1U] = '\0';
+    dest->role = src->role;
+    dest->wifi_enabled = src->wifi_enabled;
+    dest->ble_companion_enabled = src->ble_companion_enabled;
+    dest->observer_enabled = src->observer_enabled;
+    dest->high_contrast = src->high_contrast;
+    dest->night_mode = src->night_mode;
+    dest->onboarding_complete = src->onboarding_complete;
+    dest->path_hash_bytes = src->path_hash_bytes;
+    dest->frequency_hz = src->frequency_hz;
+    dest->bandwidth_tenths_khz = src->bandwidth_tenths_khz;
+    dest->spreading_factor = src->spreading_factor;
+    dest->coding_rate = src->coding_rate;
+    dest->tx_power_dbm = src->tx_power_dbm;
+    dest->rx_boost = src->rx_boost;
+    dest->tcxo_mode = src->tcxo_mode;
+    dest->map_location_set = src->map_location_set;
+    dest->map_lat_e7 = src->map_lat_e7;
+    dest->map_lon_e7 = src->map_lon_e7;
+    dest->identity_ready = src->identity_ready;
+    memcpy(dest->identity_public_key, src->identity_public_key, sizeof(dest->identity_public_key));
+    memcpy(dest->identity_private_key, src->identity_private_key, sizeof(dest->identity_private_key));
+    dest->schema_version = D1L_SETTINGS_SCHEMA_VERSION;
+    d1l_settings_sanitize(dest);
+}
+
 esp_err_t d1l_settings_load(void)
 {
     d1l_settings_defaults(&s_current);
@@ -279,7 +366,12 @@ esp_err_t d1l_settings_load(void)
         ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &s_current, &len);
         if (ret == ESP_OK) {
             const uint32_t loaded_schema = s_current.schema_version;
-            if (loaded_schema == 3U) {
+            if (loaded_schema == 4U) {
+                d1l_settings_v4_t old_settings = {0};
+                memcpy(&old_settings, &s_current, sizeof(old_settings));
+                migrate_v4_settings(&s_current, &old_settings);
+                should_save = true;
+            } else if (loaded_schema == 3U) {
                 d1l_settings_v3_t old_settings = {0};
                 memcpy(&old_settings, &s_current, sizeof(old_settings));
                 migrate_v3_settings(&s_current, &old_settings);
@@ -293,6 +385,25 @@ esp_err_t d1l_settings_load(void)
                 d1l_settings_sanitize(&s_current);
                 should_save = loaded_schema != D1L_SETTINGS_SCHEMA_VERSION;
             }
+        }
+    } else if (ret == ESP_OK && len == sizeof(d1l_settings_v4_t)) {
+        d1l_settings_v4_t old_settings = {0};
+        ret = nvs_get_blob(handle, D1L_SETTINGS_KEY, &old_settings, &len);
+        if (ret == ESP_OK) {
+            if (old_settings.schema_version == 4U) {
+                migrate_v4_settings(&s_current, &old_settings);
+            } else if (old_settings.schema_version == 3U) {
+                d1l_settings_v3_t old_v3 = {0};
+                memcpy(&old_v3, &old_settings, sizeof(old_v3));
+                migrate_v3_settings(&s_current, &old_v3);
+            } else if (old_settings.schema_version == 2U) {
+                d1l_settings_v2_t old_v2 = {0};
+                memcpy(&old_v2, &old_settings, sizeof(old_v2));
+                migrate_v2_settings(&s_current, &old_v2);
+            } else {
+                d1l_settings_defaults(&s_current);
+            }
+            should_save = true;
         }
     } else if (ret == ESP_OK && len == sizeof(d1l_settings_v3_t)) {
         d1l_settings_v3_t old_settings = {0};
@@ -362,6 +473,34 @@ esp_err_t d1l_settings_reset(void)
     d1l_settings_t defaults;
     d1l_settings_defaults(&defaults);
     return d1l_settings_save(&defaults);
+}
+
+esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password)
+{
+    if (!ssid || ssid[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(ssid) >= D1L_WIFI_SSID_LEN ||
+        (password && strlen(password) >= D1L_WIFI_PASSWORD_LEN)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    d1l_settings_t settings = *d1l_settings_current();
+    snprintf(settings.wifi_ssid, sizeof(settings.wifi_ssid), "%s", ssid);
+    if (password) {
+        snprintf(settings.wifi_password, sizeof(settings.wifi_password), "%s", password);
+    }
+    settings.wifi_profile_saved = true;
+    return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_settings_clear_wifi_profile(void)
+{
+    d1l_settings_t settings = *d1l_settings_current();
+    settings.wifi_profile_saved = false;
+    settings.wifi_ssid[0] = '\0';
+    settings.wifi_password[0] = '\0';
+    settings.wifi_enabled = false;
+    return d1l_settings_save(&settings);
 }
 
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,

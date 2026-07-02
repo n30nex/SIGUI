@@ -32,14 +32,14 @@ Coverage:
 - Checksum verifier.
 - MeshCore 3-byte companion transport codec.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
-- Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi off`, `ble status`, and `ble off` must be machine-readable and reflect runtime-pending/build-disabled companion radios.
+- Phase 5 connectivity status contract: `wifi status`, safe `wifi scan`, `wifi save <ssid> [password]`, `wifi clear`, `wifi on|off`, `ble status`, and `ble on|off` must be machine-readable. `wifi save` must persist SSID/password intent without printing the password, `wifi clear` must remove the saved profile and disable Wi-Fi intent, and live scans must continue to report a gated reason until the measured Wi-Fi runtime is enabled.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. The SD-aware soak must report `public_rf_tx=false` and `formats_sd=false` unless the operator explicitly enables an RF mode through a separate flag.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - Release gate audit contract: `scripts/release_gate_audit_d1l.py` must fail closed when P0 production evidence is missing, must not require hardware or ports in CI, and must report `ready_for_public_release=false` until current-commit smoke, SD matrix, 12-hour soak, manual physical UI/photos, and full RF/DM evidence are present.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces, Public History/Search sheets, advert sheet, first-boot onboarding, lock overlay, Map, manual Map center, Storage/Radio/Contact/Packet/Mesh Roles sheets, fail on missing required labels or measured text overflow, emit a touch-target map with expanded 44x44 boxes, flag RF/destructive/format-capable actions, keep `formats_sd=false` for storage setup, and include `large-mesh` and `storage-states` scenarios that prove oversized node/message stores and storage copy fit before rendering.
 - P0 UI hardware-script contract: `scripts/ui_tab_abuse_d1l.py --dry-run` and `scripts/scroll_probe_d1l.py --dry-run` must stay host-only, explicit-port for hardware mode, and must exercise `ui status` plus `ui tab <home|messages|nodes|map|packets|settings>` without hardcoded COM ports.
-- First-boot onboarding contract: settings schema v4 must persist `onboarding_complete` and optional manual map center, migrate schema v2/v3 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
+- First-boot onboarding contract: settings schema v5 must persist `onboarding_complete`, optional manual map center, and saved Wi-Fi profile metadata, migrate schema v2/v3/v4 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
 - Map location contract: first Map open with no saved center must show a touch `Set D1L Location` picker, the user must be able to pan/zoom and `Drop Pin`, the saved pin must reappear as `Move Pin`/manual center on the next Map open, and the serial `map center set|clear` commands must share the same app-model/settings persistence path without Public RF, SD writes, or formatting.
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
 - Phase 6 mesh visibility contract: `signal`, `roomservers`, and `repeaters` must be machine-readable, read from bounded packet/route/node stores, avoid new NVS writes, and appear in the smoke command list.
@@ -225,8 +225,10 @@ python .\scripts\rf_full_acceptance_d1l.py --port $env:D1L_PORT --commit <short>
 
 Keep the runner attached only to the D1L serial port. When it prints the
 `+dm <D1L public key> rf_accept_<short>_in` Discord command, send that command
-through the Meshcorebot control channel to create the controlled inbound DM. Do
-not open the COM11 Meshcorebot serial port directly. Success requires one
+through the Meshcorebot control channel, the other Meshbot, or a separate
+allowlisted Discord sender to create the controlled inbound DM. Do not open the
+COM11 Meshcorebot serial port directly, and do not use Meshcorebot's own bot
+token because its runtime ignores its own messages. Success requires one
 complete newest `rf_full_acceptance_*.json` hardware artifact with
 `identity_public_key_matches`, `meshbot_on_expected_port`, `outbound_dm`,
 `inbound_dm`, `ack_path`, `direct_route`, `health_ready`, and

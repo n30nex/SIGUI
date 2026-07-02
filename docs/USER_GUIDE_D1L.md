@@ -90,6 +90,8 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `repeaters`
 - `wifi status`
 - `wifi scan`
+- `wifi save <ssid> [password]`
+- `wifi clear`
 - `ble status`
 - `storage status`
 - `storage setup`

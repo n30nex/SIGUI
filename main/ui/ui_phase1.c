@@ -50,6 +50,9 @@ static lv_obj_t *s_dm_thread_sheet;
 static lv_obj_t *s_radio_settings_sheet;
 static lv_obj_t *s_storage_sheet;
 static lv_obj_t *s_wifi_sheet;
+static lv_obj_t *s_wifi_ssid_textarea;
+static lv_obj_t *s_wifi_password_textarea;
+static lv_obj_t *s_wifi_keyboard;
 static lv_obj_t *s_ble_sheet;
 static lv_obj_t *s_display_sheet;
 static lv_obj_t *s_diagnostics_sheet;
@@ -3970,12 +3973,92 @@ static void close_diagnostics_sheet_event_cb(lv_event_t *event)
     hide_diagnostics_sheet();
 }
 
+static void wifi_refresh_sheet(void)
+{
+    d1l_app_model_snapshot(&s_snapshot);
+    render_wifi_sheet();
+}
+
+static void wifi_textarea_event_cb(lv_event_t *event)
+{
+    if (!s_wifi_keyboard) {
+        return;
+    }
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
+        lv_obj_t *textarea = lv_event_get_target(event);
+        if (textarea == s_wifi_ssid_textarea || textarea == s_wifi_password_textarea) {
+            lv_keyboard_set_textarea(s_wifi_keyboard, textarea);
+        }
+    }
+}
+
+static void wifi_save_event_cb(lv_event_t *event)
+{
+    (void)event;
+    const char *ssid = s_wifi_ssid_textarea ? lv_textarea_get_text(s_wifi_ssid_textarea) : "";
+    const char *password = s_wifi_password_textarea ? lv_textarea_get_text(s_wifi_password_textarea) : "";
+    esp_err_t ret = d1l_app_model_save_wifi_profile(ssid, password && password[0] ? password : NULL);
+    show_toast("Wi-Fi profile", ret);
+    if (ret == ESP_OK) {
+        wifi_refresh_sheet();
+        render_active_tab();
+    }
+}
+
+static void wifi_clear_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_clear_wifi_profile();
+    show_toast("Wi-Fi clear", ret);
+    if (ret == ESP_OK) {
+        wifi_refresh_sheet();
+        render_active_tab();
+    }
+}
+
+static void wifi_toggle_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled);
+    show_toast("Wi-Fi", ret);
+    if (ret == ESP_OK) {
+        wifi_refresh_sheet();
+        render_active_tab();
+    }
+}
+
+static void wifi_keyboard_event_cb(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) {
+        wifi_save_event_cb(event);
+    } else if (code == LV_EVENT_CANCEL) {
+        hide_wifi_sheet();
+    }
+}
+
+static void ble_toggle_event_cb(lv_event_t *event)
+{
+    (void)event;
+    esp_err_t ret = d1l_app_model_set_ble_enabled(!s_snapshot.ble_companion_enabled);
+    show_toast("BLE", ret);
+    if (ret == ESP_OK) {
+        d1l_app_model_snapshot(&s_snapshot);
+        render_ble_sheet();
+        render_active_tab();
+    }
+}
+
 static void render_wifi_sheet(void)
 {
     if (!s_wifi_sheet) {
         return;
     }
     lv_obj_clean(s_wifi_sheet);
+    s_wifi_ssid_textarea = NULL;
+    s_wifi_password_textarea = NULL;
+    s_wifi_keyboard = NULL;
 
     lv_obj_t *title = create_label(s_wifi_sheet, "Wi-Fi Setup", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
@@ -3987,41 +4070,69 @@ static void render_wifi_sheet(void)
                   s_snapshot.wifi_state ? s_snapshot.wifi_state : "off",
                   s_snapshot.wifi_build_enabled ? "enabled" : "not built");
     label_set_dot_width(state, 408);
-    lv_obj_set_pos(state, 8, 54);
+    lv_obj_set_pos(state, 8, 46);
 
-    lv_obj_t *purpose = create_label(s_wifi_sheet,
-                                     "Used for time sync, optional tile downloads, and local management.",
-                                     0xE5EDF5);
-    lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(purpose, 408);
-    lv_obj_set_pos(purpose, 8, 88);
+    lv_obj_t *profile = create_label(s_wifi_sheet, "", 0xE5EDF5);
+    label_set_fmt(profile, "Profile %s  password %s",
+                  s_snapshot.wifi_profile_saved ?
+                  (s_snapshot.wifi_ssid[0] ? s_snapshot.wifi_ssid : "saved") : "not saved",
+                  s_snapshot.wifi_password_saved ? "saved" : "open/empty");
+    label_set_dot_width(profile, 408);
+    lv_obj_set_pos(profile, 8, 72);
 
-    lv_obj_t *runtime = create_label(s_wifi_sheet,
-                                     "Network scan/connect/save is not enabled in this build yet.",
-                                     0xFBBF24);
-    lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(runtime, 408);
-    lv_obj_set_pos(runtime, 8, 144);
-
-    lv_obj_t *scan = create_button(s_wifi_sheet, "Scan", 8, 206, 88, 40, NULL, NULL);
-    lv_obj_t *save = create_button(s_wifi_sheet, "Save", 106, 206, 88, 40, NULL, NULL);
-    lv_obj_t *clear = create_button(s_wifi_sheet, "Clear", 204, 206, 88, 40, NULL, NULL);
-    if (scan) {
-        lv_obj_add_state(scan, LV_STATE_DISABLED);
+    lv_obj_t *ssid_label = create_label(s_wifi_sheet, "Network name", 0x5EEAD4);
+    lv_obj_set_pos(ssid_label, 8, 98);
+    s_wifi_ssid_textarea = create_textarea(s_wifi_sheet, "wifi ssid textarea");
+    if (s_wifi_ssid_textarea) {
+        lv_obj_set_size(s_wifi_ssid_textarea, 424, 38);
+        lv_obj_set_pos(s_wifi_ssid_textarea, 0, 118);
+        lv_textarea_set_one_line(s_wifi_ssid_textarea, true);
+        lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U);
+        lv_textarea_set_placeholder_text(s_wifi_ssid_textarea, "SSID");
+        lv_textarea_set_text(s_wifi_ssid_textarea, s_snapshot.wifi_ssid);
+        lv_obj_set_style_radius(s_wifi_ssid_textarea, 8, 0);
+        lv_obj_set_style_bg_color(s_wifi_ssid_textarea, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_border_color(s_wifi_ssid_textarea, lv_color_hex(0x263241), 0);
+        lv_obj_set_style_text_color(s_wifi_ssid_textarea, lv_color_hex(0xF4F7FB), 0);
+        lv_obj_add_event_cb(s_wifi_ssid_textarea, wifi_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(s_wifi_ssid_textarea, wifi_textarea_event_cb, LV_EVENT_CLICKED, NULL);
     }
-    if (save) {
-        lv_obj_add_state(save, LV_STATE_DISABLED);
-    }
-    if (clear) {
-        lv_obj_add_state(clear, LV_STATE_DISABLED);
+
+    lv_obj_t *password_label = create_label(s_wifi_sheet, "Password", 0x5EEAD4);
+    lv_obj_set_pos(password_label, 8, 158);
+    s_wifi_password_textarea = create_textarea(s_wifi_sheet, "wifi password textarea");
+    if (s_wifi_password_textarea) {
+        lv_obj_set_size(s_wifi_password_textarea, 424, 38);
+        lv_obj_set_pos(s_wifi_password_textarea, 0, 178);
+        lv_textarea_set_one_line(s_wifi_password_textarea, true);
+        lv_textarea_set_password_mode(s_wifi_password_textarea, true);
+        lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U);
+        lv_textarea_set_placeholder_text(s_wifi_password_textarea,
+                                         s_snapshot.wifi_password_saved ? "Saved; enter to replace" : "Optional");
+        lv_textarea_set_text(s_wifi_password_textarea, "");
+        lv_obj_set_style_radius(s_wifi_password_textarea, 8, 0);
+        lv_obj_set_style_bg_color(s_wifi_password_textarea, lv_color_hex(0x071018), 0);
+        lv_obj_set_style_border_color(s_wifi_password_textarea, lv_color_hex(0x263241), 0);
+        lv_obj_set_style_text_color(s_wifi_password_textarea, lv_color_hex(0xF4F7FB), 0);
+        lv_obj_add_event_cb(s_wifi_password_textarea, wifi_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(s_wifi_password_textarea, wifi_textarea_event_cb, LV_EVENT_CLICKED, NULL);
     }
 
-    lv_obj_t *note = create_label(s_wifi_sheet,
-                                  "Buttons are placeholders until the Wi-Fi runtime is wired.",
-                                  0x8EA0AE);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, 408);
-    lv_obj_set_pos(note, 8, 264);
+    s_wifi_keyboard = create_keyboard(s_wifi_sheet, "wifi keyboard");
+    if (s_wifi_keyboard) {
+        lv_obj_set_size(s_wifi_keyboard, 424, 120);
+        lv_obj_set_pos(s_wifi_keyboard, 0, 222);
+        if (s_wifi_ssid_textarea) {
+            lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_ssid_textarea);
+        }
+        lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_READY, NULL);
+        lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
+    }
+
+    create_button(s_wifi_sheet, "Save", 8, 346, 88, 38, wifi_save_event_cb, NULL);
+    create_button(s_wifi_sheet, "Clear", 106, 346, 88, 38, wifi_clear_event_cb, NULL);
+    create_button(s_wifi_sheet, s_snapshot.wifi_enabled ? "Disable" : "Enable",
+                  204, 346, 98, 38, wifi_toggle_event_cb, NULL);
 }
 
 static void render_ble_sheet(void)
@@ -4051,18 +4162,17 @@ static void render_ble_sheet(void)
     lv_obj_set_pos(purpose, 8, 88);
 
     lv_obj_t *runtime = create_label(s_ble_sheet,
-                                     "Enable/disable and pairing controls are pending runtime support.",
+                                     "Pairing controls are gated until the measured BLE runtime is enabled.",
                                      0xFBBF24);
     lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(runtime, 408);
     lv_obj_set_pos(runtime, 8, 144);
 
-    lv_obj_t *enable = create_button(s_ble_sheet, "Enable", 8, 206, 98, 40, NULL, NULL);
+    lv_obj_t *enable = create_button(s_ble_sheet,
+                                     s_snapshot.ble_companion_enabled ? "Disable" : "Enable",
+                                     8, 206, 98, 40, ble_toggle_event_cb, NULL);
     lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
     lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
-    if (enable) {
-        lv_obj_add_state(enable, LV_STATE_DISABLED);
-    }
     if (pair) {
         lv_obj_add_state(pair, LV_STATE_DISABLED);
     }
@@ -4906,8 +5016,8 @@ static void create_wifi_sheet(lv_obj_t *screen)
     if (!s_wifi_sheet) {
         return;
     }
-    lv_obj_set_size(s_wifi_sheet, 448, 320);
-    lv_obj_set_pos(s_wifi_sheet, 16, 82);
+    lv_obj_set_size(s_wifi_sheet, 448, 392);
+    lv_obj_set_pos(s_wifi_sheet, 16, 44);
     lv_obj_set_style_radius(s_wifi_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_wifi_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_wifi_sheet, lv_color_hex(0x334155), 0);

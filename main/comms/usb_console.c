@@ -3431,6 +3431,9 @@ static const char *wifi_scan_reason(const d1l_connectivity_status_t *status)
     if (!status->wifi_build_enabled) {
         return "build_disabled";
     }
+    if (!status->wifi_profile_saved) {
+        return "profile_required";
+    }
     return "scan_stack_pending";
 }
 
@@ -3439,9 +3442,12 @@ static void cmd_wifi_status(void)
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
     ok_begin("wifi status");
-    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"scan_supported\":%s,\"state\":\"%s\",\"policy\":\"%s\"}\n",
+    printf(",\"setting_enabled\":%s,\"build_enabled\":%s,\"stack_active\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
            bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
            bool_json(status.wifi_stack_active), bool_json(status.wifi_scan_supported),
+           bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
+    print_json_string(status.wifi_profile_saved ? status.wifi_ssid : "");
+    printf(",\"state\":\"%s\",\"policy\":\"%s\",\"live_network\":false}\n",
            status.wifi_state, status.coexistence_policy);
 }
 
@@ -3470,10 +3476,73 @@ static void cmd_wifi_on(void)
                    ret == ESP_ERR_NOT_SUPPORTED ?
                    (status.wifi_build_enabled ? "WIFI_RUNTIME_PENDING" : "WIFI_BUILD_DISABLED") :
                    esp_err_to_name(ret),
-                   "Wi-Fi enable/start is pending a later measured connectivity build");
+                   "Wi-Fi build support is unavailable in this release build");
         return;
     }
     cmd_wifi_status();
+}
+
+static void cmd_wifi_save(const char *line)
+{
+    const char *args = line + strlen("wifi save ");
+    while (*args == ' ') {
+        args++;
+    }
+    if (args[0] == '\0') {
+        err_result("wifi save", "INVALID_ARG", "usage: wifi save <ssid> [password]");
+        return;
+    }
+    char ssid[D1L_WIFI_SSID_LEN] = {0};
+    char password[D1L_WIFI_PASSWORD_LEN] = {0};
+    const char *space = strchr(args, ' ');
+    const char *password_to_save = NULL;
+    size_t ssid_len = space ? (size_t)(space - args) : strlen(args);
+    if (ssid_len == 0 || ssid_len >= sizeof(ssid)) {
+        err_result("wifi save", "INVALID_SSID", "SSID must be 1-32 printable characters without spaces");
+        return;
+    }
+    memcpy(ssid, args, ssid_len);
+    ssid[ssid_len] = '\0';
+    if (space) {
+        const char *password_arg = space + 1;
+        while (*password_arg == ' ') {
+            password_arg++;
+        }
+        if (strlen(password_arg) >= sizeof(password)) {
+            err_result("wifi save", "INVALID_PASSWORD", "password must fit in 64 characters");
+            return;
+        }
+        snprintf(password, sizeof(password), "%s", password_arg);
+        if (password[0] != '\0') {
+            password_to_save = password;
+        }
+    }
+    esp_err_t ret = d1l_connectivity_save_wifi_profile(ssid, password_to_save);
+    if (ret != ESP_OK) {
+        err_result("wifi save", esp_err_to_name(ret), "could not persist Wi-Fi profile");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi save");
+    printf(",\"persisted\":true,\"profile_saved\":%s,\"password_saved\":%s,\"ssid\":",
+           bool_json(status.wifi_profile_saved), bool_json(status.wifi_password_saved));
+    print_json_string(status.wifi_ssid ? status.wifi_ssid : "");
+    printf(",\"public_rf_tx\":false,\"note\":\"Wi-Fi profile saved for the measured runtime path; password is not printed\"}\n");
+}
+
+static void cmd_wifi_clear(void)
+{
+    esp_err_t ret = d1l_connectivity_clear_wifi_profile();
+    if (ret != ESP_OK) {
+        err_result("wifi clear", esp_err_to_name(ret), "could not clear Wi-Fi profile");
+        return;
+    }
+    d1l_connectivity_status_t status = {0};
+    d1l_connectivity_status(&status);
+    ok_begin("wifi clear");
+    printf(",\"persisted\":true,\"profile_saved\":%s,\"setting_enabled\":%s,\"ssid\":\"\"}\n",
+           bool_json(status.wifi_profile_saved), bool_json(status.wifi_enabled_setting));
 }
 
 static void cmd_wifi_scan(void)
@@ -3481,9 +3550,10 @@ static void cmd_wifi_scan(void)
     d1l_connectivity_status_t status = {0};
     d1l_connectivity_status(&status);
     ok_begin("wifi scan");
-    printf(",\"scan_started\":false,\"networks\":[],\"setting_enabled\":%s,\"build_enabled\":%s,\"scan_supported\":%s,\"state\":\"%s\",\"reason\":\"%s\"}\n",
+    printf(",\"scan_started\":false,\"networks\":[],\"setting_enabled\":%s,\"build_enabled\":%s,\"scan_supported\":%s,\"profile_saved\":%s,\"state\":\"%s\",\"reason\":\"%s\"}\n",
            bool_json(status.wifi_enabled_setting), bool_json(status.wifi_build_enabled),
-           bool_json(status.wifi_scan_supported), status.wifi_state, wifi_scan_reason(&status));
+           bool_json(status.wifi_scan_supported), bool_json(status.wifi_profile_saved),
+           status.wifi_state, wifi_scan_reason(&status));
 }
 
 static void cmd_ble_status(void)
@@ -3530,7 +3600,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage map-policy\",\"storage setup\",\"storage setup confirm FORMAT-DESKOS-SD\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [search <text>]\",\"messages dm [fingerprint]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3711,6 +3781,10 @@ static void handle_line(const char *line)
         cmd_wifi_on();
     } else if (strcmp(line, "wifi scan") == 0) {
         cmd_wifi_scan();
+    } else if (strncmp(line, "wifi save ", strlen("wifi save ")) == 0) {
+        cmd_wifi_save(line);
+    } else if (strcmp(line, "wifi clear") == 0) {
+        cmd_wifi_clear();
     } else if (strcmp(line, "ble status") == 0) {
         cmd_ble_status();
     } else if (strcmp(line, "ble off") == 0) {

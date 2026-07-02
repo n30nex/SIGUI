@@ -1370,24 +1370,26 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
 
 
 def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Wi-Fi Setup", "Network features are optional")
+    draw_sheet_frame(s, "Wi-Fi Setup", "Profile and state")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_wifi_setup", destination="home")
-    s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
-    s.text("Used for time sync, optional tile downloads, and local management.", (44, 194, 436, 236), 13, TEXT)
-    s.text("Network scan/connect/save is pending runtime support.", (44, 252, 436, 294), 13, AMBER)
-    draw_button(s, (44, 318, 132, 360), "Scan", BLUE, action="wifi_scan")
-    draw_button(s, (144, 318, 232, 360), "Save", GREEN, action="wifi_save")
-    draw_button(s, (244, 318, 332, 360), "Clear", AMBER, action="wifi_clear")
-    s.text("Buttons are placeholders until Wi-Fi runtime is wired.", (44, 374, 436, 404), 12, MUTED)
+    s.text("State off  build enabled", (44, 146, 436, 168), 14, AMBER, True)
+    s.text("Profile not saved  password open/empty", (44, 174, 436, 196), 13, TEXT)
+    s.text("Network name", (44, 208, 200, 228), 13, GREEN, True)
+    s.text("SSID", (54, 238, 420, 260), 14, MUTED)
+    s.text("Password", (44, 272, 200, 292), 13, GREEN, True)
+    s.text("Optional", (54, 302, 420, 324), 14, MUTED)
+    draw_button(s, (44, 360, 132, 400), "Save", GREEN, action="wifi_save")
+    draw_button(s, (144, 360, 232, 400), "Clear", AMBER, action="wifi_clear")
+    draw_button(s, (244, 360, 342, 400), "Enable", BLUE, action="wifi_enable")
     draw_dock(s, "Home")
 
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "BLE Setup", "Companion pairing status")
+    draw_sheet_frame(s, "BLE Setup", "Companion state")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="home")
     s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
     s.text("Companion BLE is for official app pairing and local setup when enabled.", (44, 194, 436, 236), 13, TEXT)
-    s.text("Enable/disable and pairing controls are pending runtime support.", (44, 252, 436, 294), 13, AMBER)
+    s.text("Pairing controls are gated until the measured BLE runtime is enabled.", (44, 252, 436, 294), 13, AMBER)
     draw_button(s, (44, 318, 142, 360), "Enable", BLUE, action="ble_enable")
     draw_button(s, (154, 318, 252, 360), "Pair", GREEN, action="ble_pair")
     draw_button(s, (264, 318, 362, 360), "Forget", AMBER, action="ble_forget")
@@ -1660,16 +1662,20 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "wifi_setup_sheet": (
         "Wi-Fi Setup",
-        "Network features are optional",
-        "State off  build disabled",
-        "Scan",
+        "Profile and state",
+        "State off  build enabled",
+        "Network name",
+        "Password",
+        "SSID",
+        "Optional",
         "Save",
         "Clear",
+        "Enable",
         "Close",
     ),
     "ble_setup_sheet": (
         "BLE Setup",
-        "Companion pairing status",
+        "Companion state",
         "State off  build disabled",
         "Enable",
         "Pair",

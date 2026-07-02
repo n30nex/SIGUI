@@ -6,6 +6,7 @@
 
 #include "esp_err.h"
 
+#include "app/settings_model.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
@@ -74,6 +75,8 @@ typedef struct {
     bool wifi_enabled;
     bool ble_companion_enabled;
     bool observer_enabled;
+    bool wifi_profile_saved;
+    bool wifi_password_saved;
     bool onboarding_complete;
     bool wifi_build_enabled;
     bool ble_build_enabled;
@@ -125,6 +128,7 @@ typedef struct {
     esp_err_t storage_last_error;
     char time_label[8];
     char node_name[32];
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
     char identity_fingerprint[17];
     const char *reset_reason;
     const char *mesh_state;
@@ -218,6 +222,10 @@ esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_clear_map_location(void);
+esp_err_t d1l_app_model_set_wifi_enabled(bool enabled);
+esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password);
+esp_err_t d1l_app_model_clear_wifi_profile(void);
+esp_err_t d1l_app_model_set_ble_enabled(bool enabled);
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile);
 void d1l_app_model_default_radio_profile(d1l_app_radio_profile_edit_t *profile);
 esp_err_t d1l_app_model_save_radio_profile(const d1l_app_radio_profile_edit_t *profile);

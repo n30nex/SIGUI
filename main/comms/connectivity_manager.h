@@ -14,8 +14,11 @@ typedef struct {
     bool wifi_scan_supported;
     bool wifi_stack_active;
     bool ble_stack_active;
+    bool wifi_profile_saved;
+    bool wifi_password_saved;
     const char *wifi_state;
     const char *ble_state;
+    const char *wifi_ssid;
     const char *coexistence_policy;
 } d1l_connectivity_status_t;
 
@@ -23,4 +26,5 @@ esp_err_t d1l_connectivity_init(void);
 void d1l_connectivity_status(d1l_connectivity_status_t *out_status);
 esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled);
 esp_err_t d1l_connectivity_set_ble_enabled(bool enabled);
-
+esp_err_t d1l_connectivity_save_wifi_profile(const char *ssid, const char *password);
+esp_err_t d1l_connectivity_clear_wifi_profile(void);

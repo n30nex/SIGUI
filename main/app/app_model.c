@@ -228,6 +228,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
     snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
     snapshot->observer_enabled = connectivity.observer_enabled_setting;
+    snapshot->wifi_profile_saved = connectivity.wifi_profile_saved;
+    snapshot->wifi_password_saved = connectivity.wifi_password_saved;
     snapshot->onboarding_complete = settings->onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
@@ -279,6 +281,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->time_available = false;
     snprintf(snapshot->time_label, sizeof(snapshot->time_label), "--:--");
     snprintf(snapshot->node_name, sizeof(snapshot->node_name), "%s", settings->node_name);
+    copy_cstr(snapshot->wifi_ssid, sizeof(snapshot->wifi_ssid),
+              connectivity.wifi_ssid ? connectivity.wifi_ssid : "");
     if (settings->identity_ready) {
         hex_prefix(snapshot->identity_fingerprint, sizeof(snapshot->identity_fingerprint),
                    settings->identity_public_key, 8U);
@@ -473,6 +477,26 @@ esp_err_t d1l_app_model_clear_map_location(void)
     settings.map_lat_e7 = 0;
     settings.map_lon_e7 = 0;
     return d1l_settings_save(&settings);
+}
+
+esp_err_t d1l_app_model_set_wifi_enabled(bool enabled)
+{
+    return d1l_connectivity_set_wifi_enabled(enabled);
+}
+
+esp_err_t d1l_app_model_save_wifi_profile(const char *ssid, const char *password)
+{
+    return d1l_connectivity_save_wifi_profile(ssid, password);
+}
+
+esp_err_t d1l_app_model_clear_wifi_profile(void)
+{
+    return d1l_connectivity_clear_wifi_profile();
+}
+
+esp_err_t d1l_app_model_set_ble_enabled(bool enabled)
+{
+    return d1l_connectivity_set_ble_enabled(enabled);
 }
 
 void d1l_app_model_current_radio_profile(d1l_app_radio_profile_edit_t *profile)

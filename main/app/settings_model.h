@@ -6,8 +6,10 @@
 #include "esp_err.h"
 #include "mesh/meshcore_radio_profile.h"
 
-#define D1L_SETTINGS_SCHEMA_VERSION 4U
+#define D1L_SETTINGS_SCHEMA_VERSION 5U
 #define D1L_NODE_NAME_LEN 32U
+#define D1L_WIFI_SSID_LEN 33U
+#define D1L_WIFI_PASSWORD_LEN 65U
 #define D1L_IDENTITY_PUBLIC_KEY_LEN 32U
 #define D1L_IDENTITY_PRIVATE_KEY_LEN 64U
 #define D1L_MAP_LOCATION_LAT_E7_MIN (-900000000L)
@@ -33,7 +35,10 @@ typedef struct {
     bool high_contrast;
     bool night_mode;
     bool onboarding_complete;
+    bool wifi_profile_saved;
     uint8_t path_hash_bytes;
+    char wifi_ssid[D1L_WIFI_SSID_LEN];
+    char wifi_password[D1L_WIFI_PASSWORD_LEN];
     uint32_t frequency_hz;
     uint16_t bandwidth_tenths_khz;
     uint8_t spreading_factor;
@@ -54,6 +59,8 @@ void d1l_settings_sanitize(d1l_settings_t *settings);
 esp_err_t d1l_settings_load(void);
 esp_err_t d1l_settings_save(const d1l_settings_t *settings);
 esp_err_t d1l_settings_reset(void);
+esp_err_t d1l_settings_save_wifi_profile(const char *ssid, const char *password);
+esp_err_t d1l_settings_clear_wifi_profile(void);
 esp_err_t d1l_settings_complete_onboarding(const char *node_name, bool wifi_enabled,
                                            bool ble_companion_enabled, bool observer_enabled);
 esp_err_t d1l_settings_reset_onboarding(void);

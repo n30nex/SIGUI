@@ -13,7 +13,12 @@ def read(rel: str) -> str:
 def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 4U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 5U" in header
+    assert "D1L_WIFI_SSID_LEN 33U" in header
+    assert "D1L_WIFI_PASSWORD_LEN 65U" in header
+    assert "wifi_profile_saved" in header
+    assert "wifi_ssid" in header
+    assert "wifi_password" in header
     assert "identity_public_key" in header
     assert "identity_private_key" in header
     assert "onboarding_complete" in header
@@ -27,10 +32,18 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_next_mesh_timestamp" in header
     assert "d1l_settings_v2_t" in source
     assert "d1l_settings_v3_t" in source
+    assert "d1l_settings_v4_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
+    assert "migrate_v4_settings" in source
+    assert "if (loaded_schema == 4U)" in source
     assert "if (loaded_schema == 3U)" in source
     assert "if (loaded_schema == 2U)" in source
+    assert "d1l_settings_save_wifi_profile" in header
+    assert "d1l_settings_clear_wifi_profile" in header
+    assert "strlen(ssid) >= D1L_WIFI_SSID_LEN" in source
+    assert "settings.wifi_profile_saved = true" in source
+    assert "settings.wifi_enabled = false" in source
     assert "dest->map_location_set = false" in source
     assert "dest->onboarding_complete = true" in source
     assert 'D1L_SETTINGS_NAMESPACE "d1l_settings"' in source
@@ -47,6 +60,9 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->ble_companion_enabled = false" in source
     assert "settings->observer_enabled = false" in source
     assert "settings->onboarding_complete = false" in source
+    assert "settings->wifi_profile_saved = false" in source
+    assert "settings->wifi_ssid[0] = '\\0'" in source
+    assert "settings->wifi_password[0] = '\\0'" in source
     assert "settings->map_location_set = false" in source
     assert "settings->map_lat_e7 = 0" in source
     assert "settings->map_lon_e7 = 0" in source
@@ -80,6 +96,8 @@ def test_console_exposes_phase2_foundation_commands():
         "radio set rxboost",
         "mesh advert flood",
         "wifi status",
+        "wifi save",
+        "wifi clear",
         "wifi off",
         "crashlog",
         "ble status",
@@ -99,6 +117,9 @@ def test_console_exposes_phase2_foundation_commands():
     assert "stored_nvs_ed25519" in console
     assert "d1l_connectivity_set_wifi_enabled(false)" in console
     assert "d1l_connectivity_set_ble_enabled(false)" in console
+    assert "d1l_connectivity_save_wifi_profile(ssid, password_to_save)" in console
+    assert "d1l_connectivity_clear_wifi_profile()" in console
+    assert "password is not printed" in console
     assert "disabled_by_setting" in console
     assert '\\"radio\\":{\\"frequency_hz\\":%lu' in console
     assert "cmd_radio_set_txpower" in console

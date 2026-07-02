@@ -610,6 +610,9 @@ def test_settings_screen_reports_companion_wireless_state():
     header = read("main/app/app_model.h")
     assert "wifi_state" in header
     assert "ble_state" in header
+    assert "wifi_profile_saved" in header
+    assert "wifi_password_saved" in header
+    assert "wifi_ssid" in header
     assert "coexistence_policy" in header
     assert '"Wireless"' in source
     assert '"MeshCore"' in source
@@ -636,8 +639,18 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"BLE Setup"' in source
     assert '"Display"' in source
     assert '"Diagnostics"' in source
-    assert '"Network scan/connect/save is not enabled in this build yet."' in source
-    assert '"Enable/disable and pairing controls are pending runtime support."' in source
+    assert "static lv_obj_t *s_wifi_ssid_textarea" in source
+    assert "static lv_obj_t *s_wifi_password_textarea" in source
+    assert "static lv_obj_t *s_wifi_keyboard" in source
+    assert "d1l_app_model_save_wifi_profile(ssid, password && password[0] ? password : NULL)" in source
+    assert "d1l_app_model_clear_wifi_profile()" in source
+    assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
+    assert "d1l_app_model_set_ble_enabled(!s_snapshot.ble_companion_enabled)" in source
+    assert "lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U)" in source
+    assert "lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U)" in source
+    assert '"Network name"' in source
+    assert '"Password"' in source
+    assert '"Pairing controls are gated until the measured BLE runtime is enabled."' in source
     assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in source
     assert '"Advanced details stay here so normal screens remain simple."' in source
     assert "render_health_line" in source
