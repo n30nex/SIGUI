@@ -44,6 +44,10 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "esp_wifi_scan_start(NULL, true)" in source
     assert "esp_wifi_scan_get_ap_records" in source
     assert "esp_wifi_set_config(WIFI_IF_STA, &config)" in source
+    assert "copy_wifi_config_field(config.sta.ssid" in source
+    assert "copy_wifi_config_field(config.sta.password" in source
+    assert "snprintf((char *)config.sta.ssid" not in source
+    assert "snprintf((char *)config.sta.password" not in source
     assert "esp_wifi_connect()" in source
     assert "WIFI_STORAGE_RAM" in source
     assert "ESP_ERR_NOT_SUPPORTED" in source

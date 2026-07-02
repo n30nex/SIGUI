@@ -236,6 +236,22 @@ static void copy_scan_record(d1l_wifi_scan_ap_t *dest, const wifi_ap_record_t *s
     dest->channel = src->primary;
     dest->auth = wifi_auth_name(src->authmode);
 }
+
+static void copy_wifi_config_field(uint8_t *dest, size_t dest_size, const char *src)
+{
+    if (!dest || dest_size == 0U) {
+        return;
+    }
+    memset(dest, 0, dest_size);
+    if (!src) {
+        return;
+    }
+    size_t len = 0;
+    while (len < dest_size && src[len] != '\0') {
+        dest[len] = (uint8_t)src[len];
+        len++;
+    }
+}
 #endif
 
 static void fill_status(d1l_connectivity_status_t *out_status)
@@ -398,9 +414,10 @@ esp_err_t d1l_connectivity_wifi_connect(void)
         return ret;
     }
     wifi_config_t config = {0};
-    snprintf((char *)config.sta.ssid, sizeof(config.sta.ssid), "%s", settings->wifi_ssid);
-    snprintf((char *)config.sta.password, sizeof(config.sta.password), "%s",
-             settings->wifi_password);
+    copy_wifi_config_field(config.sta.ssid, sizeof(config.sta.ssid),
+                           settings->wifi_ssid);
+    copy_wifi_config_field(config.sta.password, sizeof(config.sta.password),
+                           settings->wifi_password);
     config.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     config.sta.pmf_cfg.capable = true;

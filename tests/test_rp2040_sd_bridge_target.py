@@ -72,6 +72,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "MeshCore DeskOS D1L SD" in sketch
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
+    assert '"none",\n        false,\n        0,\n        0,' in sketch
+    assert '"none",\n        false,\n        false,\n        0,\n        0,' not in sketch
 
     for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch

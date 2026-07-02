@@ -181,6 +181,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage filecanary" in console
     assert "storage map-tile-canary <token>" in console
     assert "storage map-tile-download <z> <x> <y> <url-template> <attribution>" in console
+    assert "bool_json(download_supported)" in console
+    assert "bool_json(live_network_download)" in console
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
     assert 'strcmp(line, "storage mount")' in console

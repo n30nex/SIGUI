@@ -1103,7 +1103,9 @@ static void cmd_storage_map_policy(void)
                                  !connectivity.wifi_connected ? "wifi_required" :
                                  D1L_MAP_TILE_DOWNLOAD_STATE;
     printf(",\"zoom_max\":%u,\"sideload_supported\":true,\"canary_command\":\"storage map-tile-canary <token>\",\"download_command\":\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
-           (unsigned)D1L_MAP_TILE_ZOOM_MAX);
+           (unsigned)D1L_MAP_TILE_ZOOM_MAX,
+           bool_json(download_supported),
+           bool_json(live_network_download));
     print_json_string(download_state);
     printf(",\"download_requires\":");
     print_json_string(D1L_MAP_TILE_DOWNLOAD_REQUIRES);
