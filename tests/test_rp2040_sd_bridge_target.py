@@ -27,6 +27,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '#include <SdFat.h>' in sketch
     assert '#include <SDFS.h>' in sketch
     assert '#include <SPI.h>' in sketch
+    assert '#include <Wire.h>' in sketch
     assert '#include <hardware/gpio.h>' in sketch
     assert "USE_SD_CRC" not in sketch
     assert "USE_SPI_ARRAY_TRANSFER" not in sketch
@@ -42,6 +43,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
     assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
+    assert "constexpr uint8_t SD_I2C_SDA_PIN = 20;" in sketch
+    assert "constexpr uint8_t SD_I2C_SCL_PIN = 21;" in sketch
     assert "constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;" in sketch
     assert "constexpr uint16_t SD_POWER_SETTLE_MS = 1000;" in sketch
     assert "constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;" in sketch
@@ -65,8 +68,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.end()" in sketch
-    assert "SPI1.setMOSI(SD_MOSI_PIN)" in sketch
-    assert "SPI1.setMISO(SD_MISO_PIN)" in sketch
+    assert "SPI1.setMOSI(SD_MOSI_PIN)" not in sketch
+    assert "SPI1.setMISO(SD_MISO_PIN)" not in sketch
+    assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
+    assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SPI1.setCS(SD_CS_PIN)" not in sketch
     assert "s_sd_pin_cs_ok = true;" in sketch
     assert "bool s_sd_mounted = false;" in sketch
@@ -83,6 +88,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN)" in seeed_config
     assert "s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN)" in seeed_config
     assert "s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN)" in seeed_config
+    assert "Wire.setSDA(SD_I2C_SDA_PIN)" in seeed_config
+    assert "Wire.setSCL(SD_I2C_SCL_PIN)" in seeed_config
+    assert "Wire.begin()" in seeed_config
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch

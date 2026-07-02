@@ -68,8 +68,8 @@ package's default SD library settings. The filesystem path runs on the
 protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
 the RP2040 core1 worker. It first tries the already-powered high/dedicated
 Arduino-Pico SPI1 path using Seeed's published MicroSD sample sequence:
-drive GPIO18 high, set `SPI1` SCK/TX/RX to GPIO10/11/12, then call
-`SD.begin(13, 1000000, SPI1)`. This first attempt intentionally avoids
+drive GPIO18 high, initialize `Wire` on SDA20/SCL21, set `SPI1` SCK/TX/RX to
+GPIO10/11/12, then call `SD.begin(13, 1000000, SPI1)`. This first attempt intentionally avoids
 manual CS biasing, pre-clocking, explicit `SPI1.begin()`, or a second SdFat
 probe before failure handling. If that
 library path does not mount, it falls back to bounded raw SPI presence probes across the high/low rail and

@@ -4,6 +4,7 @@
 #include <SdFat.h>
 #include <SDFS.h>
 #include <SPI.h>
+#include <Wire.h>
 #include <hardware/gpio.h>
 
 namespace {
@@ -29,6 +30,8 @@ constexpr uint8_t SD_SCK_PIN = 10;
 constexpr uint8_t SD_MOSI_PIN = 11;
 constexpr uint8_t SD_MISO_PIN = 12;
 constexpr uint8_t SD_POWER_PIN = 18;
+constexpr uint8_t SD_I2C_SDA_PIN = 20;
+constexpr uint8_t SD_I2C_SCL_PIN = 21;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
 constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;
@@ -202,8 +205,8 @@ void settle_sd_power(bool power_high, bool force_power_cycle) {
 void configure_sd_spi_pins() {
     pinMode(SD_MISO_PIN, INPUT_PULLUP);
     s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
-    s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN);
-    s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN);
+    s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN);
+    s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN);
     s_sd_pin_cs_ok = true;
 }
 
@@ -249,6 +252,9 @@ void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
     }
     digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
     s_sd_power_high = power_high;
+    Wire.setSDA(SD_I2C_SDA_PIN);
+    Wire.setSCL(SD_I2C_SCL_PIN);
+    Wire.begin();
     s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
     s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN);
     s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN);

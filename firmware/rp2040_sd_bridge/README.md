@@ -14,11 +14,13 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
+- Internal sensor/I2C bus used by Seeed's SD example: SDA GPIO20, SCL GPIO21.
 - The first explicit mount attempt follows Seeed's published MicroSD sample
-  sequence exactly: drive GPIO18 high, set `SPI1` SCK/TX/RX to GPIO10/11/12,
-  then call `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the
-  selected rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send
-  idle clocks so warm-reset cards can re-enter SPI init. SD MISO uses the
+  sequence exactly: drive GPIO18 high, initialize `Wire` on SDA20/SCL21, set
+  `SPI1` SCK/TX/RX to GPIO10/11/12, then call
+  `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the selected
+  rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send idle
+  clocks so warm-reset cards can re-enter SPI init. SD MISO uses the
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
