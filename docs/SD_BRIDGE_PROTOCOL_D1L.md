@@ -152,9 +152,15 @@ RP2040 should reply with the post-format status, preferably using the format pre
 DESKOS_SD_FORMAT state=ready present=1 mounted=1 deskos=1 fs=fat32 format_required=0 format_supported=1 capacity_kb=31166976 free_kb=31166976 note=format_complete
 ```
 
-During FAT initialization the RP2040 may stream unprefixed SdFat progress text
-on the same UART. The ESP32 treats that text only as keepalive activity and
-continues waiting for the terminal `DESKOS_SD_FORMAT ...` reply. A generic
+During FAT initialization the RP2040 may stream progress lines on the same UART:
+
+```text
+DESKOS_SD_FORMAT_PROGRESS step=fat_format_start
+```
+
+The ESP32 treats those lines only as keepalive/progress evidence and continues
+waiting for the terminal `DESKOS_SD_FORMAT ...` reply. If that final reply never
+arrives, timeout notes include the last observed progress step. A generic
 `DESKOS_SD_STATUS ...` line is intentionally ignored so stale status polls
 cannot be mistaken for confirmed format completion.
 

@@ -24,6 +24,64 @@ REQUIRED_NOTICE_FILES = {
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
 }
 FULL_SOAK_SECONDS = 12 * 60 * 60
+TOP_LEVEL_COMMIT_FIELDS = (
+    "commit",
+    "commit_sha",
+    "commitSha",
+    "head_sha",
+    "headSha",
+    "head_sha256",
+    "git_commit",
+    "gitCommit",
+    "git_sha",
+    "gitSha",
+    "source_commit",
+    "sourceCommit",
+    "source_head_sha",
+    "sourceHeadSha",
+    "firmware_commit",
+    "firmwareCommit",
+    "firmware_head_sha",
+    "firmwareHeadSha",
+    "firmware_git_sha",
+    "firmwareGitSha",
+    "build_commit",
+    "buildCommit",
+    "build_head_sha",
+    "buildHeadSha",
+    "workflow_sha",
+    "workflowSha",
+    "github_sha",
+    "githubSha",
+)
+NESTED_COMMIT_FIELDS = (
+    "commit",
+    "commit_sha",
+    "commitSha",
+    "head_sha",
+    "headSha",
+    "head_sha256",
+    "git_commit",
+    "gitCommit",
+    "git_sha",
+    "gitSha",
+    "source_commit",
+    "sourceCommit",
+    "source_head_sha",
+    "sourceHeadSha",
+    "firmware_commit",
+    "firmwareCommit",
+    "firmware_head_sha",
+    "firmwareHeadSha",
+    "firmware_git_sha",
+    "firmwareGitSha",
+    "build_commit",
+    "buildCommit",
+    "build_head_sha",
+    "buildHeadSha",
+)
+COMMIT_METADATA_CONTAINERS = ("git", "artifact", "firmware", "build", "source", "workflow", "github", "metadata")
+GENERIC_SHA_COMMIT_CONTAINERS = {"git", "workflow", "github"}
 
 
 def default_d1l_port() -> str:
@@ -93,32 +151,40 @@ def commit_file(root: Path, commit: str | None, *patterns: str) -> Path | None:
     return newest_file(root, *commit_patterns)
 
 
+def artifact_commit_values(data: dict) -> list[str]:
+    if not isinstance(data, dict):
+        return []
+    values: list[Any] = [
+        data.get(field)
+        for field in TOP_LEVEL_COMMIT_FIELDS
+    ]
+    for container_name in COMMIT_METADATA_CONTAINERS:
+        container = data.get(container_name)
+        if isinstance(container, dict):
+            values.extend(container.get(field) for field in NESTED_COMMIT_FIELDS)
+            if container_name in GENERIC_SHA_COMMIT_CONTAINERS:
+                values.append(container.get("sha"))
+    return [value.strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+def commit_value_matches(value: str, commit: str) -> bool:
+    full = commit.lower()
+    short = full[:7]
+    lowered = value.lower()
+    return lowered == full or lowered.startswith(short)
+
+
 def artifact_commit_matches(path: Path, data: dict, commit: str | None) -> bool:
     if not commit:
         return True
+    metadata_values = artifact_commit_values(data)
+    if metadata_values:
+        return any(commit_value_matches(value, commit) for value in metadata_values)
+
+    name = path.name.lower()
     full = commit.lower()
     short = full[:7]
-    if short in path.name.lower() or full in path.name.lower():
-        return True
-
-    values: list[Any] = [
-        data.get("commit"),
-        data.get("head_sha"),
-        data.get("headSha"),
-        data.get("head_sha256"),
-    ]
-    git = data.get("git") if isinstance(data.get("git"), dict) else {}
-    values.extend([git.get("commit"), git.get("head_sha"), git.get("headSha")])
-    artifact = data.get("artifact") if isinstance(data.get("artifact"), dict) else {}
-    values.extend([artifact.get("commit"), artifact.get("head_sha"), artifact.get("headSha")])
-
-    for value in values:
-        if not isinstance(value, str):
-            continue
-        lowered = value.lower()
-        if lowered == full or lowered.startswith(short):
-            return True
-    return False
+    return short in name or full in name
 
 
 def newest_commit_json(root: Path, commit: str | None, *patterns: str) -> Path | None:
@@ -411,7 +477,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "com12_smoke",
             "D1L hardware smoke",
-            commit_file(hardware_dir, args.commit, "smoke_*.json"),
+            newest_commit_json(hardware_dir, args.commit, "smoke_*.json"),
             root,
             lambda data: data.get("ok") is True and data.get("port") == args.d1l_port,
             "Current-commit D1L smoke artifact passes.",

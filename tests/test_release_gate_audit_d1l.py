@@ -6,6 +6,7 @@ from scripts.release_gate_audit_d1l import build_audit, parse_args
 
 
 COMMIT = "68350bf9f3fabfd2db4110ec6ffc36068056a060"
+STALE_COMMIT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 RUN_ID = "28549761003"
 
 
@@ -191,6 +192,127 @@ def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):
 
     assert gates["ui_tab_abuse"]["ok"] is False
     assert gates["ui_tab_abuse"]["details"]["path_found"] is False
+
+
+def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filename_matches(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12", "firmware_commit": STALE_COMMIT})
+    write_json(
+        hardware / "ui_tab_abuse_68350bf.json",
+        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0, "firmware_commit": STALE_COMMIT},
+    )
+    write_json(
+        hardware / "scroll_probe_68350bf.json",
+        {
+            "ok": True,
+            "port": "COM12",
+            "failure_count": 0,
+            "screens": ["messages", "nodes", "packets", "settings", "map"],
+            "git": {"head_sha": STALE_COMMIT},
+        },
+    )
+    write_json(
+        hardware / "dm_probe_68350bf.json",
+        {
+            "ok": True,
+            "port": "COM12",
+            "meshbot_expected_port": "COM11",
+            "public_rf_transmit": False,
+            "artifact": {"commit": STALE_COMMIT},
+            "checks": {
+                "meshbot_on_expected_port": True,
+                "send_ok": True,
+                "messages_dm_has_token": True,
+                "packets_search_has_token": True,
+                "route_trace_has_target": True,
+                "meshbot_rx_contact_delta": True,
+                "health_ready": True,
+                "no_public_commands": True,
+            },
+        },
+    )
+    write_json(
+        hardware / "rp2040_preflight_68350bf.json",
+        {
+            "ok": True,
+            "ready_for_sd_acceptance": True,
+            "candidate_volumes": [],
+            "classification": {"storage_file_gate_ready": True},
+            "firmwareCommit": STALE_COMMIT,
+        },
+    )
+    write_json(
+        tmp_path / "artifacts" / "soak" / "d1l-12h-soak_68350bf.json",
+        {
+            "ok": True,
+            "mode": "hardware",
+            "duration_sec": 43200,
+            "commit": STALE_COMMIT,
+            "summary": {
+                "ok": True,
+                "threshold_failures": [],
+                "board_ready_all": True,
+                "ui_ready_all": True,
+                "uptime_monotonic": True,
+            },
+        },
+    )
+    write_json(hardware / "manual_touch_review_68350bf.json", {"ok": True, "source": {"commit": STALE_COMMIT}})
+    (hardware / "photos").mkdir(parents=True)
+    (hardware / "photos" / "screen.jpg").write_bytes(b"screen")
+    write_json(
+        hardware / "rf_full_acceptance_68350bf.json",
+        {
+            "ok": True,
+            "source": {"commit": STALE_COMMIT},
+            "checks": {
+                "inbound_dm": True,
+                "ack_path": True,
+                "direct_route": True,
+            },
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    for gate_id in (
+        "com12_smoke",
+        "ui_tab_abuse",
+        "ui_scroll_probe",
+        "outbound_dm_com11",
+        "sd_acceptance_matrix",
+        "full_duration_idle_soak",
+        "manual_physical_ui_review",
+        "full_rf_dm_acceptance",
+    ):
+        assert gates[gate_id]["ok"] is False
+    assert gates["com12_smoke"]["details"]["path_found"] is False
+    assert gates["ui_tab_abuse"]["details"]["path_found"] is False
+    assert gates["ui_scroll_probe"]["details"]["path_found"] is False
+    assert gates["outbound_dm_com11"]["details"]["path_found"] is False
+    assert gates["sd_acceptance_matrix"]["evidence"] == []
+    assert gates["full_duration_idle_soak"]["evidence"] == []
+    assert gates["manual_physical_ui_review"]["details"]["review_found"] is False
+    assert gates["manual_physical_ui_review"]["details"]["photo_count"] == 1
+    assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
+
+
+def test_release_gate_audit_accepts_matching_commit_metadata_without_commit_filename(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    write_json(
+        hardware / "ui_tab_abuse_latest.json",
+        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0, "firmware_commit": COMMIT},
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_tab_abuse"]["ok"] is True
+    assert gates["ui_tab_abuse"]["evidence"] == ["artifacts/hardware/com12/ui_tab_abuse_latest.json"]
 
 
 def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):

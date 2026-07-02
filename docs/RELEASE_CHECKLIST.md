@@ -67,6 +67,7 @@
 - [x] First `storage status`/`storage setup` fallback surface implemented: probes the RP2040 SD status protocol, reports protocol/card/root/setup state, never auto-formats, keeps onboard NVS store backends, and has Settings/simulator visibility.
 - [x] ESP32 confirmed-format request guard implemented: `DESKOS_SD_FORMAT FORMAT-DESKOS-SD` can only be sent after exact confirmation plus bridge-reported card presence, format support, and setup-required state.
 - [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS` and guarded `DESKOS_SD_FORMAT FORMAT-DESKOS-SD`.
+- [x] RP2040 guarded format path now emits `DESKOS_SD_FORMAT_PROGRESS step=...` milestones, and the ESP32 timeout note preserves the last observed format step without treating progress as format completion.
 - [x] Generic RP2040 SD file-operation protocol foundation added for future SD-backed stores: bounded `DESKOS_SD_FILE v=1` stat/read/write/append/delete/rename with path validation, base64url payloads, CRC32 checks, and simulator coverage.
 - [x] Retained blob-store abstraction can use the RP2040 SD file protocol for retained Public/DM message history, route history, and packet history when a ready card reports file operations and atomic rename; NVS remains mirrored as fallback.
 - [x] Serial-only SD file-operation proof command added: `storage filecanary` performs guarded temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification without Public RF or formatting.
@@ -122,7 +123,7 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is commit-strict so stale tab/scroll/DM/SD/RF/manual/soak artifacts cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-e83ef31.json` reports `ready_for_public_release=false` with four open P0 gates.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-ca8035c-after-hardening-with-actions.json` reports `ready_for_public_release=false` with four open P0 gates.
 - [x] COM12 smoke, 100-cycle tab abuse, scroll probe, and outbound DM proof captured for `e83ef31` after flashing the verified Actions package from run `28563475256`.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit after SD, full RF inbound, manual UI/photos, and 12-hour soak P0 gates are closed.
 - [ ] Physical screen photos captured.

@@ -22,6 +22,7 @@
 #define D1L_RP2040_SD_DIAG_REPLY_PREFIX "DESKOS_SD_DIAG"
 #define D1L_RP2040_SD_FORMAT_QUERY_PREFIX "DESKOS_SD_FORMAT "
 #define D1L_RP2040_SD_FORMAT_REPLY_PREFIX "DESKOS_SD_FORMAT"
+#define D1L_RP2040_SD_FORMAT_PROGRESS_PREFIX "DESKOS_SD_FORMAT_PROGRESS"
 #define D1L_RP2040_FILE_PREFIX "DESKOS_SD_FILE"
 #define D1L_RP2040_LINE_BUFFER_SIZE (D1L_RP2040_FILE_LINE_MAX + 1U)
 #define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
@@ -398,7 +399,10 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                                                  char *line, size_t line_size,
                                                  uint32_t timeout_ms,
                                                  bool extend_timeout_on_rx,
-                                                 bool *response_truncated)
+                                                 bool *response_truncated,
+                                                 const char *progress_prefix,
+                                                 char *last_progress,
+                                                 size_t last_progress_size)
 {
     if (!s_status.uart_ready) {
         return s_status.init_result;
@@ -410,6 +414,9 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
 
     if (response_truncated) {
         *response_truncated = false;
+    }
+    if (last_progress && last_progress_size > 0) {
+        last_progress[0] = '\0';
     }
     uart_flush_input((uart_port_t)s_status.uart_port);
     const int written = uart_write_bytes((uart_port_t)s_status.uart_port, command, command_len);
@@ -441,6 +448,18 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                         return ESP_OK;
                     }
                 }
+                if (progress_prefix && line_has_prefix(line, progress_prefix) &&
+                    last_progress && last_progress_size > 0) {
+                    const char *step = NULL;
+                    size_t step_len = 0;
+                    if (token_value_span(line, "step", &step, &step_len) &&
+                        step_len + 1U <= last_progress_size) {
+                        memcpy(last_progress, step, step_len);
+                        last_progress[step_len] = '\0';
+                    } else {
+                        snprintf(last_progress, last_progress_size, "progress");
+                    }
+                }
             }
             used = 0;
             dropping = false;
@@ -469,7 +488,7 @@ static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
 {
     return exchange_prefixed_line_internal(command, command_len, prefixes, prefix_count,
                                            line, line_size, timeout_ms, false,
-                                           response_truncated);
+                                           response_truncated, NULL, NULL, 0);
 }
 
 static esp_err_t parse_sd_line_with_prefix(const char *line,
@@ -957,16 +976,24 @@ esp_err_t d1l_rp2040_bridge_format_sd(d1l_rp2040_sd_status_t *out_status,
     char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_sd_status(out_status, ESP_ERR_TIMEOUT);
+    char last_progress[32] = {0};
     esp_err_t ret = exchange_prefixed_line_internal(command, (size_t)command_len, prefixes, 1,
                                                     line, sizeof(line), timeout_ms, true,
-                                                    &truncated);
+                                                    &truncated,
+                                                    D1L_RP2040_SD_FORMAT_PROGRESS_PREFIX,
+                                                    last_progress, sizeof(last_progress));
     out_status->response_truncated = truncated;
     if (ret != ESP_OK) {
         out_status->last_error = ret;
-        snprintf(out_status->note, sizeof(out_status->note),
-                 ret == ESP_ERR_TIMEOUT ?
-                 "RP2040 SD format command timed out; no format confirmation received" :
-                 "Could not write SD format command to RP2040 UART");
+        if (ret == ESP_ERR_TIMEOUT && last_progress[0] != '\0') {
+            snprintf(out_status->note, sizeof(out_status->note),
+                     "RP2040 SD format timed out after step %s", last_progress);
+        } else {
+            snprintf(out_status->note, sizeof(out_status->note),
+                     ret == ESP_ERR_TIMEOUT ?
+                     "RP2040 SD format command timed out; no format confirmation received" :
+                     "Could not write SD format command to RP2040 UART");
+        }
         return ret;
     }
 

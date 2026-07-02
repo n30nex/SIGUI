@@ -14,6 +14,7 @@ constexpr const char *PING_REQUEST = "DESKOS_SD_PING";
 constexpr const char *PING_REPLY = "DESKOS_SD_PING";
 constexpr const char *FORMAT_REQUEST = "DESKOS_SD_FORMAT";
 constexpr const char *FORMAT_REPLY = "DESKOS_SD_FORMAT";
+constexpr const char *FORMAT_PROGRESS_REPLY = "DESKOS_SD_FORMAT_PROGRESS";
 constexpr const char *FORMAT_CONFIRMATION = "FORMAT-DESKOS-SD";
 constexpr const char *DIAG_REQUEST = "DESKOS_SD_DIAG";
 constexpr const char *DIAG_REPLY = "DESKOS_SD_DIAG";
@@ -680,7 +681,15 @@ SdSnapshot mount_status() {
     return cache_status(pending_snapshot(s_worker_busy ? "mount_in_progress" : "mount_queued"));
 }
 
+void send_format_progress(const char *step) {
+    String line(FORMAT_PROGRESS_REPLY);
+    line += " step=";
+    line += ((step && step[0]) ? step : "unknown");
+    reply_stream->println(line);
+}
+
 SdSnapshot format_card() {
+    send_format_progress("probe_start");
     SdSnapshot snapshot = make_snapshot("error", "format_failed");
     CardProbe probes[] = {
         manual_probe_card(DEDICATED_SPI, true),
@@ -690,12 +699,14 @@ SdSnapshot format_card() {
     };
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (!selected) {
+        send_format_progress("no_card");
         apply_probe_to_snapshot(snapshot, probes[0]);
         snapshot.state = "no_card";
         snapshot.note = "no_card";
         return snapshot;
     }
 
+    send_format_progress("card_selected");
     s_sd_power_high = selected->power_high;
     s_sd_spi_options = selected->options;
     apply_probe_to_snapshot(snapshot, *selected);
@@ -712,12 +723,14 @@ SdSnapshot format_card() {
     SdCardFactory card_factory;
     SdCard *card = card_factory.newCard(sd_spi_config(s_sd_spi_options));
     if (!card) {
+        send_format_progress("card_init_failed");
         snapshot.note = "format_card_init_failed";
         return snapshot;
     }
     snapshot.probe_error = card->errorCode();
     snapshot.probe_data = card->errorData();
     if (snapshot.probe_error != 0) {
+        send_format_progress("card_init_failed");
         snapshot.note = "format_card_init_failed";
         delete card;
         return snapshot;
@@ -727,6 +740,7 @@ SdSnapshot format_card() {
     snapshot.probe_error = card->errorCode();
     snapshot.probe_data = card->errorData();
     if (sectors == 0 || snapshot.probe_error != 0) {
+        send_format_progress("sector_count_failed");
         snapshot.note = "format_sector_count_failed";
         delete card;
         return snapshot;
@@ -735,16 +749,20 @@ SdSnapshot format_card() {
 
     FatFormatter fat_formatter;
     uint8_t sector_buffer[512];
+    send_format_progress("fat_format_start");
     const bool formatted = fat_formatter.format(card, sector_buffer, reply_stream);
     snapshot.probe_error = card->errorCode();
     snapshot.probe_data = card->errorData();
     delete card;
     if (!formatted) {
+        send_format_progress("fat_format_failed");
         snapshot.note = "format_failed";
         return snapshot;
     }
+    send_format_progress("fat_format_done");
 
     SD.end(false);
+    send_format_progress("post_format_mount");
     if (!mount_sd()) {
         snapshot.note = "post_format_mount_failed";
         return snapshot;
@@ -770,6 +788,7 @@ SdSnapshot format_card() {
     snapshot.note = "deskos_root_missing";
     fill_capacity(snapshot);
 
+    send_format_progress("deskos_prepare");
     const char *prepare_note = "ready";
     if (prepare_deskos_structure(&prepare_note)) {
         snapshot.state = "ready";

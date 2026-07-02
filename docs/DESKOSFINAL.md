@@ -1229,9 +1229,9 @@ python .\scripts\release_gate_audit_d1l.py --github-run-id <run-id> --commit <co
 
 The audit is intentionally commit-strict for hardware evidence. Smoke, tab
 abuse, scroll probe, outbound DM, RP2040/SD preflight, full RF, manual review,
-and soak artifacts must either include the audited short/full commit in the
-filename or embed matching commit metadata. Stale passing artifacts from an
-older firmware flash must fail closed.
+and soak artifacts must match the audited short/full commit. Explicit embedded
+commit metadata wins over filename fallback, so stale passing artifacts from an
+older firmware flash must fail closed even if a filename is misleading.
 
 The latest local audit
 `artifacts/release-gate/release-gate-audit-e83ef31.json` for Actions run
@@ -1316,13 +1316,13 @@ cannot be copied until the RP2040 is placed in UF2/BOOTSEL mode.
 `artifacts/hardware/com12/rp2040_preflight_e83ef31_after_format_timeout_reset.json`
 shows the current COM12 bridge still responds to ping/protocol/diag and detects
 the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`. The
-flashed `e83ef31` build already preserves SdFat formatter progress as a
-keepalive, adds a newline fence before the terminal `DESKOS_SD_FORMAT` reply,
-extends the firmware format timeout to 660 seconds, and keeps
-`format_command_sent` separate from `format_confirmed`; full SD auto-prepare,
-retained-history, export, map-tile, and reboot/remount proof remain open until
-a known-good/compatible card or bridge update reaches the ready file gate and
-the SD matrix is rerun.
+format path now emits `DESKOS_SD_FORMAT_PROGRESS step=...` milestones while
+the ESP32 still waits for the terminal `DESKOS_SD_FORMAT` result, extends the
+firmware format timeout to 660 seconds, and keeps `format_command_sent`
+separate from `format_confirmed`; full SD auto-prepare, retained-history,
+export, map-tile, and reboot/remount proof remain open until a
+known-good/compatible card or bridge update reaches the ready file gate and the
+SD matrix is rerun.
 
 ### Map
 
