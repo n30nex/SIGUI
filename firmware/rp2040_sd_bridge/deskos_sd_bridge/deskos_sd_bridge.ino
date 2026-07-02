@@ -212,16 +212,28 @@ void apply_sd_miso_pullup() {
     gpio_pull_up(SD_MISO_PIN);
 }
 
+void bias_sd_spi_lines_for_power() {
+    SPI1.end();
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    pinMode(SD_MOSI_PIN, OUTPUT);
+    digitalWrite(SD_MOSI_PIN, HIGH);
+    pinMode(SD_SCK_PIN, OUTPUT);
+    digitalWrite(SD_SCK_PIN, LOW);
+    pinMode(SD_MISO_PIN, INPUT_PULLUP);
+    apply_sd_miso_pullup();
+    s_sd_pin_cs_ok = true;
+}
+
 uint8_t sample_sd_miso_level() {
     gpio_set_input_enabled(SD_MISO_PIN, true);
     return gpio_get(SD_MISO_PIN) ? 1U : 0U;
 }
 
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
+    bias_sd_spi_lines_for_power();
     settle_sd_power(power_high, force_power_cycle);
-    SPI1.end();
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
+    bias_sd_spi_lines_for_power();
     configure_sd_spi_pins();
 }
 
@@ -230,10 +242,9 @@ void configure_sd_bus() {
 }
 
 void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
+    bias_sd_spi_lines_for_power();
     settle_sd_power(power_high, force_power_cycle);
-    SPI1.end();
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
+    bias_sd_spi_lines_for_power();
     configure_sd_spi_pins();
     SPI1.begin();
     apply_sd_miso_pullup();

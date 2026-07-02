@@ -53,6 +53,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
     assert "sd_wait_ready(SD_SELECTED_READY_WAIT_MS)" in sketch
+    assert "bias_sd_spi_lines_for_power()" in sketch
+    assert "pinMode(SD_MOSI_PIN, OUTPUT)" in sketch
+    assert "digitalWrite(SD_MOSI_PIN, HIGH)" in sketch
+    assert "pinMode(SD_SCK_PIN, OUTPUT)" in sketch
+    assert "digitalWrite(SD_SCK_PIN, LOW)" in sketch
     assert "pinMode(SD_MISO_PIN, INPUT_PULLUP)" in sketch
     assert "gpio_pull_up(SD_MISO_PIN)" in sketch
     assert "gpio_set_input_enabled(SD_MISO_PIN, true)" in sketch
@@ -70,6 +75,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "mount_sd_seeed_sample_path" in sketch
     assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
     assert "configure_seeed_sd_bus(s_sd_power_high)" in sketch
+    assert sketch.index("bias_sd_spi_lines_for_power()") < sketch.index("settle_sd_power(power_high, force_power_cycle)")
+    assert sketch.count("bias_sd_spi_lines_for_power()") >= 5
     assert "SPI1.begin()" in sketch[sketch.index("void configure_seeed_sd_bus"):sketch.index("void clock_sd_idle_bytes")]
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch

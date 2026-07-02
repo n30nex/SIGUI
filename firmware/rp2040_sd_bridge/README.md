@@ -14,10 +14,11 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
-- SD CS is driven high during bus setup. The first explicit mount attempt
-  preserves the already-powered rail state to match Seeed's MicroSD example;
-  fallback probes can force-cycle the selected rail level, wait for it to
-  settle, and send idle clocks so warm-reset cards can re-enter SPI init. SD
+- SD CS is driven high and MOSI is biased high before the SD rail is powered or
+  force-cycled, with SCK held low and MISO pulled up. The first explicit mount
+  attempt preserves the already-powered rail state to match Seeed's MicroSD
+  example; fallback probes can force-cycle the selected rail level, wait for it
+  to settle, and send idle clocks so warm-reset cards can re-enter SPI init. SD
   MISO uses the RP2040 internal pull-up and input buffer before and after SPI1
   claims the pin so a floating or open card-response line does not read as a
   false all-zero response.
