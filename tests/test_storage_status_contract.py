@@ -48,6 +48,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_boot_prepare" in source
     assert 'strcmp(s_status.sd_state, "mount_required")' in source
     assert "prepare_fat32_on_computer" in source
+    assert "inspect_rp2040_sd_mount_error_firmware_path" in source
+    assert "mount_failed_with_diag" in source
+    assert source.index("mount_failed_with_diag") < source.index("prepare_fat32_on_computer")
     assert "backup_reformat_fat32_on_computer" in source
     assert '"store_migration_pending"' in source
     assert "file_ops_supported" in header
@@ -218,6 +221,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "NVS fallback" in simulator
     assert "storage_setup_sheet" in simulator
     assert "Prepare FAT32 on a computer" in simulator
+    assert "Inspect RP2040 mount diagnostics" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
     assert "char state[32]" in rp2040_header
     assert "d1l_rp2040_ping_t" in rp2040_header

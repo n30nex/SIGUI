@@ -541,8 +541,13 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
         snprintf(status->filesystem, sizeof(status->filesystem), "unknown");
     }
     if (status->note[0] == '\0') {
+        const bool mount_failed_with_diag = status->card_present &&
+                                           !status->filesystem_mounted &&
+                                           (status->mount_error != 0U ||
+                                            status->mount_data != 0U);
         snprintf(status->note, sizeof(status->note), "%s",
                  status->data_ready ? "SD card is ready for DeskOS data" :
+                 mount_failed_with_diag ? "RP2040 SD filesystem mount failed; inspect firmware mount diagnostics" :
                  status->needs_fat32 ? "Prepare a FAT32 card on a computer before using SD storage" :
                  "SD card is not ready for DeskOS data");
     }

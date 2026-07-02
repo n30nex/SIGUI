@@ -4664,9 +4664,11 @@ static void render_storage_sheet(void)
     lv_obj_set_pos(backend, 8, 152);
 
     lv_obj_t *action = create_label(s_storage_sheet, "", 0xFBBF24);
+    const bool prepare_fat32_action = s_snapshot.storage_setup_action &&
+        strcmp(s_snapshot.storage_setup_action, "prepare_fat32_on_computer") == 0;
     label_set_fmt(action, "next step: %s%s",
                   s_snapshot.storage_setup_action ? s_snapshot.storage_setup_action : "not_available",
-                  s_snapshot.storage_sd_needs_fat32 ? " (prepare FAT32 on computer)" : "");
+                  prepare_fat32_action ? " (prepare FAT32 on computer)" : "");
     lv_label_set_long_mode(action, LV_LABEL_LONG_DOT);
     lv_obj_set_width(action, 408);
     lv_obj_set_pos(action, 8, 184);

@@ -172,10 +172,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
         "SD Card",
-        "FAT32 card required",
+        "FAT32 only, no format",
         "SD Card",
         "Backends",
-        "Prepare FAT32 on a computer; DeskOS only creates folders.",
+        "No device format; onboard NVS remains fallback.",
     } <= labels_by_view["storage_setup_sheet"]
     assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"} <= labels_by_view["advert_sheet"]
@@ -293,16 +293,49 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
 
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
     scenarios = {
-        "storage-no-card": "insert_card",
-        "storage-needs-fat32": "prepare_fat32_on_computer",
-        "storage-root-missing": "retry_storage_mount",
-        "storage-ready-pending-migration": "store_migration_pending",
-        "storage-ready-packet-log-sd": "packet_log_canary_enabled",
-        "storage-ready-retained-history-sd": "retained_history_sd_enabled",
-        "storage-ready-map-tiles-sd": "retained_history_sd_enabled",
+        "storage-no-card": (
+            "insert_card",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
+        "storage-needs-fat32": (
+            "prepare_fat32_on_computer",
+            "FAT32 card required",
+            "Prepare FAT32 on a computer; DeskOS only creates folders.",
+        ),
+        "storage-mount-error": (
+            "inspect_rp2040_sd_mount_error_firmware_path",
+            "Firmware mount issue",
+            "Inspect RP2040 mount diagnostics; do not format on-device.",
+        ),
+        "storage-root-missing": (
+            "retry_storage_mount",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
+        "storage-ready-pending-migration": (
+            "store_migration_pending",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
+        "storage-ready-packet-log-sd": (
+            "packet_log_canary_enabled",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
+        "storage-ready-retained-history-sd": (
+            "retained_history_sd_enabled",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
+        "storage-ready-map-tiles-sd": (
+            "retained_history_sd_enabled",
+            "FAT32 only, no format",
+            "No device format; onboard NVS remains fallback.",
+        ),
     }
 
-    for scenario, setup_action in scenarios.items():
+    for scenario, (setup_action, subtitle, guidance) in scenarios.items():
         report = ui_simulator.generate(tmp_path / scenario, views=("settings", "storage_setup_sheet"), scenario=scenario)
         labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
         storage_view = next(view for view in report["views"] if view["name"] == "storage_setup_sheet")
@@ -315,10 +348,10 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
         assert {"Settings", "Setup Dashboard", "SD Card", "Wi-Fi", "BLE", "Radio", "Map Tiles"} <= labels_by_view["settings"]
         assert {
             "SD Card",
-            "FAT32 card required",
+            subtitle,
             "Backends",
             f"setup {setup_action}",
-            "Prepare FAT32 on a computer; DeskOS only creates folders.",
+            guidance,
         } <= labels_by_view["storage_setup_sheet"]
         if scenario == "storage-ready-packet-log-sd":
             assert "messages NVS / packets SD / routes NVS" in labels_by_view["storage_setup_sheet"]

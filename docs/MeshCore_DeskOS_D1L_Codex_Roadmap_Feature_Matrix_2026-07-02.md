@@ -33,7 +33,7 @@ DeskOS D1L remains a developer preview. Public binary release is blocked until t
 - The RP2040 bridge no longer exposes an SD format request, progress line, confirmation phrase, or formatter function.
 - ESP32 storage no longer has a confirmed-format API.
 - `storage setup` is policy/status only and reports `policy="no_device_format"`.
-- Unmountable or non-FAT32 cards are classified as `not_fat32_or_unmountable` / `prepare_fat32_on_computer`.
+- Unmountable or non-FAT32 cards are classified as `not_fat32_or_unmountable`; raw-card-present failures with RP2040 `mount_error`/`mount_data` diagnostics are surfaced as `inspect_rp2040_sd_mount_error_firmware_path` because the current validation card is user-confirmed FAT32.
 - A mounted FAT32 card with missing DeskOS files is still auto-provisioned with the DeskOS directory and manifest structure.
 - Existing/invalid DeskOS manifests are not overwritten; status falls back to NVS and asks the user to back up/reformat FAT32 on a computer.
 

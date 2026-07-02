@@ -25,7 +25,7 @@ Required tokens:
 - `mounted`: `1` when the filesystem is mounted and usable.
 - `deskos`: `1` when the `/deskos` data root exists or has been created.
 - `fs`: filesystem label such as `fat32`, `fatfs`, `exfat`, `unknown`, or `none`.
-- `needs_fat32`: `1` when a card is present but cannot be mounted as a usable FAT32 DeskOS card. Users must fix this on a computer.
+- `needs_fat32`: `1` when a card is present but cannot be mounted as a usable FAT32 DeskOS card. If `mount_err` or `mount_data` is nonzero on a user-confirmed FAT32 card, treat the result as an RP2040 firmware mount-path blocker rather than a card-format request.
 - `capacity_kb` and `free_kb`: unsigned decimal kilobytes, `0` when unknown.
 - `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and
   `probe_data`: non-formatting card-probe diagnostics. `mount_err` and
@@ -81,8 +81,10 @@ Exhaustive high/low and dedicated/shared probing is reserved for the manual
 diagnostic request below. If no card responds, the bridge reports
 `state=no_card`. If a card responds but the filesystem is unusable, the bridge
 reports `state=not_fat32_or_unmountable present=1 mounted=0 needs_fat32=1
-note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active and tells the
-user to prepare a FAT32 card on a computer.
+note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When
+`mount_err` or `mount_data` is nonzero on a user-confirmed FAT32 card, the ESP32
+must surface `inspect_rp2040_sd_mount_error_firmware_path` instead of telling
+the user to prepare another card.
 
 ## Ping Request
 

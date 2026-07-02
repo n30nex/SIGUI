@@ -155,6 +155,10 @@ static const char *stable_filesystem(const char *filesystem)
 
 static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 {
+    const bool mount_failed_with_diag = sd->card_present &&
+                                        !sd->filesystem_mounted &&
+                                        (sd->mount_error != 0U || sd->mount_data != 0U);
+
     s_status.rp2040_bridge_ready = sd->bridge_ready;
     s_status.rp2040_sd_protocol_supported = sd->protocol_supported;
     s_status.sd_present = sd->card_present;
@@ -209,9 +213,15 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.setup_action = "insert_card";
         s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
     } else if (s_status.sd_needs_fat32) {
-        s_status.setup_action = "prepare_fat32_on_computer";
-        s_status.note =
-            "SD card is present but not usable; prepare a FAT32 card on a computer and reinsert it";
+        if (mount_failed_with_diag) {
+            s_status.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
+            s_status.note =
+                "SD card is present but the RP2040 SdFat mount failed; inspect firmware mount diagnostics before changing the card";
+        } else {
+            s_status.setup_action = "prepare_fat32_on_computer";
+            s_status.note =
+                "SD card is present but not usable; prepare a FAT32 card on a computer and reinsert it";
+        }
     } else if (!sd->deskos_root_ready) {
         s_status.setup_action =
             strcmp(s_status.sd_state, "deskos_manifest_invalid") == 0 ?

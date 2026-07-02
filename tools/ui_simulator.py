@@ -292,6 +292,17 @@ def storage_needs_fat32_snapshot() -> Snapshot:
     )
 
 
+def storage_mount_error_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="mount error",
+        storage_backend="NVS fallback",
+        storage_detail="RP2040 SdFat mount diagnostics",
+        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_setup_action="inspect_rp2040_sd_mount_error_firmware_path",
+    )
+
+
 def storage_root_missing_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
@@ -367,6 +378,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-states": storage_ready_pending_migration_snapshot,
     "storage-no-card": storage_no_card_snapshot,
     "storage-needs-fat32": storage_needs_fat32_snapshot,
+    "storage-mount-error": storage_mount_error_snapshot,
     "storage-root-missing": storage_root_missing_snapshot,
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
@@ -1410,12 +1422,22 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
 
 
 def render_storage_setup_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "SD Card", "FAT32 card required")
+    if snap.storage_setup_action == "inspect_rp2040_sd_mount_error_firmware_path":
+        subtitle = "Firmware mount issue"
+        guidance = "Inspect RP2040 mount diagnostics; do not format on-device."
+    elif snap.storage_setup_action == "prepare_fat32_on_computer":
+        subtitle = "FAT32 card required"
+        guidance = "Prepare FAT32 on a computer; DeskOS only creates folders."
+    else:
+        subtitle = "FAT32 only, no format"
+        guidance = "No device format; onboard NVS remains fallback."
+
+    draw_sheet_frame(s, "SD Card", subtitle)
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_storage_setup", destination="settings")
     draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
     draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
-    s.text("Prepare FAT32 on a computer; DeskOS only creates folders.", (44, 328, 436, 360), 12, AMBER, True)
+    s.text(guidance, (44, 328, 436, 360), 12, AMBER, True)
     draw_dock(s, "Settings")
 
 
@@ -1782,10 +1804,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "storage_setup_sheet": (
         "SD Card",
-        "FAT32 card required",
         "SD Card",
         "Backends",
-        "Prepare FAT32 on a computer; DeskOS only creates folders.",
         "Close",
     ),
     "display_settings_sheet": (

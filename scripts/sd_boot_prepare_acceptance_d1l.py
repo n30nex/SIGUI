@@ -26,6 +26,12 @@ SCENARIOS = (
 )
 FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
+FIRMWARE_MOUNT_ERROR_ACTION = "inspect_rp2040_sd_mount_error_firmware_path"
+FALLBACK_SETUP_ACTIONS = {
+    "prepare_fat32_on_computer",
+    "retry_storage_mount",
+    "use_nvs_fallback",
+}
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
 
@@ -160,6 +166,11 @@ def setup_policy_reported(setup: dict | None) -> bool:
     )
 
 
+def sd_mount_error_present(report: dict | None) -> bool:
+    sd = sd_status(report)
+    return any(int(sd.get(key) or 0) != 0 for key in ("mount_error", "mount_data"))
+
+
 def boot_prepare_passed(
     scenario: str,
     *,
@@ -207,7 +218,12 @@ def boot_prepare_passed(
         if state == "ready" and storage_file_gate_ready(storage_after):
             return True, "prepared_ready_without_runner_format"
         if setup_policy_reported(storage_setup) and (
-            setup_action in {"prepare_fat32_on_computer", "retry_storage_mount", "use_nvs_fallback"}
+            setup_action == FIRMWARE_MOUNT_ERROR_ACTION
+            or sd_mount_error_present(storage_after)
+        ):
+            return True, "firmware_mount_error_fallback"
+        if setup_policy_reported(storage_setup) and (
+            setup_action in FALLBACK_SETUP_ACTIONS
             or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error"}
         ):
             return True, "computer_fat32_required"
@@ -217,7 +233,12 @@ def boot_prepare_passed(
         if state == "ready" and sd_status(storage_after).get("data_root_ready") is True:
             return True, "existing_data_preserved_ready"
         if setup_policy_reported(storage_setup) and (
-            setup_action in {"prepare_fat32_on_computer", "retry_storage_mount", "use_nvs_fallback"}
+            setup_action == FIRMWARE_MOUNT_ERROR_ACTION
+            or sd_mount_error_present(storage_after)
+        ):
+            return True, "existing_data_firmware_mount_fallback"
+        if setup_policy_reported(storage_setup) and (
+            setup_action in FALLBACK_SETUP_ACTIONS
             or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error", "bridge_reported"}
         ):
             return True, "existing_data_not_wiped"
