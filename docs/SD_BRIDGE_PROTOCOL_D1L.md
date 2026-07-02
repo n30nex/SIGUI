@@ -70,8 +70,8 @@ protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
 the RP2040 core1 worker. It first tries the already-powered high/dedicated
 Arduino `SD.begin(13, 1000000, SPI1)` path documented by Seeed for the
 Indicator RP2040 MicroSD bus without pre-clocking the bus, registering SPI CS,
-or running a second SdFat probe on failure. If that library path does not mount,
-it falls back to bounded raw SPI presence probes across the high/low rail and
+manually driving CS high, or running a second SdFat probe on failure. If that
+library path does not mount, it falls back to bounded raw SPI presence probes across the high/low rail and
 dedicated/shared SPI candidates. High-power candidates are tried once without
 force-cycling the rail before force-cycled fallback probes run. Only fallback
 candidates that answer a valid SD idle/init sequence receive one matching

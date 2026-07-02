@@ -61,6 +61,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SD.end(false)" in sketch
     assert "mount_sd_seeed_sample_path" in sketch
+    assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
+    assert "configure_seeed_sd_bus(s_sd_power_high)" in sketch
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
@@ -83,6 +85,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert 'SdSnapshot snapshot = pending_snapshot("filesystem_mounting")' in sketch
+    assert "publish_mount_progress(snapshot)" in sketch
+    assert "if (s_worker_busy)" in sketch
     assert 'snapshot = pending_snapshot("probing_card")' in sketch
     assert sketch.index('SdSnapshot snapshot = pending_snapshot("filesystem_mounting")') < sketch.index("if (mount_sd_seeed_sample_path(true, false))")
     assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index('snapshot = pending_snapshot("probing_card")')

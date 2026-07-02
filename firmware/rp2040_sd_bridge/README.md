@@ -100,8 +100,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated
   `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD example without
-  pre-clocking the bus, registering SPI CS, or running a second SdFat probe on
-  failure. If that library path does not mount, the bridge falls back to bounded
+  pre-clocking the bus, registering or manually driving SPI CS, or running a
+  second SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a

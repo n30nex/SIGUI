@@ -176,12 +176,10 @@ const char *spi_mode_token(uint8_t options) {
 SdSpiConfig sd_spi_config(uint8_t options);
 uint8_t sd_spi_transfer(uint8_t value);
 
-void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
+void settle_sd_power(bool power_high, bool force_power_cycle) {
     static bool sd_power_settled = false;
     static bool last_power_high = true;
     pinMode(SD_POWER_PIN, OUTPUT);
-    pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
     if (force_power_cycle) {
         digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH);
         delay(SD_POWER_CYCLE_OFF_MS);
@@ -193,13 +191,28 @@ void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
         sd_power_settled = true;
         last_power_high = power_high;
     }
+}
+
+void configure_sd_spi_pins() {
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
 }
 
+void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
+    settle_sd_power(power_high, force_power_cycle);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    configure_sd_spi_pins();
+}
+
 void configure_sd_bus() {
     configure_sd_bus(s_sd_power_high);
+}
+
+void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
+    settle_sd_power(power_high, force_power_cycle);
+    configure_sd_spi_pins();
 }
 
 void clock_sd_idle_bytes() {
@@ -251,7 +264,7 @@ bool begin_sd_filesystem(bool capture_failure_details = true) {
 }
 
 bool mount_sd_seeed_sample_path(bool power_high, bool force_power_cycle) {
-    configure_sd_bus(power_high, force_power_cycle);
+    configure_seeed_sd_bus(power_high, force_power_cycle);
     s_sd_mounted = false;
     return begin_sd_filesystem(false);
 }
@@ -507,6 +520,12 @@ void publish_worker_snapshot(const SdSnapshot &snapshot) {
     ++s_worker_snapshot_revision;
 }
 
+void publish_mount_progress(const SdSnapshot &snapshot) {
+    if (s_worker_busy) {
+        publish_worker_snapshot(snapshot);
+    }
+}
+
 void publish_worker_diag(const DiagSnapshot &diag) {
     s_worker_diag = diag;
     ++s_worker_diag_revision;
@@ -742,7 +761,7 @@ SdSnapshot mount_status_blocking() {
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
     SdSnapshot snapshot = pending_snapshot("filesystem_mounting");
-    publish_worker_snapshot(snapshot);
+    publish_mount_progress(snapshot);
     if (mount_sd_seeed_sample_path(true, false)) {
         return mounted_snapshot_from_current_config();
     }
@@ -750,7 +769,7 @@ SdSnapshot mount_status_blocking() {
     s_last_mount_error = 0;
     s_last_mount_data = 0;
     snapshot = pending_snapshot("probing_card");
-    publish_worker_snapshot(snapshot);
+    publish_mount_progress(snapshot);
 
     snapshot = make_snapshot("no_card", "no_card");
     CardProbe probes[] = {
@@ -774,7 +793,7 @@ SdSnapshot mount_status_blocking() {
         apply_probe_to_snapshot(snapshot, probes[i]);
         s_sd_power_high = probes[i].power_high;
         s_sd_spi_options = probes[i].options;
-        publish_worker_snapshot(snapshot);
+        publish_mount_progress(snapshot);
 
         if (mount_sd_with_probe_config(probes[i])) {
             return mounted_snapshot_from_current_config();
@@ -1715,7 +1734,7 @@ void setup() {
     Serial1.setRX(RP2040_ESP32_RX_PIN);
     Serial1.setTX(RP2040_ESP32_TX_PIN);
     Serial1.begin(ESP32_BRIDGE_BAUD);
-    configure_sd_bus();
+    configure_seeed_sd_bus(s_sd_power_high);
     delay(50);
     Serial.println("DeskOS RP2040 SD bridge ready");
 }
