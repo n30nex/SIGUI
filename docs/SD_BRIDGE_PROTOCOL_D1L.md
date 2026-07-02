@@ -63,9 +63,8 @@ explicit SD-touch attempt completes. `DESKOS_SD_STATUS` remains safe and
 non-touching before this command, and returns the cached result after this
 command completes.
 
-The RP2040 bridge is built with SdFat SPI command CRC enabled
-(`USE_SD_CRC=1`) and RP2040 SdFat array transfers disabled
-(`USE_SPI_ARRAY_TRANSFER=0`). The filesystem path runs on the
+The RP2040 bridge is built by GitHub Actions with the Arduino-Pico board
+package's default SD library settings. The filesystem path runs on the
 protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
 the RP2040 core1 worker. It first tries the already-powered high/dedicated
 Arduino `SD.begin(13, 1000000, SPI1)` path documented by Seeed for the
@@ -91,10 +90,7 @@ already-powered rail state first; force-cycled candidates run after that. The pr
 `CMD0=0x00` only when the following SD v2 `CMD8` echoes `0x1AA`, so a real
 ready-state card can continue without allowing an all-zero stuck bus to look
 present in the fallback matrix. It then tries one matching filesystem mount on each raw-present candidate before
-reporting `no_card` or a FAT32-required state. The Actions RP2040 build must keep `USE_SD_CRC=1` so
-SdFat uses real command CRCs for `CMD55`/`ACMD41`, and
-`USE_SPI_ARRAY_TRANSFER=0` so the SdFat-backed filesystem path uses the same
-byte-wise SPI transfer style as the raw probe. The first filesystem init
+reporting `no_card` or a FAT32-required state. The first filesystem init
 preserves the already-powered rail state; fallback probes and mounts can toggle
 the selected power-rail level and reclock the card so warm firmware resets do
 not leave the card outside `CMD0` idle detection. The manual

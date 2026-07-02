@@ -1,18 +1,5 @@
 #include <Arduino.h>
 
-#ifndef USE_SD_CRC
-#error "D1L RP2040 bridge requires USE_SD_CRC=1; build via GitHub Actions d1l-ci."
-#endif
-#if USE_SD_CRC != 1
-#error "D1L RP2040 bridge requires USE_SD_CRC=1 for FAT32 card init."
-#endif
-#ifndef USE_SPI_ARRAY_TRANSFER
-#error "D1L RP2040 bridge requires USE_SPI_ARRAY_TRANSFER=0; build via GitHub Actions d1l-ci."
-#endif
-#if USE_SPI_ARRAY_TRANSFER != 0
-#error "D1L RP2040 bridge requires byte-wise SdFat SPI transfers on SPI1."
-#endif
-
 #include <SD.h>
 #include <SdFat.h>
 #include <SDFS.h>
