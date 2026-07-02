@@ -54,6 +54,8 @@ typedef struct {
     uint32_t path_max;
     uint32_t probe_error;
     uint32_t probe_data;
+    uint32_t mount_error;
+    uint32_t mount_data;
     esp_err_t last_error;
     char state[32];
     char filesystem[16];

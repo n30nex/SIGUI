@@ -86,11 +86,13 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   advertise `file_ops=1`, `file_line_max=512`, `file_chunk_max=192`,
   `path_max=96`, and `atomic_rename=1`. Status replies include optional cached
   probe diagnostics:
-  `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and `probe_data`.
+  `probe_power`, `probe_mode`, `probe_present`, `probe_err`, `probe_data`,
+  `mount_err`, and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
   report `state=mount_pending`, and tries the direct SdFat filesystem mount
-  before using SdFat card-initialization probes to classify failures.
+  before using a bounded raw SPI probe to classify failures. Failed direct
+  mount attempts report the captured SdFat `mount_err` and `mount_data` bytes.
   The filesystem mount uses the same SPI1 pin map at the bridge's conservative
   1 MHz SD clock and retries once after resetting the SdFat state. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports

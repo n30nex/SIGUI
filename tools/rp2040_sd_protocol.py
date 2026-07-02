@@ -82,6 +82,8 @@ STATUS_FIELDS = (
     "probe_present",
     "probe_err",
     "probe_data",
+    "mount_err",
+    "mount_data",
 )
 FILE_CAPABILITY_FIELDS = (
     "file_ops",
@@ -279,6 +281,8 @@ def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
         f" probe_present={bool_token(probe_present)}"
         f" probe_err={0 if probe_present else 254}"
         f" probe_data=0"
+        f" mount_err={0 if scenario.mounted else (1 if scenario.present else 254)}"
+        f" mount_data=0"
         f" file_ops={bool_token(file_ready(scenario))}"
         f" file_line_max={FILE_LINE_MAX}"
         f" file_chunk_max={MAX_FILE_CHUNK_BYTES}"

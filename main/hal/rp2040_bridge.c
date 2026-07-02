@@ -519,6 +519,8 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     (void)parse_u32_token(line, "path_max", &status->path_max);
     (void)parse_u32_token(line, "probe_err", &status->probe_error);
     (void)parse_u32_token(line, "probe_data", &status->probe_data);
+    (void)parse_u32_token(line, "mount_err", &status->mount_error);
+    (void)parse_u32_token(line, "mount_data", &status->mount_data);
     parse_word_token(line, "probe_power", status->probe_power, sizeof(status->probe_power));
     parse_word_token(line, "probe_mode", status->probe_mode, sizeof(status->probe_mode));
 

@@ -929,9 +929,11 @@ static void cmd_storage_status(void)
     print_json_string(status.sd_probe_power[0] ? status.sd_probe_power : "unknown");
     printf(",\"probe_mode\":");
     print_json_string(status.sd_probe_mode[0] ? status.sd_probe_mode : "unknown");
-    printf(",\"probe_error\":%lu,\"probe_data\":%lu,\"last_error\":\"%s\"},\"data_enabled\":%s,\"data_backend\":",
+    printf(",\"probe_error\":%lu,\"probe_data\":%lu,\"mount_error\":%lu,\"mount_data\":%lu,\"last_error\":\"%s\"},\"data_enabled\":%s,\"data_backend\":",
            (unsigned long)status.sd_probe_error,
            (unsigned long)status.sd_probe_data,
+           (unsigned long)status.sd_mount_error,
+           (unsigned long)status.sd_mount_data,
            esp_err_to_name(status.last_error), bool_json(status.data_enabled));
     print_json_string(status.data_backend ? status.data_backend : "nvs");
     printf(",\"message_store_backend\":");
@@ -1009,9 +1011,11 @@ static void cmd_storage_mount(void)
     print_json_string(status.sd_probe_power[0] ? status.sd_probe_power : "unknown");
     printf(",\"probe_mode\":");
     print_json_string(status.sd_probe_mode[0] ? status.sd_probe_mode : "unknown");
-    printf(",\"probe_error\":%lu,\"probe_data\":%lu,\"last_error\":\"%s\"},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
+    printf(",\"probe_error\":%lu,\"probe_data\":%lu,\"mount_error\":%lu,\"mount_data\":%lu,\"last_error\":\"%s\"},\"setup_required\":%s,\"setup_supported\":%s,\"setup_action\":",
            (unsigned long)status.sd_probe_error,
            (unsigned long)status.sd_probe_data,
+           (unsigned long)status.sd_mount_error,
+           (unsigned long)status.sd_mount_data,
            esp_err_to_name(status.last_error),
            bool_json(status.setup_required),
            bool_json(status.setup_supported));

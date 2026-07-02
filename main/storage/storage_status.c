@@ -79,6 +79,8 @@ static void clear_sd_runtime_fields(d1l_storage_status_t *status)
     status->path_max = 0;
     status->sd_probe_error = 0;
     status->sd_probe_data = 0;
+    status->sd_mount_error = 0;
+    status->sd_mount_data = 0;
     status->sd_filesystem = "unknown";
     status->sd_probe_power[0] = '\0';
     status->sd_probe_mode[0] = '\0';
@@ -174,6 +176,8 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     s_status.path_max = sd->path_max;
     s_status.sd_probe_error = sd->probe_error;
     s_status.sd_probe_data = sd->probe_data;
+    s_status.sd_mount_error = sd->mount_error;
+    s_status.sd_mount_data = sd->mount_data;
     snprintf(s_status.sd_probe_power, sizeof(s_status.sd_probe_power), "%s",
              sd->probe_power[0] ? sd->probe_power : "unknown");
     snprintf(s_status.sd_probe_mode, sizeof(s_status.sd_probe_mode), "%s",

@@ -53,10 +53,14 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
-    assert "probe_card(DEDICATED_SPI, true)" in sketch
-    assert "probe_card(SHARED_SPI, true)" in sketch
-    assert "probe_card(DEDICATED_SPI, false)" in sketch
-    assert "probe_card(SHARED_SPI, false)" in sketch
+    assert "manual_probe_card(DEDICATED_SPI, true)" in sketch
+    assert "manual_probe_card(SHARED_SPI, true)" in sketch
+    assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
+    assert "manual_probe_card(SHARED_SPI, false)" in sketch
+    assert "s_last_mount_error = s_sd.card()->errorCode()" in sketch
+    assert "s_last_mount_data = s_sd.card()->errorData()" in sketch
+    assert '" mount_err="' in sketch
+    assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch

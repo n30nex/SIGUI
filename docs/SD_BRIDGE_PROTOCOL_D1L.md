@@ -15,7 +15,7 @@ DESKOS_SD_STATUS
 RP2040 replies with one line:
 
 ```text
-DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 Required tokens:
@@ -28,8 +28,10 @@ Required tokens:
 - `needs_fat32`: `1` when a card is present but cannot be mounted as a usable FAT32 DeskOS card. Users must fix this on a computer.
 - `capacity_kb` and `free_kb`: unsigned decimal kilobytes, `0` when unknown.
 - `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and
-  `probe_data`: non-formatting card-probe diagnostics. Older bridge firmware
-  may omit these tokens; ESP32 treats them as optional.
+  `probe_data`: non-formatting card-probe diagnostics. `mount_err` and
+  `mount_data` are the captured SdFat error bytes from the direct filesystem
+  mount attempt. Older bridge firmware may omit these tokens; ESP32 treats them
+  as optional.
 - `file_ops`: `1` when the card is ready and the generic file protocol below is available.
 - `file_line_max`: maximum request/reply line length, excluding newline. Current value: `512`.
 - `file_chunk_max`: maximum decoded read/write/append payload size. Current value: `192` bytes.
@@ -63,17 +65,18 @@ If the SD stack is still probing or mounting the card, the line may report
 `DESKOS_SD_STATUS` until the cached state becomes `ready`,
 `not_fat32_or_unmountable`, `deskos_manifest_invalid`, `no_card`, or `error`.
 
-The RP2040 bridge must use a bounded raw SPI presence probe before entering the
-Arduino/SdFat filesystem mount path. An electrically absent or non-responsive
-card should report `no_card` rather than wedging the UART bridge.
+The RP2040 bridge first tries the direct SdFat filesystem mount on the expected
+D1L SD bus. If that fails, it records the SdFat mount error bytes and then uses a
+bounded raw SPI presence probe for classification. An electrically absent or
+non-responsive card should report `no_card` rather than wedging the UART bridge.
 
 ```text
-DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 The D1L bridge tries the expected high-power, dedicated-`SPI1` FAT mount first.
-If that mount fails, it uses one raw SdFat presence probe on the same expected
-D1L bus before reporting `no_card` or a FAT32-required state.
+If that mount fails, it uses one bounded raw SPI presence probe on the same
+expected D1L bus before reporting `no_card` or a FAT32-required state.
 Exhaustive high/low and dedicated/shared probing is reserved for the manual
 diagnostic request below. If no card responds, the bridge reports
 `state=no_card`. If a card responds but the filesystem is unusable, the bridge

@@ -33,6 +33,8 @@ typedef struct {
     uint32_t path_max;
     uint32_t sd_probe_error;
     uint32_t sd_probe_data;
+    uint32_t sd_mount_error;
+    uint32_t sd_mount_data;
     esp_err_t last_error;
     char sd_probe_power[8];
     char sd_probe_mode[16];

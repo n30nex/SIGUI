@@ -133,6 +133,8 @@ SdSnapshot s_worker_snapshot = {};
 DiagSnapshot s_worker_diag = {};
 DiagSnapshot s_cached_diag = {};
 bool s_cached_diag_valid = false;
+uint8_t s_last_mount_error = 0;
+uint8_t s_last_mount_data = 0;
 volatile uint8_t s_worker_request = SD_WORKER_NONE;
 volatile bool s_worker_busy = false;
 volatile bool s_mount_worker_completed = false;
@@ -183,13 +185,34 @@ bool mount_sd_with_power(bool power_high) {
     SPI1.begin();
     s_sd.end();
     if (s_sd.begin(sd_spi_config(s_sd_spi_options))) {
+        s_last_mount_error = 0;
+        s_last_mount_data = 0;
         return true;
+    }
+    if (s_sd.card()) {
+        s_last_mount_error = s_sd.card()->errorCode();
+        s_last_mount_data = s_sd.card()->errorData();
+    } else {
+        s_last_mount_error = 0xFE;
+        s_last_mount_data = 0;
     }
     s_sd.end();
     delay(50);
     configure_sd_bus(power_high);
     SPI1.begin();
-    return s_sd.begin(sd_spi_config(s_sd_spi_options));
+    if (s_sd.begin(sd_spi_config(s_sd_spi_options))) {
+        s_last_mount_error = 0;
+        s_last_mount_data = 0;
+        return true;
+    }
+    if (s_sd.card()) {
+        s_last_mount_error = s_sd.card()->errorCode();
+        s_last_mount_data = s_sd.card()->errorData();
+    } else {
+        s_last_mount_error = 0xFE;
+        s_last_mount_data = 0;
+    }
+    return false;
 }
 
 bool mount_sd() {
@@ -650,13 +673,13 @@ SdSnapshot mount_status_blocking() {
     }
 
     snapshot = make_snapshot("no_card", "no_card");
-    CardProbe probe = probe_card(DEDICATED_SPI, true);
+    CardProbe probe = manual_probe_card(DEDICATED_SPI, true);
     if (!probe.present) {
         CardProbe probes[] = {
             probe,
-            probe_card(SHARED_SPI, true),
-            probe_card(DEDICATED_SPI, false),
-            probe_card(SHARED_SPI, false),
+            manual_probe_card(SHARED_SPI, true),
+            manual_probe_card(DEDICATED_SPI, false),
+            manual_probe_card(SHARED_SPI, false),
         };
         const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
         if (!selected) {
@@ -752,10 +775,10 @@ DiagSnapshot pending_diag_snapshot() {
 
 DiagSnapshot diag_status_blocking() {
     DiagSnapshot diag = pending_diag_snapshot();
-    diag.high_dedicated = probe_card(DEDICATED_SPI, true);
-    diag.high_shared = probe_card(SHARED_SPI, true);
-    diag.low_dedicated = probe_card(DEDICATED_SPI, false);
-    diag.low_shared = probe_card(SHARED_SPI, false);
+    diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true);
+    diag.high_shared = manual_probe_card(SHARED_SPI, true);
+    diag.low_dedicated = manual_probe_card(DEDICATED_SPI, false);
+    diag.low_shared = manual_probe_card(SHARED_SPI, false);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
@@ -1086,6 +1109,10 @@ void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) 
     line += String(static_cast<unsigned int>(snapshot.probe_error));
     line += " probe_data=";
     line += String(static_cast<unsigned int>(snapshot.probe_data));
+    line += " mount_err=";
+    line += String(static_cast<unsigned int>(s_last_mount_error));
+    line += " mount_data=";
+    line += String(static_cast<unsigned int>(s_last_mount_data));
     line += " file_ops=";
     line += bool_token(file_ready);
     line += " file_line_max=";
