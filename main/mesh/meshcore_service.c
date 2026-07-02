@@ -1512,9 +1512,8 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     remember_pending_dm_tx(&contact, text, route_path_hash_bytes, route_path_hops, 0, ack_hash);
-    if (append_dm_store_tx(&s_pending_dm_tx)) {
-        clear_pending_dm_tx();
-    }
+    (void)append_dm_store_tx(&s_pending_dm_tx);
+    clear_pending_dm_tx();
     Radio.Send(raw, raw_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",

@@ -83,6 +83,8 @@ def test_meshcore_service_retains_dm_when_queued_not_only_tx_done():
     radio_send_at = send_body.index("Radio.Send(raw, raw_len)")
 
     assert remember_at < append_at < clear_at < radio_send_at
+    assert "(void)append_dm_store_tx(&s_pending_dm_tx);\n    clear_pending_dm_tx();" in send_body
+    assert "if (append_dm_store_tx(&s_pending_dm_tx))" not in send_body
     assert "static bool append_dm_store_tx" in source
     assert "static void clear_pending_dm_tx" in source
 
