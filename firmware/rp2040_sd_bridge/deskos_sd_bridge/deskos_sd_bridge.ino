@@ -184,6 +184,7 @@ void configure_sd_spi_pins() {
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
+    SPI1.setCS(SD_CS_PIN);
 }
 
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
@@ -233,7 +234,7 @@ void capture_sd_mount_error(uint8_t options) {
 }
 
 bool begin_sd_filesystem(bool capture_failure_details = true) {
-    if (SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)) {
+    if (SD.begin(SD_CS_PIN, SPI1)) {
         s_sd_mounted = true;
         s_last_mount_error = 0;
         s_last_mount_data = 0;
