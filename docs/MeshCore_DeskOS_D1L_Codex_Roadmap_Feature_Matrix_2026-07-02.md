@@ -84,7 +84,7 @@ DeskOS D1L remains a developer preview. Public binary release is blocked until t
 ## Release Gate Policy Notes
 
 - `scripts/release_gate_audit_d1l.py` now requires SD preflight evidence to report `formats_sd=false` before the SD acceptance gate can pass.
-- Stale SD artifacts that contain old format-capable next actions are marked obsolete and sanitized to `prepare_fat32_card_on_computer_or_swap_known_good_sd_card` in the generated audit.
+- Stale SD artifacts that contain old format-capable next actions are marked obsolete and sanitized to a no-device-format repair action in the generated audit. Fresh raw-card-present failures with SdFat `mount_error` fields must point to firmware-side RP2040 mount inspection.
 - The latest local audit `artifacts/release-gate/d1l-release-gate-audit-c0c20a2-COM12-progress.json` still fails closed with five P0 blockers: outbound DM proof, SD acceptance matrix, 12-hour soak, manual physical UI/photos, and full RF acceptance.
 
 ## Next Work Order

@@ -36,7 +36,7 @@ REQUIRED_ROUTE_PROBE_CHECKS = {
     "routes_trace_has_probe",
     "health_ready",
 }
-SAFE_SD_NEXT_ACTION = "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+SAFE_SD_NEXT_ACTION = "confirm_fat32_card_or_inspect_rp2040_sd_mount_path"
 OBSOLETE_SD_NEXT_ACTION_TOKENS = ("format", "mkfs", "erase", "wipe")
 TOP_LEVEL_COMMIT_FIELDS = (
     "commit",

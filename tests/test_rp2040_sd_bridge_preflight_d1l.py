@@ -109,7 +109,9 @@ def raw_card_present_mount_failed_line() -> str:
         '"sd":{"state":"not_fat32_or_unmountable","present":true,"mounted":false,'
         '"data_root_ready":false,"needs_fat32":true,'
         '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
-        '"file_ops":false,"atomic_rename":false,"last_error":"ESP_OK"},'
+        '"file_ops":false,"atomic_rename":false,'
+        '"probe_error":0,"probe_data":192,"mount_error":23,"mount_data":8,'
+        '"last_error":"ESP_OK"},'
         '"data_backend":"nvs","export_backend":"serial"}\n'
     )
 
@@ -514,7 +516,9 @@ def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):
     assert report["ok"] is True
     assert report["ready_for_sd_acceptance"] is False
     assert report["classification"]["state"] == "raw_card_present_mount_failed"
-    assert report["classification"]["next_action"] == "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+    assert report["classification"]["next_action"] == "inspect_rp2040_sd_mount_error_firmware_path"
+    assert report["classification"]["sd_mount_error"] == 23
+    assert report["classification"]["sd_mount_data"] == 8
 
 
 def test_run_preflight_polls_safe_status_while_mount_pending(monkeypatch):

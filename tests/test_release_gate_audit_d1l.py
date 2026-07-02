@@ -265,7 +265,7 @@ def test_release_gate_audit_blocks_obsolete_sd_format_guidance_without_echoing_a
     assert sd_gate["ok"] is False
     assert sd_gate["details"]["no_device_format_policy_ok"] is False
     assert sd_gate["details"]["obsolete_format_action_blocked"] is True
-    assert sd_gate["details"]["classification"]["next_action"] == "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+    assert sd_gate["details"]["classification"]["next_action"] == "confirm_fat32_card_or_inspect_rp2040_sd_mount_path"
     assert "run_guarded_format_or_swap_known_good_sd_card" not in json.dumps(sd_gate)
 
 

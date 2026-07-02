@@ -106,6 +106,14 @@ def sd_state(result: dict) -> str | None:
     return state if isinstance(state, str) else None
 
 
+def sd_has_mount_error(sd: dict) -> bool:
+    for key in ("mount_error", "mount_data"):
+        value = sd.get(key)
+        if isinstance(value, (int, float)) and value:
+            return True
+    return False
+
+
 def classify_preflight(
     rp2040_status: dict,
     rp2040_ping: dict,
@@ -150,7 +158,11 @@ def classify_preflight(
         and sd.get("needs_fat32") is True
     ):
         state = "raw_card_present_mount_failed"
-        next_action = "prepare_fat32_card_on_computer_or_swap_known_good_sd_card"
+        next_action = (
+            "inspect_rp2040_sd_mount_error_firmware_path"
+            if sd_has_mount_error(sd)
+            else "confirm_fat32_card_or_inspect_rp2040_sd_mount_path"
+        )
     elif bridge_uart_ready and ping_supported and not protocol_supported:
         state = "sd_status_pending"
         next_action = "inspect_storage_status_and_run_storage_diag"
@@ -191,6 +203,8 @@ def classify_preflight(
         "storage_file_gate_ready": file_gate_ready,
         "sd_state": sd.get("state"),
         "sd_last_error": sd.get("last_error"),
+        "sd_mount_error": sd.get("mount_error"),
+        "sd_mount_data": sd.get("mount_data"),
     }
 
 
