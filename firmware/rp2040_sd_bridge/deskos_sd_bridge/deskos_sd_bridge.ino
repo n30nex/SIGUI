@@ -650,13 +650,13 @@ SdSnapshot mount_status_blocking() {
     }
 
     snapshot = make_snapshot("no_card", "no_card");
-    CardProbe probe = manual_probe_card(DEDICATED_SPI, true);
+    CardProbe probe = probe_card(DEDICATED_SPI, true);
     if (!probe.present) {
         CardProbe probes[] = {
             probe,
-            manual_probe_card(SHARED_SPI, true),
-            manual_probe_card(DEDICATED_SPI, false),
-            manual_probe_card(SHARED_SPI, false),
+            probe_card(SHARED_SPI, true),
+            probe_card(DEDICATED_SPI, false),
+            probe_card(SHARED_SPI, false),
         };
         const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
         if (!selected) {
@@ -752,10 +752,10 @@ DiagSnapshot pending_diag_snapshot() {
 
 DiagSnapshot diag_status_blocking() {
     DiagSnapshot diag = pending_diag_snapshot();
-    diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true);
-    diag.high_shared = manual_probe_card(SHARED_SPI, true);
-    diag.low_dedicated = manual_probe_card(DEDICATED_SPI, false);
-    diag.low_shared = manual_probe_card(SHARED_SPI, false);
+    diag.high_dedicated = probe_card(DEDICATED_SPI, true);
+    diag.high_shared = probe_card(SHARED_SPI, true);
+    diag.low_dedicated = probe_card(DEDICATED_SPI, false);
+    diag.low_shared = probe_card(SHARED_SPI, false);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
