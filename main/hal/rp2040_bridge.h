@@ -55,7 +55,7 @@ typedef struct {
     uint32_t probe_error;
     uint32_t probe_data;
     esp_err_t last_error;
-    char state[24];
+    char state[32];
     char filesystem[16];
     char note[96];
     char probe_power[8];

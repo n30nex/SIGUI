@@ -217,6 +217,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage_setup_sheet" in simulator
     assert "Prepare FAT32 on a computer" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
+    assert "char state[32]" in rp2040_header
     assert "d1l_rp2040_ping_t" in rp2040_header
     assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header

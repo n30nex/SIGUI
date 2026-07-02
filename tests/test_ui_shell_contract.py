@@ -864,6 +864,7 @@ def test_live_packet_receive_store_reads_are_serialized_for_ui_snapshots():
     assert "xSemaphoreCreateMutexStatic" in lock_header
     assert "d1l_store_lock_take" in lock_header
     assert "d1l_store_lock_give" in lock_header
+    assert ".buffer = {0}" not in lock_header
 
     for path in [
         "main/mesh/packet_log.c",

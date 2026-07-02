@@ -9,7 +9,7 @@ typedef struct {
     portMUX_TYPE init_mux;
 } d1l_store_lock_t;
 
-#define D1L_STORE_LOCK_INITIALIZER { .buffer = {0}, .handle = NULL, .init_mux = portMUX_INITIALIZER_UNLOCKED }
+#define D1L_STORE_LOCK_INITIALIZER { .handle = NULL, .init_mux = portMUX_INITIALIZER_UNLOCKED }
 
 static inline SemaphoreHandle_t d1l_store_lock_handle(d1l_store_lock_t *lock)
 {
