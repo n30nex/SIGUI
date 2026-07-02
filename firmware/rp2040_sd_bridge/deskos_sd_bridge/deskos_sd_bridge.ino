@@ -595,6 +595,44 @@ SdSnapshot mount_status_blocking() {
     SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
+    snapshot = pending_snapshot("filesystem_mounting");
+    publish_worker_snapshot(snapshot);
+    if (mount_sd()) {
+        CardProbe mounted_probe = {
+            true,
+            0,
+            0,
+            0,
+            power_token(s_sd_power_high),
+            "mount",
+            s_sd_power_high,
+            s_sd_spi_options,
+        };
+        apply_probe_to_snapshot(snapshot, mounted_probe);
+        snapshot.state = "creating_deskos_files";
+        snapshot.present = true;
+        snapshot.mounted = true;
+        snapshot.deskos = false;
+        snapshot.fs = fat_label();
+        snapshot.note = "deskos_root_missing";
+        fill_capacity(snapshot);
+
+        const char *prepare_note = "ready";
+        if (prepare_deskos_structure(&prepare_note)) {
+            snapshot.state = "ready";
+            snapshot.deskos = true;
+            snapshot.note = prepare_note;
+        } else {
+            snapshot.state = strcmp(prepare_note, "deskos_manifest_invalid") == 0 ||
+                             strcmp(prepare_note, "deskos_map_manifest_invalid") == 0 ?
+                             "deskos_manifest_invalid" : "error";
+            snapshot.note = prepare_note;
+        }
+
+        return snapshot;
+    }
+
+    snapshot = make_snapshot("no_card", "no_card");
     CardProbe probe = manual_probe_card(DEDICATED_SPI, true);
     if (!probe.present) {
         CardProbe probes[] = {

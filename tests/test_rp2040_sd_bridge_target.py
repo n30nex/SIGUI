@@ -106,6 +106,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "mount_not_checked",
         "mount_started",
         "mount_in_progress",
+        "filesystem_mounting",
         "card_detected_mounting",
         "deskos_root_missing",
         "deskos_manifest_invalid",
