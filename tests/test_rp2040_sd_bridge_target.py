@@ -50,6 +50,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
     assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
+    assert "pinMode(SD_MISO_PIN, INPUT_PULLUP)" in sketch
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
