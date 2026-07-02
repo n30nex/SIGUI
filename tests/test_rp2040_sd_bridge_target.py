@@ -47,7 +47,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
-    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
+    assert "SdFat s_sd;" in sketch
+    assert "s_sd.begin(sd_spi_config(s_sd_spi_options))" in sketch
     assert "SPI1.begin()" in sketch
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
@@ -61,6 +62,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sd_command(41" in sketch
     assert "delete card" in sketch
     assert "SDFS.format()" not in sketch
+    assert "s_sd.format()" not in sketch
     old_request = "DESKOS_SD_" + "FORMAT"
     old_confirmation = "FORMAT-" + "DESKOS-SD"
     assert old_request not in sketch
@@ -156,12 +158,12 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "handle_file_write" in sketch
     assert "handle_file_delete" in sketch
     assert "handle_file_rename" in sketch
-    assert "SD.rename(source_path, target_path)" in sketch
+    assert "s_sd.rename(source_path, target_path)" in sketch
     assert "REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE" in sketch
     assert "rename_replace_preserving_old" in sketch
     assert "REPLACE_BACKUP_SUFFIX" in sketch
-    assert "SD.rename(target_path, backup_path)" in sketch
-    assert "(void)SD.rename(backup_path, target_path)" in sketch
+    assert "s_sd.rename(target_path, backup_path)" in sketch
+    assert "(void)s_sd.rename(backup_path, target_path)" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch

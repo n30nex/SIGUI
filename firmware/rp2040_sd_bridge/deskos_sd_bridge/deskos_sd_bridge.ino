@@ -124,6 +124,7 @@ enum SdWorkerRequest : uint8_t {
 LineRx bridge_rx = {{0}, 0, false};
 LineRx usb_rx = {{0}, 0, false};
 Stream *reply_stream = &Serial1;
+SdFat s_sd;
 bool s_sd_power_high = true;
 uint8_t s_sd_spi_options = DEDICATED_SPI;
 SdSnapshot s_cached_snapshot = {};
@@ -153,6 +154,8 @@ const char *spi_mode_token(uint8_t options) {
     return options == SHARED_SPI ? "shared" : "dedicated";
 }
 
+SdSpiConfig sd_spi_config(uint8_t options);
+
 void configure_sd_bus(bool power_high) {
     static bool sd_power_settled = false;
     static bool last_power_high = true;
@@ -178,15 +181,15 @@ void configure_sd_bus() {
 bool mount_sd_with_power(bool power_high) {
     configure_sd_bus(power_high);
     SPI1.begin();
-    SD.end(false);
-    if (SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)) {
+    s_sd.end();
+    if (s_sd.begin(sd_spi_config(s_sd_spi_options))) {
         return true;
     }
-    SD.end(false);
+    s_sd.end();
     delay(50);
     configure_sd_bus(power_high);
     SPI1.begin();
-    return SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+    return s_sd.begin(sd_spi_config(s_sd_spi_options));
 }
 
 bool mount_sd() {
@@ -319,7 +322,7 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         options,
     };
     configure_sd_bus(power_high);
-    SD.end(false);
+    s_sd.end();
     SdCardFactory card_factory;
     SdCard *card = card_factory.newCard(sd_spi_config(options));
     if (!card) {
@@ -439,7 +442,7 @@ bool start_sd_worker(SdWorkerRequest request) {
 }
 
 const char *fat_label() {
-    switch (SD.fatType()) {
+    switch (s_sd.vol()->fatType()) {
     case 12:
         return "fat12";
     case 16:
@@ -452,21 +455,21 @@ const char *fat_label() {
 }
 
 void fill_capacity(SdSnapshot &snapshot) {
-    FSInfo info;
-    if (SDFS.info(info)) {
-        snapshot.capacity_kb = clamp_kb(info.totalBytes);
-        snapshot.free_kb = info.usedBytes <= info.totalBytes
-                                ? clamp_kb(info.totalBytes - info.usedBytes)
-                                : 0;
-    } else {
-        snapshot.capacity_kb = clamp_kb(SD.size64());
-        snapshot.free_kb = 0;
+    if (s_sd.vol()) {
+        const uint64_t cluster_count = s_sd.vol()->clusterCount();
+        const uint64_t free_count = s_sd.vol()->freeClusterCount();
+        const uint64_t bytes_per_cluster = s_sd.vol()->bytesPerCluster();
+        snapshot.capacity_kb = clamp_kb(cluster_count * bytes_per_cluster);
+        snapshot.free_kb = free_count <= cluster_count ? clamp_kb(free_count * bytes_per_cluster) : 0;
+        return;
     }
+    snapshot.capacity_kb = 0;
+    snapshot.free_kb = 0;
 }
 
 bool path_is_directory(const char *path) {
-    File file = SD.open(path, "r");
-    const bool is_dir = file && file.isDirectory();
+    FsFile file = s_sd.open(path, O_RDONLY);
+    const bool is_dir = file && file.isDir();
     if (file) {
         file.close();
     }
@@ -474,29 +477,36 @@ bool path_is_directory(const char *path) {
 }
 
 bool ensure_directory(const char *path) {
-    if (SD.exists(path)) {
+    if (s_sd.exists(path)) {
         return path_is_directory(path);
     }
-    return SD.mkdir(path) && path_is_directory(path);
+    return s_sd.mkdir(path) && path_is_directory(path);
 }
 
 bool manifest_valid() {
-    if (!SD.exists(DESKOS_MANIFEST)) {
+    if (!s_sd.exists(DESKOS_MANIFEST)) {
         return false;
     }
-    File file = SD.open(DESKOS_MANIFEST, "r");
-    if (!file || file.isDirectory()) {
+    FsFile file = s_sd.open(DESKOS_MANIFEST, O_RDONLY);
+    if (!file || file.isDir()) {
         if (file) {
             file.close();
         }
         return false;
     }
-    if (file.size() == 0 || file.size() > 512) {
+    const uint32_t size = static_cast<uint32_t>(file.fileSize());
+    if (size == 0 || size > 512) {
         file.close();
         return false;
     }
-    String text = file.readString();
+    char buffer[513];
+    const int read_len = file.read(buffer, size);
     file.close();
+    if (read_len <= 0) {
+        return false;
+    }
+    buffer[read_len] = '\0';
+    String text(buffer);
     return text.indexOf("\"schema\":1") >= 0 &&
            text.indexOf("\"name\":\"MeshCore DeskOS D1L SD\"") >= 0 &&
            text.indexOf("\"device\":\"seeed-indicator-d1l\"") >= 0 &&
@@ -504,34 +514,41 @@ bool manifest_valid() {
 }
 
 bool map_manifest_valid() {
-    if (!SD.exists(DESKOS_MAP_MANIFEST)) {
+    if (!s_sd.exists(DESKOS_MAP_MANIFEST)) {
         return false;
     }
-    File file = SD.open(DESKOS_MAP_MANIFEST, "r");
-    if (!file || file.isDirectory()) {
+    FsFile file = s_sd.open(DESKOS_MAP_MANIFEST, O_RDONLY);
+    if (!file || file.isDir()) {
         if (file) {
             file.close();
         }
         return false;
     }
-    if (file.size() == 0 || file.size() > 512) {
+    const uint32_t size = static_cast<uint32_t>(file.fileSize());
+    if (size == 0 || size > 512) {
         file.close();
         return false;
     }
-    String text = file.readString();
+    char buffer[513];
+    const int read_len = file.read(buffer, size);
     file.close();
+    if (read_len <= 0) {
+        return false;
+    }
+    buffer[read_len] = '\0';
+    String text(buffer);
     return text.indexOf("\"schema\":1") >= 0 &&
            text.indexOf("\"kind\":\"map_cache\"") >= 0 &&
            text.indexOf("\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\"") >= 0;
 }
 
 bool write_text_file(const char *path, const char *payload) {
-    File file = SD.open(path, "w");
+    FsFile file = s_sd.open(path, O_WRONLY | O_CREAT | O_TRUNC);
     if (!file) {
         return false;
     }
-    const size_t written = file.print(payload);
-    file.flush();
+    const size_t written = file.write(reinterpret_cast<const uint8_t *>(payload), strlen(payload));
+    file.sync();
     file.close();
     return written == strlen(payload);
 }
@@ -547,7 +564,7 @@ bool write_map_manifest() {
 
 bool prepare_deskos_structure(const char **note) {
     bool created = false;
-    if (!SD.exists(DESKOS_ROOT)) {
+    if (!s_sd.exists(DESKOS_ROOT)) {
         created = true;
     }
     if (!ensure_directory(DESKOS_ROOT)) {
@@ -555,7 +572,7 @@ bool prepare_deskos_structure(const char **note) {
         return false;
     }
     for (size_t i = 0; i < sizeof(DESKOS_REQUIRED_DIRS) / sizeof(DESKOS_REQUIRED_DIRS[0]); ++i) {
-        if (!SD.exists(DESKOS_REQUIRED_DIRS[i])) {
+        if (!s_sd.exists(DESKOS_REQUIRED_DIRS[i])) {
             created = true;
         }
         if (!ensure_directory(DESKOS_REQUIRED_DIRS[i])) {
@@ -563,7 +580,7 @@ bool prepare_deskos_structure(const char **note) {
             return false;
         }
     }
-    if (SD.exists(DESKOS_MANIFEST)) {
+    if (s_sd.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
             *note = "deskos_manifest_invalid";
             return false;
@@ -575,7 +592,7 @@ bool prepare_deskos_structure(const char **note) {
             return false;
         }
     }
-    if (SD.exists(DESKOS_MAP_MANIFEST)) {
+    if (s_sd.exists(DESKOS_MAP_MANIFEST)) {
         if (!map_manifest_valid()) {
             *note = "deskos_map_manifest_invalid";
             return false;
@@ -994,7 +1011,7 @@ bool ensure_parent_dirs(const char *full_path) {
             continue;
         }
         *p = '\0';
-        if (!SD.exists(tmp) && !SD.mkdir(tmp)) {
+        if (!s_sd.exists(tmp) && !s_sd.mkdir(tmp)) {
             *p = '/';
             return false;
         }
@@ -1013,25 +1030,25 @@ bool make_backup_path(const char *target_path, char *backup_path, size_t backup_
 }
 
 const char *rename_replace_preserving_old(const char *source_path, const char *target_path) {
-    if (!SD.exists(target_path)) {
-        return SD.rename(source_path, target_path) ? nullptr : "rename_failed";
+    if (!s_sd.exists(target_path)) {
+        return s_sd.rename(source_path, target_path) ? nullptr : "rename_failed";
     }
 
     char backup_path[FILE_FULL_PATH_MAX];
     if (!make_backup_path(target_path, backup_path, sizeof(backup_path))) {
         return "too_large";
     }
-    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
+    if (s_sd.exists(backup_path) && !s_sd.remove(backup_path)) {
         return "delete_failed";
     }
-    if (!SD.rename(target_path, backup_path)) {
+    if (!s_sd.rename(target_path, backup_path)) {
         return "rename_failed";
     }
-    if (!SD.rename(source_path, target_path)) {
-        (void)SD.rename(backup_path, target_path);
+    if (!s_sd.rename(source_path, target_path)) {
+        (void)s_sd.rename(backup_path, target_path);
         return "rename_failed";
     }
-    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
+    if (s_sd.exists(backup_path) && !s_sd.remove(backup_path)) {
         return "delete_failed";
     }
     return nullptr;
@@ -1226,21 +1243,21 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=stat exists=";
-    if (!SD.exists(full_path)) {
+    if (!s_sd.exists(full_path)) {
         out += "0 kind=none size=0 note=ok";
         reply_stream->println(out);
         return;
     }
 
-    File file = SD.open(full_path, "r");
+    FsFile file = s_sd.open(full_path, O_RDONLY);
     if (!file) {
         send_file_error(request_id, "stat", "open_failed");
         return;
     }
     out += "1 kind=";
-    out += file.isDirectory() ? "dir" : "file";
+    out += file.isDir() ? "dir" : "file";
     out += " size=";
-    out += String(static_cast<unsigned long>(file.isDirectory() ? 0 : file.size()));
+    out += String(static_cast<unsigned long>(file.isDir() ? 0 : file.fileSize()));
     out += " note=ok";
     file.close();
     reply_stream->println(out);
@@ -1265,21 +1282,21 @@ void handle_file_read(uint32_t request_id, const char *line) {
         send_file_error(request_id, "read", "too_large");
         return;
     }
-    if (!SD.exists(full_path)) {
+    if (!s_sd.exists(full_path)) {
         send_file_error(request_id, "read", "not_found");
         return;
     }
 
-    File file = SD.open(full_path, "r");
-    if (!file || file.isDirectory()) {
-        send_file_error(request_id, "read", file && file.isDirectory() ? "is_dir" : "open_failed");
+    FsFile file = s_sd.open(full_path, O_RDONLY);
+    if (!file || file.isDir()) {
+        send_file_error(request_id, "read", file && file.isDir() ? "is_dir" : "open_failed");
         if (file) {
             file.close();
         }
         return;
     }
-    const uint32_t file_size = static_cast<uint32_t>(file.size());
-    if (offset > file_size || !file.seek(offset)) {
+    const uint32_t file_size = static_cast<uint32_t>(file.fileSize());
+    if (offset > file_size || !file.seekSet(offset)) {
         file.close();
         send_file_error(request_id, "read", "range");
         return;
@@ -1352,16 +1369,16 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     }
 
     uint32_t current_size = 0;
-    if (!truncate && SD.exists(full_path)) {
-        File existing = SD.open(full_path, "r");
-        if (!existing || existing.isDirectory()) {
-            send_file_error(request_id, op_name, existing && existing.isDirectory() ? "is_dir" : "open_failed");
+    if (!truncate && s_sd.exists(full_path)) {
+        FsFile existing = s_sd.open(full_path, O_RDONLY);
+        if (!existing || existing.isDir()) {
+            send_file_error(request_id, op_name, existing && existing.isDir() ? "is_dir" : "open_failed");
             if (existing) {
                 existing.close();
             }
             return;
         }
-        current_size = static_cast<uint32_t>(existing.size());
+        current_size = static_cast<uint32_t>(existing.fileSize());
         existing.close();
     }
     if (append_mode) {
@@ -1371,14 +1388,14 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
         return;
     }
 
-    File file = SD.open(full_path, truncate ? "w" : "a");
+    FsFile file = s_sd.open(full_path, truncate ? (O_WRONLY | O_CREAT | O_TRUNC) : (O_WRONLY | O_CREAT | O_APPEND | O_AT_END));
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
         return;
     }
     const size_t written = data_len == 0 ? 0 : file.write(data, data_len);
-    file.flush();
-    const uint32_t new_size = static_cast<uint32_t>(file.size());
+    file.sync();
+    const uint32_t new_size = static_cast<uint32_t>(file.fileSize());
     file.close();
     if (written != data_len) {
         send_file_error(request_id, op_name, "write_failed");
@@ -1408,11 +1425,11 @@ void handle_file_delete(uint32_t request_id, const char *line) {
         send_file_error(request_id, "delete", "bad_path");
         return;
     }
-    if (!SD.exists(full_path)) {
+    if (!s_sd.exists(full_path)) {
         send_file_error(request_id, "delete", "not_found");
         return;
     }
-    if (!SD.remove(full_path)) {
+    if (!s_sd.remove(full_path)) {
         send_file_error(request_id, "delete", "delete_failed");
         return;
     }
@@ -1437,7 +1454,7 @@ void handle_file_rename(uint32_t request_id, const char *line) {
         send_file_error(request_id, "rename", "bad_path");
         return;
     }
-    if (!SD.exists(source_path)) {
+    if (!s_sd.exists(source_path)) {
         send_file_error(request_id, "rename", "not_found");
         return;
     }
@@ -1445,19 +1462,19 @@ void handle_file_rename(uint32_t request_id, const char *line) {
         send_file_error(request_id, "rename", "open_failed");
         return;
     }
-    if (SD.exists(target_path) && !replace_target) {
+    if (s_sd.exists(target_path) && !replace_target) {
         send_file_error(request_id, "rename", "exists");
         return;
     }
 
     const char *replace_error = replace_target
                                     ? rename_replace_preserving_old(source_path, target_path)
-                                    : (SD.rename(source_path, target_path) ? nullptr : "rename_failed");
+                                    : (s_sd.rename(source_path, target_path) ? nullptr : "rename_failed");
     if (replace_error) {
         send_file_error(request_id, "rename", replace_error);
         return;
     }
-    if (!SD.exists(target_path)) {
+    if (!s_sd.exists(target_path)) {
         send_file_error(request_id, "rename", "rename_failed");
         return;
     }
