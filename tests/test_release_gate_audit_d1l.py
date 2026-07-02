@@ -105,6 +105,59 @@ def write_core_evidence(root: Path) -> None:
         )
 
 
+def write_routes_probe_evidence(root: Path, commit: str = COMMIT) -> None:
+    payload = {
+        "schema": 1,
+        "mode": "hardware-route-probe",
+        "port": "COM12",
+        "dm_rf_tx": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "ok": True,
+        "checks": {
+            "trace_reports_active_probe": True,
+            "probe_queued": True,
+            "probe_is_dm_rf": True,
+            "probe_not_public_rf": True,
+            "token_generated": True,
+            "packets_search_has_token": True,
+            "messages_dm_has_token": True,
+            "routes_trace_has_probe": True,
+            "health_ready": True,
+        },
+        "steps": [
+            {
+                "command": "messages dm 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "entries": [
+                        {
+                            "direction": "tx",
+                            "text": "trace_unit",
+                            "acked": True,
+                            "ack_hash": 1234,
+                        }
+                    ],
+                },
+            },
+            {
+                "command": "routes trace 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "entries": [
+                        {
+                            "kind": "trace_probe",
+                            "direction": "tx",
+                            "route": "direct",
+                        }
+                    ],
+                },
+            },
+        ],
+    }
+    write_json(root / "artifacts" / "hardware" / "com12" / f"routes_probe_{commit[:7]}.json", payload)
+
+
 def audit_args(root: Path):
     return parse_args(
         [
@@ -152,6 +205,25 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_duration_idle_soak"]["ok"] is False
     assert gates["manual_physical_ui_review"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["ok"] is False
+    assert report["p0_failed_count"] == 4
+
+
+def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_full_rf(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_routes_probe_evidence(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["supplemental_dm_route_probe"]["ok"] is True
+    assert gates["supplemental_dm_route_probe"]["severity"] == "P1"
+    assert gates["supplemental_dm_route_probe"]["evidence"] == [
+        "artifacts/hardware/com12/routes_probe_68350bf.json"
+    ]
+    assert gates["supplemental_dm_route_probe"]["details"]["scope"] == "supplementary_dm_only_not_full_rf_acceptance"
+    assert gates["full_rf_dm_acceptance"]["ok"] is False
+    assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
+    assert report["ready_for_public_release"] is False
     assert report["p0_failed_count"] == 4
 
 

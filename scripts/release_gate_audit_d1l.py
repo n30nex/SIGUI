@@ -25,6 +25,17 @@ REQUIRED_NOTICE_FILES = {
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
 }
 FULL_SOAK_SECONDS = 12 * 60 * 60
+REQUIRED_ROUTE_PROBE_CHECKS = {
+    "trace_reports_active_probe",
+    "probe_queued",
+    "probe_is_dm_rf",
+    "probe_not_public_rf",
+    "token_generated",
+    "packets_search_has_token",
+    "messages_dm_has_token",
+    "routes_trace_has_probe",
+    "health_ready",
+}
 TOP_LEVEL_COMMIT_FIELDS = (
     "commit",
     "commit_sha",
@@ -321,6 +332,46 @@ def dm_probe_ok(data: dict, expected_port: str, expected_bot_port: str) -> bool:
     )
 
 
+def route_probe_ok(data: dict, expected_port: str) -> bool:
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    return (
+        data.get("ok") is True
+        and data.get("mode") == "hardware-route-probe"
+        and data.get("port") == expected_port
+        and data.get("dm_rf_tx") is True
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and all(checks.get(name) is True for name in REQUIRED_ROUTE_PROBE_CHECKS)
+    )
+
+
+def route_probe_gate(hardware_dir: Path, root: Path, commit: str | None, expected_port: str) -> GateResult:
+    probe = newest_commit_json(hardware_dir, commit, "routes_probe_*.json")
+    data = read_json(probe)
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    missing_or_failed = sorted(name for name in REQUIRED_ROUTE_PROBE_CHECKS if checks.get(name) is not True)
+    ok = bool(probe and data and route_probe_ok(data, expected_port))
+    return GateResult(
+        "supplemental_dm_route_probe",
+        "P1",
+        ok,
+        "Supplemental DM-only route active probe",
+        [rel(probe, root)] if probe else [],
+        "Supplemental DM-only active route probe evidence is present; full RF acceptance still requires inbound DM, ACK/PATH, and direct-route proof."
+        if ok else "No passing supplemental DM-only route probe artifact was found.",
+        {
+            "path_found": bool(probe),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "dm_rf_tx": data.get("dm_rf_tx") if data else None,
+            "public_rf_tx": data.get("public_rf_tx") if data else None,
+            "formats_sd": data.get("formats_sd") if data else None,
+            "missing_or_failed_checks": missing_or_failed,
+            "scope": "supplementary_dm_only_not_full_rf_acceptance",
+        },
+    )
+
+
 def sd_gate(preflight_path: Path | None, root: Path) -> GateResult:
     preflight = read_json(preflight_path)
     classification = preflight.get("classification") if isinstance(preflight.get("classification"), dict) else {}
@@ -518,6 +569,7 @@ def build_audit(args: argparse.Namespace) -> dict:
             "No passing outbound D1L-to-meshbot DM proof artifact was found.",
         )
     )
+    gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(sd_gate(newest_commit_json(hardware_dir, args.commit, "rp2040_preflight_*.json", "rp2040_sd_preflight_*.json"), root))
     gates.append(full_soak_gate(soak_dir, root, args.commit))
     gates.append(manual_evidence_gate(hardware_dir, root, args.commit))
