@@ -88,18 +88,18 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 
 - `DESKOS_SD_STATUS` is safe to call during boot and UI polling. It does not
   probe, mount, format, or write SD. Before an explicit mount it reports
-  `state=mount_required`; while an explicit mount worker is running it may
-  report `state=mount_pending`; after `DESKOS_SD_MOUNT` or file operations,
-  it returns the cached latest SD state. Ready cached cards
+  `state=mount_required`; after `DESKOS_SD_MOUNT` or file operations, it
+  returns the cached latest SD state. Ready cached cards
   advertise `file_ops=1`, `file_line_max=512`, `file_chunk_max=192`,
   `path_max=96`, and `atomic_rename=1`. Status replies include optional cached
   probe diagnostics:
   `probe_power`, `probe_mode`, `probe_present`, `probe_err`, `probe_data`,
   `mount_err`, and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
-  It starts the SD probe/mount worker on the second RP2040 core, may immediately
-  report `state=mount_pending`, and first tries the already-powered
-  high/dedicated `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD
+  It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
+  filesystem stack can wedge when invoked from the RP2040 core1 worker. The
+  command first tries the already-powered high/dedicated
+  `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD
   example. If that library path does not mount, the bridge falls back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before

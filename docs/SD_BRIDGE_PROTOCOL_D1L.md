@@ -45,8 +45,7 @@ Values must not contain spaces. Use underscores in `note`.
 
 On the D1L RP2040 bridge, status is safe to call from boot and UI polling. It
 does not probe, mount, format, or write SD. Before any explicit mount result is
-cached, the bridge reports `state=mount_required note=mount_not_checked`. While
-an explicit mount worker is running, status may report `state=mount_pending`.
+cached, the bridge reports `state=mount_required note=mount_not_checked`.
 After `DESKOS_SD_MOUNT` or file operations complete, status returns the cached
 latest SD state.
 
@@ -59,15 +58,16 @@ ESP32 sends this explicit SD-touch command when the operator runs
 DESKOS_SD_MOUNT
 ```
 
-RP2040 replies immediately with one status-shaped line using the mount prefix.
-If the SD stack is still probing or mounting the card, the line may report
-`state=mount_pending note=mount_started`; the ESP32 should poll safe
-`DESKOS_SD_STATUS` until the cached state becomes `ready`,
-`not_fat32_or_unmountable`, `deskos_manifest_invalid`, `no_card`, or `error`.
+RP2040 replies with one status-shaped line using the mount prefix after the
+explicit SD-touch attempt completes. `DESKOS_SD_STATUS` remains safe and
+non-touching before this command, and returns the cached result after this
+command completes.
 
 The RP2040 bridge is built with SdFat SPI command CRC enabled
 (`USE_SD_CRC=1`) and RP2040 SdFat array transfers disabled
-(`USE_SPI_ARRAY_TRANSFER=0`). It first tries the already-powered high/dedicated
+(`USE_SPI_ARRAY_TRANSFER=0`). The filesystem path runs on the
+protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
+the RP2040 core1 worker. It first tries the already-powered high/dedicated
 Arduino `SD.begin(13, 1000000, SPI1)` path documented by Seeed for the
 Indicator RP2040 MicroSD bus. If that library path does not mount, it falls back
 to bounded raw SPI presence probes across the high/low rail and

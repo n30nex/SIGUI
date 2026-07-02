@@ -794,15 +794,7 @@ SdSnapshot mount_status_blocking() {
 
 SdSnapshot mount_status() {
     refresh_worker_results();
-    if (s_mount_worker_completed && !s_worker_busy && s_worker_request == SD_WORKER_NONE &&
-        s_cached_snapshot_valid) {
-        s_mount_worker_completed = false;
-        return s_cached_snapshot;
-    }
-    if (start_sd_worker(SD_WORKER_MOUNT)) {
-        return cache_status(pending_snapshot("mount_started"));
-    }
-    return cache_status(pending_snapshot(s_worker_busy ? "mount_in_progress" : "mount_queued"));
+    return cache_status(mount_status_blocking());
 }
 
 DiagSnapshot pending_diag_snapshot() {
