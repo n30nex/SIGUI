@@ -244,6 +244,69 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
     assert report["checks"]["direct_route"] is True
 
 
+def test_rf_full_acceptance_accepts_truncated_ack_kind_when_tx_is_acked():
+    meshbot = {
+        "serial": {"active_port": "COM11", "meshcore_connected": True},
+        "discord": {"connected": True},
+    }
+    report = rf_accept.build_report(
+        port="COM12",
+        baud=115200,
+        bot_status_path=Path("status.json"),
+        bot_port="COM11",
+        fingerprint="0BF0A701D5AE2DB6",
+        public_key=rf_accept.DEFAULT_D1L_PUBLIC_KEY,
+        token="rf_unit",
+        send_outbound=True,
+        steps=[
+            {"command": "identity status", "result": {"ok": True, "fingerprint": "BA14729E8588E30B"}},
+            {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_out", "result": {"ok": True}},
+            {"command": "packets search rf_unit_out", "result": {"ok": True, "entries": [{"note": "rf_unit_out"}]}},
+            {"command": "mesh send dm 0BF0A701D5AE2DB6 rf_unit_direct", "result": {"ok": True}},
+            {
+                "command": "messages dm 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "fingerprint": "0BF0A701D5AE2DB6",
+                    "entries": [
+                        {
+                            "direction": "tx",
+                            "text": "rf_unit_out",
+                            "acked": True,
+                            "ack_hash": 4815162342,
+                        },
+                        {"direction": "rx", "text": "rf_unit_in"},
+                        {"direction": "tx", "text": "rf_unit_direct"},
+                    ],
+                },
+            },
+            {"command": "packets", "result": {"ok": True, "entries": [{"kind": "dm_ack_unmatche"}]}},
+            {
+                "command": "routes trace 0BF0A701D5AE2DB6",
+                "result": {
+                    "ok": True,
+                    "fingerprint": "0BF0A701D5AE2DB6",
+                    "entries": [
+                        {
+                            "target": "0BF0A701D5AE2DB6",
+                            "kind": "dm_text",
+                            "direction": "tx",
+                            "route": "direct",
+                        }
+                    ],
+                },
+            },
+            {"command": "health", "result": {"ok": True, "board_ready": True, "ui_ready": True}},
+        ],
+        meshbot_before=meshbot,
+        meshbot_after=meshbot,
+        inbound_seen_at="2026-07-01T00:00:00+00:00",
+    )
+
+    assert report["ok"] is True
+    assert report["checks"]["ack_path"] is True
+
+
 def test_rf_full_acceptance_prefixes_match_console_response_names():
     assert expected_command_name("mesh send dm 0BF0A701D5AE2DB6 hello") == "mesh send dm"
     assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"

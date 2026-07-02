@@ -133,7 +133,7 @@ def messages_have_acked_tx(value: dict | None, token: str, fingerprint: str) -> 
 def packets_have_ack_or_path(value: dict | None) -> bool:
     for entry in entries(value):
         kind = str(entry.get("kind", "")).lower()
-        if kind in {"dm_ack", "path_return"}:
+        if kind.startswith("dm_ack") or kind.startswith("path_return"):
             return True
     return False
 
