@@ -67,7 +67,7 @@ The RP2040 bridge is built by GitHub Actions with the Arduino-Pico board
 package's default SD library settings. The filesystem path runs on the
 protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
 the RP2040 core1 worker. It first tries the already-powered high/dedicated
-Arduino-Pico SPI1 path using `SPI1.setCS(13)`, manual CS-high idle,
+Arduino-Pico SPI1 path using software-controlled GPIO13 CS, manual CS-high idle,
 pre/post-SPI MISO pull-up, `SPI1.begin()`, and `SD.begin(13, SPI1)` on the
 Indicator RP2040 MicroSD bus without pre-clocking the bus or running a second
 SdFat probe on failure. If that
@@ -137,8 +137,9 @@ RP2040 replies with one compact line:
 DESKOS_SD_DIAG pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000 pin_sck=1 pin_mosi=1 pin_miso=1 pin_cs=1 selected_power=high selected_mode=dedicated mount_selected=0 hd_p=0 hd_e=254 hd_d=0 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_idle_ff=255 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_idle_ff=255 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_idle_ff=255 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_idle_ff=255 ls_kb=0
 ```
 
-`pin_sck`, `pin_mosi`, `pin_miso`, and `pin_cs` report whether Arduino-Pico
-accepted the configured SPI1 pins. Each probe prefix (`hd`, `hs`, `ld`, `ls`)
+`pin_sck`, `pin_mosi`, and `pin_miso` report whether Arduino-Pico accepted the
+configured SPI1 pins; `pin_cs` reports that software GPIO13 chip select is
+configured. Each probe prefix (`hd`, `hs`, `ld`, `ls`)
 reports presence (`*_p`), final probe error (`*_e`), error data (`*_d`), raw
 `CMD0` response (`*_c0`), raw `CMD8` response (`*_c8`), the four `CMD8` R7 echo
 bytes (`*_r70`..`*_r73`), MISO line samples after pull-up, after SPI1 begins,

@@ -60,7 +60,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.end()" in sketch
     assert "SPI1.setMOSI(SD_MOSI_PIN)" in sketch
     assert "SPI1.setMISO(SD_MISO_PIN)" in sketch
-    assert "SPI1.setCS(SD_CS_PIN)" in sketch
+    assert "SPI1.setCS(SD_CS_PIN)" not in sketch
+    assert "s_sd_pin_cs_ok = true;" in sketch
     assert "bool s_sd_mounted = false;" in sketch
     assert "SD.begin(SD_CS_PIN, SPI1)" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" not in sketch
