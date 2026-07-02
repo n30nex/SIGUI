@@ -571,7 +571,7 @@ bool manifest_valid() {
         return false;
     }
     char buffer[513];
-    const int read_len = file.read(buffer, size);
+    const int read_len = file.read(reinterpret_cast<uint8_t *>(buffer), size);
     file.close();
     if (read_len <= 0) {
         return false;
@@ -601,7 +601,7 @@ bool map_manifest_valid() {
         return false;
     }
     char buffer[513];
-    const int read_len = file.read(buffer, size);
+    const int read_len = file.read(reinterpret_cast<uint8_t *>(buffer), size);
     file.close();
     if (read_len <= 0) {
         return false;
