@@ -67,11 +67,13 @@ If the SD stack is still probing or mounting the card, the line may report
 
 The RP2040 bridge is built with SdFat SPI command CRC enabled
 (`USE_SD_CRC=1`) and RP2040 SdFat array transfers disabled
-(`USE_SPI_ARRAY_TRANSFER=0`). It first runs bounded raw SPI presence probes
-across the high/low rail and dedicated/shared SPI candidates. High-power
-candidates are tried once without force-cycling the rail, matching Seeed's
-already-powered sample path, before force-cycled fallback probes run. Only
-candidates that answer a valid SD idle/init sequence receive an Arduino
+(`USE_SPI_ARRAY_TRANSFER=0`). It first tries the already-powered high/dedicated
+Arduino `SD.begin(13, 1000000, SPI1)` path documented by Seeed for the
+Indicator RP2040 MicroSD bus. If that library path does not mount, it falls back
+to bounded raw SPI presence probes across the high/low rail and
+dedicated/shared SPI candidates. High-power candidates are tried once without
+force-cycling the rail before force-cycled fallback probes run. Only fallback
+candidates that answer a valid SD idle/init sequence receive another Arduino
 `SD`/`SDFS` filesystem mount attempt on the expected D1L SD bus. Failed
 filesystem attempts record captured SdFat diagnostic error bytes. An
 electrically absent or non-responsive card should report `no_card` rather than
@@ -81,19 +83,20 @@ wedging the UART bridge.
 DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
-The D1L bridge runs bounded raw SPI probes for high/dedicated, high/shared,
-low/dedicated, and low/shared candidates before trying any filesystem mount.
-The high/dedicated and high/shared probes first preserve the already-powered
-rail state; force-cycled candidates run after that. The probe accepts
+The D1L bridge tries a Seeed-style high/dedicated filesystem mount before the
+fallback raw SPI probes for high/dedicated, high/shared, low/dedicated, and
+low/shared candidates. The high/dedicated and high/shared probes preserve the
+already-powered rail state first; force-cycled candidates run after that. The probe accepts
 `CMD0=0x00` only when the following SD v2 `CMD8` echoes `0x1AA`, so a real
 ready-state card can continue without allowing an all-zero stuck bus to look
-present. It then tries filesystem mount on each raw-present candidate before
+present in the fallback matrix. It then tries filesystem mount on each raw-present candidate before
 reporting `no_card` or a FAT32-required state. The Actions RP2040 build must keep `USE_SD_CRC=1` so
 SdFat uses real command CRCs for `CMD55`/`ACMD41`, and
 `USE_SPI_ARRAY_TRANSFER=0` so the SdFat-backed filesystem path uses the same
-byte-wise SPI transfer style as the raw probe. Before each filesystem init/probe, the
-bridge toggles the selected power-rail level and reclocks the card so warm
-firmware resets do not leave the card outside `CMD0` idle detection. The manual
+byte-wise SPI transfer style as the raw probe. The first filesystem init
+preserves the already-powered rail state; fallback probes and mounts can toggle
+the selected power-rail level and reclock the card so warm firmware resets do
+not leave the card outside `CMD0` idle detection. The manual
 diagnostic request below reports the same candidate matrix without filesystem
 writes. If no card
 responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`. If a card responds but the

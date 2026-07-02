@@ -14,12 +14,10 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
-- SD CS is driven high during bus setup. Before each explicit SdFat mount or
-  raw probe, the bridge force-cycles the selected rail level, waits for it to
-  settle, and sends idle clocks so warm-reset cards can re-enter SPI init. The
-  raw probe requires `CMD0` to answer idle (`0x01`) before it reports a card as
-  present, so stale ready-state or floating-bus responses do not mask firmware
-  mount failures.
+- SD CS is driven high during bus setup. The first explicit mount attempt
+  preserves the already-powered rail state to match Seeed's MicroSD example;
+  fallback probes can force-cycle the selected rail level, wait for it to
+  settle, and send idle clocks so warm-reset cards can re-enter SPI init.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
@@ -100,17 +98,15 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `mount_err`, and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
-  report `state=mount_pending`, and first uses bounded raw SPI probes to find
-  viable high/low rail and dedicated/shared SPI candidates. The high-power
-  candidates are probed once without force-cycling the rail, matching Seeed's
-  already-powered sample path, before the bridge falls back to force-cycled
-  candidates. Only raw-present candidates get an Arduino `SD`/`SDFS` filesystem
-  mount attempt before the bridge declares the card unmountable. Failed mount
-  attempts report captured SdFat diagnostic `mount_err` and `mount_data` bytes
-  from the same SPI1 bus.
-  The filesystem mount force-cycles the rail before each init, uses the
-  same SPI1 pin map at the bridge's conservative 1 MHz SD clock, and retries
-  once after resetting the `SD`/`SDFS` state. No electrical card
+  report `state=mount_pending`, and first tries the already-powered
+  high/dedicated `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD
+  example. If that library path does not mount, the bridge falls back to bounded
+  raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
+  high-power candidates are probed once without force-cycling the rail before
+  force-cycled fallback probes run. Only raw-present fallback candidates get a
+  second Arduino `SD`/`SDFS` filesystem mount attempt before the bridge declares
+  the card unmountable. Failed mount attempts report captured SdFat diagnostic
+  `mount_err` and `mount_data` bytes from the same SPI1 bus. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.

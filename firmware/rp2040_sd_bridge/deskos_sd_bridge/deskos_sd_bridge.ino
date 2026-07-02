@@ -731,9 +731,15 @@ SdSnapshot mounted_snapshot_from_current_config() {
 SdSnapshot mount_status_blocking() {
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
+    SdSnapshot snapshot = pending_snapshot("filesystem_mounting");
+    publish_worker_snapshot(snapshot);
+    if (mount_sd_with_power(true, false)) {
+        return mounted_snapshot_from_current_config();
+    }
+
     s_last_mount_error = 0;
     s_last_mount_data = 0;
-    SdSnapshot snapshot = pending_snapshot("probing_card");
+    snapshot = pending_snapshot("probing_card");
     publish_worker_snapshot(snapshot);
 
     snapshot = make_snapshot("no_card", "no_card");
