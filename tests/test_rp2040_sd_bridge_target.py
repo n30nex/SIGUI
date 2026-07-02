@@ -27,6 +27,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '#include <SdFat.h>' in sketch
     assert '#include <SDFS.h>' in sketch
     assert '#include <SPI.h>' in sketch
+    assert '#include <hardware/gpio.h>' in sketch
     assert "USE_SD_CRC" not in sketch
     assert "USE_SPI_ARRAY_TRANSFER" not in sketch
     assert "requires byte-wise SdFat SPI transfers" not in sketch
@@ -51,6 +52,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
     assert "pinMode(SD_MISO_PIN, INPUT_PULLUP)" in sketch
+    assert "gpio_pull_up(SD_MISO_PIN)" in sketch
+    assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch

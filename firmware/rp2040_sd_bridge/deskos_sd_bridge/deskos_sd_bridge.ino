@@ -4,6 +4,7 @@
 #include <SdFat.h>
 #include <SDFS.h>
 #include <SPI.h>
+#include <hardware/gpio.h>
 
 namespace {
 
@@ -191,6 +192,10 @@ void configure_sd_spi_pins() {
     SPI1.setCS(SD_CS_PIN);
 }
 
+void apply_sd_miso_pullup() {
+    gpio_pull_up(SD_MISO_PIN);
+}
+
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
     settle_sd_power(power_high, force_power_cycle);
     pinMode(SD_CS_PIN, OUTPUT);
@@ -208,6 +213,7 @@ void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
     digitalWrite(SD_CS_PIN, HIGH);
     configure_sd_spi_pins();
     SPI1.begin();
+    apply_sd_miso_pullup();
 }
 
 void clock_sd_idle_bytes() {
@@ -224,6 +230,7 @@ void prepare_sd_card_init(bool power_high, bool force_power_cycle) {
     s_sd_mounted = false;
     configure_sd_bus(power_high, force_power_cycle);
     SPI1.begin();
+    apply_sd_miso_pullup();
     clock_sd_idle_bytes();
 }
 
@@ -354,6 +361,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
                                   force_power_cycle);
     configure_sd_bus(power_high, force_power_cycle);
     SPI1.begin();
+    apply_sd_miso_pullup();
     SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
     digitalWrite(SD_CS_PIN, HIGH);
     for (uint8_t i = 0; i < 10; ++i) {
