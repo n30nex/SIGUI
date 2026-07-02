@@ -69,13 +69,14 @@ The RP2040 bridge is built with SdFat SPI command CRC enabled
 protocol-handling core because Arduino `SD`/`SDFS` can wedge when invoked from
 the RP2040 core1 worker. It first tries the already-powered high/dedicated
 Arduino `SD.begin(13, 1000000, SPI1)` path documented by Seeed for the
-Indicator RP2040 MicroSD bus. If that library path does not mount, it falls back
-to bounded raw SPI presence probes across the high/low rail and
+Indicator RP2040 MicroSD bus without pre-clocking the bus, registering SPI CS,
+or running a second SdFat probe on failure. If that library path does not mount,
+it falls back to bounded raw SPI presence probes across the high/low rail and
 dedicated/shared SPI candidates. High-power candidates are tried once without
 force-cycling the rail before force-cycled fallback probes run. Only fallback
-candidates that answer a valid SD idle/init sequence receive another Arduino
-`SD`/`SDFS` filesystem mount attempt on the expected D1L SD bus. Failed
-filesystem attempts record captured SdFat diagnostic error bytes. An
+candidates that answer a valid SD idle/init sequence receive one matching
+Arduino `SD`/`SDFS` filesystem mount attempt on the expected D1L SD bus. Failed
+fallback filesystem attempts can record captured SdFat diagnostic error bytes. An
 electrically absent or non-responsive card should report `no_card` rather than
 wedging the UART bridge.
 
@@ -89,7 +90,7 @@ low/shared candidates. The high/dedicated and high/shared probes preserve the
 already-powered rail state first; force-cycled candidates run after that. The probe accepts
 `CMD0=0x00` only when the following SD v2 `CMD8` echoes `0x1AA`, so a real
 ready-state card can continue without allowing an all-zero stuck bus to look
-present in the fallback matrix. It then tries filesystem mount on each raw-present candidate before
+present in the fallback matrix. It then tries one matching filesystem mount on each raw-present candidate before
 reporting `no_card` or a FAT32-required state. The Actions RP2040 build must keep `USE_SD_CRC=1` so
 SdFat uses real command CRCs for `CMD55`/`ACMD41`, and
 `USE_SPI_ARRAY_TRANSFER=0` so the SdFat-backed filesystem path uses the same

@@ -56,16 +56,18 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
-    assert "SPI1.setCS(SD_CS_PIN)" in sketch
+    assert "SPI1.setCS(SD_CS_PIN)" not in sketch
     assert "bool s_sd_mounted = false;" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SD.end(false)" in sketch
+    assert "mount_sd_seeed_sample_path" in sketch
+    assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
     assert "clock_sd_idle_bytes" in sketch
     assert "configure_sd_bus(power_high, force_power_cycle)" in sketch
     assert "mount_sd_with_probe_config" in sketch
-    assert "if (mount_sd_with_power(true, false))" in sketch
+    assert "if (mount_sd_seeed_sample_path(true, false))" in sketch
     assert "mounted_snapshot_from_current_config" in sketch
     assert "last_present_probe" in sketch
     assert "for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i)" in sketch
@@ -82,8 +84,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert 'SdSnapshot snapshot = pending_snapshot("filesystem_mounting")' in sketch
     assert 'snapshot = pending_snapshot("probing_card")' in sketch
-    assert sketch.index('SdSnapshot snapshot = pending_snapshot("filesystem_mounting")') < sketch.index("if (mount_sd_with_power(true, false))")
-    assert sketch.index("if (mount_sd_with_power(true, false))") < sketch.index('snapshot = pending_snapshot("probing_card")')
+    assert sketch.index('SdSnapshot snapshot = pending_snapshot("filesystem_mounting")') < sketch.index("if (mount_sd_seeed_sample_path(true, false))")
+    assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index('snapshot = pending_snapshot("probing_card")')
     assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true, false)")
     assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
     assert "s_last_mount_error = card->errorCode()" in sketch

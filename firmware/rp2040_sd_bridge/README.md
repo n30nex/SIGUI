@@ -99,15 +99,17 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated
-  `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD
-  example. If that library path does not mount, the bridge falls back to bounded
+  `SD.begin(13, 1000000, SPI1)` path from Seeed's MicroSD example without
+  pre-clocking the bus, registering SPI CS, or running a second SdFat probe on
+  failure. If that library path does not mount, the bridge falls back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a
-  second Arduino `SD`/`SDFS` filesystem mount attempt before the bridge declares
-  the card unmountable. Failed mount attempts report captured SdFat diagnostic
-  `mount_err` and `mount_data` bytes from the same SPI1 bus. No electrical card
-  reports `no_card`; an inserted card with an unusable filesystem reports
+  single matching Arduino `SD`/`SDFS` filesystem mount attempt before the bridge
+  declares the card unmountable. Failed fallback mount attempts can report
+  captured SdFat diagnostic `mount_err` and `mount_data` bytes from the same
+  SPI1 bus. No electrical card reports `no_card`; an inserted card with an
+  unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`

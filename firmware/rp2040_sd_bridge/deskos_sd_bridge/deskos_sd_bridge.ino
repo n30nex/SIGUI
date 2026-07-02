@@ -196,7 +196,6 @@ void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
     SPI1.setSCK(SD_SCK_PIN);
     SPI1.setTX(SD_MOSI_PIN);
     SPI1.setRX(SD_MISO_PIN);
-    SPI1.setCS(SD_CS_PIN);
 }
 
 void configure_sd_bus() {
@@ -233,7 +232,7 @@ void capture_sd_mount_error(uint8_t options) {
     }
 }
 
-bool begin_sd_filesystem() {
+bool begin_sd_filesystem(bool capture_failure_details = true) {
     if (SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)) {
         s_sd_mounted = true;
         s_last_mount_error = 0;
@@ -241,9 +240,20 @@ bool begin_sd_filesystem() {
         return true;
     }
     s_sd_mounted = false;
-    capture_sd_mount_error(s_sd_spi_options);
+    if (capture_failure_details) {
+        capture_sd_mount_error(s_sd_spi_options);
+    } else {
+        s_last_mount_error = 0xFD;
+        s_last_mount_data = 0;
+    }
     SD.end(false);
     return false;
+}
+
+bool mount_sd_seeed_sample_path(bool power_high, bool force_power_cycle) {
+    configure_sd_bus(power_high, force_power_cycle);
+    s_sd_mounted = false;
+    return begin_sd_filesystem(false);
 }
 
 bool mount_sd_with_power(bool power_high, bool force_power_cycle) {
@@ -266,7 +276,7 @@ bool mount_sd() {
 bool mount_sd_with_probe_config(const CardProbe &probe) {
     s_sd_power_high = probe.power_high;
     s_sd_spi_options = probe.options;
-    return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle);
+    return mount_sd_seeed_sample_path(s_sd_power_high, probe.force_power_cycle);
 }
 
 CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options,
@@ -733,7 +743,7 @@ SdSnapshot mount_status_blocking() {
     s_sd_spi_options = DEDICATED_SPI;
     SdSnapshot snapshot = pending_snapshot("filesystem_mounting");
     publish_worker_snapshot(snapshot);
-    if (mount_sd_with_power(true, false)) {
+    if (mount_sd_seeed_sample_path(true, false)) {
         return mounted_snapshot_from_current_config();
     }
 
