@@ -31,8 +31,9 @@ constexpr uint8_t SD_MISO_PIN = 12;
 constexpr uint8_t SD_POWER_PIN = 18;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
 constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
-constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 150;
-constexpr uint16_t SD_POWER_SETTLE_MS = 300;
+constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;
+constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
+constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
 constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
@@ -363,7 +364,7 @@ uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *ext
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_spi_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
-    const uint8_t ready = sd_wait_ready(50);
+    const uint8_t ready = sd_wait_ready(SD_SELECTED_READY_WAIT_MS);
     if (ready_byte) {
         *ready_byte = ready;
     }

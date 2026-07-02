@@ -42,8 +42,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
     assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
-    assert "constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 150;" in sketch
-    assert "constexpr uint16_t SD_POWER_SETTLE_MS = 300;" in sketch
+    assert "constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;" in sketch
+    assert "constexpr uint16_t SD_POWER_SETTLE_MS = 1000;" in sketch
+    assert "constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;" in sketch
     assert "digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW)" in sketch
     assert "digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH)" in sketch
     assert "bool s_sd_power_high = true;" in sketch
@@ -51,6 +52,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
     assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
+    assert "sd_wait_ready(SD_SELECTED_READY_WAIT_MS)" in sketch
     assert "pinMode(SD_MISO_PIN, INPUT_PULLUP)" in sketch
     assert "gpio_pull_up(SD_MISO_PIN)" in sketch
     assert "gpio_set_input_enabled(SD_MISO_PIN, true)" in sketch
