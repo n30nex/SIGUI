@@ -271,7 +271,7 @@ void capture_sd_mount_error(uint8_t options) {
 }
 
 bool begin_sd_filesystem(bool capture_failure_details = true) {
-    if (SD.begin(SD_CS_PIN, SPI1)) {
+    if (SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)) {
         s_sd_mounted = true;
         s_last_mount_error = 0;
         s_last_mount_data = 0;

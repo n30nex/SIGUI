@@ -34,10 +34,10 @@ adds the `earlephilhower/arduino-pico` board package URL, installs
 `rp2040:rp2040`, and compiles the sketch with FQBN
 `rp2040:rp2040:seeed_indicator_rp2040` using the board package's default SD
 library settings. The current validation card is user-confirmed FAT32 but still
-reports RP2040 init/probe failures, so the bridge stays close to Seeed's
-documented SD pin/power path while using Arduino-Pico's documented
-`SD.begin(13, SPI1)` second-port overload and software-controlled GPIO13 CS
-instead of forcing custom SdFat transfer flags.
+reports RP2040 init/probe failures before the filesystem layer, so the bridge
+stays close to Seeed's documented SD pin/power path while using Arduino-Pico's second-port SD support,
+Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and software-controlled
+GPIO13 CS instead of forcing custom SdFat transfer flags.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.
@@ -102,8 +102,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated Arduino-Pico SPI1
   path, keeping GPIO13 under software CS control, idling CS high, starting SPI1,
-  and calling `SD.begin(13, SPI1)` without pre-clocking the bus or running a
-  second SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
+  and calling `SD.begin(13, 1000000, SPI1)` without pre-clocking the bus or
+  running a second SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a

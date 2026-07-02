@@ -65,8 +65,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setCS(SD_CS_PIN)" not in sketch
     assert "s_sd_pin_cs_ok = true;" in sketch
     assert "bool s_sd_mounted = false;" in sketch
-    assert "SD.begin(SD_CS_PIN, SPI1)" in sketch
-    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" not in sketch
+    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SD.end(false)" in sketch
     assert "mount_sd_seeed_sample_path" in sketch
     assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
