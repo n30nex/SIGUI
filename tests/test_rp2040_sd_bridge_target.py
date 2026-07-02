@@ -105,6 +105,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "probe.cmd0_response = cmd0" in sketch
     assert "probe.cmd8_response = cmd8" in sketch
     assert "probe.cmd8_echo[i] = cmd8_extra[i]" in sketch
+    assert "{0, 0, 1, 170}" in sketch
     assert '"_c0="' in sketch
     assert '"_c8="' in sketch
     assert '"_r7"' in sketch
