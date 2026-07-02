@@ -1107,30 +1107,20 @@ With a known-good MeshCore node/bot:
 - Packet log captures each event.
 - UI updates without manual refresh.
 
-Current evidence: `artifacts/hardware/com12/dm_probe_b841621c.json` passed on
-COM12 against the local COM11 Meshcorebot with `send_ok=true`,
-`messages_dm_has_token=true`, `packets_search_has_token=true`,
-`route_trace_has_target=true`, `meshbot_rx_contact_delta=true`, and
-`no_public_commands=true`. Treat outbound DM-to-peer proof as closed for this
-checkpoint. Controlled inbound DM, ACK/PATH, direct-route RF proof, and manual
-touch DM workflow review remain open.
-
-2026-07-02 `e83ef31` refresh: after flashing the verified Actions package from
-run `28563475256`, `artifacts/hardware/com12/dm_probe_e83ef31.json` passed the
-targeted outbound COM12-to-COM11 DM proof. The latest full RF run
-`artifacts/hardware/com12/rf_full_acceptance_e83ef31.json` remains failed only
-because no controlled inbound Meshcorebot DM was observed during the wait
-window: its checks show `outbound_dm=true`, `ack_path=true`,
-`direct_route=true`, `health_ready=true`, `no_public_commands=true`, and
-`inbound_dm=false`. The required inbound command for this run was
-`+dm ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07 rf_accept_e83ef31_in`.
-
-2026-07-02 `9c4c362` refresh: after flashing the verified Actions package from
-run `28567973708`, `artifacts/hardware/com12/dm_probe_9c4c362.json` passed the
-targeted outbound COM12-to-COM11 DM proof with retained DM, packet-search,
-route-trace, meshbot receive-counter, health, and no-Public-command checks all
-true. A fresh full RF run is still required for controlled inbound DM,
-ACK/PATH, and direct-route release acceptance on the newest firmware.
+Current evidence: after flashing the verified Actions package from run
+`28569851955` for commit `a1afd4b`, the D1L passed targeted outbound
+COM12-to-COM11 DM proof in `artifacts/hardware/com12/dm_probe_a1afd4b.json`.
+The DM-only active route probe
+`artifacts/hardware/com12/routes_probe_a1afd4b.json` also passed with
+`dm_rf_tx=true`, `public_rf_tx=false`, retained packet/message evidence, route
+trace evidence, and health ready. The full RF acceptance run
+`artifacts/hardware/com12/rf_full_acceptance_a1afd4b.json` is now narrowed to a
+single missing check: `inbound_dm=false`; `identity_public_key_matches`,
+`meshbot_on_expected_port`, `outbound_dm`, `ack_path`, `direct_route`,
+`health_ready`, and `no_public_commands` all passed. The required inbound
+command for that run was
+`+dm ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07 rf_accept_a1afd4b_in`.
+Manual touch DM workflow review remains open.
 
 Repeatable full RF acceptance is now handled by a single D1L-port runner. Keep
 the runner on the D1L serial port only; do not open the COM11 Meshcorebot port
@@ -1167,25 +1157,26 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28567973708` for commit `9c4c362` rebuilt the
+Current evidence: Actions run `28569851955` for commit `a1afd4b` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
 firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
 flashed to COM12 passed current-commit smoke, 100-cycle tab abuse, scroll probe,
-outbound DM proof, Wi-Fi profile proof, and RP2040 preflight. The RP2040 UF2 checksum is
+outbound DM proof, route-probe proof, and RP2040 preflight. The RP2040 UF2 checksum is
 `B2FCB1177478908207CBDE2BC0B267C8AE0AF95CE8C1D46BA8E36166DFDD0B40`, but no
 mounted UF2 bootloader volume was available, so the RP2040 bridge still cannot
 be copied without physical UF2/BOOTSEL action. The latest preflight
-`artifacts/hardware/com12/rp2040_preflight_9c4c362.json`
+`artifacts/hardware/com12/rp2040_preflight_a1afd4b.json`
 proves the RP2040 UART, ping, protocol, and diag paths respond, but the inserted
 card remains `raw_card_present_mount_failed` with `sd.state="setup_required"`
-and `ready_for_sd_acceptance=false`. The guarded operator-approved format
-attempt `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
-sent the explicit confirmation (`format_command_sent=true`,
-`format_allowed=true`, `public_rf_tx=false`) but returned `ESP_ERR_TIMEOUT`,
-did not confirm a format, and did not reach the ready file-operation gate. Full
-SD auto-prepare, retained-history, export, map-tile, and reboot/remount proof
-remain open until a known-good/compatible card or bridge update reaches the
-ready file gate and all SD canaries pass on the device SD card.
+and `ready_for_sd_acceptance=false`. The latest UF2 scan
+`artifacts/hardware/com12/rp2040_uf2_volume_scan_a1afd4b.json` found
+`candidate_volumes=[]`. The prior guarded operator-approved format attempt
+`artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
+sent the explicit confirmation but timed out before confirmed format or a ready
+file-operation gate. Full SD auto-prepare, retained-history, export, map-tile,
+and reboot/remount proof remain open until a known-good/compatible card or
+bridge update reaches the ready file gate and all SD canaries pass on the
+device SD card.
 
 ### 13.5 Soak
 
@@ -1236,14 +1227,14 @@ commit metadata wins over filename fallback, so stale passing artifacts from an
 older firmware flash must fail closed even if a filename is misleading.
 
 The latest local audit
-`artifacts/release-gate/release-gate-audit-9c4c362-fast-hw.json` for Actions
-run `28567973708` reports `ready_for_public_release=false` with four P0 gates
+`artifacts/release-gate/release-gate-audit-a1afd4b-fast-hw.json` for Actions
+run `28569851955` reports `ready_for_public_release=false` with four P0 gates
 still open after current-commit COM12 smoke, tab abuse, scroll probe, outbound
-DM, Wi-Fi profile proof, RP2040 preflight, Actions checksums, and packaged notices all passed: SD
-acceptance matrix, 12-hour idle/listening soak, manual physical UI/photos, and
-full RF acceptance because the controlled inbound DM was not observed. Any later
-commit must be rebuilt by GitHub Actions, flashed to COM12, and smoked before it
-can become the final release commit.
+DM, supplemental DM route probe, RP2040 preflight, Actions checksums, and
+packaged notices all passed: SD acceptance matrix, 12-hour idle/listening soak,
+manual physical UI/photos, and full RF acceptance because the controlled inbound
+DM was not observed. Any later commit must be rebuilt by GitHub Actions, flashed
+to COM12, and smoked before it can become the final release commit.
 
 ---
 
