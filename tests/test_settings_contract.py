@@ -40,6 +40,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "mesh_timestamp_can_fallback" in source
     assert "ESP_ERR_NVS_NOT_ENOUGH_SPACE" in source
     assert "ESP_ERR_NVS_NO_FREE_PAGES" in source
+    assert "} else if (mesh_timestamp_can_fallback(ret))" in source
     assert "*timestamp = next_ram_mesh_timestamp" in source
     assert 'snprintf(settings->node_name, sizeof(settings->node_name), "D1L Desk")' in source
     assert "settings->wifi_enabled = false" in source

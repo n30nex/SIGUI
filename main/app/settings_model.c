@@ -411,6 +411,11 @@ esp_err_t d1l_settings_next_mesh_timestamp(uint32_t *timestamp)
                (ret == ESP_OK && stored < D1L_SETTINGS_MESH_TIMESTAMP_BASE)) {
         next = D1L_SETTINGS_MESH_TIMESTAMP_BASE + 1U;
         ret = ESP_OK;
+    } else if (mesh_timestamp_can_fallback(ret)) {
+        next = next_ram_mesh_timestamp(next);
+        nvs_close(handle);
+        *timestamp = next;
+        return ESP_OK;
     }
 
     if (ret == ESP_OK) {
