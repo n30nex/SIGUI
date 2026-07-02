@@ -303,6 +303,17 @@ def storage_mount_error_snapshot() -> Snapshot:
     )
 
 
+def storage_probe_error_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_state="probe error",
+        storage_backend="NVS fallback",
+        storage_detail="RP2040 CMD0/CMD8 diagnostics",
+        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_setup_action="inspect_rp2040_sd_cmd0_firmware_path",
+    )
+
+
 def storage_root_missing_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
@@ -379,6 +390,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-no-card": storage_no_card_snapshot,
     "storage-needs-fat32": storage_needs_fat32_snapshot,
     "storage-mount-error": storage_mount_error_snapshot,
+    "storage-probe-error": storage_probe_error_snapshot,
     "storage-root-missing": storage_root_missing_snapshot,
     "storage-ready-pending-migration": storage_ready_pending_migration_snapshot,
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
@@ -1425,6 +1437,9 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     if snap.storage_setup_action == "inspect_rp2040_sd_mount_error_firmware_path":
         subtitle = "Firmware mount issue"
         guidance = "Inspect RP2040 mount diagnostics; do not format on-device."
+    elif snap.storage_setup_action == "inspect_rp2040_sd_cmd0_firmware_path":
+        subtitle = "Firmware probe issue"
+        guidance = "Inspect RP2040 CMD0/CMD8 diagnostics; do not format on-device."
     elif snap.storage_setup_action == "prepare_fat32_on_computer":
         subtitle = "FAT32 card required"
         guidance = "Prepare FAT32 on a computer; DeskOS only creates folders."

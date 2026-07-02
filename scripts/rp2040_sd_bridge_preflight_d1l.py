@@ -117,7 +117,7 @@ def sd_has_mount_error(sd: dict) -> bool:
 def sd_has_rejected_probe(sd: dict) -> bool:
     probe_error = sd.get("probe_error")
     probe_data = sd.get("probe_data")
-    if probe_error == 3:
+    if probe_error in (3, 4):
         return True
     return isinstance(probe_data, (int, float)) and probe_data not in (0, 0xFF)
 

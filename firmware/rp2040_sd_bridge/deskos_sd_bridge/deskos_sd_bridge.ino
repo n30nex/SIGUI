@@ -112,6 +112,7 @@ struct CardProbe {
     const char *mode;
     bool power_high;
     uint8_t options;
+    bool force_power_cycle;
 };
 
 struct DiagSnapshot {
@@ -211,10 +212,10 @@ void clock_sd_idle_bytes() {
     SPI1.endTransaction();
 }
 
-void prepare_sd_card_init(bool power_high) {
+void prepare_sd_card_init(bool power_high, bool force_power_cycle) {
     SD.end(false);
     s_sd_mounted = false;
-    configure_sd_bus(power_high, true);
+    configure_sd_bus(power_high, force_power_cycle);
     SPI1.begin();
     clock_sd_idle_bytes();
 }
@@ -245,13 +246,13 @@ bool begin_sd_filesystem() {
     return false;
 }
 
-bool mount_sd_with_power(bool power_high) {
-    prepare_sd_card_init(power_high);
+bool mount_sd_with_power(bool power_high, bool force_power_cycle) {
+    prepare_sd_card_init(power_high, force_power_cycle);
     if (begin_sd_filesystem()) {
         return true;
     }
     delay(50);
-    prepare_sd_card_init(power_high);
+    prepare_sd_card_init(power_high, force_power_cycle);
     if (begin_sd_filesystem()) {
         return true;
     }
@@ -259,16 +260,17 @@ bool mount_sd_with_power(bool power_high) {
 }
 
 bool mount_sd() {
-    return mount_sd_with_power(s_sd_power_high);
+    return mount_sd_with_power(s_sd_power_high, true);
 }
 
 bool mount_sd_with_probe_config(const CardProbe &probe) {
     s_sd_power_high = probe.power_high;
     s_sd_spi_options = probe.options;
-    return mount_sd();
+    return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle);
 }
 
-CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options) {
+CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options,
+                      bool force_power_cycle = true) {
     CardProbe probe = {
         false,
         0,
@@ -278,6 +280,7 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         mode,
         power_high,
         options,
+        force_power_cycle,
     };
     return probe;
 }
@@ -325,9 +328,10 @@ uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *ext
     return response;
 }
 
-CardProbe manual_probe_card(uint8_t options, bool power_high) {
-    CardProbe probe = empty_probe(power_token(power_high), spi_mode_token(options), power_high, options);
-    configure_sd_bus(power_high, true);
+CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_cycle = true) {
+    CardProbe probe = empty_probe(power_token(power_high), spi_mode_token(options), power_high, options,
+                                  force_power_cycle);
+    configure_sd_bus(power_high, force_power_cycle);
     SPI1.begin();
     SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
     digitalWrite(SD_CS_PIN, HIGH);
@@ -341,7 +345,9 @@ CardProbe manual_probe_card(uint8_t options, bool power_high) {
         SPI1.endTransaction();
         return probe;
     }
-    if (cmd0 != 0x01U) {
+    const bool cmd0_idle = cmd0 == 0x01U;
+    const bool cmd0_ready = cmd0 == 0x00U;
+    if (!cmd0_idle && !cmd0_ready) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         SPI1.endTransaction();
@@ -351,6 +357,13 @@ CardProbe manual_probe_card(uint8_t options, bool power_high) {
     uint8_t cmd8_extra[4] = {0, 0, 0, 0};
     const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra));
     const bool sd_v2 = (cmd8 & 0x04U) == 0;
+    const bool cmd8_echo_ok = cmd8_extra[2] == 0x01U && cmd8_extra[3] == 0xAAU;
+    if (sd_v2 && !cmd8_echo_ok) {
+        probe.error_code = 4;
+        probe.error_data = cmd8_extra[3];
+        SPI1.endTransaction();
+        return probe;
+    }
     const uint32_t init_start = millis();
     uint8_t acmd41 = 0xFF;
     do {
@@ -392,6 +405,7 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         spi_mode_token(options),
         power_high,
         options,
+        false,
     };
     configure_sd_bus(power_high);
     SD.end(false);
@@ -690,6 +704,7 @@ SdSnapshot mounted_snapshot_from_current_config() {
         "mount",
         s_sd_power_high,
         s_sd_spi_options,
+        false,
     };
     apply_probe_to_snapshot(snapshot, mounted_probe);
     snapshot.present = true;
@@ -723,6 +738,8 @@ SdSnapshot mount_status_blocking() {
 
     snapshot = make_snapshot("no_card", "no_card");
     CardProbe probes[] = {
+        manual_probe_card(DEDICATED_SPI, true, false),
+        manual_probe_card(SHARED_SPI, true, false),
         manual_probe_card(DEDICATED_SPI, true),
         manual_probe_card(SHARED_SPI, true),
         manual_probe_card(DEDICATED_SPI, false),
@@ -798,8 +815,8 @@ DiagSnapshot pending_diag_snapshot() {
 
 DiagSnapshot diag_status_blocking() {
     DiagSnapshot diag = pending_diag_snapshot();
-    diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true);
-    diag.high_shared = manual_probe_card(SHARED_SPI, true);
+    diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true, false);
+    diag.high_shared = manual_probe_card(SHARED_SPI, true, false);
     diag.low_dedicated = manual_probe_card(DEDICATED_SPI, false);
     diag.low_shared = manual_probe_card(SHARED_SPI, false);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};

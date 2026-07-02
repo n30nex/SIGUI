@@ -158,6 +158,8 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     const bool mount_failed_with_diag = sd->card_present &&
                                         !sd->filesystem_mounted &&
                                         (sd->mount_error != 0U || sd->mount_data != 0U);
+    const bool probe_rejected_card = !sd->card_present &&
+                                     (sd->probe_error == 3U || sd->probe_error == 4U);
 
     s_status.rp2040_bridge_ready = sd->bridge_ready;
     s_status.rp2040_sd_protocol_supported = sd->protocol_supported;
@@ -210,8 +212,14 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.setup_action = "wait_for_storage_mount";
         s_status.note = "RP2040 SD bridge is checking the inserted card; onboard NVS remains the default data store until the mount completes";
     } else if (!sd->card_present) {
-        s_status.setup_action = "insert_card";
-        s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
+        if (probe_rejected_card) {
+            s_status.setup_action = "inspect_rp2040_sd_cmd0_firmware_path";
+            s_status.note =
+                "RP2040 SD probe rejected the card init response; inspect firmware CMD0/CMD8 diagnostics before changing the card";
+        } else {
+            s_status.setup_action = "insert_card";
+            s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
+        }
     } else if (s_status.sd_needs_fat32) {
         if (mount_failed_with_diag) {
             s_status.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";

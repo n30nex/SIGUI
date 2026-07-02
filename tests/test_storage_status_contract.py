@@ -49,6 +49,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert 'strcmp(s_status.sd_state, "mount_required")' in source
     assert "prepare_fat32_on_computer" in source
     assert "inspect_rp2040_sd_mount_error_firmware_path" in source
+    assert "inspect_rp2040_sd_cmd0_firmware_path" in source
+    assert "probe_rejected_card" in source
+    assert "sd->probe_error == 3U || sd->probe_error == 4U" in source
     assert "mount_failed_with_diag" in source
     assert source.index("mount_failed_with_diag") < source.index("prepare_fat32_on_computer")
     assert "backup_reformat_fat32_on_computer" in source

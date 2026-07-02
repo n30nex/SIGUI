@@ -308,6 +308,11 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
             "Firmware mount issue",
             "Inspect RP2040 mount diagnostics; do not format on-device.",
         ),
+        "storage-probe-error": (
+            "inspect_rp2040_sd_cmd0_firmware_path",
+            "Firmware probe issue",
+            "Inspect RP2040 CMD0/CMD8 diagnostics; do not format on-device.",
+        ),
         "storage-root-missing": (
             "retry_storage_mount",
             "FAT32 only, no format",

@@ -61,9 +61,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SD.end(false)" in sketch
     assert "SDFS.info(info)" in sketch
-    assert "prepare_sd_card_init(power_high)" in sketch
+    assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
     assert "clock_sd_idle_bytes" in sketch
-    assert "configure_sd_bus(power_high, true)" in sketch
+    assert "configure_sd_bus(power_high, force_power_cycle)" in sketch
     assert "mount_sd_with_probe_config" in sketch
     assert "mounted_snapshot_from_current_config" in sketch
     assert "last_present_probe" in sketch
@@ -73,21 +73,27 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
+    assert "manual_probe_card(DEDICATED_SPI, true, false)" in sketch
+    assert "manual_probe_card(SHARED_SPI, true, false)" in sketch
     assert "manual_probe_card(DEDICATED_SPI, true)" in sketch
     assert "manual_probe_card(SHARED_SPI, true)" in sketch
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert 'snapshot = pending_snapshot("probing_card")' in sketch
     assert 'snapshot = pending_snapshot("filesystem_mounting")' not in sketch
-    assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true)")
+    assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true, false)")
     assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
     assert "s_last_mount_error = card->errorCode()" in sketch
     assert "s_last_mount_data = card->errorData()" in sketch
     assert '" mount_err="' in sketch
     assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
-    assert "if (cmd0 != 0x01U)" in sketch
+    assert "const bool cmd0_idle = cmd0 == 0x01U" in sketch
+    assert "const bool cmd0_ready = cmd0 == 0x00U" in sketch
+    assert "if (!cmd0_idle && !cmd0_ready)" in sketch
     assert "probe.error_code = 3" in sketch
+    assert "cmd8_echo_ok" in sketch
+    assert "probe.error_code = 4" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
     assert "delete card" in sketch
