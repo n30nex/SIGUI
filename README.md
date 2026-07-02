@@ -38,6 +38,7 @@ python .\scripts\sd_retained_history_acceptance_d1l.py --port $env:D1L_PORT --al
 python .\scripts\sd_map_tile_canary_d1l.py --port $env:D1L_PORT --allow-unavailable --token prebridge
 python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --allow-unavailable --token prebridge
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --port $env:D1L_PORT --token prod
+python .\scripts\manual_ui_review_d1l.py --port $env:D1L_PORT --photo-dir .\artifacts\hardware\com12\photos --confirm-display-stable --confirm-touch-accurate --confirm-bottom-tabs --confirm-messages-public --confirm-dm-workflow --confirm-nodes-contacts-routes --confirm-map-storage --confirm-settings-sheets --confirm-photos-current
 python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 300 --sample-interval-sec 60 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
@@ -45,7 +46,7 @@ Current bench D1L validation uses COM12. Do not use COM11 or COM29 for D1L flash
 
 ## Licensing and Attribution
 
-This firmware uses Seeed SenseCAP Indicator BSP/examples and design references from SigurdOS-TDeck with permission. See [docs/ATTRIBUTIONS.md](docs/ATTRIBUTIONS.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [docs/SOURCE_AUDIT_AND_ATTRIBUTION.md](docs/SOURCE_AUDIT_AND_ATTRIBUTION.md) before public release packaging or redistributing source/binaries.
+MeshCore DeskOS D1L is released under GPL-3.0-or-later; see [LICENSE](LICENSE). This firmware uses Seeed SenseCAP Indicator BSP/examples and design references from SigurdOS-TDeck with permission. See [docs/ATTRIBUTIONS.md](docs/ATTRIBUTIONS.md), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [docs/SOURCE_AUDIT_AND_ATTRIBUTION.md](docs/SOURCE_AUDIT_AND_ATTRIBUTION.md) before public release packaging or redistributing source/binaries.
 
 ## Roadmap
 

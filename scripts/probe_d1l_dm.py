@@ -12,8 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from artifact_metadata import stamp_report
     from smoke_d1l import send_console_command
 except ImportError:
+    from scripts.artifact_metadata import stamp_report
     from scripts.smoke_d1l import send_console_command
 
 
@@ -277,9 +279,13 @@ def run_serial_probe(
 
 
 def write_report(report: dict, out_path: Path | None) -> Path:
+    root = Path(__file__).resolve().parents[1]
     if out_path is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        out_path = Path("artifacts") / "smoke" / f"d1l-dm-probe-{stamp}.json"
+        out_path = root / "artifacts" / "smoke" / f"d1l-dm-probe-{stamp}.json"
+    elif not out_path.is_absolute():
+        out_path = root / out_path
+    stamp_report(report, root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return out_path

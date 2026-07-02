@@ -117,15 +117,17 @@
 - [x] RP2040 SD bridge artifact generation added to GitHub Actions.
 - [x] Release package includes normal flash set, app update image, full 8MB image, manifest, checksums, and explicit-port flash helpers.
 - [x] Release package includes third-party notices and source attribution documents for upstream material, including the permitted SigurdOS-derived work.
-- [ ] Top-level MeshCore DeskOS D1L project license selected, committed as `LICENSE`, and SigurdOS permission evidence archived with date, channel/link, and exact permitted scope.
+- [x] Top-level MeshCore DeskOS D1L project license selected, committed as `LICENSE`, and included in release package notices.
+- [ ] SigurdOS permission evidence archived with date, channel/link, and exact permitted scope.
 - [x] First user guide added.
 - [x] First developer guide added.
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-ca8035c-after-hardening-with-actions.json` reports `ready_for_public_release=false` with four open P0 gates.
-- [x] COM12 smoke, 100-cycle tab abuse, scroll probe, and outbound DM proof captured for `e83ef31` after flashing the verified Actions package from run `28563475256`.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-947d3ab-after-hw.json` reports `ready_for_public_release=false` with four open P0 gates before the new top-level license package gate.
+- [x] COM12 smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, and RP2040 preflight captured for `947d3ab` after flashing the verified Actions package from run `28565310587`.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit after SD, full RF inbound, manual UI/photos, and 12-hour soak P0 gates are closed.
 - [ ] Physical screen photos captured.
+- [x] Manual physical UI review artifact helper added: `scripts/manual_ui_review_d1l.py` requires current photos plus explicit display/touch/navigation/workflow confirmations before producing an `ok=true` review JSON.
 - [ ] Final full-duration soak evidence added.
 - [ ] Final manual touch review added.

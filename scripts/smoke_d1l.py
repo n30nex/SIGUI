@@ -12,6 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from artifact_metadata import stamp_report
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import stamp_report
+
 
 SMOKE_COMMANDS = [
     "version",
@@ -280,6 +285,7 @@ def main() -> int:
     else:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         out_path = root / "artifacts" / "smoke" / f"d1l-smoke-{stamp}.json"
+    stamp_report(report, root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="ascii")
     print(json.dumps(report))

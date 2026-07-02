@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from artifact_metadata import stamp_report
     from flash_rp2040_sd_bridge_uf2 import FlashGuardError, candidate_volumes, verify_artifact
     from smoke_d1l import send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import stamp_report
     from scripts.flash_rp2040_sd_bridge_uf2 import (
         FlashGuardError,
         candidate_volumes,
@@ -295,6 +297,7 @@ def write_report(report: dict, out_path: Path | None) -> Path:
         out_path = root / "artifacts" / "rp2040-preflight" / f"d1l-rp2040-sd-bridge-preflight-{stamp}.json"
     elif not out_path.is_absolute():
         out_path = root / out_path
+    stamp_report(report, root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2) + "\n", encoding="ascii")
     return out_path

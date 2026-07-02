@@ -27,6 +27,7 @@ def write_release_package(run_dir: Path) -> Path:
     package = run_dir / "d1l-release-package" / f"d1l-release-{COMMIT}"
     write_manifest_file(package, "README_RELEASE.md", b"release")
     notices = {
+        "notices/LICENSE": b"project license",
         "notices/THIRD_PARTY_NOTICES.md": b"third party",
         "notices/ATTRIBUTIONS.md": b"attributions",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md": b"source audit",

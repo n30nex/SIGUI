@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 REQUIRED_SCROLL_SCREENS = {"messages", "nodes", "packets", "settings", "map"}
 REQUIRED_NOTICE_FILES = {
+    "notices/LICENSE",
     "notices/THIRD_PARTY_NOTICES.md",
     "notices/ATTRIBUTIONS.md",
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",

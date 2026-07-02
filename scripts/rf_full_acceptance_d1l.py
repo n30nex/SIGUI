@@ -11,8 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from artifact_metadata import stamp_report
     from smoke_d1l import send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import stamp_report
     from scripts.smoke_d1l import send_console_command
 
 
@@ -443,7 +445,11 @@ def default_out_path(report: dict) -> Path:
 
 
 def write_report(report: dict, out_path: Path | None) -> Path:
+    root = Path(__file__).resolve().parents[1]
     path = out_path or default_out_path(report)
+    if not path.is_absolute():
+        path = root / path
+    stamp_report(report, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return path

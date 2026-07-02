@@ -4,6 +4,8 @@ Date: 2026-06-29
 
 This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
 
+Top-level project license: GPL-3.0-or-later. The public release package must include `LICENSE`, `THIRD_PARTY_NOTICES.md`, `docs/ATTRIBUTIONS.md`, and this source audit.
+
 ## Included Submodules
 
 - Seeed SenseCAP Indicator ESP32 SDK: https://github.com/Seeed-Solution/sensecap_indicator_esp32

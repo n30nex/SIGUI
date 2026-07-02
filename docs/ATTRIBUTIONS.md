@@ -2,6 +2,8 @@
 
 This project builds on open hardware/software work from upstream firmware projects. Keep this file with public source archives, release notes, and binary firmware releases.
 
+MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must include the top-level `LICENSE` file with these attribution and notice documents.
+
 ## Seeed SenseCAP Indicator
 
 - Project: Seeed SenseCAP Indicator ESP32 SDK and examples

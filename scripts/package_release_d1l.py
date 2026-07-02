@@ -180,6 +180,7 @@ def copy_optional_debug_files(build_dir: Path, package_dir: Path) -> list[dict]:
 
 def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
     notice_specs = [
+        ("LICENSE", "LICENSE"),
         ("THIRD_PARTY_NOTICES.md", "THIRD_PARTY_NOTICES.md"),
         ("docs/ATTRIBUTIONS.md", "ATTRIBUTIONS.md"),
         ("docs/SOURCE_AUDIT_AND_ATTRIBUTION.md", "SOURCE_AUDIT_AND_ATTRIBUTION.md"),
@@ -358,7 +359,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
 - `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
-- `notices/` contains third-party notices, source audit notes, and attributions for public distribution.
+- `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash

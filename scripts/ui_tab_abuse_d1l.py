@@ -12,7 +12,9 @@ from pathlib import Path
 
 try:
     from smoke_d1l import send_console_command
+    from artifact_metadata import stamp_report
 except ModuleNotFoundError:
+    from scripts.artifact_metadata import stamp_report
     from scripts.smoke_d1l import send_console_command
 
 
@@ -190,6 +192,7 @@ def main() -> int:
         mode = "hardware"
 
     out_path = resolve_out_path(args.out, mode)
+    stamp_report(report, Path(__file__).resolve().parents[1])
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(report, indent=2), encoding="ascii")
     print(json.dumps(report))
