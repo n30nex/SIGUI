@@ -82,6 +82,10 @@ STATUS_FIELDS = (
     "probe_present",
     "probe_err",
     "probe_data",
+    "detect",
+    "detect_driven",
+    "det_pullup",
+    "det_pulldown",
     "mount_err",
     "mount_data",
 )
@@ -281,6 +285,10 @@ def status_line(scenario: SdScenario, prefix: str = STATUS_REPLY) -> str:
         f" probe_present={bool_token(probe_present)}"
         f" probe_err={0 if probe_present else 254}"
         f" probe_data=0"
+        f" detect=floating"
+        f" detect_driven=0"
+        f" det_pullup=1"
+        f" det_pulldown=0"
         f" mount_err={0 if scenario.mounted else (1 if scenario.present else 254)}"
         f" mount_data=0"
         f" file_ops={bool_token(file_ready(scenario))}"
@@ -324,9 +332,10 @@ def diag_line(scenario: SdScenario) -> str:
     err = 0 if scenario.present else 254
     capacity = scenario.capacity_kb if scenario.present else 0
     return (
-        f"{DIAG_REPLY} pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000"
+        f"{DIAG_REPLY} pins=det7-cs13-sck10-mosi11-miso12-pwr18 hz=1000000"
         f" selected_power=high selected_mode=dedicated"
         f" mount_selected={bool_token(scenario.mounted)}"
+        f" detect=floating detect_driven=0 det_pullup=1 det_pulldown=0"
         f"{diag_probe_tokens('hd', scenario.present, err, capacity)}"
         f"{diag_probe_tokens('hs', False, 254, 0)}"
         f"{diag_probe_tokens('ld', False, 254, 0)}"

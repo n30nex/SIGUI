@@ -39,6 +39,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint32_t ESP32_BRIDGE_BAUD = 921600;" in sketch
     assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in sketch
     assert "constexpr uint8_t SD_CS_PIN = 13;" in sketch
+    assert "constexpr uint8_t SD_DET_PIN = 7;" in sketch
     assert "constexpr uint8_t SD_SCK_PIN = 10;" in sketch
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
@@ -65,6 +66,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "gpio_pull_up(SD_MISO_PIN)" in sketch
     assert "gpio_set_input_enabled(SD_MISO_PIN, true)" in sketch
     assert "sample_sd_miso_level()" in sketch
+    assert "sample_sd_detect()" in sketch
+    assert "pinMode(SD_DET_PIN, INPUT_PULLUP)" in sketch
+    assert "pinMode(SD_DET_PIN, INPUT_PULLDOWN)" in sketch
+    assert "apply_detect_to_snapshot(snapshot)" in sketch
+    assert "apply_detect_to_diag(diag)" in sketch
     assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.end()" in sketch
@@ -103,6 +109,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i)" in sketch
     assert "return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle)" in sketch
     assert "if (mount_sd_with_probe_config(probes[i]))" in sketch
+    assert "raw_probe_rejected_card(probes[0])" in sketch
+    assert 'snapshot.note = "sd_probe_rejected_card"' in sketch
     assert "SPI1.begin()" in sketch
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
@@ -153,6 +161,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '" pin_mosi="' in sketch
     assert '" pin_miso="' in sketch
     assert '" pin_cs="' in sketch
+    assert '" detect="' in sketch
+    assert '" detect_driven="' in sketch
+    assert '" det_pullup="' in sketch
+    assert '" det_pulldown="' in sketch
     assert "probe.miso_pullup_level = sample_sd_miso_level()" in sketch
     assert "probe.miso_spi_level = sample_sd_miso_level()" in sketch
     assert "probe.miso_idle_level = sample_sd_miso_level()" in sketch
@@ -207,6 +219,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "mount_not_checked",
         "filesystem_mounting",
         "probing_card",
+        "sd_probe_rejected_card",
         "card_detected_mounting",
         "deskos_root_missing",
         "deskos_manifest_invalid",

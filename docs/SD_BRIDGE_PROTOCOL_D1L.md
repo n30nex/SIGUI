@@ -15,7 +15,7 @@ DESKOS_SD_STATUS
 RP2040 replies with one line:
 
 ```text
-DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_STATUS state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 detect=low detect_driven=1 det_pullup=0 det_pulldown=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 Required tokens:
@@ -32,6 +32,10 @@ Required tokens:
   `mount_data` are captured SdFat diagnostic error bytes from the filesystem
   mount attempt. Older bridge firmware may omit these tokens; ESP32 treats them
   as optional.
+- `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`: raw GPIO7
+  SD-detect diagnostics. The bridge samples GPIO7 with pull-up and pull-down so
+  operators can distinguish a floating detect line from a board-driven high or
+  low state without assuming a card-format problem.
 - `file_ops`: `1` when the card is ready and the generic file protocol below is available.
 - `file_line_max`: maximum request/reply line length, excluding newline. Current value: `512`.
 - `file_chunk_max`: maximum decoded read/write/append payload size. Current value: `192` bytes.
@@ -79,10 +83,13 @@ candidates that answer a valid SD idle/init sequence receive one matching
 Arduino `SD`/`SDFS` filesystem mount attempt on the expected D1L SD bus. Failed
 fallback filesystem attempts can record captured SdFat diagnostic error bytes. An
 electrically absent or non-responsive card should report `no_card` rather than
-wedging the UART bridge.
+wedging the UART bridge. A selected-card response path that returns all-zero
+CMD0/CMD8 bytes reports `state=error note=sd_probe_rejected_card`, which the
+ESP32 treats as an RP2040 firmware/SPI initialization path instead of a
+card-format request.
 
 ```text
-DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
+DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 detect=low detect_driven=1 det_pullup=0 det_pulldown=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
 The D1L bridge tries a Seeed-style high/dedicated filesystem mount before the
@@ -98,7 +105,9 @@ the selected power-rail level and reclock the card so warm firmware resets do
 not leave the card outside `CMD0` idle detection. The manual
 diagnostic request below reports the same candidate matrix without filesystem
 writes. If no card
-responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`. If a card responds but the
+responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`;
+if the selected-card path returns all-zero CMD0/CMD8 bytes, the bridge reports
+`state=error note=sd_probe_rejected_card`. If a card responds but the
 filesystem is unusable, the bridge reports `state=not_fat32_or_unmountable`,
 `present=1`, `mounted=0`, `needs_fat32=1`, and
 `note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When
@@ -135,12 +144,13 @@ DESKOS_SD_DIAG
 RP2040 replies with one compact line:
 
 ```text
-DESKOS_SD_DIAG pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000 pin_sck=1 pin_mosi=1 pin_miso=1 pin_cs=1 selected_power=high selected_mode=dedicated mount_selected=0 hd_p=0 hd_e=254 hd_d=0 hd_c0r=255 hd_c8r=255 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_idle_ff=255 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0r=255 hs_c8r=255 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_idle_ff=255 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0r=255 ld_c8r=255 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_idle_ff=255 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0r=255 ls_c8r=255 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_idle_ff=255 ls_kb=0
+DESKOS_SD_DIAG pins=det7-cs13-sck10-mosi11-miso12-pwr18 hz=1000000 pin_sck=1 pin_mosi=1 pin_miso=1 pin_cs=1 selected_power=high selected_mode=dedicated mount_selected=0 detect=floating detect_driven=0 det_pullup=1 det_pulldown=0 hd_p=0 hd_e=254 hd_d=0 hd_c0r=255 hd_c8r=255 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_idle_ff=255 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0r=255 hs_c8r=255 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_idle_ff=255 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0r=255 ld_c8r=255 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_idle_ff=255 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0r=255 ls_c8r=255 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_idle_ff=255 ls_kb=0
 ```
 
 `pin_sck`, `pin_mosi`, and `pin_miso` report whether Arduino-Pico accepted the
 configured SPI1 pins; `pin_cs` reports that software GPIO13 chip select is
-configured. Each probe prefix (`hd`, `hs`, `ld`, `ls`)
+configured. `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`
+report the raw GPIO7 SD-detect sample. Each probe prefix (`hd`, `hs`, `ld`, `ls`)
 reports presence (`*_p`), final probe error (`*_e`), error data (`*_d`), the
 CS-low ready bytes before CMD0/CMD8 (`*_c0r`, `*_c8r`), raw `CMD0` response
 (`*_c0`), raw `CMD8` response (`*_c8`), the four `CMD8` R7 echo bytes

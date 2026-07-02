@@ -156,9 +156,13 @@ def test_diag_protocol_reports_probe_matrix_without_formatting():
     diag = parse_tokens(reply_for_request(DIAG_REQUEST, SCENARIOS["no-card"]))
 
     assert diag["prefix"] == DIAG_REPLY
-    assert diag["pins"] == "cs13-sck10-mosi11-miso12-pwr18"
+    assert diag["pins"] == "det7-cs13-sck10-mosi11-miso12-pwr18"
     assert diag["selected_power"] == "high"
     assert diag["selected_mode"] == "dedicated"
+    assert diag["detect"] == "floating"
+    assert diag["detect_driven"] == "0"
+    assert diag["det_pullup"] == "1"
+    assert diag["det_pulldown"] == "0"
     assert diag["hd_p"] == "0"
     assert diag["hs_p"] == "0"
     assert diag["ld_p"] == "0"

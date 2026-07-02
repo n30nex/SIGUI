@@ -9,6 +9,7 @@ It speaks the newline-delimited protocol documented in
 - RP2040 `Serial1` RX: GPIO17, connected to ESP32 TX GPIO19.
 - RP2040 `Serial1` TX: GPIO16, connected to ESP32 RX GPIO20.
 - SD SPI: `SPI1`.
+- SD detect: GPIO7, reported as raw driven/floating diagnostic state.
 - SD CS: GPIO13.
 - SD SCK: GPIO10.
 - SD MOSI/TX: GPIO11.
@@ -99,7 +100,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `path_max=96`, and `atomic_rename=1`. Status replies include optional cached
   probe diagnostics:
   `probe_power`, `probe_mode`, `probe_present`, `probe_err`, `probe_data`,
-  `mount_err`, and `mount_data`.
+  raw GPIO7 detect tokens `detect`, `detect_driven`, `det_pullup`, and
+  `det_pulldown`, plus `mount_err` and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
@@ -113,8 +115,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   single matching Arduino `SD`/`SDFS` filesystem mount attempt before the bridge
   declares the card unmountable. Failed fallback mount attempts can report
   captured SdFat diagnostic `mount_err` and `mount_data` bytes from the same
-  SPI1 bus. No electrical card reports `no_card`; an inserted card with an
-  unusable filesystem reports
+  SPI1 bus. A raw probe that collapses to the all-zero CMD0/CMD8 firmware path
+  reports `state=error note=sd_probe_rejected_card` rather than ordinary
+  `no_card`; an inserted card with an unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
@@ -130,7 +133,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO line samples
   (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
   CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
-  separated from a real card echo mismatch.
+  separated from a real card echo mismatch. Diagnostic replies also include
+  raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
+  with the SPI response path.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and
   manifests. If the card is absent, unmountable, not FAT32, or has invalid

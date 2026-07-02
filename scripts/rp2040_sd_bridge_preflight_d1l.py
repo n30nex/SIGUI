@@ -183,11 +183,11 @@ def classify_preflight(
     elif not bridge_uart_ready:
         state = "rp2040_uart_unavailable"
         next_action = "check_d1l_power_cable_and_rp2040_uart"
+    elif protocol_supported and sd_has_rejected_probe(sd):
+        state = "sd_probe_rejected_card"
+        next_action = "inspect_rp2040_sd_cmd0_firmware_path"
     elif protocol_supported and sd.get("present") is not True:
-        if sd.get("state") == "no_card" and sd_has_rejected_probe(sd):
-            state = "sd_probe_rejected_card"
-            next_action = "inspect_rp2040_sd_cmd0_firmware_path"
-        elif diag_attempted and not diag_supported and artifact_ok:
+        if diag_attempted and not diag_supported and artifact_ok:
             state = "sd_card_not_present_diag_pending"
             next_action = (
                 "dry_run_then_copy_rp2040_uf2" if uf2_volume_available

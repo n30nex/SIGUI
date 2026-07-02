@@ -26,6 +26,7 @@ constexpr uint8_t RP2040_ESP32_TX_PIN = 16;
 constexpr uint32_t ESP32_BRIDGE_BAUD = 921600;
 
 constexpr uint8_t SD_CS_PIN = 13;
+constexpr uint8_t SD_DET_PIN = 7;
 constexpr uint8_t SD_SCK_PIN = 10;
 constexpr uint8_t SD_MOSI_PIN = 11;
 constexpr uint8_t SD_MISO_PIN = 12;
@@ -93,6 +94,10 @@ struct SdSnapshot {
     bool probe_present;
     uint8_t probe_error;
     uint8_t probe_data;
+    const char *detect_state;
+    bool detect_driven;
+    uint8_t detect_pullup_level;
+    uint8_t detect_pulldown_level;
 };
 
 struct CardProbe {
@@ -129,6 +134,17 @@ struct DiagSnapshot {
     const char *selected_mode;
     bool mount_selected;
     bool valid;
+    const char *detect_state;
+    bool detect_driven;
+    uint8_t detect_pullup_level;
+    uint8_t detect_pulldown_level;
+};
+
+struct DetectSample {
+    const char *state;
+    bool driven;
+    uint8_t pullup_level;
+    uint8_t pulldown_level;
 };
 
 struct LineRx {
@@ -184,6 +200,45 @@ const char *spi_mode_token(uint8_t options) {
 
 SdSpiConfig sd_spi_config(uint8_t options);
 uint8_t sd_spi_transfer(uint8_t value);
+
+DetectSample sample_sd_detect() {
+    pinMode(SD_DET_PIN, INPUT_PULLUP);
+    delayMicroseconds(50);
+    const uint8_t pullup_level = digitalRead(SD_DET_PIN) ? 1U : 0U;
+    pinMode(SD_DET_PIN, INPUT_PULLDOWN);
+    delayMicroseconds(50);
+    const uint8_t pulldown_level = digitalRead(SD_DET_PIN) ? 1U : 0U;
+    pinMode(SD_DET_PIN, INPUT_PULLUP);
+
+    const bool externally_driven = pullup_level == pulldown_level;
+    const char *state = "floating";
+    if (externally_driven) {
+        state = pullup_level ? "high" : "low";
+    }
+    DetectSample sample = {
+        state,
+        externally_driven,
+        pullup_level,
+        pulldown_level,
+    };
+    return sample;
+}
+
+void apply_detect_to_snapshot(SdSnapshot &snapshot) {
+    const DetectSample detect = sample_sd_detect();
+    snapshot.detect_state = detect.state;
+    snapshot.detect_driven = detect.driven;
+    snapshot.detect_pullup_level = detect.pullup_level;
+    snapshot.detect_pulldown_level = detect.pulldown_level;
+}
+
+void apply_detect_to_diag(DiagSnapshot &diag) {
+    const DetectSample detect = sample_sd_detect();
+    diag.detect_state = detect.state;
+    diag.detect_driven = detect.driven;
+    diag.detect_pullup_level = detect.pullup_level;
+    diag.detect_pulldown_level = detect.pulldown_level;
+}
 
 void settle_sd_power(bool power_high, bool force_power_cycle) {
     static bool sd_power_settled = false;
@@ -574,8 +629,17 @@ SdSnapshot make_snapshot(const char *state, const char *note) {
         false,
         0,
         0,
+        "unknown",
+        false,
+        0xFF,
+        0xFF,
     };
+    apply_detect_to_snapshot(snapshot);
     return snapshot;
+}
+
+bool raw_probe_rejected_card(const CardProbe &probe) {
+    return !probe.present && (probe.error_code == 3U || probe.error_code == 4U);
 }
 
 SdSnapshot current_status() {
@@ -894,11 +958,16 @@ SdSnapshot mount_status_blocking() {
 
     if (!last_present_probe) {
         apply_probe_to_snapshot(snapshot, probes[0]);
+        if (raw_probe_rejected_card(probes[0])) {
+            snapshot.state = "error";
+            snapshot.note = "sd_probe_rejected_card";
+        }
         s_sd_power_high = true;
         s_sd_spi_options = DEDICATED_SPI;
         s_last_mount_error = 0;
         s_last_mount_data = 0;
         configure_sd_bus();
+        apply_detect_to_snapshot(snapshot);
         return snapshot;
     }
 
@@ -932,7 +1001,12 @@ DiagSnapshot pending_diag_snapshot() {
         "pending",
         false,
         false,
+        "unknown",
+        false,
+        0xFF,
+        0xFF,
     };
+    apply_detect_to_diag(diag);
     return diag;
 }
 
@@ -1276,6 +1350,14 @@ void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) 
     line += String(static_cast<unsigned int>(snapshot.probe_error));
     line += " probe_data=";
     line += String(static_cast<unsigned int>(snapshot.probe_data));
+    line += " detect=";
+    line += snapshot.detect_state;
+    line += " detect_driven=";
+    line += bool_token(snapshot.detect_driven);
+    line += " det_pullup=";
+    line += String(static_cast<unsigned int>(snapshot.detect_pullup_level));
+    line += " det_pulldown=";
+    line += String(static_cast<unsigned int>(snapshot.detect_pulldown_level));
     line += " mount_err=";
     line += String(static_cast<unsigned int>(s_last_mount_error));
     line += " mount_data=";
@@ -1354,7 +1436,7 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
 
 void send_diag_snapshot(const DiagSnapshot &diag) {
     String line(DIAG_REPLY);
-    line += " pins=cs13-sck10-mosi11-miso12-pwr18";
+    line += " pins=det7-cs13-sck10-mosi11-miso12-pwr18";
     line += " hz=";
     line += String(static_cast<unsigned long>(SD_SPI_HZ));
     line += " pin_sck=";
@@ -1371,6 +1453,14 @@ void send_diag_snapshot(const DiagSnapshot &diag) {
     line += diag.selected_mode;
     line += " mount_selected=";
     line += bool_token(diag.mount_selected);
+    line += " detect=";
+    line += diag.detect_state;
+    line += " detect_driven=";
+    line += bool_token(diag.detect_driven);
+    line += " det_pullup=";
+    line += String(static_cast<unsigned int>(diag.detect_pullup_level));
+    line += " det_pulldown=";
+    line += String(static_cast<unsigned int>(diag.detect_pulldown_level));
     append_probe_tokens(line, "hd", diag.high_dedicated);
     append_probe_tokens(line, "hs", diag.high_shared);
     append_probe_tokens(line, "ld", diag.low_dedicated);
