@@ -77,6 +77,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(SHARED_SPI, true)" in sketch
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
+    assert 'snapshot = pending_snapshot("probing_card")' in sketch
+    assert 'snapshot = pending_snapshot("filesystem_mounting")' not in sketch
+    assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true)")
     assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
     assert "s_last_mount_error = card->errorCode()" in sketch
     assert "s_last_mount_data = card->errorData()" in sketch
@@ -135,7 +138,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "mount_not_checked",
         "mount_started",
         "mount_in_progress",
-        "filesystem_mounting",
+        "probing_card",
         "card_detected_mounting",
         "deskos_root_missing",
         "deskos_manifest_invalid",

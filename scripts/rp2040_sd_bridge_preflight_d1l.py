@@ -114,6 +114,14 @@ def sd_has_mount_error(sd: dict) -> bool:
     return False
 
 
+def sd_has_rejected_probe(sd: dict) -> bool:
+    probe_error = sd.get("probe_error")
+    probe_data = sd.get("probe_data")
+    if probe_error == 3:
+        return True
+    return isinstance(probe_data, (int, float)) and probe_data not in (0, 0xFF)
+
+
 def classify_preflight(
     rp2040_status: dict,
     rp2040_ping: dict,
@@ -176,7 +184,10 @@ def classify_preflight(
         state = "rp2040_uart_unavailable"
         next_action = "check_d1l_power_cable_and_rp2040_uart"
     elif protocol_supported and sd.get("present") is not True:
-        if diag_attempted and not diag_supported and artifact_ok:
+        if sd.get("state") == "no_card" and sd_has_rejected_probe(sd):
+            state = "sd_probe_rejected_card"
+            next_action = "inspect_rp2040_sd_cmd0_firmware_path"
+        elif diag_attempted and not diag_supported and artifact_ok:
             state = "sd_card_not_present_diag_pending"
             next_action = (
                 "dry_run_then_copy_rp2040_uf2" if uf2_volume_available

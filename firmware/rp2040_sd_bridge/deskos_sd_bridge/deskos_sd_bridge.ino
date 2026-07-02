@@ -714,14 +714,12 @@ SdSnapshot mounted_snapshot_from_current_config() {
 }
 
 SdSnapshot mount_status_blocking() {
-    SdSnapshot snapshot = make_snapshot("no_card", "no_card");
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
-    snapshot = pending_snapshot("filesystem_mounting");
+    s_last_mount_error = 0;
+    s_last_mount_data = 0;
+    SdSnapshot snapshot = pending_snapshot("probing_card");
     publish_worker_snapshot(snapshot);
-    if (mount_sd()) {
-        return mounted_snapshot_from_current_config();
-    }
 
     snapshot = make_snapshot("no_card", "no_card");
     CardProbe probes[] = {

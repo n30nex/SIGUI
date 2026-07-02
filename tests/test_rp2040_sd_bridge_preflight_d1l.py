@@ -103,6 +103,16 @@ def no_card_storage_line() -> str:
     )
 
 
+def no_card_rejected_probe_storage_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"no_card","present":false,"mounted":false,'
+        '"rp2040_bridge_ready":true,"rp2040_protocol_supported":true,'
+        '"probe_error":3,"probe_data":0,"last_error":"ESP_OK"},'
+        '"data_backend":"nvs","export_backend":"serial"}\n'
+    )
+
+
 def raw_card_present_mount_failed_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
@@ -358,6 +368,30 @@ def test_preflight_classifies_no_card_with_diag_pending_as_bridge_flash_needed()
     assert report["state"] == "sd_card_not_present_diag_pending"
     assert report["next_action"] == "put_rp2040_in_uf2_bootloader"
     assert report["rp2040_diag_supported"] is False
+
+
+def test_preflight_classifies_no_card_with_cmd0_rejection_as_firmware_path():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "no_card",
+                "present": False,
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+                "probe_error": 3,
+                "probe_data": 0,
+            },
+        },
+        [],
+        {"ok": True},
+    )
+
+    assert report["state"] == "sd_probe_rejected_card"
+    assert report["next_action"] == "inspect_rp2040_sd_cmd0_firmware_path"
 
 
 def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):

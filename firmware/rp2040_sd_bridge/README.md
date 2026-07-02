@@ -100,12 +100,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `mount_err`, and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
-  report `state=mount_pending`, and tries the Arduino `SD`/`SDFS` filesystem
-  mount path documented by Seeed before using bounded raw SPI probes to find viable high/low rail and
-  dedicated/shared SPI candidates. Every raw-present candidate gets a filesystem
-  mount attempt before the bridge declares the card unmountable. Failed mount
-  attempts report captured SdFat diagnostic `mount_err` and `mount_data` bytes
-  from the same SPI1 bus.
+  report `state=mount_pending`, and first uses bounded raw SPI probes to find
+  viable high/low rail and dedicated/shared SPI candidates. Only raw-present
+  candidates get an Arduino `SD`/`SDFS` filesystem mount attempt before the
+  bridge declares the card unmountable. Failed mount attempts report captured
+  SdFat diagnostic `mount_err` and `mount_data` bytes from the same SPI1 bus.
   The filesystem mount force-cycles the rail before each init, uses the
   same SPI1 pin map at the bridge's conservative 1 MHz SD clock, and retries
   once after resetting the `SD`/`SDFS` state. No electrical card
