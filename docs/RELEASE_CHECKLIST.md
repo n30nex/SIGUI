@@ -116,6 +116,7 @@
 - [x] RP2040 SD bridge artifact generation added to GitHub Actions.
 - [x] Release package includes normal flash set, app update image, full 8MB image, manifest, checksums, and explicit-port flash helpers.
 - [x] Release package includes third-party notices and source attribution documents for upstream material, including the permitted SigurdOS-derived work.
+- [ ] Top-level MeshCore DeskOS D1L project license selected, committed as `LICENSE`, and SigurdOS permission evidence archived with date, channel/link, and exact permitted scope.
 - [x] First user guide added.
 - [x] First developer guide added.
 - [x] Known limitations updated.

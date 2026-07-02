@@ -10,6 +10,7 @@ Portions of this project's architecture, touch-input behavior, and test strategy
 - License: GPL-3.0-or-later
 - Source: https://github.com/hermes-gadget/SigurdOS-tdeck
 - Source commit reviewed: `e7e7b12ee771edd2b15e64e1a6569b7b18f84423`
+- Upstream metadata reviewed: default branch `dev`, root `LICENSE`, README license statement, `LICENSES/DejaVu-Fonts.txt`, and MeshCore submodule pin `60ea4a91bf14363e837037a79ce1bff7fa37483f`
 - Permission: used with maintainer permission and attribution.
 
 MeshCore DeskOS D1L is informed by and may adapt concepts from SigurdOS T-Deck by hermes-gadget, GPL-3.0-or-later, reviewed at commit `e7e7b12ee771edd2b15e64e1a6569b7b18f84423`: https://github.com/hermes-gadget/SigurdOS-tdeck. SigurdOS T-Deck builds on MeshCore by meshcore-dev, MIT, reviewed as submodule commit `60ea4a91bf14363e837037a79ce1bff7fa37483f`: https://github.com/meshcore-dev/MeshCore.

@@ -216,10 +216,10 @@ static void append_public_message_store_tx(const char *message)
     }
 }
 
-static void append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
+static bool append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
 {
     if (!pending || !pending->active) {
-        return;
+        return true;
     }
     esp_err_t ret = d1l_dm_store_append(pending->fingerprint, pending->alias, "tx",
                                         pending->text, 0, 0, pending->path_hash_bytes,
@@ -227,7 +227,14 @@ static void append_dm_store_tx(const d1l_pending_dm_tx_t *pending)
                                         pending->ack_hash);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "DM tx store append failed: %s", esp_err_to_name(ret));
+        return false;
     }
+    return true;
+}
+
+static void clear_pending_dm_tx(void)
+{
+    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
 }
 
 static void remember_pending_public_tx(const char *message)
@@ -249,8 +256,8 @@ static void flush_pending_public_tx(void)
 static void flush_pending_tx(void)
 {
     flush_pending_public_tx();
-    append_dm_store_tx(&s_pending_dm_tx);
-    memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    (void)append_dm_store_tx(&s_pending_dm_tx);
+    clear_pending_dm_tx();
 }
 
 static void remember_pending_dm_tx(const d1l_contact_entry_t *contact, const char *text,
@@ -1505,6 +1512,9 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     s_tx_busy = true;
     s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     remember_pending_dm_tx(&contact, text, route_path_hash_bytes, route_path_hops, 0, ack_hash);
+    if (append_dm_store_tx(&s_pending_dm_tx)) {
+        clear_pending_dm_tx();
+    }
     Radio.Send(raw, raw_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",

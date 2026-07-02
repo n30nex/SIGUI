@@ -72,6 +72,21 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake
 
 
+def test_meshcore_service_retains_dm_when_queued_not_only_tx_done():
+    source = read("main/mesh/meshcore_service.c")
+    send_start = source.index("esp_err_t d1l_meshcore_service_send_dm")
+    send_body = source[send_start:source.index("const char *d1l_meshcore_service_state_name", send_start)]
+
+    remember_at = send_body.index("remember_pending_dm_tx(&contact, text")
+    append_at = send_body.index("append_dm_store_tx(&s_pending_dm_tx)")
+    clear_at = send_body.index("clear_pending_dm_tx()")
+    radio_send_at = send_body.index("Radio.Send(raw, raw_len)")
+
+    assert remember_at < append_at < clear_at < radio_send_at
+    assert "static bool append_dm_store_tx" in source
+    assert "static void clear_pending_dm_tx" in source
+
+
 def test_console_and_smoke_expose_dm_workflow():
     console = read("main/comms/usb_console.c")
     assert 'ok_begin("messages dm")' in console

@@ -141,6 +141,21 @@ def find_step(steps: list[dict], command_prefix: str) -> dict | None:
     return None
 
 
+def command_can_retry(command: str) -> bool:
+    return not command.strip().lower().startswith("mesh send ")
+
+
+def send_probe_command(ser, command: str, timeout: float, retries: int = 1) -> dict:
+    result = send_console_command(ser, command, timeout)
+    for _ in range(max(0, retries)):
+        if result.get("code") != "TIMEOUT" or not command_can_retry(command):
+            break
+        time.sleep(0.2)
+        ser.reset_input_buffer()
+        result = send_console_command(ser, command, timeout)
+    return result
+
+
 def build_report(
     *,
     port: str,
@@ -233,7 +248,7 @@ def run_serial_probe(
         time.sleep(1.0)
         ser.reset_input_buffer()
         for command in commands:
-            result = send_console_command(ser, command, timeout)
+            result = send_probe_command(ser, command, timeout)
             steps.append({"command": command, "result": result})
             if command.startswith("mesh send dm "):
                 bot_after_dm_wait = wait_for_bot_receive(

@@ -21,8 +21,9 @@ This project uses references for architecture and feature parity, but Phase 1 so
 - SigurdOS T-Deck: https://github.com/hermes-gadget/SigurdOS-tdeck
   - Source commit reviewed: `e7e7b12ee771edd2b15e64e1a6569b7b18f84423` on `dev`.
   - License: GPL-3.0-or-later.
+  - Metadata reviewed for release attribution: default branch `dev`, root `LICENSE`, README license wording, `LICENSES/DejaVu-Fonts.txt`, and MeshCore submodule pin `60ea4a91bf14363e837037a79ce1bff7fa37483f`.
   - Upstream copyright headers reviewed: `Copyright (C) 2025 Ben`.
-  - Permission: maintainers gave this project permission to use the work with attribution.
+  - Permission: maintainers gave this project permission to use the work with attribution. Public release evidence still needs the archived permission date, channel/link, and exact scope.
   - Files reviewed for the D1L touch/input slice: `src/hal/tdeck_pins.h`, `src/hal/tdeck_board.h`, `src/hal/touch.h`, `src/hal/touch.cpp`, `src/hal/display.cpp`, `src/main.cpp`, and `test/test_touch/test_touch.cpp`.
   - Use: primary production firmware reference for touch-first MeshCore UX and input architecture. The current D1L implementation adapts its cached-state, validation/clamping, deterministic-release, and test-coverage ideas onto the Seeed BSP/FT5x06 path.
   - Risk: copying/adapting GPL source would impose GPL obligations on distributed firmware/source unless separate written terms grant otherwise. The current D1L touch work keeps controller code on the Seeed FT5x06 BSP path instead of porting SigurdOS's GT911 driver.

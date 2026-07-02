@@ -344,6 +344,21 @@ def build_report(
     }
 
 
+def command_can_retry(command: str) -> bool:
+    return not command.strip().lower().startswith("mesh send ")
+
+
+def send_acceptance_command(ser, command: str, timeout: float, retries: int = 1) -> dict:
+    result = send_console_command(ser, command, timeout)
+    for _ in range(max(0, retries)):
+        if result.get("code") != "TIMEOUT" or not command_can_retry(command):
+            break
+        time.sleep(0.2)
+        ser.reset_input_buffer()
+        result = send_console_command(ser, command, timeout)
+    return result
+
+
 def run_hardware(
     *,
     port: str,
@@ -371,7 +386,7 @@ def run_hardware(
     inbound_seen_at = None
 
     def run_command(ser, command: str, command_timeout: float | None = None) -> dict:
-        result = send_console_command(ser, command, command_timeout or timeout)
+        result = send_acceptance_command(ser, command, command_timeout or timeout)
         steps.append({"command": command, "result": result})
         return result
 

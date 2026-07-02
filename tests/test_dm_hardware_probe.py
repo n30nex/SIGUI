@@ -4,6 +4,14 @@ from scripts import probe_d1l_dm
 from scripts.smoke_d1l import expected_command_name
 
 
+class FakeSerial:
+    def __init__(self):
+        self.reset_count = 0
+
+    def reset_input_buffer(self):
+        self.reset_count += 1
+
+
 def test_dm_probe_dry_run_is_dm_only():
     report = probe_d1l_dm.dry_run_report(
         "0BF0A701D5AE2DB6",
@@ -70,3 +78,42 @@ def test_dm_send_prefix_matches_console_response_name():
     assert expected_command_name("messages dm") == "messages dm"
     assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"
     assert expected_command_name("messages dm clear") == "messages dm clear"
+
+
+def test_dm_probe_retries_read_only_timeout(monkeypatch):
+    responses = iter([
+        {"ok": False, "cmd": "identity status", "code": "TIMEOUT"},
+        {"ok": True, "cmd": "identity status", "fingerprint": "BA14729E8588E30B"},
+    ])
+    calls = []
+
+    def fake_send(_ser, command, _timeout):
+        calls.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(probe_d1l_dm, "send_console_command", fake_send)
+    monkeypatch.setattr(probe_d1l_dm.time, "sleep", lambda _seconds: None)
+    ser = FakeSerial()
+
+    result = probe_d1l_dm.send_probe_command(ser, "identity status", 1.0)
+
+    assert result["ok"] is True
+    assert calls == ["identity status", "identity status"]
+    assert ser.reset_count == 1
+
+
+def test_dm_probe_does_not_retry_dm_send_timeout(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, _timeout):
+        calls.append(command)
+        return {"ok": False, "cmd": "mesh send dm", "code": "TIMEOUT"}
+
+    monkeypatch.setattr(probe_d1l_dm, "send_console_command", fake_send)
+    ser = FakeSerial()
+
+    result = probe_d1l_dm.send_probe_command(ser, "mesh send dm 0BF0A701D5AE2DB6 token", 1.0)
+
+    assert result["ok"] is False
+    assert calls == ["mesh send dm 0BF0A701D5AE2DB6 token"]
+    assert ser.reset_count == 0

@@ -4,6 +4,14 @@ from scripts import rf_full_acceptance_d1l as rf_accept
 from scripts.smoke_d1l import expected_command_name
 
 
+class FakeSerial:
+    def __init__(self):
+        self.reset_count = 0
+
+    def reset_input_buffer(self):
+        self.reset_count += 1
+
+
 def test_rf_full_acceptance_dry_run_is_dm_only():
     report = rf_accept.dry_run_report(
         port="COM12",
@@ -238,5 +246,45 @@ def test_rf_full_acceptance_rejects_stale_packet_ack_without_tx_ack():
 
 def test_rf_full_acceptance_prefixes_match_console_response_names():
     assert expected_command_name("mesh send dm 0BF0A701D5AE2DB6 hello") == "mesh send dm"
+    assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"
+
+
+def test_rf_full_acceptance_retries_read_only_timeout(monkeypatch):
+    responses = iter([
+        {"ok": False, "cmd": "identity status", "code": "TIMEOUT"},
+        {"ok": True, "cmd": "identity status", "fingerprint": "BA14729E8588E30B"},
+    ])
+    calls = []
+
+    def fake_send(_ser, command, _timeout):
+        calls.append(command)
+        return next(responses)
+
+    monkeypatch.setattr(rf_accept, "send_console_command", fake_send)
+    monkeypatch.setattr(rf_accept.time, "sleep", lambda _seconds: None)
+    ser = FakeSerial()
+
+    result = rf_accept.send_acceptance_command(ser, "identity status", 1.0)
+
+    assert result["ok"] is True
+    assert calls == ["identity status", "identity status"]
+    assert ser.reset_count == 1
+
+
+def test_rf_full_acceptance_does_not_retry_dm_send_timeout(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, _timeout):
+        calls.append(command)
+        return {"ok": False, "cmd": "mesh send dm", "code": "TIMEOUT"}
+
+    monkeypatch.setattr(rf_accept, "send_console_command", fake_send)
+    ser = FakeSerial()
+
+    result = rf_accept.send_acceptance_command(ser, "mesh send dm 0BF0A701D5AE2DB6 token", 1.0)
+
+    assert result["ok"] is False
+    assert calls == ["mesh send dm 0BF0A701D5AE2DB6 token"]
+    assert ser.reset_count == 0
     assert expected_command_name("messages dm 0BF0A701D5AE2DB6") == "messages dm"
     assert expected_command_name("packets search rf_unit") == "packets search"
