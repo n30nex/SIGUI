@@ -225,6 +225,38 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
 
 
+def test_serial_tab_state_stays_pending_until_render_finishes():
+    source = read("main/ui/ui_phase1.c")
+
+    assert "static portMUX_TYPE s_tab_lock = portMUX_INITIALIZER_UNLOCKED" in source
+    assert "static void request_tab_switch(d1l_ui_tab_t tab)" in source
+    assert "static bool begin_pending_tab_switch(d1l_ui_tab_t *out_tab)" in source
+    assert "static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)" in source
+    assert "request_tab_switch(tab)" in source
+    assert "request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event))" in source
+    assert "request_tab_switch(D1L_UI_TAB_MESSAGES)" in source
+
+    process_body = source.split("static void process_pending_tab_switch(void)", 1)[1].split(
+        "static void lock_event_cb", 1
+    )[0]
+    assert "begin_pending_tab_switch(&rendered_tab)" in process_body
+    assert "s_tab_switch_pending = false;" not in process_body.split("render_active_tab();", 1)[0]
+    assert "render_active_tab();" in process_body
+    assert "finish_pending_tab_switch(rendered_tab);" in process_body
+    assert process_body.index("render_active_tab();") < process_body.index(
+        "finish_pending_tab_switch(rendered_tab);"
+    )
+
+    for name in [
+        "d1l_ui_phase1_active_tab_name",
+        "d1l_ui_phase1_pending_tab_name",
+        "d1l_ui_phase1_tab_switch_pending",
+    ]:
+        body = source.split(f"{name}(", 1)[1].split("\n}", 1)[0]
+        assert "portENTER_CRITICAL(&s_tab_lock)" in body
+        assert "portEXIT_CRITICAL(&s_tab_lock)" in body
+
+
 def test_touch_ui_actions_route_through_app_model():
     source = read("main/ui/ui_phase1.c")
     header = read("main/app/app_model.h")

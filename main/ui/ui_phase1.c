@@ -34,6 +34,7 @@ static TaskHandle_t s_touch_task_handle;
 static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_board_touch_state_t s_touch_state;
 static bool s_touch_state_ready = false;
+static portMUX_TYPE s_tab_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_content;
@@ -211,6 +212,45 @@ static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
+
+static void request_tab_switch(d1l_ui_tab_t tab)
+{
+    portENTER_CRITICAL(&s_tab_lock);
+    s_pending_tab = tab;
+    s_tab_switch_pending = true;
+    portEXIT_CRITICAL(&s_tab_lock);
+}
+
+static bool begin_pending_tab_switch(d1l_ui_tab_t *out_tab)
+{
+    bool pending;
+    d1l_ui_tab_t tab;
+
+    portENTER_CRITICAL(&s_tab_lock);
+    pending = s_tab_switch_pending;
+    tab = s_pending_tab;
+    if (pending) {
+        s_active_tab = tab;
+    }
+    portEXIT_CRITICAL(&s_tab_lock);
+
+    if (!pending) {
+        return false;
+    }
+    if (out_tab) {
+        *out_tab = tab;
+    }
+    return true;
+}
+
+static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)
+{
+    portENTER_CRITICAL(&s_tab_lock);
+    if (s_pending_tab == rendered_tab) {
+        s_tab_switch_pending = false;
+    }
+    portEXIT_CRITICAL(&s_tab_lock);
+}
 
 static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
@@ -3566,8 +3606,7 @@ static void set_messages_mode(bool show_dms)
         render_active_tab();
         return;
     }
-    s_pending_tab = D1L_UI_TAB_MESSAGES;
-    s_tab_switch_pending = true;
+    request_tab_switch(D1L_UI_TAB_MESSAGES);
 }
 
 static void open_messages_public_event_cb(lv_event_t *event)
@@ -5451,30 +5490,43 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     if (!s_started || !s_content) {
         return ESP_ERR_INVALID_STATE;
     }
-    s_pending_tab = tab;
-    s_tab_switch_pending = true;
+    request_tab_switch(tab);
     return ESP_OK;
 }
 
 const char *d1l_ui_phase1_active_tab_name(void)
 {
-    return tab_name(s_active_tab);
+    d1l_ui_tab_t tab;
+
+    portENTER_CRITICAL(&s_tab_lock);
+    tab = s_active_tab;
+    portEXIT_CRITICAL(&s_tab_lock);
+    return tab_name(tab);
 }
 
 const char *d1l_ui_phase1_pending_tab_name(void)
 {
-    return tab_name(s_pending_tab);
+    d1l_ui_tab_t tab;
+
+    portENTER_CRITICAL(&s_tab_lock);
+    tab = s_pending_tab;
+    portEXIT_CRITICAL(&s_tab_lock);
+    return tab_name(tab);
 }
 
 bool d1l_ui_phase1_tab_switch_pending(void)
 {
-    return s_tab_switch_pending;
+    bool pending;
+
+    portENTER_CRITICAL(&s_tab_lock);
+    pending = s_tab_switch_pending;
+    portEXIT_CRITICAL(&s_tab_lock);
+    return pending;
 }
 
 static void request_tab_event_cb(lv_event_t *event)
 {
-    s_pending_tab = (d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event);
-    s_tab_switch_pending = true;
+    request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event));
 }
 
 static void dock_event_cb(lv_event_t *event)
@@ -5484,11 +5536,10 @@ static void dock_event_cb(lv_event_t *event)
 
 static void process_pending_tab_switch(void)
 {
-    if (!s_tab_switch_pending) {
+    d1l_ui_tab_t rendered_tab;
+    if (!begin_pending_tab_switch(&rendered_tab)) {
         return;
     }
-    s_tab_switch_pending = false;
-    s_active_tab = s_pending_tab;
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -5511,6 +5562,7 @@ static void process_pending_tab_switch(void)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_active_tab();
+    finish_pending_tab_switch(rendered_tab);
 }
 
 static void lock_event_cb(lv_event_t *event)
