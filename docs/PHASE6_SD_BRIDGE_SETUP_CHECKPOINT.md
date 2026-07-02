@@ -46,7 +46,7 @@ This checkpoint advances optional SD-card data storage without making boot or re
 
 ## Remaining SD Work
 
-- Investigate why the direct SdFat mount does not produce a ready FAT32 filesystem on the validation D1L even though the user-confirmed FAT32 card is inserted and the bounded raw SPI probe detects the card (`probe_error=0`, `probe_data=192`). Use the new `mount_error`/`mount_data` fields as firmware-side diagnostics; do not treat reformatting the card as the fix.
+- Current follow-up: the direct high/dedicated SdFat mount did not produce a ready FAT32 filesystem even though the user-confirmed FAT32 card was inserted and the bounded raw SPI probe detected the card (`probe_error=0`, `probe_data=192`). The bridge now tries filesystem mount on every raw-present high/low, dedicated/shared candidate before declaring the card unmountable. Use `mount_error`/`mount_data` as firmware-side diagnostics; do not treat reformatting the card as the fix.
 - Keep using COM12 preflight after RP2040/ESP32 changes; only run SD file/export/map canaries once `storage status` reports `state="ready"`, `file_ops=true`, and `atomic_rename=true`.
 - Complete SD card acceptance so `storage status` reports the ready file-operation gates and `storage filecanary` proves temp write, read, rename replace, stat, final read, and cleanup against a real card.
 - Complete hardware proof for retained Public/DM history, route history, packet history, diagnostic exports, sampled data exports, and map-tile cache once a card is electrically detected.

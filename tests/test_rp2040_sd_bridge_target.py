@@ -49,6 +49,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
     assert "SdFat s_sd;" in sketch
     assert "s_sd.begin(sd_spi_config(s_sd_spi_options))" in sketch
+    assert "mount_sd_with_probe_config" in sketch
+    assert "mounted_snapshot_from_current_config" in sketch
+    assert "last_present_probe" in sketch
+    assert "for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i)" in sketch
+    assert "if (mount_sd_with_probe_config(probes[i]))" in sketch
     assert "SPI1.begin()" in sketch
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
@@ -57,6 +62,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(SHARED_SPI, true)" in sketch
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
+    assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
     assert "s_last_mount_error = s_sd.card()->errorCode()" in sketch
     assert "s_last_mount_data = s_sd.card()->errorData()" in sketch
     assert '" mount_err="' in sketch

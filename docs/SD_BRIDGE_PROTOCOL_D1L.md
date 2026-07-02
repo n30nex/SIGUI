@@ -66,8 +66,10 @@ If the SD stack is still probing or mounting the card, the line may report
 `not_fat32_or_unmountable`, `deskos_manifest_invalid`, `no_card`, or `error`.
 
 The RP2040 bridge first tries the direct SdFat filesystem mount on the expected
-D1L SD bus. If that fails, it records the SdFat mount error bytes and then uses a
-bounded raw SPI presence probe for classification. An electrically absent or
+D1L SD bus. If that fails, it records the SdFat mount error bytes and then runs
+bounded raw SPI presence probes across the high/low rail and dedicated/shared
+SPI candidates. Every raw-present candidate receives a filesystem mount attempt
+before the bridge reports the card as unmountable. An electrically absent or
 non-responsive card should report `no_card` rather than wedging the UART bridge.
 
 ```text
@@ -75,10 +77,11 @@ DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 
 ```
 
 The D1L bridge tries the expected high-power, dedicated-`SPI1` FAT mount first.
-If that mount fails, it uses one bounded raw SPI presence probe on the same
-expected D1L bus before reporting `no_card` or a FAT32-required state.
-Exhaustive high/low and dedicated/shared probing is reserved for the manual
-diagnostic request below. If no card responds, the bridge reports
+If that mount fails, it runs bounded raw SPI probes for high/dedicated,
+high/shared, low/dedicated, and low/shared candidates, then retries filesystem
+mount on each raw-present candidate before reporting `no_card` or a
+FAT32-required state. The manual diagnostic request below reports the same
+candidate matrix without filesystem writes. If no card responds, the bridge reports
 `state=no_card`. If a card responds but the filesystem is unusable, the bridge
 reports `state=not_fat32_or_unmountable present=1 mounted=0 needs_fat32=1
 note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When

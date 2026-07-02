@@ -219,6 +219,12 @@ bool mount_sd() {
     return mount_sd_with_power(s_sd_power_high);
 }
 
+bool mount_sd_with_probe_config(const CardProbe &probe) {
+    s_sd_power_high = probe.power_high;
+    s_sd_spi_options = probe.options;
+    return mount_sd();
+}
+
 CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options) {
     CardProbe probe = {
         false,
@@ -631,87 +637,8 @@ bool prepare_deskos_structure(const char **note) {
     return true;
 }
 
-SdSnapshot mount_status_blocking() {
-    SdSnapshot snapshot = make_snapshot("no_card", "no_card");
-    s_sd_power_high = true;
-    s_sd_spi_options = DEDICATED_SPI;
-    snapshot = pending_snapshot("filesystem_mounting");
-    publish_worker_snapshot(snapshot);
-    if (mount_sd()) {
-        CardProbe mounted_probe = {
-            true,
-            0,
-            0,
-            0,
-            power_token(s_sd_power_high),
-            "mount",
-            s_sd_power_high,
-            s_sd_spi_options,
-        };
-        apply_probe_to_snapshot(snapshot, mounted_probe);
-        snapshot.state = "creating_deskos_files";
-        snapshot.present = true;
-        snapshot.mounted = true;
-        snapshot.deskos = false;
-        snapshot.fs = fat_label();
-        snapshot.note = "deskos_root_missing";
-        fill_capacity(snapshot);
-
-        const char *prepare_note = "ready";
-        if (prepare_deskos_structure(&prepare_note)) {
-            snapshot.state = "ready";
-            snapshot.deskos = true;
-            snapshot.note = prepare_note;
-        } else {
-            snapshot.state = strcmp(prepare_note, "deskos_manifest_invalid") == 0 ||
-                             strcmp(prepare_note, "deskos_map_manifest_invalid") == 0 ?
-                             "deskos_manifest_invalid" : "error";
-            snapshot.note = prepare_note;
-        }
-
-        return snapshot;
-    }
-
-    snapshot = make_snapshot("no_card", "no_card");
-    CardProbe probe = manual_probe_card(DEDICATED_SPI, true);
-    if (!probe.present) {
-        CardProbe probes[] = {
-            probe,
-            manual_probe_card(SHARED_SPI, true),
-            manual_probe_card(DEDICATED_SPI, false),
-            manual_probe_card(SHARED_SPI, false),
-        };
-        const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
-        if (!selected) {
-            apply_probe_to_snapshot(snapshot, probe);
-            s_sd_power_high = true;
-            s_sd_spi_options = DEDICATED_SPI;
-            configure_sd_bus();
-            return snapshot;
-        }
-        probe = *selected;
-    }
-
-    s_sd_power_high = probe.power_high;
-    s_sd_spi_options = probe.options;
-    apply_probe_to_snapshot(snapshot, probe);
-    snapshot.state = "mount_pending";
-    snapshot.present = true;
-    snapshot.fs = "unknown";
-    snapshot.capacity_kb = probe.capacity_kb;
-    snapshot.note = "card_detected_mounting";
-    publish_worker_snapshot(snapshot);
-
-    if (!mount_sd()) {
-        snapshot.state = "not_fat32_or_unmountable";
-        snapshot.present = true;
-        snapshot.fs = "unknown";
-        snapshot.needs_fat32 = true;
-        snapshot.capacity_kb = probe.capacity_kb;
-        snapshot.note = "needs_fat32_on_computer";
-        return snapshot;
-    }
-
+SdSnapshot mounted_snapshot_from_current_config() {
+    SdSnapshot snapshot = make_snapshot("creating_deskos_files", "deskos_root_missing");
     CardProbe mounted_probe = {
         true,
         0,
@@ -723,12 +650,10 @@ SdSnapshot mount_status_blocking() {
         s_sd_spi_options,
     };
     apply_probe_to_snapshot(snapshot, mounted_probe);
-    snapshot.state = "creating_deskos_files";
     snapshot.present = true;
     snapshot.mounted = true;
     snapshot.deskos = false;
     snapshot.fs = fat_label();
-    snapshot.note = "deskos_root_missing";
     fill_capacity(snapshot);
 
     const char *prepare_note = "ready";
@@ -743,6 +668,64 @@ SdSnapshot mount_status_blocking() {
         snapshot.note = prepare_note;
     }
 
+    return snapshot;
+}
+
+SdSnapshot mount_status_blocking() {
+    SdSnapshot snapshot = make_snapshot("no_card", "no_card");
+    s_sd_power_high = true;
+    s_sd_spi_options = DEDICATED_SPI;
+    snapshot = pending_snapshot("filesystem_mounting");
+    publish_worker_snapshot(snapshot);
+    if (mount_sd()) {
+        return mounted_snapshot_from_current_config();
+    }
+
+    snapshot = make_snapshot("no_card", "no_card");
+    CardProbe probes[] = {
+        manual_probe_card(DEDICATED_SPI, true),
+        manual_probe_card(SHARED_SPI, true),
+        manual_probe_card(DEDICATED_SPI, false),
+        manual_probe_card(SHARED_SPI, false),
+    };
+    const CardProbe *last_present_probe = nullptr;
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
+        if (!probes[i].present) {
+            continue;
+        }
+        last_present_probe = &probes[i];
+        snapshot = make_snapshot("mount_pending", "card_detected_mounting");
+        snapshot.present = true;
+        snapshot.fs = "unknown";
+        snapshot.capacity_kb = probes[i].capacity_kb;
+        apply_probe_to_snapshot(snapshot, probes[i]);
+        s_sd_power_high = probes[i].power_high;
+        s_sd_spi_options = probes[i].options;
+        publish_worker_snapshot(snapshot);
+
+        if (mount_sd_with_probe_config(probes[i])) {
+            return mounted_snapshot_from_current_config();
+        }
+    }
+
+    if (!last_present_probe) {
+        apply_probe_to_snapshot(snapshot, probes[0]);
+        s_sd_power_high = true;
+        s_sd_spi_options = DEDICATED_SPI;
+        s_last_mount_error = 0;
+        s_last_mount_data = 0;
+        configure_sd_bus();
+        return snapshot;
+    }
+
+    s_sd_power_high = last_present_probe->power_high;
+    s_sd_spi_options = last_present_probe->options;
+    snapshot = make_snapshot("not_fat32_or_unmountable", "needs_fat32_on_computer");
+    snapshot.present = true;
+    snapshot.fs = "unknown";
+    snapshot.needs_fat32 = true;
+    snapshot.capacity_kb = last_present_probe->capacity_kb;
+    apply_probe_to_snapshot(snapshot, *last_present_probe);
     return snapshot;
 }
 

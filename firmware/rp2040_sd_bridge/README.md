@@ -91,7 +91,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
   report `state=mount_pending`, and tries the direct SdFat filesystem mount
-  before using a bounded raw SPI probe to classify failures. Failed direct
+  before using bounded raw SPI probes to find viable high/low rail and
+  dedicated/shared SPI candidates. Every raw-present candidate gets a filesystem
+  mount attempt before the bridge declares the card unmountable. Failed direct
   mount attempts report the captured SdFat `mount_err` and `mount_data` bytes.
   The filesystem mount uses the same SPI1 pin map at the bridge's conservative
   1 MHz SD clock and retries once after resetting the SdFat state. No electrical card
