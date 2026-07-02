@@ -37,7 +37,7 @@ so SdFat sends valid SPI command CRC bytes during card initialization while
 using byte-wise SPI transfers on the RP2040 SPI1 SD bus. The bridge sketch has
 compile-time guards for these settings because the current validation card
 reached the byte-wise raw SPI init path while the default RP2040 SdFat array
-transfer path failed in the filesystem mount path.
+transfer path failed before the filesystem was available.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.
@@ -100,14 +100,15 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `mount_err`, and `mount_data`.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It starts the SD probe/mount worker on the second RP2040 core, may immediately
-  report `state=mount_pending`, and tries the direct SdFat filesystem mount
-  before using bounded raw SPI probes to find viable high/low rail and
+  report `state=mount_pending`, and tries the Arduino `SD`/`SDFS` filesystem
+  mount path documented by Seeed before using bounded raw SPI probes to find viable high/low rail and
   dedicated/shared SPI candidates. Every raw-present candidate gets a filesystem
-  mount attempt before the bridge declares the card unmountable. Failed direct
-  mount attempts report the captured SdFat `mount_err` and `mount_data` bytes.
-  The filesystem mount force-cycles the rail before each SdFat init, uses the
+  mount attempt before the bridge declares the card unmountable. Failed mount
+  attempts report captured SdFat diagnostic `mount_err` and `mount_data` bytes
+  from the same SPI1 bus.
+  The filesystem mount force-cycles the rail before each init, uses the
   same SPI1 pin map at the bridge's conservative 1 MHz SD clock, and retries
-  once after resetting the SdFat state. No electrical card
+  once after resetting the `SD`/`SDFS` state. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.

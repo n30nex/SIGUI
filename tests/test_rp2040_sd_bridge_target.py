@@ -57,8 +57,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
-    assert "SdFat s_sd;" in sketch
-    assert "s_sd.begin(sd_spi_config(s_sd_spi_options))" in sketch
+    assert "bool s_sd_mounted = false;" in sketch
+    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
+    assert "SD.end(false)" in sketch
+    assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high)" in sketch
     assert "clock_sd_idle_bytes" in sketch
     assert "configure_sd_bus(power_high, true)" in sketch
@@ -76,8 +78,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
-    assert "s_last_mount_error = s_sd.card()->errorCode()" in sketch
-    assert "s_last_mount_data = s_sd.card()->errorData()" in sketch
+    assert "s_last_mount_error = card->errorCode()" in sketch
+    assert "s_last_mount_data = card->errorData()" in sketch
     assert '" mount_err="' in sketch
     assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
@@ -87,7 +89,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sd_command(41" in sketch
     assert "delete card" in sketch
     assert "SDFS.format()" not in sketch
-    assert "s_sd.format()" not in sketch
+    assert "SD.format()" not in sketch
     old_request = "DESKOS_SD_" + "FORMAT"
     old_confirmation = "FORMAT-" + "DESKOS-SD"
     assert old_request not in sketch
@@ -183,12 +185,12 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "handle_file_write" in sketch
     assert "handle_file_delete" in sketch
     assert "handle_file_rename" in sketch
-    assert "s_sd.rename(source_path, target_path)" in sketch
+    assert "SD.rename(source_path, target_path)" in sketch
     assert "REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE" in sketch
     assert "rename_replace_preserving_old" in sketch
     assert "REPLACE_BACKUP_SUFFIX" in sketch
-    assert "s_sd.rename(target_path, backup_path)" in sketch
-    assert "(void)s_sd.rename(backup_path, target_path)" in sketch
+    assert "SD.rename(target_path, backup_path)" in sketch
+    assert "(void)SD.rename(backup_path, target_path)" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
