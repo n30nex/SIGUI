@@ -41,17 +41,24 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in sketch
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in sketch
     assert "constexpr uint8_t SD_POWER_PIN = 18;" in sketch
+    assert "constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 150;" in sketch
+    assert "constexpr uint16_t SD_POWER_SETTLE_MS = 300;" in sketch
     assert "digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW)" in sketch
+    assert "digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH)" in sketch
     assert "bool s_sd_power_high = true;" in sketch
     assert "pinMode(SD_CS_PIN, OUTPUT)" in sketch
     assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
-    assert "delay(250)" in sketch
+    assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
+    assert "delay(SD_POWER_SETTLE_MS)" in sketch
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
     assert "SPI1.setRX(SD_MISO_PIN)" in sketch
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
     assert "SdFat s_sd;" in sketch
     assert "s_sd.begin(sd_spi_config(s_sd_spi_options))" in sketch
+    assert "prepare_sd_card_init(power_high)" in sketch
+    assert "clock_sd_idle_bytes" in sketch
+    assert "configure_sd_bus(power_high, true)" in sketch
     assert "mount_sd_with_probe_config" in sketch
     assert "mounted_snapshot_from_current_config" in sketch
     assert "last_present_probe" in sketch

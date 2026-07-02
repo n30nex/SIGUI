@@ -37,6 +37,8 @@ constexpr uint8_t SD_MISO_PIN = 12;
 constexpr uint8_t SD_POWER_PIN = 18;
 constexpr uint32_t SD_SPI_HZ = 1000000U;
 constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
+constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 150;
+constexpr uint16_t SD_POWER_SETTLE_MS = 300;
 constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
@@ -165,16 +167,22 @@ const char *spi_mode_token(uint8_t options) {
 }
 
 SdSpiConfig sd_spi_config(uint8_t options);
+uint8_t sd_spi_transfer(uint8_t value);
 
-void configure_sd_bus(bool power_high) {
+void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
     static bool sd_power_settled = false;
     static bool last_power_high = true;
     pinMode(SD_POWER_PIN, OUTPUT);
-    digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
     pinMode(SD_CS_PIN, OUTPUT);
     digitalWrite(SD_CS_PIN, HIGH);
-    if (!sd_power_settled || last_power_high != power_high) {
-        delay(250);
+    if (force_power_cycle) {
+        digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH);
+        delay(SD_POWER_CYCLE_OFF_MS);
+        sd_power_settled = false;
+    }
+    digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
+    if (force_power_cycle || !sd_power_settled || last_power_high != power_high) {
+        delay(SD_POWER_SETTLE_MS);
         sd_power_settled = true;
         last_power_high = power_high;
     }
@@ -188,10 +196,24 @@ void configure_sd_bus() {
     configure_sd_bus(s_sd_power_high);
 }
 
-bool mount_sd_with_power(bool power_high) {
-    configure_sd_bus(power_high);
-    SPI1.begin();
+void clock_sd_idle_bytes() {
+    SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(SD_CS_PIN, HIGH);
+    for (uint8_t i = 0; i < 10; ++i) {
+        (void)sd_spi_transfer(0xFF);
+    }
+    SPI1.endTransaction();
+}
+
+void prepare_sd_card_init(bool power_high) {
     s_sd.end();
+    configure_sd_bus(power_high, true);
+    SPI1.begin();
+    clock_sd_idle_bytes();
+}
+
+bool mount_sd_with_power(bool power_high) {
+    prepare_sd_card_init(power_high);
     if (s_sd.begin(sd_spi_config(s_sd_spi_options))) {
         s_last_mount_error = 0;
         s_last_mount_data = 0;
@@ -206,8 +228,7 @@ bool mount_sd_with_power(bool power_high) {
     }
     s_sd.end();
     delay(50);
-    configure_sd_bus(power_high);
-    SPI1.begin();
+    prepare_sd_card_init(power_high);
     if (s_sd.begin(sd_spi_config(s_sd_spi_options))) {
         s_last_mount_error = 0;
         s_last_mount_data = 0;
@@ -292,7 +313,7 @@ uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *ext
 
 CardProbe manual_probe_card(uint8_t options, bool power_high) {
     CardProbe probe = empty_probe(power_token(power_high), spi_mode_token(options), power_high, options);
-    configure_sd_bus(power_high);
+    configure_sd_bus(power_high, true);
     SPI1.begin();
     SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
     digitalWrite(SD_CS_PIN, HIGH);

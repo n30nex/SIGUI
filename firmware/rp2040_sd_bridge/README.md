@@ -14,8 +14,9 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
-- SD CS is driven high during bus setup, and the bridge waits once after
-  enabling the SD/sensor rail so slow cards have time to power up.
+- SD CS is driven high during bus setup. Before each explicit SdFat mount or
+  raw probe, the bridge force-cycles the selected rail level, waits for it to
+  settle, and sends idle clocks so warm-reset cards can re-enter SPI init.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
@@ -99,8 +100,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   dedicated/shared SPI candidates. Every raw-present candidate gets a filesystem
   mount attempt before the bridge declares the card unmountable. Failed direct
   mount attempts report the captured SdFat `mount_err` and `mount_data` bytes.
-  The filesystem mount uses the same SPI1 pin map at the bridge's conservative
-  1 MHz SD clock and retries once after resetting the SdFat state. No electrical card
+  The filesystem mount force-cycles the rail before each SdFat init, uses the
+  same SPI1 pin map at the bridge's conservative 1 MHz SD clock, and retries
+  once after resetting the SdFat state. No electrical card
   reports `no_card`; an inserted card with an unusable filesystem reports
   `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
   cards on a computer.
