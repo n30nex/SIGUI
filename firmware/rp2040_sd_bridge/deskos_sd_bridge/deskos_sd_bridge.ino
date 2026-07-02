@@ -437,11 +437,12 @@ uint8_t sd_wait_ready(uint32_t timeout_ms) {
 }
 
 uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len,
-                   uint8_t *ready_byte = nullptr, bool ignore_leading_zero = false) {
+                   uint8_t *ready_byte = nullptr, bool ignore_leading_zero = false,
+                   bool wait_selected_ready = true) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_spi_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
-    const uint8_t ready = sd_wait_ready(SD_SELECTED_READY_WAIT_MS);
+    const uint8_t ready = wait_selected_ready ? sd_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU;
     if (ready_byte) {
         *ready_byte = ready;
     }
@@ -485,7 +486,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     }
     probe.miso_idle_level = sample_sd_miso_level();
 
-    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true);
+    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, false);
     probe.cmd0_response = cmd0;
     if (cmd0 == 0xFF) {
         probe.error_code = 1;

@@ -103,7 +103,10 @@ present in the fallback matrix. It then tries one matching filesystem mount on e
 reporting `no_card` or a FAT32-required state. The first filesystem init
 preserves the already-powered rail state; fallback probes and mounts can toggle
 the selected power-rail level and reclock the card so warm firmware resets do
-not leave the card outside `CMD0` idle detection. The manual
+not leave the card outside `CMD0` idle detection. The manual probe sends the
+initial `CMD0` immediately after the CS-high idle clocks and CS assertion,
+matching the SD SPI entry sequence instead of waiting with the card selected
+before the reset command. The manual
 diagnostic request below reports the same candidate matrix without filesystem
 writes. If no card
 responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`;
@@ -153,7 +156,8 @@ configured SPI1 pins; `pin_cs` reports that software GPIO13 chip select is
 configured. `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`
 report the raw GPIO7 SD-detect sample. Each probe prefix (`hd`, `hs`, `ld`, `ls`)
 reports presence (`*_p`), final probe error (`*_e`), error data (`*_d`), the
-CS-low ready bytes before CMD0/CMD8 (`*_c0r`, `*_c8r`), raw `CMD0` response
+skipped-wait sentinel before CMD0 (`*_c0r`) and CS-low ready byte before CMD8
+(`*_c8r`), raw `CMD0` response
 (`*_c0`), raw `CMD8` response (`*_c8`), the four `CMD8` R7 echo bytes
 (`*_r70`..`*_r73`), MISO line samples after pull-up, after SPI1 begins, and
 after idle clocks (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), the first
