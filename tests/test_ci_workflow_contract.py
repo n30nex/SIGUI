@@ -63,7 +63,7 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "arduino-cli core install rp2040:rp2040" in job
     assert "arduino-cli compile" in job
     assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in job
-    assert '--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1"' in job
+    assert '--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1 -DUSE_SPI_ARRAY_TRANSFER=0"' in job
     assert "firmware/rp2040_sd_bridge/deskos_sd_bridge" in job
     assert "artifacts/rp2040-sd-bridge" in job
     assert "SHA256SUMS.txt" in job

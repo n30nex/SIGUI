@@ -16,7 +16,10 @@ It speaks the newline-delimited protocol documented in
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
 - SD CS is driven high during bus setup. Before each explicit SdFat mount or
   raw probe, the bridge force-cycles the selected rail level, waits for it to
-  settle, and sends idle clocks so warm-reset cards can re-enter SPI init.
+  settle, and sends idle clocks so warm-reset cards can re-enter SPI init. The
+  raw probe requires `CMD0` to answer idle (`0x01`) before it reports a card as
+  present, so stale ready-state or floating-bus responses do not mask firmware
+  mount failures.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
@@ -29,10 +32,12 @@ Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
 adds the `earlephilhower/arduino-pico` board package URL, installs
 `rp2040:rp2040`, and compiles the sketch with FQBN
 `rp2040:rp2040:seeed_indicator_rp2040`. The RP2040 job passes
-`--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1"` so SdFat sends
-valid SPI command CRC bytes during card initialization. The bridge sketch has a
-compile-time guard for this setting because the current validation card reaches
-raw SPI init but rejects the default SdFat `ACMD41` path with the CRC-error bit.
+`--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1 -DUSE_SPI_ARRAY_TRANSFER=0"`
+so SdFat sends valid SPI command CRC bytes during card initialization while
+using byte-wise SPI transfers on the RP2040 SPI1 SD bus. The bridge sketch has
+compile-time guards for these settings because the current validation card
+reached the byte-wise raw SPI init path while the default RP2040 SdFat array
+transfer path failed in the filesystem mount path.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.

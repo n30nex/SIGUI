@@ -30,6 +30,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "#ifndef USE_SD_CRC" in sketch
     assert "#if USE_SD_CRC != 1" in sketch
     assert 'requires USE_SD_CRC=1' in sketch
+    assert "#ifndef USE_SPI_ARRAY_TRANSFER" in sketch
+    assert "#if USE_SPI_ARRAY_TRANSFER != 0" in sketch
+    assert "requires byte-wise SdFat SPI transfers" in sketch
     assert "Serial1.setRX(RP2040_ESP32_RX_PIN)" in sketch
     assert "Serial1.setTX(RP2040_ESP32_TX_PIN)" in sketch
     assert "constexpr uint8_t RP2040_ESP32_RX_PIN = 17;" in sketch
@@ -78,6 +81,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '" mount_err="' in sketch
     assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
+    assert "if (cmd0 != 0x01U)" in sketch
+    assert "probe.error_code = 3" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
     assert "delete card" in sketch

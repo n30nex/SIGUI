@@ -6,6 +6,12 @@
 #if USE_SD_CRC != 1
 #error "D1L RP2040 bridge requires USE_SD_CRC=1 for FAT32 card init."
 #endif
+#ifndef USE_SPI_ARRAY_TRANSFER
+#error "D1L RP2040 bridge requires USE_SPI_ARRAY_TRANSFER=0; build via GitHub Actions d1l-ci."
+#endif
+#if USE_SPI_ARRAY_TRANSFER != 0
+#error "D1L RP2040 bridge requires byte-wise SdFat SPI transfers on SPI1."
+#endif
 
 #include <SD.h>
 #include <SdFat.h>
@@ -327,9 +333,9 @@ CardProbe manual_probe_card(uint8_t options, bool power_high) {
         SPI1.endTransaction();
         return probe;
     }
-    if ((cmd0 & 0x01U) == 0) {
-        probe.present = true;
-        probe.error_code = 0;
+    if (cmd0 != 0x01U) {
+        probe.error_code = 3;
+        probe.error_data = cmd0;
         SPI1.endTransaction();
         return probe;
     }
