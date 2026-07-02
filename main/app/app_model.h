@@ -204,6 +204,9 @@ esp_err_t d1l_app_model_send_public_text(const char *text);
 size_t d1l_app_model_query_public_messages(d1l_message_entry_t *out_entries,
                                            size_t max_entries, const char *query);
 esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text);
+esp_err_t d1l_app_model_request_trace_probe(const char *fingerprint,
+                                            char *out_token,
+                                            size_t out_token_size);
 size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
                                     bool *out_unread, size_t max_entries);
 esp_err_t d1l_app_model_find_contact(const char *fingerprint, d1l_contact_entry_t *out_contact);

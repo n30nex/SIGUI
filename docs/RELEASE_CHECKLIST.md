@@ -56,7 +56,7 @@
 - [x] Heard-node store survives reboot on `COM7`.
 - [x] Contact store promotion from heard node survives reboot on `COM7`.
 - [x] Route store survives reboot on `COM7`.
-- [x] Read-only `routes trace <fingerprint>` diagnostic and contact-detail Route Trace sheet implemented with retained route/contact evidence.
+- [x] `routes trace <fingerprint>` diagnostic and contact-detail Route Trace sheet implemented with retained route/contact evidence plus an explicit DM-only `routes probe <fingerprint>` / touch `Ping` action; no Public RF is used by the active probe.
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
 - [x] Contact favorite/mute flags persist across reboot and are exposed through serial diagnostics plus the contact detail UI.
 - [x] Public unread/read state persists across reboot and is exposed through serial diagnostics plus the Messages UI.
@@ -82,7 +82,7 @@
 - [x] Non-destructive RP2040 SD bridge preflight added: `scripts/rp2040_sd_bridge_preflight_d1l.py` verifies the Actions UF2 artifact, lists UF2 bootloader volumes, queries only the selected D1L port, records optional `storage diag` probe evidence, and reports the next bridge-flash/SD-acceptance action without Public RF, formatting, or UF2 copying.
 - [x] SD boot/use acceptance runner added: `scripts/sd_boot_prepare_acceptance_d1l.py` covers no-card, correct-structure, missing-structure, unformatted, existing-data, and bridge-unavailable scenarios with a non-formatting default and an explicit operator-authorized `--allow-format-confirm` path for the D1L test SD card.
 - [x] Actions-built RP2040 SD bridge protocol and no-card fallback hardware-validated on COM12/COM16 from run `28478756887`; follow-up COM12 evidence through `8150b7b` proves RP2040 UART/ping/protocol/diag responsiveness and inserted-card `setup_required` detection without Public RF or formatting.
-- [ ] Flash the verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; current COM12 evidence `artifacts/hardware/com12/rp2040_preflight_e83ef31_after_format_timeout_reset.json` reports `ready_for_sd_acceptance=false`, and `artifacts/hardware/com12/rp2040_uf2_volume_scan_e83ef31.json` found no mounted UF2 bootloader volume.
+- [ ] Flash the verified RP2040 UF2 after the RP2040 is placed in UF2/BOOTSEL mode; current COM12 evidence `artifacts/hardware/com12/rp2040_preflight_9c4c362.json` reports `ready_for_sd_acceptance=false`, and `artifacts/hardware/com12/rp2040_uf2_volume_scan_9c4c362.json` found no mounted UF2 bootloader volume.
 - [ ] Optional SD-card data storage implemented: boot detect/validate, user-confirmed format, onboard fallback, SD-backed message/packet/route/export/map-tile stores, reboot/remount proof, and live network tile downloads after Wi-Fi runtime/user opt-in.
 - [x] Signal/room-server/repeater mesh visibility commands and summary cards are flashed, smoke-tested, and Public `test` RF-regression tested on `COM7`.
 - [x] First touch Mesh Roles browser sheet is built, flashed, smoke-tested, and RF-regression tested on `COM7`.
@@ -124,8 +124,8 @@
 - [x] Known limitations updated.
 - [x] Hardware validation notes include exact port, board, and date.
 - [x] Host simulator screenshots captured.
-- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-947d3ab-after-hw.json` reports `ready_for_public_release=false` with four open P0 gates before the new top-level license package gate.
-- [x] COM12 smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, and RP2040 preflight captured for `947d3ab` after flashing the verified Actions package from run `28565310587`.
+- [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched tab/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. Current local audit `artifacts/release-gate/release-gate-audit-9c4c362-fast-hw.json` reports `ready_for_public_release=false` with four open P0 gates.
+- [x] COM12 smoke, 100-cycle tab abuse, scroll probe, outbound DM proof, Wi-Fi profile proof, RP2040 preflight, and guarded SD format-timeout evidence captured for `9c4c362` after flashing the verified Actions package from run `28567973708`.
 - [ ] Current-commit COM12 smoke artifact captured for the final release commit after SD, full RF inbound, manual UI/photos, and 12-hour soak P0 gates are closed.
 - [ ] Physical screen photos captured.
 - [x] Manual physical UI review artifact helper added: `scripts/manual_ui_review_d1l.py` requires current photos plus explicit display/touch/navigation/workflow confirmations before producing an `ok=true` review JSON.

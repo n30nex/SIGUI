@@ -377,6 +377,13 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
     return d1l_meshcore_service_send_dm(fingerprint, text);
 }
 
+esp_err_t d1l_app_model_request_trace_probe(const char *fingerprint,
+                                            char *out_token,
+                                            size_t out_token_size)
+{
+    return d1l_meshcore_service_request_trace_probe(fingerprint, out_token, out_token_size);
+}
+
 size_t d1l_app_model_copy_dm_thread(const char *fingerprint, d1l_dm_entry_t *out_entries,
                                     bool *out_unread, size_t max_entries)
 {

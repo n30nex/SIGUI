@@ -537,10 +537,13 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "s_contact_action_mute" in source
     assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source
     assert "d1l_app_model_copy_route_trace(contact->fingerprint, s_route_trace_entries" in source
+    assert "route_trace_probe_event_cb" in source
+    assert "d1l_app_model_request_trace_probe(s_route_trace_contact.fingerprint" in source
+    assert 'create_button(s_route_trace_sheet, "Ping"' in source
     assert 'create_button(s_contact_detail_sheet, "Trace"' in source
     assert 'create_button(s_contact_detail_sheet, "Edit"' in source
     assert '"Alias only; retained history remains"' in source
-    assert '"Local evidence only; active RF ping/trace is pending"' in source
+    assert '"DM-only trace probe; no Public RF"' in source
     assert '"Contact Export"' in source
     assert '"MeshCore QR  %.16s  type %u"' in source
     assert "lv_qrcode_create" in source

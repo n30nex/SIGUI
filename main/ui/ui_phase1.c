@@ -1815,6 +1815,23 @@ static void close_route_trace_event_cb(lv_event_t *event)
     hide_route_trace_sheet();
 }
 
+static void route_trace_probe_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_route_trace_contact.fingerprint[0] == '\0') {
+        show_toast("Trace ping", ESP_ERR_INVALID_STATE);
+        return;
+    }
+    char token[D1L_MESSAGE_TEXT_LEN] = {0};
+    esp_err_t ret = d1l_app_model_request_trace_probe(s_route_trace_contact.fingerprint,
+                                                       token, sizeof(token));
+    if (ret == ESP_OK) {
+        show_toast_text("Trace ping queued", true);
+    } else {
+        show_toast("Trace ping", ret);
+    }
+}
+
 static void render_route_trace_sheet(void)
 {
     if (!s_route_trace_sheet) {
@@ -1835,6 +1852,7 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(title, 250);
     lv_obj_set_pos(title, 8, 4);
 
+    create_button(s_route_trace_sheet, "Ping", 238, 0, 70, 40, route_trace_probe_event_cb, NULL);
     create_button(s_route_trace_sheet, "Close", 316, 0, 76, 40, close_route_trace_event_cb, NULL);
 
     lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0x8EA0AE);
@@ -1915,7 +1933,7 @@ static void render_route_trace_sheet(void)
     }
 
     lv_obj_t *note = create_label(s_route_trace_sheet,
-                                  "Local evidence only; active RF ping/trace is pending",
+                                  "DM-only trace probe; no Public RF",
                                   0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
     lv_obj_set_width(note, 392);

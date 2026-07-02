@@ -4,14 +4,15 @@ Date: 2026-06-30
 
 ## Scope
 
-This checkpoint adds a read-only retained-evidence route trace helper. It does not transmit RF and does not claim active ping/trace support.
+This checkpoint started as a read-only retained-evidence route trace helper. The current production slice adds an explicit opt-in DM-only trace probe; passive `routes trace` remains non-transmitting.
 
 ## Implementation
 
 - `d1l_route_store_copy_for_target` returns bounded newest route rows for one target fingerprint.
 - `d1l_app_model_copy_route_trace` exposes the same query to UI code.
-- `routes trace <fingerprint>` returns contact state, best retained route evidence, filtered route rows, and `active_probe_supported=false`.
-- Contact Detail now exposes `Trace`, opening a Route Trace sheet with contact path, best evidence, retained route rows, and an active-ping pending note.
+- `routes trace <fingerprint>` returns contact state, best retained route evidence, filtered route rows, `active_probe_supported=true`, and the active probe command name.
+- `routes probe <fingerprint>` queues a generated `trace_<nonce>` DM to the selected contact, records `trace_probe` route evidence, reports `public_rf_tx=false`, and applies a 30-second per-contact cooldown.
+- Contact Detail now exposes `Trace`, opening a Route Trace sheet with contact path, best evidence, retained route rows, and a `Ping` action for the DM-only active probe.
 - `tools/ui_simulator.py` renders the Route Trace sheet in the default and `large-mesh` scenarios.
 
 ## Validation
@@ -33,7 +34,7 @@ This checkpoint adds a read-only retained-evidence route trace helper. It does n
 - Standard smoke:
   - Artifact: `artifacts/smoke/d1l-smoke-route-trace-local-COM7.json`.
   - Passed 34 commands.
-  - `routes trace 0BF0A701D5AE2DB6` returned `known_contact=true`, alias `YKF Corebot`, `route_count=2`, best seq `291`, confidence `100`, and `active_probe_supported=false`.
+- `routes trace 0BF0A701D5AE2DB6` returned `known_contact=true`, alias `YKF Corebot`, `route_count=2`, best seq `291`, confidence `100`, and the original read-only implementation reported `active_probe_supported=false`.
   - No `mesh send public` command was sent.
 - Targeted DM-only hardware probe:
   - Runs through `scripts/probe_d1l_dm.py` against D1L `COM7` and Meshcorebot `COM11`.
@@ -48,7 +49,7 @@ This checkpoint adds a read-only retained-evidence route trace helper. It does n
 
 ## Still Pending
 
-- Manual physical touch review of Contact Detail `Trace` and Route Trace open/scroll/close.
-- Active RF ping/trace helper.
+- Manual physical touch review of Contact Detail `Trace`, Route Trace open/scroll/close, and the `Ping` action.
+- Current-commit hardware proof of `routes probe <fingerprint>` after flashing the new active-probe build.
 - Controlled ACK/PATH RF proof and direct-route RF proof.
 - Full 12-hour idle/listening soak.

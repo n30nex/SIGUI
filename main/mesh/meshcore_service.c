@@ -7,6 +7,7 @@
 #include "bsp_sx126x.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mbedtls/aes.h"
@@ -54,6 +55,7 @@
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
+#define D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS 30000U
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -61,6 +63,8 @@ static bool s_radio_started;
 static volatile bool s_tx_busy;
 static bool s_pending_public_tx;
 static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
+static uint32_t s_last_trace_probe_ms;
+static char s_last_trace_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 
 typedef struct {
     bool active;
@@ -1526,6 +1530,67 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     }
     append_packet_log("tx", "dm_text", 0, 0, route_path_hash_bytes, route_path_hops,
                       raw_len, raw, raw_len, text);
+    return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
+                                                   char *out_token,
+                                                   size_t out_token_size)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if (s_last_trace_probe_fingerprint[0] != '\0' &&
+        strncmp(s_last_trace_probe_fingerprint, fingerprint,
+                sizeof(s_last_trace_probe_fingerprint)) == 0 &&
+        (uint32_t)(now_ms - s_last_trace_probe_ms) < D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
+        contact.public_key_hex[0] == '\0') {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    char token[D1L_MESSAGE_TEXT_LEN] = {0};
+    const int written = snprintf(token, sizeof(token), "trace_%08lX",
+                                 (unsigned long)esp_random());
+    if (written <= 0 || (size_t)written >= sizeof(token)) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    esp_err_t ret = d1l_meshcore_service_send_dm(fingerprint, token);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const d1l_settings_t *settings = d1l_settings_current();
+    const bool use_direct = contact.out_path_valid && path_len_valid(contact.out_path_len);
+    const uint8_t route_path_hash_bytes = use_direct ? path_hash_size(contact.out_path_len) :
+                                          settings->path_hash_bytes;
+    const uint8_t route_path_hops = use_direct ? path_hash_count(contact.out_path_len) : 0U;
+    esp_err_t route_ret =
+        d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "trace_probe",
+                                           route_name(use_direct ? D1L_MESHCORE_ROUTE_DIRECT :
+                                                      D1L_MESHCORE_ROUTE_FLOOD),
+                                           "tx", 0, 0, route_path_hash_bytes, route_path_hops,
+                                           (uint16_t)strlen(token));
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store trace probe tx failed: %s", esp_err_to_name(route_ret));
+    }
+
+    snprintf(s_last_trace_probe_fingerprint, sizeof(s_last_trace_probe_fingerprint),
+             "%s", fingerprint);
+    s_last_trace_probe_ms = now_ms;
+    if (out_token && out_token_size > 0) {
+        snprintf(out_token, out_token_size, "%s", token);
+    }
     return ESP_OK;
 }
 

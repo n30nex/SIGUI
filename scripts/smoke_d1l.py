@@ -121,6 +121,7 @@ def expected_command_name(command: str) -> str:
         "messages dm ",
         "mesh send dm ",
         "routes trace ",
+        "routes probe ",
         "packets filter ",
         "packets search ",
         "packets raw ",

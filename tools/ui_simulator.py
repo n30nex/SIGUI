@@ -1473,8 +1473,9 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
         draw_row(s, (44, y, 436, y + 30), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
         y += 34
         rendered += 1
+    draw_button(s, (236, 94, 306, 134), "Ping", BLUE, action="send_trace_probe", dm_tx=True)
     draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_route_trace", destination="contact_detail_sheet")
-    s.text("Local evidence only", (44, 390, 300, 408), 11, MUTED)
+    s.text("DM-only trace probe", (44, 390, 300, 408), 11, MUTED)
     draw_dock(s, "Nodes")
     s.metrics.update(
         {
@@ -1690,7 +1691,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Reply", "Close"),
     "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
-    "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"),
+    "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Ping", "Close"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
@@ -1787,6 +1788,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
             {"view": "contact_detail_sheet", "action": "open_dm_compose", "destination": "compose_sheet"},
             {"view": "contact_detail_sheet", "action": "open_route_trace", "destination": "route_trace_sheet"},
+            {"view": "route_trace_sheet", "action": "send_trace_probe", "dm_tx": True},
             {"view": "contact_detail_sheet", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
             {"view": "contact_detail_sheet", "action": "open_contact_export", "destination": "contact_export_sheet"},
             {"view": "contact_detail_sheet", "action": "toggle_favorite"},

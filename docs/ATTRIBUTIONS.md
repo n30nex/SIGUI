@@ -16,6 +16,7 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Repository: https://github.com/hermes-gadget/SigurdOS-tdeck
 - Upstream default branch reviewed: `dev`
 - Source commit reviewed: `e7e7b12ee771edd2b15e64e1a6569b7b18f84423`
+- Local follow-up reference checkout reviewed: `F:/Sigured/SigurdOS-tdeck` at `9ae0a3d03a1fcb0a6e77844ae97f0bfc5bab7f1e`; local dirty files were not copied.
 - Root license file reviewed: `LICENSE`
 - README license statement reviewed: `GPL-3.0-or-later`
 - Bundled notice reviewed: `LICENSES/DejaVu-Fonts.txt`
@@ -25,6 +26,14 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Permission: the maintainers gave this project permission to use the work with attribution. Before public release, archive the date, channel/link, and exact scope of that permission with the release evidence.
 - Use in this project: reference architecture for a production touch-first MeshCore desk firmware, especially UI shell structure, navigation patterns, cached input state, storage/map concepts, packet/log visibility, release tooling, and hardware test coverage ideas. No literal SigurdOS source is copied into this D1L slice.
 - 2026-07-01 production UI pass: reviewed SigurdOS-TDeck Settings, Bluetooth, and Wi-Fi network screens as workflow references for category-style setup/status surfaces. The DeskOS D1L Wi-Fi/BLE setup sheets and packet terminal UI were implemented as original ESP-IDF/LVGL code in this repository.
-- Upstream files/docs reviewed for this production slice: `docs/HOME_SCREEN.md`, `docs/MAP_SCREEN.md`, `docs/MESH_NETWORKING.md`, `docs/CONTACT_STORE.md`, `src/ui/home_screen.*`, `src/ui/navigation.*`, `src/ui/screens_common.*`, `src/app/map_renderer.*`, `src/app/tile_cache.*`, `src/mesh/persistence_store.*`, `src/mesh/contact_store.*`, `src/mesh/message_store.*`, `src/ui/screens/screen_packets.cpp`, `src/ui/screens/screen_settings.cpp`, `src/ui/screens/screen_bluetooth.cpp`, `src/ui/screens/screen_wifi_networks.cpp`, `scripts/build_metadata.py`, `scripts/merge_bin.py`, and related tests.
+- Upstream files/docs reviewed for this production slice: `docs/HOME_SCREEN.md`, `docs/MAP_SCREEN.md`, `docs/MESH_NETWORKING.md`, `docs/TERMINAL.md`, `docs/SETTINGS_SCREEN.md`, `docs/NETWORK_SCREEN.md`, `src/ui/home_screen.*`, `src/ui/navigation.*`, `src/ui/onboarding_screen.cpp`, `src/ui/screens.cpp`, `src/app/map_renderer.*`, `src/app/tile_cache.*`, `src/mesh/contact_store.*`, `src/mesh/message_store.*`, `scripts/build_metadata.py`, `scripts/merge_bin.py`, and related tests. The D1L active route probe, Wi-Fi setup, packet terminal, storage, and map work are original ESP-IDF/LVGL implementations that use those files as workflow and architecture references only.
+
+## MeshCore T-Deck Plus LVGL Reference
+
+- Project: MeshCore T-Deck Plus LVGL
+- Repository: https://github.com/realtag-github/meshcore-tdeck-plus-lvgl
+- Local reference checkout reviewed: `F:/realtag/meshcore-tdeck-plus-lvgl` at `519238f9084fe5b20e18716794a8d48a895ee6c9`
+- Local license file: not present in the inspected checkout; keep this as reference-only unless a compatible license or permission archive is added.
+- Use in this project: reference-only comparison for small-screen MeshCore workflows and touch-first UX constraints. No literal source is copied into this D1L slice.
 
 SigurdOS-TDeck targets the LilyGo T-Deck GT911 touch controller, while this firmware targets the Seeed SenseCAP Indicator D1L FT5x06/GX panel. D1L touch controller code therefore stays on the Seeed BSP/FT5x06 path, with SigurdOS-TDeck used as an attributed reference for input architecture and validation behavior rather than blindly copying the GT911 driver.

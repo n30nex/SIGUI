@@ -691,7 +691,7 @@ Room servers need a clear label and separate filter/list. The user should not ha
 - Companions, repeaters, and room servers are visually distinct.
 - Node details open and close repeatedly without crash.
 - Home repeater panel is backed by the same data.
-- Serial `nodes`, `repeaters`, `roomservers`, `routes trace` agree with UI summaries.
+- Serial `nodes`, `repeaters`, `roomservers`, `routes trace`, and opt-in DM-only `routes probe` agree with UI summaries.
 
 ---
 
@@ -1125,6 +1125,13 @@ window: its checks show `outbound_dm=true`, `ack_path=true`,
 `inbound_dm=false`. The required inbound command for this run was
 `+dm ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07 rf_accept_e83ef31_in`.
 
+2026-07-02 `9c4c362` refresh: after flashing the verified Actions package from
+run `28567973708`, `artifacts/hardware/com12/dm_probe_9c4c362.json` passed the
+targeted outbound COM12-to-COM11 DM proof with retained DM, packet-search,
+route-trace, meshbot receive-counter, health, and no-Public-command checks all
+true. A fresh full RF run is still required for controlled inbound DM,
+ACK/PATH, and direct-route release acceptance on the newest firmware.
+
 Repeatable full RF acceptance is now handled by a single D1L-port runner. Keep
 the runner on the D1L serial port only; do not open the COM11 Meshcorebot port
 directly. After the runner prints the Discord command, send that command through
@@ -1160,19 +1167,19 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28565310587` for commit `947d3ab` rebuilt the
+Current evidence: Actions run `28567973708` for commit `9c4c362` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
 firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
 flashed to COM12 passed current-commit smoke, 100-cycle tab abuse, scroll probe,
-outbound DM proof, and RP2040 preflight. The RP2040 UF2 checksum is
+outbound DM proof, Wi-Fi profile proof, and RP2040 preflight. The RP2040 UF2 checksum is
 `B2FCB1177478908207CBDE2BC0B267C8AE0AF95CE8C1D46BA8E36166DFDD0B40`, but no
 mounted UF2 bootloader volume was available, so the RP2040 bridge still cannot
 be copied without physical UF2/BOOTSEL action. The latest preflight
-`artifacts/hardware/com12/rp2040_preflight_947d3ab_after_esp32_flash.json`
+`artifacts/hardware/com12/rp2040_preflight_9c4c362.json`
 proves the RP2040 UART, ping, protocol, and diag paths respond, but the inserted
 card remains `raw_card_present_mount_failed` with `sd.state="setup_required"`
 and `ready_for_sd_acceptance=false`. The guarded operator-approved format
-attempt `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_947d3ab.json`
+attempt `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
 sent the explicit confirmation (`format_command_sent=true`,
 `format_allowed=true`, `public_rf_tx=false`) but returned `ESP_ERR_TIMEOUT`,
 did not confirm a format, and did not reach the ready file-operation gate. Full
@@ -1228,17 +1235,15 @@ and soak artifacts must match the audited short/full commit. Explicit embedded
 commit metadata wins over filename fallback, so stale passing artifacts from an
 older firmware flash must fail closed even if a filename is misleading.
 
-The latest pre-license local audit
-`artifacts/release-gate/release-gate-audit-947d3ab-after-hw.json` for Actions
-run `28565310587` reports `ready_for_public_release=false` with four P0 gates
+The latest local audit
+`artifacts/release-gate/release-gate-audit-9c4c362-fast-hw.json` for Actions
+run `28567973708` reports `ready_for_public_release=false` with four P0 gates
 still open after current-commit COM12 smoke, tab abuse, scroll probe, outbound
-DM, RP2040 preflight, Actions checksums, and packaged notices all passed: SD
+DM, Wi-Fi profile proof, RP2040 preflight, Actions checksums, and packaged notices all passed: SD
 acceptance matrix, 12-hour idle/listening soak, manual physical UI/photos, and
-full RF acceptance because the controlled inbound DM was not observed. The next
-commit adds the top-level `LICENSE` package gate, so the old `947d3ab` package
-will fail that new notices check until a fresh GitHub Actions release package is
-built. Any later commit must be rebuilt by GitHub Actions, flashed to COM12, and
-smoked before it can become the final release commit.
+full RF acceptance because the controlled inbound DM was not observed. Any later
+commit must be rebuilt by GitHub Actions, flashed to COM12, and smoked before it
+can become the final release commit.
 
 ---
 
@@ -1302,15 +1307,15 @@ entries.
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
-Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_947d3ab.json`
+Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_9c4c362.json`
 proved the guarded unformatted-card path sends the explicit confirmation only
 when allowed (`format_command_sent=true`, `format_allowed=true`,
 `public_rf_tx=false`, health ready), but the RP2040 bridge timed out before
 reporting a confirmed format result or ready file-operation gate. Actions run
-`28565310587` for commit `947d3ab` rebuilt a verified RP2040 UF2 with SHA256
+`28567973708` for commit `9c4c362` rebuilt a verified RP2040 UF2 with SHA256
 `B2FCB1177478908207CBDE2BC0B267C8AE0AF95CE8C1D46BA8E36166DFDD0B40`. The bridge
 cannot be copied until the RP2040 is placed in UF2/BOOTSEL mode.
-`artifacts/hardware/com12/rp2040_preflight_947d3ab_after_esp32_flash.json`
+`artifacts/hardware/com12/rp2040_preflight_9c4c362.json`
 shows the current COM12 bridge still responds to ping/protocol/diag and detects
 the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`. The
 format path now emits `DESKOS_SD_FORMAT_PROGRESS step=...` milestones while

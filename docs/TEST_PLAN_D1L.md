@@ -334,8 +334,9 @@ For Phase 6 retained route trace validation:
 1. Verify `contacts` contains a promoted contact or use a known 16-hex fingerprint.
 2. Run `routes trace <fingerprint>`.
 3. Verify the response returns `cmd="routes trace"`, the requested `fingerprint`, `known_contact`, `contact_route`, `route_count`, `best_route`, `best_confidence`, and an `entries` array filtered to that target.
-4. Verify `active_probe_supported=false`; this helper summarizes local retained evidence and does not transmit RF.
-5. For physical touch review, open the contact detail sheet, tap `Trace`, verify the Route Trace sheet opens with contact path, best evidence, retained route rows, and the active-ping pending note, then close it.
+4. Verify `active_probe_supported=true` and `active_probe_command="routes probe <fingerprint>"`; plain `routes trace` still summarizes retained evidence and does not transmit RF.
+5. Run `routes probe <fingerprint>` only when an opt-in DM RF trace is allowed. Verify the response has `cmd="routes probe"`, `queued=true`, a generated `trace_` token, `dm_rf_tx=true`, and `public_rf_tx=false`.
+6. For physical touch review, open the contact detail sheet, tap `Trace`, verify the Route Trace sheet opens with contact path, best evidence, retained route rows, and a `Ping` action. Tap `Ping` only during RF-allowed validation and verify it queues the same DM-only active trace behavior without sending Public RF.
 
 ## Packet Log
 

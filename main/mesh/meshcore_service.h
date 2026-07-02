@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_err.h"
@@ -31,4 +32,7 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);
 esp_err_t d1l_meshcore_service_send_public(const char *text);
 esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text);
+esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
+                                                   char *out_token,
+                                                   size_t out_token_size);
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state);
