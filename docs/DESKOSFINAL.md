@@ -1115,15 +1115,15 @@ COM12 against the local COM11 Meshcorebot with `send_ok=true`,
 checkpoint. Controlled inbound DM, ACK/PATH, direct-route RF proof, and manual
 touch DM workflow review remain open.
 
-2026-07-01 `db23416` refresh: after flashing the verified Actions package from
-run `28554444594`, `artifacts/hardware/com12/dm_probe_db23416.json` passed the
-targeted outbound COM12-to-COM11 DM proof. The first full RF run
-`artifacts/hardware/com12/rf_full_acceptance_db23416.json` intentionally remains
-failed: no controlled inbound trigger was observed, and the second DM send
-exposed an onboard NVS capacity failure while persisting the MeshCore TX
-timestamp. The follow-up patch makes timestamp persistence pressure non-fatal
-by falling back to a monotonic RAM timestamp; it still requires a fresh
-Actions-built firmware flash before rerunning full RF acceptance.
+2026-07-02 `e83ef31` refresh: after flashing the verified Actions package from
+run `28563475256`, `artifacts/hardware/com12/dm_probe_e83ef31.json` passed the
+targeted outbound COM12-to-COM11 DM proof. The latest full RF run
+`artifacts/hardware/com12/rf_full_acceptance_e83ef31.json` remains failed only
+because no controlled inbound Meshcorebot DM was observed during the wait
+window: its checks show `outbound_dm=true`, `ack_path=true`,
+`direct_route=true`, `health_ready=true`, `no_public_commands=true`, and
+`inbound_dm=false`. The required inbound command for this run was
+`+dm ba14729e8588e30b44b36ff9c6c5511b9d88bf787196c6a46de102af6ebafa07 rf_accept_e83ef31_in`.
 
 Repeatable full RF acceptance is now handled by a single D1L-port runner. Keep
 the runner on the D1L serial port only; do not open the COM11 Meshcorebot port
@@ -1160,27 +1160,30 @@ python .\scripts\sd_data_export_d1l.py --port $env:D1L_PORT --token prod
 
 The operator has allowed formatting the SD card inserted in the D1L for production validation. Use only the guarded unformatted-card path above and never silently wipe a correct DeskOS card or unrelated existing-data card.
 
-Current evidence: Actions run `28553272721` for commit `736ccfc` rebuilt the
+Current evidence: Actions run `28563475256` for commit `e83ef31` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
 firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
 flashed to COM12 passed current-commit smoke in
-`artifacts/hardware/com12/smoke_736ccfc.json`. The RP2040 UF2 checksum is
-`ACBA21708C9DAB5CEE19305F9BC31947357C71D5298FAB07AC64DB5296E089D3`, but no
-mounted UF2 bootloader volume was available, so the RP2040 bridge could not be
-copied without physical UF2/BOOTSEL action. The settle preflight
-`artifacts/hardware/com12/rp2040_preflight_736ccfc_after_format_timeout_settle.json`
-proves the RP2040 UART, ping, protocol, and diag paths respond, and the inserted
-card reaches `sd.state="setup_required"` with raw-card-present/mount-failed
-diagnostics. The guarded operator-approved format attempt in
-`artifacts/hardware/com12/sd_boot_prepare_unformatted_736ccfc.json` remained
-safe (`public_rf_tx=false`, `formats_sd=false`) but timed out before a confirmed
-`DESKOS_SD_FORMAT` reply or ready file-operation gate. The next Actions-built
-slice keeps SdFat formatter progress as a UART keepalive, adds a newline fence
-before the terminal `DESKOS_SD_FORMAT` reply, and extends the ESP32
-confirmed-format wait to 660 seconds to match the acceptance runner. Full SD
-auto-prepare, retained-history, export, map-tile, and reboot/remount proof
-remain open until the next Actions-built firmware and RP2040 bridge are flashed,
-the guarded format returns ready, and all SD canaries pass on the device SD card.
+`artifacts/hardware/com12/smoke_e83ef31.json`. The RP2040 UF2 checksum is
+`0EC0A3C1A89AE267A90B5D6DC14170AB347AD1C14B7330A47E0C871FE6A0B196`, but no
+mounted UF2 bootloader volume was available in
+`artifacts/hardware/com12/rp2040_uf2_volume_scan_e83ef31.json`, so the RP2040
+bridge still cannot be copied without physical UF2/BOOTSEL action. The latest
+preflight
+`artifacts/hardware/com12/rp2040_preflight_e83ef31_after_format_timeout_reset.json`
+proves the RP2040 UART, ping, protocol, and diag paths respond, but the inserted
+card remains `raw_card_present_mount_failed` with `sd.state="setup_required"`,
+`format_required=true`, and `ready_for_sd_acceptance=false`. The no-confirmation
+probe `artifacts/hardware/com12/sd_boot_prepare_unformatted_probe_e83ef31.json`
+proved the unformatted path stays non-destructive. The guarded
+operator-approved format attempt
+`artifacts/hardware/com12/sd_boot_prepare_unformatted_format_e83ef31.json` sent
+the explicit confirmation (`format_command_sent=true`, `format_allowed=true`,
+`public_rf_tx=false`) but returned `ESP_ERR_TIMEOUT`, did not confirm a format,
+and did not reach the ready file-operation gate. Full SD auto-prepare,
+retained-history, export, map-tile, and reboot/remount proof remain open until
+a known-good/compatible card or bridge update reaches the ready file gate and
+all SD canaries pass on the device SD card.
 
 ### 13.5 Soak
 
@@ -1230,12 +1233,15 @@ and soak artifacts must either include the audited short/full commit in the
 filename or embed matching commit metadata. Stale passing artifacts from an
 older firmware flash must fail closed.
 
-The latest local audit for `736ccfc` reports `ready_for_public_release=false`
-with four P0 gates still open after current-commit COM12 smoke and outbound DM
-proof passed: SD acceptance matrix, 12-hour idle/listening soak, manual physical
-UI/photos, and full inbound/ACK/PATH/direct-route RF proof. Any later commit
-must be rebuilt by GitHub Actions, flashed to COM12, and smoked before it can
-become the final release commit.
+The latest local audit
+`artifacts/release-gate/release-gate-audit-e83ef31.json` for Actions run
+`28563475256` reports `ready_for_public_release=false` with four P0 gates still
+open after current-commit COM12 smoke, tab abuse, scroll probe, outbound DM,
+Actions checksums, and packaged notices all passed: SD acceptance matrix,
+12-hour idle/listening soak, manual physical UI/photos, and full RF acceptance
+because the controlled inbound DM was not observed. Any later commit must be
+rebuilt by GitHub Actions, flashed to COM12, and smoked before it can become the
+final release commit.
 
 ---
 
@@ -1299,22 +1305,24 @@ entries.
 - [x] Require confirmation for ambiguous/existing-data formats.
 - [x] Add reboot/remount acceptance script.
 
-Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_736ccfc.json`
-proved the guarded unformatted-card path stays safe (`classification=format_confirmed_not_ready`,
-`format_allowed=true`, `public_rf_tx=false`, `formats_sd=false`, health ready),
-but the RP2040 bridge timed out before reporting a confirmed format result.
-Actions run `28553272721` for commit `736ccfc` rebuilt a verified RP2040 UF2
-with SHA256 `ACBA21708C9DAB5CEE19305F9BC31947357C71D5298FAB07AC64DB5296E089D3`.
-The bridge cannot be copied until the RP2040 is placed in UF2/BOOTSEL mode.
-`artifacts/hardware/com12/rp2040_preflight_736ccfc_after_format_timeout_settle.json`
+Current blocker: `artifacts/hardware/com12/sd_boot_prepare_unformatted_format_e83ef31.json`
+proved the guarded unformatted-card path sends the explicit confirmation only
+when allowed (`format_command_sent=true`, `format_allowed=true`,
+`public_rf_tx=false`, health ready), but the RP2040 bridge timed out before
+reporting a confirmed format result or ready file-operation gate. Actions run
+`28563475256` for commit `e83ef31` rebuilt a verified RP2040 UF2 with SHA256
+`0EC0A3C1A89AE267A90B5D6DC14170AB347AD1C14B7330A47E0C871FE6A0B196`. The bridge
+cannot be copied until the RP2040 is placed in UF2/BOOTSEL mode.
+`artifacts/hardware/com12/rp2040_preflight_e83ef31_after_format_timeout_reset.json`
 shows the current COM12 bridge still responds to ping/protocol/diag and detects
 the inserted card as `setup_required`, but `ready_for_sd_acceptance=false`. The
-current follow-up patch preserves SdFat formatter progress as a keepalive, adds
-a newline fence before the terminal `DESKOS_SD_FORMAT` reply, extends the
-firmware format timeout to 660 seconds, and keeps `format_command_sent`
-separate from `format_confirmed`; full SD auto-prepare, retained-history,
-export, map-tile, and reboot/remount proof remain open until the next
-Actions-built image is flashed and the SD matrix is rerun.
+flashed `e83ef31` build already preserves SdFat formatter progress as a
+keepalive, adds a newline fence before the terminal `DESKOS_SD_FORMAT` reply,
+extends the firmware format timeout to 660 seconds, and keeps
+`format_command_sent` separate from `format_confirmed`; full SD auto-prepare,
+retained-history, export, map-tile, and reboot/remount proof remain open until
+a known-good/compatible card or bridge update reaches the ready file gate and
+the SD matrix is rerun.
 
 ### Map
 
