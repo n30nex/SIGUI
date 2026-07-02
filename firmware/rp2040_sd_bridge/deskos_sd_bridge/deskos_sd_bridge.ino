@@ -1,4 +1,12 @@
 #include <Arduino.h>
+
+#ifndef USE_SD_CRC
+#error "D1L RP2040 bridge requires USE_SD_CRC=1; build via GitHub Actions d1l-ci."
+#endif
+#if USE_SD_CRC != 1
+#error "D1L RP2040 bridge requires USE_SD_CRC=1 for FAT32 card init."
+#endif
+
 #include <SD.h>
 #include <SdFat.h>
 #include <SDFS.h>

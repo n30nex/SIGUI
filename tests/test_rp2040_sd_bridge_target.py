@@ -27,6 +27,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '#include <SdFat.h>' in sketch
     assert '#include <SDFS.h>' in sketch
     assert '#include <SPI.h>' in sketch
+    assert "#ifndef USE_SD_CRC" in sketch
+    assert "#if USE_SD_CRC != 1" in sketch
+    assert 'requires USE_SD_CRC=1' in sketch
     assert "Serial1.setRX(RP2040_ESP32_RX_PIN)" in sketch
     assert "Serial1.setTX(RP2040_ESP32_TX_PIN)" in sketch
     assert "constexpr uint8_t RP2040_ESP32_RX_PIN = 17;" in sketch

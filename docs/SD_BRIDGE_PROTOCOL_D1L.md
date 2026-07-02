@@ -65,12 +65,14 @@ If the SD stack is still probing or mounting the card, the line may report
 `DESKOS_SD_STATUS` until the cached state becomes `ready`,
 `not_fat32_or_unmountable`, `deskos_manifest_invalid`, `no_card`, or `error`.
 
-The RP2040 bridge first tries the direct SdFat filesystem mount on the expected
-D1L SD bus. If that fails, it records the SdFat mount error bytes and then runs
-bounded raw SPI presence probes across the high/low rail and dedicated/shared
-SPI candidates. Every raw-present candidate receives a filesystem mount attempt
-before the bridge reports the card as unmountable. An electrically absent or
-non-responsive card should report `no_card` rather than wedging the UART bridge.
+The RP2040 bridge is built with SdFat SPI command CRC enabled
+(`USE_SD_CRC=1`), then first tries the direct SdFat filesystem mount on the
+expected D1L SD bus. If that fails, it records the SdFat mount error bytes and
+then runs bounded raw SPI presence probes across the high/low rail and
+dedicated/shared SPI candidates. Every raw-present candidate receives a
+filesystem mount attempt before the bridge reports the card as unmountable. An
+electrically absent or non-responsive card should report `no_card` rather than
+wedging the UART bridge.
 
 ```text
 DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
@@ -80,14 +82,17 @@ The D1L bridge tries the expected high-power, dedicated-`SPI1` FAT mount first.
 If that mount fails, it runs bounded raw SPI probes for high/dedicated,
 high/shared, low/dedicated, and low/shared candidates, then retries filesystem
 mount on each raw-present candidate before reporting `no_card` or a
-FAT32-required state. The manual diagnostic request below reports the same
-candidate matrix without filesystem writes. If no card responds, the bridge reports
-`state=no_card`. If a card responds but the filesystem is unusable, the bridge
-reports `state=not_fat32_or_unmountable present=1 mounted=0 needs_fat32=1
-note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When
-`mount_err` or `mount_data` is nonzero on a user-confirmed FAT32 card, the ESP32
-must surface `inspect_rp2040_sd_mount_error_firmware_path` instead of telling
-the user to prepare another card.
+FAT32-required state. The Actions RP2040 build must keep `USE_SD_CRC=1` so
+SdFat uses real command CRCs for `CMD55`/`ACMD41`, matching the raw probe path
+that detects the user-confirmed FAT32 card. The manual diagnostic request below
+reports the same candidate matrix without filesystem writes. If no card
+responds, the bridge reports `state=no_card`. If a card responds but the
+filesystem is unusable, the bridge reports `state=not_fat32_or_unmountable`,
+`present=1`, `mounted=0`, `needs_fat32=1`, and
+`note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When
+`mount_err` or `mount_data` is nonzero on a user-confirmed FAT32 card, the
+ESP32 must surface `inspect_rp2040_sd_mount_error_firmware_path` instead of
+telling the user to prepare another card.
 
 ## Ping Request
 

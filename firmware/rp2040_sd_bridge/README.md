@@ -27,7 +27,11 @@ plain ASCII rather than Seeed's sensor `PacketSerial` framing.
 Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
 adds the `earlephilhower/arduino-pico` board package URL, installs
 `rp2040:rp2040`, and compiles the sketch with FQBN
-`rp2040:rp2040:seeed_indicator_rp2040`.
+`rp2040:rp2040:seeed_indicator_rp2040`. The RP2040 job passes
+`--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1"` so SdFat sends
+valid SPI command CRC bytes during card initialization. The bridge sketch has a
+compile-time guard for this setting because the current validation card reaches
+raw SPI init but rejects the default SdFat `ACMD41` path with the CRC-error bit.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.
