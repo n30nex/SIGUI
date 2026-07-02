@@ -242,12 +242,17 @@ void configure_sd_bus() {
 }
 
 void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
-    bias_sd_spi_lines_for_power();
-    settle_sd_power(power_high, force_power_cycle);
-    bias_sd_spi_lines_for_power();
-    configure_sd_spi_pins();
-    SPI1.begin();
-    apply_sd_miso_pullup();
+    pinMode(SD_POWER_PIN, OUTPUT);
+    if (force_power_cycle) {
+        digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH);
+        delay(SD_POWER_CYCLE_OFF_MS);
+    }
+    digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
+    s_sd_power_high = power_high;
+    s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
+    s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN);
+    s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN);
+    s_sd_pin_cs_ok = true;
 }
 
 void clock_sd_idle_bytes() {
@@ -325,7 +330,7 @@ bool mount_sd() {
 bool mount_sd_with_probe_config(const CardProbe &probe) {
     s_sd_power_high = probe.power_high;
     s_sd_spi_options = probe.options;
-    return mount_sd_seeed_sample_path(s_sd_power_high, probe.force_power_cycle);
+    return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle);
 }
 
 CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint8_t options,

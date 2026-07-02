@@ -14,14 +14,14 @@ It speaks the newline-delimited protocol documented in
 - SD MOSI/TX: GPIO11.
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
-- SD CS is driven high and MOSI is biased high before the SD rail is powered or
-  force-cycled, with SCK held low and MISO pulled up. The first explicit mount
-  attempt preserves the already-powered rail state to match Seeed's MicroSD
-  example; fallback probes can force-cycle the selected rail level, wait for it
-  to settle, and send idle clocks so warm-reset cards can re-enter SPI init. SD
-  MISO uses the RP2040 internal pull-up and input buffer before and after SPI1
-  claims the pin so a floating or open card-response line does not read as a
-  false all-zero response.
+- The first explicit mount attempt follows Seeed's published MicroSD sample
+  sequence exactly: drive GPIO18 high, set `SPI1` SCK/TX/RX to GPIO10/11/12,
+  then call `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the
+  selected rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send
+  idle clocks so warm-reset cards can re-enter SPI init. SD MISO uses the
+  RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
+  so a floating or open card-response line does not read as a false all-zero
+  response.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.

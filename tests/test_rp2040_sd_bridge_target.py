@@ -76,8 +76,13 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
     assert "configure_seeed_sd_bus(s_sd_power_high)" in sketch
     assert sketch.index("bias_sd_spi_lines_for_power()") < sketch.index("settle_sd_power(power_high, force_power_cycle)")
-    assert sketch.count("bias_sd_spi_lines_for_power()") >= 5
-    assert "SPI1.begin()" in sketch[sketch.index("void configure_seeed_sd_bus"):sketch.index("void clock_sd_idle_bytes")]
+    assert sketch.count("bias_sd_spi_lines_for_power()") >= 3
+    seeed_config = sketch[sketch.index("void configure_seeed_sd_bus"):sketch.index("void clock_sd_idle_bytes")]
+    assert "SPI1.begin()" not in seeed_config
+    assert "bias_sd_spi_lines_for_power()" not in seeed_config
+    assert "s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN)" in seeed_config
+    assert "s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN)" in seeed_config
+    assert "s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN)" in seeed_config
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
@@ -88,6 +93,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "mounted_snapshot_from_current_config" in sketch
     assert "last_present_probe" in sketch
     assert "for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i)" in sketch
+    assert "return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle)" in sketch
     assert "if (mount_sd_with_probe_config(probes[i]))" in sketch
     assert "SPI1.begin()" in sketch
     assert "delay(50)" in sketch
