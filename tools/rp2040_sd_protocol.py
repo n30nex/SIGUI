@@ -302,18 +302,35 @@ def ping_line() -> str:
     )
 
 
+def diag_probe_tokens(prefix: str, present: bool, err: int, capacity_kb: int) -> str:
+    cmd0 = 1 if present else 255
+    cmd8 = 1 if present else 255
+    r7 = (0, 0, 1, 170) if present else (0, 0, 0, 0)
+    return (
+        f" {prefix}_p={bool_token(present)}"
+        f" {prefix}_e={err}"
+        f" {prefix}_d=0"
+        f" {prefix}_c0={cmd0}"
+        f" {prefix}_c8={cmd8}"
+        f" {prefix}_r70={r7[0]}"
+        f" {prefix}_r71={r7[1]}"
+        f" {prefix}_r72={r7[2]}"
+        f" {prefix}_r73={r7[3]}"
+        f" {prefix}_kb={capacity_kb}"
+    )
+
+
 def diag_line(scenario: SdScenario) -> str:
-    present = bool_token(scenario.present)
     err = 0 if scenario.present else 254
     capacity = scenario.capacity_kb if scenario.present else 0
     return (
         f"{DIAG_REPLY} pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000"
         f" selected_power=high selected_mode=dedicated"
         f" mount_selected={bool_token(scenario.mounted)}"
-        f" hd_p={present} hd_e={err} hd_d=0 hd_kb={capacity}"
-        f" hs_p=0 hs_e=254 hs_d=0 hs_kb=0"
-        f" ld_p=0 ld_e=254 ld_d=0 ld_kb=0"
-        f" ls_p=0 ls_e=254 ls_d=0 ls_kb=0"
+        f"{diag_probe_tokens('hd', scenario.present, err, capacity)}"
+        f"{diag_probe_tokens('hs', False, 254, 0)}"
+        f"{diag_probe_tokens('ld', False, 254, 0)}"
+        f"{diag_probe_tokens('ls', False, 254, 0)}"
     )
 
 

@@ -61,6 +61,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "mount_sd_seeed_sample_path" in sketch
     assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
     assert "configure_seeed_sd_bus(s_sd_power_high)" in sketch
+    assert "SPI1.begin()" in sketch[sketch.index("void configure_seeed_sd_bus"):sketch.index("void clock_sd_idle_bytes")]
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
@@ -101,6 +102,12 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "probe.error_code = 3" in sketch
     assert "cmd8_echo_ok" in sketch
     assert "probe.error_code = 4" in sketch
+    assert "probe.cmd0_response = cmd0" in sketch
+    assert "probe.cmd8_response = cmd8" in sketch
+    assert "probe.cmd8_echo[i] = cmd8_extra[i]" in sketch
+    assert '"_c0="' in sketch
+    assert '"_c8="' in sketch
+    assert '"_r7"' in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
     assert "delete card" in sketch

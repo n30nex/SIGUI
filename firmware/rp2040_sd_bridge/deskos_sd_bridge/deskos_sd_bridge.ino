@@ -95,6 +95,9 @@ struct CardProbe {
     uint32_t capacity_kb;
     uint8_t error_code;
     uint8_t error_data;
+    uint8_t cmd0_response;
+    uint8_t cmd8_response;
+    uint8_t cmd8_echo[4];
     const char *power;
     const char *mode;
     bool power_high;
@@ -200,7 +203,10 @@ void configure_sd_bus() {
 
 void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
     settle_sd_power(power_high, force_power_cycle);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
     configure_sd_spi_pins();
+    SPI1.begin();
 }
 
 void clock_sd_idle_bytes() {
@@ -287,6 +293,9 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         0,
         0xFF,
         0,
+        0xFF,
+        0xFF,
+        {0, 0, 0, 0},
         power,
         mode,
         power_high,
@@ -351,6 +360,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     }
 
     const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0);
+    probe.cmd0_response = cmd0;
     if (cmd0 == 0xFF) {
         probe.error_code = 1;
         SPI1.endTransaction();
@@ -367,6 +377,10 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd8_extra[4] = {0, 0, 0, 0};
     const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra));
+    probe.cmd8_response = cmd8;
+    for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
+        probe.cmd8_echo[i] = cmd8_extra[i];
+    }
     const bool sd_v2 = (cmd8 & 0x04U) == 0;
     const bool cmd8_echo_ok = cmd8_extra[2] == 0x01U && cmd8_extra[3] == 0xAAU;
     if (sd_v2 && !cmd8_echo_ok) {
@@ -412,6 +426,9 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         0,
         0xFE,
         0,
+        0xFF,
+        0xFF,
+        {0, 0, 0, 0},
         power_token(power_high),
         spi_mode_token(options),
         power_high,
@@ -1194,6 +1211,22 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
     line += prefix;
     line += "_d=";
     line += String(static_cast<unsigned int>(probe.error_data));
+    line += " ";
+    line += prefix;
+    line += "_c0=";
+    line += String(static_cast<unsigned int>(probe.cmd0_response));
+    line += " ";
+    line += prefix;
+    line += "_c8=";
+    line += String(static_cast<unsigned int>(probe.cmd8_response));
+    for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
+        line += " ";
+        line += prefix;
+        line += "_r7";
+        line += String(static_cast<unsigned int>(i));
+        line += "=";
+        line += String(static_cast<unsigned int>(probe.cmd8_echo[i]));
+    }
     line += " ";
     line += prefix;
     line += "_kb=";

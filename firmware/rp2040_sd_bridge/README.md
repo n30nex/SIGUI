@@ -98,9 +98,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated Arduino-Pico SPI1
-  path, registering CS with `SPI1.setCS(13)` and calling `SD.begin(13, SPI1)`
-  without pre-clocking the bus, manually driving SPI CS, or running a second
-  SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
+  path, registering CS with `SPI1.setCS(13)`, idling CS high, starting SPI1,
+  and calling `SD.begin(13, SPI1)` without pre-clocking the bus or running a
+  second SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a
@@ -119,7 +119,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   high/shared, low/dedicated, and low/shared raw probe result. It returns a
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
-  does not write to the card.
+  does not write to the card. Probe tokens include raw `CMD0`, `CMD8`, and R7
+  echo bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`) so all-zero bus behavior can be
+  separated from a real card echo mismatch.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and
   manifests. If the card is absent, unmountable, not FAT32, or has invalid

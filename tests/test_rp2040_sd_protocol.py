@@ -163,6 +163,13 @@ def test_diag_protocol_reports_probe_matrix_without_formatting():
     assert diag["hs_p"] == "0"
     assert diag["ld_p"] == "0"
     assert diag["ls_p"] == "0"
+    for prefix in ("hd", "hs", "ld", "ls"):
+        assert diag[f"{prefix}_c0"] == "255"
+        assert diag[f"{prefix}_c8"] == "255"
+        assert diag[f"{prefix}_r70"] == "0"
+        assert diag[f"{prefix}_r71"] == "0"
+        assert diag[f"{prefix}_r72"] == "0"
+        assert diag[f"{prefix}_r73"] == "0"
 
 
 def test_format_protocol_is_not_exposed():
