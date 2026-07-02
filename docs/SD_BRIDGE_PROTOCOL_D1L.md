@@ -134,15 +134,17 @@ DESKOS_SD_DIAG
 RP2040 replies with one compact line:
 
 ```text
-DESKOS_SD_DIAG pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000 selected_power=high selected_mode=dedicated mount_selected=0 hd_p=0 hd_e=254 hd_d=0 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_kb=0
+DESKOS_SD_DIAG pins=cs13-sck10-mosi11-miso12-pwr18 hz=1000000 selected_power=high selected_mode=dedicated mount_selected=0 hd_p=0 hd_e=254 hd_d=0 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_kb=0
 ```
 
 Each probe prefix (`hd`, `hs`, `ld`, `ls`) reports presence (`*_p`), final
 probe error (`*_e`), error data (`*_d`), raw `CMD0` response (`*_c0`), raw
 `CMD8` response (`*_c8`), the four `CMD8` R7 echo bytes (`*_r70`..`*_r73`),
-and detected capacity in KiB (`*_kb`). These fields are non-formatting
-diagnostics for distinguishing a stuck/all-zero SPI bus from a real card that
-answers `CMD0` but fails the SD v2 echo check.
+MISO line samples after pull-up, after SPI1 begins, and after idle clocks
+(`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and detected capacity in KiB
+(`*_kb`). These fields are non-formatting diagnostics for distinguishing a
+stuck/all-zero SPI bus from a real card that answers `CMD0` but fails the SD v2
+echo check.
 
 Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`
 low/dedicated, and `ls` low/shared. For each probe, `_p` is present, `_e` is

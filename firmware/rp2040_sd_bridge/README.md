@@ -18,9 +18,9 @@ It speaks the newline-delimited protocol documented in
   preserves the already-powered rail state to match Seeed's MicroSD example;
   fallback probes can force-cycle the selected rail level, wait for it to
   settle, and send idle clocks so warm-reset cards can re-enter SPI init. SD
-  MISO uses the RP2040 internal pull-up before and after SPI1 claims the pin so
-  a floating or open card-response line does not read as a false all-zero
-  response.
+  MISO uses the RP2040 internal pull-up and input buffer before and after SPI1
+  claims the pin so a floating or open card-response line does not read as a
+  false all-zero response.
 - UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
@@ -122,8 +122,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   high/shared, low/dedicated, and low/shared raw probe result. It returns a
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
-  does not write to the card. Probe tokens include raw `CMD0`, `CMD8`, and R7
-  echo bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`) so all-zero bus behavior can be
+  does not write to the card. Probe tokens include raw `CMD0`, `CMD8`, R7 echo
+  bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`), and MISO line samples
+  (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`) so all-zero bus behavior can be
   separated from a real card echo mismatch.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and

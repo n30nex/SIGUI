@@ -53,6 +53,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
     assert "pinMode(SD_MISO_PIN, INPUT_PULLUP)" in sketch
     assert "gpio_pull_up(SD_MISO_PIN)" in sketch
+    assert "gpio_set_input_enabled(SD_MISO_PIN, true)" in sketch
+    assert "sample_sd_miso_level()" in sketch
     assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
@@ -113,6 +115,12 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '"_c0="' in sketch
     assert '"_c8="' in sketch
     assert '"_r7"' in sketch
+    assert '"_miso_pull="' in sketch
+    assert '"_miso_spi="' in sketch
+    assert '"_miso_idle="' in sketch
+    assert "probe.miso_pullup_level = sample_sd_miso_level()" in sketch
+    assert "probe.miso_spi_level = sample_sd_miso_level()" in sketch
+    assert "probe.miso_idle_level = sample_sd_miso_level()" in sketch
     assert "sd_command(8, 0x1AA, 0x87" in sketch
     assert "sd_command(41" in sketch
     assert "delete card" in sketch

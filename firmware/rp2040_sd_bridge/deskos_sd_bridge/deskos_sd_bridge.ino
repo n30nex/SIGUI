@@ -99,6 +99,9 @@ struct CardProbe {
     uint8_t cmd0_response;
     uint8_t cmd8_response;
     uint8_t cmd8_echo[4];
+    uint8_t miso_pullup_level;
+    uint8_t miso_spi_level;
+    uint8_t miso_idle_level;
     const char *power;
     const char *mode;
     bool power_high;
@@ -193,7 +196,13 @@ void configure_sd_spi_pins() {
 }
 
 void apply_sd_miso_pullup() {
+    gpio_set_input_enabled(SD_MISO_PIN, true);
     gpio_pull_up(SD_MISO_PIN);
+}
+
+uint8_t sample_sd_miso_level() {
+    gpio_set_input_enabled(SD_MISO_PIN, true);
+    return gpio_get(SD_MISO_PIN) ? 1U : 0U;
 }
 
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
@@ -304,6 +313,9 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         0xFF,
         0xFF,
         {0, 0, 0, 0},
+        0xFF,
+        0xFF,
+        0xFF,
         power,
         mode,
         power_high,
@@ -360,13 +372,16 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     CardProbe probe = empty_probe(power_token(power_high), spi_mode_token(options), power_high, options,
                                   force_power_cycle);
     configure_sd_bus(power_high, force_power_cycle);
+    probe.miso_pullup_level = sample_sd_miso_level();
     SPI1.begin();
     apply_sd_miso_pullup();
+    probe.miso_spi_level = sample_sd_miso_level();
     SPI1.beginTransaction(SPISettings(SD_PROBE_SPI_HZ, MSBFIRST, SPI_MODE0));
     digitalWrite(SD_CS_PIN, HIGH);
     for (uint8_t i = 0; i < 10; ++i) {
         (void)sd_spi_transfer(0xFF);
     }
+    probe.miso_idle_level = sample_sd_miso_level();
 
     const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0);
     probe.cmd0_response = cmd0;
@@ -438,6 +453,9 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         0xFF,
         0xFF,
         {0, 0, 0, 0},
+        0xFF,
+        0xFF,
+        0xFF,
         power_token(power_high),
         spi_mode_token(options),
         power_high,
@@ -746,6 +764,9 @@ SdSnapshot mounted_snapshot_from_current_config() {
         0,
         0,
         {0, 0, 1, 170},
+        sample_sd_miso_level(),
+        sample_sd_miso_level(),
+        sample_sd_miso_level(),
         power_token(s_sd_power_high),
         "mount",
         s_sd_power_high,
@@ -1239,6 +1260,18 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
         line += "=";
         line += String(static_cast<unsigned int>(probe.cmd8_echo[i]));
     }
+    line += " ";
+    line += prefix;
+    line += "_miso_pull=";
+    line += String(static_cast<unsigned int>(probe.miso_pullup_level));
+    line += " ";
+    line += prefix;
+    line += "_miso_spi=";
+    line += String(static_cast<unsigned int>(probe.miso_spi_level));
+    line += " ";
+    line += prefix;
+    line += "_miso_idle=";
+    line += String(static_cast<unsigned int>(probe.miso_idle_level));
     line += " ";
     line += prefix;
     line += "_kb=";
