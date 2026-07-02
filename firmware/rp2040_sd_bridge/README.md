@@ -123,8 +123,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
   does not write to the card. Probe tokens include SPI pin-acceptance flags,
-  raw `CMD0`, `CMD8`, R7 echo bytes (`*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO
-  line samples (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
+  CMD0/CMD8 ready bytes, raw `CMD0`, `CMD8`, R7 echo bytes (`*_c0r`, `*_c8r`,
+  `*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO line samples
+  (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
   CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
   separated from a real card echo mismatch.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the

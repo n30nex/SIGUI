@@ -96,6 +96,8 @@ struct CardProbe {
     uint32_t capacity_kb;
     uint8_t error_code;
     uint8_t error_data;
+    uint8_t cmd0_ready_byte;
+    uint8_t cmd8_ready_byte;
     uint8_t cmd0_response;
     uint8_t cmd8_response;
     uint8_t cmd8_echo[4];
@@ -323,6 +325,8 @@ CardProbe empty_probe(const char *power, const char *mode, bool power_high, uint
         0,
         0xFF,
         0xFF,
+        0xFF,
+        0xFF,
         {0, 0, 0, 0},
         0xFF,
         0xFF,
@@ -354,11 +358,15 @@ uint8_t sd_wait_ready(uint32_t timeout_ms) {
     return value;
 }
 
-uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len) {
+uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len,
+                   uint8_t *ready_byte = nullptr, bool ignore_leading_zero = false) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_spi_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
-    (void)sd_wait_ready(50);
+    const uint8_t ready = sd_wait_ready(50);
+    if (ready_byte) {
+        *ready_byte = ready;
+    }
     (void)sd_spi_transfer(0x40U | command);
     (void)sd_spi_transfer(static_cast<uint8_t>(argument >> 24));
     (void)sd_spi_transfer(static_cast<uint8_t>(argument >> 16));
@@ -366,8 +374,11 @@ uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *ext
     (void)sd_spi_transfer(static_cast<uint8_t>(argument));
     (void)sd_spi_transfer(crc);
     uint8_t response = 0xFF;
-    for (uint8_t i = 0; i < 16; ++i) {
+    for (uint8_t i = 0; i < 64; ++i) {
         response = sd_spi_transfer(0xFF);
+        if (ignore_leading_zero && response == 0x00U) {
+            continue;
+        }
         if ((response & 0x80U) == 0) {
             break;
         }
@@ -396,7 +407,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     }
     probe.miso_idle_level = sample_sd_miso_level();
 
-    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0);
+    const uint8_t cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true);
     probe.cmd0_response = cmd0;
     if (cmd0 == 0xFF) {
         probe.error_code = 1;
@@ -413,7 +424,8 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     }
 
     uint8_t cmd8_extra[4] = {0, 0, 0, 0};
-    const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra));
+    const uint8_t cmd8 = sd_command(8, 0x1AA, 0x87, cmd8_extra, sizeof(cmd8_extra),
+                                    &probe.cmd8_ready_byte, true);
     probe.cmd8_response = cmd8;
     for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
         probe.cmd8_echo[i] = cmd8_extra[i];
@@ -463,6 +475,8 @@ CardProbe probe_card(uint8_t options, bool power_high) {
         0,
         0xFE,
         0,
+        0xFF,
+        0xFF,
         0xFF,
         0xFF,
         {0, 0, 0, 0},
@@ -775,6 +789,8 @@ SdSnapshot mounted_snapshot_from_current_config() {
         0,
         0,
         0,
+        0xFF,
+        0xFF,
         0,
         0,
         {0, 0, 1, 170},
@@ -1267,6 +1283,14 @@ void append_probe_tokens(String &line, const char *prefix, const CardProbe &prob
     line += prefix;
     line += "_d=";
     line += String(static_cast<unsigned int>(probe.error_data));
+    line += " ";
+    line += prefix;
+    line += "_c0r=";
+    line += String(static_cast<unsigned int>(probe.cmd0_ready_byte));
+    line += " ";
+    line += prefix;
+    line += "_c8r=";
+    line += String(static_cast<unsigned int>(probe.cmd8_ready_byte));
     line += " ";
     line += prefix;
     line += "_c0=";
