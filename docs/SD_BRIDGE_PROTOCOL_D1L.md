@@ -75,8 +75,9 @@ Arduino-Pico SPI1 path using Seeed's published MicroSD sample sequence:
 drive GPIO18 high, initialize `Wire` on SDA20/SCL21, set `SPI1` SCK/TX/RX to
 GPIO10/11/12, then call `SD.begin(13, 1000000, SPI1)`. This first attempt intentionally avoids
 manual CS biasing, pre-clocking, explicit `SPI1.begin()`, or a second SdFat
-probe before failure handling. If that
-library path does not mount, it falls back to bounded raw SPI presence probes across the high/low rail and
+probe before failure handling. If that already-powered library path does not
+mount, the bridge repeats the same Seeed path once after cycling GPIO18 before
+it falls back to bounded raw SPI presence probes across the high/low rail and
 dedicated/shared SPI candidates. High-power candidates are tried once without
 force-cycling the rail before force-cycled fallback probes run. Only fallback
 candidates that answer a valid SD idle/init sequence receive one matching

@@ -922,6 +922,12 @@ SdSnapshot mount_status_blocking() {
         return mounted_snapshot_from_current_config();
     }
 
+    snapshot = pending_snapshot("filesystem_mounting_power_cycle");
+    publish_mount_progress(snapshot);
+    if (mount_sd_seeed_sample_path(true, true)) {
+        return mounted_snapshot_from_current_config();
+    }
+
     s_last_mount_error = 0;
     s_last_mount_data = 0;
     snapshot = pending_snapshot("probing_card");

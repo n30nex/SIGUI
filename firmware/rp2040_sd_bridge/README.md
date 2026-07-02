@@ -21,7 +21,9 @@ It speaks the newline-delimited protocol documented in
   `SPI1` SCK/TX/RX to GPIO10/11/12, then call
   `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the selected
   rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send idle
-  clocks so warm-reset cards can re-enter SPI init. SD MISO uses the
+  clocks so warm-reset cards can re-enter SPI init. Before those raw probes,
+  the bridge repeats the exact Seeed init once after a GPIO18 rail cycle so the
+  filesystem stack gets a clean power-on attempt without extra bus traffic. SD MISO uses the
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
@@ -108,7 +110,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   command first tries the already-powered high/dedicated Arduino-Pico SPI1
   path, keeping GPIO13 under software CS control, idling CS high, starting SPI1,
   and calling `SD.begin(13, 1000000, SPI1)` without pre-clocking the bus or
-  running a second SdFat probe on failure. If that library path does not mount, the bridge falls back to bounded
+  running a second SdFat probe on failure. If that already-powered library path
+  does not mount, the bridge repeats the same Seeed path once after cycling
+  GPIO18 before falling back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a

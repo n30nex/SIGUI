@@ -122,11 +122,14 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert 'SdSnapshot snapshot = pending_snapshot("filesystem_mounting")' in sketch
+    assert 'snapshot = pending_snapshot("filesystem_mounting_power_cycle")' in sketch
     assert "publish_mount_progress(snapshot)" in sketch
     assert "if (s_worker_busy)" in sketch
     assert 'snapshot = pending_snapshot("probing_card")' in sketch
     assert sketch.index('SdSnapshot snapshot = pending_snapshot("filesystem_mounting")') < sketch.index("if (mount_sd_seeed_sample_path(true, false))")
     assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index('snapshot = pending_snapshot("probing_card")')
+    assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index("if (mount_sd_seeed_sample_path(true, true))")
+    assert sketch.index("if (mount_sd_seeed_sample_path(true, true))") < sketch.index('snapshot = pending_snapshot("probing_card")')
     assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true, false)")
     assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
     assert "s_last_mount_error = card->errorCode()" in sketch
@@ -218,6 +221,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "ready",
         "mount_not_checked",
         "filesystem_mounting",
+        "filesystem_mounting_power_cycle",
         "probing_card",
         "sd_probe_rejected_card",
         "card_detected_mounting",
