@@ -162,7 +162,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "probe.error_code = 4" in sketch
     assert "probe.cmd0_response = cmd0" in sketch
     assert "probe.cmd8_response = cmd8" in sketch
-    assert "&probe.cmd0_ready_byte, false, false" in sketch
+    assert "&probe.cmd0_ready_byte, true, false" in sketch
     assert "&probe.cmd8_ready_byte, false" in sketch
     assert "wait_selected_ready ? sd_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU" in sketch
     assert "ignore_leading_zero && response == 0x00U" in sketch
