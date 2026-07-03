@@ -19,6 +19,17 @@ except ModuleNotFoundError:
 
 
 TAB_SEQUENCE = ("home", "messages", "nodes", "map", "packets", "settings")
+RELEASE_MIN_CYCLES = 500
+TELEMETRY_FIELDS = (
+    "heap_free",
+    "heap_min_free",
+    "heap_largest_free",
+    "lvgl_free_bytes",
+    "lvgl_largest_free_bytes",
+    "lvgl_used_pct",
+    "ui_task_stack_free_words",
+    "reset_reason",
+)
 
 
 def utc_stamp() -> str:
@@ -36,6 +47,8 @@ def dry_run_report(cycles: int, settle_sec: float, clear_crashlog_before_start: 
         "settle_sec": settle_sec,
         "clear_crashlog_before_start": clear_crashlog_before_start,
         "tabs": list(TAB_SEQUENCE),
+        "release_min_cycles": RELEASE_MIN_CYCLES,
+        "telemetry_fields": list(TELEMETRY_FIELDS),
         "commands": ["ui status", *[f"ui tab {tab}" for tab in TAB_SEQUENCE], "health", "crashlog"],
     }
 
@@ -55,6 +68,53 @@ def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, 
             return True, statuses
         time.sleep(poll_sec)
     return False, statuses
+
+
+def _int_values(rows: list[dict], field: str) -> list[int]:
+    values: list[int] = []
+    for row in rows:
+        value = row.get(field)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            values.append(value)
+        elif isinstance(value, str) and value.isdigit():
+            values.append(int(value))
+    return values
+
+
+def summarize_telemetry(events: list[dict]) -> dict:
+    health_rows = [
+        event.get("health", {})
+        for event in events
+        if isinstance(event.get("health"), dict) and event.get("health", {}).get("ok") is True
+    ]
+    status_rows = []
+    for event in events:
+        statuses = event.get("statuses") or []
+        if statuses and isinstance(statuses[-1], dict):
+            status_rows.append(statuses[-1])
+
+    metrics = {}
+    for field in TELEMETRY_FIELDS:
+        if field == "reset_reason":
+            continue
+        values = _int_values(health_rows, field)
+        if values:
+            metrics[field] = {"min": min(values), "max": max(values), "last": values[-1]}
+
+    uptimes = _int_values(health_rows, "uptime_ms")
+    return {
+        "health_sample_count": len(health_rows),
+        "telemetry_fields": list(TELEMETRY_FIELDS),
+        "metrics": metrics,
+        "reset_reasons": sorted(
+            {row.get("reset_reason") for row in health_rows if isinstance(row.get("reset_reason"), str)}
+        ),
+        "uptime_monotonic": bool(uptimes) and all(after >= before for before, after in zip(uptimes, uptimes[1:])),
+        "final_active_tab": status_rows[-1].get("active_tab") if status_rows else None,
+        "final_pending": status_rows[-1].get("pending") if status_rows else None,
+    }
 
 
 def run_tab_abuse(
@@ -124,6 +184,10 @@ def run_tab_abuse(
     setup_failures = [
         event for event in setup_events if not event.get("result", {}).get("ok")
     ]
+    telemetry = summarize_telemetry(events)
+    telemetry_failures = []
+    if not telemetry.get("uptime_monotonic"):
+        telemetry_failures.append({"check": "uptime_monotonic", "ok": False})
     return {
         "schema": 1,
         "mode": "hardware",
@@ -132,13 +196,16 @@ def run_tab_abuse(
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
         "cycles": cycles,
+        "release_min_cycles": RELEASE_MIN_CYCLES,
         "settle_sec": settle_sec,
         "poll_sec": poll_sec,
         "clear_crashlog_before_start": clear_crashlog_before_start,
         "tabs": list(TAB_SEQUENCE),
-        "ok": not failures and not setup_failures,
-        "failure_count": len(failures) + len(setup_failures),
+        "ok": not failures and not setup_failures and not telemetry_failures,
+        "failure_count": len(failures) + len(setup_failures) + len(telemetry_failures),
         "failures": failures,
+        "telemetry_failures": telemetry_failures,
+        "telemetry": telemetry,
         "setup_events": setup_events,
         "events": events,
     }
@@ -159,7 +226,7 @@ def main() -> int:
     parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
-    parser.add_argument("--cycles", type=int, default=100)
+    parser.add_argument("--cycles", type=int, default=RELEASE_MIN_CYCLES)
     parser.add_argument("--settle-sec", type=float, default=0.1)
     parser.add_argument("--poll-sec", type=float, default=0.05)
     parser.add_argument("--clear-crashlog-before-start", action="store_true")

@@ -10,8 +10,8 @@ python .\tools\ui_simulator.py --out artifacts\ui-sim
 python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
 python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-storage
 python .\scripts\smoke_d1l.py --dry-run
-python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 100
-python .\scripts\scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map
+python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 500
+python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\probe_d1l_dm.py --dry-run
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --dry-run --token dryrun
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
@@ -38,7 +38,7 @@ Coverage:
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - Release gate audit contract: `scripts/release_gate_audit_d1l.py` must fail closed when P0 production evidence is missing, must not require hardware or ports in CI, must reject obsolete SD preflight evidence that recommends any device-format action, must require SD evidence to report `formats_sd=false`, and must report `ready_for_public_release=false` until current-commit smoke, SD matrix, 12-hour soak, manual physical UI/photos, and full RF/DM evidence are present.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces, the Settings setup dashboard, Public History/Search sheets, advert sheet, first-boot onboarding, lock overlay, Map, manual Map center, Map Tiles provider/download sheet, Storage/Radio/Contact/Packet/Mesh Roles sheets, fail on missing required labels or measured text overflow, emit a touch-target map with expanded 44x44 boxes, flag RF/destructive/format-capable actions, keep `formats_sd=false` for storage setup and map tile download actions, and include `large-mesh` and `storage-states` scenarios that prove oversized node/message stores and storage copy fit before rendering.
-- P0 UI hardware-script contract: `scripts/ui_tab_abuse_d1l.py --dry-run` and `scripts/scroll_probe_d1l.py --dry-run` must stay host-only, explicit-port for hardware mode, and must exercise `ui status` plus `ui tab <home|messages|nodes|map|packets|settings>` without hardcoded COM ports.
+- P0 UI hardware-script contract: `scripts/ui_tab_abuse_d1l.py --dry-run --cycles 500` and `scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map` must stay host-only, explicit-port for hardware mode, and must exercise `ui status`, telemetry fields from `health`, crashlog checks, and `ui tab <home|messages|nodes|map|packets|settings>` without hardcoded COM ports. The tab-abuse artifact must prove at least 500 cycles, monotonic uptime, zero failures, and heap/LVGL/UI-stack/reset telemetry; the scroll artifact must identify each canonical surface and the tab used to reach it.
 - First-boot onboarding contract: settings schema v6 must persist `onboarding_complete`, optional manual map center, saved Wi-Fi profile metadata, and optional map tile provider/attribution/zoom metadata, migrate schema v2/v3/v4/v5 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
 - Map location contract: first Map open with no saved center must show a touch `Set D1L Location` sheet with decimal latitude/longitude fields and an onscreen keyboard, the user must be able to Save/Clear/Skip without dock overlap, the saved pin must reappear as `Move Pin`/manual center on the next Map open, and the serial `map center set|clear` commands must share the same app-model/settings persistence path without Public RF, SD writes, or formatting.
 - Phase 6 packet filter/raw-hex contract: packet log entries must carry a bounded raw hex preview, expose `packets filter`, `packets search`, `packets raw`, and render Packet-tab filter/search/raw-hex UI surfaces in the simulator.
@@ -61,8 +61,8 @@ $env:D1L_PORT = "COMx"
 python .\scripts\backup_flash_d1l.py --port $env:D1L_PORT --size 8MB
 .\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
-python .\scripts\ui_tab_abuse_d1l.py --port $env:D1L_PORT --cycles 100 --clear-crashlog-before-start
-python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens messages,nodes,packets,settings,map --manual-touch --clear-crashlog-before-start
+python .\scripts\ui_tab_abuse_d1l.py --port $env:D1L_PORT --cycles 500 --clear-crashlog-before-start
+python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map --manual-touch --clear-crashlog-before-start
 ```
 
 Expected commands:

@@ -23,10 +23,10 @@ jobs:
         run: python ./scripts/smoke_d1l.py --dry-run
 
       - name: UI tab abuse dry run
-        run: python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 100
+        run: python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 500
 
       - name: UI scroll probe dry run
-        run: python ./scripts/scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map
+        run: python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 
       - name: Soak dry run
         run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test

@@ -20,8 +20,8 @@ python .\tools\ui_simulator.py --out artifacts\ui-sim
 python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
 python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-storage
 python .\scripts\smoke_d1l.py --dry-run
-python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 100
-python .\scripts\scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map
+python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 500
+python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 ```

@@ -39,8 +39,8 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
     assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in host
     assert "python ./scripts/smoke_d1l.py --dry-run" in host
-    assert "python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 100" in host
-    assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens messages,nodes,packets,settings,map" in host
+    assert "python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 500" in host
+    assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map" in host
     assert "python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test" in host
     assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host

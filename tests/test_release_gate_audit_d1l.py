@@ -8,6 +8,57 @@ from scripts.release_gate_audit_d1l import build_audit, parse_args
 COMMIT = "68350bf9f3fabfd2db4110ec6ffc36068056a060"
 STALE_COMMIT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 RUN_ID = "28549761003"
+SCROLL_SURFACES = {
+    "home": "home",
+    "public_messages": "messages",
+    "dm_thread": "messages",
+    "nodes": "nodes",
+    "packets": "packets",
+    "settings": "settings",
+    "storage": "settings",
+    "wifi": "settings",
+    "map": "map",
+}
+
+
+def ui_tab_abuse_payload(**overrides: object) -> dict:
+    payload = {
+        "ok": True,
+        "port": "COM12",
+        "cycles": 500,
+        "failure_count": 0,
+        "telemetry": {
+            "health_sample_count": 3000,
+            "uptime_monotonic": True,
+            "telemetry_fields": [
+                "heap_free",
+                "heap_min_free",
+                "heap_largest_free",
+                "lvgl_free_bytes",
+                "lvgl_largest_free_bytes",
+                "lvgl_used_pct",
+                "ui_task_stack_free_words",
+                "reset_reason",
+            ],
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
+def scroll_probe_payload(**overrides: object) -> dict:
+    payload = {
+        "ok": True,
+        "port": "COM12",
+        "failure_count": 0,
+        "screens": list(SCROLL_SURFACES),
+        "surface_plan": [
+            {"screen": screen, "tab": tab, "label": screen.replace("_", " ").title()}
+            for screen, tab in SCROLL_SURFACES.items()
+        ],
+    }
+    payload.update(overrides)
+    return payload
 
 
 def write_json(path: Path, payload: dict) -> None:
@@ -59,16 +110,8 @@ def write_core_evidence(root: Path) -> None:
 
     hardware = root / "artifacts" / "hardware" / "com12"
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
-    write_json(hardware / "ui_tab_abuse_68350bf.json", {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0})
-    write_json(
-        hardware / "scroll_probe_68350bf.json",
-        {
-            "ok": True,
-            "port": "COM12",
-            "failure_count": 0,
-            "screens": ["messages", "nodes", "packets", "settings", "map"],
-        },
-    )
+    write_json(hardware / "ui_tab_abuse_68350bf.json", ui_tab_abuse_payload())
+    write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
     write_json(
         hardware / "dm_probe_68350bf.json",
         {
@@ -421,7 +464,7 @@ def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):
     (hardware / "ui_tab_abuse_68350bf.json").unlink()
     write_json(
         hardware / "ui_tab_abuse_deadbee.json",
-        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0},
+        ui_tab_abuse_payload(),
     )
 
     report = build_audit(audit_args(tmp_path))
@@ -431,23 +474,49 @@ def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):
     assert gates["ui_tab_abuse"]["details"]["path_found"] is False
 
 
+def test_release_gate_audit_requires_500_cycle_tab_abuse(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(hardware / "ui_tab_abuse_68350bf.json", ui_tab_abuse_payload(cycles=100))
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_tab_abuse"]["ok"] is False
+
+
+def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    missing_storage = {key: value for key, value in SCROLL_SURFACES.items() if key != "storage"}
+    write_json(
+        hardware / "scroll_probe_68350bf.json",
+        scroll_probe_payload(
+            screens=list(missing_storage),
+            surface_plan=[
+                {"screen": screen, "tab": tab, "label": screen.replace("_", " ").title()}
+                for screen, tab in missing_storage.items()
+            ],
+        ),
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_scroll_probe"]["ok"] is False
+
+
 def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filename_matches(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12", "firmware_commit": STALE_COMMIT})
     write_json(
         hardware / "ui_tab_abuse_68350bf.json",
-        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0, "firmware_commit": STALE_COMMIT},
+        ui_tab_abuse_payload(firmware_commit=STALE_COMMIT),
     )
     write_json(
         hardware / "scroll_probe_68350bf.json",
-        {
-            "ok": True,
-            "port": "COM12",
-            "failure_count": 0,
-            "screens": ["messages", "nodes", "packets", "settings", "map"],
-            "git": {"head_sha": STALE_COMMIT},
-        },
+        scroll_probe_payload(git={"head_sha": STALE_COMMIT}),
     )
     write_json(
         hardware / "dm_probe_68350bf.json",
@@ -570,7 +639,7 @@ def test_release_gate_audit_accepts_matching_commit_metadata_without_commit_file
     (hardware / "ui_tab_abuse_68350bf.json").unlink()
     write_json(
         hardware / "ui_tab_abuse_latest.json",
-        {"ok": True, "port": "COM12", "cycles": 100, "failure_count": 0, "firmware_commit": COMMIT},
+        ui_tab_abuse_payload(firmware_commit=COMMIT),
     )
 
     report = build_audit(audit_args(tmp_path))

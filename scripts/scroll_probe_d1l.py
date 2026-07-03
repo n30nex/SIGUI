@@ -18,8 +18,30 @@ except ModuleNotFoundError:
     from scripts.smoke_d1l import send_console_command
 
 
-DEFAULT_SCREENS = ("messages", "nodes", "packets", "settings", "map")
-VALID_SCREENS = ("home", "messages", "nodes", "map", "packets", "settings")
+SCROLL_SURFACES = {
+    "home": {"tab": "home", "label": "Home previews"},
+    "public_messages": {"tab": "messages", "label": "Public messages"},
+    "dm_thread": {"tab": "messages", "label": "DM thread"},
+    "nodes": {"tab": "nodes", "label": "Nodes"},
+    "packets": {"tab": "packets", "label": "Packets"},
+    "settings": {"tab": "settings", "label": "Settings"},
+    "storage": {"tab": "settings", "label": "Storage settings"},
+    "wifi": {"tab": "settings", "label": "Wi-Fi settings"},
+    "map": {"tab": "map", "label": "Map"},
+}
+SCREEN_ALIASES = {
+    "messages": "public_messages",
+    "public": "public_messages",
+    "public_messages": "public_messages",
+    "public-messages": "public_messages",
+    "dm": "dm_thread",
+    "dm_thread": "dm_thread",
+    "dm-thread": "dm_thread",
+    "wi_fi": "wifi",
+    "wi-fi": "wifi",
+}
+DEFAULT_SCREENS = tuple(SCROLL_SURFACES)
+VALID_SCREENS = tuple(SCROLL_SURFACES)
 
 
 def utc_stamp() -> str:
@@ -27,14 +49,23 @@ def utc_stamp() -> str:
 
 
 def parse_screens(value: str) -> list[str]:
-    screens = [item.strip().lower() for item in value.split(",") if item.strip()]
-    invalid = [screen for screen in screens if screen not in VALID_SCREENS]
+    raw_screens = [item.strip().lower() for item in value.split(",") if item.strip()]
+    screens = [SCREEN_ALIASES.get(screen.replace(" ", "_"), screen.replace(" ", "_")) for screen in raw_screens]
+    invalid = [raw for raw, screen in zip(raw_screens, screens) if screen not in SCROLL_SURFACES]
     if invalid:
         raise ValueError(f"invalid screen(s): {', '.join(invalid)}")
     return screens
 
 
+def surface_plan(screens: list[str]) -> list[dict]:
+    return [
+        {"screen": screen, "tab": SCROLL_SURFACES[screen]["tab"], "label": SCROLL_SURFACES[screen]["label"]}
+        for screen in screens
+    ]
+
+
 def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> dict:
+    plan = surface_plan(screens)
     return {
         "schema": 1,
         "mode": "dry-run",
@@ -44,7 +75,8 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
         "manual_touch": manual_touch,
         "dwell_sec": dwell_sec,
         "screens": screens,
-        "commands": [*[f"ui tab {screen}" for screen in screens], "ui status", "health", "crashlog"],
+        "surface_plan": plan,
+        "commands": [*[f"ui tab {item['tab']}" for item in plan], "ui status", "health", "crashlog"],
     }
 
 
@@ -81,11 +113,14 @@ def run_scroll_probe(
                 {"cmd": "crashlog clear", "result": send_console_command(ser, "crashlog clear", timeout)}
             )
 
-        for screen in screens:
-            request = send_console_command(ser, f"ui tab {screen}", timeout)
+        for surface in surface_plan(screens):
+            screen = surface["screen"]
+            tab = surface["tab"]
+            label = surface["label"]
+            request = send_console_command(ser, f"ui tab {tab}", timeout)
             time.sleep(dwell_sec)
             if manual_touch:
-                print(f"Manual check: scroll the {screen} screen, then press Enter.")
+                print(f"Manual check: scroll the {label} surface, then press Enter.")
                 input()
             status = send_console_command(ser, "ui status", timeout)
             health = send_console_command(ser, "health", timeout)
@@ -93,6 +128,8 @@ def run_scroll_probe(
             events.append(
                 {
                     "screen": screen,
+                    "tab": tab,
+                    "label": label,
                     "request": request,
                     "status": status,
                     "health": health,
@@ -107,12 +144,13 @@ def run_scroll_probe(
             "screen": event["screen"],
             "request_ok": event["request"].get("ok"),
             "active_tab": event["status"].get("active_tab"),
+            "expected_active_tab": event["tab"],
             "health_ok": event["health"].get("ok"),
             "crashlog_entries": crashlog_has_entries(event["crashlog"]),
         }
         for event in events
         if not event["request"].get("ok")
-        or event["status"].get("active_tab") != event["screen"]
+        or event["status"].get("active_tab") != event["tab"]
         or not event["health"].get("ok")
         or crashlog_has_entries(event["crashlog"])
     ]
@@ -127,6 +165,7 @@ def run_scroll_probe(
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
         "screens": screens,
+        "surface_plan": surface_plan(screens),
         "dwell_sec": dwell_sec,
         "manual_touch": manual_touch,
         "clear_crashlog_before_start": clear_crashlog_before_start,

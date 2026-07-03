@@ -17,7 +17,29 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
 
-REQUIRED_SCROLL_SCREENS = {"messages", "nodes", "packets", "settings", "map"}
+RELEASE_TAB_ABUSE_MIN_CYCLES = 500
+REQUIRED_TAB_TELEMETRY_FIELDS = {
+    "heap_free",
+    "heap_min_free",
+    "heap_largest_free",
+    "lvgl_free_bytes",
+    "lvgl_largest_free_bytes",
+    "lvgl_used_pct",
+    "ui_task_stack_free_words",
+    "reset_reason",
+}
+REQUIRED_SCROLL_SURFACES = {
+    "home": "home",
+    "public_messages": "messages",
+    "dm_thread": "messages",
+    "nodes": "nodes",
+    "packets": "packets",
+    "settings": "settings",
+    "storage": "settings",
+    "wifi": "settings",
+    "map": "map",
+}
+REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
 REQUIRED_NOTICE_FILES = {
     "notices/LICENSE",
     "notices/THIRD_PARTY_NOTICES.md",
@@ -309,21 +331,33 @@ def all_checks_true(data: dict) -> bool:
 
 
 def ui_tab_abuse_ok(data: dict, expected_port: str) -> bool:
+    telemetry = data.get("telemetry") if isinstance(data.get("telemetry"), dict) else {}
+    telemetry_fields = set(telemetry.get("telemetry_fields") or data.get("telemetry_fields") or [])
     return (
         data.get("ok") is True
         and data.get("port") == expected_port
-        and int(data.get("cycles") or 0) >= 100
+        and int(data.get("cycles") or 0) >= RELEASE_TAB_ABUSE_MIN_CYCLES
         and int(data.get("failure_count") or 0) == 0
+        and int(telemetry.get("health_sample_count") or 0) > 0
+        and telemetry.get("uptime_monotonic") is True
+        and REQUIRED_TAB_TELEMETRY_FIELDS.issubset(telemetry_fields)
     )
 
 
 def scroll_probe_ok(data: dict, expected_port: str) -> bool:
     screens = set(data.get("screens") or [])
+    plan = data.get("surface_plan") if isinstance(data.get("surface_plan"), list) else []
+    tabs_by_screen = {
+        item.get("screen"): item.get("tab")
+        for item in plan
+        if isinstance(item, dict) and isinstance(item.get("screen"), str)
+    }
     return (
         data.get("ok") is True
         and data.get("port") == expected_port
         and int(data.get("failure_count") or 0) == 0
         and REQUIRED_SCROLL_SCREENS.issubset(screens)
+        and all(tabs_by_screen.get(screen) == tab for screen, tab in REQUIRED_SCROLL_SURFACES.items())
     )
 
 
@@ -674,12 +708,12 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(
         simple_json_ok_gate(
             "ui_tab_abuse",
-            "100-cycle D1L tab abuse",
+            "500-cycle D1L tab abuse",
             newest_commit_json(hardware_dir, args.commit, "ui_tab_abuse_*.json"),
             root,
             lambda data: ui_tab_abuse_ok(data, args.d1l_port),
-            "100-cycle D1L tab abuse artifact passes.",
-            "No passing 100-cycle D1L tab abuse artifact was found.",
+            "500-cycle D1L tab abuse artifact passes.",
+            "No passing 500-cycle D1L tab abuse artifact was found.",
         )
     )
     gates.append(
