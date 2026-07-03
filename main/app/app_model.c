@@ -307,11 +307,16 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_response_truncated = storage.response_truncated;
     snapshot->map_page_supported = true;
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
-    snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
-                                            snapshot->map_tile_cache_ready;
+    snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
     snapshot->map_tile_sideload_supported = true;
     snapshot->map_location_set = settings->map_location_set;
     snapshot->map_tile_provider_saved = settings->map_tile_provider_saved;
+    snapshot->map_tile_download_supported = connectivity.wifi_build_enabled &&
+                                            connectivity.wifi_connected &&
+                                            snapshot->map_tile_cache_ready &&
+                                            snapshot->map_location_set &&
+                                            snapshot->map_tile_provider_saved &&
+                                            snapshot->map_tile_render_supported;
     snapshot->map_lat_e7 = settings->map_lat_e7;
     snapshot->map_lon_e7 = settings->map_lon_e7;
     snapshot->map_tile_zoom = settings->map_tile_zoom;
@@ -333,9 +338,11 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->map_tile_cache_policy = D1L_MAP_TILE_CACHE_POLICY;
     snapshot->map_tile_cache_path_template = D1L_MAP_TILE_CACHE_PATH_TEMPLATE;
     snapshot->map_tile_download_state = !snapshot->map_tile_cache_ready ? "sd_cache_required" :
+                                        !connectivity.wifi_build_enabled ? "wifi_unavailable" :
                                         !connectivity.wifi_connected ? "wifi_required" :
                                         !settings->map_tile_provider_saved ? "provider_required" :
                                         !settings->map_location_set ? "location_required" :
+                                        !snapshot->map_tile_render_supported ? "tile_render_pending" :
                                         "ready";
     snapshot->map_tile_download_requires = D1L_MAP_TILE_DOWNLOAD_REQUIRES;
     snapshot->map_tile_provider_policy = D1L_MAP_TILE_PROVIDER_POLICY;
@@ -614,23 +621,46 @@ esp_err_t d1l_app_model_download_center_map_tile(d1l_map_tile_download_result_t 
     if (!out_result) {
         return ESP_ERR_INVALID_ARG;
     }
+    memset(out_result, 0, sizeof(*out_result));
     const d1l_settings_t *settings = d1l_settings_current();
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
+    d1l_storage_status_t storage = {0};
+    d1l_storage_status(&storage);
+    out_result->wifi_connected = connectivity.wifi_connected;
+    out_result->sd_ready = d1l_map_tile_store_sd_ready(&storage);
+    out_result->public_rf_tx = false;
+    out_result->formats_sd = false;
+    out_result->provider_allowed = settings->map_tile_provider_saved;
     if (!settings->map_tile_provider_saved) {
-        memset(out_result, 0, sizeof(*out_result));
-        return ESP_ERR_INVALID_STATE;
+        snprintf(out_result->step, sizeof(out_result->step), "provider");
+        out_result->last_error = ESP_ERR_INVALID_STATE;
+        return out_result->last_error;
     }
 
     uint32_t x = 0;
     uint32_t y = 0;
     if (!map_center_tile_from_settings(settings, settings->map_tile_zoom, &x, &y)) {
-        memset(out_result, 0, sizeof(*out_result));
-        return ESP_ERR_INVALID_STATE;
+        snprintf(out_result->step, sizeof(out_result->step), "location");
+        out_result->last_error = ESP_ERR_INVALID_STATE;
+        return out_result->last_error;
+    }
+    if (!connectivity.wifi_connected) {
+        snprintf(out_result->step, sizeof(out_result->step), "wifi");
+        out_result->last_error = ESP_ERR_INVALID_STATE;
+        return out_result->last_error;
+    }
+    if (!out_result->sd_ready) {
+        snprintf(out_result->step, sizeof(out_result->step), "preflight");
+        out_result->last_error = ESP_ERR_NOT_SUPPORTED;
+        return out_result->last_error;
+    }
+    if (!D1L_MAP_TILE_RENDER_SUPPORTED) {
+        snprintf(out_result->step, sizeof(out_result->step), "tile_render_pending");
+        out_result->last_error = ESP_ERR_NOT_SUPPORTED;
+        return out_result->last_error;
     }
 
-    d1l_connectivity_status_t connectivity = {0};
-    d1l_connectivity_status(&connectivity);
-    d1l_storage_status_t storage = {0};
-    d1l_storage_status(&storage);
     return d1l_map_tile_store_download(settings->map_tile_url_template,
                                        settings->map_tile_attribution,
                                        settings->map_tile_zoom,

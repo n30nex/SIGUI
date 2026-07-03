@@ -118,8 +118,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Zoom 12",
         "Save",
         "Clear",
-        "Download",
-        "Downloads one center tile for your saved D1L location.",
+        "Live download unavailable",
+        "Tile render pending; use serial canaries for SD cache proof.",
         "No public OSM bulk tile servers. Visible attribution is required.",
         "Keyboard",
         "Close",
@@ -252,8 +252,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["map_tiles_sheet"]["edit_map_tile_provider"]["kind"] == "text_field"
     assert actions_by_view["map_tiles_sheet"]["edit_map_tile_attribution"]["kind"] == "text_field"
     assert actions_by_view["map_tiles_sheet"]["save_map_tile_provider"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
-    assert actions_by_view["map_tiles_sheet"]["download_center_tile"]["public_rf_tx"] is False
-    assert actions_by_view["map_tiles_sheet"]["download_center_tile"]["formats_sd"] is False
+    assert "download_center_tile" not in actions_by_view["map_tiles_sheet"]
     assert actions_by_view["map_tiles_sheet"]["close_map_tiles"]["destination"] == "map"
     assert actions_by_view["settings"]["open_map_tiles"]["destination"] == "map_tiles_sheet"
     assert not any(target["kind"] == "dock_tab" for target in views["map_tiles_sheet"]["touch_targets"])
@@ -368,7 +367,8 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
             map_view = map_report["views"][0]
             assert map_report["ok"] is True, scenario
             assert map_view["metrics"]["map_tile_cache_ready"] is True
-            assert map_view["metrics"]["map_tile_download_supported"] is True
+            assert map_view["metrics"]["map_tile_download_supported"] is False
+            assert map_view["metrics"]["map_tile_render_supported"] is False
             assert "sd_map_tiles_ready" in set(map_view["labels"])
         else:
             assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]

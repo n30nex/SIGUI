@@ -508,7 +508,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_MAP_TILE_ZOOM_MAX 18U" in store_header
     assert 'D1L_MAP_TILE_CACHE_POLICY "sd_offline_cache_when_ready"' in store_header
     assert 'D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/z{z}/x{x}/y{y}.tile"' in store_header
-    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "provider_required_or_ready_when_wifi_sd_provider_ok"' in store_header
+    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "tile_render_pending"' in store_header
+    assert "tile rendering proof" in store_header
     assert "D1L_MAP_TILE_URL_TEMPLATE_MAX 192U" in store_header
     assert "D1L_MAP_TILE_ATTRIBUTION_MAX 64U" in store_header
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_header

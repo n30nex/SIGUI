@@ -16,8 +16,8 @@
 #define D1L_MAP_TILE_DOWNLOAD_MAX_BYTES (128U * 1024U)
 #define D1L_MAP_TILE_CACHE_POLICY "sd_offline_cache_when_ready"
 #define D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/z{z}/x{x}/y{y}.tile"
-#define D1L_MAP_TILE_DOWNLOAD_STATE "provider_required_or_ready_when_wifi_sd_provider_ok"
-#define D1L_MAP_TILE_DOWNLOAD_REQUIRES "Connect Wi-Fi, configure an allowed tile provider with attribution, then download only your area"
+#define D1L_MAP_TILE_DOWNLOAD_STATE "tile_render_pending"
+#define D1L_MAP_TILE_DOWNLOAD_REQUIRES "Connected Wi-Fi, ready SD cache, saved location, allowed provider, attribution, and tile rendering proof"
 #define D1L_MAP_TILE_PROVIDER_POLICY "provider_config_required_no_public_osm_bulk"
 #define D1L_MAP_TILE_PROVIDER_ATTRIBUTION "Provider attribution required on Map and release notices"
 

@@ -4121,15 +4121,26 @@ static void render_map_tiles_sheet(void)
                   map_tiles_save_event_cb, NULL);
     create_button(s_map_tiles_sheet, "Clear", 314, 216, 66, 36,
                   map_tiles_clear_event_cb, NULL);
-    create_button(s_map_tiles_sheet, "Download", 16, 262, 112, 38,
-                  map_tiles_download_event_cb, NULL);
+    const bool tile_download_supported = s_snapshot.map_tile_download_supported;
+    if (tile_download_supported) {
+        create_button(s_map_tiles_sheet, "Download", 16, 262, 112, 38,
+                      map_tiles_download_event_cb, NULL);
+    } else {
+        lv_obj_t *unavailable = create_label(s_map_tiles_sheet, "Live download unavailable",
+                                             0xFBBF24);
+        lv_label_set_long_mode(unavailable, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(unavailable, 190);
+        lv_obj_set_pos(unavailable, 16, 270);
+    }
 
     lv_obj_t *download = create_label(s_map_tiles_sheet,
-                                      "Downloads one center tile for your saved D1L location.",
+                                      tile_download_supported ?
+                                      "Downloads one center tile for your saved D1L location." :
+                                      "Tile render pending; use serial canaries for SD cache proof.",
                                       0xE5EDF5);
     lv_label_set_long_mode(download, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(download, 320);
-    lv_obj_set_pos(download, 142, 260);
+    lv_obj_set_width(download, tile_download_supported ? 320 : 238);
+    lv_obj_set_pos(download, tile_download_supported ? 142 : 218, 260);
     lv_obj_t *policy = create_label(s_map_tiles_sheet,
                                     "No public OSM bulk tile servers. Visible attribution is required.",
                                     0xFBBF24);
@@ -4205,7 +4216,8 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
                        snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24);
 
     snprintf(value, sizeof(value), "%s",
-             snapshot->map_tile_download_supported ? "Ready" : "Setup");
+             snapshot->map_tile_download_supported ? "Ready" :
+             snapshot->map_tile_render_supported ? "Setup" : "Unavailable");
     snprintf(detail, sizeof(detail), "%s",
              snapshot->map_tile_download_state ? snapshot->map_tile_download_state :
              "provider_required");

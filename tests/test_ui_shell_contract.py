@@ -46,6 +46,7 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "map_page_supported" in header
     assert "map_tile_cache_ready" in header
     assert "map_tile_download_supported" in header
+    assert "map_tile_render_supported" in header
     assert "map_tile_sideload_supported" in header
     assert "map_tile_cache_policy" in header
     assert "map_tile_cache_path_template" in header
@@ -565,7 +566,9 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert '"Allowed provider template"' in source
     assert '"Attribution"' in source
     assert '"Download"' in source
-    assert '"Downloads one center tile for your saved D1L location."' in source
+    assert "if (tile_download_supported)" in source
+    assert '"Live download unavailable"' in source
+    assert '"Tile render pending; use serial canaries for SD cache proof."' in source
     assert '"No public OSM bulk tile servers. Visible attribution is required."' in source
     assert '"Set D1L Location"' in source
     assert '"Map needs your D1L location"' in source
@@ -586,6 +589,7 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert '"Routes"' in source
     assert "snapshot->map_tile_cache_ready" in source
     assert "snapshot->map_tile_download_supported" in source
+    assert "snapshot->map_tile_render_supported" in model
     assert "snapshot->map_tile_cache_policy" in source
     assert "snapshot->map_tile_cache_path_template" in source
     assert "snapshot->map_tile_download_requires" in source
@@ -612,10 +616,15 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert 'const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"}' in source
     assert "for (int i = 0; i < 6; ++i)" in source
     assert "map_tile_download_supported" in header
+    assert "map_tile_render_supported" in header
     assert "map_tile_sideload_supported" in header
     assert "map_tile_provider_policy" in header
     assert "map_tile_provider_attribution" in header
-    assert "snapshot->map_tile_download_supported = connectivity.wifi_build_enabled" in model
+    assert "D1L_MAP_TILE_RENDER_SUPPORTED false" in header
+    assert "connectivity.wifi_connected" in model
+    assert "snapshot->map_tile_provider_saved &&" in model
+    assert "snapshot->map_tile_render_supported" in model
+    assert '"tile_render_pending"' in model
     assert '"sd_cache_required"' in model
     assert '"wifi_required"' in model
     assert "snapshot->map_tile_sideload_supported = true" in model

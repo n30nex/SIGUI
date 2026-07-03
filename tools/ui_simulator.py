@@ -92,6 +92,7 @@ class Snapshot:
     map_tile_download_state: str
     map_tile_download_requires: str
     map_tile_download_supported: bool
+    map_tile_render_supported: bool
     map_tile_sideload_supported: bool
     map_tile_provider_saved: bool
     map_tile_url_template: str
@@ -152,8 +153,9 @@ def sample_snapshot() -> Snapshot:
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
         map_tile_download_state="provider_required",
-        map_tile_download_requires="Connect Wi-Fi, configure an allowed tile provider with attribution, then download only your area",
+        map_tile_download_requires="Connected Wi-Fi, ready SD cache, saved location, allowed provider, attribution, and tile rendering proof",
         map_tile_download_supported=False,
+        map_tile_render_supported=False,
         map_tile_sideload_supported=True,
         map_tile_provider_saved=False,
         map_tile_url_template="",
@@ -256,8 +258,9 @@ def large_mesh_snapshot() -> Snapshot:
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
         map_tile_download_state="provider_required",
-        map_tile_download_requires="Connect Wi-Fi, configure an allowed tile provider with attribution, then download only your area",
+        map_tile_download_requires="Connected Wi-Fi, ready SD cache, saved location, allowed provider, attribution, and tile rendering proof",
         map_tile_download_supported=False,
+        map_tile_render_supported=False,
         map_tile_sideload_supported=True,
         map_tile_provider_saved=False,
         map_tile_url_template="",
@@ -368,8 +371,9 @@ def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
         storage_setup_action="retained_history_sd_enabled",
         map_tile_backend="sd_map_tiles_ready",
         map_tile_cache_ready=True,
-        map_tile_download_supported=True,
-        map_tile_download_state="wifi_required",
+        map_tile_download_supported=False,
+        map_tile_render_supported=False,
+        map_tile_download_state="tile_render_pending",
     )
 
 
@@ -1024,7 +1028,9 @@ def render_map(s: Surface, snap: Snapshot):
         s,
         (250, 104, 464, 176),
         "Downloads",
-        "Ready" if snap.map_tile_download_supported else "Setup",
+        "Ready" if snap.map_tile_download_supported else (
+            "Setup" if snap.map_tile_render_supported else "Unavailable"
+        ),
         snap.map_tile_download_state,
         BLUE,
     )
@@ -1062,6 +1068,7 @@ def render_map(s: Surface, snap: Snapshot):
         {
             "map_tile_cache_ready": snap.map_tile_cache_ready,
             "map_tile_download_supported": snap.map_tile_download_supported,
+            "map_tile_render_supported": snap.map_tile_render_supported,
             "map_location_set": snap.map_location_set,
             "map_center_source": snap.map_center_source,
             "map_center_lat_e7": snap.map_lat_e7,
@@ -1131,17 +1138,21 @@ def render_map_tiles_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (178, 294, 232, 330), "Z+", ACCENT, action="map_tile_zoom_up")
     draw_button(s, (244, 294, 306, 330), "Save", GREEN, action="save_map_tile_provider")
     draw_button(s, (314, 294, 380, 330), "Clear", AMBER, action="clear_map_tile_provider")
-    draw_button(
-        s,
-        (16, 340, 128, 378),
-        "Download",
-        BLUE,
-        action="download_center_tile",
-        destination=None,
-        public_rf_tx=False,
-        formats_sd=False,
-    )
-    s.text("Downloads one center tile for your saved D1L location.", (142, 340, 464, 362), 12, TEXT, True)
+    if snap.map_tile_download_supported:
+        draw_button(
+            s,
+            (16, 340, 128, 378),
+            "Download",
+            BLUE,
+            action="download_center_tile",
+            destination=None,
+            public_rf_tx=False,
+            formats_sd=False,
+        )
+        s.text("Downloads one center tile for your saved D1L location.", (142, 340, 464, 362), 12, TEXT, True)
+    else:
+        s.text("Live download unavailable", (28, 340, 214, 362), 12, AMBER, True)
+        s.text("Tile render pending; use serial canaries for SD cache proof.", (218, 340, 464, 362), 11, TEXT, True)
     s.text("No public OSM bulk tile servers. Visible attribution is required.", (28, 382, 452, 408), 11, AMBER, True)
 
     s.round_rect((16, 416, 464, 470), (10, 16, 24), BORDER, 8)
@@ -1777,8 +1788,8 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Zoom 12",
         "Save",
         "Clear",
-        "Download",
-        "Downloads one center tile for your saved D1L location.",
+        "Live download unavailable",
+        "Tile render pending; use serial canaries for SD cache proof.",
         "No public OSM bulk tile servers. Visible attribution is required.",
         "Keyboard",
         "Close",
@@ -2001,7 +2012,6 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
             {"view": "map_tiles_sheet", "action": "map_tile_zoom_down"},
             {"view": "map_tiles_sheet", "action": "map_tile_zoom_up"},
             {"view": "map_tiles_sheet", "action": "save_map_tile_provider"},
-            {"view": "map_tiles_sheet", "action": "download_center_tile", "public_rf_tx": False, "formats_sd": False},
             {"view": "map_tiles_sheet", "action": "close_map_tiles", "destination": "map"},
             {"view": "map", "action": "open_map_location_picker", "destination": "map_location_sheet"},
             {"view": "map_location_sheet", "action": "edit_map_latitude"},

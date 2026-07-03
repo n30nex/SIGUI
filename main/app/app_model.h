@@ -26,6 +26,7 @@
 #define D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY
 #define D1L_HOME_MESSAGE_PREVIEW 5U
 #define D1L_HOME_REPEATER_PREVIEW 3U
+#define D1L_MAP_TILE_RENDER_SUPPORTED false
 
 typedef struct {
     bool is_dm;
@@ -103,6 +104,7 @@ typedef struct {
     bool map_page_supported;
     bool map_tile_cache_ready;
     bool map_tile_download_supported;
+    bool map_tile_render_supported;
     bool map_tile_sideload_supported;
     bool map_location_set;
     bool map_tile_provider_saved;
