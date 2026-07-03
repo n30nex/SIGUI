@@ -706,7 +706,11 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
 
 void setup() {
     Serial.begin(115200);
-    delay(1500);
+    const uint32_t serial_wait_start = millis();
+    while (!Serial && millis() - serial_wait_start < 5000U) {
+        delay(10);
+    }
+    delay(500);
     print_progress("setup_start");
     SmokeResult result = run_smoke();
     print_progress("raw_probe_start");
