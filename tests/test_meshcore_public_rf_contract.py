@@ -19,6 +19,49 @@ def test_meshcore_service_builds_public_group_text_packets():
     assert "Radio.Send(cmd->raw, cmd->raw_len)" in source
 
 
+def test_meshcore_service_rejects_139_char_user_text_without_truncation():
+    source = read("main/mesh/meshcore_service.c")
+    console = read("main/comms/usb_console.c")
+    ui = read("main/ui/ui_phase1.c")
+
+    assert "#define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS" in source
+    assert "D1L_MESHCORE_USER_TEXT_MAX == 138U" in source
+    assert "return ESP_ERR_INVALID_SIZE;" in source
+    assert "validate_user_text(text)" in source
+
+    public_builder = source.split("static esp_err_t build_public_text_packet", 1)[1].split(
+        "static esp_err_t calc_dm_ack_hash", 1
+    )[0]
+    dm_builder = source.split("static esp_err_t build_dm_text_packet", 1)[1].split(
+        "static uint8_t path_hash_size", 1
+    )[0]
+    public_sender = source.split("esp_err_t d1l_meshcore_service_send_public", 1)[1].split(
+        "esp_err_t d1l_meshcore_service_send_dm", 1
+    )[0]
+    dm_sender = source.split("esp_err_t d1l_meshcore_service_send_dm", 1)[1].split(
+        "esp_err_t d1l_meshcore_service_request_trace_probe", 1
+    )[0]
+
+    assert "validate_user_text(text)" in public_builder
+    assert "validate_user_text(text)" in dm_builder
+    assert 'snprintf((char *)&plain[5]' not in public_builder
+    assert 'snprintf((char *)&plain[5]' not in dm_builder
+    assert "memcpy(&plain[5], text, message_len)" in public_builder
+    assert "memcpy(&plain[5], text, message_len)" in dm_builder
+    assert "validate_user_text(text)" in public_sender
+    assert public_sender.index("validate_user_text(text)") < public_sender.index(
+        "meshcore_service_send_command(&start_cmd"
+    )
+    assert "validate_user_text(text)" in dm_sender
+    assert dm_sender.index("validate_user_text(text)") < dm_sender.index(
+        "d1l_meshcore_service_ensure_identity()"
+    )
+
+    assert "MESSAGE_TOO_LONG" in console
+    assert "max 138 characters" in console
+    assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
+
+
 def test_meshcore_service_decodes_verified_adverts():
     source = read("main/mesh/meshcore_service.c")
     cmake = read("main/CMakeLists.txt")

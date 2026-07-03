@@ -51,6 +51,7 @@
 #define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
 #define D1L_MESHCORE_MAX_RAW_PACKET 255U
 #define D1L_MESHCORE_MAX_TEXT_BYTES 160U
+#define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
 #define D1L_MESHCORE_PREAMBLE_LOW_SF 32U
 #define D1L_MESHCORE_TX_TIMEOUT_MS 5000U
@@ -61,6 +62,10 @@
 #define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 4096U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
+_Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
+               "MeshCore user text limit must reject 139+ chars");
+_Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
+               "MeshCore plaintext buffer must fit the user text limit");
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -169,6 +174,19 @@ static void hex_prefix(char *dest, size_t dest_size, const uint8_t *src, size_t 
         dest[out++] = hex[src[i] & 0x0fU];
     }
     dest[out] = '\0';
+}
+
+static esp_err_t validate_user_text(const char *text)
+{
+    if (text == NULL || text[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0; i <= D1L_MESHCORE_USER_TEXT_MAX; ++i) {
+        if (text[i] == '\0') {
+            return ESP_OK;
+        }
+    }
+    return ESP_ERR_INVALID_SIZE;
 }
 
 static int hex_nibble(char c)
@@ -615,26 +633,22 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
                                           uint32_t tx_timestamp, uint8_t *raw,
                                           size_t raw_size, uint8_t *out_len)
 {
-    if (!text || !raw || !out_len || text[0] == '\0') {
+    if (!raw || !out_len) {
         return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t text_ret = validate_user_text(text);
+    if (text_ret != ESP_OK) {
+        return text_ret;
     }
     if (path_hash_bytes < 1 || path_hash_bytes > 3) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES];
+    uint8_t plain[D1L_MESHCORE_MAX_TEXT_BYTES] = {0};
     write_le32(plain, tx_timestamp);
     plain[4] = 0;
-
-    int written = snprintf((char *)&plain[5], sizeof(plain) - 5U, "%s", text);
-    if (written < 0) {
-        return ESP_FAIL;
-    }
-    const size_t max_message_len = sizeof(plain) - 5U - 1U;
-    size_t message_len = (size_t)written;
-    if (message_len > max_message_len) {
-        message_len = max_message_len;
-    }
+    const size_t message_len = strlen(text);
+    memcpy(&plain[5], text, message_len);
     const size_t plain_len = 5U + message_len;
 
     if (raw_size < 4U) {
@@ -702,9 +716,12 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
                                       size_t raw_size, uint8_t *out_len,
                                       uint32_t *out_ack_hash)
 {
-    if (!settings || !settings->identity_ready || !contact || !text || text[0] == '\0' ||
-        !raw || !out_len || !out_ack_hash) {
+    if (!settings || !settings->identity_ready || !contact || !raw || !out_len || !out_ack_hash) {
         return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t text_ret = validate_user_text(text);
+    if (text_ret != ESP_OK) {
+        return text_ret;
     }
     if (contact->public_key_hex[0] == '\0') {
         return ESP_ERR_INVALID_STATE;
@@ -729,16 +746,8 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
     write_le32(plain, tx_timestamp);
     const uint8_t attempt = 0;
     plain[4] = (uint8_t)((D1L_MESHCORE_TXT_TYPE_PLAIN << 2) | attempt);
-
-    int written = snprintf((char *)&plain[5], sizeof(plain) - 5U, "%s", text);
-    if (written < 0) {
-        return ESP_FAIL;
-    }
-    const size_t max_message_len = sizeof(plain) - 5U - 1U;
-    size_t message_len = (size_t)written;
-    if (message_len > max_message_len) {
-        message_len = max_message_len;
-    }
+    const size_t message_len = strlen(text);
+    memcpy(&plain[5], text, message_len);
     const size_t plain_len = 5U + message_len;
 
     esp_err_t ret = calc_dm_ack_hash(out_ack_hash, plain, plain_len,
@@ -1601,14 +1610,14 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
 
 esp_err_t d1l_meshcore_service_send_public(const char *text)
 {
-    if (text == NULL || text[0] == '\0') {
-        return ESP_ERR_INVALID_ARG;
+    esp_err_t ret = validate_user_text(text);
+    if (ret != ESP_OK) {
+        return ret;
     }
     d1l_meshcore_service_cmd_t start_cmd = {
         .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
     };
-    esp_err_t ret =
-        meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
@@ -1656,10 +1665,14 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
 
 esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text)
 {
-    if (!fingerprint || fingerprint[0] == '\0' || !text || text[0] == '\0') {
+    if (!fingerprint || fingerprint[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = d1l_meshcore_service_ensure_identity();
+    esp_err_t ret = validate_user_text(text);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = d1l_meshcore_service_ensure_identity();
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;

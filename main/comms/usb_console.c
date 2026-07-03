@@ -836,8 +836,10 @@ static void cmd_mesh_send_public(const char *line)
     if (ret != ESP_OK) {
         err_result("mesh send public",
                    ret == ESP_ERR_INVALID_ARG ? "EMPTY_MESSAGE" :
+                   ret == ESP_ERR_INVALID_SIZE ? "MESSAGE_TOO_LONG" :
                    ret == ESP_ERR_INVALID_STATE ? "MESHCORE_TX_BUSY_OR_RADIO_NOT_READY" :
                    ret == ESP_ERR_NOT_SUPPORTED ? "UNSUPPORTED_RADIO_PROFILE" : "MESHCORE_SEND_FAILED",
+                   ret == ESP_ERR_INVALID_SIZE ? "max 138 characters" :
                    "verify radio profile is US/CAN 910.525 BW62.5 SF7 CR5 and try again");
         return;
     }
@@ -3467,7 +3469,10 @@ static void cmd_mesh_send_dm(const char *line)
     }
     esp_err_t ret = d1l_meshcore_service_send_dm(fingerprint, text);
     if (ret != ESP_OK) {
-        err_result("mesh send dm", esp_err_to_name(ret), "DM requires a promoted contact with a retained public key");
+        err_result("mesh send dm",
+                   ret == ESP_ERR_INVALID_SIZE ? "MESSAGE_TOO_LONG" : esp_err_to_name(ret),
+                   ret == ESP_ERR_INVALID_SIZE ? "max 138 characters" :
+                   "DM requires a promoted contact with a retained public key");
         return;
     }
     ok_begin("mesh send dm");
