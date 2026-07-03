@@ -287,6 +287,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
         "void append_probe_tokens", 1
     )[0]
     assert "snapshot_fs_is_fat32(snapshot)" in snapshot_body
+    directory_body = sketch.split("bool ensure_directory", 1)[1].split(
+        "bool manifest_file_valid", 1
+    )[0]
+    assert "SD.mkdir(path) || SD.exists(path)" in directory_body
+    assert "path_is_directory" not in sketch
     assert '"none",\n        false,\n        0,\n        0,' in sketch
     assert '"none",\n        false,\n        false,\n        0,\n        0,' not in sketch
 

@@ -1438,20 +1438,11 @@ void fill_capacity(SdSnapshot &snapshot) {
     snapshot.free_kb = 0;
 }
 
-bool path_is_directory(const char *path) {
-    File file = SD.open(path, FILE_READ);
-    const bool is_dir = file && file.isDirectory();
-    if (file) {
-        file.close();
-    }
-    return is_dir;
-}
-
 bool ensure_directory(const char *path) {
     if (SD.exists(path)) {
-        return path_is_directory(path);
+        return true;
     }
-    return SD.mkdir(path) && path_is_directory(path);
+    return SD.mkdir(path) || SD.exists(path);
 }
 
 bool manifest_file_valid(const char *path) {
