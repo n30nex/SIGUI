@@ -80,3 +80,4 @@ def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
 def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"
+    assert smoke_d1l.expected_command_name("ui scroll-probe storage") == "ui scroll-probe"
