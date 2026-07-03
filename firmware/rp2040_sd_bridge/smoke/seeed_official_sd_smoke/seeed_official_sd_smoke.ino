@@ -31,6 +31,10 @@ struct SmokeResult {
     bool fat32;
     bool needs_fat32;
     uint8_t fat_type;
+    bool mount_sd_2arg;
+    bool mount_sd_2arg_spi_begin;
+    bool mount_sd_3arg_spi_begin;
+    const char *mount_mode;
     bool root_open;
     bool mkdir_ok;
     bool write_open;
@@ -53,8 +57,14 @@ struct RawProbe {
     bool present;
     bool cmd8_echo_ok;
     bool acmd41_ready;
+    bool high_capacity;
+    bool sector0_read;
+    bool sector0_sig_ok;
+    bool boot_sector_read;
+    bool boot_sector_sig_ok;
     uint8_t error_code;
     uint8_t error_data;
+    uint8_t partition_type;
     uint8_t miso_pullup_level;
     uint8_t miso_idle_level;
     uint8_t idle_rx_ff;
@@ -67,12 +77,25 @@ struct RawProbe {
     uint8_t acmd41_response;
     uint8_t acmd41_attempts;
     uint8_t ocr[4];
+    uint32_t first_lba;
+    const char *fs_hint;
 };
 
-void configure_seeed_sd_bus() {
+void float_sd_lines_for_power_off();
+
+void settle_seeed_sd_power(bool force_power_cycle) {
     pinMode(SD_POWER_PIN, OUTPUT);
+    if (force_power_cycle) {
+        float_sd_lines_for_power_off();
+        digitalWrite(SD_POWER_PIN, LOW);
+        delay(SD_POWER_CYCLE_OFF_MS);
+    }
     digitalWrite(SD_POWER_PIN, HIGH);
-    delay(1000);
+    delay(SD_POWER_SETTLE_MS);
+}
+
+void configure_seeed_sd_bus() {
+    settle_seeed_sd_power(false);
 
     Wire.setSDA(SD_I2C_SDA_PIN);
     Wire.setSCL(SD_I2C_SCL_PIN);
@@ -85,6 +108,27 @@ void configure_seeed_sd_bus() {
     pinMode(SD_CS_PIN, OUTPUT);
     digitalWrite(SD_CS_PIN, HIGH);
     pinMode(SD_MISO_PIN, INPUT_PULLUP);
+}
+
+void configure_seeed_sd_bus_for_mount(bool force_power_cycle, bool explicit_spi_begin) {
+    SD.end(false);
+    SPI1.end();
+    settle_seeed_sd_power(force_power_cycle);
+
+    Wire.setSDA(SD_I2C_SDA_PIN);
+    Wire.setSCL(SD_I2C_SCL_PIN);
+    Wire.begin();
+
+    SPI1.setSCK(SD_SCK_PIN);
+    SPI1.setTX(SD_MOSI_PIN);
+    SPI1.setRX(SD_MISO_PIN);
+    SPI1.setCS(SD_CS_PIN);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    pinMode(SD_MISO_PIN, INPUT_PULLUP);
+    if (explicit_spi_begin) {
+        SPI1.begin();
+    }
 }
 
 DetectSample sample_detect() {
@@ -192,9 +236,121 @@ uint8_t sd_command(uint8_t command,
     return response;
 }
 
+uint32_t read_le32(const uint8_t *bytes) {
+    return static_cast<uint32_t>(bytes[0]) |
+           (static_cast<uint32_t>(bytes[1]) << 8) |
+           (static_cast<uint32_t>(bytes[2]) << 16) |
+           (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
+const char *sector_fs_hint(const uint8_t *sector) {
+    if (memcmp(sector + 3, "EXFAT   ", 8) == 0) {
+        return "exfat";
+    }
+    if (memcmp(sector + 82, "FAT32   ", 8) == 0) {
+        return "fat32";
+    }
+    if (memcmp(sector + 54, "FAT16   ", 8) == 0) {
+        return "fat16";
+    }
+    if (memcmp(sector + 54, "FAT12   ", 8) == 0) {
+        return "fat12";
+    }
+    return "unknown";
+}
+
+bool raw_read_sector(uint32_t lba, bool high_capacity, uint8_t *sector,
+                     uint8_t *response_out, uint8_t *token_out) {
+    const uint32_t address = high_capacity ? lba : (lba * 512UL);
+    digitalWrite(SD_CS_PIN, LOW);
+    (void)wait_selected_ready(10);
+    (void)spi_transfer(0x40U | 17U);
+    (void)spi_transfer(static_cast<uint8_t>(address >> 24));
+    (void)spi_transfer(static_cast<uint8_t>(address >> 16));
+    (void)spi_transfer(static_cast<uint8_t>(address >> 8));
+    (void)spi_transfer(static_cast<uint8_t>(address));
+    (void)spi_transfer(0xFF);
+    const uint8_t response = wait_sd_response();
+    if (response_out) {
+        *response_out = response;
+    }
+    if (response != 0U) {
+        digitalWrite(SD_CS_PIN, HIGH);
+        (void)spi_transfer(0xFF);
+        return false;
+    }
+
+    uint8_t token = 0xFF;
+    const uint32_t start_ms = millis();
+    do {
+        token = spi_transfer(0xFF);
+        if (token == 0xFEU) {
+            break;
+        }
+    } while (millis() - start_ms < 100U);
+    if (token_out) {
+        *token_out = token;
+    }
+    if (token != 0xFEU) {
+        digitalWrite(SD_CS_PIN, HIGH);
+        (void)spi_transfer(0xFF);
+        return false;
+    }
+
+    for (uint16_t i = 0; i < 512U; ++i) {
+        sector[i] = spi_transfer(0xFF);
+    }
+    (void)spi_transfer(0xFF);
+    (void)spi_transfer(0xFF);
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)spi_transfer(0xFF);
+    return true;
+}
+
+void parse_raw_sector0(RawProbe &probe) {
+    uint8_t sector[512] = {0};
+    uint8_t response = 0xFF;
+    uint8_t token = 0xFF;
+    probe.sector0_read = raw_read_sector(0, probe.high_capacity, sector, &response, &token);
+    if (!probe.sector0_read) {
+        probe.error_code = 6U;
+        probe.error_data = response != 0U ? response : token;
+        return;
+    }
+
+    probe.sector0_sig_ok = sector[510] == 0x55U && sector[511] == 0xAAU;
+    if (!probe.sector0_sig_ok) {
+        probe.fs_hint = "no_55aa";
+        return;
+    }
+
+    probe.partition_type = sector[0x1BE + 4];
+    probe.first_lba = read_le32(sector + 0x1BE + 8);
+    const bool has_mbr_partition = probe.partition_type != 0U && probe.first_lba != 0U;
+    const uint8_t *boot_sector = sector;
+    uint8_t boot[512] = {0};
+    if (has_mbr_partition) {
+        probe.boot_sector_read =
+            raw_read_sector(probe.first_lba, probe.high_capacity, boot, &response, &token);
+        if (probe.boot_sector_read) {
+            boot_sector = boot;
+        }
+    } else {
+        probe.boot_sector_read = true;
+    }
+    if (!probe.boot_sector_read) {
+        probe.error_code = 7U;
+        probe.error_data = response != 0U ? response : token;
+        return;
+    }
+    probe.boot_sector_sig_ok = boot_sector[510] == 0x55U && boot_sector[511] == 0xAAU;
+    probe.fs_hint = probe.boot_sector_sig_ok ? sector_fs_hint(boot_sector) : "boot_no_55aa";
+}
+
 RawProbe run_raw_probe() {
     RawProbe probe = {};
     probe.ran = true;
+    probe.fs_hint = "not_read";
     probe.cmd0_response = 0xFF;
     probe.cmd8_response = 0xFF;
     probe.cmd0_ready_byte = 0xFF;
@@ -266,6 +422,8 @@ RawProbe run_raw_probe() {
     }
 
     (void)sd_command(58, 0, 0xFD, probe.ocr, sizeof(probe.ocr), nullptr);
+    probe.high_capacity = (probe.ocr[0] & 0x40U) != 0U;
+    parse_raw_sector0(probe);
     SPI1.endTransaction();
     probe.error_code = 0U;
     probe.error_data = probe.ocr[0];
@@ -307,8 +465,33 @@ bool read_smoke_file(const char *path) {
 
 SmokeResult run_smoke() {
     SmokeResult result = {};
-    configure_seeed_sd_bus();
-    result.mounted = SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+    result.mount_mode = "none";
+
+    configure_seeed_sd_bus_for_mount(true, false);
+    result.mount_sd_2arg = SD.begin(SD_CS_PIN, SPI1);
+    result.mounted = result.mount_sd_2arg;
+    if (result.mounted) {
+        result.mount_mode = "sd_begin_cs_spi1";
+    }
+
+    if (!result.mounted) {
+        configure_seeed_sd_bus_for_mount(true, true);
+        result.mount_sd_2arg_spi_begin = SD.begin(SD_CS_PIN, SPI1);
+        result.mounted = result.mount_sd_2arg_spi_begin;
+        if (result.mounted) {
+            result.mount_mode = "spi1_begin_then_sd_begin_cs_spi1";
+        }
+    }
+
+    if (!result.mounted) {
+        configure_seeed_sd_bus_for_mount(true, true);
+        result.mount_sd_3arg_spi_begin = SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+        result.mounted = result.mount_sd_3arg_spi_begin;
+        if (result.mounted) {
+            result.mount_mode = "spi1_begin_then_sd_begin_cs_hz_spi1";
+        }
+    }
+
     if (!result.mounted) {
         return result;
     }
@@ -392,10 +575,18 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
     print_bool_field("format_performed", false);
     print_bool_field("detect_used_for_ok", false);
     print_bool_field("power_measured", false);
+    print_bool_field("mount_sd_2arg", result.mount_sd_2arg);
+    print_bool_field("mount_sd_2arg_spi_begin", result.mount_sd_2arg_spi_begin);
+    print_bool_field("mount_sd_3arg_spi_begin", result.mount_sd_3arg_spi_begin);
     print_bool_field("diag_ran", probe.ran);
     print_bool_field("raw_present", probe.present);
     print_bool_field("raw_cmd8_echo_ok", probe.cmd8_echo_ok);
     print_bool_field("raw_acmd41_ready", probe.acmd41_ready);
+    print_bool_field("raw_high_capacity", probe.high_capacity);
+    print_bool_field("raw_sector0_read", probe.sector0_read);
+    print_bool_field("raw_sector0_sig_ok", probe.sector0_sig_ok);
+    print_bool_field("raw_boot_sector_read", probe.boot_sector_read);
+    print_bool_field("raw_boot_sector_sig_ok", probe.boot_sector_sig_ok);
     Serial.print("\"cs\":13,\"sck\":10,\"mosi\":11,\"miso\":12,");
     Serial.print("\"power\":18,\"detect_pin\":7,\"i2c_sda\":20,\"i2c_scl\":21,");
     Serial.print("\"hz\":");
@@ -422,10 +613,16 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
     print_u8_field("raw_cmd55", probe.cmd55_response);
     print_u8_field("raw_acmd41", probe.acmd41_response);
     print_u8_field("raw_acmd41_attempts", probe.acmd41_attempts);
+    print_u8_field("raw_partition_type", probe.partition_type);
+    Serial.print("\"raw_first_lba\":");
+    Serial.print(probe.first_lba);
+    Serial.print(',');
     print_u8_field("raw_ocr0", probe.ocr[0]);
     print_u8_field("raw_ocr1", probe.ocr[1]);
     print_u8_field("raw_ocr2", probe.ocr[2]);
     print_u8_field("raw_ocr3", probe.ocr[3]);
+    print_string_field("mount_mode", result.mount_mode);
+    print_string_field("raw_fs_hint", probe.fs_hint);
     print_string_field("power_state", "gpio18_commanded_high_not_measured");
     Serial.print("\"format\":\"non_destructive\",\"max_card_gb\":");
     Serial.print(MAX_CARD_GB);

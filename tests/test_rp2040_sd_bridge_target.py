@@ -92,6 +92,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.setCS(SD_CS_PIN)" in sketch
     assert "s_sd_pin_cs_ok = true;" in sketch
     assert "bool s_sd_mounted = false;" in sketch
+    assert "SD.begin(SD_CS_PIN, SPI1)" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
     assert "SD.end(false)" in sketch
     assert "mount_sd_seeed_sample_path" in sketch
@@ -111,6 +112,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in seeed_config
     assert "Wire.setSCL(SD_I2C_SCL_PIN)" in seeed_config
     assert "Wire.begin()" in seeed_config
+    assert "begin_sd_filesystem_spi1_default(false)" in sketch
     assert "begin_sd_filesystem(false)" in sketch
     assert "SDFS.info(info)" in sketch
     assert "prepare_sd_card_init(power_high, force_power_cycle)" in sketch
@@ -404,7 +406,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "constexpr uint32_t SD_SPI_HZ = 1000000U;" in smoke
     assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in smoke
     assert "constexpr uint8_t MAX_CARD_GB = 32;" in smoke
-    assert "delay(1000)" in smoke
+    assert "delay(SD_POWER_SETTLE_MS)" in smoke
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in smoke
     assert "Wire.setSCL(SD_I2C_SCL_PIN)" in smoke
     assert "SPI1.setSCK(SD_SCK_PIN)" in smoke
@@ -412,6 +414,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "SPI1.setRX(SD_MISO_PIN)" in smoke
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in smoke
     assert "SPI1.setCS(SD_CS_PIN)" in smoke
+    assert "SD.begin(SD_CS_PIN, SPI1)" in smoke
     assert 'SD.open("/")' in smoke
     assert "result.fat_type = SD.fatType()" in smoke
     assert "result.fat32 = result.fat_type == 32U" in smoke
@@ -429,6 +432,11 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "raw_cmd8_ready" in smoke
     assert "raw_acmd41" in smoke
     assert "raw_cmd8_echo_ok" in smoke
+    assert "raw_sector0_read" in smoke
+    assert "raw_partition_type" in smoke
+    assert "raw_first_lba" in smoke
+    assert "raw_fs_hint" in smoke
+    assert "mount_mode" in smoke
     assert "will_format" in smoke
     assert "format_performed" in smoke
     assert "detect_used_for_ok" in smoke

@@ -415,8 +415,46 @@ bool begin_sd_filesystem(bool capture_failure_details = true) {
     return false;
 }
 
+bool begin_sd_filesystem_spi1_default(bool capture_failure_details = true) {
+    if (SD.begin(SD_CS_PIN, SPI1)) {
+        s_sd_mounted = true;
+        s_last_mount_error = 0;
+        s_last_mount_data = 0;
+        return true;
+    }
+    s_sd_mounted = false;
+    if (capture_failure_details) {
+        capture_sd_mount_error(s_sd_spi_options);
+    } else {
+        s_last_mount_error = 0xFC;
+        s_last_mount_data = 0;
+    }
+    SD.end(false);
+    return false;
+}
+
 bool mount_sd_seeed_sample_path(bool power_high, bool force_power_cycle) {
+    SD.end(false);
+    SPI1.end();
     configure_seeed_sd_bus(power_high, force_power_cycle);
+    s_sd_mounted = false;
+    if (begin_sd_filesystem_spi1_default(false)) {
+        return true;
+    }
+
+    SD.end(false);
+    SPI1.end();
+    configure_seeed_sd_bus(power_high, true);
+    SPI1.begin();
+    s_sd_mounted = false;
+    if (begin_sd_filesystem_spi1_default(false)) {
+        return true;
+    }
+
+    SD.end(false);
+    SPI1.end();
+    configure_seeed_sd_bus(power_high, true);
+    SPI1.begin();
     s_sd_mounted = false;
     return begin_sd_filesystem(false);
 }
