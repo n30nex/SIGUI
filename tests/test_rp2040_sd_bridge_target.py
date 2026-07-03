@@ -164,7 +164,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "ignore_leading_zero && response == 0x00U" in sketch
     assert "SD_CMD0_READY_SAMPLE_MS" in sketch
     assert "for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip)" in sketch
-    assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true," in sketch
+    assert "sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, false," in sketch
+    assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, 0, true," in sketch
     assert 'append_probe_tokens(line, "bb", diag.bitbang)' in sketch
     assert 'append_probe_tokens(line, "bi", diag.bitbang_inverted_cs)' in sketch
     assert 'append_probe_tokens(line, "bs", diag.bitbang_sck_mosi_swapped)' in sketch
@@ -181,7 +182,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "probe.error_code = 4" in sketch
     assert "probe.cmd0_response = cmd0" in sketch
     assert "probe.cmd8_response = cmd8" in sketch
-    assert "&probe.cmd0_ready_byte, true, true" in sketch
+    assert "&probe.cmd0_ready_byte, true, false" in sketch
     assert "selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS" in sketch
     assert "&probe.cmd8_ready_byte, false" in sketch
     assert "wait_selected_ready ? sd_wait_ready(selected_ready_wait_ms) : 0xFFU" in sketch

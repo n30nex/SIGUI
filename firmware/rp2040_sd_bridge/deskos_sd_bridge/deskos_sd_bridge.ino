@@ -835,7 +835,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, true,
+        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, false,
                           SD_CMD0_READY_SAMPLE_MS);
         if (cmd0 == 0x01U) {
             break;
@@ -916,7 +916,7 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true,
+        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, 0, true,
                                   SD_CMD0_READY_SAMPLE_MS, cs_active_high);
         if (cmd0 == 0x01U) {
             break;
@@ -924,7 +924,7 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
-                                          true, slip, true, SD_CMD0_READY_SAMPLE_MS,
+                                          false, slip, true, SD_CMD0_READY_SAMPLE_MS,
                                           cs_active_high);
                 if (cmd0 == 0x01U) {
                     break;
@@ -1005,7 +1005,7 @@ CardProbe manual_probe_card_bitbang_sck_mosi_swapped(bool power_high,
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
         cmd0 = bitbang_sd_command_sck_mosi_swapped(0, 0, 0x95, nullptr, 0,
-                                                   &probe.cmd0_ready_byte, true, 0, true,
+                                                   &probe.cmd0_ready_byte, false, 0, true,
                                                    SD_CMD0_READY_SAMPLE_MS);
         if (cmd0 == 0x01U) {
             break;
@@ -1013,7 +1013,7 @@ CardProbe manual_probe_card_bitbang_sck_mosi_swapped(bool power_high,
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command_sck_mosi_swapped(0, 0, 0x95, nullptr, 0,
-                                                           &probe.cmd0_ready_byte, true,
+                                                           &probe.cmd0_ready_byte, false,
                                                            slip, true,
                                                            SD_CMD0_READY_SAMPLE_MS);
                 if (cmd0 == 0x01U) {
@@ -1101,7 +1101,7 @@ CardProbe manual_probe_card_bitbang_pin_map(const BitbangPinMap &pins, const cha
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
         cmd0 = bitbang_sd_command_pin_map(pins, 0, 0, 0x95, nullptr, 0,
-                                          &probe.cmd0_ready_byte, true, 0, true,
+                                          &probe.cmd0_ready_byte, false, 0, true,
                                           SD_CMD0_READY_SAMPLE_MS);
         if (cmd0 == 0x01U) {
             break;
@@ -1109,7 +1109,7 @@ CardProbe manual_probe_card_bitbang_pin_map(const BitbangPinMap &pins, const cha
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command_pin_map(pins, 0, 0, 0x95, nullptr, 0,
-                                                  &probe.cmd0_ready_byte, true,
+                                                  &probe.cmd0_ready_byte, false,
                                                   slip, true,
                                                   SD_CMD0_READY_SAMPLE_MS);
                 if (cmd0 == 0x01U) {
