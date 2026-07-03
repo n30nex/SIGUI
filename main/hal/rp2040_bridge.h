@@ -10,6 +10,7 @@
 #define D1L_RP2040_FILE_LINE_MAX 512U
 #define D1L_RP2040_FILE_PATH_MAX 96U
 #define D1L_RP2040_FILE_CHUNK_MAX 192U
+#define D1L_RP2040_STOCK_PROBE_MAX_BYTES 192U
 
 typedef struct {
     bool uart_ready;
@@ -113,12 +114,26 @@ typedef struct {
     char note[48];
 } d1l_rp2040_file_result_t;
 
+typedef struct {
+    bool bridge_ready;
+    bool response_seen;
+    bool json_seen;
+    bool response_truncated;
+    uint32_t bytes_read;
+    esp_err_t last_error;
+    char sent_cobs_hex[8];
+    char response_ascii[D1L_RP2040_STOCK_PROBE_MAX_BYTES + 1U];
+    char response_hex[(D1L_RP2040_STOCK_PROBE_MAX_BYTES * 2U) + 1U];
+    char note[96];
+} d1l_rp2040_stock_probe_t;
+
 esp_err_t d1l_rp2040_bridge_init(void);
 esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status);
 esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms);
 esp_err_t d1l_rp2040_bridge_double_reset(uint32_t hold_ms, uint32_t gap_ms, uint32_t settle_ms);
 esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_enter_bootloader(uint32_t timeout_ms);
+esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_mount_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms);
 esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t timeout_ms);

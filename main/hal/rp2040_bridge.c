@@ -222,6 +222,37 @@ static void init_file_result(d1l_rp2040_file_result_t *result, esp_err_t err)
     }
 }
 
+static void init_stock_probe(d1l_rp2040_stock_probe_t *probe, esp_err_t err)
+{
+    memset(probe, 0, sizeof(*probe));
+    probe->bridge_ready = s_status.uart_ready;
+    probe->last_error = err;
+    snprintf(probe->sent_cobs_hex, sizeof(probe->sent_cobs_hex), "02A500");
+    snprintf(probe->note, sizeof(probe->note), "%s",
+             s_status.uart_ready ?
+             "Seeed stock RP2040 model-title probe has not answered" :
+             "RP2040 UART bridge is unavailable");
+}
+
+static void append_stock_probe_byte(d1l_rp2040_stock_probe_t *probe, uint8_t byte)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    const uint32_t index = probe->bytes_read;
+    probe->bytes_read++;
+    if (index >= D1L_RP2040_STOCK_PROBE_MAX_BYTES) {
+        probe->response_truncated = true;
+        return;
+    }
+    probe->response_hex[index * 2U] = hex[(byte >> 4) & 0x0FU];
+    probe->response_hex[(index * 2U) + 1U] = hex[byte & 0x0FU];
+    probe->response_hex[(index * 2U) + 2U] = '\0';
+    probe->response_ascii[index] = (byte >= 0x20U && byte <= 0x7EU) ? (char)byte : '.';
+    probe->response_ascii[index + 1U] = '\0';
+    if (byte == '{') {
+        probe->json_seen = true;
+    }
+}
+
 static esp_err_t map_file_error(const char *err)
 {
     if (!err || err[0] == '\0') {
@@ -907,6 +938,63 @@ esp_err_t d1l_rp2040_bridge_enter_bootloader(uint32_t timeout_ms)
     bool ok = false;
     if (!parse_bool_token(line, "ok", &ok) || !ok) {
         return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uint32_t timeout_ms)
+{
+    if (out_probe == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        init_stock_probe(out_probe, s_status.init_result);
+        return s_status.init_result;
+    }
+
+    static const uint8_t seeed_model_title_query[] = {0x02U, 0xA5U, 0x00U};
+    init_stock_probe(out_probe, ESP_ERR_TIMEOUT);
+    uart_flush_input((uart_port_t)s_status.uart_port);
+    const int written = uart_write_bytes((uart_port_t)s_status.uart_port,
+                                         (const char *)seeed_model_title_query,
+                                         sizeof(seeed_model_title_query));
+    if (written != (int)sizeof(seeed_model_title_query)) {
+        out_probe->last_error = ESP_FAIL;
+        snprintf(out_probe->note, sizeof(out_probe->note),
+                 "could not write Seeed stock model-title COBS probe");
+        return ESP_FAIL;
+    }
+
+    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
+    bool saw_close_brace = false;
+    while (esp_timer_get_time() < deadline_us) {
+        uint8_t ch = 0;
+        int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
+        if (len <= 0) {
+            continue;
+        }
+        out_probe->response_seen = true;
+        append_stock_probe_byte(out_probe, ch);
+        if (ch == '}') {
+            saw_close_brace = true;
+            break;
+        }
+    }
+
+    if (!out_probe->response_seen) {
+        out_probe->last_error = ESP_ERR_TIMEOUT;
+        snprintf(out_probe->note, sizeof(out_probe->note),
+                 "Seeed stock model-title COBS probe timed out");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    out_probe->last_error = ESP_OK;
+    if (saw_close_brace && out_probe->json_seen) {
+        snprintf(out_probe->note, sizeof(out_probe->note),
+                 "Seeed stock RP2040 JSON response captured");
+    } else {
+        snprintf(out_probe->note, sizeof(out_probe->note),
+                 "Non-empty RP2040 response captured");
     }
     return ESP_OK;
 }

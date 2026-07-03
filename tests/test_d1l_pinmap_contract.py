@@ -41,8 +41,11 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert "d1l_rp2040_bridge_double_reset" in rp2040_header
     assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_enter_bootloader" in rp2040_header
+    assert "d1l_rp2040_bridge_stock_probe" in rp2040_header
     assert "D1L_RP2040_PING_QUERY" in rp2040_source
     assert "D1L_RP2040_BOOTLOADER_QUERY" in rp2040_source
+    assert "seeed_model_title_query" in rp2040_source
+    assert "{0x02U, 0xA5U, 0x00U}" in rp2040_source
     assert "tca9535_set_direction(pins->expander_reset, true)" in rp2040_source
     assert "tca9535_set_level(pins->expander_reset, false)" in rp2040_source
     assert "tca9535_set_level(pins->expander_reset, true)" in rp2040_source
@@ -53,6 +56,14 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert '"rp2040 bootloader"' in console
     assert 'cmd_rp2040_bootloader' in console
     assert 'strcmp(line, "rp2040 bootloader")' in console
+    assert '"rp2040 stock-probe"' in console
+    assert 'cmd_rp2040_stock_probe' in console
+    assert 'strcmp(line, "rp2040 stock-probe")' in console
+    stock_probe_body = console.split("static void cmd_rp2040_stock_probe", 1)[1].split("static void cmd_storage_status", 1)[0]
+    assert '\\"sent_cobs_hex\\"' in stock_probe_body
+    assert '\\"response_hex\\"' in stock_probe_body
+    assert '\\"response_ascii\\"' in stock_probe_body
+    assert '\\"sd_touched\\":false' in stock_probe_body
     assert '"rp2040 double-reset"' in console
     assert 'cmd_rp2040_double_reset' in console
     assert 'strncmp(line, "rp2040 double-reset"' in console
