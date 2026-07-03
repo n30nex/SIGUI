@@ -19,6 +19,7 @@ constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;
 constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
 constexpr uint16_t SD_ACMD41_TIMEOUT_MS = 1000;
+constexpr uint16_t SD_READ_TOKEN_TIMEOUT_MS = 1000;
 constexpr uint8_t MAX_CARD_GB = 32;
 
 constexpr const char *SMOKE_DIR = "/d1l_smoke";
@@ -64,6 +65,10 @@ struct RawProbe {
     bool boot_sector_sig_ok;
     uint8_t error_code;
     uint8_t error_data;
+    uint8_t sector0_response;
+    uint8_t sector0_token;
+    uint8_t boot_sector_response;
+    uint8_t boot_sector_token;
     uint8_t partition_type;
     uint8_t miso_pullup_level;
     uint8_t miso_idle_level;
@@ -287,7 +292,7 @@ bool raw_read_sector(uint32_t lba, bool high_capacity, uint8_t *sector,
         if (token == 0xFEU) {
             break;
         }
-    } while (millis() - start_ms < 100U);
+    } while (millis() - start_ms < SD_READ_TOKEN_TIMEOUT_MS);
     if (token_out) {
         *token_out = token;
     }
@@ -312,6 +317,8 @@ void parse_raw_sector0(RawProbe &probe) {
     uint8_t response = 0xFF;
     uint8_t token = 0xFF;
     probe.sector0_read = raw_read_sector(0, probe.high_capacity, sector, &response, &token);
+    probe.sector0_response = response;
+    probe.sector0_token = token;
     if (!probe.sector0_read) {
         probe.error_code = 6U;
         probe.error_data = response != 0U ? response : token;
@@ -332,11 +339,15 @@ void parse_raw_sector0(RawProbe &probe) {
     if (has_mbr_partition) {
         probe.boot_sector_read =
             raw_read_sector(probe.first_lba, probe.high_capacity, boot, &response, &token);
+        probe.boot_sector_response = response;
+        probe.boot_sector_token = token;
         if (probe.boot_sector_read) {
             boot_sector = boot;
         }
     } else {
         probe.boot_sector_read = true;
+        probe.boot_sector_response = 0U;
+        probe.boot_sector_token = 0xFEU;
     }
     if (!probe.boot_sector_read) {
         probe.error_code = 7U;
@@ -351,6 +362,10 @@ RawProbe run_raw_probe() {
     RawProbe probe = {};
     probe.ran = true;
     probe.fs_hint = "not_read";
+    probe.sector0_response = 0xFF;
+    probe.sector0_token = 0xFF;
+    probe.boot_sector_response = 0xFF;
+    probe.boot_sector_token = 0xFF;
     probe.cmd0_response = 0xFF;
     probe.cmd8_response = 0xFF;
     probe.cmd0_ready_byte = 0xFF;
@@ -424,6 +439,10 @@ RawProbe run_raw_probe() {
     (void)sd_command(58, 0, 0xFD, probe.ocr, sizeof(probe.ocr), nullptr);
     probe.high_capacity = (probe.ocr[0] & 0x40U) != 0U;
     parse_raw_sector0(probe);
+    if (!probe.sector0_read || !probe.boot_sector_read) {
+        SPI1.endTransaction();
+        return probe;
+    }
     SPI1.endTransaction();
     probe.error_code = 0U;
     probe.error_data = probe.ocr[0];
@@ -613,6 +632,10 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
     print_u8_field("raw_cmd55", probe.cmd55_response);
     print_u8_field("raw_acmd41", probe.acmd41_response);
     print_u8_field("raw_acmd41_attempts", probe.acmd41_attempts);
+    print_u8_field("raw_sector0_response", probe.sector0_response);
+    print_u8_field("raw_sector0_token", probe.sector0_token);
+    print_u8_field("raw_boot_sector_response", probe.boot_sector_response);
+    print_u8_field("raw_boot_sector_token", probe.boot_sector_token);
     print_u8_field("raw_partition_type", probe.partition_type);
     Serial.print("\"raw_first_lba\":");
     Serial.print(probe.first_lba);

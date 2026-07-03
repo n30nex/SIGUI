@@ -405,6 +405,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "constexpr uint8_t SD_I2C_SCL_PIN = 21;" in smoke
     assert "constexpr uint32_t SD_SPI_HZ = 1000000U;" in smoke
     assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in smoke
+    assert "constexpr uint16_t SD_READ_TOKEN_TIMEOUT_MS = 1000;" in smoke
     assert "constexpr uint8_t MAX_CARD_GB = 32;" in smoke
     assert "delay(SD_POWER_SETTLE_MS)" in smoke
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in smoke
@@ -433,6 +434,10 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "raw_acmd41" in smoke
     assert "raw_cmd8_echo_ok" in smoke
     assert "raw_sector0_read" in smoke
+    assert "raw_sector0_response" in smoke
+    assert "raw_sector0_token" in smoke
+    assert "raw_boot_sector_response" in smoke
+    assert "raw_boot_sector_token" in smoke
     assert "raw_partition_type" in smoke
     assert "raw_first_lba" in smoke
     assert "raw_fs_hint" in smoke
