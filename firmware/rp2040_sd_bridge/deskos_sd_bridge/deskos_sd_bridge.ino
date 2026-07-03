@@ -2083,7 +2083,7 @@ bool ensure_parent_dirs(const char *full_path) {
             continue;
         }
         *p = '\0';
-        if (!SD.exists(tmp) && !SD.mkdir(tmp)) {
+        if (!SD.mkdir(tmp) && !SD.exists(tmp)) {
             *p = '/';
             return false;
         }

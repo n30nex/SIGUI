@@ -402,6 +402,10 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
+    parent_body = sketch.split("bool ensure_parent_dirs", 1)[1].split(
+        "bool make_backup_path", 1
+    )[0]
+    assert parent_body.index("SD.mkdir(tmp)") < parent_body.index("SD.exists(tmp)")
     delete_body = sketch.split("void handle_file_delete", 1)[1].split(
         "void handle_file_rename", 1
     )[0]
