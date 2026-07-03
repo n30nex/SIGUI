@@ -402,6 +402,12 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
+    delete_body = sketch.split("void handle_file_delete", 1)[1].split(
+        "void handle_file_rename", 1
+    )[0]
+    assert delete_body.index("ensure_parent_dirs(full_path)") < delete_body.index(
+        "SD.exists(full_path)"
+    )
 
 
 def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():

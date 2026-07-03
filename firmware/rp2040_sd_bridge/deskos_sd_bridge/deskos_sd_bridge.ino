@@ -2593,6 +2593,10 @@ void handle_file_delete(uint32_t request_id, const char *line) {
         send_file_error(request_id, "delete", "bad_path");
         return;
     }
+    if (!ensure_parent_dirs(full_path)) {
+        send_file_error(request_id, "delete", "not_found");
+        return;
+    }
     if (!SD.exists(full_path)) {
         send_file_error(request_id, "delete", "not_found");
         return;
