@@ -527,6 +527,49 @@ static void cmd_ui_tab(const char *line)
     printf("}\n");
 }
 
+static void cmd_ui_scroll_probe(const char *line)
+{
+    const char *arg = line + strlen("ui scroll-probe ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char surface[24] = {0};
+    size_t len = 0;
+    while (arg[len] != '\0' && !isspace((unsigned char)arg[len]) &&
+           len + 1U < sizeof(surface)) {
+        surface[len] = (char)tolower((unsigned char)arg[len]);
+        len++;
+    }
+    if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
+        err_result("ui scroll-probe", "INVALID_SURFACE",
+                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>");
+        return;
+    }
+
+    d1l_ui_scroll_probe_result_t probe = {0};
+    esp_err_t ret = d1l_ui_phase1_scroll_probe(surface, &probe);
+    if (ret != ESP_OK) {
+        err_result("ui scroll-probe", esp_err_to_name(ret),
+                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>");
+        return;
+    }
+
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"ui scroll-probe\",\"surface\":",
+           D1L_CONSOLE_SCHEMA, bool_json(probe.ok));
+    print_json_string(probe.surface);
+    printf(",\"tab\":");
+    print_json_string(probe.tab);
+    printf(",\"surface_supported\":%s,\"target_found\":%s,\"scrollable\":%s,\"moved\":%s",
+           bool_json(probe.surface_supported), bool_json(probe.target_found),
+           bool_json(probe.scrollable), bool_json(probe.moved));
+    printf(",\"before_y\":%ld,\"after_y\":%ld",
+           (long)probe.before_y, (long)probe.after_y);
+    printf(",\"scroll_top_before\":%ld,\"scroll_bottom_before\":%ld",
+           (long)probe.scroll_top_before, (long)probe.scroll_bottom_before);
+    printf(",\"scroll_top_after\":%ld,\"scroll_bottom_after\":%ld}\n",
+           (long)probe.scroll_top_after, (long)probe.scroll_bottom_after);
+}
+
 static void cmd_identity_status(void)
 {
     esp_err_t ret = d1l_meshcore_service_ensure_identity();
@@ -4010,7 +4053,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4037,6 +4080,8 @@ static void handle_line(const char *line)
         cmd_ui_status();
     } else if (strncmp(line, "ui tab ", strlen("ui tab ")) == 0) {
         cmd_ui_tab(line);
+    } else if (strncmp(line, "ui scroll-probe ", strlen("ui scroll-probe ")) == 0) {
+        cmd_ui_scroll_probe(line);
     } else if (strcmp(line, "map center") == 0) {
         cmd_map_center();
     } else if (strncmp(line, "map center set ", strlen("map center set ")) == 0) {

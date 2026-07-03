@@ -219,11 +219,18 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
     assert "lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE)" not in source
     assert "d1l_ui_phase1_request_tab" in header
+    assert "d1l_ui_scroll_probe_result_t" in header
+    assert "d1l_ui_phase1_scroll_probe" in header
     assert "d1l_ui_phase1_active_tab_name" in header
     assert "cmd_ui_status" in console
     assert "cmd_ui_tab" in console
+    assert "cmd_ui_scroll_probe" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "process_pending_scroll_probe()" in source
+    assert "lv_obj_get_scroll_bottom(target)" in source
+    assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
 
 
 def test_serial_tab_state_stays_pending_until_render_finishes():

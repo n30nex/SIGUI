@@ -60,6 +60,23 @@ def ui_tab_abuse_payload(**overrides: object) -> dict:
 
 
 def scroll_probe_payload(**overrides: object) -> dict:
+    probe_results = {
+        screen: {
+            "ok": True,
+            "surface": screen,
+            "tab": tab,
+            "target_found": True,
+            "scrollable": True,
+            "moved": True,
+            "before_y": 0,
+            "after_y": 120,
+            "scroll_top_before": 0,
+            "scroll_bottom_before": 120,
+            "scroll_top_after": 120,
+            "scroll_bottom_after": 0,
+        }
+        for screen, tab in SCROLL_SURFACES.items()
+    }
     payload = {
         "ok": True,
         "port": "COM12",
@@ -67,6 +84,11 @@ def scroll_probe_payload(**overrides: object) -> dict:
         "screens": list(SCROLL_SURFACES),
         "surface_plan": [
             {"screen": screen, "tab": tab, "label": screen.replace("_", " ").title()}
+            for screen, tab in SCROLL_SURFACES.items()
+        ],
+        "probe_results": probe_results,
+        "events": [
+            {"screen": screen, "tab": tab, "probe": probe_results[screen]}
             for screen, tab in SCROLL_SURFACES.items()
         ],
     }
@@ -891,6 +913,23 @@ def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):
             ],
         ),
     )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_scroll_probe"]["ok"] is False
+
+
+def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload()
+    payload["probe_results"]["storage"]["ok"] = False
+    payload["probe_results"]["storage"]["moved"] = False
+    for event in payload["events"]:
+        if event["screen"] == "storage":
+            event["probe"] = payload["probe_results"]["storage"]
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)

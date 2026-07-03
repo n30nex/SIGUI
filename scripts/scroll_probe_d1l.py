@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator-assisted scroll probe for MeshCore DeskOS D1L screens."""
+"""Autonomous scroll probe for MeshCore DeskOS D1L screens."""
 
 from __future__ import annotations
 
@@ -66,6 +66,10 @@ def surface_plan(screens: list[str]) -> list[dict]:
 
 def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> dict:
     plan = surface_plan(screens)
+    commands: list[str] = []
+    for item in plan:
+        commands.extend([f"ui tab {item['tab']}", f"ui scroll-probe {item['screen']}"])
+    commands.extend(["ui status", "health", "crashlog"])
     return {
         "schema": 1,
         "mode": "dry-run",
@@ -76,7 +80,7 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
         "dwell_sec": dwell_sec,
         "screens": screens,
         "surface_plan": plan,
-        "commands": [*[f"ui tab {item['tab']}" for item in plan], "ui status", "health", "crashlog"],
+        "commands": commands,
     }
 
 
@@ -119,6 +123,7 @@ def run_scroll_probe(
             label = surface["label"]
             request = send_console_command(ser, f"ui tab {tab}", timeout)
             time.sleep(dwell_sec)
+            probe = send_console_command(ser, f"ui scroll-probe {screen}", timeout)
             if manual_touch:
                 print(f"Manual check: scroll the {label} surface, then press Enter.")
                 input()
@@ -131,6 +136,7 @@ def run_scroll_probe(
                     "tab": tab,
                     "label": label,
                     "request": request,
+                    "probe": probe,
                     "status": status,
                     "health": health,
                     "crashlog": crashlog,
@@ -143,6 +149,12 @@ def run_scroll_probe(
         {
             "screen": event["screen"],
             "request_ok": event["request"].get("ok"),
+            "probe_ok": event["probe"].get("ok"),
+            "probe_surface": event["probe"].get("surface"),
+            "probe_tab": event["probe"].get("tab"),
+            "target_found": event["probe"].get("target_found"),
+            "scrollable": event["probe"].get("scrollable"),
+            "moved": event["probe"].get("moved"),
             "active_tab": event["status"].get("active_tab"),
             "expected_active_tab": event["tab"],
             "health_ok": event["health"].get("ok"),
@@ -150,6 +162,12 @@ def run_scroll_probe(
         }
         for event in events
         if not event["request"].get("ok")
+        or not event["probe"].get("ok")
+        or event["probe"].get("surface") != event["screen"]
+        or event["probe"].get("tab") != event["tab"]
+        or event["probe"].get("target_found") is not True
+        or event["probe"].get("scrollable") is not True
+        or event["probe"].get("moved") is not True
         or event["status"].get("active_tab") != event["tab"]
         or not event["health"].get("ok")
         or crashlog_has_entries(event["crashlog"])
@@ -173,6 +191,7 @@ def run_scroll_probe(
         "failure_count": len(failures) + len(setup_failures),
         "failures": failures,
         "setup_events": setup_events,
+        "probe_results": {event["screen"]: event["probe"] for event in events},
         "events": events,
     }
 

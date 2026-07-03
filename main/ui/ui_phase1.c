@@ -1,5 +1,6 @@
 #include "ui_phase1.h"
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl.h"
 
@@ -125,6 +127,7 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
+static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 1500U;
 static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
 static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
@@ -133,6 +136,11 @@ static size_t s_packet_row_limit = 100U;
 static size_t s_packet_skip_newest;
 static size_t s_packet_total_matches;
 static bool s_packet_sd_history_page;
+static SemaphoreHandle_t s_scroll_probe_done_sem;
+static portMUX_TYPE s_scroll_probe_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_scroll_probe_pending;
+static char s_scroll_probe_surface[24];
+static d1l_ui_scroll_probe_result_t s_scroll_probe_result;
 
 #if CONFIG_FREERTOS_UNICORE
 #define D1L_UI_TASK_CORE 0
@@ -275,6 +283,7 @@ static const char *packet_filter_kind(void);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
 static void map_tiles_keyboard_event_cb(lv_event_t *event);
+static void process_pending_scroll_probe(void);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -319,6 +328,64 @@ static bool tab_from_name(const char *name, d1l_ui_tab_t *out_tab)
     return true;
 }
 
+static bool scroll_surface_from_name(const char *name, char *out_surface,
+                                     size_t out_surface_len, d1l_ui_tab_t *out_tab)
+{
+    char normalized[24] = {0};
+    if (!name || !out_surface || out_surface_len == 0 || !out_tab) {
+        return false;
+    }
+    size_t len = 0;
+    while (*name && len + 1U < sizeof(normalized)) {
+        char ch = (char)tolower((unsigned char)*name++);
+        normalized[len++] = (ch == '-' || ch == ' ') ? '_' : ch;
+    }
+    normalized[len] = '\0';
+    if (*name || len == 0) {
+        return false;
+    }
+
+    const char *surface = NULL;
+    d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
+    if (strcmp(normalized, "home") == 0) {
+        surface = "home";
+        tab = D1L_UI_TAB_HOME;
+    } else if (strcmp(normalized, "public") == 0 ||
+               strcmp(normalized, "messages") == 0 ||
+               strcmp(normalized, "public_messages") == 0) {
+        surface = "public_messages";
+        tab = D1L_UI_TAB_MESSAGES;
+    } else if (strcmp(normalized, "dm") == 0 ||
+               strcmp(normalized, "dm_thread") == 0) {
+        surface = "dm_thread";
+        tab = D1L_UI_TAB_MESSAGES;
+    } else if (strcmp(normalized, "nodes") == 0) {
+        surface = "nodes";
+        tab = D1L_UI_TAB_NODES;
+    } else if (strcmp(normalized, "packets") == 0 || strcmp(normalized, "pkts") == 0) {
+        surface = "packets";
+        tab = D1L_UI_TAB_PACKETS;
+    } else if (strcmp(normalized, "settings") == 0 || strcmp(normalized, "set") == 0) {
+        surface = "settings";
+        tab = D1L_UI_TAB_SETTINGS;
+    } else if (strcmp(normalized, "storage") == 0 || strcmp(normalized, "sd") == 0) {
+        surface = "storage";
+        tab = D1L_UI_TAB_SETTINGS;
+    } else if (strcmp(normalized, "wifi") == 0 || strcmp(normalized, "wi_fi") == 0) {
+        surface = "wifi";
+        tab = D1L_UI_TAB_SETTINGS;
+    } else if (strcmp(normalized, "map") == 0) {
+        surface = "map";
+        tab = D1L_UI_TAB_MAP;
+    } else {
+        return false;
+    }
+
+    snprintf(out_surface, out_surface_len, "%s", surface);
+    *out_tab = tab;
+    return true;
+}
+
 static void configure_content_scroll_root(lv_obj_t *root)
 {
     if (!root) {
@@ -331,6 +398,16 @@ static void configure_content_scroll_root(lv_obj_t *root)
     lv_obj_set_style_border_width(root, 0, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_set_style_pad_bottom(root, 12, 0);
+}
+
+static void configure_sheet_scroll(lv_obj_t *sheet)
+{
+    if (!sheet) {
+        return;
+    }
+    lv_obj_add_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(sheet, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(sheet, LV_SCROLLBAR_MODE_AUTO);
 }
 
 static void lv_tick_task(void *arg)
@@ -5526,6 +5603,45 @@ esp_err_t d1l_ui_phase1_request_tab(const char *name)
     return ESP_OK;
 }
 
+esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
+                                      d1l_ui_scroll_probe_result_t *result)
+{
+    char canonical[24] = {0};
+    d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
+    if (!result || !scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_started || !s_content || !s_scroll_probe_done_sem) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    while (xSemaphoreTake(s_scroll_probe_done_sem, 0) == pdTRUE) {
+    }
+
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    if (s_scroll_probe_pending) {
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&s_scroll_probe_result, 0, sizeof(s_scroll_probe_result));
+    snprintf(s_scroll_probe_surface, sizeof(s_scroll_probe_surface), "%s", canonical);
+    s_scroll_probe_pending = true;
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+
+    if (xSemaphoreTake(s_scroll_probe_done_sem,
+                       pdMS_TO_TICKS(D1L_UI_SCROLL_PROBE_TIMEOUT_MS)) != pdTRUE) {
+        portENTER_CRITICAL(&s_scroll_probe_lock);
+        s_scroll_probe_pending = false;
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    *result = s_scroll_probe_result;
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+    return ESP_OK;
+}
+
 const char *d1l_ui_phase1_active_tab_name(void)
 {
     d1l_ui_tab_t tab;
@@ -5595,6 +5711,155 @@ static void process_pending_tab_switch(void)
     hide_mesh_roles_sheet();
     render_active_tab();
     finish_pending_tab_switch(rendered_tab);
+}
+
+static lv_obj_t *find_scrollable_descendant(lv_obj_t *root, lv_obj_t **fallback)
+{
+    if (!root) {
+        return NULL;
+    }
+    lv_obj_update_layout(root);
+    if (lv_obj_has_flag(root, LV_OBJ_FLAG_SCROLLABLE)) {
+        if (!*fallback) {
+            *fallback = root;
+        }
+        if (lv_obj_get_scroll_bottom(root) > 0 || lv_obj_get_scroll_top(root) > 0) {
+            return root;
+        }
+    }
+
+    const uint32_t child_count = lv_obj_get_child_cnt(root);
+    for (uint32_t i = 0; i < child_count; ++i) {
+        lv_obj_t *child = lv_obj_get_child(root, (int32_t)i);
+        lv_obj_t *target = find_scrollable_descendant(child, fallback);
+        if (target) {
+            return target;
+        }
+    }
+    return NULL;
+}
+
+static lv_obj_t *scroll_probe_find_target(lv_obj_t *root)
+{
+    lv_obj_t *fallback = NULL;
+    lv_obj_t *target = find_scrollable_descendant(root, &fallback);
+    return target ? target : fallback;
+}
+
+static void measure_scroll_probe_target(lv_obj_t *target,
+                                        d1l_ui_scroll_probe_result_t *result)
+{
+    if (!target || !result) {
+        return;
+    }
+    lv_obj_update_layout(target);
+    result->target_found = true;
+    result->scrollable = lv_obj_has_flag(target, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_scroll_to_y(target, 0, LV_ANIM_OFF);
+    lv_obj_update_layout(target);
+    result->before_y = (int32_t)lv_obj_get_scroll_y(target);
+    result->scroll_top_before = (int32_t)lv_obj_get_scroll_top(target);
+    result->scroll_bottom_before = (int32_t)lv_obj_get_scroll_bottom(target);
+
+    lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF);
+    lv_obj_update_layout(target);
+    result->after_y = (int32_t)lv_obj_get_scroll_y(target);
+    result->scroll_top_after = (int32_t)lv_obj_get_scroll_top(target);
+    result->scroll_bottom_after = (int32_t)lv_obj_get_scroll_bottom(target);
+    result->moved = result->before_y != result->after_y ||
+        result->scroll_top_before != result->scroll_top_after ||
+        result->scroll_bottom_before != result->scroll_bottom_after;
+    result->ok = result->surface_supported && result->target_found &&
+        result->scrollable && result->moved;
+}
+
+static lv_obj_t *scroll_probe_open_surface(const char *surface)
+{
+    if (strcmp(surface, "public_messages") == 0) {
+        s_messages_show_dms = false;
+        render_active_tab();
+        show_public_history_sheet();
+        return scroll_probe_find_target(s_public_history_sheet);
+    }
+    if (strcmp(surface, "dm_thread") == 0) {
+        s_messages_show_dms = true;
+        render_active_tab();
+        d1l_app_model_snapshot(&s_snapshot);
+        if (s_snapshot.recent_dm_count == 0 ||
+            s_snapshot.recent_dms[0].contact_fingerprint[0] == '\0') {
+            return NULL;
+        }
+        show_dm_thread_for(s_snapshot.recent_dms[0].contact_fingerprint,
+                           s_snapshot.recent_dms[0].contact_alias[0] ?
+                           s_snapshot.recent_dms[0].contact_alias :
+                           s_snapshot.recent_dms[0].contact_fingerprint);
+        return scroll_probe_find_target(s_dm_thread_sheet);
+    }
+    if (strcmp(surface, "storage") == 0) {
+        open_storage_sheet_event_cb(NULL);
+        return scroll_probe_find_target(s_storage_sheet);
+    }
+    if (strcmp(surface, "wifi") == 0) {
+        open_wifi_sheet_event_cb(NULL);
+        return scroll_probe_find_target(s_wifi_sheet);
+    }
+    return scroll_probe_find_target(s_content);
+}
+
+static void run_scroll_probe_on_ui_task(const char *surface,
+                                        d1l_ui_scroll_probe_result_t *result)
+{
+    d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
+    char canonical[24] = {0};
+    if (!scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
+        return;
+    }
+
+    result->surface_supported = true;
+    snprintf(result->surface, sizeof(result->surface), "%s", canonical);
+    snprintf(result->tab, sizeof(result->tab), "%s", tab_name(tab));
+    request_tab_switch(tab);
+    process_pending_tab_switch();
+
+    lv_obj_t *target = scroll_probe_open_surface(canonical);
+    measure_scroll_probe_target(target, result);
+}
+
+static bool begin_pending_scroll_probe(char *surface, size_t surface_len)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    pending = s_scroll_probe_pending;
+    if (pending && surface && surface_len > 0) {
+        snprintf(surface, surface_len, "%s", s_scroll_probe_surface);
+        s_scroll_probe_pending = false;
+    }
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+    return pending;
+}
+
+static void finish_pending_scroll_probe(const d1l_ui_scroll_probe_result_t *result)
+{
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    s_scroll_probe_result = *result;
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+    if (s_scroll_probe_done_sem) {
+        (void)xSemaphoreGive(s_scroll_probe_done_sem);
+    }
+}
+
+static void process_pending_scroll_probe(void)
+{
+    char surface[24] = {0};
+    if (!begin_pending_scroll_probe(surface, sizeof(surface))) {
+        return;
+    }
+
+    d1l_ui_scroll_probe_result_t result = {0};
+    run_scroll_probe_on_ui_task(surface, &result);
+    finish_pending_scroll_probe(&result);
 }
 
 static void lock_event_cb(lv_event_t *event)
@@ -5792,7 +6057,7 @@ static void create_public_history_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_public_history_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_public_history_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_public_history_sheet, 12, 0);
-    lv_obj_clear_flag(s_public_history_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    configure_sheet_scroll(s_public_history_sheet);
     lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -5885,7 +6150,7 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_dm_thread_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_dm_thread_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_dm_thread_sheet, 12, 0);
-    lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    configure_sheet_scroll(s_dm_thread_sheet);
     lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -5919,7 +6184,7 @@ static void create_storage_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_storage_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_storage_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_storage_sheet, 12, 0);
-    lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    configure_sheet_scroll(s_storage_sheet);
     lv_obj_add_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -5936,7 +6201,7 @@ static void create_wifi_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_color(s_wifi_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_wifi_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_wifi_sheet, 12, 0);
-    lv_obj_clear_flag(s_wifi_sheet, LV_OBJ_FLAG_SCROLLABLE);
+    configure_sheet_scroll(s_wifi_sheet);
     lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -6378,6 +6643,7 @@ static void ui_task(void *arg)
     while (true) {
         uint32_t wait_ms = lv_timer_handler();
         process_pending_tab_switch();
+        process_pending_scroll_probe();
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {
@@ -6458,6 +6724,12 @@ esp_err_t d1l_ui_phase1_start(void)
 {
     if (s_started) {
         return ESP_OK;
+    }
+    if (!s_scroll_probe_done_sem) {
+        s_scroll_probe_done_sem = xSemaphoreCreateBinary();
+        if (!s_scroll_probe_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     lv_init();

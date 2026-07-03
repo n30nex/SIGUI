@@ -424,6 +424,25 @@ def ui_tab_abuse_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def scroll_probe_results_by_screen(data: dict) -> dict:
+    probes: dict = {}
+    probe_results = data.get("probe_results")
+    if isinstance(probe_results, dict):
+        for screen, probe in probe_results.items():
+            if isinstance(screen, str) and isinstance(probe, dict):
+                probes[screen] = probe
+    events = data.get("events")
+    if isinstance(events, list):
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            screen = event.get("screen")
+            probe = event.get("probe")
+            if isinstance(screen, str) and isinstance(probe, dict):
+                probes[screen] = probe
+    return probes
+
+
 def scroll_probe_ok(data: dict, expected_port: str) -> bool:
     screens = set(data.get("screens") or [])
     plan = data.get("surface_plan") if isinstance(data.get("surface_plan"), list) else []
@@ -432,12 +451,23 @@ def scroll_probe_ok(data: dict, expected_port: str) -> bool:
         for item in plan
         if isinstance(item, dict) and isinstance(item.get("screen"), str)
     }
+    probes = scroll_probe_results_by_screen(data)
     return (
         data.get("ok") is True
         and data.get("port") == expected_port
         and int(data.get("failure_count") or 0) == 0
         and REQUIRED_SCROLL_SCREENS.issubset(screens)
         and all(tabs_by_screen.get(screen) == tab for screen, tab in REQUIRED_SCROLL_SURFACES.items())
+        and all(
+            isinstance(probes.get(screen), dict)
+            and probes[screen].get("ok") is True
+            and probes[screen].get("surface") == screen
+            and probes[screen].get("tab") == tab
+            and probes[screen].get("target_found") is True
+            and probes[screen].get("scrollable") is True
+            and probes[screen].get("moved") is True
+            for screen, tab in REQUIRED_SCROLL_SURFACES.items()
+        )
     )
 
 

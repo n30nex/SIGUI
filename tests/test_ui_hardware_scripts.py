@@ -47,6 +47,8 @@ def test_scroll_probe_dry_run_and_screen_parser():
     assert {"screen": "storage", "tab": "settings", "label": "Storage settings"} in report["surface_plan"]
     assert {"screen": "dm_thread", "tab": "messages", "label": "DM thread"} in report["surface_plan"]
     assert "ui tab messages" in report["commands"]
+    assert "ui scroll-probe storage" in report["commands"]
+    assert "ui scroll-probe dm_thread" in report["commands"]
     assert "crashlog" in report["commands"]
 
 
