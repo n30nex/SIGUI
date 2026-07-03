@@ -230,6 +230,7 @@ def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
         "rp2040-sd-bridge-firmware/SHA256SUMS.txt",
         "rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
     ]
+    package = None
     if github_run_dir:
         manifests.extend(github_run_dir / label for label in labels)
         package = find_release_package(github_run_dir)

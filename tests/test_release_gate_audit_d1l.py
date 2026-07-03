@@ -231,6 +231,26 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["docs_current_evidence"]["ok"] is True
 
 
+def test_release_gate_audit_dry_run_without_downloaded_actions_artifacts_fails_closed(tmp_path: Path):
+    report = build_audit(
+        parse_args(
+            [
+                "--root",
+                str(tmp_path),
+                "--hardware-dir",
+                str(tmp_path / "artifacts" / "hardware" / "com12"),
+                "--soak-dir",
+                str(tmp_path / "artifacts" / "soak"),
+            ]
+        )
+    )
+    gates = gate_by_id(report)
+
+    assert report["ready_for_public_release"] is False
+    assert gates["ci_artifacts_checksums"]["ok"] is False
+    assert gates["ci_artifacts_checksums"]["details"]["missing"] == []
+
+
 def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: Path):
     write_core_evidence(tmp_path)
 
