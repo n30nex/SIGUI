@@ -635,6 +635,11 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    if (!s_force_nvs && storage_sd_ready_for_files()) {
+        s_status.last_error = ESP_OK;
+        return ESP_OK;
+    }
+
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_mount_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);

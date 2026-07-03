@@ -140,6 +140,14 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
+    mount_body = source.split("esp_err_t d1l_storage_status_mount", 1)[1].split(
+        "void d1l_storage_status", 1
+    )[0]
+    assert "storage_sd_ready_for_files()" in mount_body
+    assert mount_body.index("storage_sd_ready_for_files()") < mount_body.index(
+        "d1l_rp2040_bridge_mount_sd(&sd, timeout_ms)"
+    )
+    assert "s_status.last_error = ESP_OK" in mount_body
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
