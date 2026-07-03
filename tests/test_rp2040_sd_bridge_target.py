@@ -386,6 +386,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "#include <SPI.h>" in smoke
     assert "#include <Wire.h>" in smoke
     assert "constexpr uint8_t SD_CS_PIN = 13;" in smoke
+    assert "constexpr uint8_t SD_DET_PIN = 7;" in smoke
     assert "constexpr uint8_t SD_SCK_PIN = 10;" in smoke
     assert "constexpr uint8_t SD_MOSI_PIN = 11;" in smoke
     assert "constexpr uint8_t SD_MISO_PIN = 12;" in smoke
@@ -393,6 +394,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "constexpr uint8_t SD_I2C_SDA_PIN = 20;" in smoke
     assert "constexpr uint8_t SD_I2C_SCL_PIN = 21;" in smoke
     assert "constexpr uint32_t SD_SPI_HZ = 1000000U;" in smoke
+    assert "constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;" in smoke
     assert "constexpr uint8_t MAX_CARD_GB = 32;" in smoke
     assert "delay(1000)" in smoke
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in smoke
@@ -401,11 +403,31 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "SPI1.setTX(SD_MOSI_PIN)" in smoke
     assert "SPI1.setRX(SD_MISO_PIN)" in smoke
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in smoke
+    assert "SPI1.setCS(SD_CS_PIN)" in smoke
     assert 'SD.open("/")' in smoke
+    assert "result.fat_type = SD.fatType()" in smoke
+    assert "result.fat32 = result.fat_type == 32U" in smoke
     assert "SD.mkdir(SMOKE_DIR)" in smoke
     assert "SD.open(SMOKE_TMP, FILE_WRITE)" in smoke
     assert "SD.rename(SMOKE_TMP, SMOKE_FINAL)" in smoke
     assert "SD.remove(SMOKE_FINAL)" in smoke
+    assert "run_raw_probe" in smoke
+    assert "sd_command(0, 0, 0x95" in smoke
+    assert "sd_command(8, 0x1AA, 0x87" in smoke
+    assert "sd_command(41, sd_v2 ? 0x40000000UL : 0, 0x77" in smoke
+    assert "raw_cmd0" in smoke
+    assert "raw_cmd0_ready" in smoke
+    assert "raw_cmd8" in smoke
+    assert "raw_cmd8_ready" in smoke
+    assert "raw_acmd41" in smoke
+    assert "raw_cmd8_echo_ok" in smoke
+    assert "will_format" in smoke
+    assert "format_performed" in smoke
+    assert "detect_used_for_ok" in smoke
+    assert "power_state" in smoke
+    assert "gpio18_commanded_high_not_measured" in smoke
+    assert "detect_pullup" in smoke
+    assert "detect_pulldown" in smoke
     assert "seeed_official_sd_smoke" in smoke
     assert "max_card_gb" in smoke
     assert "public_rf_tx" in smoke

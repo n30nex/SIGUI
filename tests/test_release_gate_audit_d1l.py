@@ -202,6 +202,8 @@ def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> Non
                 "test": "seeed_official_sd_smoke",
                 "ok": True,
                 "mount": True,
+                "fat32": True,
+                "needs_fat32": False,
                 "root_open": True,
                 "mkdir": True,
                 "write": True,
@@ -211,6 +213,28 @@ def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> Non
                 "delete": True,
                 "public_rf_tx": False,
                 "formats_sd": False,
+                "will_format": False,
+                "format_performed": False,
+                "detect_used_for_ok": False,
+                "power_measured": False,
+                "power_state": "gpio18_commanded_high_not_measured",
+                "detect": "low",
+                "detect_pullup": 0,
+                "detect_pulldown": 0,
+                "diag_ran": True,
+                "raw_present": True,
+                "raw_cmd8_echo_ok": True,
+                "raw_acmd41_ready": True,
+                "raw_err": 0,
+                "raw_cmd0_ready": 255,
+                "raw_cmd0": 1,
+                "raw_cmd8_ready": 255,
+                "raw_cmd8": 1,
+                "raw_r70": 0,
+                "raw_r71": 0,
+                "raw_r72": 1,
+                "raw_r73": 170,
+                "raw_acmd41": 0,
                 "format": "non_destructive",
                 "fat_type": 32,
                 "max_card_gb": 32,
@@ -348,11 +372,11 @@ def write_raw_diag_evidence(root: Path, commit: str = COMMIT, metadata_commit: s
             fields[f"{prefix}{suffix}"] = "1"
     line = "DESKOS_SD_DIAG " + " ".join(f"{key}={value}" for key, value in fields.items())
     write_json(
-        root / "artifacts" / "hardware" / "com12" / f"rp2040_direct_diag_{commit[:7]}.json",
+        root / "artifacts" / "hardware" / "com16" / f"rp2040_direct_diag_{commit[:7]}.json",
         {
             "schema": 1,
             "ok": True,
-            "port": "COM12",
+            "port": "COM16",
             "public_rf_tx": False,
             "formats_sd": False,
             "diag": line,
@@ -726,7 +750,81 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     ]
     assert gates["sd_official_seeed_smoke_passed"]["details"]["inner_test"] == "seeed_official_sd_smoke"
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
+    assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
+    assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
     assert report["p0_failed_count"] == 14
+
+
+def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com16"
+    write_json(
+        hardware / "rp2040_seeed_official_sd_smoke_68350bf.json",
+        {
+            "schema": 1,
+            "kind": "seeed_official_sd_smoke_capture",
+            "port": "COM16",
+            "commit": COMMIT,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": False,
+            "matched": {
+                "test": "seeed_official_sd_smoke",
+                "ok": False,
+                "mount": False,
+                "fat32": False,
+                "needs_fat32": False,
+                "root_open": False,
+                "mkdir": False,
+                "write": False,
+                "read": False,
+                "rename": False,
+                "stat": False,
+                "delete": False,
+                "public_rf_tx": False,
+                "formats_sd": False,
+                "will_format": False,
+                "format_performed": False,
+                "detect_used_for_ok": False,
+                "power_measured": False,
+                "power_state": "gpio18_commanded_high_not_measured",
+                "detect": "floating",
+                "detect_pullup": 1,
+                "detect_pulldown": 0,
+                "diag_ran": True,
+                "raw_present": False,
+                "raw_cmd8_echo_ok": False,
+                "raw_acmd41_ready": False,
+                "raw_err": 3,
+                "raw_data": 0,
+                "raw_miso_pullup": 1,
+                "raw_miso_idle": 0,
+                "raw_idle_ff": 0,
+                "raw_cmd0_ready": 0,
+                "raw_cmd0": 0,
+                "raw_cmd8_ready": 0,
+                "raw_cmd8": 0,
+                "raw_r70": 0,
+                "raw_r71": 0,
+                "raw_r72": 0,
+                "raw_r73": 0,
+                "raw_acmd41": 255,
+                "format": "non_destructive",
+                "fat_type": 0,
+                "max_card_gb": 32,
+            },
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_official_seeed_smoke_passed"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["inner_test"] == "seeed_official_sd_smoke"
+    assert gate["details"]["raw_diagnostics"]["raw_cmd0"] == 0
+    assert gate["details"]["raw_diagnostics"]["raw_err"] == 3
+    assert gate["details"]["power_measured"] is False
+    assert gate["details"]["detect"] == "floating"
 
 
 def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):

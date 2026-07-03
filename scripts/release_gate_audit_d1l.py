@@ -914,6 +914,32 @@ def official_seeed_sd_smoke_gate(
     payload = first_official_seeed_smoke_payload(data)
     ok = bool(smoke and data and official_seeed_sd_smoke_ok(data, expected_port))
     required_steps = ("mount", "root_open", "mkdir", "write", "read", "rename", "stat", "delete")
+    raw_fields = (
+        "diag_ran",
+        "raw_present",
+        "raw_cmd8_echo_ok",
+        "raw_acmd41_ready",
+        "raw_err",
+        "raw_data",
+        "raw_miso_pullup",
+        "raw_miso_idle",
+        "raw_idle_ff",
+        "raw_cmd0_ready",
+        "raw_cmd0",
+        "raw_cmd8_ready",
+        "raw_cmd8",
+        "raw_r70",
+        "raw_r71",
+        "raw_r72",
+        "raw_r73",
+        "raw_cmd55",
+        "raw_acmd41",
+        "raw_acmd41_attempts",
+        "raw_ocr0",
+        "raw_ocr1",
+        "raw_ocr2",
+        "raw_ocr3",
+    )
     return GateResult(
         "sd_official_seeed_smoke_passed",
         "P0",
@@ -931,6 +957,17 @@ def official_seeed_sd_smoke_gate(
             "required_steps": {step: payload.get(step) for step in required_steps} if payload else {},
             "fat_type": payload.get("fat_type") if payload else None,
             "max_card_gb": payload.get("max_card_gb") if payload else None,
+            "fat32": payload.get("fat32") if payload else None,
+            "needs_fat32": payload.get("needs_fat32") if payload else None,
+            "will_format": payload.get("will_format") if payload else None,
+            "format_performed": payload.get("format_performed") if payload else None,
+            "detect_used_for_ok": payload.get("detect_used_for_ok") if payload else None,
+            "power_measured": payload.get("power_measured") if payload else None,
+            "power_state": payload.get("power_state") if payload else None,
+            "detect": payload.get("detect") if payload else None,
+            "detect_pullup": payload.get("detect_pullup") if payload else None,
+            "detect_pulldown": payload.get("detect_pulldown") if payload else None,
+            "raw_diagnostics": {field: payload.get(field) for field in raw_fields} if payload else {},
             "formats_sd": payload.get("formats_sd") if payload else data.get("formats_sd") if data else None,
             "public_rf_tx": payload.get("public_rf_tx") if payload else data.get("public_rf_tx") if data else None,
         },
@@ -1519,7 +1556,10 @@ def build_audit(args: argparse.Namespace) -> dict:
     retained_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-retained-history")
     reboot_remount_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-reboot-remount")
     map_tile_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-map-tile-canary")
-    raw_diag_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
+    raw_diag_roots = unique_dirs(
+        sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-preflight")
+        + sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
+    )
     sd_matrix_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-matrix")
     sd_power_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-electrical", "sd-matrix")
     preflight_path = newest_commit_json_from_roots(
@@ -1590,7 +1630,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(official_seeed_sd_smoke_gate(official_smoke_roots, root, args.commit, args.rp2040_port))
     gates.append(sd_gate(preflight_path, root))
-    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.rp2040_port))
     gates.append(sd_boot_prepare_gate(boot_prepare_roots, root, args.commit, args.d1l_port))
     gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))

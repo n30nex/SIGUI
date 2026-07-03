@@ -67,10 +67,16 @@ again.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under
-`artifacts\hardware\com12\seeed_official_sd_smoke_<sha>.json`, and require
+`artifacts\hardware\com16\seeed_official_sd_smoke_<sha>.json`, and require
 `test="seeed_official_sd_smoke"`, `ok=true`, `mount/root_open/mkdir/write/read/rename/stat/delete=true`,
-`fat_type=32`, `max_card_gb<=32`, `public_rf_tx=false`, and
-`formats_sd=false`. Then flash the production bridge artifact below.
+`fat32=true`, `fat_type=32`, `max_card_gb<=32`, `public_rf_tx=false`, and
+`formats_sd=false`. Failed smoke captures must preserve the raw diagnostic
+fields (`diag_ran`, `detect`, `raw_cmd0`, `raw_cmd8`, `raw_r70`..`raw_r73`,
+`raw_acmd41`, and OCR/MISO samples) so the next action can distinguish power,
+CS, command-response, CMD8 echo, ACMD41, and filesystem failures. `power_state`
+means GPIO18 was commanded high; it is not a substitute for the separate SD
+socket voltage/signal measurement artifact. Then flash the production bridge
+artifact below.
 
 1. Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode.
 2. Confirm Windows mounted a UF2 bootloader volume. The volume should expose

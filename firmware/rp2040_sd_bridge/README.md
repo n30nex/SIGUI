@@ -64,7 +64,11 @@ The stricter release proof artifact is
 `{"test":"seeed_official_sd_smoke",...}` after the exact Seeed GPIO18,
 Wire20/21, SPI1 10/11/12, CS13, 1 MHz sequence and proves root open,
 mkdir, write, read, rename, stat, delete, FAT32, <=32GB, no Public RF, and no
-formatting.
+formatting. The same JSON line also carries non-formatting raw diagnostics
+(`raw_cmd0`, `raw_cmd8`, `raw_r70`..`raw_r73`, `raw_acmd41`, `raw_ocr0`..`raw_ocr3`,
+MISO samples, and GPIO7 detect samples). `power_state` is deliberately reported
+as `gpio18_commanded_high_not_measured` until a meter or scope artifact proves
+the socket rail under load.
 Do not use the Windows host for firmware compilation.
 
 ## Hardware Validation
