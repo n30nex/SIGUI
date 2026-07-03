@@ -16,9 +16,10 @@ It speaks the newline-delimited protocol documented in
 - SD MISO/RX: GPIO12.
 - SD/sensor rail power enable: GPIO18, driven high before SD init.
 - Internal sensor/I2C bus used by Seeed's SD example: SDA GPIO20, SCL GPIO21.
-- The first explicit mount attempt follows Seeed's published MicroSD sample
-  sequence exactly: drive GPIO18 high, initialize `Wire` on SDA20/SCL21, set
-  `SPI1` SCK/TX/RX to GPIO10/11/12, then call
+- The first explicit mount attempt follows Seeed's published MicroSD pin/power
+  sequence and Arduino-Pico's SdFat SPI1 pin setup: drive GPIO18 high,
+  initialize `Wire` on SDA20/SCL21, set `SPI1` SCK/MOSI/MISO to GPIO10/11/12,
+  register GPIO13 as CS, then call
   `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the selected
   rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send idle
   clocks so warm-reset cards can re-enter SPI init. Before those raw probes,
@@ -42,8 +43,9 @@ adds the `earlephilhower/arduino-pico` board package URL, installs
 library settings. The current validation card is user-confirmed FAT32 but still
 reports RP2040 init/probe failures before the filesystem layer, so the bridge
 stays close to Seeed's documented SD pin/power path while using Arduino-Pico's second-port SD support,
-Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and software-controlled
-GPIO13 CS instead of forcing custom SdFat transfer flags.
+Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and the Arduino-Pico
+maintainer's SPI1 SdFat pin method names: `setCS`, `setMISO`, `setMOSI`, and
+`setSCK`.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.
@@ -108,8 +110,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated Arduino-Pico SPI1
-  path, keeping GPIO13 under software CS control, idling CS high, starting SPI1,
-  and calling `SD.begin(13, 1000000, SPI1)` without pre-clocking the bus or
+  path, registering GPIO13 as SPI1 CS, idling CS high, starting SPI1, and
+  calling `SD.begin(13, 1000000, SPI1)` without pre-clocking the bus or
   running a second SdFat probe on failure. If that already-powered library path
   does not mount, the bridge repeats the same Seeed path once after cycling
   GPIO18 before falling back to bounded

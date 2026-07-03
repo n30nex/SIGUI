@@ -74,11 +74,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert sketch.count("apply_sd_miso_pullup()") >= 4
     assert "SPI1.setSCK(SD_SCK_PIN)" in sketch
     assert "SPI1.end()" in sketch
-    assert "SPI1.setMOSI(SD_MOSI_PIN)" not in sketch
-    assert "SPI1.setMISO(SD_MISO_PIN)" not in sketch
-    assert "SPI1.setTX(SD_MOSI_PIN)" in sketch
-    assert "SPI1.setRX(SD_MISO_PIN)" in sketch
-    assert "SPI1.setCS(SD_CS_PIN)" not in sketch
+    assert "SPI1.setMOSI(SD_MOSI_PIN)" in sketch
+    assert "SPI1.setMISO(SD_MISO_PIN)" in sketch
+    assert "SPI1.setTX(SD_MOSI_PIN)" not in sketch
+    assert "SPI1.setRX(SD_MISO_PIN)" not in sketch
+    assert "SPI1.setCS(SD_CS_PIN)" in sketch
     assert "s_sd_pin_cs_ok = true;" in sketch
     assert "bool s_sd_mounted = false;" in sketch
     assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in sketch
@@ -92,8 +92,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "SPI1.begin()" not in seeed_config
     assert "bias_sd_spi_lines_for_power()" not in seeed_config
     assert "s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN)" in seeed_config
-    assert "s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN)" in seeed_config
-    assert "s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN)" in seeed_config
+    assert "s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN)" in seeed_config
+    assert "s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN)" in seeed_config
+    assert "s_sd_pin_cs_ok = SPI1.setCS(SD_CS_PIN)" in seeed_config
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in seeed_config
     assert "Wire.setSCL(SD_I2C_SCL_PIN)" in seeed_config
     assert "Wire.begin()" in seeed_config
