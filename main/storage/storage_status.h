@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "storage/retained_blob_store.h"
 
 #define D1L_STORAGE_SD_MOUNT_POINT "/sdcard"
 #define D1L_STORAGE_SD_DATA_ROOT "/sdcard/deskos"
@@ -40,6 +41,7 @@ typedef struct {
     esp_err_t last_error;
     bool manager_running;
     bool force_nvs;
+    bool retained_sd_degraded;
     char sd_probe_power[8];
     char sd_probe_mode[16];
     const char *manager_state;
@@ -57,6 +59,8 @@ typedef struct {
     const char *export_backend;
     const char *setup_action;
     const char *note;
+    d1l_retained_blob_store_sd_stats_t
+        retained_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT];
 } d1l_storage_status_t;
 
 esp_err_t d1l_storage_status_init(void);

@@ -143,6 +143,25 @@ static void print_json_string(const char *text)
     putchar('"');
 }
 
+static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_t *stats)
+{
+    const d1l_retained_blob_store_sd_stats_t empty = {0};
+    if (!stats) {
+        stats = &empty;
+    }
+    printf("{\"sd_read_fail_count\":%lu,\"sd_write_fail_count\":%lu,"
+           "\"sd_rename_fail_count\":%lu,\"sd_last_error\":\"%s\","
+           "\"sd_degraded_latched\":%s,\"nvs_mirror_fail_count\":%lu,"
+           "\"nvs_mirror_last_error\":\"%s\"}",
+           (unsigned long)stats->sd_read_fail_count,
+           (unsigned long)stats->sd_write_fail_count,
+           (unsigned long)stats->sd_rename_fail_count,
+           esp_err_to_name(stats->sd_last_error),
+           bool_json(stats->sd_degraded_latched),
+           (unsigned long)stats->nvs_mirror_fail_count,
+           esp_err_to_name(stats->nvs_mirror_last_error));
+}
+
 static bool parse_fingerprint_token(const char *src, char *dest, size_t dest_size)
 {
     if (!src || !dest || dest_size < D1L_NODE_FINGERPRINT_LEN) {
@@ -965,6 +984,23 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_PROVIDER_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
+    printf(",\"retained_sd\":{\"degraded\":%s,\"note\":",
+           bool_json(status.retained_sd_degraded));
+    print_json_string(status.retained_sd_degraded ?
+                      D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE : "");
+    printf(",\"stores\":{\"messages\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES]);
+    printf(",\"dm\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_DM_MESSAGES]);
+    printf(",\"routes\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_ROUTES]);
+    printf(",\"packets\":");
+    print_retained_sd_store_json(
+        &status.retained_sd_stats[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf("}}");
     printf(",\"stores\":{\"settings\":\"nvs\",\"identity\":\"nvs\",\"messages\":");
     print_json_string(status.message_store_backend ? status.message_store_backend : "nvs");
     printf(",\"dm\":");

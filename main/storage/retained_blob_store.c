@@ -24,6 +24,12 @@ typedef struct {
     const char *sd_directory;
 } d1l_retained_blob_store_config_t;
 
+typedef enum {
+    D1L_RETAINED_SD_OP_READ,
+    D1L_RETAINED_SD_OP_WRITE,
+    D1L_RETAINED_SD_OP_RENAME,
+} d1l_retained_blob_store_sd_op_t;
+
 static const d1l_retained_blob_store_config_t s_store_configs[] = {
     {
         .id = D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
@@ -52,6 +58,55 @@ static const d1l_retained_blob_store_config_t s_store_configs[] = {
 };
 
 static bool s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT];
+static d1l_retained_blob_store_sd_stats_t s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT];
+
+static bool sd_error_latches_degraded(esp_err_t ret)
+{
+    return ret != ESP_OK &&
+           ret != ESP_ERR_INVALID_ARG &&
+           ret != ESP_ERR_INVALID_SIZE &&
+           ret != ESP_ERR_NOT_FOUND;
+}
+
+static void note_sd_failure(const d1l_retained_blob_store_config_t *config,
+                            d1l_retained_blob_store_sd_op_t op,
+                            esp_err_t ret)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT ||
+        ret == ESP_OK || ret == ESP_ERR_INVALID_ARG) {
+        return;
+    }
+
+    d1l_retained_blob_store_sd_stats_t *stats = &s_store_sd_stats[config->id];
+    switch (op) {
+    case D1L_RETAINED_SD_OP_READ:
+        stats->sd_read_fail_count++;
+        break;
+    case D1L_RETAINED_SD_OP_WRITE:
+        stats->sd_write_fail_count++;
+        break;
+    case D1L_RETAINED_SD_OP_RENAME:
+        stats->sd_rename_fail_count++;
+        break;
+    default:
+        break;
+    }
+    stats->sd_last_error = ret;
+    if (sd_error_latches_degraded(ret)) {
+        stats->sd_degraded_latched = true;
+    }
+}
+
+static void note_nvs_mirror_failure(const d1l_retained_blob_store_config_t *config,
+                                    esp_err_t ret)
+{
+    if (!config || config->id >= D1L_RETAINED_BLOB_STORE_COUNT || ret == ESP_OK) {
+        return;
+    }
+    d1l_retained_blob_store_sd_stats_t *stats = &s_store_sd_stats[config->id];
+    stats->nvs_mirror_fail_count++;
+    stats->nvs_mirror_last_error = ret;
+}
 
 static const d1l_retained_blob_store_config_t *find_store(d1l_retained_blob_store_id_t store_id)
 {
@@ -233,17 +288,23 @@ static esp_err_t sd_write_blob(const d1l_retained_blob_store_config_t *config,
                                                      offset == 0, &write_result,
                                                      D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
         if (ret != ESP_OK || write_result.length != chunk) {
+            const esp_err_t failure = ret == ESP_OK ? ESP_FAIL : ret;
+            note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, failure);
             d1l_rp2040_file_result_t ignored = {0};
             (void)d1l_rp2040_bridge_file_delete(temp_path, &ignored,
                                                 D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
-            return ret == ESP_OK ? ESP_FAIL : ret;
+            return failure;
         }
         offset += chunk;
     }
 
     d1l_rp2040_file_result_t rename_result = {0};
-    return d1l_rp2040_bridge_file_rename(temp_path, path, true, &rename_result,
-                                         D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    esp_err_t ret = d1l_rp2040_bridge_file_rename(temp_path, path, true, &rename_result,
+                                                  D1L_RETAINED_SD_WRITE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        note_sd_failure(config, D1L_RETAINED_SD_OP_RENAME, ret);
+    }
+    return ret;
 }
 
 static esp_err_t sd_erase_blob(const d1l_retained_blob_store_config_t *config,
@@ -290,6 +351,27 @@ bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id)
     return store_sd_enabled(find_store(store_id));
 }
 
+bool d1l_retained_blob_store_sd_stats(d1l_retained_blob_store_id_t store_id,
+                                      d1l_retained_blob_store_sd_stats_t *out_stats)
+{
+    const d1l_retained_blob_store_config_t *config = find_store(store_id);
+    if (!config || !out_stats) {
+        return false;
+    }
+    *out_stats = s_store_sd_stats[config->id];
+    return true;
+}
+
+bool d1l_retained_blob_store_any_sd_degraded(void)
+{
+    for (size_t i = 0; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        if (s_store_sd_stats[i].sd_degraded_latched) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void d1l_retained_blob_store_note_sd_backend(bool data_ready,
                                              bool file_ops_supported,
                                              bool atomic_rename_supported,
@@ -326,6 +408,7 @@ esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
         if (sd_ret == ESP_OK) {
             return ESP_OK;
         }
+        note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret);
         *len_inout = requested_len;
         esp_err_t nvs_ret = nvs_read_blob(config, key, dst, len_inout);
         if (nvs_ret == ESP_OK) {
@@ -362,8 +445,8 @@ esp_err_t d1l_retained_blob_store_write(d1l_retained_blob_store_id_t store_id,
     if (store_sd_enabled(config)) {
         esp_err_t sd_ret = sd_write_blob(config, key, src, len);
         if (sd_ret == ESP_OK) {
-            (void)nvs_write_blob(config, key, src, len);
-            return sd_ret;
+            note_nvs_mirror_failure(config, nvs_write_blob(config, key, src, len));
+            return ESP_OK;
         }
     }
 
@@ -393,7 +476,8 @@ esp_err_t d1l_retained_blob_store_write_split(d1l_retained_blob_store_id_t store
     esp_err_t sd_ret = sd_write_blob(config, key, primary_src, primary_len);
     esp_err_t nvs_ret = nvs_write_blob(config, key, nvs_src, nvs_len);
     if (sd_ret == ESP_OK) {
-        return nvs_ret;
+        note_nvs_mirror_failure(config, nvs_ret);
+        return ESP_OK;
     }
     return nvs_ret == ESP_OK ? ESP_OK : sd_ret;
 }

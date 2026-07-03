@@ -20,6 +20,16 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_backend_name" in header
     assert "d1l_retained_blob_store_is_available" in header
     assert "d1l_retained_blob_store_uses_sd" in header
+    assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in header
+    assert "d1l_retained_blob_store_sd_stats_t" in header
+    assert "sd_read_fail_count" in header
+    assert "sd_write_fail_count" in header
+    assert "sd_rename_fail_count" in header
+    assert "sd_last_error" in header
+    assert "sd_degraded_latched" in header
+    assert "nvs_mirror_fail_count" in header
+    assert "d1l_retained_blob_store_sd_stats" in header
+    assert "d1l_retained_blob_store_any_sd_degraded" in header
     assert "d1l_retained_blob_store_note_sd_backend" in header
     assert "d1l_retained_blob_store_read" in header
     assert "d1l_retained_blob_store_read_fallback" in header
@@ -43,6 +53,13 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert 'return store_sd_enabled(config) ? "sd" : "nvs";' in source
     assert "s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_sd_enabled[config->id]" in source
+    assert "s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT]" in source
+    assert "note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret)" in source
+    assert "note_sd_failure(config, D1L_RETAINED_SD_OP_WRITE, failure)" in source
+    assert "note_sd_failure(config, D1L_RETAINED_SD_OP_RENAME, ret)" in source
+    assert "sd_error_latches_degraded" in source
+    assert "stats->sd_degraded_latched = true" in source
+    assert "note_nvs_mirror_failure(config" in source
     assert "d1l_retained_blob_store_note_sd_backend" in source
     assert "data_ready &&" in source
     assert "file_ops_supported &&" in source
@@ -68,12 +85,14 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "nvs_erase_key(handle, key)" in source
     assert "nvs_commit(handle)" in source
     assert "ESP_ERR_NVS_NOT_FOUND" in source
-    assert "(void)nvs_write_blob(config, key, src, len)" in source
+    assert "note_nvs_mirror_failure(config, nvs_write_blob(config, key, src, len))" in source
     assert "d1l_retained_blob_store_write_split" in source
     assert "const bool has_primary = primary_src && primary_len > 0" in source
     assert "const bool has_fallback = fallback_src && fallback_len > 0" in source
     assert "sd_write_blob(config, key, primary_src, primary_len)" in source
     assert "nvs_write_blob(config, key, nvs_src, nvs_len)" in source
+    assert "note_nvs_mirror_failure(config, nvs_ret)" in source
+    assert "return ESP_OK;" in source
     assert "return nvs_ret == ESP_OK ? ESP_OK : sd_ret;" in source
     assert "return sd_ret == ESP_ERR_NOT_FOUND ? nvs_ret : sd_ret;" in source
 

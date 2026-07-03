@@ -96,6 +96,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "sd_probe_power" in header
     assert "sd_probe_error" in header
     assert "sd_mount_error" in header
+    assert "retained_sd_degraded" in header
+    assert "retained_sd_stats" in header
     assert "s_status.file_ops_supported = sd->file_ops_supported" in source
     assert "s_status.atomic_rename_supported = sd->atomic_rename_supported" in source
     assert "s_status.file_line_max = sd->file_line_max" in source
@@ -111,6 +113,10 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in source
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in source
+    assert "refresh_retained_sd_health" in source
+    assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
+    assert "d1l_retained_blob_store_any_sd_degraded()" in source
+    assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in source
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
     assert 'status->route_store_backend = "nvs"' not in source
@@ -215,6 +221,11 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"manager\\":{\\"running\\":%s' in console
     assert '\\"backoff_ms\\":%lu' in console
     assert '\\"force_nvs\\":%s' in console
+    assert '\\"retained_sd\\":{\\"degraded\\":%s' in console
+    assert '\\"sd_read_fail_count\\":%lu' in console
+    assert '\\"sd_write_fail_count\\":%lu' in console
+    assert '\\"sd_rename_fail_count\\":%lu' in console
+    assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in console
     assert 'cmd_storage_diag' in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console

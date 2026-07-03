@@ -128,6 +128,11 @@ Expected proof with a ready card:
 - `message_store_backend="sd"`, `dm_store_backend="sd"`,
   `route_store_backend="sd"`, `packet_log_backend="sd"`,
   `data_backend="mixed"`, and `setup_action="retained_history_sd_enabled"`.
+- `retained_sd.degraded=false` and each retained store reports zero
+  `sd_read_fail_count`, `sd_write_fail_count`, and `sd_rename_fail_count`
+  before canaries; if the card is yanked or SD writes fail, `storage status`
+  must show `SD degraded; using internal fallback` while new rows remain
+  available from onboard NVS fallback.
 - `storage filecanary` returns `ok=true`, `rename_replace=true`,
   `read_final=true`, `delete_final=true`, and `stat_deleted=true`.
 - `storage export-canary <token>` returns `ok=true`, `write_tmp=true`,

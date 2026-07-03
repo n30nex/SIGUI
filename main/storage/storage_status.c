@@ -41,6 +41,29 @@ static volatile bool s_manager_remount_requested;
 static volatile bool s_manager_reset_bridge_requested;
 static bool s_force_nvs;
 
+static void refresh_retained_sd_health(d1l_storage_status_t *status)
+{
+    if (!status) {
+        return;
+    }
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_DM_MESSAGES,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_DM_MESSAGES]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_ROUTES,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_ROUTES]);
+    (void)d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PACKET_LOG,
+                                           &status->retained_sd_stats[
+                                               D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    status->retained_sd_degraded = d1l_retained_blob_store_any_sd_degraded();
+    if (status->retained_sd_degraded) {
+        status->note = D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE;
+    }
+}
+
 static const char *storage_manager_state_name(d1l_storage_manager_state_t state)
 {
     switch (state) {
@@ -101,6 +124,7 @@ static void set_store_backends(d1l_storage_status_t *status)
     status->export_backend = d1l_export_store_sd_ready(status) ?
         "sd_diagnostic_exports_ready" : "serial";
     status->data_enabled = any_retained_sd;
+    refresh_retained_sd_health(status);
 }
 
 static void set_default_actions(d1l_storage_status_t *status)
@@ -627,5 +651,6 @@ void d1l_storage_status(d1l_storage_status_t *out_status)
     if (!s_status.initialized) {
         (void)d1l_storage_status_init();
     }
+    refresh_retained_sd_health(&s_status);
     *out_status = s_status;
 }
