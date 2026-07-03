@@ -57,7 +57,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "digitalWrite(SD_CS_PIN, HIGH)" in sketch
     assert "delay(SD_POWER_CYCLE_OFF_MS)" in sketch
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
-    assert "sd_wait_ready(SD_SELECTED_READY_WAIT_MS)" in sketch
+    assert "sd_wait_ready(selected_ready_wait_ms)" in sketch
     assert "bias_sd_spi_lines_for_power()" in sketch
     assert "float_sd_spi_lines_for_power_off()" in sketch
     assert "gpio_disable_pulls(pins[i])" in sketch
