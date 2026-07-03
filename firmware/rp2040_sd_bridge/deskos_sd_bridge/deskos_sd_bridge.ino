@@ -133,6 +133,7 @@ struct DiagSnapshot {
     CardProbe low_shared;
     CardProbe bitbang;
     CardProbe bitbang_inverted_cs;
+    CardProbe bitbang_sck_mosi_swapped;
     bool pin_sck_ok;
     bool pin_mosi_ok;
     bool pin_miso_ok;
@@ -475,8 +476,49 @@ uint8_t sd_bitbang_clock_bit(bool mosi_high) {
     return received;
 }
 
+uint8_t sd_bitbang_transfer_sck_mosi_swapped(uint8_t value) {
+    uint8_t received = 0;
+    for (uint8_t mask = 0x80U; mask != 0; mask >>= 1) {
+        digitalWrite(SD_SCK_PIN, (value & mask) ? HIGH : LOW);
+        delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+        digitalWrite(SD_MOSI_PIN, HIGH);
+        delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+        received <<= 1;
+        if (digitalRead(SD_MISO_PIN)) {
+            received |= 1U;
+        }
+        digitalWrite(SD_MOSI_PIN, LOW);
+        delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    }
+    return received;
+}
+
+uint8_t sd_bitbang_clock_bit_sck_mosi_swapped(bool mosi_high) {
+    digitalWrite(SD_SCK_PIN, mosi_high ? HIGH : LOW);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    digitalWrite(SD_MOSI_PIN, HIGH);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    const uint8_t received = digitalRead(SD_MISO_PIN) ? 1U : 0U;
+    digitalWrite(SD_MOSI_PIN, LOW);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    return received;
+}
+
 uint8_t sd_cs_idle_level(bool cs_active_high) {
     return cs_active_high ? LOW : HIGH;
+}
+
+void configure_sd_bitbang_sck_mosi_swapped_bus(bool power_high, bool force_power_cycle = false) {
+    bias_sd_spi_lines_for_power();
+    settle_sd_power(power_high, force_power_cycle);
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    pinMode(SD_SCK_PIN, OUTPUT);
+    digitalWrite(SD_SCK_PIN, HIGH);
+    pinMode(SD_MOSI_PIN, OUTPUT);
+    digitalWrite(SD_MOSI_PIN, LOW);
+    pinMode(SD_MISO_PIN, INPUT_PULLUP);
+    apply_sd_miso_pullup();
 }
 
 uint8_t sd_cs_selected_level(bool cs_active_high) {
@@ -524,6 +566,19 @@ uint8_t bitbang_wait_ready(uint32_t timeout_ms) {
     return value;
 }
 
+uint8_t bitbang_wait_ready_sck_mosi_swapped(uint32_t timeout_ms) {
+    const uint32_t start = millis();
+    uint8_t value = 0xFF;
+    do {
+        value = sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+        if (value == 0xFF) {
+            return value;
+        }
+        delay(1);
+    } while (millis() - start < timeout_ms);
+    return value;
+}
+
 uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra,
                            size_t extra_len, uint8_t *ready_byte = nullptr,
                            bool wait_selected_ready = true, uint8_t pre_clock_bits = 0,
@@ -561,6 +616,48 @@ uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint
     }
     digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     (void)sd_bitbang_transfer(0xFF);
+    return response;
+}
+
+uint8_t bitbang_sd_command_sck_mosi_swapped(uint8_t command, uint32_t argument, uint8_t crc,
+                                           uint8_t *extra, size_t extra_len,
+                                           uint8_t *ready_byte = nullptr,
+                                           bool wait_selected_ready = true,
+                                           uint8_t pre_clock_bits = 0,
+                                           bool ignore_leading_zero = false,
+                                           uint32_t selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS) {
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+    digitalWrite(SD_CS_PIN, LOW);
+    for (uint8_t i = 0; i < pre_clock_bits; ++i) {
+        (void)sd_bitbang_clock_bit_sck_mosi_swapped(true);
+    }
+    const uint8_t ready = wait_selected_ready ?
+        bitbang_wait_ready_sck_mosi_swapped(selected_ready_wait_ms) : 0xFFU;
+    if (ready_byte) {
+        *ready_byte = ready;
+    }
+    (void)sd_bitbang_transfer_sck_mosi_swapped(0x40U | command);
+    (void)sd_bitbang_transfer_sck_mosi_swapped(static_cast<uint8_t>(argument >> 24));
+    (void)sd_bitbang_transfer_sck_mosi_swapped(static_cast<uint8_t>(argument >> 16));
+    (void)sd_bitbang_transfer_sck_mosi_swapped(static_cast<uint8_t>(argument >> 8));
+    (void)sd_bitbang_transfer_sck_mosi_swapped(static_cast<uint8_t>(argument));
+    (void)sd_bitbang_transfer_sck_mosi_swapped(crc);
+    uint8_t response = 0xFF;
+    for (uint8_t i = 0; i < 64; ++i) {
+        response = sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+        if (ignore_leading_zero && response == 0x00U) {
+            continue;
+        }
+        if ((response & 0x80U) == 0) {
+            break;
+        }
+    }
+    for (size_t i = 0; i < extra_len; ++i) {
+        extra[i] = sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+    }
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_bitbang_transfer_sck_mosi_swapped(0xFF);
     return response;
 }
 
@@ -779,6 +876,101 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
 
     uint8_t ocr[4] = {0, 0, 0, 0};
     (void)bitbang_sd_command(58, 0, 0xFD, ocr, sizeof(ocr));
+    probe.error_data = ocr[0];
+    return probe;
+}
+
+CardProbe manual_probe_card_bitbang_sck_mosi_swapped(bool power_high,
+                                                     bool force_power_cycle = false) {
+    CardProbe probe = empty_probe(power_token(power_high), "bitbang-sck-mosi-swapped",
+                                  power_high, DEDICATED_SPI, force_power_cycle);
+    configure_sd_bitbang_sck_mosi_swapped_bus(power_high, force_power_cycle);
+    probe.miso_pullup_level = sample_sd_miso_level();
+    probe.miso_spi_level = probe.miso_pullup_level;
+    digitalWrite(SD_CS_PIN, HIGH);
+    probe.idle_rx_ff = sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+    for (uint8_t i = 1; i < 10; ++i) {
+        (void)sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+    }
+    probe.miso_idle_level = sample_sd_miso_level();
+
+    uint8_t cmd0 = 0xFFU;
+    for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
+        cmd0 = bitbang_sd_command_sck_mosi_swapped(0, 0, 0x95, nullptr, 0,
+                                                   &probe.cmd0_ready_byte, true, 0, true,
+                                                   SD_CMD0_READY_SAMPLE_MS);
+        if (cmd0 == 0x01U) {
+            break;
+        }
+        if (cmd0 == 0x00U) {
+            for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
+                cmd0 = bitbang_sd_command_sck_mosi_swapped(0, 0, 0x95, nullptr, 0,
+                                                           &probe.cmd0_ready_byte, true,
+                                                           slip, true,
+                                                           SD_CMD0_READY_SAMPLE_MS);
+                if (cmd0 == 0x01U) {
+                    break;
+                }
+            }
+            if (cmd0 == 0x01U) {
+                break;
+            }
+        }
+        digitalWrite(SD_CS_PIN, HIGH);
+        for (uint8_t i = 0; i < SD_CMD0_RECOVERY_CLOCKS; ++i) {
+            (void)sd_bitbang_transfer_sck_mosi_swapped(0xFF);
+        }
+        delay(10);
+    }
+    probe.cmd0_response = cmd0;
+    if (cmd0 == 0xFF) {
+        probe.error_code = 1;
+        return probe;
+    }
+    if (cmd0 != 0x01U) {
+        probe.error_code = 3;
+        probe.error_data = cmd0;
+        return probe;
+    }
+
+    uint8_t cmd8_extra[4] = {0, 0, 0, 0};
+    const uint8_t cmd8 = bitbang_sd_command_sck_mosi_swapped(8, 0x1AA, 0x87, cmd8_extra,
+                                                             sizeof(cmd8_extra),
+                                                             &probe.cmd8_ready_byte, true);
+    probe.cmd8_response = cmd8;
+    for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
+        probe.cmd8_echo[i] = cmd8_extra[i];
+    }
+    const bool sd_v2 = (cmd8 & 0x04U) == 0;
+    const bool cmd8_echo_ok = cmd8_extra[2] == 0x01U && cmd8_extra[3] == 0xAAU;
+    if (sd_v2 && !cmd8_echo_ok) {
+        probe.error_code = 4;
+        probe.error_data = cmd8_extra[3];
+        return probe;
+    }
+
+    const uint32_t init_start = millis();
+    uint8_t acmd41 = 0xFF;
+    do {
+        (void)bitbang_sd_command_sck_mosi_swapped(55, 0, 0x65, nullptr, 0);
+        acmd41 = bitbang_sd_command_sck_mosi_swapped(41, sd_v2 ? 0x40000000UL : 0,
+                                                     0x77, nullptr, 0);
+        if (acmd41 == 0) {
+            probe.present = true;
+            probe.error_code = 0;
+            break;
+        }
+        delay(10);
+    } while (millis() - init_start < 750);
+
+    if (!probe.present) {
+        probe.error_code = acmd41 == 0xFF ? 2 : acmd41;
+        probe.error_data = cmd8;
+        return probe;
+    }
+
+    uint8_t ocr[4] = {0, 0, 0, 0};
+    (void)bitbang_sd_command_sck_mosi_swapped(58, 0, 0xFD, ocr, sizeof(ocr));
     probe.error_data = ocr[0];
     return probe;
 }
@@ -1241,6 +1433,7 @@ DiagSnapshot pending_diag_snapshot() {
         empty_probe("low", "shared", false, SHARED_SPI),
         empty_probe("high", "bitbang", true, DEDICATED_SPI),
         empty_probe("high", "bitbang-inverted-cs", true, DEDICATED_SPI),
+        empty_probe("high", "bitbang-sck-mosi-swapped", true, DEDICATED_SPI),
         s_sd_pin_sck_ok,
         s_sd_pin_mosi_ok,
         s_sd_pin_miso_ok,
@@ -1266,6 +1459,7 @@ DiagSnapshot diag_status_blocking() {
     diag.low_shared = manual_probe_card(SHARED_SPI, false);
     diag.bitbang = manual_probe_card_bitbang(true, false);
     diag.bitbang_inverted_cs = manual_probe_card_bitbang(true, true, true);
+    diag.bitbang_sck_mosi_swapped = manual_probe_card_bitbang_sck_mosi_swapped(true, true);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
@@ -1715,6 +1909,7 @@ void send_diag_snapshot(const DiagSnapshot &diag) {
     append_probe_tokens(line, "ls", diag.low_shared);
     append_probe_tokens(line, "bb", diag.bitbang);
     append_probe_tokens(line, "bi", diag.bitbang_inverted_cs);
+    append_probe_tokens(line, "bs", diag.bitbang_sck_mosi_swapped);
     reply_stream->println(line);
 }
 

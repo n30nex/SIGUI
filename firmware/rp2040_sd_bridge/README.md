@@ -154,7 +154,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   window; the bit-banged probe also retries all-zero CMD0 results with one to
   seven pre-command clocks while CS is asserted. `bi_*` repeats the bit-banged
   probe with inverted CS idle/select polarity to rule out a board-select
-  polarity or routing mismatch without driving MISO. These diagnostics test
+  polarity or routing mismatch without driving MISO. `bs_*` repeats the
+  bit-banged probe with SCK and MOSI swapped, which exercises only card input
+  lines and rules out that safe pin-map mismatch. These diagnostics test
   reset-entry byte recovery without formatting or writing the card.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and

@@ -150,13 +150,13 @@ DESKOS_SD_DIAG
 RP2040 replies with one compact line:
 
 ```text
-DESKOS_SD_DIAG pins=det7-cs13-sck10-mosi11-miso12-pwr18 hz=1000000 pin_sck=1 pin_mosi=1 pin_miso=1 pin_cs=1 selected_power=high selected_mode=dedicated mount_selected=0 detect=floating detect_driven=0 det_pullup=1 det_pulldown=0 hd_p=0 hd_e=254 hd_d=0 hd_c0r=255 hd_c8r=255 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_idle_ff=255 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0r=255 hs_c8r=255 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_idle_ff=255 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0r=255 ld_c8r=255 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_idle_ff=255 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0r=255 ls_c8r=255 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_idle_ff=255 ls_kb=0 bb_p=0 bb_e=254 bb_d=0 bb_c0r=255 bb_c8r=255 bb_c0=255 bb_c8=255 bb_r70=0 bb_r71=0 bb_r72=0 bb_r73=0 bb_miso_pull=1 bb_miso_spi=1 bb_miso_idle=1 bb_idle_ff=255 bb_kb=0 bi_p=0 bi_e=254 bi_d=0 bi_c0r=255 bi_c8r=255 bi_c0=255 bi_c8=255 bi_r70=0 bi_r71=0 bi_r72=0 bi_r73=0 bi_miso_pull=1 bi_miso_spi=1 bi_miso_idle=1 bi_idle_ff=255 bi_kb=0
+DESKOS_SD_DIAG pins=det7-cs13-sck10-mosi11-miso12-pwr18 hz=1000000 pin_sck=1 pin_mosi=1 pin_miso=1 pin_cs=1 selected_power=high selected_mode=dedicated mount_selected=0 detect=floating detect_driven=0 det_pullup=1 det_pulldown=0 hd_p=0 hd_e=254 hd_d=0 hd_c0r=255 hd_c8r=255 hd_c0=255 hd_c8=255 hd_r70=0 hd_r71=0 hd_r72=0 hd_r73=0 hd_miso_pull=1 hd_miso_spi=1 hd_miso_idle=1 hd_idle_ff=255 hd_kb=0 hs_p=0 hs_e=254 hs_d=0 hs_c0r=255 hs_c8r=255 hs_c0=255 hs_c8=255 hs_r70=0 hs_r71=0 hs_r72=0 hs_r73=0 hs_miso_pull=1 hs_miso_spi=1 hs_miso_idle=1 hs_idle_ff=255 hs_kb=0 ld_p=0 ld_e=254 ld_d=0 ld_c0r=255 ld_c8r=255 ld_c0=255 ld_c8=255 ld_r70=0 ld_r71=0 ld_r72=0 ld_r73=0 ld_miso_pull=1 ld_miso_spi=1 ld_miso_idle=1 ld_idle_ff=255 ld_kb=0 ls_p=0 ls_e=254 ls_d=0 ls_c0r=255 ls_c8r=255 ls_c0=255 ls_c8=255 ls_r70=0 ls_r71=0 ls_r72=0 ls_r73=0 ls_miso_pull=1 ls_miso_spi=1 ls_miso_idle=1 ls_idle_ff=255 ls_kb=0 bb_p=0 bb_e=254 bb_d=0 bb_c0r=255 bb_c8r=255 bb_c0=255 bb_c8=255 bb_r70=0 bb_r71=0 bb_r72=0 bb_r73=0 bb_miso_pull=1 bb_miso_spi=1 bb_miso_idle=1 bb_idle_ff=255 bb_kb=0 bi_p=0 bi_e=254 bi_d=0 bi_c0r=255 bi_c8r=255 bi_c0=255 bi_c8=255 bi_r70=0 bi_r71=0 bi_r72=0 bi_r73=0 bi_miso_pull=1 bi_miso_spi=1 bi_miso_idle=1 bi_idle_ff=255 bi_kb=0 bs_p=0 bs_e=254 bs_d=0 bs_c0r=255 bs_c8r=255 bs_c0=255 bs_c8=255 bs_r70=0 bs_r71=0 bs_r72=0 bs_r73=0 bs_miso_pull=1 bs_miso_spi=1 bs_miso_idle=1 bs_idle_ff=255 bs_kb=0
 ```
 
 `pin_sck`, `pin_mosi`, and `pin_miso` report whether Arduino-Pico accepted the
 configured SPI1 pins; `pin_cs` reports that GPIO13 chip select registration is
 configured. `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`
-report the raw GPIO7 SD-detect sample. Each probe prefix (`hd`, `hs`, `ld`, `ls`, `bb`, `bi`)
+report the raw GPIO7 SD-detect sample. Each probe prefix (`hd`, `hs`, `ld`, `ls`, `bb`, `bi`, `bs`)
 reports presence (`*_p`), final probe error (`*_e`), error data (`*_d`), the
 CS-low selected-ready byte before CMD0 (`*_c0r`) and before CMD8 (`*_c8r`), raw `CMD0` response
 (`*_c0`), raw `CMD8` response (`*_c8`), the four `CMD8` R7 echo bytes
@@ -167,14 +167,16 @@ KiB (`*_kb`). Raw CMD0 probes sample selected-ready and scan past leading
 all-zero response bytes inside the response window; the `bb_*` CMD0 path also
 retries all-zero CMD0 responses with one to seven pre-command bit clocks while
 selected. The `bi_*` path repeats the bit-banged probe with inverted CS
-idle/select polarity and never drives MISO. These fields are non-formatting
-diagnostics for distinguishing a stuck/all-zero SPI bus, byte-boundary issue,
-or select-polarity mismatch from a card that reaches SPI idle but fails the SD
-v2 echo check.
+idle/select polarity and never drives MISO. The `bs_*` path repeats the
+bit-banged probe with SCK and MOSI swapped, exercising only card input lines.
+These fields are non-formatting diagnostics for distinguishing a stuck/all-zero
+SPI bus, byte-boundary issue, select-polarity mismatch, or safe pin-map mismatch
+from a card that reaches SPI idle but fails the SD v2 echo check.
 
 Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`
-low/dedicated, `ls` low/shared, `bb` high-power bit-banged GPIO probe, and
-`bi` high-power bit-banged inverted-CS GPIO probe. The `bb` and `bi` probes are
+low/dedicated, `ls` low/shared, `bb` high-power bit-banged GPIO probe,
+`bi` high-power bit-banged inverted-CS GPIO probe, and `bs` high-power
+bit-banged SCK/MOSI-swapped GPIO probe. The `bb`, `bi`, and `bs` probes are
 diagnostic-only and do not enable file operations or bypass the ready SD gate.
 For each probe, `_p` is present, `_e` is
 the SdFat error code, `_d` is error data, and `_kb` is detected capacity. The
