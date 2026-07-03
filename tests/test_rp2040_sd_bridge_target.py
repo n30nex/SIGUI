@@ -281,7 +281,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '"deskos_map_manifest_invalid"' in sketch
     assert "manifest_file_valid" in sketch
     assert "map_manifest_file_valid" in sketch
-    assert "write_text_file_direct(DESKOS_MANIFEST" not in sketch
+    assert "write_text_file_direct(DESKOS_MANIFEST, DESKOS_MANIFEST_PAYLOAD)" in sketch
+    assert "manifest_valid()" in sketch
     assert "write_text_file_direct(DESKOS_MAP_MANIFEST" not in sketch
     assert "bool mounted_fs_is_fat32()" in sketch
     assert "SD.fatType() == 32" in sketch

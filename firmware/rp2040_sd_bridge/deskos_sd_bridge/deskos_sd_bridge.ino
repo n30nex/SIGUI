@@ -1560,11 +1560,16 @@ bool preserve_invalid_manifest(const char *final_path,
 }
 
 bool write_manifest() {
-    return write_atomic_text_file(DESKOS_MANIFEST,
-                                  DESKOS_MANIFEST_TMP,
-                                  DESKOS_MANIFEST_BAD,
-                                  DESKOS_MANIFEST_PAYLOAD,
-                                  manifest_file_valid);
+    if (write_atomic_text_file(DESKOS_MANIFEST,
+                               DESKOS_MANIFEST_TMP,
+                               DESKOS_MANIFEST_BAD,
+                               DESKOS_MANIFEST_PAYLOAD,
+                               manifest_file_valid)) {
+        return true;
+    }
+    (void)remove_file_if_present(DESKOS_MANIFEST_TMP);
+    return write_text_file_direct(DESKOS_MANIFEST, DESKOS_MANIFEST_PAYLOAD) &&
+           manifest_valid();
 }
 
 bool write_map_manifest() {
@@ -1661,6 +1666,10 @@ SdSnapshot mounted_snapshot_from_current_config() {
 }
 
 SdSnapshot mount_status_blocking() {
+    if (s_sd_mounted) {
+        return mounted_snapshot_from_current_config();
+    }
+
     s_sd_power_high = true;
     s_sd_spi_options = DEDICATED_SPI;
     SdSnapshot snapshot = pending_snapshot("filesystem_mounting");
@@ -1687,6 +1696,10 @@ SdSnapshot mount_status_blocking() {
 
 SdSnapshot request_mount_status() {
     refresh_worker_results();
+    SdSnapshot status = current_status();
+    if (status.mounted && snapshot_fs_is_fat32(status)) {
+        return cache_status(mounted_snapshot_from_current_config());
+    }
     if (!s_worker_busy && s_worker_request == SD_WORKER_NONE) {
         (void)start_sd_worker(SD_WORKER_MOUNT);
     }
