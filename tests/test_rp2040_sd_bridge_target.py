@@ -405,13 +405,23 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     parent_body = sketch.split("bool ensure_parent_dirs", 1)[1].split(
         "bool make_backup_path", 1
     )[0]
-    assert parent_body.index("SD.mkdir(tmp)") < parent_body.index("SD.exists(tmp)")
+    assert "SD.mkdir(tmp)" in parent_body
+    assert "SD.exists" not in parent_body
+    replace_body = sketch.split("const char *rename_replace_preserving_old", 1)[1].split(
+        "void send_snapshot", 1
+    )[0]
+    assert "SD.exists" not in replace_body
     delete_body = sketch.split("void handle_file_delete", 1)[1].split(
         "void handle_file_rename", 1
     )[0]
+    assert "SD.exists" not in delete_body
     assert delete_body.index("ensure_parent_dirs(full_path)") < delete_body.index(
-        "SD.exists(full_path)"
+        "SD.remove(full_path)"
     )
+    file_protocol_body = sketch.split("void handle_file_stat", 1)[1].split(
+        "void handle_file_line", 1
+    )[0]
+    assert "SD.exists" not in file_protocol_body
 
 
 def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():

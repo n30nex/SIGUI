@@ -2083,10 +2083,7 @@ bool ensure_parent_dirs(const char *full_path) {
             continue;
         }
         *p = '\0';
-        if (!SD.mkdir(tmp) && !SD.exists(tmp)) {
-            *p = '/';
-            return false;
-        }
+        (void)SD.mkdir(tmp);
         *p = '/';
     }
     return true;
@@ -2102,17 +2099,15 @@ bool make_backup_path(const char *target_path, char *backup_path, size_t backup_
 }
 
 const char *rename_replace_preserving_old(const char *source_path, const char *target_path) {
-    if (!SD.exists(target_path)) {
-        return SD.rename(source_path, target_path) ? nullptr : "rename_failed";
+    if (SD.rename(source_path, target_path)) {
+        return nullptr;
     }
 
     char backup_path[FILE_FULL_PATH_MAX];
     if (!make_backup_path(target_path, backup_path, sizeof(backup_path))) {
         return "too_large";
     }
-    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
-        return "delete_failed";
-    }
+    (void)SD.remove(backup_path);
     if (!SD.rename(target_path, backup_path)) {
         return "rename_failed";
     }
@@ -2120,7 +2115,7 @@ const char *rename_replace_preserving_old(const char *source_path, const char *t
         (void)SD.rename(backup_path, target_path);
         return "rename_failed";
     }
-    if (SD.exists(backup_path) && !SD.remove(backup_path)) {
+    if (!SD.remove(backup_path)) {
         return "delete_failed";
     }
     return nullptr;
@@ -2403,15 +2398,10 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=stat exists=";
-    if (!SD.exists(full_path)) {
-        out += "0 kind=none size=0 note=ok";
-        reply_stream->println(out);
-        return;
-    }
-
     File file = SD.open(full_path, FILE_READ);
     if (!file) {
-        send_file_error(request_id, "stat", "open_failed");
+        out += "0 kind=none size=0 note=ok";
+        reply_stream->println(out);
         return;
     }
     out += "1 kind=";
@@ -2442,14 +2432,9 @@ void handle_file_read(uint32_t request_id, const char *line) {
         send_file_error(request_id, "read", "too_large");
         return;
     }
-    if (!SD.exists(full_path)) {
-        send_file_error(request_id, "read", "not_found");
-        return;
-    }
-
     File file = SD.open(full_path, FILE_READ);
     if (!file || file.isDirectory()) {
-        send_file_error(request_id, "read", file && file.isDirectory() ? "is_dir" : "open_failed");
+        send_file_error(request_id, "read", file && file.isDirectory() ? "is_dir" : "not_found");
         if (file) {
             file.close();
         }
@@ -2529,17 +2514,17 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     }
 
     uint32_t current_size = 0;
-    if (!truncate && SD.exists(full_path)) {
+    if (!truncate) {
         File existing = SD.open(full_path, FILE_READ);
-        if (!existing || existing.isDirectory()) {
-            send_file_error(request_id, op_name, existing && existing.isDirectory() ? "is_dir" : "open_failed");
-            if (existing) {
+        if (existing) {
+            if (existing.isDirectory()) {
                 existing.close();
+                send_file_error(request_id, op_name, "is_dir");
+                return;
             }
-            return;
+            current_size = static_cast<uint32_t>(existing.size());
+            existing.close();
         }
-        current_size = static_cast<uint32_t>(existing.size());
-        existing.close();
     }
     if (append_mode) {
         offset = current_size;
@@ -2597,12 +2582,8 @@ void handle_file_delete(uint32_t request_id, const char *line) {
         send_file_error(request_id, "delete", "not_found");
         return;
     }
-    if (!SD.exists(full_path)) {
-        send_file_error(request_id, "delete", "not_found");
-        return;
-    }
     if (!SD.remove(full_path)) {
-        send_file_error(request_id, "delete", "delete_failed");
+        send_file_error(request_id, "delete", "not_found");
         return;
     }
     String out(FILE_REPLY);
@@ -2626,16 +2607,8 @@ void handle_file_rename(uint32_t request_id, const char *line) {
         send_file_error(request_id, "rename", "bad_path");
         return;
     }
-    if (!SD.exists(source_path)) {
-        send_file_error(request_id, "rename", "not_found");
-        return;
-    }
     if (!ensure_parent_dirs(target_path)) {
         send_file_error(request_id, "rename", "open_failed");
-        return;
-    }
-    if (SD.exists(target_path) && !replace_target) {
-        send_file_error(request_id, "rename", "exists");
         return;
     }
 
@@ -2644,10 +2617,6 @@ void handle_file_rename(uint32_t request_id, const char *line) {
                                     : (SD.rename(source_path, target_path) ? nullptr : "rename_failed");
     if (replace_error) {
         send_file_error(request_id, "rename", replace_error);
-        return;
-    }
-    if (!SD.exists(target_path)) {
-        send_file_error(request_id, "rename", "rename_failed");
         return;
     }
     String out(FILE_REPLY);
