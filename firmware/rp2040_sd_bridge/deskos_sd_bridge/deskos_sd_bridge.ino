@@ -849,8 +849,8 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
         SPI1.endTransaction();
         return probe;
     }
-    const bool cmd0_idle = cmd0 == 0x01U;
-    if (!cmd0_idle) {
+    const bool cmd0_idle_or_ready = cmd0 == 0x01U || cmd0 == 0x00U;
+    if (!cmd0_idle_or_ready) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         SPI1.endTransaction();
@@ -942,7 +942,7 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
         probe.error_code = 1;
         return probe;
     }
-    if (cmd0 != 0x01U) {
+    if (cmd0 != 0x01U && cmd0 != 0x00U) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         return probe;
@@ -1035,7 +1035,7 @@ CardProbe manual_probe_card_bitbang_sck_mosi_swapped(bool power_high,
         probe.error_code = 1;
         return probe;
     }
-    if (cmd0 != 0x01U) {
+    if (cmd0 != 0x01U && cmd0 != 0x00U) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         return probe;
@@ -1131,7 +1131,7 @@ CardProbe manual_probe_card_bitbang_pin_map(const BitbangPinMap &pins, const cha
         probe.error_code = 1;
         return probe;
     }
-    if (cmd0 != 0x01U) {
+    if (cmd0 != 0x01U && cmd0 != 0x00U) {
         probe.error_code = 3;
         probe.error_data = cmd0;
         return probe;

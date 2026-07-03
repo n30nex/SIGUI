@@ -154,8 +154,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
   with the SPI response path. The raw probe sends CMD0 without a selected-ready
   prewait, then scans past leading all-zero CMD0 response bytes inside the
-  response window; the bit-banged probe also retries all-zero CMD0 results with
-  one to seven pre-command clocks while CS is asserted. `bi_*` repeats the bit-banged
+  response window. A `CMD0=0` result is allowed to continue only far enough to
+  require a valid CMD8 echo and ACMD41 completion, so a stuck-low DO line is
+  not treated as a mounted card. The bit-banged probe also retries all-zero
+  CMD0 results with one to seven pre-command clocks while CS is asserted. `bi_*` repeats the bit-banged
   probe with inverted CS idle/select polarity to rule out a board-select
   polarity or routing mismatch without driving MISO. `bs_*`, `bcm_*`, and
   `bsc_*` repeat the bit-banged probe with SCK/MOSI, CS/MOSI, and SCK/CS

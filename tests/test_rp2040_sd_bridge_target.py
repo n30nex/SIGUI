@@ -141,7 +141,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '" mount_err="' in sketch
     assert '" mount_data="' in sketch
     assert "sd_command(0, 0, 0x95" in sketch
-    assert "const bool cmd0_idle = cmd0 == 0x01U" in sketch
+    assert "const bool cmd0_idle_or_ready = cmd0 == 0x01U || cmd0 == 0x00U" in sketch
     assert "constexpr uint8_t SD_CMD0_RETRIES = 8;" in sketch
     assert "clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS)" in sketch
     assert "constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;" in sketch
@@ -176,7 +176,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert 'empty_probe("high", "bitbang-sck-mosi-swapped", true, DEDICATED_SPI)' in sketch
     assert 'empty_probe("high", "bitbang-cs-mosi-swapped", true, DEDICATED_SPI)' in sketch
     assert 'empty_probe("high", "bitbang-sck-cs-swapped", true, DEDICATED_SPI)' in sketch
-    assert "if (!cmd0_idle)" in sketch
+    assert "if (!cmd0_idle_or_ready)" in sketch
+    assert "cmd0 != 0x01U && cmd0 != 0x00U" in sketch
     assert "probe.error_code = 3" in sketch
     assert "cmd8_echo_ok" in sketch
     assert "probe.error_code = 4" in sketch
