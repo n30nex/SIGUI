@@ -55,6 +55,10 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert '"rp2040 double-reset"' in console
     assert 'cmd_rp2040_double_reset' in console
     assert 'strncmp(line, "rp2040 double-reset"' in console
+    double_reset_body = console.split("static void cmd_rp2040_double_reset", 1)[1].split("static void cmd_rp2040_ping", 1)[0]
+    assert 'ok_begin(line)' in double_reset_body
+    assert 'err_result(line, "INVALID_ARG"' in double_reset_body
+    assert 'err_result(line, esp_err_to_name(ret)' in double_reset_body
     assert '"rp2040 reset"' in console
     assert 'strcmp(line, "rp2040 reset")' in console
     assert "public_rf_tx" in console

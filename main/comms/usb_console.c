@@ -956,17 +956,17 @@ static void cmd_rp2040_double_reset(const char *line)
     if (*args != '\0') {
         if (!parse_next_u32_arg(&args, &hold_ms) ||
             !parse_next_u32_arg(&args, &gap_ms)) {
-            err_result("rp2040 double-reset", "INVALID_ARG",
+            err_result(line, "INVALID_ARG",
                        "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
             return;
         }
         if (*args != '\0' && !parse_next_u32_arg(&args, &settle_ms)) {
-            err_result("rp2040 double-reset", "INVALID_ARG",
+            err_result(line, "INVALID_ARG",
                        "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
             return;
         }
         if (*args != '\0') {
-            err_result("rp2040 double-reset", "INVALID_ARG",
+            err_result(line, "INVALID_ARG",
                        "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
             return;
         }
@@ -974,19 +974,19 @@ static void cmd_rp2040_double_reset(const char *line)
     if (hold_ms < 10U || hold_ms > 250U ||
         gap_ms < 25U || gap_ms > 1000U ||
         settle_ms < 500U || settle_ms > 5000U) {
-        err_result("rp2040 double-reset", "INVALID_ARG",
+        err_result(line, "INVALID_ARG",
                    "bounds: hold 10-250 ms, gap 25-1000 ms, settle 500-5000 ms");
         return;
     }
     esp_err_t ret = d1l_rp2040_bridge_double_reset(hold_ms, gap_ms, settle_ms);
     if (ret != ESP_OK) {
-        err_result("rp2040 double-reset", esp_err_to_name(ret),
+        err_result(line, esp_err_to_name(ret),
                    "could not perform RP2040 double reset through the D1L IO expander");
         return;
     }
     d1l_rp2040_status_t status = {0};
     (void)d1l_rp2040_bridge_status(&status);
-    ok_begin("rp2040 double-reset");
+    ok_begin(line);
     printf(",\"reset_expander_pin\":%u,\"hold_ms\":%lu,\"gap_ms\":%lu,\"settle_ms\":%lu,\"uart_ready\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"sd_touched\":false}\n",
            status.reset_expander_pin,
            (unsigned long)hold_ms,
