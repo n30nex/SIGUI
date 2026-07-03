@@ -942,11 +942,40 @@ static void cmd_rp2040_reset(void)
            status.uart_ready ? "true" : "false");
 }
 
-static void cmd_rp2040_double_reset(void)
+static void cmd_rp2040_double_reset(const char *line)
 {
-    const uint32_t hold_ms = 50U;
-    const uint32_t gap_ms = 150U;
-    const uint32_t settle_ms = 1500U;
+    uint32_t hold_ms = 50U;
+    uint32_t gap_ms = 150U;
+    uint32_t settle_ms = 1500U;
+    const char *args = line + strlen("rp2040 double-reset");
+    while (*args == ' ') {
+        args++;
+    }
+    if (*args != '\0') {
+        if (!parse_next_u32_arg(&args, &hold_ms) ||
+            !parse_next_u32_arg(&args, &gap_ms)) {
+            err_result("rp2040 double-reset", "INVALID_ARG",
+                       "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
+            return;
+        }
+        if (*args != '\0' && !parse_next_u32_arg(&args, &settle_ms)) {
+            err_result("rp2040 double-reset", "INVALID_ARG",
+                       "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
+            return;
+        }
+        if (*args != '\0') {
+            err_result("rp2040 double-reset", "INVALID_ARG",
+                       "usage: rp2040 double-reset [hold_ms gap_ms [settle_ms]]");
+            return;
+        }
+    }
+    if (hold_ms < 10U || hold_ms > 250U ||
+        gap_ms < 25U || gap_ms > 1000U ||
+        settle_ms < 500U || settle_ms > 5000U) {
+        err_result("rp2040 double-reset", "INVALID_ARG",
+                   "bounds: hold 10-250 ms, gap 25-1000 ms, settle 500-5000 ms");
+        return;
+    }
     esp_err_t ret = d1l_rp2040_bridge_double_reset(hold_ms, gap_ms, settle_ms);
     if (ret != ESP_OK) {
         err_result("rp2040 double-reset", esp_err_to_name(ret),
@@ -1560,6 +1589,30 @@ static bool parse_u32_word(const char *word, uint32_t *out_value)
         return false;
     }
     *out_value = (uint32_t)value;
+    return true;
+}
+
+static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value)
+{
+    if (!cursor || !*cursor || !out_value) {
+        return false;
+    }
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
+    if (**cursor == '\0') {
+        return false;
+    }
+    char *end = NULL;
+    unsigned long value = strtoul(*cursor, &end, 10);
+    if (end == *cursor || !end || (*end != '\0' && *end != ' ') || value > UINT32_MAX) {
+        return false;
+    }
+    *out_value = (uint32_t)value;
+    *cursor = end;
+    while (**cursor == ' ') {
+        (*cursor)++;
+    }
     return true;
 }
 
@@ -4085,7 +4138,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 double-reset\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4168,8 +4221,10 @@ static void handle_line(const char *line)
         cmd_rp2040_ping();
     } else if (strcmp(line, "rp2040 bootloader") == 0) {
         cmd_rp2040_bootloader();
-    } else if (strcmp(line, "rp2040 double-reset") == 0) {
-        cmd_rp2040_double_reset();
+    } else if (strncmp(line, "rp2040 double-reset", strlen("rp2040 double-reset")) == 0 &&
+               (line[strlen("rp2040 double-reset")] == '\0' ||
+                line[strlen("rp2040 double-reset")] == ' ')) {
+        cmd_rp2040_double_reset(line);
     } else if (strcmp(line, "rp2040 reset") == 0) {
         cmd_rp2040_reset();
     } else if (strcmp(line, "storage status") == 0) {

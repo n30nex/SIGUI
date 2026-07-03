@@ -54,7 +54,7 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert 'strcmp(line, "rp2040 bootloader")' in console
     assert '"rp2040 double-reset"' in console
     assert 'cmd_rp2040_double_reset' in console
-    assert 'strcmp(line, "rp2040 double-reset")' in console
+    assert 'strncmp(line, "rp2040 double-reset"' in console
     assert '"rp2040 reset"' in console
     assert 'strcmp(line, "rp2040 reset")' in console
     assert "public_rf_tx" in console
