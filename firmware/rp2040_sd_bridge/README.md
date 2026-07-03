@@ -149,7 +149,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
   CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
   separated from a real card echo mismatch. The `bb_*` fields bypass the SPI1
-  peripheral with direct GPIO clocking and are diagnostic-only; they do not
+  peripheral with direct GPIO clocking and are diagnostic-only; the `b3_*`
+  fields repeat that raw command path with SPI mode 3 clock polarity/phase to
+  isolate reset-entry timing without changing the filesystem path. They do not
   enable file operations. Diagnostic replies also include
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
   with the SPI response path. The raw probe samples selected-ready before CMD0
