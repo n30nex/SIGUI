@@ -137,6 +137,15 @@ void configure_seeed_sd_bus_for_mount(bool force_power_cycle, bool explicit_spi_
     }
 }
 
+void print_progress(const char *stage) {
+    Serial.print("{\"test\":\"seeed_official_sd_smoke_progress\",\"stage\":\"");
+    Serial.print(stage);
+    Serial.print("\",\"sd_use_sd_crc\":");
+    Serial.print(static_cast<unsigned int>(USE_SD_CRC));
+    Serial.println("}");
+    Serial.flush();
+}
+
 DetectSample sample_detect() {
     pinMode(SD_DET_PIN, INPUT_PULLUP);
     delay(2);
@@ -509,19 +518,24 @@ bool read_smoke_file(const char *path) {
 }
 
 SmokeResult run_smoke() {
+    print_progress("run_smoke_start");
     SmokeResult result = {};
     result.mount_mode = "none";
 
+    print_progress("mount_sd_2arg_start");
     configure_seeed_sd_bus_for_mount(true, false);
     result.mount_sd_2arg = SD.begin(SD_CS_PIN, SPI1);
+    print_progress(result.mount_sd_2arg ? "mount_sd_2arg_ok" : "mount_sd_2arg_failed");
     result.mounted = result.mount_sd_2arg;
     if (result.mounted) {
         result.mount_mode = "sd_begin_cs_spi1";
     }
 
     if (!result.mounted) {
+        print_progress("mount_sd_2arg_spi_begin_start");
         configure_seeed_sd_bus_for_mount(true, true);
         result.mount_sd_2arg_spi_begin = SD.begin(SD_CS_PIN, SPI1);
+        print_progress(result.mount_sd_2arg_spi_begin ? "mount_sd_2arg_spi_begin_ok" : "mount_sd_2arg_spi_begin_failed");
         result.mounted = result.mount_sd_2arg_spi_begin;
         if (result.mounted) {
             result.mount_mode = "spi1_begin_then_sd_begin_cs_spi1";
@@ -529,8 +543,10 @@ SmokeResult run_smoke() {
     }
 
     if (!result.mounted) {
+        print_progress("mount_sd_3arg_spi_begin_start");
         configure_seeed_sd_bus_for_mount(true, true);
         result.mount_sd_3arg_spi_begin = SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1);
+        print_progress(result.mount_sd_3arg_spi_begin ? "mount_sd_3arg_spi_begin_ok" : "mount_sd_3arg_spi_begin_failed");
         result.mounted = result.mount_sd_3arg_spi_begin;
         if (result.mounted) {
             result.mount_mode = "spi1_begin_then_sd_begin_cs_hz_spi1";
@@ -538,15 +554,19 @@ SmokeResult run_smoke() {
     }
 
     if (!result.mounted) {
+        print_progress("run_smoke_mount_failed");
         return result;
     }
+    print_progress("filesystem_check_start");
     result.fat_type = SD.fatType();
     result.fat32 = result.fat_type == 32U;
     result.needs_fat32 = !result.fat32;
     if (!result.fat32) {
+        print_progress("filesystem_not_fat32");
         return result;
     }
 
+    print_progress("file_ops_start");
     result.root_open = root_directory_opens();
     result.mkdir_ok = SD.exists(SMOKE_DIR) || SD.mkdir(SMOKE_DIR);
     (void)SD.remove(SMOKE_TMP);
@@ -561,6 +581,7 @@ SmokeResult run_smoke() {
                      read_smoke_file(SMOKE_FINAL);
     result.delete_ok = result.stat_ok && SD.remove(SMOKE_FINAL) &&
                        !SD.exists(SMOKE_FINAL);
+    print_progress("run_smoke_done");
     return result;
 }
 
@@ -686,9 +707,13 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
 void setup() {
     Serial.begin(115200);
     delay(1500);
+    print_progress("setup_start");
     SmokeResult result = run_smoke();
+    print_progress("raw_probe_start");
     RawProbe probe = run_raw_probe();
+    print_progress("detect_start");
     DetectSample detect = sample_detect();
+    print_progress("final_result_start");
     print_result(result, probe, detect);
 }
 
