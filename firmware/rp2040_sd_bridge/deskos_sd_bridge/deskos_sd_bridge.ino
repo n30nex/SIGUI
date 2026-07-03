@@ -1517,7 +1517,8 @@ bool remove_file_if_present(const char *path) {
 }
 
 bool write_text_file_direct(const char *path, const char *payload) {
-    File file = SD.open(path, "w");
+    (void)SD.remove(path);
+    File file = SD.open(path, FILE_WRITE);
     if (!file) {
         return false;
     }
@@ -1730,9 +1731,12 @@ SdSnapshot mount_status_blocking() {
     return snapshot;
 }
 
-SdSnapshot mount_status() {
+SdSnapshot request_mount_status() {
     refresh_worker_results();
-    return cache_status(mount_status_blocking());
+    if (!s_worker_busy && s_worker_request == SD_WORKER_NONE) {
+        (void)start_sd_worker(SD_WORKER_MOUNT);
+    }
+    return cache_status(pending_snapshot("filesystem_mounting"));
 }
 
 DiagSnapshot pending_diag_snapshot() {
@@ -2250,7 +2254,7 @@ void send_status() {
 }
 
 void send_mount_status() {
-    send_snapshot(*reply_stream, MOUNT_REPLY, mount_status());
+    send_snapshot(*reply_stream, MOUNT_REPLY, request_mount_status());
 }
 
 void send_ping() {
@@ -2498,9 +2502,17 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
         return;
     }
 
-    File file = SD.open(full_path, truncate ? "w" : "a");
+    if (truncate) {
+        (void)SD.remove(full_path);
+    }
+    File file = SD.open(full_path, FILE_WRITE);
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
+        return;
+    }
+    if (append_mode && !file.seek(current_size)) {
+        file.close();
+        send_file_error(request_id, op_name, "range");
         return;
     }
     const size_t written = data_len == 0 ? 0 : file.write(data, data_len);
@@ -2603,7 +2615,8 @@ void handle_file_line(const char *line) {
         return;
     }
 
-    SdSnapshot status = mount_status();
+    refresh_worker_results();
+    SdSnapshot status = current_status();
     if (!status.present) {
         send_file_error(request_id, op, "no_card");
         return;

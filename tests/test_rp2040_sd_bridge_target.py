@@ -135,7 +135,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "publish_mount_progress(snapshot)" in sketch
     assert "if (s_worker_busy)" in sketch
     mount_body = sketch.split("SdSnapshot mount_status_blocking()", 1)[1].split(
-        "SdSnapshot mount_status()", 1
+        "SdSnapshot request_mount_status()", 1
     )[0]
     assert mount_body.count("mount_sd_seeed_sample_path(true,") == 2
     assert "mount_sd_with_probe_config(" not in mount_body
@@ -152,6 +152,16 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert mount_body.index("if (mount_sd_seeed_sample_path(true, true))") < mount_body.index(
         "sd_mount_failed_official_seeed_path"
     )
+    request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
+        "DiagSnapshot pending_diag_snapshot()", 1
+    )[0]
+    assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
+    assert "mount_status_blocking()" not in request_mount_body
+    send_mount_body = sketch.split("void send_mount_status()", 1)[1].split(
+        "void send_ping()", 1
+    )[0]
+    assert "request_mount_status()" in send_mount_body
+    assert "mount_status_blocking()" not in send_mount_body
     diag_body = sketch.split("DiagSnapshot diag_status_blocking()", 1)[1].split(
         "String bool_token", 1
     )[0]
