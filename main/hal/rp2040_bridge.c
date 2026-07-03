@@ -7,6 +7,7 @@
 #include "driver/uart.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "hal/indicator_pins.h"
 #include "tca9535.h"
@@ -34,6 +35,36 @@ static d1l_rp2040_status_t s_status = {
 };
 
 static uint16_t s_file_request_id = 1;
+static StaticSemaphore_t s_bridge_mutex_storage;
+static SemaphoreHandle_t s_bridge_mutex;
+
+static void ensure_bridge_mutex(void)
+{
+    if (s_bridge_mutex == NULL) {
+        s_bridge_mutex = xSemaphoreCreateMutexStatic(&s_bridge_mutex_storage);
+    }
+}
+
+static esp_err_t take_bridge_lock(uint32_t timeout_ms)
+{
+    ensure_bridge_mutex();
+    if (s_bridge_mutex == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    const uint32_t wait_ms = timeout_ms > 0 ? timeout_ms + 500U : 500U;
+    TickType_t ticks = pdMS_TO_TICKS(wait_ms);
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    return xSemaphoreTake(s_bridge_mutex, ticks) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static void give_bridge_lock(void)
+{
+    if (s_bridge_mutex != NULL) {
+        xSemaphoreGive(s_bridge_mutex);
+    }
+}
 
 static esp_err_t pulse_rp2040_reset(const d1l_rp2040_pins_t *pins, uint32_t hold_ms)
 {
@@ -490,16 +521,23 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
     if (last_progress && last_progress_size > 0) {
         last_progress[0] = '\0';
     }
+
+    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
+    int64_t deadline_us = 0;
+    size_t used = 0;
+    bool dropping = false;
+    esp_err_t ret = take_bridge_lock(timeout_ms);
+    if (ret != ESP_OK) {
+        return ret;
+    }
     uart_flush_input((uart_port_t)s_status.uart_port);
     const int written = uart_write_bytes((uart_port_t)s_status.uart_port, command, command_len);
     if (written != (int)command_len) {
-        return ESP_FAIL;
+        ret = ESP_FAIL;
+        goto done;
     }
 
-    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
-    int64_t deadline_us = esp_timer_get_time() + timeout_us;
-    size_t used = 0;
-    bool dropping = false;
+    deadline_us = esp_timer_get_time() + timeout_us;
     while (esp_timer_get_time() < deadline_us) {
         uint8_t ch = 0;
         int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
@@ -517,7 +555,8 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
                 line[used] = '\0';
                 for (size_t i = 0; i < prefix_count; ++i) {
                     if (line_has_prefix(line, prefixes[i])) {
-                        return ESP_OK;
+                        ret = ESP_OK;
+                        goto done;
                     }
                 }
                 if (progress_prefix && line_has_prefix(line, progress_prefix) &&
@@ -550,7 +589,11 @@ static esp_err_t exchange_prefixed_line_internal(const char *command, size_t com
             }
         }
     }
-    return ESP_ERR_TIMEOUT;
+    ret = ESP_ERR_TIMEOUT;
+
+done:
+    give_bridge_lock();
+    return ret;
 }
 
 static esp_err_t exchange_prefixed_line(const char *command, size_t command_len,
@@ -825,6 +868,8 @@ static esp_err_t send_file_command(const char *command, size_t command_len,
 
 esp_err_t d1l_rp2040_bridge_init(void)
 {
+    ensure_bridge_mutex();
+
     const d1l_rp2040_pins_t *pins = d1l_rp2040_pins();
     s_status.uart_port = pins->uart_port;
     s_status.tx_gpio = pins->esp_tx_gpio;
@@ -881,15 +926,23 @@ esp_err_t d1l_rp2040_bridge_set_baud(uint32_t baud)
     if (!s_status.uart_ready) {
         return s_status.init_result;
     }
-    esp_err_t ret = uart_set_baudrate((uart_port_t)s_status.uart_port, baud);
+    esp_err_t ret = take_bridge_lock(1000U);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = uart_set_baudrate((uart_port_t)s_status.uart_port, baud);
     if (ret != ESP_OK) {
         s_status.init_result = ret;
         s_status.uart_ready = false;
-        return ret;
+        goto done;
     }
     s_status.baud_rate = (int)baud;
     uart_flush_input((uart_port_t)s_status.uart_port);
-    return ESP_OK;
+    ret = ESP_OK;
+
+done:
+    give_bridge_lock();
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
@@ -898,20 +951,28 @@ esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
     const uint32_t hold = hold_ms > 0 ? hold_ms : 100U;
     const uint32_t settle = settle_ms > 0 ? settle_ms : 500U;
 
-    esp_err_t ret = tca9535_set_direction(pins->expander_reset, true);
+    esp_err_t ret = take_bridge_lock(hold + settle + 1000U);
     if (ret != ESP_OK) {
         return ret;
     }
+    ret = tca9535_set_direction(pins->expander_reset, true);
+    if (ret != ESP_OK) {
+        goto done;
+    }
     ret = pulse_rp2040_reset(pins, hold);
     if (ret != ESP_OK) {
-        return ret;
+        goto done;
     }
 
     if (s_status.uart_ready) {
         uart_flush_input((uart_port_t)s_status.uart_port);
     }
     vTaskDelay(pdMS_TO_TICKS(settle));
-    return ESP_OK;
+    ret = ESP_OK;
+
+done:
+    give_bridge_lock();
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_double_reset(uint32_t hold_ms, uint32_t gap_ms, uint32_t settle_ms)
@@ -921,25 +982,33 @@ esp_err_t d1l_rp2040_bridge_double_reset(uint32_t hold_ms, uint32_t gap_ms, uint
     const uint32_t gap = gap_ms > 0 ? gap_ms : 150U;
     const uint32_t settle = settle_ms > 0 ? settle_ms : 1500U;
 
-    esp_err_t ret = tca9535_set_direction(pins->expander_reset, true);
+    esp_err_t ret = take_bridge_lock((hold * 2U) + gap + settle + 1000U);
     if (ret != ESP_OK) {
         return ret;
     }
+    ret = tca9535_set_direction(pins->expander_reset, true);
+    if (ret != ESP_OK) {
+        goto done;
+    }
     ret = pulse_rp2040_reset(pins, hold);
     if (ret != ESP_OK) {
-        return ret;
+        goto done;
     }
     vTaskDelay(pdMS_TO_TICKS(gap));
     ret = pulse_rp2040_reset(pins, hold);
     if (ret != ESP_OK) {
-        return ret;
+        goto done;
     }
 
     if (s_status.uart_ready) {
         uart_flush_input((uart_port_t)s_status.uart_port);
     }
     vTaskDelay(pdMS_TO_TICKS(settle));
-    return ESP_OK;
+    ret = ESP_OK;
+
+done:
+    give_bridge_lock();
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_ms)
@@ -1011,6 +1080,15 @@ esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uin
 
     static const uint8_t seeed_model_title_query[] = {0x02U, 0xA5U, 0x00U};
     init_stock_probe(out_probe, ESP_ERR_TIMEOUT);
+    int64_t deadline_us = 0;
+    bool saw_close_brace = false;
+    esp_err_t ret = take_bridge_lock(timeout_ms);
+    if (ret != ESP_OK) {
+        out_probe->last_error = ret;
+        snprintf(out_probe->note, sizeof(out_probe->note),
+                 "could not lock RP2040 UART for Seeed stock model-title probe");
+        return ret;
+    }
     uart_flush_input((uart_port_t)s_status.uart_port);
     const int written = uart_write_bytes((uart_port_t)s_status.uart_port,
                                          (const char *)seeed_model_title_query,
@@ -1019,11 +1097,11 @@ esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uin
         out_probe->last_error = ESP_FAIL;
         snprintf(out_probe->note, sizeof(out_probe->note),
                  "could not write Seeed stock model-title COBS probe");
-        return ESP_FAIL;
+        ret = ESP_FAIL;
+        goto done;
     }
 
-    const int64_t deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
-    bool saw_close_brace = false;
+    deadline_us = esp_timer_get_time() + ((int64_t)timeout_ms * 1000LL);
     while (esp_timer_get_time() < deadline_us) {
         uint8_t ch = 0;
         int len = uart_read_bytes((uart_port_t)s_status.uart_port, &ch, 1, pdMS_TO_TICKS(10));
@@ -1042,7 +1120,8 @@ esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uin
         out_probe->last_error = ESP_ERR_TIMEOUT;
         snprintf(out_probe->note, sizeof(out_probe->note),
                  "Seeed stock model-title COBS probe timed out");
-        return ESP_ERR_TIMEOUT;
+        ret = ESP_ERR_TIMEOUT;
+        goto done;
     }
 
     out_probe->last_error = ESP_OK;
@@ -1053,7 +1132,11 @@ esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uin
         snprintf(out_probe->note, sizeof(out_probe->note),
                  "Non-empty RP2040 response captured");
     }
-    return ESP_OK;
+    ret = ESP_OK;
+
+done:
+    give_bridge_lock();
+    return ret;
 }
 
 esp_err_t d1l_rp2040_bridge_baud_probe(d1l_rp2040_baud_probe_t *out_probe, uint32_t timeout_ms)

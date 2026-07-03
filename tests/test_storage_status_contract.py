@@ -178,6 +178,40 @@ def test_rp2040_format_command_waits_for_format_reply_only():
     assert "d1l_rp2040_bridge_format_sd" not in source
 
 
+def test_rp2040_bridge_serializes_uart_transactions():
+    source = read("main/hal/rp2040_bridge.c")
+
+    assert '#include "freertos/semphr.h"' in source
+    assert "static StaticSemaphore_t s_bridge_mutex_storage" in source
+    assert "xSemaphoreCreateMutexStatic(&s_bridge_mutex_storage)" in source
+    assert "xSemaphoreTake(s_bridge_mutex" in source
+    assert "xSemaphoreGive(s_bridge_mutex)" in source
+
+    exchange_body = source.split("static esp_err_t exchange_prefixed_line_internal", 1)[1].split(
+        "static esp_err_t exchange_prefixed_line(", 1
+    )[0]
+    assert "take_bridge_lock(timeout_ms)" in exchange_body
+    assert exchange_body.index("take_bridge_lock(timeout_ms)") < exchange_body.index("uart_flush_input")
+    assert exchange_body.index("uart_write_bytes") < exchange_body.index("uart_read_bytes")
+    assert "give_bridge_lock()" in exchange_body
+
+    file_command_body = source.split("static esp_err_t send_file_command", 1)[1].split(
+        "esp_err_t d1l_rp2040_bridge_init", 1
+    )[0]
+    assert "exchange_prefixed_line(command, command_len" in file_command_body
+
+    serialized_functions = [
+        ("esp_err_t d1l_rp2040_bridge_set_baud", "esp_err_t d1l_rp2040_bridge_reset"),
+        ("esp_err_t d1l_rp2040_bridge_reset", "esp_err_t d1l_rp2040_bridge_double_reset"),
+        ("esp_err_t d1l_rp2040_bridge_double_reset", "esp_err_t d1l_rp2040_bridge_ping"),
+        ("esp_err_t d1l_rp2040_bridge_stock_probe", "esp_err_t d1l_rp2040_bridge_baud_probe"),
+    ]
+    for start, end in serialized_functions:
+        body = source.split(start, 1)[1].split(end, 1)[0]
+        assert "take_bridge_lock" in body
+        assert "give_bridge_lock()" in body
+
+
 def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     app_header = read("main/app/app_model.h")
     app_source = read("main/app/app_model.c")
