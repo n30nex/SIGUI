@@ -279,7 +279,9 @@ static void copy_limited_text(char *dest, size_t dest_size, const char *src)
         dest[0] = '\0';
         return;
     }
-    snprintf(dest, dest_size, "%s", src);
+    size_t copy_len = strnlen(src, dest_size - 1U);
+    memcpy(dest, src, copy_len);
+    dest[copy_len] = '\0';
 }
 
 static esp_err_t map_file_error(const char *err)
