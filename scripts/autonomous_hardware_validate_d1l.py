@@ -50,6 +50,7 @@ FORBIDDEN_PORTS = {"COM" + "11", "COM" + "29"}
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
+BOOTLOADER_TOUCH_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -303,11 +304,35 @@ def enter_rp2040_bootloader(port: str) -> dict:
         "ended_at": None,
         "ok": True,
     }
+    touch_code = (
+        "import sys\n"
+        "import serial\n"
+        "ser = serial.Serial(port=sys.argv[1], baudrate=1200, timeout=0.2)\n"
+        "ser.close()\n"
+    )
+    run_kwargs: dict[str, Any] = {}
+    if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
+        run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     try:
-        import serial
-
-        ser = serial.Serial(port=port, baudrate=1200, timeout=0.2)
-        ser.close()
+        result = subprocess.run(
+            [sys.executable, "-c", touch_code, port],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=BOOTLOADER_TOUCH_TIMEOUT_SECONDS,
+            **run_kwargs,
+        )
+        report["returncode"] = result.returncode
+        if result.stdout:
+            report["stdout_tail"] = result.stdout[-1000:]
+        if result.stderr:
+            report["stderr_tail"] = result.stderr[-1000:]
+    except subprocess.TimeoutExpired as exc:
+        report["ok"] = True
+        report["warning"] = f"1200-baud touch timed out after {BOOTLOADER_TOUCH_TIMEOUT_SECONDS}s"
+        if exc.stderr:
+            text = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr)
+            report["stderr_tail"] = text[-1000:]
     except Exception as exc:  # Windows often drops the CDC device mid-open.
         report["ok"] = True
         report["warning"] = str(exc)
