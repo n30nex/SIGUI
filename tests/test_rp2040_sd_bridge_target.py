@@ -150,8 +150,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "manual_probe_card_bitbang(true, false)" in sketch
     assert "sd_bitbang_clock_bit(true)" in sketch
     assert "pre_clock_bits" in sketch
+    assert "ignore_leading_zero && response == 0x00U" in sketch
+    assert "sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, false)" in sketch
     assert "for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip)" in sketch
-    assert "bitbang_sd_command(0, 0, 0x95" in sketch
+    assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, 0, true)" in sketch
     assert 'append_probe_tokens(line, "bb", diag.bitbang)' in sketch
     assert 'empty_probe("high", "bitbang", true, DEDICATED_SPI)' in sketch
     assert "if (!cmd0_idle)" in sketch

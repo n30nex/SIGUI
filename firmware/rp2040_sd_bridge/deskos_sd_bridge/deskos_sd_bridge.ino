@@ -508,7 +508,8 @@ uint8_t bitbang_wait_ready(uint32_t timeout_ms) {
 
 uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra,
                            size_t extra_len, uint8_t *ready_byte = nullptr,
-                           bool wait_selected_ready = true, uint8_t pre_clock_bits = 0) {
+                           bool wait_selected_ready = true, uint8_t pre_clock_bits = 0,
+                           bool ignore_leading_zero = false) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_bitbang_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
@@ -528,6 +529,9 @@ uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint
     uint8_t response = 0xFF;
     for (uint8_t i = 0; i < 64; ++i) {
         response = sd_bitbang_transfer(0xFF);
+        if (ignore_leading_zero && response == 0x00U) {
+            continue;
+        }
         if ((response & 0x80U) == 0) {
             break;
         }
@@ -605,7 +609,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, false);
+        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, false);
         if (cmd0 == 0x01U) {
             break;
         }
@@ -683,14 +687,14 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false);
+        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, 0, true);
         if (cmd0 == 0x01U) {
             break;
         }
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
-                                          false, slip);
+                                          false, slip, true);
                 if (cmd0 == 0x01U) {
                     break;
                 }
