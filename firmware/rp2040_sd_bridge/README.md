@@ -49,8 +49,8 @@ library settings. The current validation card is user-confirmed FAT32 but still
 reports RP2040 init/probe failures before the filesystem layer, so the bridge
 stays close to Seeed's documented SD pin/power path while using Arduino-Pico's second-port SD support,
 Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and the Arduino-Pico
-maintainer's SPI1 SdFat pin method names: `setCS`, `setMISO`, `setMOSI`, and
-`setSCK`.
+maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
+`setTX`, and `setSCK`.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 Do not use the Windows host for firmware compilation.

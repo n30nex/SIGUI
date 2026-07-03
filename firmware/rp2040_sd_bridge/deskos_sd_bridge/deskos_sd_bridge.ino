@@ -299,8 +299,8 @@ void settle_sd_power(bool power_high, bool force_power_cycle) {
 void configure_sd_spi_pins() {
     pinMode(SD_MISO_PIN, INPUT_PULLUP);
     s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
-    s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN);
-    s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN);
+    s_sd_pin_mosi_ok = SPI1.setTX(SD_MOSI_PIN);
+    s_sd_pin_miso_ok = SPI1.setRX(SD_MISO_PIN);
     s_sd_pin_cs_ok = SPI1.setCS(SD_CS_PIN);
 }
 
