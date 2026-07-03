@@ -55,6 +55,11 @@ def test_contact_mutation_commands_map_to_console_responses():
     assert expected_command_name("contacts delete A1B2C3D4E5F60789") == "contacts delete"
 
 
+def test_rp2040_argument_commands_map_to_console_responses():
+    assert expected_command_name("rp2040 baud-probe 700") == "rp2040 baud-probe"
+    assert expected_command_name("rp2040 set-baud 115200") == "rp2040 set-baud"
+
+
 def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
     monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
     ser = FakeSerial(

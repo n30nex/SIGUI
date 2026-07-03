@@ -966,8 +966,14 @@ static void cmd_rp2040_baud_probe(const char *line)
         }
     }
 
-    d1l_rp2040_baud_probe_t probe = {0};
-    esp_err_t ret = d1l_rp2040_bridge_baud_probe(&probe, timeout_ms);
+    d1l_rp2040_baud_probe_t *probe = calloc(1, sizeof(*probe));
+    if (probe == NULL) {
+        err_result("rp2040 baud-probe", "ESP_ERR_NO_MEM",
+                   "could not allocate RP2040 baud probe report");
+        return;
+    }
+
+    esp_err_t ret = d1l_rp2040_bridge_baud_probe(probe, timeout_ms);
     d1l_rp2040_status_t status = {0};
     (void)d1l_rp2040_bridge_status(&status);
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 baud-probe\",\"code\":\"%s\","
@@ -979,16 +985,16 @@ static void cmd_rp2040_baud_probe(const char *line)
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK),
            esp_err_to_name(ret),
-           bool_json(probe.bridge_ready),
-           bool_json(probe.found_deskos),
-           bool_json(probe.found_stock),
-           (unsigned long)probe.selected_baud,
-           (unsigned long)probe.original_baud,
+           bool_json(probe->bridge_ready),
+           bool_json(probe->found_deskos),
+           bool_json(probe->found_stock),
+           (unsigned long)probe->selected_baud,
+           (unsigned long)probe->original_baud,
            (unsigned long)status.baud_rate,
            (unsigned long)timeout_ms,
-           (unsigned long)probe.tested_count);
-    for (uint32_t i = 0; i < probe.tested_count && i < D1L_RP2040_BAUD_PROBE_MAX_RESULTS; ++i) {
-        const d1l_rp2040_baud_probe_result_t *result = &probe.results[i];
+           (unsigned long)probe->tested_count);
+    for (uint32_t i = 0; i < probe->tested_count && i < D1L_RP2040_BAUD_PROBE_MAX_RESULTS; ++i) {
+        const d1l_rp2040_baud_probe_result_t *result = &probe->results[i];
         if (i > 0U) {
             putchar(',');
         }
@@ -1010,6 +1016,7 @@ static void cmd_rp2040_baud_probe(const char *line)
         putchar('}');
     }
     printf("]}\n");
+    free(probe);
 }
 
 static void cmd_rp2040_reset(void)

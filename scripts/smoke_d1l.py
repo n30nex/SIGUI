@@ -161,6 +161,8 @@ def expected_command_name(command: str) -> str:
         "backlight ",
         "mesh send public ",
         "mesh send dm ",
+        "rp2040 baud-probe ",
+        "rp2040 set-baud ",
     ]:
         if command.startswith(prefix):
             return prefix.strip()
