@@ -924,6 +924,94 @@ static void cmd_rp2040_status(void)
            (unsigned long)status.buffered_bytes);
 }
 
+static void cmd_rp2040_set_baud(const char *line)
+{
+    const char *args = line + strlen("rp2040 set-baud ");
+    while (*args == ' ') {
+        args++;
+    }
+    uint32_t baud = 0;
+    if (!parse_next_u32_arg(&args, &baud) || *args != '\0') {
+        err_result("rp2040 set-baud", "INVALID_ARG",
+                   "usage: rp2040 set-baud <9600|38400|57600|115200|230400|460800|921600|1000000>");
+        return;
+    }
+    esp_err_t ret = d1l_rp2040_bridge_set_baud(baud);
+    if (ret != ESP_OK) {
+        err_result("rp2040 set-baud", esp_err_to_name(ret),
+                   "could not set RP2040 UART baud; supported rates are bounded for safe probing");
+        return;
+    }
+    d1l_rp2040_status_t status = {0};
+    (void)d1l_rp2040_bridge_status(&status);
+    ok_begin("rp2040 set-baud");
+    printf(",\"baud\":%lu,\"uart_ready\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"sd_touched\":false}\n",
+           (unsigned long)status.baud_rate,
+           bool_json(status.uart_ready));
+}
+
+static void cmd_rp2040_baud_probe(const char *line)
+{
+    uint32_t timeout_ms = 700U;
+    const char *args = line + strlen("rp2040 baud-probe");
+    while (*args == ' ') {
+        args++;
+    }
+    if (*args != '\0') {
+        if (!parse_next_u32_arg(&args, &timeout_ms) || *args != '\0' ||
+            timeout_ms < 100U || timeout_ms > 3000U) {
+            err_result("rp2040 baud-probe", "INVALID_ARG",
+                       "usage: rp2040 baud-probe [timeout_ms 100-3000]");
+            return;
+        }
+    }
+
+    d1l_rp2040_baud_probe_t probe = {0};
+    esp_err_t ret = d1l_rp2040_bridge_baud_probe(&probe, timeout_ms);
+    d1l_rp2040_status_t status = {0};
+    (void)d1l_rp2040_bridge_status(&status);
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 baud-probe\",\"code\":\"%s\","
+           "\"bridge_ready\":%s,\"found_deskos\":%s,\"found_stock\":%s,"
+           "\"selected_baud\":%lu,\"original_baud\":%lu,\"restored_baud\":%lu,"
+           "\"timeout_ms\":%lu,\"tested_count\":%lu,"
+           "\"public_rf_tx\":false,\"formats_sd\":false,\"sd_touched\":false,"
+           "\"results\":[",
+           D1L_CONSOLE_SCHEMA,
+           bool_json(ret == ESP_OK),
+           esp_err_to_name(ret),
+           bool_json(probe.bridge_ready),
+           bool_json(probe.found_deskos),
+           bool_json(probe.found_stock),
+           (unsigned long)probe.selected_baud,
+           (unsigned long)probe.original_baud,
+           (unsigned long)status.baud_rate,
+           (unsigned long)timeout_ms,
+           (unsigned long)probe.tested_count);
+    for (uint32_t i = 0; i < probe.tested_count && i < D1L_RP2040_BAUD_PROBE_MAX_RESULTS; ++i) {
+        const d1l_rp2040_baud_probe_result_t *result = &probe.results[i];
+        if (i > 0U) {
+            putchar(',');
+        }
+        printf("{\"baud\":%lu,\"deskos_ping_ok\":%s,\"ping_code\":\"%s\","
+               "\"stock_response_seen\":%s,\"stock_json_seen\":%s,"
+               "\"stock_code\":\"%s\",\"stock_bytes_read\":%lu,"
+               "\"stock_response_truncated\":%s,\"stock_response_hex\":",
+               (unsigned long)result->baud,
+               bool_json(result->deskos_ping_ok),
+               esp_err_to_name(result->ping_error),
+               bool_json(result->stock_response_seen),
+               bool_json(result->stock_json_seen),
+               esp_err_to_name(result->stock_error),
+               (unsigned long)result->stock_bytes_read,
+               bool_json(result->stock_response_truncated));
+        print_json_string(result->stock_response_hex);
+        printf(",\"stock_response_ascii\":");
+        print_json_string(result->stock_response_ascii);
+        putchar('}');
+    }
+    printf("]}\n");
+}
+
 static void cmd_rp2040_reset(void)
 {
     const uint32_t hold_ms = 100U;
@@ -4163,7 +4251,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4242,6 +4330,12 @@ static void handle_line(const char *line)
         cmd_companion_status();
     } else if (strcmp(line, "rp2040 status") == 0) {
         cmd_rp2040_status();
+    } else if (strncmp(line, "rp2040 set-baud ", strlen("rp2040 set-baud ")) == 0) {
+        cmd_rp2040_set_baud(line);
+    } else if (strncmp(line, "rp2040 baud-probe", strlen("rp2040 baud-probe")) == 0 &&
+               (line[strlen("rp2040 baud-probe")] == '\0' ||
+                line[strlen("rp2040 baud-probe")] == ' ')) {
+        cmd_rp2040_baud_probe(line);
     } else if (strcmp(line, "rp2040 ping") == 0) {
         cmd_rp2040_ping();
     } else if (strcmp(line, "rp2040 bootloader") == 0) {

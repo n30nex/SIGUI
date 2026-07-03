@@ -181,13 +181,73 @@ def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path,
     assert commands == [
         "rp2040 status",
         "rp2040 ping",
+        "rp2040 baud-probe 700",
         "rp2040 double-reset 50 150 1500",
         "rp2040 double-reset 30 300 1500",
         "rp2040 double-reset 100 500 2000",
         "rp2040 reset",
         "rp2040 ping",
+        "rp2040 baud-probe 700",
     ]
     assert payload["state"] == "no_autonomous_bootloader_path"
+
+
+def test_rp2040_access_precheck_switches_to_baud_probe_match(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    commands = []
+
+    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
+    monkeypatch.setattr(
+        runner,
+        "rp2040_port_discovery",
+        lambda port, d1l_port: {"preferred_port": port, "d1l_port": d1l_port, "present": False, "selected_port": None, "candidates": [], "skipped": []},
+    )
+
+    def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
+        commands.append(command)
+        if command == "rp2040 status":
+            return {"ok": True, "cmd": command, "uart_ready": True}
+        if command == "rp2040 ping":
+            return {"ok": False, "cmd": command, "code": "ESP_ERR_TIMEOUT", "protocol_supported": False}
+        if command == "rp2040 baud-probe 700":
+            return {"ok": True, "cmd": command, "found_deskos": True, "selected_baud": 115200}
+        if command == "rp2040 set-baud 115200":
+            return {"ok": True, "cmd": command, "baud": 115200}
+        return {"ok": True, "cmd": command, "protocol_supported": True}
+
+    def fake_console_with_verified_ping(port, baud, command, timeout, *, settle_sec=1.0):
+        if command == "rp2040 ping" and commands and commands[-1] == "rp2040 set-baud 115200":
+            commands.append(command)
+            return {"ok": True, "cmd": command, "protocol_supported": True}
+        return fake_console(port, baud, command, timeout, settle_sec=settle_sec)
+
+    monkeypatch.setattr(runner, "send_d1l_console", fake_console_with_verified_ping)
+
+    report = runner.rp2040_access_precheck(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert report["state"] == "bridge_protocol_ready_after_baud_probe"
+    assert report["selected_rp2040_uart_baud"] == 115200
+    assert report["bootloader_entry"] == "rp2040 bootloader"
+    assert commands == [
+        "rp2040 status",
+        "rp2040 ping",
+        "rp2040 baud-probe 700",
+        "rp2040 set-baud 115200",
+        "rp2040 ping",
+    ]
 
 
 def test_validation_stops_at_access_precheck_before_official_smoke_or_restore(tmp_path, monkeypatch):

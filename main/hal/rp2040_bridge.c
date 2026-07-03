@@ -253,6 +253,35 @@ static void append_stock_probe_byte(d1l_rp2040_stock_probe_t *probe, uint8_t byt
     }
 }
 
+static bool supported_rp2040_baud(uint32_t baud)
+{
+    switch (baud) {
+    case 9600U:
+    case 38400U:
+    case 57600U:
+    case 115200U:
+    case 230400U:
+    case 460800U:
+    case 921600U:
+    case 1000000U:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static void copy_limited_text(char *dest, size_t dest_size, const char *src)
+{
+    if (!dest || dest_size == 0) {
+        return;
+    }
+    if (!src) {
+        dest[0] = '\0';
+        return;
+    }
+    snprintf(dest, dest_size, "%s", src);
+}
+
 static esp_err_t map_file_error(const char *err)
 {
     if (!err || err[0] == '\0') {
@@ -835,6 +864,25 @@ esp_err_t d1l_rp2040_bridge_status(d1l_rp2040_status_t *out_status)
     return s_status.init_result;
 }
 
+esp_err_t d1l_rp2040_bridge_set_baud(uint32_t baud)
+{
+    if (!supported_rp2040_baud(baud)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_status.uart_ready) {
+        return s_status.init_result;
+    }
+    esp_err_t ret = uart_set_baudrate((uart_port_t)s_status.uart_port, baud);
+    if (ret != ESP_OK) {
+        s_status.init_result = ret;
+        s_status.uart_ready = false;
+        return ret;
+    }
+    s_status.baud_rate = (int)baud;
+    uart_flush_input((uart_port_t)s_status.uart_port);
+    return ESP_OK;
+}
+
 esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
 {
     const d1l_rp2040_pins_t *pins = d1l_rp2040_pins();
@@ -995,6 +1043,87 @@ esp_err_t d1l_rp2040_bridge_stock_probe(d1l_rp2040_stock_probe_t *out_probe, uin
     } else {
         snprintf(out_probe->note, sizeof(out_probe->note),
                  "Non-empty RP2040 response captured");
+    }
+    return ESP_OK;
+}
+
+esp_err_t d1l_rp2040_bridge_baud_probe(d1l_rp2040_baud_probe_t *out_probe, uint32_t timeout_ms)
+{
+    if (out_probe == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(out_probe, 0, sizeof(*out_probe));
+    out_probe->bridge_ready = s_status.uart_ready;
+    out_probe->original_baud = (uint32_t)s_status.baud_rate;
+    out_probe->last_error = ESP_ERR_NOT_FOUND;
+    if (!s_status.uart_ready) {
+        out_probe->last_error = s_status.init_result;
+        return s_status.init_result;
+    }
+
+    static const uint32_t bauds[] = {
+        921600U,
+        460800U,
+        230400U,
+        115200U,
+        57600U,
+        38400U,
+        9600U,
+        1000000U,
+    };
+    const uint32_t per_probe_timeout = timeout_ms > 0 ? timeout_ms : 700U;
+    const uint32_t original_baud = (uint32_t)s_status.baud_rate;
+
+    for (size_t i = 0; i < sizeof(bauds) / sizeof(bauds[0]) &&
+                       i < D1L_RP2040_BAUD_PROBE_MAX_RESULTS; ++i) {
+        d1l_rp2040_baud_probe_result_t *result = &out_probe->results[i];
+        result->baud = bauds[i];
+        out_probe->tested_count++;
+
+        esp_err_t ret = d1l_rp2040_bridge_set_baud(bauds[i]);
+        if (ret != ESP_OK) {
+            result->ping_error = ret;
+            result->stock_error = ret;
+            continue;
+        }
+        vTaskDelay(pdMS_TO_TICKS(25));
+
+        d1l_rp2040_ping_t ping = {0};
+        ret = d1l_rp2040_bridge_ping(&ping, per_probe_timeout);
+        result->ping_error = ret;
+        result->deskos_ping_ok = (ret == ESP_OK && ping.protocol_supported);
+        if (result->deskos_ping_ok && !out_probe->found_deskos) {
+            out_probe->found_deskos = true;
+            out_probe->selected_baud = bauds[i];
+            out_probe->last_error = ESP_OK;
+        }
+
+        d1l_rp2040_stock_probe_t stock = {0};
+        ret = d1l_rp2040_bridge_stock_probe(&stock, per_probe_timeout);
+        result->stock_error = ret;
+        result->stock_response_seen = stock.response_seen;
+        result->stock_json_seen = stock.json_seen;
+        result->stock_response_truncated = stock.response_truncated;
+        result->stock_bytes_read = stock.bytes_read;
+        copy_limited_text(result->stock_response_ascii,
+                          sizeof(result->stock_response_ascii),
+                          stock.response_ascii);
+        copy_limited_text(result->stock_response_hex,
+                          sizeof(result->stock_response_hex),
+                          stock.response_hex);
+        if (stock.response_seen && !out_probe->found_stock) {
+            out_probe->found_stock = true;
+            if (!out_probe->found_deskos) {
+                out_probe->selected_baud = bauds[i];
+                out_probe->last_error = ESP_OK;
+            }
+        }
+    }
+
+    const esp_err_t restore_ret = d1l_rp2040_bridge_set_baud(original_baud);
+    if (restore_ret != ESP_OK) {
+        out_probe->last_error = restore_ret;
+        return restore_ret;
     }
     return ESP_OK;
 }

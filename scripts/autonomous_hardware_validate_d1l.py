@@ -66,6 +66,8 @@ RP2040_DOUBLE_RESET_SWEEP_MS = (
     (30, 300, 1500),
     (100, 500, 2000),
 )
+RP2040_BAUD_PROBE_TIMEOUT_MS = 700
+RP2040_BAUD_PROBE_COMMAND_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -647,6 +649,39 @@ def send_d1l_console(port: str, baud: int, command: str, timeout: float, *, sett
         return send_console_command(ser, command, timeout)
 
 
+def baud_probe_selected_deskos(result: dict) -> int | None:
+    if result.get("ok") is not True or result.get("found_deskos") is not True:
+        return None
+    try:
+        selected = int(result.get("selected_baud") or 0)
+    except (TypeError, ValueError):
+        return None
+    return selected if selected > 0 else None
+
+
+def rp2040_try_baud_probe(ctx: RunContext, report: dict[str, Any], label: str) -> bool:
+    probe_key = f"baud_probe{label}"
+    set_key = f"set_baud{label}"
+    ping_key = f"ping_after_baud_probe{label}"
+    report[probe_key] = send_d1l_console(
+        ctx.d1l_port,
+        ctx.baud,
+        f"rp2040 baud-probe {RP2040_BAUD_PROBE_TIMEOUT_MS}",
+        RP2040_BAUD_PROBE_COMMAND_TIMEOUT_SECONDS,
+    )
+    selected = baud_probe_selected_deskos(report[probe_key])
+    if selected is None:
+        return False
+    report[set_key] = send_d1l_console(ctx.d1l_port, ctx.baud, f"rp2040 set-baud {selected}", 5.0)
+    report[ping_key] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0)
+    if d1l_console_ok(report[ping_key], require_protocol=True):
+        report["selected_rp2040_uart_baud"] = selected
+        report["state"] = f"bridge_protocol_ready_after_baud_probe{label}"
+        report["bootloader_entry"] = "rp2040 bootloader"
+        return True
+    return False
+
+
 def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
     out = rp2040_access_precheck_out(ctx)
     report: dict[str, Any] = {
@@ -690,6 +725,8 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
         report["state"] = "bridge_protocol_ready"
         report["bootloader_entry"] = "rp2040 bootloader"
         return finish()
+    if rp2040_try_baud_probe(ctx, report, ""):
+        return finish()
 
     sweep, success = rp2040_double_reset_sweep(ctx)
     report["double_reset_sweep"] = sweep
@@ -720,6 +757,8 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
     elif d1l_console_ok(report["ping_after_reset"], require_protocol=True):
         report["state"] = "bridge_protocol_ready_after_reset"
         report["bootloader_entry"] = "rp2040 bootloader"
+    elif rp2040_try_baud_probe(ctx, report, "_after_reset"):
+        pass
     else:
         report["ok"] = False
         report["state"] = "no_autonomous_bootloader_path"
