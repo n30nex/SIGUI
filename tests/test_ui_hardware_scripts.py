@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from scripts import scroll_probe_d1l, smoke_d1l, ui_tab_abuse_d1l
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_ui_tab_abuse_dry_run_is_explicit_port_safe():
@@ -53,6 +57,22 @@ def test_scroll_probe_rejects_unknown_screen():
         assert "unknown" in str(exc)
     else:
         raise AssertionError("parse_screens accepted an unknown screen")
+
+
+def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
+    release_docs = [
+        "docs/DESKOSFINAL.md",
+        "docs/ROADMAP.md",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/RELEASE_CHECKLIST.md",
+        "docs/TEST_PLAN_D1L.md",
+    ]
+    offenders = [
+        rel
+        for rel in release_docs
+        if "100-cycle" in (ROOT / rel).read_text(encoding="utf-8")
+    ]
+    assert offenders == []
 
 
 def test_smoke_knows_ui_console_commands():

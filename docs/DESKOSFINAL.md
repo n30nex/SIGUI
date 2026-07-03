@@ -1150,8 +1150,9 @@ Users must supply FAT32 cards prepared on a computer. Do not format from ESP32 f
 Current evidence: Actions run `28569851955` for commit `a1afd4b` rebuilt the
 ESP32 release package and RP2040 SD bridge UF2. The downloaded release package,
 firmware, and RP2040 checksum manifests verified, and the verified ESP32 package
-flashed to COM12 passed current-commit smoke, 100-cycle tab abuse, scroll probe,
-outbound DM proof, route-probe proof, and RP2040 preflight. The RP2040 UF2 checksum is
+flashed to COM12 passed smoke, a shorter historical tab-abuse run, scroll probe,
+outbound DM proof, route-probe proof, and RP2040 preflight. Final release still
+requires a current-commit 500-cycle tab-abuse artifact. The RP2040 UF2 checksum is
 `B2FCB1177478908207CBDE2BC0B267C8AE0AF95CE8C1D46BA8E36166DFDD0B40`, but no
 mounted UF2 bootloader volume was available, so the RP2040 bridge still cannot
 be copied without physical UF2/BOOTSEL action. The latest preflight
