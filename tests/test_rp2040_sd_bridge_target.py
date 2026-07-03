@@ -58,6 +58,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "delay(SD_POWER_SETTLE_MS)" in sketch
     assert "sd_wait_ready(SD_SELECTED_READY_WAIT_MS)" in sketch
     assert "bias_sd_spi_lines_for_power()" in sketch
+    assert "float_sd_spi_lines_for_power_off()" in sketch
+    assert "gpio_disable_pulls(pins[i])" in sketch
     assert "pinMode(SD_MOSI_PIN, OUTPUT)" in sketch
     assert "digitalWrite(SD_MOSI_PIN, HIGH)" in sketch
     assert "pinMode(SD_SCK_PIN, OUTPUT)" in sketch
@@ -86,15 +88,17 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "mount_sd_seeed_sample_path" in sketch
     assert "configure_seeed_sd_bus(power_high, force_power_cycle)" in sketch
     assert "configure_seeed_sd_bus(s_sd_power_high)" in sketch
-    assert sketch.index("bias_sd_spi_lines_for_power()") < sketch.index("settle_sd_power(power_high, force_power_cycle)")
-    assert sketch.count("bias_sd_spi_lines_for_power()") >= 3
+    assert sketch.index("float_sd_spi_lines_for_power_off()") < sketch.index("digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH)")
+    assert sketch.index("digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW)") < sketch.index("if (power_high) {\n        bias_sd_spi_lines_for_power();")
+    assert sketch.count("bias_sd_spi_lines_for_power()") >= 4
     seeed_config = sketch[sketch.index("void configure_seeed_sd_bus"):sketch.index("void clock_sd_idle_bytes")]
     assert "SPI1.begin()" not in seeed_config
     assert "bias_sd_spi_lines_for_power()" not in seeed_config
-    assert "s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN)" in seeed_config
-    assert "s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN)" in seeed_config
-    assert "s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN)" in seeed_config
-    assert "s_sd_pin_cs_ok = SPI1.setCS(SD_CS_PIN)" in seeed_config
+    assert "settle_sd_power(power_high, force_power_cycle)" in seeed_config
+    assert "configure_sd_spi_pins()" in seeed_config
+    assert "pinMode(SD_CS_PIN, OUTPUT)" in seeed_config
+    assert "digitalWrite(SD_CS_PIN, HIGH)" in seeed_config
+    assert "apply_sd_miso_pullup()" in seeed_config
     assert "Wire.setSDA(SD_I2C_SDA_PIN)" in seeed_config
     assert "Wire.setSCL(SD_I2C_SCL_PIN)" in seeed_config
     assert "Wire.begin()" in seeed_config

@@ -21,10 +21,12 @@ It speaks the newline-delimited protocol documented in
   initialize `Wire` on SDA20/SCL21, set `SPI1` SCK/MOSI/MISO to GPIO10/11/12,
   register GPIO13 as CS, then call
   `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the selected
-  rail level, wait for it to settle, bias CS/MOSI/SCK/MISO, and send idle
-  clocks so warm-reset cards can re-enter SPI init. Before those raw probes,
-  the bridge repeats the exact Seeed init once after a GPIO18 rail cycle so the
-  filesystem stack gets a clean power-on attempt without extra bus traffic. SD MISO uses the
+  rail level with the SD SPI pins floated while GPIO18 is off so CS/MOSI/SCK
+  cannot backfeed the card, wait for the rail to settle, bias
+  CS/MOSI/SCK/MISO, and send idle clocks so warm-reset cards can re-enter SPI
+  init. Before those raw probes, the bridge repeats the Seeed init once after
+  a settled GPIO18 rail cycle so the filesystem stack gets a clean power-on
+  attempt. SD MISO uses the
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
@@ -110,11 +112,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
   command first tries the already-powered high/dedicated Arduino-Pico SPI1
-  path, registering GPIO13 as SPI1 CS, idling CS high, starting SPI1, and
-  calling `SD.begin(13, 1000000, SPI1)` without pre-clocking the bus or
-  running a second SdFat probe on failure. If that already-powered library path
-  does not mount, the bridge repeats the same Seeed path once after cycling
-  GPIO18 before falling back to bounded
+  path with CS idled high and GPIO18 settled, registering GPIO13 as SPI1 CS,
+  and calling `SD.begin(13, 1000000, SPI1)` without running a second SdFat
+  probe on failure. If that already-powered library path does not mount, the
+  bridge repeats the same Seeed path once after cycling GPIO18 with the SD SPI
+  pins floated during rail-off before falling back to bounded
   raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
   high-power candidates are probed once without force-cycling the rail before
   force-cycled fallback probes run. Only raw-present fallback candidates get a

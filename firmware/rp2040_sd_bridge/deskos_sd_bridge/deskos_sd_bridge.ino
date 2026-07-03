@@ -244,21 +244,41 @@ void apply_detect_to_diag(DiagSnapshot &diag) {
     diag.detect_pulldown_level = detect.pulldown_level;
 }
 
+void bias_sd_spi_lines_for_power();
+
+void float_sd_spi_lines_for_power_off() {
+    SPI1.end();
+    const uint8_t pins[] = {SD_CS_PIN, SD_MOSI_PIN, SD_SCK_PIN, SD_MISO_PIN};
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
+        pinMode(pins[i], INPUT);
+        gpio_set_input_enabled(pins[i], true);
+        gpio_disable_pulls(pins[i]);
+    }
+}
+
 void settle_sd_power(bool power_high, bool force_power_cycle) {
     static bool sd_power_settled = false;
     static bool last_power_high = true;
     pinMode(SD_POWER_PIN, OUTPUT);
     if (force_power_cycle) {
+        float_sd_spi_lines_for_power_off();
         digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH);
         delay(SD_POWER_CYCLE_OFF_MS);
         sd_power_settled = false;
     }
     digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
+    if (!power_high) {
+        float_sd_spi_lines_for_power_off();
+    }
     if (force_power_cycle || !sd_power_settled || last_power_high != power_high) {
         delay(SD_POWER_SETTLE_MS);
         sd_power_settled = true;
         last_power_high = power_high;
     }
+    if (power_high) {
+        bias_sd_spi_lines_for_power();
+    }
+    s_sd_power_high = power_high;
 }
 
 void configure_sd_spi_pins() {
@@ -293,7 +313,6 @@ uint8_t sample_sd_miso_level() {
 }
 
 void configure_sd_bus(bool power_high, bool force_power_cycle = false) {
-    bias_sd_spi_lines_for_power();
     settle_sd_power(power_high, force_power_cycle);
     bias_sd_spi_lines_for_power();
     configure_sd_spi_pins();
@@ -304,20 +323,14 @@ void configure_sd_bus() {
 }
 
 void configure_seeed_sd_bus(bool power_high, bool force_power_cycle = false) {
-    pinMode(SD_POWER_PIN, OUTPUT);
-    if (force_power_cycle) {
-        digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH);
-        delay(SD_POWER_CYCLE_OFF_MS);
-    }
-    digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW);
-    s_sd_power_high = power_high;
+    settle_sd_power(power_high, force_power_cycle);
     Wire.setSDA(SD_I2C_SDA_PIN);
     Wire.setSCL(SD_I2C_SCL_PIN);
     Wire.begin();
-    s_sd_pin_sck_ok = SPI1.setSCK(SD_SCK_PIN);
-    s_sd_pin_mosi_ok = SPI1.setMOSI(SD_MOSI_PIN);
-    s_sd_pin_miso_ok = SPI1.setMISO(SD_MISO_PIN);
-    s_sd_pin_cs_ok = SPI1.setCS(SD_CS_PIN);
+    configure_sd_spi_pins();
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
+    apply_sd_miso_pullup();
 }
 
 void clock_sd_cs_high(uint8_t count) {
