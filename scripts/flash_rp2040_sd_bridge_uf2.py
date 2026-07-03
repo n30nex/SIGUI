@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guarded UF2 copier for the D1L RP2040 SD bridge artifact."""
+"""Guarded UF2 copier for D1L RP2040 UF2 artifacts."""
 
 from __future__ import annotations
 
@@ -46,9 +46,14 @@ def parse_sha256sums(path: Path) -> dict[str, str]:
     return entries
 
 
-def verify_artifact(artifact_dir: Path, expected_sha256: str | None = None) -> dict:
+def verify_artifact(
+    artifact_dir: Path,
+    expected_sha256: str | None = None,
+    *,
+    uf2_name: str = UF2_NAME,
+) -> dict:
     artifact_dir = artifact_dir.resolve()
-    uf2_path = artifact_dir / UF2_NAME
+    uf2_path = artifact_dir / uf2_name
     sums_path = artifact_dir / SHA256SUMS_NAME
     if not uf2_path.is_file():
         raise FlashGuardError(f"missing UF2 artifact: {uf2_path}")
@@ -56,13 +61,13 @@ def verify_artifact(artifact_dir: Path, expected_sha256: str | None = None) -> d
         raise FlashGuardError(f"missing checksum manifest: {sums_path}")
 
     checksums = parse_sha256sums(sums_path)
-    expected = checksums.get(UF2_NAME) or checksums.get(f"./{UF2_NAME}")
+    expected = checksums.get(uf2_name) or checksums.get(f"./{uf2_name}")
     if not expected:
-        raise FlashGuardError(f"{SHA256SUMS_NAME} does not list {UF2_NAME}")
+        raise FlashGuardError(f"{SHA256SUMS_NAME} does not list {uf2_name}")
     actual = sha256_file(uf2_path)
     if actual.lower() != expected.lower():
         raise FlashGuardError(
-            f"checksum mismatch for {UF2_NAME}: expected {expected}, actual {actual}"
+            f"checksum mismatch for {uf2_name}: expected {expected}, actual {actual}"
         )
     if expected_sha256 and actual.lower() != expected_sha256.lower():
         raise FlashGuardError(
@@ -70,6 +75,7 @@ def verify_artifact(artifact_dir: Path, expected_sha256: str | None = None) -> d
         )
     return {
         "path": str(uf2_path),
+        "name": uf2_name,
         "size": uf2_path.stat().st_size,
         "sha256": actual.upper(),
         "manifest": str(sums_path),
@@ -167,11 +173,12 @@ def copy_uf2(
     *,
     do_copy: bool = False,
     expected_sha256: str | None = None,
+    uf2_name: str = UF2_NAME,
     extra_roots: list[Path] | None = None,
 ) -> dict:
-    artifact = verify_artifact(artifact_dir, expected_sha256)
+    artifact = verify_artifact(artifact_dir, expected_sha256, uf2_name=uf2_name)
     target, candidates = choose_volume(volume, extra_roots)
-    destination = target / UF2_NAME
+    destination = target / uf2_name
     report = {
         "schema": 1,
         "ok": True,
@@ -210,6 +217,7 @@ def main() -> int:
     )
     parser.add_argument("--volume", help="RP2040 UF2 bootloader volume root, e.g. E:")
     parser.add_argument("--expected-sha256")
+    parser.add_argument("--uf2-name", default=UF2_NAME)
     parser.add_argument("--copy", action="store_true", help="Actually copy the UF2; default is dry-run")
     parser.add_argument("--list-volumes", action="store_true")
     parser.add_argument("--out")
@@ -231,6 +239,7 @@ def main() -> int:
             Path(args.volume) if args.volume else None,
             do_copy=args.copy,
             expected_sha256=args.expected_sha256,
+            uf2_name=args.uf2_name,
         )
         report["created_at"] = datetime.now(timezone.utc).isoformat()
 

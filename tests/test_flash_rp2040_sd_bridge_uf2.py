@@ -7,14 +7,19 @@ import pytest
 from scripts import flash_rp2040_sd_bridge_uf2 as uf2_flash
 
 
-def make_artifact(tmp_path: Path, payload: bytes = b"uf2-payload") -> tuple[Path, str]:
+def make_artifact(
+    tmp_path: Path,
+    payload: bytes = b"uf2-payload",
+    *,
+    uf2_name: str = uf2_flash.UF2_NAME,
+) -> tuple[Path, str]:
     artifact = tmp_path / "artifact"
     artifact.mkdir()
-    uf2 = artifact / uf2_flash.UF2_NAME
+    uf2 = artifact / uf2_name
     uf2.write_bytes(payload)
     digest = hashlib.sha256(payload).hexdigest()
     (artifact / uf2_flash.SHA256SUMS_NAME).write_text(
-        f"{digest}  ./{uf2_flash.UF2_NAME}\n",
+        f"{digest}  ./{uf2_name}\n",
         encoding="ascii",
     )
     return artifact, digest
@@ -45,6 +50,23 @@ def test_verify_artifact_rejects_bad_expected_hash(tmp_path):
 
     with pytest.raises(uf2_flash.FlashGuardError, match="expected-sha256"):
         uf2_flash.verify_artifact(artifact, expected_sha256="0" * 64)
+
+
+def test_verify_artifact_supports_named_uf2_artifacts(tmp_path):
+    artifact, digest = make_artifact(
+        tmp_path,
+        payload=b"official-smoke",
+        uf2_name="seeed_official_sd_smoke.ino.uf2",
+    )
+
+    report = uf2_flash.verify_artifact(
+        artifact,
+        expected_sha256=digest,
+        uf2_name="seeed_official_sd_smoke.ino.uf2",
+    )
+
+    assert report["name"] == "seeed_official_sd_smoke.ino.uf2"
+    assert report["sha256"] == digest.upper()
 
 
 def test_copy_uf2_dry_run_detects_single_uf2_volume_without_copying(tmp_path):
@@ -80,6 +102,24 @@ def test_copy_uf2_requires_explicit_copy_flag(tmp_path):
 
     assert report["copied"] is True
     assert (volume / uf2_flash.UF2_NAME).read_bytes() == b"uf2-payload"
+
+
+def test_copy_uf2_supports_named_uf2_artifacts(tmp_path):
+    uf2_name = "seeed_official_sd_smoke.ino.uf2"
+    artifact, digest = make_artifact(tmp_path, payload=b"smoke", uf2_name=uf2_name)
+    volume = make_uf2_volume(tmp_path)
+
+    report = uf2_flash.copy_uf2(
+        artifact,
+        volume,
+        do_copy=True,
+        expected_sha256=digest,
+        uf2_name=uf2_name,
+    )
+
+    assert report["copied"] is True
+    assert report["artifact"]["name"] == uf2_name
+    assert (volume / uf2_name).read_bytes() == b"smoke"
 
 
 def test_copy_uf2_refuses_ambiguous_or_missing_uf2_volume(tmp_path):

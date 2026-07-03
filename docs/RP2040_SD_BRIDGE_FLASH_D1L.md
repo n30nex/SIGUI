@@ -27,6 +27,23 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
 ```
 
+## Guided Manual Install
+
+If COM12 is healthy but the RP2040 does not answer `rp2040 ping` and no
+autonomous COM16/UF2 path appears, use the guided installer instead of looping
+autonomous validation:
+
+```powershell
+python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
+```
+
+The guided flow is documented in `docs/D1L_SD_CARD_GUIDED_INSTALL.md`. It still
+verifies Actions-built checksums, refuses COM11/COM29, never formats SD, never
+sends Public RF, captures the official Seeed SD smoke proof, restores the
+DeskOS RP2040 bridge, runs COM12 preflight, and runs short SD canaries when the
+file gate is ready. The only manual operation is putting the RP2040 into
+UF2/BOOTSEL mode when prompted.
+
 The last hardware-tested UF2 before the safe-status/explicit-mount follow-up was
 from Actions run `28499319258` for commit
 `a8268073ae290567e26f27491c8ffa167f6f8d57`:
