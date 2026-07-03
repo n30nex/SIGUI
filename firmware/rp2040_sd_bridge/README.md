@@ -24,8 +24,10 @@ It speaks the newline-delimited protocol documented in
   rail level with the SD SPI pins floated while GPIO18 is off so CS/MOSI/SCK
   cannot backfeed the card, wait for the rail to settle, bias
   CS/MOSI/SCK/MISO, and send idle clocks so warm-reset cards can re-enter SPI
-  init. Before those raw probes, the bridge repeats the Seeed init once after
-  a settled GPIO18 rail cycle so the filesystem stack gets a clean power-on
+  init. CMD0 reset-entry waits for DO/MISO to go high after CS is asserted
+  before sending the command frame, matching the SD SPI command-ready rule.
+  Before those raw probes, the bridge repeats the Seeed init once after a
+  settled GPIO18 rail cycle so the filesystem stack gets a clean power-on
   attempt. SD MISO uses the
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
@@ -138,7 +140,7 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
   does not write to the card. Probe tokens include SPI pin-acceptance flags,
-  the CMD0 skipped-wait sentinel, the CMD8 ready byte, raw `CMD0`, `CMD8`, R7
+  the CMD0 and CMD8 selected-ready bytes, raw `CMD0`, `CMD8`, R7
   echo bytes (`*_c0r`, `*_c8r`, `*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO line samples
   (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
   CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
@@ -146,11 +148,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   peripheral with direct GPIO clocking and are diagnostic-only; they do not
   enable file operations. Diagnostic replies also include
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
-  with the SPI response path. The raw probe scans past leading all-zero CMD0
-  response bytes inside the response window; the bit-banged probe also retries
-  all-zero CMD0 results with one to seven pre-command clocks while CS is
-  asserted. These diagnostics test reset-entry byte recovery without formatting
-  or writing the card.
+  with the SPI response path. The raw probe waits for selected-ready before
+  CMD0 and scans past leading all-zero CMD0 response bytes inside the response
+  window; the bit-banged probe also retries all-zero CMD0 results with one to
+  seven pre-command clocks while CS is asserted. These diagnostics test
+  reset-entry byte recovery without formatting or writing the card.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and
   manifests. If the card is absent, unmountable, not FAT32, or has invalid

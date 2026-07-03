@@ -158,18 +158,17 @@ configured SPI1 pins; `pin_cs` reports that GPIO13 chip select registration is
 configured. `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`
 report the raw GPIO7 SD-detect sample. Each probe prefix (`hd`, `hs`, `ld`, `ls`, `bb`)
 reports presence (`*_p`), final probe error (`*_e`), error data (`*_d`), the
-skipped-wait sentinel before CMD0 (`*_c0r`) and CS-low ready byte before CMD8
-(`*_c8r`), raw `CMD0` response
+CS-low selected-ready byte before CMD0 (`*_c0r`) and before CMD8 (`*_c8r`), raw `CMD0` response
 (`*_c0`), raw `CMD8` response (`*_c8`), the four `CMD8` R7 echo bytes
 (`*_r70`..`*_r73`), MISO line samples after pull-up, after SPI1 begins, and
 after idle clocks (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), the first
 CS-high idle `SPI1.transfer(0xFF)` byte (`*_idle_ff`), and detected capacity in
-KiB (`*_kb`). Raw CMD0 probes scan past leading all-zero response bytes inside
-the response window; the `bb_*` CMD0 path also retries all-zero CMD0 responses
-with one to seven pre-command bit clocks while selected. These fields are
-non-formatting diagnostics for distinguishing a stuck/all-zero SPI bus or
-byte-boundary issue from a card that reaches SPI idle but fails the SD v2 echo
-check.
+KiB (`*_kb`). Raw CMD0 probes wait for selected-ready and scan past leading
+all-zero response bytes inside the response window; the `bb_*` CMD0 path also
+retries all-zero CMD0 responses with one to seven pre-command bit clocks while
+selected. These fields are non-formatting diagnostics for distinguishing a
+stuck/all-zero SPI bus or byte-boundary issue from a card that reaches SPI idle
+but fails the SD v2 echo check.
 
 Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`
 low/dedicated, `ls` low/shared, and `bb` high-power bit-banged GPIO probe. The

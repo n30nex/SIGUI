@@ -609,7 +609,7 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, false);
+        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, true);
         if (cmd0 == 0x01U) {
             break;
         }
@@ -687,14 +687,14 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false, 0, true);
+        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true);
         if (cmd0 == 0x01U) {
             break;
         }
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
-                                          false, slip, true);
+                                          true, slip, true);
                 if (cmd0 == 0x01U) {
                     break;
                 }
