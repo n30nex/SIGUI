@@ -2337,6 +2337,7 @@ void send_file_error(uint32_t request_id, const char *op, const char *err) {
     line += " note=";
     line += err;
     reply_stream->println(line);
+    reply_stream->flush();
 }
 
 bool parse_file_header(const char *line, uint32_t *request_id, char *op, size_t op_size) {
@@ -2402,6 +2403,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     if (!file) {
         out += "0 kind=none size=0 note=ok";
         reply_stream->println(out);
+        reply_stream->flush();
         return;
     }
     out += "1 kind=";
@@ -2411,6 +2413,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " note=ok";
     file.close();
     reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_read(uint32_t request_id, const char *line) {
@@ -2470,6 +2473,7 @@ void handle_file_read(uint32_t request_id, const char *line) {
     out += crc32_token(data, used);
     out += " note=ok";
     reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_write(uint32_t request_id, const char *line, bool append_mode) {
@@ -2564,6 +2568,7 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     out += String(static_cast<unsigned long>(new_size));
     out += " note=ok";
     reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_delete(uint32_t request_id, const char *line) {
@@ -2587,6 +2592,7 @@ void handle_file_delete(uint32_t request_id, const char *line) {
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=delete note=ok";
     reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_rename(uint32_t request_id, const char *line) {
@@ -2620,6 +2626,7 @@ void handle_file_rename(uint32_t request_id, const char *line) {
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=rename note=ok";
     reply_stream->println(out);
+    reply_stream->flush();
 }
 
 void handle_file_line(const char *line) {

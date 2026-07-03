@@ -428,6 +428,7 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
         "void handle_file_line", 1
     )[0]
     assert "SD.exists" not in file_protocol_body
+    assert file_protocol_body.count("reply_stream->flush()") >= 5
 
 
 def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
