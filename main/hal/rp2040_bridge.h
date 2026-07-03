@@ -91,6 +91,7 @@ typedef struct {
     char selected_power[8];
     char selected_mode[16];
     char note[64];
+    char raw_line[D1L_RP2040_FILE_LINE_MAX + 1U];
 } d1l_rp2040_sd_diag_t;
 
 typedef struct {

@@ -591,6 +591,7 @@ static esp_err_t parse_sd_diag_line(const char *line, d1l_rp2040_sd_diag_t *diag
 
     init_sd_diag(diag, ESP_OK);
     diag->protocol_supported = true;
+    snprintf(diag->raw_line, sizeof(diag->raw_line), "%s", line);
     parse_word_token(line, "pins", diag->pins, sizeof(diag->pins));
     parse_word_token(line, "selected_power", diag->selected_power, sizeof(diag->selected_power));
     parse_word_token(line, "selected_mode", diag->selected_mode, sizeof(diag->selected_mode));

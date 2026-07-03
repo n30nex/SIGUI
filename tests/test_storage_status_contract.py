@@ -264,6 +264,13 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"probe_error\\":%lu' in console
     assert '\\"mount_error\\":%lu' in console
     assert "d1l_rp2040_bridge_sd_diag" in console
+    assert "cmd_storage_diag_raw" in console
+    assert '"storage diag raw"' in console
+    assert 'strcmp(line, "storage diag raw")' in console
+    assert '\\"cmd\\":\\"storage diag raw\\"' in console
+    assert '\\"raw_line\\":' in console
+    assert "char raw_line[D1L_RP2040_FILE_LINE_MAX + 1U]" in rp2040_header
+    assert "snprintf(diag->raw_line, sizeof(diag->raw_line), \"%s\", line)" in rp2040_source
     assert '\\"formats_sd\\":false' in console
     assert '\\"public_rf_tx\\":false' in console
     assert "D1L_MAP_TILE_CACHE_POLICY" in console
