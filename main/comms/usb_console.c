@@ -40,6 +40,8 @@
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 
+static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
+
 static void trim_line(char *line)
 {
     size_t n = strlen(line);
