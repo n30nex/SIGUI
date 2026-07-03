@@ -49,6 +49,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;" in sketch
     assert "constexpr uint16_t SD_POWER_SETTLE_MS = 1000;" in sketch
     assert "constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;" in sketch
+    assert "constexpr uint16_t SD_CMD0_READY_SAMPLE_MS = 10;" in sketch
     assert "digitalWrite(SD_POWER_PIN, power_high ? HIGH : LOW)" in sketch
     assert "digitalWrite(SD_POWER_PIN, power_high ? LOW : HIGH)" in sketch
     assert "bool s_sd_power_high = true;" in sketch
@@ -151,9 +152,9 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "sd_bitbang_clock_bit(true)" in sketch
     assert "pre_clock_bits" in sketch
     assert "ignore_leading_zero && response == 0x00U" in sketch
-    assert "sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, true)" in sketch
+    assert "SD_CMD0_READY_SAMPLE_MS" in sketch
     assert "for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip)" in sketch
-    assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true)" in sketch
+    assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true," in sketch
     assert 'append_probe_tokens(line, "bb", diag.bitbang)' in sketch
     assert 'empty_probe("high", "bitbang", true, DEDICATED_SPI)' in sketch
     assert "if (!cmd0_idle)" in sketch
@@ -163,8 +164,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "probe.cmd0_response = cmd0" in sketch
     assert "probe.cmd8_response = cmd8" in sketch
     assert "&probe.cmd0_ready_byte, true, true" in sketch
+    assert "selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS" in sketch
     assert "&probe.cmd8_ready_byte, false" in sketch
-    assert "wait_selected_ready ? sd_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU" in sketch
+    assert "wait_selected_ready ? sd_wait_ready(selected_ready_wait_ms) : 0xFFU" in sketch
+    assert "wait_selected_ready ? bitbang_wait_ready(selected_ready_wait_ms) : 0xFFU" in sketch
     assert "ignore_leading_zero && response == 0x00U" in sketch
     assert "for (uint8_t i = 0; i < 64; ++i)" in sketch
     assert "probe.cmd8_echo[i] = cmd8_extra[i]" in sketch

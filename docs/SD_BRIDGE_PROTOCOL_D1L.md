@@ -163,7 +163,7 @@ CS-low selected-ready byte before CMD0 (`*_c0r`) and before CMD8 (`*_c8r`), raw 
 (`*_r70`..`*_r73`), MISO line samples after pull-up, after SPI1 begins, and
 after idle clocks (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), the first
 CS-high idle `SPI1.transfer(0xFF)` byte (`*_idle_ff`), and detected capacity in
-KiB (`*_kb`). Raw CMD0 probes wait for selected-ready and scan past leading
+KiB (`*_kb`). Raw CMD0 probes sample selected-ready and scan past leading
 all-zero response bytes inside the response window; the `bb_*` CMD0 path also
 retries all-zero CMD0 responses with one to seven pre-command bit clocks while
 selected. These fields are non-formatting diagnostics for distinguishing a

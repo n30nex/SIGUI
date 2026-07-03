@@ -38,6 +38,7 @@ constexpr uint32_t SD_PROBE_SPI_HZ = 400000U;
 constexpr uint16_t SD_POWER_CYCLE_OFF_MS = 500;
 constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
 constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
+constexpr uint16_t SD_CMD0_READY_SAMPLE_MS = 10;
 constexpr uint8_t SD_CMD0_RETRIES = 8;
 constexpr uint8_t SD_CMD0_RECOVERY_CLOCKS = 16;
 constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;
@@ -509,14 +510,15 @@ uint8_t bitbang_wait_ready(uint32_t timeout_ms) {
 uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra,
                            size_t extra_len, uint8_t *ready_byte = nullptr,
                            bool wait_selected_ready = true, uint8_t pre_clock_bits = 0,
-                           bool ignore_leading_zero = false) {
+                           bool ignore_leading_zero = false,
+                           uint32_t selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_bitbang_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
     for (uint8_t i = 0; i < pre_clock_bits; ++i) {
         (void)sd_bitbang_clock_bit(true);
     }
-    const uint8_t ready = wait_selected_ready ? bitbang_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU;
+    const uint8_t ready = wait_selected_ready ? bitbang_wait_ready(selected_ready_wait_ms) : 0xFFU;
     if (ready_byte) {
         *ready_byte = ready;
     }
@@ -559,11 +561,12 @@ uint8_t sd_wait_ready(uint32_t timeout_ms) {
 
 uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len,
                    uint8_t *ready_byte = nullptr, bool ignore_leading_zero = false,
-                   bool wait_selected_ready = true) {
+                   bool wait_selected_ready = true,
+                   uint32_t selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_spi_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
-    const uint8_t ready = wait_selected_ready ? sd_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU;
+    const uint8_t ready = wait_selected_ready ? sd_wait_ready(selected_ready_wait_ms) : 0xFFU;
     if (ready_byte) {
         *ready_byte = ready;
     }
@@ -609,7 +612,8 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, true);
+        cmd0 = sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, true,
+                          SD_CMD0_READY_SAMPLE_MS);
         if (cmd0 == 0x01U) {
             break;
         }
@@ -687,14 +691,15 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
 
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
-        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true);
+        cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true,
+                                  SD_CMD0_READY_SAMPLE_MS);
         if (cmd0 == 0x01U) {
             break;
         }
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
-                                          true, slip, true);
+                                          true, slip, true, SD_CMD0_READY_SAMPLE_MS);
                 if (cmd0 == 0x01U) {
                     break;
                 }

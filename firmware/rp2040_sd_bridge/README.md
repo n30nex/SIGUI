@@ -24,9 +24,10 @@ It speaks the newline-delimited protocol documented in
   rail level with the SD SPI pins floated while GPIO18 is off so CS/MOSI/SCK
   cannot backfeed the card, wait for the rail to settle, bias
   CS/MOSI/SCK/MISO, and send idle clocks so warm-reset cards can re-enter SPI
-  init. CMD0 reset-entry waits for DO/MISO to go high after CS is asserted
-  before sending the command frame, matching the SD SPI command-ready rule.
-  Before those raw probes, the bridge repeats the Seeed init once after a
+  init. CMD0 reset-entry samples DO/MISO after CS is asserted before sending
+  the command frame, which records whether the card is command-ready without
+  stalling the worker on a card that holds DO low. Before those raw probes, the
+  bridge repeats the Seeed init once after a
   settled GPIO18 rail cycle so the filesystem stack gets a clean power-on
   attempt. SD MISO uses the
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
@@ -148,8 +149,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   peripheral with direct GPIO clocking and are diagnostic-only; they do not
   enable file operations. Diagnostic replies also include
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
-  with the SPI response path. The raw probe waits for selected-ready before
-  CMD0 and scans past leading all-zero CMD0 response bytes inside the response
+  with the SPI response path. The raw probe samples selected-ready before CMD0
+  and scans past leading all-zero CMD0 response bytes inside the response
   window; the bit-banged probe also retries all-zero CMD0 results with one to
   seven pre-command clocks while CS is asserted. These diagnostics test
   reset-entry byte recovery without formatting or writing the card.
