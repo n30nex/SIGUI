@@ -9,6 +9,8 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
@@ -56,9 +58,15 @@
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
 #define D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS 30000U
+#define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 4096U
+#define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
+#define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
+static SemaphoreHandle_t s_status_mutex;
+static QueueHandle_t s_service_queue;
+static TaskHandle_t s_service_task;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static bool s_pending_public_tx;
@@ -81,6 +89,18 @@ static d1l_pending_dm_tx_t s_pending_dm_tx;
 static d1l_contact_entry_t s_contact_scan[D1L_CONTACT_STORE_CAPACITY];
 extern SX126x_t SX126x;
 
+typedef enum {
+    D1L_MESHCORE_SERVICE_CMD_START_RX,
+    D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+} d1l_meshcore_service_cmd_type_t;
+
+typedef struct {
+    d1l_meshcore_service_cmd_type_t type;
+    uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
+    uint8_t raw_len;
+    TaskHandle_t reply_task;
+} d1l_meshcore_service_cmd_t;
+
 static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
     0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a,
     0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72,
@@ -91,6 +111,22 @@ static const uint8_t s_public_secret[D1L_MESHCORE_PUB_KEY_SIZE] = {
 static uint8_t s_public_channel_hash;
 
 static void d1l_meshcore_start_rx(void);
+static esp_err_t meshcore_service_start_task(void);
+static void meshcore_service_request_rx_async(void);
+
+static void status_lock(void)
+{
+    if (s_status_mutex) {
+        (void)xSemaphoreTake(s_status_mutex, portMAX_DELAY);
+    }
+}
+
+static void status_unlock(void)
+{
+    if (s_status_mutex) {
+        (void)xSemaphoreGive(s_status_mutex);
+    }
+}
 
 typedef struct {
     uint8_t header;
@@ -1183,7 +1219,7 @@ static void on_tx_done(void)
     s_tx_busy = false;
     s_status.tx_packets++;
     s_status.state = D1L_MESHCORE_SERVICE_READY;
-    d1l_meshcore_start_rx();
+    meshcore_service_request_rx_async();
 }
 
 static void on_tx_timeout(void)
@@ -1193,7 +1229,7 @@ static void on_tx_timeout(void)
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
     s_tx_busy = false;
     s_status.state = D1L_MESHCORE_SERVICE_RADIO_ERROR;
-    d1l_meshcore_start_rx();
+    meshcore_service_request_rx_async();
 }
 
 static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
@@ -1203,17 +1239,17 @@ static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr
     parse_rx_path_packet(payload, size, rssi, snr);
     parse_rx_ack_packet(payload, size, rssi, snr);
     parse_rx_advert_packet(payload, size, rssi, snr);
-    d1l_meshcore_start_rx();
+    meshcore_service_request_rx_async();
 }
 
 static void on_rx_timeout(void)
 {
-    d1l_meshcore_start_rx();
+    meshcore_service_request_rx_async();
 }
 
 static void on_rx_error(void)
 {
-    d1l_meshcore_start_rx();
+    meshcore_service_request_rx_async();
 }
 
 static RadioEvents_t s_radio_events = {
@@ -1302,9 +1338,156 @@ static void d1l_meshcore_start_rx(void)
     }
 }
 
+static esp_err_t meshcore_service_handle_start_rx(void)
+{
+    esp_err_t ret = ensure_radio_started();
+    if (ret == ESP_OK) {
+        d1l_meshcore_start_rx();
+    }
+    return ret;
+}
+
+static esp_err_t meshcore_service_handle_send_raw(const d1l_meshcore_service_cmd_t *cmd)
+{
+    if (!cmd || cmd->raw_len == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_tx_busy) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_err_t ret = ensure_radio_started();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    s_tx_busy = true;
+    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
+    Radio.Send(cmd->raw, cmd->raw_len);
+    return ESP_OK;
+}
+
+static void meshcore_service_reply(const d1l_meshcore_service_cmd_t *cmd, esp_err_t ret)
+{
+    if (cmd && cmd->reply_task) {
+        (void)xTaskNotify(cmd->reply_task, (uint32_t)ret, eSetValueWithOverwrite);
+    }
+}
+
+static void meshcore_service_task(void *arg)
+{
+    (void)arg;
+    d1l_meshcore_service_cmd_t cmd = {0};
+    for (;;) {
+        if (xQueueReceive(s_service_queue, &cmd, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        esp_err_t ret = ESP_ERR_INVALID_ARG;
+        switch (cmd.type) {
+        case D1L_MESHCORE_SERVICE_CMD_START_RX:
+            ret = meshcore_service_handle_start_rx();
+            break;
+        case D1L_MESHCORE_SERVICE_CMD_SEND_RAW:
+            ret = meshcore_service_handle_send_raw(&cmd);
+            break;
+        default:
+            ret = ESP_ERR_INVALID_ARG;
+            break;
+        }
+        meshcore_service_reply(&cmd, ret);
+    }
+}
+
+static esp_err_t meshcore_service_start_task(void)
+{
+    if (!s_status_mutex) {
+        s_status_mutex = xSemaphoreCreateMutex();
+        if (!s_status_mutex) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_service_queue) {
+        s_service_queue =
+            xQueueCreate(D1L_MESHCORE_SERVICE_QUEUE_LEN, sizeof(d1l_meshcore_service_cmd_t));
+        if (!s_service_queue) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_service_task) {
+        BaseType_t created = xTaskCreate(meshcore_service_task,
+                                         "meshcore_service",
+                                         D1L_MESHCORE_SERVICE_TASK_STACK_BYTES,
+                                         NULL,
+                                         4,
+                                         &s_service_task);
+        if (created != pdPASS) {
+            s_service_task = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    return ESP_OK;
+}
+
+static esp_err_t meshcore_service_send_command(d1l_meshcore_service_cmd_t *cmd,
+                                               uint32_t timeout_ms)
+{
+    if (!cmd) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = meshcore_service_start_task();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    cmd->reply_task = xTaskGetCurrentTaskHandle();
+    (void)xTaskNotifyStateClear(NULL);
+    const TickType_t timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+    if (xQueueSend(s_service_queue, cmd, timeout_ticks) != pdTRUE) {
+        cmd->reply_task = NULL;
+        return ESP_ERR_TIMEOUT;
+    }
+    uint32_t notify_value = (uint32_t)ESP_ERR_TIMEOUT;
+    if (xTaskNotifyWait(0, UINT32_MAX, &notify_value, timeout_ticks) == pdTRUE) {
+        ret = (esp_err_t)notify_value;
+    } else {
+        ret = ESP_ERR_TIMEOUT;
+    }
+    cmd->reply_task = NULL;
+    return ret;
+}
+
+static void meshcore_service_request_rx_async(void)
+{
+    if (!s_service_queue) {
+        return;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    (void)xQueueSend(s_service_queue, &cmd, 0);
+}
+
+static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
+                                           uint8_t raw_len,
+                                           uint32_t timeout_ms)
+{
+    if (!raw || raw_len == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_SEND_RAW,
+        .raw_len = raw_len,
+    };
+    memcpy(cmd.raw, raw, raw_len);
+    return meshcore_service_send_command(&cmd, timeout_ms);
+}
+
 void d1l_meshcore_service_init(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
+    (void)meshcore_service_start_task();
+    status_lock();
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO;
     s_status.path_hash_bytes = settings->path_hash_bytes;
@@ -1316,6 +1499,7 @@ void d1l_meshcore_service_init(void)
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    status_unlock();
 }
 
 esp_err_t d1l_meshcore_service_ensure_identity(void)
@@ -1349,19 +1533,12 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
-    if (!settings->identity_ready) {
-        (void)d1l_meshcore_service_ensure_identity();
-    } else {
-        s_status.identity_ready = true;
-    }
-    if (!s_tx_busy) {
-        esp_err_t ret = ensure_radio_started();
-        if (ret == ESP_OK) {
-            d1l_meshcore_start_rx();
-        }
-    }
-    s_status.path_hash_bytes = settings->path_hash_bytes;
-    return s_status;
+    status_lock();
+    d1l_meshcore_service_status_t snapshot = s_status;
+    status_unlock();
+    snapshot.identity_ready = settings->identity_ready || snapshot.identity_ready;
+    snapshot.path_hash_bytes = settings->path_hash_bytes;
+    return snapshot;
 }
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)
@@ -1371,7 +1548,10 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
         s_status.rejected_commands++;
         return ret;
     }
-    ret = ensure_radio_started();
+    d1l_meshcore_service_cmd_t start_cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
@@ -1401,9 +1581,11 @@ esp_err_t d1l_meshcore_service_request_advert(bool flood)
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
     snprintf(note, sizeof(note), "%s %.8s", flood ? "flood" : "zero", pub_prefix);
 
-    s_tx_busy = true;
-    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
-    Radio.Send(raw, raw_len);
+    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        s_status.rejected_commands++;
+        return ret;
+    }
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(pub_prefix, settings->node_name, "advert",
                                            route_name(flood ? D1L_MESHCORE_ROUTE_FLOOD :
@@ -1422,7 +1604,11 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
     if (text == NULL || text[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
-    esp_err_t ret = ensure_radio_started();
+    d1l_meshcore_service_cmd_t start_cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    esp_err_t ret =
+        meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
@@ -1448,10 +1634,14 @@ esp_err_t d1l_meshcore_service_send_public(const char *text)
         return ret;
     }
 
-    s_tx_busy = true;
-    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     remember_pending_public_tx(text);
-    Radio.Send(raw, raw_len);
+    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        s_pending_public_tx = false;
+        s_pending_public_text[0] = '\0';
+        s_status.rejected_commands++;
+        return ret;
+    }
     esp_err_t route_ret =
         d1l_route_store_upsert_observation("public", "Public", "public_text",
                                            route_name(D1L_MESHCORE_ROUTE_FLOOD), "tx",
@@ -1474,7 +1664,10 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
         s_status.rejected_commands++;
         return ret;
     }
-    ret = ensure_radio_started();
+    d1l_meshcore_service_cmd_t start_cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    ret = meshcore_service_send_command(&start_cmd, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
         return ret;
@@ -1513,12 +1706,15 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
         return ret;
     }
 
-    s_tx_busy = true;
-    s_status.state = D1L_MESHCORE_SERVICE_TX_BUSY;
     remember_pending_dm_tx(&contact, text, route_path_hash_bytes, route_path_hops, 0, ack_hash);
+    ret = meshcore_service_send_raw(raw, raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        clear_pending_dm_tx();
+        s_status.rejected_commands++;
+        return ret;
+    }
     (void)append_dm_store_tx(&s_pending_dm_tx);
     clear_pending_dm_tx();
-    Radio.Send(raw, raw_len);
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "dm_text",
                                            route_name(use_direct ? D1L_MESHCORE_ROUTE_DIRECT :

@@ -15,7 +15,8 @@ def test_meshcore_service_builds_public_group_text_packets():
     assert "0x8b, 0x33, 0x87, 0xe9" in source
     assert "mbedtls_aes_crypt_ecb" in source
     assert "mbedtls_md_hmac" in source
-    assert "Radio.Send(raw, raw_len)" in source
+    assert "meshcore_service_send_raw(raw, raw_len" in source
+    assert "Radio.Send(cmd->raw, cmd->raw_len)" in source
 
 
 def test_meshcore_service_decodes_verified_adverts():
@@ -53,6 +54,35 @@ def test_meshcore_service_uses_meshcore_narrow_radio_profile():
     assert "D1L_MESHCORE_PREAMBLE_LOW_SF 32U" in source
     assert "LORA_BW_062" in source
     assert "SX126xSetModulationParams(&SX126x.ModulationParams)" in source
+
+
+def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
+    source = read("main/mesh/meshcore_service.c")
+    status_body = source.split("d1l_meshcore_service_status_t d1l_meshcore_service_status", 1)[
+        1
+    ].split("esp_err_t d1l_meshcore_service_request_advert", 1)[0]
+
+    forbidden = [
+        "d1l_meshcore_service_ensure_identity",
+        "ensure_radio_started",
+        "d1l_meshcore_start_rx",
+        "Radio.",
+        "d1l_settings_save",
+        "esp_fill_random",
+        "ed25519_create_keypair",
+    ]
+    for token in forbidden:
+        assert token not in status_body
+
+    assert "d1l_meshcore_service_cmd_t" in source
+    assert "xQueueCreate(D1L_MESHCORE_SERVICE_QUEUE_LEN" in source
+    assert "meshcore_service_task" in source
+    assert "meshcore_service_handle_start_rx" in source
+    assert "meshcore_service_handle_send_raw" in source
+    assert "meshcore_service_request_rx_async" in source
+    assert "SemaphoreHandle_t s_status_mutex" in source
+    assert "status_lock()" in status_body
+    assert "d1l_meshcore_service_status_t snapshot = s_status" in status_body
 
 
 def test_console_reports_phase2_public_rf_evidence():
