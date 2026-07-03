@@ -72,6 +72,8 @@ typedef struct {
     bool ui_ready;
     bool identity_ready;
     bool radio_ready;
+    bool radio_applied;
+    bool radio_apply_pending;
     bool companion_ready;
     bool wifi_enabled;
     bool ble_companion_enabled;
@@ -152,6 +154,7 @@ typedef struct {
     int8_t radio_tx_power_dbm;
     bool radio_rx_boost;
     const char *radio_tcxo;
+    const char *radio_apply_error;
     uint32_t uptime_ms;
     uint32_t heap_free;
     uint32_t heap_min_free;

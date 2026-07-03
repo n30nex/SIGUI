@@ -264,6 +264,8 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->ui_ready = s_model.ui_ready;
     snapshot->identity_ready = settings->identity_ready || mesh.identity_ready;
     snapshot->radio_ready = mesh.radio_ready;
+    snapshot->radio_applied = mesh.radio_applied;
+    snapshot->radio_apply_pending = mesh.radio_apply_pending;
     snapshot->companion_ready = mesh.companion_framing_ready;
     snapshot->radio_frequency_hz = settings->frequency_hz;
     snapshot->radio_bandwidth_tenths_khz = settings->bandwidth_tenths_khz;
@@ -272,6 +274,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->radio_tx_power_dbm = settings->tx_power_dbm;
     snapshot->radio_rx_boost = settings->rx_boost;
     snapshot->radio_tcxo = d1l_settings_tcxo_name(settings->tcxo_mode);
+    snapshot->radio_apply_error = esp_err_to_name(mesh.radio_apply_error);
     snapshot->wifi_enabled = connectivity.wifi_enabled_setting;
     snapshot->ble_companion_enabled = connectivity.ble_companion_enabled_setting;
     snapshot->observer_enabled = connectivity.observer_enabled_setting;

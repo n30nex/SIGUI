@@ -319,10 +319,10 @@ Do not use `COM11` or `COM29` for this D1L target.
   - Built in fresh Podman ESP-IDF output `build/radio-settings`; app size was `696384` bytes and app SHA256 was `00752E6B570C6030DFB79A8C02E93D97F44AC7308AB59EDB785D94A9178DF5A0`.
   - Flashed `COM7` directly with no backup/readback, per operator instruction; esptool verified written hashes.
   - Standard smoke passed with 32 commands.
-  - `settings get` reported the nested default radio profile: 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, RX boost enabled, TCXO NONE, and `applied_to_radio=false`.
+  - `settings get` reported the nested default radio profile: 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, RX boost enabled, TCXO NONE, and a false applied-to-radio value at this historical checkpoint.
   - `health` reported `board_ready=true`, `ui_ready=true`, `reset_reason=POWERON`, current stack `1112` words, UI stack `1252` words, and `lvgl_used_pct=80`.
 - Phase 6 radio settings targeted serial proof: `artifacts/smoke/d1l-radio-settings-target-local-COM7.json`
-  - `radio set txpower 19` persisted `tx_power_dbm=19` with `applied_to_radio=false`.
+  - `radio set txpower 19` persisted `tx_power_dbm=19`; the historical checkpoint still reported the saved profile as not applied to live RF.
   - `radio set rxboost 0` persisted `radio.rx_boost=false` in `settings get`.
   - `radio set preset uscan` restored 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, and RX boost enabled.
   - Final `health` stayed `board_ready=true` and `ui_ready=true`.

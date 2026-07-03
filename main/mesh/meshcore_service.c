@@ -78,6 +78,8 @@ static bool s_pending_public_tx;
 static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
 static uint32_t s_last_trace_probe_ms;
 static char s_last_trace_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static bool s_radio_profile_applied;
+static d1l_radio_profile_t s_applied_radio_profile;
 
 typedef struct {
     bool active;
@@ -187,6 +189,49 @@ static esp_err_t validate_user_text(const char *text)
         }
     }
     return ESP_ERR_INVALID_SIZE;
+}
+
+static uint16_t radio_profile_bandwidth_tenths(const d1l_radio_profile_t *profile)
+{
+    return (uint16_t)((profile->bandwidth_khz * 10.0f) + 0.5f);
+}
+
+static bool radio_profile_strings_match(const char *lhs, const char *rhs)
+{
+    if (!lhs || !rhs) {
+        return lhs == rhs;
+    }
+    return strcmp(lhs, rhs) == 0;
+}
+
+static bool radio_profiles_match(const d1l_radio_profile_t *lhs,
+                                 const d1l_radio_profile_t *rhs)
+{
+    return lhs && rhs &&
+           lhs->frequency_hz == rhs->frequency_hz &&
+           radio_profile_bandwidth_tenths(lhs) == radio_profile_bandwidth_tenths(rhs) &&
+           lhs->spreading_factor == rhs->spreading_factor &&
+           lhs->coding_rate == rhs->coding_rate &&
+           lhs->tx_power_dbm == rhs->tx_power_dbm &&
+           radio_profile_strings_match(lhs->tcxo, rhs->tcxo) &&
+           lhs->rx_boost == rhs->rx_boost;
+}
+
+static void mark_radio_apply_result(const d1l_radio_profile_t *profile, esp_err_t ret)
+{
+    status_lock();
+    s_status.radio_apply_error = ret;
+    if (ret == ESP_OK && profile) {
+        s_applied_radio_profile = *profile;
+        s_radio_profile_applied = true;
+        s_status.radio_applied = true;
+        s_status.radio_apply_pending = false;
+        status_unlock();
+        return;
+    }
+    s_status.radio_applied = false;
+    s_status.radio_apply_pending = true;
+    status_unlock();
 }
 
 static int hex_nibble(char c)
@@ -1314,6 +1359,7 @@ static esp_err_t ensure_radio_started(void)
     }
     d1l_radio_profile_t profile = d1l_settings_radio_profile(NULL);
     esp_err_t ret = configure_radio_profile(&profile);
+    mark_radio_apply_result(&profile, ret);
     if (ret != ESP_OK) {
         s_status.radio_ready = false;
         ESP_LOGW(TAG, "unsupported radio profile for MeshCore public RX/TX");
@@ -1334,7 +1380,9 @@ static void d1l_meshcore_start_rx(void)
         return;
     }
     d1l_radio_profile_t profile = d1l_settings_radio_profile(NULL);
-    if (configure_radio_profile(&profile) != ESP_OK) {
+    const esp_err_t ret = configure_radio_profile(&profile);
+    mark_radio_apply_result(&profile, ret);
+    if (ret != ESP_OK) {
         return;
     }
     if (profile.rx_boost) {
@@ -1502,7 +1550,11 @@ void d1l_meshcore_service_init(void)
     s_status.path_hash_bytes = settings->path_hash_bytes;
     s_status.identity_ready = settings->identity_ready;
     s_status.radio_ready = false;
+    s_status.radio_applied = false;
+    s_status.radio_apply_pending = true;
+    s_status.radio_apply_error = ESP_ERR_INVALID_STATE;
     s_status.companion_framing_ready = true;
+    s_radio_profile_applied = false;
     s_radio_started = false;
     s_tx_busy = false;
     s_pending_public_tx = false;
@@ -1542,11 +1594,21 @@ esp_err_t d1l_meshcore_service_ensure_identity(void)
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
+    d1l_radio_profile_t current_profile = d1l_settings_radio_profile(settings);
+    d1l_radio_profile_t applied_profile = {0};
+    bool applied_valid = false;
     status_lock();
     d1l_meshcore_service_status_t snapshot = s_status;
+    applied_profile = s_applied_radio_profile;
+    applied_valid = s_radio_profile_applied;
     status_unlock();
     snapshot.identity_ready = settings->identity_ready || snapshot.identity_ready;
     snapshot.path_hash_bytes = settings->path_hash_bytes;
+    snapshot.radio_applied = snapshot.radio_ready &&
+                             applied_valid &&
+                             snapshot.radio_apply_error == ESP_OK &&
+                             radio_profiles_match(&applied_profile, &current_profile);
+    snapshot.radio_apply_pending = !snapshot.radio_applied;
     return snapshot;
 }
 

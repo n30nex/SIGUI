@@ -23,6 +23,9 @@ typedef struct {
     uint8_t path_hash_bytes;
     bool identity_ready;
     bool radio_ready;
+    bool radio_applied;
+    bool radio_apply_pending;
+    esp_err_t radio_apply_error;
     bool companion_framing_ready;
 } d1l_meshcore_service_status_t;
 

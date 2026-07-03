@@ -59,7 +59,7 @@ Smoke:
 Targeted radio settings proof:
 
 - `artifacts/smoke/d1l-radio-settings-target-local-COM7.json`
-- `radio set txpower 19` persisted `tx_power_dbm=19` with `applied_to_radio=false`.
+- `radio set txpower 19` persisted `tx_power_dbm=19`; at that checkpoint the saved profile was reported as not yet applied to live RF.
 - `radio set rxboost 0` persisted `radio.rx_boost=false` in `settings get`.
 - `radio set preset uscan` restored 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, RX boost enabled.
 - Final `health` stayed `board_ready=true` and `ui_ready=true`.

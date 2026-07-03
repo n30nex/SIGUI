@@ -134,6 +134,10 @@ def test_console_exposes_phase2_foundation_commands():
     assert "password is not printed" in console
     assert "WIFI_DISABLED" in console
     assert '\\"radio\\":{\\"frequency_hz\\":%lu' in console
+    assert '\\"applied_to_radio\\":%s' in console
+    assert '\\"radio_apply_pending\\":%s' in console
+    assert '\\"radio_apply_error\\":\\"%s\\"' in console
+    assert '\\"applied_to_radio\\":false' not in console
     assert "cmd_radio_set_txpower" in console
     assert "cmd_radio_set_rxboost" in console
     assert "settings.tx_power_dbm = (int8_t)tx_power" in console

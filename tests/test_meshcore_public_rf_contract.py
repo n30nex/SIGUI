@@ -126,6 +126,11 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     assert "SemaphoreHandle_t s_status_mutex" in source
     assert "status_lock()" in status_body
     assert "d1l_meshcore_service_status_t snapshot = s_status" in status_body
+    assert "radio_apply_pending" in source
+    assert "radio_apply_error" in source
+    assert "radio_profile_strings_match(lhs->tcxo, rhs->tcxo)" in source
+    assert "mark_radio_apply_result(&profile, ret)" in source
+    assert "radio_profiles_match(&applied_profile, &current_profile)" in status_body
 
 
 def test_console_reports_phase2_public_rf_evidence():

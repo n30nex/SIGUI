@@ -19,7 +19,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
 - Settings setup dashboard with SD Card, Wi-Fi, BLE, Radio, Map Tiles, Display, Identity, Diagnostics, About, and Advanced tiles.
-- Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and reboot/apply warning.
+- Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and live RF apply status.
 - Modal advert sheet for zero-hop/flood actions.
 - Toast feedback for touch actions.
 - Lock/standby overlay with tap-to-unlock behavior.

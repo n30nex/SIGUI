@@ -855,7 +855,9 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "format_radio_profile_line" in source
     assert 'render_settings_tile(s_content, 238, 128, "Radio"' in source
     assert '"Radio Settings"' in source
-    assert '"Saved profile applies after reboot; live RF unchanged"' in source
+    assert '"Live RF matches saved profile"' in source
+    assert '"Saved profile pending next radio start/apply"' in source
+    assert '"Radio saved; RF apply pending"' in source
     assert '"US/CAN"' in source
     assert '"Save"' in source
     assert '"RX Boost On"' in source

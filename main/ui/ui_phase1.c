@@ -4495,7 +4495,7 @@ static void radio_save_event_cb(lv_event_t *event)
             lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(s_radio_settings_sheet);
         }
-        show_toast_text("Radio saved - reboot/apply required", true);
+        show_toast_text("Radio saved; RF apply pending", true);
     } else {
         show_toast_text("Radio profile rejected", false);
     }
@@ -4530,9 +4530,12 @@ static void render_radio_settings_sheet(void)
     lv_obj_set_width(summary, 408);
     lv_obj_set_pos(summary, 8, 44);
 
-    lv_obj_t *warning = create_label(s_radio_settings_sheet,
-                                     "Saved profile applies after reboot; live RF unchanged",
-                                     0xFBBF24);
+    const char *radio_apply_text =
+        s_snapshot.radio_applied ? "Live RF matches saved profile" :
+        s_snapshot.radio_apply_pending ? "Saved profile pending next radio start/apply" :
+        "Radio apply status unavailable";
+    lv_obj_t *warning = create_label(s_radio_settings_sheet, radio_apply_text,
+                                     s_snapshot.radio_applied ? 0x5EEAD4 : 0xFBBF24);
     lv_label_set_long_mode(warning, LV_LABEL_LONG_DOT);
     lv_obj_set_width(warning, 408);
     lv_obj_set_pos(warning, 8, 68);

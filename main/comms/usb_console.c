@@ -253,6 +253,7 @@ static void cmd_board(void)
 static void cmd_settings_get(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
+    const d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     ok_begin("settings get");
     printf(",\"node_name\":\"%s\",\"role\":\"%s\",\"onboarding_complete\":%s,\"wifi_enabled\":%s,\"ble_companion_enabled\":%s,\"observer_enabled\":%s,\"high_contrast\":%s,\"night_mode\":%s,\"path_hash_bytes\":%u,\"map_location\":{\"set\":%s,\"lat\":",
            settings->node_name, d1l_settings_role_name(settings->role),
@@ -271,12 +272,14 @@ static void cmd_settings_get(void)
     print_json_string(settings->map_tile_provider_saved ? settings->map_tile_url_template : "");
     printf(",\"attribution\":");
     print_json_string(settings->map_tile_provider_saved ? settings->map_tile_attribution : "");
-    printf(",\"policy\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":false}}\n",
+    printf(",\"policy\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":%s,\"radio_apply_pending\":%s,\"radio_apply_error\":\"%s\"}}\n",
            D1L_MAP_TILE_PROVIDER_POLICY,
            (unsigned long)settings->frequency_hz,
            ((float)settings->bandwidth_tenths_khz) / 10.0f,
            settings->spreading_factor, settings->coding_rate, settings->tx_power_dbm,
-           bool_json(settings->rx_boost), d1l_settings_tcxo_name(settings->tcxo_mode));
+           bool_json(settings->rx_boost), d1l_settings_tcxo_name(settings->tcxo_mode),
+           bool_json(mesh.radio_applied), bool_json(mesh.radio_apply_pending),
+           esp_err_to_name(mesh.radio_apply_error));
 }
 
 static void cmd_settings_reset(void)
@@ -661,11 +664,14 @@ static void cmd_radiohw(void)
 static void print_radio_profile_result(const char *cmd)
 {
     d1l_radio_profile_t profile = d1l_settings_radio_profile(NULL);
+    d1l_meshcore_service_status_t mesh = d1l_meshcore_service_status();
     ok_begin(cmd);
-    printf(",\"profile_id\":\"%s\",\"region\":\"%s\",\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"tcxo\":\"%s\",\"rx_boost\":%s,\"persisted\":true,\"applied_to_radio\":false}\n",
+    printf(",\"profile_id\":\"%s\",\"region\":\"%s\",\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"tcxo\":\"%s\",\"rx_boost\":%s,\"persisted\":true,\"applied_to_radio\":%s,\"radio_apply_pending\":%s,\"radio_apply_error\":\"%s\"}\n",
            profile.profile_id, profile.region_label, (unsigned long)profile.frequency_hz,
            profile.bandwidth_khz, profile.spreading_factor, profile.coding_rate,
-           profile.tx_power_dbm, profile.tcxo, bool_json(profile.rx_boost));
+           profile.tx_power_dbm, profile.tcxo, bool_json(profile.rx_boost),
+           bool_json(mesh.radio_applied), bool_json(mesh.radio_apply_pending),
+           esp_err_to_name(mesh.radio_apply_error));
 }
 
 static void cmd_radio_get(void)
