@@ -38,6 +38,33 @@ def write_fake_notices(root: Path) -> None:
     (root / "THIRD_PARTY_NOTICES.md").write_text("third party notices\n", encoding="ascii")
     (root / "docs" / "ATTRIBUTIONS.md").write_text("attributions\n", encoding="ascii")
     (root / "docs" / "SOURCE_AUDIT_AND_ATTRIBUTION.md").write_text("source audit\n", encoding="ascii")
+    (root / "docs" / "USER_GUIDE_D1L.md").write_text("user guide\n", encoding="ascii")
+    (root / "docs" / "DEVELOPER_GUIDE_D1L.md").write_text("developer guide\n", encoding="ascii")
+    (root / "docs" / "FLASH_RECOVERY_D1L.md").write_text("flash recovery\n", encoding="ascii")
+    (root / "docs" / "RP2040_SD_BRIDGE_FLASH_D1L.md").write_text("rp2040 guide\n", encoding="ascii")
+
+
+def write_fake_config(root: Path) -> None:
+    (root / "main").mkdir(exist_ok=True)
+    (root / "main" / "d1l_config.h").write_text(
+        '#define D1L_FIRMWARE_NAME "MeshCore DeskOS D1L"\n'
+        '#define D1L_FIRMWARE_VERSION "1.0.0-rc1"\n',
+        encoding="ascii",
+    )
+
+
+def write_fake_rp2040_artifacts(root: Path) -> Path:
+    artifacts = root / "artifacts" / "rp2040-release-inputs"
+    for name, payload in {
+        "rp2040-sd-bridge-firmware": b"BRIDGE",
+        "rp2040-sd-smoke-firmware": b"SMOKE",
+        "rp2040-seeed-official-sd-smoke-firmware": b"OFFICIAL",
+    }.items():
+        artifact_dir = artifacts / name
+        artifact_dir.mkdir(parents=True)
+        (artifact_dir / f"{name}.uf2").write_bytes(payload)
+        (artifact_dir / "SHA256SUMS.txt").write_text("placeholder\n", encoding="ascii")
+    return artifacts
 
 
 def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
@@ -46,6 +73,8 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
     out = root / "artifacts" / "release"
     write_fake_build(build)
     write_fake_notices(root)
+    write_fake_config(root)
+    rp2040_artifacts = write_fake_rp2040_artifacts(root)
 
     manifest = package_release_d1l.create_release_package(
         root=root,
@@ -53,11 +82,14 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
         out_dir=out,
         package_name="d1l-test",
         full_size=0x20000,
+        rp2040_artifact_root=rp2040_artifacts,
     )
 
     package_dir = out / "d1l-test"
     assert manifest["schema"] == 1
     assert manifest["project"] == package_release_d1l.PROJECT
+    assert manifest["app_version"] == "1.0.0-rc1"
+    assert "workflow" in manifest
     assert (package_dir / "firmware" / "bootloader.bin").read_bytes() == b"BOOT"
     assert (package_dir / "firmware" / "partition-table.bin").read_bytes() == b"PART"
     assert (package_dir / "firmware" / "meshcore_deskos_d1l.bin").read_bytes() == b"APP"
@@ -74,6 +106,20 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
         "notices/ATTRIBUTIONS.md",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     ]
+    assert [item["path"] for item in manifest["release_docs"]] == [
+        "docs/USER_GUIDE_D1L.md",
+        "docs/DEVELOPER_GUIDE_D1L.md",
+        "docs/FLASH_RECOVERY_D1L.md",
+        "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
+    ]
+    assert [item["name"] for item in manifest["rp2040_artifacts"]] == [
+        "rp2040-sd-bridge-firmware",
+        "rp2040-sd-smoke-firmware",
+        "rp2040-seeed-official-sd-smoke-firmware",
+    ]
+    for artifact in manifest["rp2040_artifacts"]:
+        assert artifact["uf2_files"]
+        assert (package_dir / artifact["uf2_files"][0]).is_file()
 
     full = package_dir / manifest["full_flash_image"]["path"]
     image = full.read_bytes()
@@ -87,10 +133,15 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path):
     assert "./firmware/meshcore_deskos_d1l.bin" in sha_text
     assert "./full-flash/meshcore_deskos_d1l-full-8mb.bin" in sha_text
     assert "./manifest.json" in sha_text
+    assert "./rp2040/rp2040-sd-bridge-firmware/rp2040-sd-bridge-firmware.uf2" in sha_text
+    assert "./rp2040/rp2040-seeed-official-sd-smoke-firmware/rp2040-seeed-official-sd-smoke-firmware.uf2" in sha_text
+    assert "./docs/USER_GUIDE_D1L.md" in sha_text
     assert "./notices/LICENSE" in sha_text
     assert "./notices/THIRD_PARTY_NOTICES.md" in sha_text
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
+    assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
+    assert "`docs/` contains the user guide" in readme
     assert "`notices/` contains the project license" in readme
 
 

@@ -65,5 +65,4 @@ idf_component_register(
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     MESHCORE_CA_DESK_MODE=1
-    D1L_PHASE1_BRINGUP=1
 )

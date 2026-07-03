@@ -831,7 +831,7 @@ static void cmd_companion_status(void)
     d1l_connectivity_status_t connectivity = {0};
     d1l_connectivity_status(&connectivity);
     ok_begin("companion status");
-    printf(",\"usb_console\":\"ready\",\"framing\":\"meshcore-3byte\",\"header_bytes\":%u,\"app_to_radio\":\"%c\",\"radio_to_app\":\"%c\",\"length\":\"uint16_le\",\"max_payload_bytes\":%u,\"transport_codec\":\"ready\",\"meshcore_bridge\":\"phase2_stub\",\"wifi\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"ble\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"coexistence_policy\":\"%s\",\"path_hash_bytes_supported\":[1,2,3],\"default_path_hash_bytes\":1}\n",
+    printf(",\"usb_console\":\"ready\",\"framing\":\"meshcore-3byte\",\"header_bytes\":%u,\"app_to_radio\":\"%c\",\"radio_to_app\":\"%c\",\"length\":\"uint16_le\",\"max_payload_bytes\":%u,\"transport_codec\":\"ready\",\"meshcore_bridge\":\"ready\",\"wifi\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"ble\":{\"setting_enabled\":%s,\"build_enabled\":%s,\"state\":\"%s\"},\"coexistence_policy\":\"%s\",\"path_hash_bytes_supported\":[1,2,3],\"default_path_hash_bytes\":1}\n",
            D1L_COMPANION3_HEADER_SIZE, D1L_COMPANION3_APP_TO_RADIO,
            D1L_COMPANION3_RADIO_TO_APP, D1L_COMPANION3_MAX_FRAME_SIZE,
            bool_json(connectivity.wifi_enabled_setting),

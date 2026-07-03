@@ -1597,8 +1597,8 @@ esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
 const char *d1l_meshcore_service_state_name(d1l_meshcore_service_state_t state)
 {
     switch (state) {
-    case D1L_MESHCORE_SERVICE_PHASE1_STUB:
-        return "phase1_stub";
+    case D1L_MESHCORE_SERVICE_INITIALIZING:
+        return "initializing";
     case D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO:
         return "waiting_for_radio";
     case D1L_MESHCORE_SERVICE_READY:

@@ -86,8 +86,14 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
 def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     job = job_block("firmware-build")
 
+    assert "needs: rp2040-sd-bridge-build" in job
     assert "idf.py build" in job
+    assert "actions/download-artifact@v7" in job
+    assert "pattern: rp2040-*-firmware" in job
+    assert "path: artifacts/rp2040-release-inputs" in job
+    assert "merge-multiple: false" in job
     assert "python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release" in job
+    assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
     assert "python scripts/verify_checksums.py artifacts/release" in job
     assert "--port" not in job

@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -18,6 +19,17 @@ DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
 EXPECTED_BSP_PATCH = Path("patches/sensecap_indicator_touch_fix.patch")
 EXPECTED_BSP_SUBMODULE = Path("third_party/sensecap_indicator_esp32")
+RELEASE_DOC_SPECS = [
+    ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
+    ("docs/DEVELOPER_GUIDE_D1L.md", "DEVELOPER_GUIDE_D1L.md"),
+    ("docs/FLASH_RECOVERY_D1L.md", "FLASH_RECOVERY_D1L.md"),
+    ("docs/RP2040_SD_BRIDGE_FLASH_D1L.md", "RP2040_SD_BRIDGE_FLASH_D1L.md"),
+]
+RP2040_ARTIFACT_NAMES = [
+    "rp2040-sd-bridge-firmware",
+    "rp2040-sd-smoke-firmware",
+    "rp2040-seeed-official-sd-smoke-firmware",
+]
 
 
 def utc_stamp() -> str:
@@ -202,6 +214,89 @@ def copy_notice_files(root: Path, package_dir: Path) -> list[dict]:
     return copied
 
 
+def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
+    docs_dir = package_dir / "docs"
+    copied = []
+    for source_rel, dest_name in RELEASE_DOC_SPECS:
+        source = root / source_rel
+        if not source.exists():
+            continue
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        dest = docs_dir / dest_name
+        shutil.copy2(source, dest)
+        copied.append({
+            "path": dest.relative_to(package_dir).as_posix(),
+            "source": source_rel,
+            "sha256": sha256_file(dest),
+        })
+    return copied
+
+
+def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list[dict]:
+    if artifact_root is None:
+        return []
+    artifact_root = artifact_root.resolve()
+    if not artifact_root.is_dir():
+        raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}")
+
+    missing = [name for name in RP2040_ARTIFACT_NAMES if not (artifact_root / name).is_dir()]
+    if missing:
+        raise FileNotFoundError("Missing RP2040 release artifacts: " + ", ".join(missing))
+
+    copied = []
+    rp2040_dir = package_dir / "rp2040"
+    for artifact_name in RP2040_ARTIFACT_NAMES:
+        source_dir = artifact_root / artifact_name
+        dest_dir = rp2040_dir / artifact_name
+        shutil.copytree(source_dir, dest_dir)
+        files = []
+        uf2_files = []
+        for path in sorted(dest_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            rel_path = path.relative_to(package_dir).as_posix()
+            entry = {
+                "path": rel_path,
+                "size": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+            files.append(entry)
+            if path.suffix.lower() == ".uf2":
+                uf2_files.append(rel_path)
+        if not uf2_files:
+            raise ValueError(f"{artifact_name} does not contain a UF2 file")
+        copied.append({
+            "name": artifact_name,
+            "path": dest_dir.relative_to(package_dir).as_posix(),
+            "uf2_files": uf2_files,
+            "files": files,
+        })
+    return copied
+
+
+def d1l_firmware_version(root: Path) -> str:
+    config = root / "main" / "d1l_config.h"
+    if not config.exists():
+        return "unknown"
+    match = re.search(r'#define\s+D1L_FIRMWARE_VERSION\s+"([^"]+)"', config.read_text(encoding="utf-8"))
+    return match.group(1) if match else "unknown"
+
+
+def workflow_info() -> dict:
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    return {
+        "run_id": run_id,
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+        "workflow": os.environ.get("GITHUB_WORKFLOW"),
+        "sha": os.environ.get("GITHUB_SHA"),
+        "ref": os.environ.get("GITHUB_REF"),
+        "repository": repository,
+        "run_url": f"{server_url}/{repository}/actions/runs/{run_id}" if repository and run_id else None,
+    }
+
+
 def app_entry(entries: list[dict]) -> dict:
     for entry in entries:
         if entry["role"] == "app":
@@ -357,8 +452,10 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 ## Contents
 
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
+- `rp2040/` contains the Actions-built RP2040 SD bridge, legacy smoke, and official Seeed SD smoke UF2 artifacts when packaged by CI.
 - `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
+- `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
@@ -397,7 +494,14 @@ App SHA256: `{app['sha256']}`
     )
 
 
-def create_release_package(root: Path, build_dir: Path, out_dir: Path, package_name: str, full_size: int) -> dict:
+def create_release_package(
+    root: Path,
+    build_dir: Path,
+    out_dir: Path,
+    package_name: str,
+    full_size: int,
+    rp2040_artifact_root: Path | None = None,
+) -> dict:
     flasher_args = load_flasher_args(build_dir)
     package_dir = out_dir / package_name
     if package_dir.exists():
@@ -411,26 +515,32 @@ def create_release_package(root: Path, build_dir: Path, out_dir: Path, package_n
     full_image = write_full_flash_image(build_dir, package_dir, flasher_args, full_size)
     debug_files = copy_optional_debug_files(build_dir, package_dir)
     notice_files = copy_notice_files(root, package_dir)
+    release_docs = copy_release_docs(root, package_dir)
+    rp2040_artifacts = copy_rp2040_artifacts(rp2040_artifact_root, package_dir)
     scripts = write_flash_scripts(package_dir, entries, flasher_args, full_image)
 
     manifest = {
         "schema": 1,
         "project": PROJECT,
+        "app_version": d1l_firmware_version(root),
         "package": package_name,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "git": git_info(root),
+        "workflow": workflow_info(),
         "source_build_dir": str(build_dir),
         "flash_settings": flasher_args.get("flash_settings", {}),
         "flash_files": entries,
+        "rp2040_artifacts": rp2040_artifacts,
         "update_image": update_image,
         "full_flash_image": full_image,
         "debug_files": debug_files,
+        "release_docs": release_docs,
         "notice_files": notice_files,
         "scripts": scripts,
         "notes": [
             "Project flash scripts require D1L_PORT or an explicit -Port.",
             "Full 8MB flash script requires a typed confirmation because it can overwrite persisted state.",
-            "Flash backup was skipped in current bring-up only when the operator explicitly requested that.",
+            "Flash backup may be skipped only when the operator explicitly requests that for hardware validation.",
         ],
     }
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="ascii")
@@ -446,6 +556,7 @@ def main() -> int:
     parser.add_argument("--out-dir", default="artifacts/release")
     parser.add_argument("--package-name", default=None)
     parser.add_argument("--full-size", type=lambda value: int(value, 0), default=DEFAULT_FLASH_SIZE)
+    parser.add_argument("--rp2040-artifact-root", default=None)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -461,7 +572,18 @@ def main() -> int:
         suffix = info.get("short_commit") or utc_stamp()
         package_name = f"d1l-release-{suffix}"
 
-    manifest = create_release_package(root, build_dir, out_dir, package_name, args.full_size)
+    rp2040_artifact_root = Path(args.rp2040_artifact_root) if args.rp2040_artifact_root else None
+    if rp2040_artifact_root and not rp2040_artifact_root.is_absolute():
+        rp2040_artifact_root = root / rp2040_artifact_root
+
+    manifest = create_release_package(
+        root,
+        build_dir,
+        out_dir,
+        package_name,
+        args.full_size,
+        rp2040_artifact_root=rp2040_artifact_root,
+    )
     print(json.dumps(manifest))
     return 0
 

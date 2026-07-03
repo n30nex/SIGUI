@@ -157,6 +157,7 @@ jobs:
           retention-days: 14
 
   firmware-build:
+    needs: rp2040-sd-bridge-build
     runs-on: ubuntu-latest
     container: espressif/idf:release-v5.1
     steps:
@@ -178,10 +179,17 @@ jobs:
           find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" -o -name "flasher_args.json" \) -print -exec cp --parents {} artifacts/firmware/ \;
           (cd artifacts/firmware && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
+      - name: Download RP2040 release artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: rp2040-*-firmware
+          path: artifacts/rp2040-release-inputs
+          merge-multiple: false
+
       - name: Package D1L release
         shell: bash
         run: |
-          python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}"
+          python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --rp2040-artifact-root artifacts/rp2040-release-inputs
 
       - name: Verify firmware and release checksums
         run: |
