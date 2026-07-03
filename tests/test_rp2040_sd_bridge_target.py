@@ -356,7 +356,10 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "SD.rename(target_path, backup_path)" in sketch
     assert "(void)SD.rename(backup_path, target_path)" in sketch
     assert 'constexpr char REPLACE_BACKUP_SUFFIX[] = ".bak";' in sketch
+    assert "FILE_FULL_PATH_WITHOUT_BACKUP_MAX" in sketch
     assert "sizeof(REPLACE_BACKUP_SUFFIX)" in sketch
+    assert "rename replace backup path must fit the .bak suffix" in sketch
+    assert "max file path buffer must include the replace backup suffix" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch

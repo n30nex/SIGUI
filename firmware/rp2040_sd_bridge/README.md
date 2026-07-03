@@ -178,6 +178,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   192-byte chunks so each newline-delimited request remains under the 512-byte
   line cap. `rename replace=1` uses a backup/rollback step when replacing an
   existing final file so ordinary rename failures do not erase the old final.
+  The full-path buffer is sized for a maximum 96-byte relative path plus the
+  internal `.bak` suffix used by that rollback step.
 - No formatting happens at boot, ping, status, mount, diagnostics, or file
   checks.
 - Retained Public message history, DM history, route history, and packet history

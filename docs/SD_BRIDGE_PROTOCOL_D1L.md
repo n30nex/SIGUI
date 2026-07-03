@@ -264,6 +264,12 @@ Standard error codes are `bad_request`, `bad_value`, `unsupported_op`,
 `read_failed`, `write_failed`, `flush_failed`, `rename_failed`, `delete_failed`,
 `io_error`, and `timeout`.
 
+For `rename replace=1`, the RP2040 first renames an existing final file to an
+internal `.bak` path, commits the temp file, then removes the backup. The bridge
+must size full-path buffers for the maximum 96-byte relative path plus that
+backup suffix so max-length retained-store and map-tile paths can still use
+atomic replace safely.
+
 For compacted stores and map tiles, write chunks to a temporary path, then use
 `rename replace=1` as the commit step. Retained history blobs use:
 `stores/messages/public/public.bin`, `stores/messages/dm/threads.bin`,

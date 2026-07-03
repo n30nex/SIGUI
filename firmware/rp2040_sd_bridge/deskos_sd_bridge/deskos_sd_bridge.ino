@@ -81,8 +81,15 @@ constexpr size_t FILE_CHUNK_MAX = 192;
 constexpr size_t FILE_PATH64_MAX = 128;
 constexpr size_t FILE_DATA64_MAX = 256;
 constexpr char REPLACE_BACKUP_SUFFIX[] = ".bak";
+constexpr size_t FILE_FULL_PATH_WITHOUT_BACKUP_MAX =
+    sizeof("/deskos/") + FILE_PATH_MAX;
 constexpr size_t FILE_FULL_PATH_MAX =
-    sizeof("/deskos/") + FILE_PATH_MAX + sizeof(REPLACE_BACKUP_SUFFIX);
+    FILE_FULL_PATH_WITHOUT_BACKUP_MAX + sizeof(REPLACE_BACKUP_SUFFIX);
+static_assert(FILE_FULL_PATH_MAX > FILE_FULL_PATH_WITHOUT_BACKUP_MAX,
+              "rename replace backup path must fit the .bak suffix");
+static_assert(FILE_FULL_PATH_MAX >=
+                  sizeof("/deskos/") + FILE_PATH_MAX + sizeof(REPLACE_BACKUP_SUFFIX),
+              "max file path buffer must include the replace backup suffix");
 constexpr bool REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE = true;
 
 struct SdSnapshot {

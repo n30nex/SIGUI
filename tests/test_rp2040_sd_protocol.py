@@ -376,6 +376,67 @@ def test_file_protocol_supports_bounded_write_read_rename_delete_cycle():
     assert path != final
 
 
+def test_file_protocol_supports_max_path_atomic_rename_delete_cycle():
+    fs = SdFileSystem()
+    final_relative = f"maxpath/{'f' * 84}.bin"
+    tmp_relative = f"maxpath/{'t' * 84}.tmp"
+    assert len(final_relative) == MAX_FILE_PATH_CHARS
+    assert len(tmp_relative) == MAX_FILE_PATH_CHARS
+
+    final = encode_path(final_relative)
+    tmp = encode_path(tmp_relative)
+    old_payload = b"old-final"
+    payload = b"max-path-retained-commit"
+    fs.files[final_relative] = old_payload
+
+    write = file_tokens(
+        reply_for_request(
+            file_request(
+                70,
+                "write",
+                path=tmp,
+                off=0,
+                len=len(payload),
+                trunc=1,
+                data=b64url(payload),
+                crc=crc32_hex(payload),
+            ),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    rename = file_tokens(
+        reply_for_request(
+            file_request(71, "rename", path=tmp, to=final, replace=1),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    read = file_tokens(
+        reply_for_request(
+            file_request(72, "read", path=final, off=0, len=MAX_FILE_CHUNK_BYTES),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+    delete = file_tokens(
+        reply_for_request(file_request(73, "delete", path=final), SCENARIOS["ready"], fs)
+    )
+    deleted = file_tokens(
+        reply_for_request(file_request(74, "stat", path=final), SCENARIOS["ready"], fs)
+    )
+
+    assert write["ok"] == "1"
+    assert rename["ok"] == "1"
+    assert read["ok"] == "1"
+    assert read["data"] == b64url(payload)
+    assert read["data"] != b64url(old_payload)
+    assert delete["ok"] == "1"
+    assert deleted["exists"] == "0"
+    assert tmp_relative not in fs.files
+    assert final_relative not in fs.files
+
+
 def test_file_protocol_replace_preserves_final_and_zero_length_write_policy():
     fs = SdFileSystem(files={"logs/final.bin": b"old-final"})
     tmp = encode_path("logs/tmp.bin")
