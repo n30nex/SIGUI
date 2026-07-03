@@ -231,6 +231,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "process_pending_scroll_probe()" in source
     assert "lv_obj_get_scroll_bottom(target)" in source
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
+    assert '"Scroll Probe DM"' in source
+    assert '"Thread keeps delivery, ACK, and PATH state together."' in source
+    assert '"Scroll proof keeps this empty-state layout validated too."' in source
 
 
 def test_serial_tab_state_stays_pending_until_render_finishes():

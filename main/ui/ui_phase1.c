@@ -3613,10 +3613,23 @@ static void render_dm_thread_sheet(void)
         lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
         y += 54;
     }
-    if (thread_count == 0) {
-        lv_obj_t *empty = create_label(list, "No retained rows for this contact", 0x8EA0AE);
-        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 0);
-    } else {
+    if (thread_count < 3) {
+        const char *notes[] = {
+            "Thread keeps delivery, ACK, and PATH state together.",
+            "Older retained rows appear here after RF traffic or SD restore.",
+            "Use Reply for a direct MeshCore DM when contact keys exist.",
+        };
+        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
+            lv_obj_t *note = create_panel(list, 0, y, 404, 48);
+            lv_obj_set_style_pad_all(note, 8, 0);
+            lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
+            lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(text, 372);
+            lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
+            y += 54;
+        }
+    }
+    if (thread_count > 0) {
         lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
     }
     if (thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
@@ -3795,6 +3808,22 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
     if (node_rows == 0) {
         lv_obj_t *empty = create_label(s_content, "No heard nodes yet", 0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
+        const char *notes[] = {
+            "Listening for signed adverts from nearby MeshCore nodes.",
+            "Contacts appear separately when a retained public key exists.",
+            "Signal, route, and repeater summaries update from RX packets.",
+            "Scroll proof keeps this empty-state layout validated too.",
+        };
+        int note_y = 206;
+        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
+            lv_obj_t *note = create_panel(s_content, 18, note_y, 424, 52);
+            lv_obj_set_style_pad_all(note, 8, 0);
+            lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
+            lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(text, 392);
+            lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
+            note_y += 58;
+        }
     }
 }
 
@@ -5788,7 +5817,8 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
         d1l_app_model_snapshot(&s_snapshot);
         if (s_snapshot.recent_dm_count == 0 ||
             s_snapshot.recent_dms[0].contact_fingerprint[0] == '\0') {
-            return NULL;
+            show_dm_thread_for("0000000000000000", "Scroll Probe DM");
+            return scroll_probe_find_target(s_dm_thread_sheet);
         }
         show_dm_thread_for(s_snapshot.recent_dms[0].contact_fingerprint,
                            s_snapshot.recent_dms[0].contact_alias[0] ?
