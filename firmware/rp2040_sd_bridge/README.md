@@ -81,8 +81,10 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 ```
 
 The current ESP32 release flashing scripts are not RP2040 UF2 flashing tools.
-Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode before
-copying `deskos_sd_bridge.ino.uf2`. Use
+If the already-flashed bridge answers `DESKOS_SD_PING`, the ESP32 console can
+request UF2 mode with `rp2040 bootloader` / `DESKOS_SD_BOOTLOADER` without
+touching SD. Otherwise put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL
+mass-storage mode before copying `deskos_sd_bridge.ino.uf2`. Use
 `scripts/flash_rp2040_sd_bridge_uf2.py --volume <RP2040_UF2_DRIVE>:` first as a
 dry run, then add `--copy` only after it verifies the artifact checksum and UF2
 bootloader metadata. Use an empty or sacrificial SD card first: `DESKOS_SD_STATUS`
@@ -144,6 +146,10 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.
+- `DESKOS_SD_BOOTLOADER` replies with `ok=1`, `sd_touch=0`,
+  `public_rf_tx=0`, and `formats_sd=0`, then calls the Arduino-Pico
+  `rp2040.rebootToBootloader()` API so autonomous validation can copy a UF2
+  without a BOOTSEL button press when a compatible bridge is already running.
 - `DESKOS_SD_DIAG` is a manual diagnostic request used by `storage diag`. It
   reports the pin contract, selected rail/SPI mode, and the high/dedicated,
   high/shared, low/dedicated, low/shared, and high-power bit-banged raw probe

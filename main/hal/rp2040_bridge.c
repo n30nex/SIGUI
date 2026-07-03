@@ -14,6 +14,8 @@
 #define D1L_RP2040_UART_BUF_SIZE 1024
 #define D1L_RP2040_PING_QUERY "DESKOS_SD_PING\n"
 #define D1L_RP2040_PING_REPLY_PREFIX "DESKOS_SD_PING"
+#define D1L_RP2040_BOOTLOADER_QUERY "DESKOS_SD_BOOTLOADER\n"
+#define D1L_RP2040_BOOTLOADER_REPLY_PREFIX "DESKOS_SD_BOOTLOADER"
 #define D1L_RP2040_SD_QUERY "DESKOS_SD_STATUS\n"
 #define D1L_RP2040_SD_REPLY_PREFIX "DESKOS_SD_STATUS"
 #define D1L_RP2040_SD_MOUNT_QUERY "DESKOS_SD_MOUNT\n"
@@ -847,6 +849,32 @@ esp_err_t d1l_rp2040_bridge_ping(d1l_rp2040_ping_t *out_ping, uint32_t timeout_m
     out_ping->response_truncated = truncated;
     out_ping->last_error = ret;
     return ret;
+}
+
+esp_err_t d1l_rp2040_bridge_enter_bootloader(uint32_t timeout_ms)
+{
+    if (!s_status.uart_ready) {
+        return s_status.init_result;
+    }
+
+    const char *prefixes[] = {D1L_RP2040_BOOTLOADER_REPLY_PREFIX};
+    char line[D1L_RP2040_LINE_BUFFER_SIZE];
+    bool truncated = false;
+    esp_err_t ret = exchange_prefixed_line(D1L_RP2040_BOOTLOADER_QUERY,
+                                           strlen(D1L_RP2040_BOOTLOADER_QUERY),
+                                           prefixes, 1, line, sizeof(line),
+                                           timeout_ms, &truncated);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (truncated) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    bool ok = false;
+    if (!parse_bool_token(line, "ok", &ok) || !ok) {
+        return ESP_FAIL;
+    }
+    return ESP_OK;
 }
 
 esp_err_t d1l_rp2040_bridge_probe_sd(d1l_rp2040_sd_status_t *out_status, uint32_t timeout_ms)

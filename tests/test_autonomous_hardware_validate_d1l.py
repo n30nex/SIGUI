@@ -107,6 +107,133 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert plan["ports"]["rp2040"] == "COM16"
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
+    assert "rp2040_autonomous_access_precheck" in plan["steps"]
+    assert "d1l_500_cycle_tab_abuse" not in plan["steps"]
+    assert "d1l_scroll_probe" not in plan["steps"]
+
+
+def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    commands = []
+
+    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
+    monkeypatch.setattr(runner, "rp2040_port_snapshot", lambda port: {"port": port, "present": False, "matches": []})
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
+        commands.append(command)
+        if command == "rp2040 status":
+            return {"ok": True, "cmd": command, "uart_ready": True}
+        if command == "rp2040 reset":
+            return {"ok": True, "cmd": command}
+        return {"ok": False, "cmd": command, "code": "ESP_ERR_TIMEOUT", "protocol_supported": False}
+
+    monkeypatch.setattr(runner, "send_d1l_console", fake_console)
+
+    report = runner.rp2040_access_precheck(ctx, dry_run=False)
+    payload = json.loads(runner.rp2040_access_precheck_out(ctx).read_text(encoding="ascii"))
+
+    assert report["ok"] is False
+    assert report["state"] == "no_autonomous_bootloader_path"
+    assert report["error"] == "rp2040_bootloader_unavailable"
+    assert report["manual_user_required"] is False
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+    assert commands == ["rp2040 status", "rp2040 ping", "rp2040 reset", "rp2040 ping"]
+    assert payload["state"] == "no_autonomous_bootloader_path"
+
+
+def test_validation_stops_at_access_precheck_before_official_smoke_or_restore(tmp_path, monkeypatch):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--skip-esp32-flash",
+        ]
+    )
+
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
+    monkeypatch.setattr(
+        runner,
+        "rp2040_access_precheck",
+        lambda ctx, dry_run: {
+            "schema": 1,
+            "kind": "rp2040_autonomous_access_precheck",
+            "ok": False,
+            "error": "rp2040_bootloader_unavailable",
+        },
+    )
+    monkeypatch.setattr(runner, "run_official_sd_smoke", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("official smoke should not run")))
+    monkeypatch.setattr(runner, "restore_bridge", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("restore should not run")))
+    monkeypatch.setattr(runner, "run_release_gate", lambda ctx, dry_run: {"schema": 1, "kind": "release_gate_audit", "ok": True, "ready_for_public_release": False, "failed_count": 1, "p0_failed_count": 1})
+
+    report = runner.run_validation(args)
+
+    assert report["ok"] is False
+    assert report["error"] == "rp2040_bootloader_unavailable"
+    assert [step["kind"] for step in report["runs"]] == [
+        "input_artifact_check",
+        "rp2040_autonomous_access_precheck",
+        "release_gate_audit",
+    ]
+
+
+def test_bootloader_entry_prefers_bridge_command_when_ping_ready(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    commands = []
+
+    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
+    monkeypatch.setattr(runner, "rp2040_port_snapshot", lambda port: (_ for _ in ()).throw(AssertionError("COM16 fallback should not run")))
+    monkeypatch.setattr(runner, "enter_rp2040_bootloader_usb_touch", lambda port: (_ for _ in ()).throw(AssertionError("USB touch should not run")))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
+        commands.append(command)
+        if command == "rp2040 ping":
+            return {"ok": True, "cmd": command, "protocol_supported": True}
+        if command == "rp2040 bootloader":
+            return {"ok": True, "cmd": command}
+        return {"ok": False, "cmd": command}
+
+    monkeypatch.setattr(runner, "send_d1l_console", fake_console)
+
+    report = runner.enter_rp2040_bootloader(ctx, volume=None)
+
+    assert report["ok"] is True
+    assert report["method"] == "rp2040_bridge_command"
+    assert commands == ["rp2040 ping", "rp2040 bootloader"]
+    assert report["bridge_bootloader"]["cmd"] == "rp2040 bootloader"
 
 
 def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monkeypatch):
@@ -129,6 +256,7 @@ def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monk
         return {"schema": 1, "kind": kind, "ok": True, "public_rf_tx": False, "formats_sd": False}
 
     monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: ok_step("input_artifact_check"))
+    monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "run_official_sd_smoke", lambda *args, **kwargs: (_ for _ in ()).throw(OSError(22, "Invalid argument")))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
@@ -168,7 +296,7 @@ def test_bridge_restore_verifies_ping_before_reporting_ok(tmp_path, monkeypatch)
         esp32_flash_baud=460800,
     )
 
-    monkeypatch.setattr(runner, "enter_rp2040_bootloader", lambda port: {"ok": True, "port": port})
+    monkeypatch.setattr(runner, "enter_rp2040_bootloader", lambda ctx, volume: {"ok": True, "port": ctx.rp2040_port})
     monkeypatch.setattr(runner, "copy_named_uf2", lambda **_kwargs: {"ok": True, "copied": True})
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
@@ -213,6 +341,7 @@ def test_validation_stops_before_preflight_when_bridge_restore_not_verified(tmp_
         return {"schema": 1, "kind": "rp2040_bridge_restore", "ok": False, "error": "bridge_restore_not_verified"}
 
     monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
+    monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: {"schema": 1, "kind": "rp2040_autonomous_access_precheck", "ok": True})
     monkeypatch.setattr(runner, "restore_bridge", failed_restore)
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: (_ for _ in ()).throw(AssertionError("preflight should not run")))
     monkeypatch.setattr(runner, "run_release_gate", lambda ctx, dry_run: {"schema": 1, "kind": "release_gate_audit", "ok": True, "ready_for_public_release": False, "failed_count": 1, "p0_failed_count": 1})
@@ -224,6 +353,7 @@ def test_validation_stops_before_preflight_when_bridge_restore_not_verified(tmp_
     assert len(restore_attempts) == 2
     assert [step["kind"] for step in report["runs"]] == [
         "input_artifact_check",
+        "rp2040_autonomous_access_precheck",
         "rp2040_bridge_restore",
         "rp2040_bridge_restore",
         "release_gate_audit",

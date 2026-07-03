@@ -73,10 +73,15 @@ python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --
 ```
 
 The runner touches only COM12 and COM16, refuses COM11/COM29, flashes the
-official Seeed SD smoke UF2, captures its COM16 JSON, restores the production
-bridge UF2, runs COM12 preflight/smoke/500-cycle tab-abuse/scroll evidence, and
-then regenerates the fail-closed release gate. It does not format SD and does
-not send Public RF.
+ESP32 image when not skipped, then performs a short RP2040 access precheck
+before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks whether
+COM16 is present, asks COM12 for `rp2040 ping`, tries one `rp2040 reset`, and
+fails closed if no autonomous bootloader path is available. It does not format
+SD, does not send Public RF, and does not require user action. When access is
+available, the runner can flash the official Seeed SD smoke UF2, capture its
+COM16 JSON, restore the production bridge UF2, run short COM12 SD preflight and
+smoke evidence, and regenerate the fail-closed release gate. 500-cycle UI
+tab-abuse and scroll probes are opt-in with `--include-ui-probes`.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under
@@ -93,23 +98,27 @@ before capture starts, it must still archive the same COM16 smoke path as an
 `ok=false` artifact with the exception text, `public_rf_tx=false`, and
 `formats_sd=false`. Then flash the production bridge artifact below.
 
-1. Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode.
-2. Confirm Windows mounted a UF2 bootloader volume. The volume should expose
+1. If the current bridge answers `rp2040 ping`, run `rp2040 bootloader` from
+   COM12 to request UF2 mode without touching SD. If the bridge does not answer
+   and no COM16/UF2 path is visible, the software has no autonomous BOOTSEL
+   control on this board revision.
+2. Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode.
+3. Confirm Windows mounted a UF2 bootloader volume. The volume should expose
    UF2 bootloader metadata such as `INFO_UF2.TXT` or `INDEX.HTM`.
-3. Dry-run the guarded copy helper. This verifies `SHA256SUMS.txt`, confirms
+4. Dry-run the guarded copy helper. This verifies `SHA256SUMS.txt`, confirms
    the target has UF2 bootloader metadata, and refuses ambiguous/missing volumes:
 
    ```powershell
    python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>: --expected-sha256 <sha256>
    ```
 
-4. Copy only `deskos_sd_bridge.ino.uf2` with the explicit `--copy` flag:
+5. Copy only `deskos_sd_bridge.ino.uf2` with the explicit `--copy` flag:
 
    ```powershell
    python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>: --expected-sha256 <sha256> --copy --out artifacts\rp2040-flash\rp2040-sd-bridge-uf2-copy.json
    ```
 
-5. Wait for the volume to disconnect/reboot, then power-cycle the D1L if needed.
+6. Wait for the volume to disconnect/reboot, then power-cycle the D1L if needed.
 
 Do not use `flash_d1l.ps1`, `flash_project.ps1`, or `esptool` for this RP2040
 step; those are ESP32-S3 paths.

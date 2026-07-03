@@ -6,6 +6,7 @@ from tools.rp2040_sd_protocol import (
     FILE_REQUEST,
     MAX_FILE_CHUNK_BYTES,
     MAX_FILE_PATH_CHARS,
+    BOOTLOADER_REQUEST,
     DIAG_REQUEST,
     MOUNT_REQUEST,
     PING_REQUEST,
@@ -284,7 +285,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '"none",\n        false,\n        0,\n        0,' in sketch
     assert '"none",\n        false,\n        false,\n        0,\n        0,' not in sketch
 
-    for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, DIAG_REQUEST, FILE_REQUEST]:
+    for token in [STATUS_REQUEST, MOUNT_REQUEST, PING_REQUEST, BOOTLOADER_REQUEST, DIAG_REQUEST, FILE_REQUEST]:
         assert token in sketch
         assert token in readme
 
@@ -347,6 +348,10 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "SD_WORKER_DIAG" in sketch
     assert "Stream *reply_stream = &Serial1;" in sketch
     assert "send_ping" in sketch
+    assert "send_bootloader" in sketch
+    assert "rp2040.rebootToBootloader()" in sketch
+    assert "public_rf_tx=0" in sketch
+    assert "formats_sd=0" in sketch
     assert "send_mount_status" in sketch
     assert "sd_touch=0" in sketch
     assert "send_snapshot(*reply_stream" in sketch

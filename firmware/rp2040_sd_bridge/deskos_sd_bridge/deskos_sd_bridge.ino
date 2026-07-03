@@ -15,6 +15,8 @@ constexpr const char *MOUNT_REQUEST = "DESKOS_SD_MOUNT";
 constexpr const char *MOUNT_REPLY = "DESKOS_SD_MOUNT";
 constexpr const char *PING_REQUEST = "DESKOS_SD_PING";
 constexpr const char *PING_REPLY = "DESKOS_SD_PING";
+constexpr const char *BOOTLOADER_REQUEST = "DESKOS_SD_BOOTLOADER";
+constexpr const char *BOOTLOADER_REPLY = "DESKOS_SD_BOOTLOADER";
 constexpr const char *DIAG_REQUEST = "DESKOS_SD_DIAG";
 constexpr const char *DIAG_REPLY = "DESKOS_SD_DIAG";
 constexpr const char *FILE_REQUEST = "DESKOS_SD_FILE";
@@ -2216,6 +2218,19 @@ void send_ping() {
     reply_stream->println(line);
 }
 
+void send_bootloader() {
+    String line(BOOTLOADER_REPLY);
+    line += " ok=1";
+    line += " sd_touch=0";
+    line += " public_rf_tx=0";
+    line += " formats_sd=0";
+    line += " note=entering_uf2";
+    reply_stream->println(line);
+    reply_stream->flush();
+    delay(50);
+    rp2040.rebootToBootloader();
+}
+
 void send_file_error(uint32_t request_id, const char *op, const char *err) {
     String line(FILE_REPLY);
     line += " v=1 id=";
@@ -2577,6 +2592,11 @@ void handle_line(char *line) {
 
     if (strcmp(line, PING_REQUEST) == 0) {
         send_ping();
+        return;
+    }
+
+    if (strcmp(line, BOOTLOADER_REQUEST) == 0) {
+        send_bootloader();
         return;
     }
 

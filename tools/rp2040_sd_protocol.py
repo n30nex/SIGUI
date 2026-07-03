@@ -16,6 +16,8 @@ MOUNT_REQUEST = "DESKOS_SD_MOUNT"
 MOUNT_REPLY = "DESKOS_SD_MOUNT"
 PING_REQUEST = "DESKOS_SD_PING"
 PING_REPLY = "DESKOS_SD_PING"
+BOOTLOADER_REQUEST = "DESKOS_SD_BOOTLOADER"
+BOOTLOADER_REPLY = "DESKOS_SD_BOOTLOADER"
 DIAG_REQUEST = "DESKOS_SD_DIAG"
 DIAG_REPLY = "DESKOS_SD_DIAG"
 FILE_REQUEST = "DESKOS_SD_FILE"
@@ -322,6 +324,16 @@ def ping_line() -> str:
         f" path_max={MAX_FILE_PATH_CHARS}"
         " atomic_rename=1"
         " sd_touch=0"
+    )
+
+
+def bootloader_line() -> str:
+    return (
+        f"{BOOTLOADER_REPLY} ok=1"
+        " sd_touch=0"
+        " public_rf_tx=0"
+        " formats_sd=0"
+        " note=entering_uf2"
     )
 
 
@@ -743,6 +755,8 @@ def reply_for_request(
     fs = fs or SdFileSystem()
     if request == PING_REQUEST:
         return ping_line()
+    if request == BOOTLOADER_REQUEST:
+        return bootloader_line()
     if request == STATUS_REQUEST:
         return status_line(scenario)
     if request == MOUNT_REQUEST:

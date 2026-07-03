@@ -51,6 +51,7 @@ OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
 BOOTLOADER_TOUCH_TIMEOUT_SECONDS = 3.0
+BOOTLOADER_ENTRY_RESCAN_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,10 @@ def official_sd_smoke_out(ctx: RunContext) -> Path:
 
 def bridge_restore_out(ctx: RunContext) -> Path:
     return ctx.root / "artifacts" / "rp2040-flash" / f"rp2040-bridge-restore-copy-{ctx.short_commit}-{ctx.rp2040_port}.json"
+
+
+def rp2040_access_precheck_out(ctx: RunContext) -> Path:
+    return ctx.rp2040_hardware_dir / f"rp2040_access_precheck_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.rp2040_port}.json"
 
 
 def require_path(path: Path, label: str) -> Path:
@@ -301,7 +306,50 @@ def wait_for_uf2_volume(timeout_sec: float, volume: str | None) -> tuple[Path, l
             time.sleep(0.5)
 
 
-def enter_rp2040_bootloader(port: str) -> dict:
+def uf2_volume_snapshot() -> dict[str, Any]:
+    try:
+        candidates = candidate_volumes()
+    except Exception as exc:  # pragma: no cover - host/OS dependent
+        return {"available": False, "candidates": [], "error": str(exc)}
+    return {"available": bool(candidates), "candidates": candidates}
+
+
+def rp2040_port_snapshot(port: str) -> dict[str, Any]:
+    target = normalize_port(port)
+    report: dict[str, Any] = {"port": target, "present": False, "matches": []}
+    try:
+        import serial.tools.list_ports
+    except ImportError as exc:  # pragma: no cover - dependency dependent
+        report["error"] = f"pyserial is required: {exc}"
+        return report
+
+    for item in serial.tools.list_ports.comports():
+        device = str(getattr(item, "device", "") or "")
+        if normalize_port(device) != target:
+            continue
+        match: dict[str, Any] = {"device": device}
+        for attr in ["description", "hwid", "manufacturer", "product", "serial_number"]:
+            value = getattr(item, attr, None)
+            if value:
+                match[attr] = str(value)
+        for attr in ["vid", "pid"]:
+            value = getattr(item, attr, None)
+            if value is not None:
+                match[attr] = f"{int(value):04X}"
+        report["matches"].append(match)
+    report["present"] = bool(report["matches"])
+    return report
+
+
+def d1l_console_ok(result: dict, *, require_protocol: bool = False) -> bool:
+    if result.get("ok") is not True:
+        return False
+    if require_protocol and result.get("protocol_supported") is not True:
+        return False
+    return True
+
+
+def enter_rp2040_bootloader_usb_touch(port: str) -> dict:
     started_at = utc_now()
     report = {
         "schema": 1,
@@ -348,6 +396,74 @@ def enter_rp2040_bootloader(port: str) -> dict:
     return report
 
 
+def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "rp2040_bootloader_entry",
+        "port": ctx.rp2040_port,
+        "d1l_port": ctx.d1l_port,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "manual_user_required": False,
+        "started_at": utc_now(),
+        "ok": False,
+    }
+    initial_volumes = uf2_volume_snapshot()
+    report["uf2_volume_initial"] = initial_volumes
+    if initial_volumes.get("available"):
+        report["ok"] = True
+        report["method"] = "uf2_already_available"
+        report["ended_at"] = utc_now()
+        return report
+
+    ping = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0, settle_sec=3.0)
+    report["ping"] = ping
+    if d1l_console_ok(ping, require_protocol=True):
+        bridge = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 bootloader", 8.0)
+        report["bridge_bootloader"] = bridge
+        time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+        report["uf2_volume_after_bridge_command"] = uf2_volume_snapshot()
+        report["ok"] = bridge.get("ok") is True
+        report["method"] = "rp2040_bridge_command"
+        report["ended_at"] = utc_now()
+        if not report["ok"]:
+            report["error"] = "rp2040_bootloader_command_failed"
+        return report
+
+    port_initial = rp2040_port_snapshot(ctx.rp2040_port)
+    report["rp2040_port_initial"] = port_initial
+    if port_initial.get("present"):
+        report["usb_touch"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+        report["uf2_volume_after_usb_touch"] = uf2_volume_snapshot()
+        report["ok"] = True
+        report["method"] = "rp2040_1200_baud_touch"
+        report["ended_at"] = utc_now()
+        return report
+
+    reset = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0, settle_sec=3.0)
+    report["reset"] = reset
+    time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+    port_after_reset = rp2040_port_snapshot(ctx.rp2040_port)
+    report["rp2040_port_after_reset"] = port_after_reset
+    report["uf2_volume_after_reset"] = uf2_volume_snapshot()
+    if report["uf2_volume_after_reset"].get("available"):
+        report["ok"] = True
+        report["method"] = "reset_revealed_uf2"
+    elif port_after_reset.get("present"):
+        report["usb_touch_after_reset"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+        report["uf2_volume_after_reset_touch"] = uf2_volume_snapshot()
+        report["ok"] = True
+        report["method"] = "reset_then_rp2040_1200_baud_touch"
+    else:
+        report["ok"] = False
+        report["method"] = "none"
+        report["error"] = "rp2040_bootloader_unavailable"
+    report["ended_at"] = utc_now()
+    return report
+
+
 def copy_named_uf2(
     *,
     artifact_dir: Path,
@@ -369,15 +485,78 @@ def copy_named_uf2(
     }
 
 
-def send_d1l_console(port: str, baud: int, command: str, timeout: float) -> dict:
+def send_d1l_console(port: str, baud: int, command: str, timeout: float, *, settle_sec: float = 1.0) -> dict:
     try:
         import serial
     except ImportError as exc:  # pragma: no cover - dependency dependent
         return {"ok": False, "error": f"pyserial is required: {exc}", "cmd": command}
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
-        time.sleep(1.0)
+        time.sleep(settle_sec)
         ser.reset_input_buffer()
         return send_console_command(ser, command, timeout)
+
+
+def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
+    out = rp2040_access_precheck_out(ctx)
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "rp2040_autonomous_access_precheck",
+        "mode": "dry-run" if dry_run else "hardware",
+        "d1l_port": ctx.d1l_port,
+        "rp2040_port": ctx.rp2040_port,
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "manual_user_required": False,
+        "ok": True,
+        "started_at": utc_now(),
+    }
+
+    def finish() -> dict:
+        report["ended_at"] = utc_now()
+        write_json(out, report)
+        report["path"] = str(out)
+        return report
+
+    if dry_run:
+        report["state"] = "dry_run"
+        return finish()
+
+    report["uf2_volume_initial"] = uf2_volume_snapshot()
+    report["rp2040_port_initial"] = rp2040_port_snapshot(ctx.rp2040_port)
+    if report["uf2_volume_initial"].get("available"):
+        report["state"] = "uf2_volume_available"
+        return finish()
+    if report["rp2040_port_initial"].get("present"):
+        report["state"] = "usb_cdc_available_for_1200_baud_touch"
+        return finish()
+
+    report["status"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 status", 8.0, settle_sec=3.0)
+    report["ping"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0)
+    if d1l_console_ok(report["ping"], require_protocol=True):
+        report["state"] = "bridge_protocol_ready"
+        report["bootloader_entry"] = "rp2040 bootloader"
+        return finish()
+
+    report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
+    time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+    report["uf2_volume_after_reset"] = uf2_volume_snapshot()
+    report["rp2040_port_after_reset"] = rp2040_port_snapshot(ctx.rp2040_port)
+    report["ping_after_reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0, settle_sec=3.0)
+    if report["uf2_volume_after_reset"].get("available"):
+        report["state"] = "uf2_volume_available_after_reset"
+    elif report["rp2040_port_after_reset"].get("present"):
+        report["state"] = "usb_cdc_available_after_reset"
+    elif d1l_console_ok(report["ping_after_reset"], require_protocol=True):
+        report["state"] = "bridge_protocol_ready_after_reset"
+        report["bootloader_entry"] = "rp2040 bootloader"
+    else:
+        report["ok"] = False
+        report["state"] = "no_autonomous_bootloader_path"
+        report["error"] = "rp2040_bootloader_unavailable"
+        report["next_action"] = "requires_firmware_bootloader_command_or_hardware_bootsel_control"
+    return finish()
 
 
 def capture_official_smoke(port: str, baud: int, timeout: float) -> dict:
@@ -438,7 +617,13 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
     if dry_run:
         report["planned_uf2"] = OFFICIAL_SMOKE_UF2
     else:
-        report["bootloader_touch"] = enter_rp2040_bootloader(ctx.rp2040_port)
+        report["bootloader_entry"] = enter_rp2040_bootloader(ctx, volume=volume)
+        if report["bootloader_entry"].get("ok") is not True:
+            report["ok"] = False
+            report["error"] = report["bootloader_entry"].get("error", "rp2040_bootloader_unavailable")
+            write_json(out, report)
+            report["path"] = str(out)
+            return report
         report["copy"] = copy_named_uf2(
             artifact_dir=artifact_dirs(ctx)["official_smoke"],
             filename=OFFICIAL_SMOKE_UF2,
@@ -474,7 +659,13 @@ def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, d
     if dry_run:
         report["planned_uf2"] = BRIDGE_UF2
     else:
-        report["bootloader_touch"] = enter_rp2040_bootloader(ctx.rp2040_port)
+        report["bootloader_entry"] = enter_rp2040_bootloader(ctx, volume=volume)
+        if report["bootloader_entry"].get("ok") is not True:
+            report["ok"] = False
+            report["error"] = report["bootloader_entry"].get("error", "rp2040_bootloader_unavailable")
+            write_json(out, report)
+            report["path"] = str(out)
+            return report
         report["copy"] = copy_named_uf2(
             artifact_dir=artifact_dirs(ctx)["bridge"],
             filename=BRIDGE_UF2,
@@ -708,12 +899,12 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
         "steps": [
             "verify_input_artifacts",
             *(["flash_esp32"] if not args.skip_esp32_flash else []),
+            "rp2040_autonomous_access_precheck",
             *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if not args.skip_rp2040_official_smoke else []),
             "restore_rp2040_bridge",
             "rp2040_bridge_preflight",
             "d1l_smoke",
-            "d1l_500_cycle_tab_abuse",
-            "d1l_scroll_probe",
+            *(["d1l_500_cycle_tab_abuse", "d1l_scroll_probe"] if args.include_ui_probes else []),
             "release_gate_audit",
         ],
     }
@@ -775,7 +966,23 @@ def run_validation(args: argparse.Namespace) -> dict:
             return report
 
         if not args.skip_esp32_flash:
-            runs.append(flash_esp32(ctx, dry_run=args.dry_run))
+            esp32_flash = flash_esp32(ctx, dry_run=args.dry_run)
+            runs.append(esp32_flash)
+            if esp32_flash.get("ok") is not True and not args.dry_run:
+                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+                report["error"] = "esp32_flash_failed"
+                report["ok"] = False
+                report["release_gate"] = release_gate_summary(runs)
+                return report
+
+        access_precheck = rp2040_access_precheck(ctx, dry_run=args.dry_run)
+        runs.append(access_precheck)
+        if access_precheck.get("ok") is not True and not args.dry_run:
+            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+            report["error"] = access_precheck.get("error", "rp2040_bootloader_unavailable")
+            report["ok"] = False
+            report["release_gate"] = release_gate_summary(runs)
+            return report
 
         if not args.skip_rp2040_official_smoke:
             try:
@@ -811,8 +1018,9 @@ def run_validation(args: argparse.Namespace) -> dict:
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
-        runs.append(run_tab_abuse(ctx, cycles=args.tab_cycles, dry_run=args.dry_run))
-        runs.append(run_scroll_probe(ctx, dry_run=args.dry_run))
+        if args.include_ui_probes:
+            runs.append(run_tab_abuse(ctx, cycles=args.tab_cycles, dry_run=args.dry_run))
+            runs.append(run_scroll_probe(ctx, dry_run=args.dry_run))
         runs.append(run_release_gate(ctx, dry_run=args.dry_run))
     except Exception as exc:
         report["error"] = str(exc)
@@ -837,6 +1045,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--esp32-flash-baud", type=int, default=460800)
     parser.add_argument("--skip-esp32-flash", action="store_true")
     parser.add_argument("--skip-rp2040-official-smoke", action="store_true")
+    parser.add_argument("--include-ui-probes", action="store_true")
     parser.add_argument("--tab-cycles", type=int, default=500)
     parser.add_argument("--uf2-volume")
     parser.add_argument("--uf2-timeout", type=float, default=30.0)
