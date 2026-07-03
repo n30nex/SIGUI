@@ -200,7 +200,7 @@ def instruction_lines(stage: str, uf2_name: str) -> list[str]:
         "Use the RP2040 internal BOOTSEL button path, not ESP32 flashing.",
         "Wait for Windows to mount the RP2040 UF2 disk with INFO_UF2.TXT or INDEX.HTM.",
         f"The script will copy only {uf2_name}.",
-        "Do not use COM11 or COM29. Do not format the SD card on-device.",
+        f"Do not use {' or '.join(sorted(FORBIDDEN_PORTS))}. Do not format the SD card on-device.",
     ]
 
 
