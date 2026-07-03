@@ -53,6 +53,9 @@ maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
+The CI job also emits `rp2040-sd-smoke-firmware`, a non-production isolation
+sketch that runs only Seeed's published MicroSD init shape and reports
+`SEEED_SD_SMOKE ... public_rf_tx=0 formats_sd=0`.
 Do not use the Windows host for firmware compilation.
 
 ## Hardware Validation
