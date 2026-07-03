@@ -52,6 +52,8 @@ constexpr const char *DESKOS_MANIFEST_BAD = "/deskos/manifest.json.bad";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST_TMP = "/deskos/map/manifest.json.tmp";
 constexpr const char *DESKOS_MAP_MANIFEST_BAD = "/deskos/map/manifest.json.bad";
+constexpr const char *DESKOS_FILE_OPS_PROBE = "/deskos/probe.tmp";
+constexpr const char *DESKOS_JSON_PROBE = "/deskos/probe.json";
 constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
     "{\"name\":\"MeshCore DeskOS D1L SD\",\"schema\":1,"
     "\"created_by\":\"MeshCore DeskOS D1L\","
@@ -61,6 +63,8 @@ constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
     "{\"schema\":1,\"kind\":\"map_cache\","
     "\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\","
     "\"download_supported\":false}\n";
+constexpr const char DESKOS_FILE_OPS_PROBE_PAYLOAD[] = "d1l-sd-file-ops-ready\n";
+constexpr const char DESKOS_JSON_PROBE_PAYLOAD[] = "{\"schema\":1,\"probe\":\"d1l\"}\n";
 constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
 constexpr size_t FILE_PATH_MAX = 96;
@@ -1509,6 +1513,42 @@ bool write_text_file_direct(const char *path, const char *payload) {
     return written == strlen(payload);
 }
 
+bool text_file_matches(const char *path, const char *payload) {
+    if (!SD.exists(path)) {
+        return false;
+    }
+    File file = SD.open(path, FILE_READ);
+    if (!file || file.isDirectory()) {
+        if (file) {
+            file.close();
+        }
+        return false;
+    }
+    const size_t expected_len = strlen(payload);
+    if (static_cast<size_t>(file.size()) != expected_len || expected_len > 512U) {
+        file.close();
+        return false;
+    }
+    char buffer[513];
+    const int read_len = file.read(reinterpret_cast<uint8_t *>(buffer), expected_len);
+    file.close();
+    if (read_len < 0 || static_cast<size_t>(read_len) != expected_len) {
+        return false;
+    }
+    buffer[expected_len] = '\0';
+    return strcmp(buffer, payload) == 0;
+}
+
+bool write_verify_remove_text_file(const char *path, const char *payload) {
+    if (!write_text_file_direct(path, payload)) {
+        (void)remove_file_if_present(path);
+        return false;
+    }
+    const bool ok = text_file_matches(path, payload);
+    (void)remove_file_if_present(path);
+    return ok;
+}
+
 using ManifestValidator = bool (*)(const char *);
 
 bool write_atomic_text_file(const char *final_path,
@@ -1603,8 +1643,18 @@ bool prepare_deskos_structure(const char **note) {
     } else {
         created = true;
         if (!write_manifest()) {
-            *note = "deskos_manifest_unavailable";
-            return false;
+            if (!write_verify_remove_text_file(DESKOS_FILE_OPS_PROBE,
+                                               DESKOS_FILE_OPS_PROBE_PAYLOAD)) {
+                *note = "deskos_write_unavailable";
+                return false;
+            }
+            if (!write_verify_remove_text_file(DESKOS_JSON_PROBE,
+                                               DESKOS_JSON_PROBE_PAYLOAD)) {
+                *note = "deskos_json_unavailable";
+                return false;
+            }
+            *note = "manifest_deferred_file_ops_ready";
+            return true;
         }
     }
     *note = created ? "structure_created" : "ready";
