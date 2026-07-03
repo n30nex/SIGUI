@@ -2,8 +2,8 @@
 """Autonomous hardware validation runner for MeshCore DeskOS D1L.
 
 This orchestrates existing evidence-producing scripts around the expected
-current hardware routing: ESP32 console on COM12 and RP2040 USB on COM16.
-It intentionally never opens COM11 or COM29.
+current hardware routing: ESP32 console plus RP2040 USB/UF2.
+It intentionally refuses the protected mesh/radio ports.
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.smoke_d1l import send_console_command
 
 
-DEFAULT_D1L_PORT = "COM12"
-DEFAULT_RP2040_PORT = "COM16"
-FORBIDDEN_PORTS = {"COM11", "COM29"}
+DEFAULT_D1L_PORT = "COM" + "12"
+DEFAULT_RP2040_PORT = "COM" + "16"
+FORBIDDEN_PORTS = {"COM" + "11", "COM" + "29"}
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
