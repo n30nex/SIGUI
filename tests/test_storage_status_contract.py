@@ -183,6 +183,7 @@ def test_rp2040_bridge_serializes_uart_transactions():
 
     assert '#include "freertos/semphr.h"' in source
     assert "static StaticSemaphore_t s_bridge_mutex_storage" in source
+    assert "D1L_RP2040_BRIDGE_LOCK_GRACE_MS 15000U" in source
     assert "xSemaphoreCreateMutexStatic(&s_bridge_mutex_storage)" in source
     assert "xSemaphoreTake(s_bridge_mutex" in source
     assert "xSemaphoreGive(s_bridge_mutex)" in source

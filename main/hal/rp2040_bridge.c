@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "driver/uart.h"
@@ -27,6 +28,7 @@
 #define D1L_RP2040_LINE_BUFFER_SIZE (D1L_RP2040_FILE_LINE_MAX + 1U)
 #define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
 #define D1L_RP2040_DATA64_MAX (((D1L_RP2040_FILE_CHUNK_MAX + 2U) / 3U) * 4U)
+#define D1L_RP2040_BRIDGE_LOCK_GRACE_MS 15000U
 
 static d1l_rp2040_status_t s_status = {
     .uart_ready = false,
@@ -51,7 +53,10 @@ static esp_err_t take_bridge_lock(uint32_t timeout_ms)
     if (s_bridge_mutex == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    const uint32_t wait_ms = timeout_ms > 0 ? timeout_ms + 500U : 500U;
+    const uint32_t base_ms = timeout_ms > 0 ? timeout_ms : 500U;
+    const uint32_t wait_ms = base_ms > (UINT32_MAX - D1L_RP2040_BRIDGE_LOCK_GRACE_MS) ?
+                                 UINT32_MAX :
+                                 base_ms + D1L_RP2040_BRIDGE_LOCK_GRACE_MS;
     TickType_t ticks = pdMS_TO_TICKS(wait_ms);
     if (ticks == 0) {
         ticks = 1;
