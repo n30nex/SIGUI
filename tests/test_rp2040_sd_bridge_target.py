@@ -145,8 +145,12 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "const bool cmd0_idle = cmd0 == 0x01U" in sketch
     assert "constexpr uint8_t SD_CMD0_RETRIES = 8;" in sketch
     assert "clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS)" in sketch
+    assert "constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;" in sketch
     assert "constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;" in sketch
     assert "manual_probe_card_bitbang(true, false)" in sketch
+    assert "sd_bitbang_clock_bit(true)" in sketch
+    assert "pre_clock_bits" in sketch
+    assert "for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip)" in sketch
     assert "bitbang_sd_command(0, 0, 0x95" in sketch
     assert 'append_probe_tokens(line, "bb", diag.bitbang)' in sketch
     assert 'empty_probe("high", "bitbang", true, DEDICATED_SPI)' in sketch

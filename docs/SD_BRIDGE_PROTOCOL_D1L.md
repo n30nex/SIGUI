@@ -164,9 +164,11 @@ skipped-wait sentinel before CMD0 (`*_c0r`) and CS-low ready byte before CMD8
 (`*_r70`..`*_r73`), MISO line samples after pull-up, after SPI1 begins, and
 after idle clocks (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), the first
 CS-high idle `SPI1.transfer(0xFF)` byte (`*_idle_ff`), and detected capacity in
-KiB (`*_kb`). These fields are non-formatting diagnostics for distinguishing a
-stuck/all-zero SPI bus from a card that reaches SPI idle but fails the SD v2
-echo check.
+KiB (`*_kb`). The `bb_*` CMD0 path also retries all-zero CMD0 responses with
+one to seven pre-command bit clocks while selected. These fields are
+non-formatting diagnostics for distinguishing a stuck/all-zero SPI bus or
+byte-boundary issue from a card that reaches SPI idle but fails the SD v2 echo
+check.
 
 Probe prefixes are `hd` high/dedicated, `hs` high/shared, `ld`
 low/dedicated, `ls` low/shared, and `bb` high-power bit-banged GPIO probe. The

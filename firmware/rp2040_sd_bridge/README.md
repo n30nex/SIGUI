@@ -146,7 +146,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   peripheral with direct GPIO clocking and are diagnostic-only; they do not
   enable file operations. Diagnostic replies also include
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
-  with the SPI response path.
+  with the SPI response path. The bit-banged probe also retries all-zero CMD0
+  results with one to seven pre-command clocks while CS is asserted, which tests
+  byte-boundary recovery without formatting or writing the card.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and
   manifests. If the card is absent, unmountable, not FAT32, or has invalid

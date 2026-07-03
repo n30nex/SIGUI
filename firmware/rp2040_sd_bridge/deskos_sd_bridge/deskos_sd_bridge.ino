@@ -40,6 +40,7 @@ constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
 constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
 constexpr uint8_t SD_CMD0_RETRIES = 8;
 constexpr uint8_t SD_CMD0_RECOVERY_CLOCKS = 16;
+constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;
 constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;
 constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
@@ -461,6 +462,17 @@ uint8_t sd_bitbang_transfer(uint8_t value) {
     return received;
 }
 
+uint8_t sd_bitbang_clock_bit(bool mosi_high) {
+    digitalWrite(SD_MOSI_PIN, mosi_high ? HIGH : LOW);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    digitalWrite(SD_SCK_PIN, HIGH);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    const uint8_t received = digitalRead(SD_MISO_PIN) ? 1U : 0U;
+    digitalWrite(SD_SCK_PIN, LOW);
+    delayMicroseconds(SD_BITBANG_HALF_PERIOD_US);
+    return received;
+}
+
 void configure_sd_bitbang_bus(bool power_high, bool force_power_cycle = false) {
     bias_sd_spi_lines_for_power();
     settle_sd_power(power_high, force_power_cycle);
@@ -496,10 +508,13 @@ uint8_t bitbang_wait_ready(uint32_t timeout_ms) {
 
 uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra,
                            size_t extra_len, uint8_t *ready_byte = nullptr,
-                           bool wait_selected_ready = true) {
+                           bool wait_selected_ready = true, uint8_t pre_clock_bits = 0) {
     digitalWrite(SD_CS_PIN, HIGH);
     (void)sd_bitbang_transfer(0xFF);
     digitalWrite(SD_CS_PIN, LOW);
+    for (uint8_t i = 0; i < pre_clock_bits; ++i) {
+        (void)sd_bitbang_clock_bit(true);
+    }
     const uint8_t ready = wait_selected_ready ? bitbang_wait_ready(SD_SELECTED_READY_WAIT_MS) : 0xFFU;
     if (ready_byte) {
         *ready_byte = ready;
@@ -671,6 +686,18 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
         cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, false);
         if (cmd0 == 0x01U) {
             break;
+        }
+        if (cmd0 == 0x00U) {
+            for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
+                cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
+                                          false, slip);
+                if (cmd0 == 0x01U) {
+                    break;
+                }
+            }
+            if (cmd0 == 0x01U) {
+                break;
+            }
         }
         bitbang_clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS);
         delay(10);
