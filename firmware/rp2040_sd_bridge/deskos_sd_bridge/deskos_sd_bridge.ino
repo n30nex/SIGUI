@@ -2697,7 +2697,7 @@ void handle_line(char *line) {
         return;
     }
 
-    constexpr size_t file_prefix_len = sizeof(FILE_REQUEST) - 1;
+    const size_t file_prefix_len = strlen(FILE_REQUEST);
     if (strncmp(line, FILE_REQUEST, file_prefix_len) == 0 &&
         (line[file_prefix_len] == '\0' || line[file_prefix_len] == ' ')) {
         handle_file_line(line);

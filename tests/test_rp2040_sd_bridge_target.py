@@ -388,6 +388,8 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "handle_file_write" in sketch
     assert "handle_file_delete" in sketch
     assert "handle_file_rename" in sketch
+    assert "strlen(FILE_REQUEST)" in sketch
+    assert "sizeof(FILE_REQUEST) - 1" not in sketch
     assert "SD.rename(source_path, target_path)" in sketch
     assert "REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE" in sketch
     assert "rename_replace_preserving_old" in sketch
