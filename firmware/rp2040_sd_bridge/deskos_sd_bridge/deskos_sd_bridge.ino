@@ -1434,7 +1434,7 @@ bool manifest_file_valid(const char *path) {
     if (!SD.exists(path)) {
         return false;
     }
-    File file = SD.open(path, FILE_READ);
+    File file = SD.open(path, "r");
     if (!file || file.isDirectory()) {
         if (file) {
             file.close();
@@ -1468,7 +1468,7 @@ bool map_manifest_file_valid(const char *path) {
     if (!SD.exists(path)) {
         return false;
     }
-    File file = SD.open(path, FILE_READ);
+    File file = SD.open(path, "r");
     if (!file || file.isDirectory()) {
         if (file) {
             file.close();
@@ -1503,7 +1503,7 @@ bool remove_file_if_present(const char *path) {
 
 bool write_text_file_direct(const char *path, const char *payload) {
     (void)SD.remove(path);
-    File file = SD.open(path, FILE_WRITE);
+    File file = SD.open(path, "w");
     if (!file) {
         return false;
     }
@@ -1517,7 +1517,7 @@ bool text_file_matches(const char *path, const char *payload) {
     if (!SD.exists(path)) {
         return false;
     }
-    File file = SD.open(path, FILE_READ);
+    File file = SD.open(path, "r");
     if (!file || file.isDirectory()) {
         if (file) {
             file.close();
@@ -2398,7 +2398,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=stat exists=";
-    File file = SD.open(full_path, FILE_READ);
+    File file = SD.open(full_path, "r");
     if (!file) {
         out += "0 kind=none size=0 note=ok";
         reply_stream->println(out);
@@ -2432,7 +2432,7 @@ void handle_file_read(uint32_t request_id, const char *line) {
         send_file_error(request_id, "read", "too_large");
         return;
     }
-    File file = SD.open(full_path, FILE_READ);
+    File file = SD.open(full_path, "r");
     if (!file || file.isDirectory()) {
         send_file_error(request_id, "read", file && file.isDirectory() ? "is_dir" : "not_found");
         if (file) {
@@ -2515,7 +2515,7 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
 
     uint32_t current_size = 0;
     if (!truncate) {
-        File existing = SD.open(full_path, FILE_READ);
+        File existing = SD.open(full_path, "r");
         if (existing) {
             if (existing.isDirectory()) {
                 existing.close();
@@ -2536,14 +2536,10 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     if (truncate) {
         (void)SD.remove(full_path);
     }
-    File file = SD.open(full_path, FILE_WRITE);
+    const char *write_mode = truncate ? "w" : "a";
+    File file = SD.open(full_path, write_mode);
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
-        return;
-    }
-    if (append_mode && !file.seek(current_size)) {
-        file.close();
-        send_file_error(request_id, op_name, "range");
         return;
     }
     const size_t written = data_len == 0 ? 0 : file.write(data, data_len);
