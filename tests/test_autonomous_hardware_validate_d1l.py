@@ -112,6 +112,28 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "d1l_scroll_probe" not in plan["steps"]
 
 
+def test_rp2040_port_discovery_selects_allowed_usb_cdc_and_skips_protected_ports(monkeypatch):
+    monkeypatch.setattr(runner, "rp2040_port_snapshot", lambda port: {"port": port, "present": False, "matches": []})
+    monkeypatch.setattr(
+        runner,
+        "serial_port_inventory",
+        lambda: [
+            {"device": "COM12", "description": "USB-SERIAL CH340", "vid": "1A86", "pid": "7523"},
+            {"device": "COM29", "description": "Adafruit Feather RP2040", "vid": "239A", "pid": "8029"},
+            {"device": "COM17", "description": "Raspberry Pi Pico", "vid": "2E8A", "pid": "000A"},
+        ],
+    )
+
+    report = runner.rp2040_port_discovery("COM16", "COM12")
+
+    assert report["present"] is True
+    assert report["selected_port"] == "COM17"
+    assert report["selected_reason"] == "rp2040_usb_descriptor"
+    assert report["candidates"][0]["match_reasons"] == ["keyword:pico", "keyword:raspberry pi pico", "vid:2E8A"]
+    assert {"device": "COM12", "reason": "d1l_console_port"} in report["skipped"]
+    assert {"device": "COM29", "reason": "forbidden_port"} in report["skipped"]
+
+
 def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path, monkeypatch):
     ctx = runner.RunContext(
         root=tmp_path,
@@ -130,6 +152,11 @@ def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path,
 
     monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
     monkeypatch.setattr(runner, "rp2040_port_snapshot", lambda port: {"port": port, "present": False, "matches": []})
+    monkeypatch.setattr(
+        runner,
+        "rp2040_port_discovery",
+        lambda port, d1l_port: {"preferred_port": port, "d1l_port": d1l_port, "present": False, "selected_port": None, "candidates": [], "skipped": []},
+    )
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
     def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
@@ -242,6 +269,55 @@ def test_bootloader_entry_prefers_bridge_command_when_ping_ready(tmp_path, monke
     assert report["method"] == "rp2040_bridge_command"
     assert commands == ["rp2040 ping", "rp2040 bootloader"]
     assert report["bridge_bootloader"]["cmd"] == "rp2040 bootloader"
+
+
+def test_bootloader_entry_uses_discovered_rp2040_usb_cdc_port(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    commands = []
+    touched = []
+
+    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
+    monkeypatch.setattr(
+        runner,
+        "rp2040_port_discovery",
+        lambda port, d1l_port: {
+            "preferred_port": port,
+            "d1l_port": d1l_port,
+            "present": True,
+            "selected_port": "COM17",
+            "selected_reason": "rp2040_usb_descriptor",
+            "candidates": [{"device": "COM17", "match_reasons": ["vid:2E8A"]}],
+            "skipped": [],
+        },
+    )
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(runner, "enter_rp2040_bootloader_usb_touch", lambda port: touched.append(port) or {"ok": True, "port": port})
+
+    def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
+        commands.append(command)
+        return {"ok": False, "cmd": command, "code": "ESP_ERR_TIMEOUT", "protocol_supported": False}
+
+    monkeypatch.setattr(runner, "send_d1l_console", fake_console)
+
+    report = runner.enter_rp2040_bootloader(ctx, volume=None)
+
+    assert report["ok"] is True
+    assert report["method"] == "rp2040_1200_baud_touch"
+    assert report["selected_rp2040_port"] == "COM17"
+    assert touched == ["COM17"]
+    assert commands == ["rp2040 ping"]
 
 
 def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monkeypatch):

@@ -17,6 +17,7 @@ def test_rp2040_bridge_pin_contract():
         "esp_rx_gpio": 20,
         "esp_tx_gpio": 19,
         "expander_reset": 8,
+        "bootsel_control": None,
         "uart_port": 2,
         "baud": 921600,
     }

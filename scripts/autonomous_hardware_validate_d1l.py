@@ -52,6 +52,15 @@ BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
 BOOTLOADER_TOUCH_TIMEOUT_SECONDS = 3.0
 BOOTLOADER_ENTRY_RESCAN_SECONDS = 3.0
+RP2040_USB_VIDS = {"2E8A", "239A", "CAFE"}
+RP2040_USB_KEYWORDS = (
+    "rp2040",
+    "raspberry pi pico",
+    "pico",
+    "bootsel",
+    "circuitpython",
+    "adafruit",
+)
 RP2040_DOUBLE_RESET_SWEEP_MS = (
     (50, 150, 1500),
     (30, 300, 1500),
@@ -346,6 +355,94 @@ def rp2040_port_snapshot(port: str) -> dict[str, Any]:
     return report
 
 
+def serial_port_inventory() -> list[dict[str, Any]]:
+    try:
+        import serial.tools.list_ports
+    except ImportError as exc:  # pragma: no cover - dependency dependent
+        raise RuntimeError(f"pyserial is required: {exc}") from exc
+
+    ports: list[dict[str, Any]] = []
+    for item in serial.tools.list_ports.comports():
+        record: dict[str, Any] = {"device": str(getattr(item, "device", "") or "")}
+        for attr in ["description", "hwid", "manufacturer", "product", "serial_number"]:
+            value = getattr(item, attr, None)
+            if value:
+                record[attr] = str(value)
+        for attr in ["vid", "pid"]:
+            value = getattr(item, attr, None)
+            if value is not None:
+                record[attr] = f"{int(value):04X}"
+        ports.append(record)
+    return ports
+
+
+def rp2040_candidate_reasons(record: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    vid = str(record.get("vid", "")).upper()
+    if vid in RP2040_USB_VIDS:
+        reasons.append(f"vid:{vid}")
+    text = " ".join(
+        str(record.get(field, "") or "")
+        for field in ["device", "description", "hwid", "manufacturer", "product"]
+    ).lower()
+    for keyword in RP2040_USB_KEYWORDS:
+        if keyword in text:
+            reasons.append(f"keyword:{keyword}")
+    return sorted(set(reasons))
+
+
+def rp2040_port_discovery(preferred_port: str, d1l_port: str) -> dict[str, Any]:
+    preferred = rp2040_port_snapshot(preferred_port)
+    report: dict[str, Any] = {
+        "preferred_port": normalize_port(preferred_port),
+        "d1l_port": normalize_port(d1l_port),
+        "present": False,
+        "selected_port": None,
+        "preferred": preferred,
+        "candidates": [],
+        "skipped": [],
+    }
+    if preferred.get("present"):
+        report["present"] = True
+        report["selected_port"] = normalize_port(preferred_port)
+        report["selected_reason"] = "configured_port_present"
+        report["selected"] = preferred["matches"][0]
+        return report
+
+    try:
+        inventory = serial_port_inventory()
+    except Exception as exc:  # pragma: no cover - host/OS dependent
+        report["error"] = str(exc)
+        return report
+
+    d1l = normalize_port(d1l_port)
+    for record in inventory:
+        device = normalize_port(str(record.get("device", "") or ""))
+        if not device:
+            continue
+        if device == d1l:
+            report["skipped"].append({"device": device, "reason": "d1l_console_port"})
+            continue
+        if device in FORBIDDEN_PORTS:
+            report["skipped"].append({"device": device, "reason": "forbidden_port"})
+            continue
+        reasons = rp2040_candidate_reasons(record)
+        if not reasons:
+            continue
+        candidate = dict(record)
+        candidate["device"] = device
+        candidate["match_reasons"] = reasons
+        report["candidates"].append(candidate)
+
+    if report["candidates"]:
+        selected = report["candidates"][0]
+        report["present"] = True
+        report["selected_port"] = selected["device"]
+        report["selected_reason"] = "rp2040_usb_descriptor"
+        report["selected"] = selected
+    return report
+
+
 def d1l_console_ok(result: dict, *, require_protocol: bool = False) -> bool:
     if result.get("ok") is not True:
         return False
@@ -415,7 +512,7 @@ def rp2040_double_reset_sweep(ctx: RunContext) -> tuple[list[dict], dict | None]
         attempt["result"] = send_d1l_console(ctx.d1l_port, ctx.baud, command, timeout)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         attempt["uf2_volume"] = uf2_volume_snapshot()
-        attempt["rp2040_port"] = rp2040_port_snapshot(ctx.rp2040_port)
+        attempt["rp2040_port"] = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
         attempts.append(attempt)
         if attempt["uf2_volume"].get("available") or attempt["rp2040_port"].get("present"):
             return attempts, attempt
@@ -456,10 +553,12 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
             report["error"] = "rp2040_bootloader_command_failed"
         return report
 
-    port_initial = rp2040_port_snapshot(ctx.rp2040_port)
+    port_initial = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     report["rp2040_port_initial"] = port_initial
     if port_initial.get("present"):
-        report["usb_touch"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        selected_port = str(port_initial.get("selected_port") or ctx.rp2040_port)
+        report["selected_rp2040_port"] = selected_port
+        report["usb_touch"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_usb_touch"] = uf2_volume_snapshot()
         report["ok"] = True
@@ -480,7 +579,9 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["ended_at"] = utc_now()
         return report
     if success and success["rp2040_port"].get("present"):
-        report["usb_touch_after_double_reset"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        selected_port = str(success["rp2040_port"].get("selected_port") or ctx.rp2040_port)
+        report["selected_rp2040_port"] = selected_port
+        report["usb_touch_after_double_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_double_reset_touch"] = uf2_volume_snapshot()
         report["ok"] = True
@@ -492,14 +593,16 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
     reset = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0, settle_sec=3.0)
     report["reset"] = reset
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
-    port_after_reset = rp2040_port_snapshot(ctx.rp2040_port)
+    port_after_reset = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     report["rp2040_port_after_reset"] = port_after_reset
     report["uf2_volume_after_reset"] = uf2_volume_snapshot()
     if report["uf2_volume_after_reset"].get("available"):
         report["ok"] = True
         report["method"] = "reset_revealed_uf2"
     elif port_after_reset.get("present"):
-        report["usb_touch_after_reset"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        selected_port = str(port_after_reset.get("selected_port") or ctx.rp2040_port)
+        report["selected_rp2040_port"] = selected_port
+        report["usb_touch_after_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_reset_touch"] = uf2_volume_snapshot()
         report["ok"] = True
@@ -572,12 +675,13 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
         return finish()
 
     report["uf2_volume_initial"] = uf2_volume_snapshot()
-    report["rp2040_port_initial"] = rp2040_port_snapshot(ctx.rp2040_port)
+    report["rp2040_port_initial"] = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     if report["uf2_volume_initial"].get("available"):
         report["state"] = "uf2_volume_available"
         return finish()
     if report["rp2040_port_initial"].get("present"):
         report["state"] = "usb_cdc_available_for_1200_baud_touch"
+        report["selected_rp2040_port"] = report["rp2040_port_initial"].get("selected_port")
         return finish()
 
     report["status"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 status", 8.0, settle_sec=3.0)
@@ -600,17 +704,19 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
     if success and success["rp2040_port"].get("present"):
         report["state"] = "usb_cdc_available_after_double_reset"
         report["successful_double_reset"] = success
+        report["selected_rp2040_port"] = success["rp2040_port"].get("selected_port")
         return finish()
 
     report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
     report["uf2_volume_after_reset"] = uf2_volume_snapshot()
-    report["rp2040_port_after_reset"] = rp2040_port_snapshot(ctx.rp2040_port)
+    report["rp2040_port_after_reset"] = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     report["ping_after_reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0, settle_sec=3.0)
     if report["uf2_volume_after_reset"].get("available"):
         report["state"] = "uf2_volume_available_after_reset"
     elif report["rp2040_port_after_reset"].get("present"):
         report["state"] = "usb_cdc_available_after_reset"
+        report["selected_rp2040_port"] = report["rp2040_port_after_reset"].get("selected_port")
     elif d1l_console_ok(report["ping_after_reset"], require_protocol=True):
         report["state"] = "bridge_protocol_ready_after_reset"
         report["bootloader_entry"] = "rp2040 bootloader"
@@ -695,10 +801,21 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
         )
         time.sleep(2.0)
         report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
-        capture = capture_official_smoke(ctx.rp2040_port, ctx.baud, smoke_timeout)
+        capture_discovery = rp2040_port_discovery(
+            str(report["bootloader_entry"].get("selected_rp2040_port") or ctx.rp2040_port),
+            ctx.d1l_port,
+        )
+        report["rp2040_port_for_smoke_capture"] = capture_discovery
+        capture_port = str(capture_discovery.get("selected_port") or ctx.rp2040_port)
+        report["capture_port"] = capture_port
+        capture = capture_official_smoke(capture_port, ctx.baud, smoke_timeout)
         if not capture.get("result"):
             report["reset_retry"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
-            capture = capture_official_smoke(ctx.rp2040_port, ctx.baud, smoke_timeout)
+            capture_discovery = rp2040_port_discovery(capture_port, ctx.d1l_port)
+            report["rp2040_port_for_smoke_capture_retry"] = capture_discovery
+            capture_port = str(capture_discovery.get("selected_port") or capture_port)
+            report["capture_port_retry"] = capture_port
+            capture = capture_official_smoke(capture_port, ctx.baud, smoke_timeout)
         report.update(capture)
     write_json(out, report)
     report["path"] = str(out)
