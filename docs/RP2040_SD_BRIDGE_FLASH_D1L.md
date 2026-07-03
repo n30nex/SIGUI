@@ -65,6 +65,19 @@ again.
 
 ## Flash
 
+For unattended validation on the current D1L bench route, use the autonomous
+runner from the repository root:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha>
+```
+
+The runner touches only COM12 and COM16, refuses COM11/COM29, flashes the
+official Seeed SD smoke UF2, captures its COM16 JSON, restores the production
+bridge UF2, runs COM12 preflight/smoke/500-cycle tab-abuse/scroll evidence, and
+then regenerates the fail-closed release gate. It does not format SD and does
+not send Public RF.
+
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under
 `artifacts\hardware\com16\seeed_official_sd_smoke_<sha>.json`, and require

@@ -12,6 +12,7 @@ python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 500
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --dry-run
 python .\scripts\probe_d1l_dm.py --dry-run
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --dry-run --token dryrun
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
@@ -37,6 +38,7 @@ Coverage:
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. The SD-aware soak must report `public_rf_tx=false` and `formats_sd=false` unless the operator explicitly enables an RF mode through a separate flag.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - Release gate audit contract: `scripts/release_gate_audit_d1l.py` must fail closed when P0 production evidence is missing, must not require hardware or ports in CI, must reject obsolete SD preflight evidence that recommends any device-format action, must require SD evidence to report `formats_sd=false`, and must report `ready_for_public_release=false` until current-commit smoke, SD matrix, 12-hour soak, manual physical UI/photos, and full RF/DM evidence are present.
+- Autonomous hardware validation contract: `scripts/autonomous_hardware_validate_d1l.py` must provide a no-user-input orchestration path for the current D1L hardware route. It must default to COM12 for the ESP32 console, COM16 for the RP2040 USB/CDC/UF2 path, refuse COM11 and COM29, use only GitHub Actions-built artifacts, preserve `public_rf_tx=false` and `formats_sd=false`, restore the production RP2040 bridge after any official SD smoke UF2, run COM12 smoke/tab-abuse/scroll/preflight evidence, and finish with the fail-closed release gate artifact.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces, the Settings setup dashboard, Public History/Search sheets, advert sheet, first-boot onboarding, lock overlay, Map, manual Map center, Map Tiles provider/download sheet, Storage/Radio/Contact/Packet/Mesh Roles sheets, fail on missing required labels or measured text overflow, emit a touch-target map with expanded 44x44 boxes, flag RF/destructive/format-capable actions, keep `formats_sd=false` for storage setup and map tile download actions, and include `large-mesh` and `storage-states` scenarios that prove oversized node/message stores and storage copy fit before rendering.
 - P0 UI hardware-script contract: `scripts/ui_tab_abuse_d1l.py --dry-run --cycles 500` and `scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map` must stay host-only, explicit-port for hardware mode, and must exercise `ui status`, telemetry fields from `health`, crashlog checks, and `ui tab <home|messages|nodes|map|packets|settings>` without hardcoded COM ports. The tab-abuse artifact must prove at least 500 cycles, monotonic uptime, zero failures, and heap/LVGL/UI-stack/reset telemetry; the scroll artifact must identify each canonical surface and the tab used to reach it.
 - First-boot onboarding contract: settings schema v6 must persist `onboarding_complete`, optional manual map center, saved Wi-Fi profile metadata, and optional map tile provider/attribution/zoom metadata, migrate schema v2/v3/v4/v5 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
@@ -65,6 +67,18 @@ python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\ui_tab_abuse_d1l.py --port $env:D1L_PORT --cycles 500 --clear-crashlog-before-start
 python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map --manual-touch --clear-crashlog-before-start
 ```
+
+For the current autonomous COM12/COM16 D1L route, prefer the single-command
+runner after the matching GitHub Actions artifacts are downloaded:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha>
+```
+
+The runner requires no manual touch confirmation, does not open COM11 or COM29,
+copies only Actions-built RP2040 UF2 artifacts, restores the production bridge
+after official SD smoke capture, and writes the final release-gate audit under
+`artifacts\release-gate`.
 
 Expected commands:
 
