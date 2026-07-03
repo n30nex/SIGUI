@@ -298,6 +298,12 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_RP2040_FILE_LINE_MAX" in console
     assert "D1L_RP2040_FILE_CHUNK_MAX" in console
     assert "D1L_RP2040_FILE_PATH_MAX" in console
+    filecanary_body = console.split("static void cmd_storage_filecanary(void)", 1)[1].split(
+        "static void cmd_storage_retained_canary", 1
+    )[0]
+    preflight_body = filecanary_body.split("print_storage_filecanary_error", 1)[0]
+    assert "!status.data_enabled" not in preflight_body
+    assert "packet_log_backend" not in preflight_body
     assert "no Public RF or format command was used" in console
     assert "cmd_storage_retained_canary" in console
     assert "storage_retained_history_sd_ready" in console

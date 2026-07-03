@@ -7,6 +7,8 @@ ESP32-S3 DeskOS firmware flash path.
 
 - Use a GitHub Actions `rp2040-sd-bridge-firmware` artifact. Do not build the
   RP2040 bridge on the Windows host.
+- Use the same Actions run's `rp2040-seeed-official-sd-smoke-firmware` artifact
+  for the isolated official Seeed SD proof before treating SD as release-ready.
 - Use a FAT32 SD card prepared on a computer. `DESKOS_SD_STATUS` does not
   format, and a usable card may get a `/deskos` directory during explicit mount.
 - Do not format from ESP32 firmware, RP2040 firmware, serial commands, scripts,
@@ -19,6 +21,7 @@ ESP32-S3 DeskOS firmware flash path.
 
 ```powershell
 python .\scripts\verify_checksums.py artifacts\github\<run-id>\rp2040-sd-bridge-firmware
+python .\scripts\verify_checksums.py artifacts\github\<run-id>\rp2040-seeed-official-sd-smoke-firmware
 Get-FileHash artifacts\github\<run-id>\rp2040-sd-bridge-firmware\deskos_sd_bridge.ino.uf2 -Algorithm SHA256
 python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --list-volumes
 python .\scripts\rp2040_sd_bridge_preflight_d1l.py --port COM12 --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --expected-sha256 <sha256> --out artifacts\rp2040-preflight\d1l-rp2040-sd-bridge-preflight-COM12.json
@@ -60,6 +63,13 @@ installed and inspect the status/mount path instead of copying the same UF2
 again.
 
 ## Flash
+
+For the SD hardware proof, first flash the verified
+`rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under
+`artifacts\hardware\com12\seeed_official_sd_smoke_<sha>.json`, and require
+`test="seeed_official_sd_smoke"`, `ok=true`, `mount/root_open/mkdir/write/read/rename/stat/delete=true`,
+`fat_type=32`, `max_card_gb<=32`, `public_rf_tx=false`, and
+`formats_sd=false`. Then flash the production bridge artifact below.
 
 1. Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode.
 2. Confirm Windows mounted a UF2 bootloader volume. The volume should expose

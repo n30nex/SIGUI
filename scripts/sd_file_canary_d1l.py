@@ -132,7 +132,7 @@ def run_canary(port: str, baud: int, timeout: float, allow_unavailable: bool) ->
         "formats_sd": False,
         "ok": (
             before.get("ok", False)
-            and ((canary_ok and retained_history_sd_before and retained_history_sd_after) or unavailable_ok)
+            and (canary_ok or unavailable_ok)
             and after.get("ok", False)
             and packets.get("ok", False)
             and health.get("ok", False)

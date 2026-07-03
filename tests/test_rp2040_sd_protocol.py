@@ -70,6 +70,7 @@ def test_status_protocol_lines_cover_boot_states():
     no_card = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["no-card"]))
     ready = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["ready"]))
     setup = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["needs-fat32"]))
+    fat16 = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["fat16-mounted"]))
 
     assert no_card["prefix"] == STATUS_REPLY
     assert no_card["state"] == "no_card"
@@ -81,6 +82,9 @@ def test_status_protocol_lines_cover_boot_states():
     assert ready["needs_fat32"] == "0"
     assert setup["state"] == "not_fat32_or_unmountable"
     assert setup["needs_fat32"] == "1"
+    assert fat16["mounted"] == "1"
+    assert fat16["fs"] == "fat16"
+    assert fat16["file_ops"] == "0"
     assert ready["file_ops"] == "1"
     assert ready["file_line_max"] == str(FILE_LINE_MAX)
     assert ready["file_chunk_max"] == str(MAX_FILE_CHUNK_BYTES)
@@ -108,6 +112,10 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"]))
     fs = SdFileSystem()
     root_prepared = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["root-missing"], fs))
+    fat16_fs = SdFileSystem()
+    fat16_rejected = parse_tokens(
+        reply_for_request(MOUNT_REQUEST, SCENARIOS["fat16-mounted"], fat16_fs)
+    )
 
     assert status["prefix"] == STATUS_REPLY
     assert status["state"] == "mount_required"
@@ -125,6 +133,13 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     assert root_prepared["deskos"] == "1"
     assert root_prepared["needs_fat32"] == "0"
     assert root_prepared["file_ops"] == "1"
+    assert fat16_rejected["prefix"] == MOUNT_REPLY
+    assert fat16_rejected["state"] == "not_fat32_or_unmountable"
+    assert fat16_rejected["mounted"] == "1"
+    assert fat16_rejected["deskos"] == "0"
+    assert fat16_rejected["needs_fat32"] == "1"
+    assert fat16_rejected["file_ops"] == "0"
+    assert DESKOS_MANIFEST_PATH not in fat16_fs.files
     assert DESKOS_MANIFEST_PATH in fs.files
     assert DESKOS_MAP_MANIFEST_PATH in fs.files
     assert set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
@@ -168,7 +183,11 @@ def test_diag_protocol_reports_probe_matrix_without_formatting():
     assert diag["ld_p"] == "0"
     assert diag["ls_p"] == "0"
     assert diag["bb_p"] == "0"
-    for prefix in ("hd", "hs", "ld", "ls", "bb"):
+    assert diag["bi_p"] == "0"
+    assert diag["bs_p"] == "0"
+    assert diag["bcm_p"] == "0"
+    assert diag["bsc_p"] == "0"
+    for prefix in ("hd", "hs", "ld", "ls", "bb", "bi", "bs", "bcm", "bsc"):
         assert diag[f"{prefix}_c0"] == "255"
         assert diag[f"{prefix}_c8"] == "255"
         assert diag[f"{prefix}_r70"] == "0"
@@ -209,6 +228,28 @@ def test_manifest_invalid_blocks_file_ops_without_formatting():
     assert fs.files[DESKOS_MANIFEST_PATH] == b'{"schema":99}\n'
     assert stat["ok"] == "0"
     assert stat["err"] == "not_ready"
+
+
+def test_non_fat32_mounted_card_blocks_file_ops_before_deskos_prepare():
+    fs = SdFileSystem()
+    mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["fat16-mounted"], fs))
+    stat = parse_tokens(
+        reply_for_request(
+            file_request(23, "stat", path=encode_path(DESKOS_MANIFEST_PATH)),
+            SCENARIOS["fat16-mounted"],
+            fs,
+        )
+    )
+
+    assert mounted["state"] == "not_fat32_or_unmountable"
+    assert mounted["note"] == "needs_fat32_on_computer"
+    assert mounted["fs"] == "fat16"
+    assert mounted["deskos"] == "0"
+    assert mounted["file_ops"] == "0"
+    assert stat["ok"] == "0"
+    assert stat["err"] == "not_ready"
+    assert DESKOS_MANIFEST_PATH not in fs.files
+    assert DESKOS_MAP_MANIFEST_PATH not in fs.files
 
 
 def test_storage_edge_scenarios_and_constants_match_c_contract():

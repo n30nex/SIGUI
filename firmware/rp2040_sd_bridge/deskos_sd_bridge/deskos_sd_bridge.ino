@@ -80,8 +80,9 @@ constexpr size_t FILE_PATH_MAX = 96;
 constexpr size_t FILE_CHUNK_MAX = 192;
 constexpr size_t FILE_PATH64_MAX = 128;
 constexpr size_t FILE_DATA64_MAX = 256;
-constexpr size_t FILE_FULL_PATH_MAX = sizeof("/deskos/") + FILE_PATH_MAX;
-constexpr const char *REPLACE_BACKUP_SUFFIX = ".bak";
+constexpr char REPLACE_BACKUP_SUFFIX[] = ".bak";
+constexpr size_t FILE_FULL_PATH_MAX =
+    sizeof("/deskos/") + FILE_PATH_MAX + sizeof(REPLACE_BACKUP_SUFFIX);
 constexpr bool REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE = true;
 
 struct SdSnapshot {
@@ -1367,6 +1368,14 @@ const char *fat_label() {
     }
 }
 
+bool mounted_fs_is_fat32() {
+    return SD.fatType() == 32;
+}
+
+bool snapshot_fs_is_fat32(const SdSnapshot &snapshot) {
+    return snapshot.fs && strcmp(snapshot.fs, "fat32") == 0;
+}
+
 void fill_capacity(SdSnapshot &snapshot) {
     FSInfo info;
     if (SDFS.info(info)) {
@@ -1548,6 +1557,16 @@ SdSnapshot mounted_snapshot_from_current_config() {
     snapshot.fs = fat_label();
     fill_capacity(snapshot);
 
+    if (!mounted_fs_is_fat32()) {
+        snapshot.state = "not_fat32_or_unmountable";
+        snapshot.present = true;
+        snapshot.mounted = true;
+        snapshot.deskos = false;
+        snapshot.needs_fat32 = true;
+        snapshot.note = "needs_fat32_on_computer";
+        return snapshot;
+    }
+
     const char *prepare_note = "ready";
     if (prepare_deskos_structure(&prepare_note)) {
         snapshot.state = "ready";
@@ -1578,63 +1597,13 @@ SdSnapshot mount_status_blocking() {
         return mounted_snapshot_from_current_config();
     }
 
-    s_last_mount_error = 0;
-    s_last_mount_data = 0;
-    snapshot = pending_snapshot("probing_card");
-    publish_mount_progress(snapshot);
-
-    snapshot = make_snapshot("no_card", "no_card");
-    CardProbe probes[] = {
-        manual_probe_card(DEDICATED_SPI, true, false),
-        manual_probe_card(SHARED_SPI, true, false),
-        manual_probe_card(DEDICATED_SPI, true),
-        manual_probe_card(SHARED_SPI, true),
-        manual_probe_card(DEDICATED_SPI, false),
-        manual_probe_card(SHARED_SPI, false),
-    };
-    const CardProbe *last_present_probe = nullptr;
-    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
-        if (!probes[i].present) {
-            continue;
-        }
-        last_present_probe = &probes[i];
-        snapshot = make_snapshot("mount_pending", "card_detected_mounting");
-        snapshot.present = true;
-        snapshot.fs = "unknown";
-        snapshot.capacity_kb = probes[i].capacity_kb;
-        apply_probe_to_snapshot(snapshot, probes[i]);
-        s_sd_power_high = probes[i].power_high;
-        s_sd_spi_options = probes[i].options;
-        publish_mount_progress(snapshot);
-
-        if (mount_sd_with_probe_config(probes[i])) {
-            return mounted_snapshot_from_current_config();
-        }
-    }
-
-    if (!last_present_probe) {
-        apply_probe_to_snapshot(snapshot, probes[0]);
-        if (raw_probe_rejected_card(probes[0])) {
-            snapshot.state = "error";
-            snapshot.note = "sd_probe_rejected_card";
-        }
-        s_sd_power_high = true;
-        s_sd_spi_options = DEDICATED_SPI;
-        s_last_mount_error = 0;
-        s_last_mount_data = 0;
-        configure_sd_bus();
-        apply_detect_to_snapshot(snapshot);
-        return snapshot;
-    }
-
-    s_sd_power_high = last_present_probe->power_high;
-    s_sd_spi_options = last_present_probe->options;
-    snapshot = make_snapshot("not_fat32_or_unmountable", "needs_fat32_on_computer");
-    snapshot.present = true;
-    snapshot.fs = "unknown";
-    snapshot.needs_fat32 = true;
-    snapshot.capacity_kb = last_present_probe->capacity_kb;
-    apply_probe_to_snapshot(snapshot, *last_present_probe);
+    snapshot = make_snapshot("error", "sd_mount_failed_official_seeed_path");
+    CardProbe official_probe = empty_probe("high", "mount", true, DEDICATED_SPI, false);
+    official_probe.error_code = s_last_mount_error;
+    official_probe.error_data = s_last_mount_data;
+    apply_probe_to_snapshot(snapshot, official_probe);
+    configure_seeed_sd_bus(true, false);
+    apply_detect_to_snapshot(snapshot);
     return snapshot;
 }
 
@@ -1672,6 +1641,8 @@ DiagSnapshot pending_diag_snapshot() {
 }
 
 DiagSnapshot diag_status_blocking() {
+    const bool previous_power_high = s_sd_power_high;
+    const uint8_t previous_spi_options = s_sd_spi_options;
     DiagSnapshot diag = pending_diag_snapshot();
     diag.high_dedicated = manual_probe_card(DEDICATED_SPI, true, false);
     diag.high_shared = manual_probe_card(SHARED_SPI, true, false);
@@ -1685,21 +1656,21 @@ DiagSnapshot diag_status_blocking() {
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
-        s_sd_power_high = selected->power_high;
-        s_sd_spi_options = selected->options;
+        diag.selected_power = selected->power;
+        diag.selected_mode = selected->mode;
     } else {
-        s_sd_power_high = true;
-        s_sd_spi_options = DEDICATED_SPI;
+        diag.selected_power = power_token(previous_power_high);
+        diag.selected_mode = spi_mode_token(previous_spi_options);
     }
-    diag.selected_power = power_token(s_sd_power_high);
-    diag.selected_mode = spi_mode_token(s_sd_spi_options);
     diag.pin_sck_ok = s_sd_pin_sck_ok;
     diag.pin_mosi_ok = s_sd_pin_mosi_ok;
     diag.pin_miso_ok = s_sd_pin_miso_ok;
     diag.pin_cs_ok = s_sd_pin_cs_ok;
     diag.mount_selected = false;
     diag.valid = true;
-    configure_sd_bus();
+    s_sd_power_high = previous_power_high;
+    s_sd_spi_options = previous_spi_options;
+    configure_seeed_sd_bus(true, false);
     return diag;
 }
 
@@ -1984,7 +1955,7 @@ const char *rename_replace_preserving_old(const char *source_path, const char *t
 
 void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) {
     const bool file_ready = snapshot.present && snapshot.mounted && snapshot.deskos &&
-                            !snapshot.needs_fat32;
+                            !snapshot.needs_fat32 && snapshot_fs_is_fat32(snapshot);
     String line(prefix);
     line += " state=";
     line += snapshot.state;
@@ -2499,7 +2470,8 @@ void handle_file_line(const char *line) {
         send_file_error(request_id, op, "no_card");
         return;
     }
-    if (!status.mounted || !status.deskos || status.needs_fat32) {
+    if (!status.mounted || !status.deskos || status.needs_fat32 ||
+        !snapshot_fs_is_fat32(status)) {
         send_file_error(request_id, op, "not_ready");
         return;
     }

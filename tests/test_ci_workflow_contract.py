@@ -72,6 +72,11 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "python ./scripts/verify_checksums.py artifacts/rp2040-sd-bridge" in job
     assert "name: rp2040-sd-bridge-firmware" in job
     assert "path: artifacts/rp2040-sd-bridge/**" in job
+    assert "firmware/rp2040_sd_bridge/smoke/seeed_official_sd_smoke" in job
+    assert "artifacts/rp2040-seeed-official-sd-smoke" in job
+    assert "python ./scripts/verify_checksums.py artifacts/rp2040-seeed-official-sd-smoke" in job
+    assert "name: rp2040-seeed-official-sd-smoke-firmware" in job
+    assert "path: artifacts/rp2040-seeed-official-sd-smoke/**" in job
     assert "if-no-files-found: error" in job
     assert "--upload" not in job
     assert "--port" not in job

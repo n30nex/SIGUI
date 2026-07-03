@@ -120,7 +120,7 @@ def test_sd_file_canary_success_requires_canary_ok(monkeypatch):
     assert report["retained_history_sd_ready_after"] is True
 
 
-def test_sd_file_canary_success_requires_retained_history_sd_backends(monkeypatch):
+def test_sd_file_canary_success_is_independent_of_retained_history_backends(monkeypatch):
     partial_status = ready_storage_status().replace('"dm_store_backend":"sd"', '"dm_store_backend":"nvs"')
     ser = FakeSerial(
         [
@@ -138,7 +138,7 @@ def test_sd_file_canary_success_requires_retained_history_sd_backends(monkeypatc
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
     report = sd_file_canary_d1l.run_canary("COM12", 115200, 1.0, allow_unavailable=False)
 
-    assert report["ok"] is False
+    assert report["ok"] is True
     assert report["canary_passed"] is True
     assert report["retained_history_sd_ready_before"] is False
     assert report["retained_history_sd_ready_after"] is False

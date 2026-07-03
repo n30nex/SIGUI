@@ -1176,20 +1176,17 @@ static void cmd_storage_filecanary(void)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 
-    if (!status.data_enabled ||
-        !status.file_ops_supported ||
+    if (!status.file_ops_supported ||
         !status.atomic_rename_supported ||
         status.file_line_max < D1L_RP2040_FILE_LINE_MAX ||
         status.file_chunk_max < D1L_RP2040_FILE_CHUNK_MAX ||
-        status.path_max < D1L_RP2040_FILE_PATH_MAX ||
-        !status.packet_log_backend ||
-        strcmp(status.packet_log_backend, "sd") != 0) {
+        status.path_max < D1L_RP2040_FILE_PATH_MAX) {
         print_storage_filecanary_error(
             "preflight",
             ESP_ERR_NOT_SUPPORTED,
             &status,
             NULL,
-            "requires a ready RP2040 SD bridge with file_ops, atomic rename, and packet-log SD canary enabled");
+            "requires a ready RP2040 SD bridge with file_ops and atomic rename; retained-store migration is tested by storage retained-canary");
         return;
     }
 

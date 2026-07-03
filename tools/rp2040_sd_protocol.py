@@ -185,6 +185,17 @@ SCENARIOS: dict[str, SdScenario] = {
         free_kb=0,
         note="needs_fat32_on_computer",
     ),
+    "fat16-mounted": SdScenario(
+        state="setup_required",
+        present=True,
+        mounted=True,
+        deskos=False,
+        fs="fat16",
+        needs_fat32=False,
+        capacity_kb=2097152,
+        free_kb=1000000,
+        note="deskos_root_missing",
+    ),
     "root-missing": SdScenario(
         state="setup_required",
         present=True,
@@ -341,6 +352,10 @@ def diag_line(scenario: SdScenario) -> str:
         f"{diag_probe_tokens('ld', False, 254, 0)}"
         f"{diag_probe_tokens('ls', False, 254, 0)}"
         f"{diag_probe_tokens('bb', scenario.present, err, capacity)}"
+        f"{diag_probe_tokens('bi', scenario.present, err, capacity)}"
+        f"{diag_probe_tokens('bs', scenario.present, err, capacity)}"
+        f"{diag_probe_tokens('bcm', scenario.present, err, capacity)}"
+        f"{diag_probe_tokens('bsc', scenario.present, err, capacity)}"
     )
 
 
@@ -389,6 +404,14 @@ def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
         return scenario
     if not scenario.mounted:
         return scenario
+    if scenario.fs != "fat32":
+        return replace(
+            scenario,
+            state="not_fat32_or_unmountable",
+            deskos=False,
+            needs_fat32=True,
+            note="needs_fat32_on_computer",
+        )
     if not prepare_deskos_filesystem(fs):
         note = (
             "deskos_manifest_invalid"
@@ -440,7 +463,13 @@ def parse_bool_token(tokens: dict[str, str], key: str) -> bool:
 
 
 def file_ready(scenario: SdScenario) -> bool:
-    return scenario.present and scenario.mounted and scenario.deskos and not scenario.needs_fat32
+    return (
+        scenario.present
+        and scenario.mounted
+        and scenario.deskos
+        and not scenario.needs_fat32
+        and scenario.fs == "fat32"
+    )
 
 
 def file_line(**tokens: object) -> str:

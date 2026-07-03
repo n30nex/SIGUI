@@ -228,6 +228,7 @@ def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
     labels = [
         "d1l-firmware-artifacts/SHA256SUMS.txt",
         "rp2040-sd-bridge-firmware/SHA256SUMS.txt",
+        "rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
     ]
     if github_run_dir:
         manifests.extend(github_run_dir / label for label in labels)
@@ -237,7 +238,8 @@ def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
     present = [path for path in manifests if path.is_file()]
     missing = [path for path in manifests if not path.is_file()]
     failed = [path for path in present if not verify_sha256_manifest(path)]
-    ok = bool(present) and not missing and not failed and len(present) == 3
+    expected_count = len(labels) + (1 if package else 0)
+    ok = bool(present) and not missing and not failed and len(present) == expected_count
     return GateResult(
         "ci_artifacts_checksums",
         "P0",
@@ -370,6 +372,98 @@ def route_probe_gate(hardware_dir: Path, root: Path, commit: str | None, expecte
             "formats_sd": data.get("formats_sd") if data else None,
             "missing_or_failed_checks": missing_or_failed,
             "scope": "supplementary_dm_only_not_full_rf_acceptance",
+        },
+    )
+
+
+def iter_nested_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from iter_nested_dicts(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from iter_nested_dicts(nested)
+    elif isinstance(value, str):
+        text = value.strip()
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return
+            yield from iter_nested_dicts(parsed)
+
+
+def first_official_seeed_smoke_payload(data: dict) -> dict:
+    for candidate in iter_nested_dicts(data):
+        if candidate.get("test") == "seeed_official_sd_smoke":
+            return candidate
+    return {}
+
+
+def int_value(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def official_seeed_sd_smoke_ok(data: dict, expected_port: str) -> bool:
+    payload = first_official_seeed_smoke_payload(data)
+    required_steps = ("mount", "root_open", "mkdir", "write", "read", "rename", "stat", "delete")
+    max_card_gb = int_value(payload.get("max_card_gb"))
+    fat_type = int_value(payload.get("fat_type"))
+    port = data.get("port")
+    port_ok = port in (None, expected_port)
+    return (
+        port_ok
+        and payload.get("ok") is True
+        and all(payload.get(step) is True for step in required_steps)
+        and payload.get("public_rf_tx") is False
+        and payload.get("formats_sd") is False
+        and payload.get("format") == "non_destructive"
+        and max_card_gb is not None
+        and max_card_gb <= 32
+        and fat_type == 32
+    )
+
+
+def official_seeed_sd_smoke_gate(
+    hardware_dir: Path,
+    root: Path,
+    commit: str | None,
+    expected_port: str,
+) -> GateResult:
+    smoke = newest_commit_json(
+        hardware_dir,
+        commit,
+        "seeed_official_sd_smoke_*.json",
+        "sd_official_seeed_smoke_*.json",
+        "rp2040_seeed_official_sd_smoke_*.json",
+    )
+    data = read_json(smoke)
+    payload = first_official_seeed_smoke_payload(data)
+    ok = bool(smoke and data and official_seeed_sd_smoke_ok(data, expected_port))
+    required_steps = ("mount", "root_open", "mkdir", "write", "read", "rename", "stat", "delete")
+    return GateResult(
+        "sd_official_seeed_smoke_passed",
+        "P0",
+        ok,
+        "Official Seeed RP2040 SD smoke",
+        [rel(smoke, root)] if smoke else [],
+        "Official Seeed SD smoke proves mount, root open, write/read/rename/stat/delete, FAT32, <=32GB, and no formatting."
+        if ok else "No passing current-commit official Seeed SD smoke artifact was found.",
+        {
+            "path_found": bool(smoke),
+            "artifact_ok": data.get("ok") if data else None,
+            "inner_test": payload.get("test") if payload else None,
+            "inner_ok": payload.get("ok") if payload else None,
+            "port": data.get("port") if data else None,
+            "required_steps": {step: payload.get(step) for step in required_steps} if payload else {},
+            "fat_type": payload.get("fat_type") if payload else None,
+            "max_card_gb": payload.get("max_card_gb") if payload else None,
+            "formats_sd": payload.get("formats_sd") if payload else data.get("formats_sd") if data else None,
+            "public_rf_tx": payload.get("public_rf_tx") if payload else data.get("public_rf_tx") if data else None,
         },
     )
 
@@ -610,6 +704,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         )
     )
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
+    gates.append(official_seeed_sd_smoke_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(sd_gate(newest_commit_json(hardware_dir, args.commit, "rp2040_preflight_*.json", "rp2040_sd_preflight_*.json"), root))
     gates.append(full_soak_gate(soak_dir, root, args.commit))
     gates.append(manual_evidence_gate(hardware_dir, root, args.commit))

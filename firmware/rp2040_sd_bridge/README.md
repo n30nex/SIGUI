@@ -20,7 +20,10 @@ It speaks the newline-delimited protocol documented in
   sequence and Arduino-Pico's SdFat SPI1 pin setup: drive GPIO18 high,
   initialize `Wire` on SDA20/SCL21, set `SPI1` SCK/MOSI/MISO to GPIO10/11/12,
   register GPIO13 as CS, then call
-  `SD.begin(13, 1000000, SPI1)`. Fallback probes can force-cycle the selected
+  `SD.begin(13, 1000000, SPI1)`. If that first library mount fails, the bridge
+  repeats the same official Seeed path once after a clean GPIO18 rail cycle,
+  then fails closed with `sd_mount_failed_official_seeed_path`. Manual
+  diagnostics can force-cycle the selected
   rail level with the SD SPI pins floated while GPIO18 is off so CS/MOSI/SCK
   cannot backfeed the card, wait for the rail to settle, bias
   CS/MOSI/SCK/MISO, and send idle clocks so warm-reset cards can re-enter SPI
@@ -56,6 +59,12 @@ The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 The CI job also emits `rp2040-sd-smoke-firmware`, a non-production isolation
 sketch that runs only Seeed's published MicroSD init shape and reports
 `SEEED_SD_SMOKE ... public_rf_tx=0 formats_sd=0`.
+The stricter release proof artifact is
+`rp2040-seeed-official-sd-smoke-firmware`; its sketch emits
+`{"test":"seeed_official_sd_smoke",...}` after the exact Seeed GPIO18,
+Wire20/21, SPI1 10/11/12, CS13, 1 MHz sequence and proves root open,
+mkdir, write, read, rename, stat, delete, FAT32, <=32GB, no Public RF, and no
+formatting.
 Do not use the Windows host for firmware compilation.
 
 ## Hardware Validation
@@ -122,18 +131,12 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   and calling `SD.begin(13, 1000000, SPI1)` without running a second SdFat
   probe on failure. If that already-powered library path does not mount, the
   bridge repeats the same Seeed path once after cycling GPIO18 with the SD SPI
-  pins floated during rail-off before falling back to bounded
-  raw SPI probes across high/low rail and dedicated/shared SPI candidates. The
-  high-power candidates are probed once without force-cycling the rail before
-  force-cycled fallback probes run. Only raw-present fallback candidates get a
-  single matching Arduino `SD`/`SDFS` filesystem mount attempt before the bridge
-  declares the card unmountable. Failed fallback mount attempts can report
-  captured SdFat diagnostic `mount_err` and `mount_data` bytes from the same
-  SPI1 bus. A raw probe that collapses to the all-zero CMD0/CMD8 firmware path
-  reports `state=error note=sd_probe_rejected_card` rather than ordinary
-  `no_card`; an inserted card with an unusable filesystem reports
-  `not_fat32_or_unmountable` and `needs_fat32=1`. Users must prepare FAT32
-  cards on a computer.
+  pins floated during rail-off. If both official attempts fail, production
+  mount returns `state=error note=sd_mount_failed_official_seeed_path`;
+  heuristic raw probes remain diagnostic-only under `DESKOS_SD_DIAG`. A mounted
+  filesystem is rejected before `/deskos` creation unless `SD.fatType()==32`,
+  and reports `not_fat32_or_unmountable` with `needs_fat32=1`. Users must
+  prepare FAT32 cards on a computer.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.

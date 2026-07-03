@@ -136,6 +136,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build RP2040 official Seeed SD smoke
+        shell: bash
+        run: |
+          mkdir -p artifacts/rp2040-seeed-official-sd-smoke
+          arduino-cli compile \
+            --fqbn rp2040:rp2040:seeed_indicator_rp2040 \
+            --output-dir artifacts/rp2040-seeed-official-sd-smoke \
+            firmware/rp2040_sd_bridge/smoke/seeed_official_sd_smoke
+          (cd artifacts/rp2040-seeed-official-sd-smoke && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+
+      - name: Verify RP2040 official Seeed SD smoke checksums
+        run: python ./scripts/verify_checksums.py artifacts/rp2040-seeed-official-sd-smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rp2040-seeed-official-sd-smoke-firmware
+          path: artifacts/rp2040-seeed-official-sd-smoke/**
+          if-no-files-found: error
+          retention-days: 14
+
   firmware-build:
     runs-on: ubuntu-latest
     container: espressif/idf:release-v5.1

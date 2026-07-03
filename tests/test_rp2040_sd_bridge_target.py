@@ -17,6 +17,15 @@ from tools.rp2040_sd_protocol import (
 ROOT = Path(__file__).resolve().parents[1]
 SKETCH = ROOT / "firmware" / "rp2040_sd_bridge" / "deskos_sd_bridge" / "deskos_sd_bridge.ino"
 README = ROOT / "firmware" / "rp2040_sd_bridge" / "README.md"
+WORKFLOW = ROOT / ".github" / "workflows" / "d1l-ci.yml"
+OFFICIAL_SMOKE = (
+    ROOT
+    / "firmware"
+    / "rp2040_sd_bridge"
+    / "smoke"
+    / "seeed_official_sd_smoke"
+    / "seeed_official_sd_smoke.ino"
+)
 
 
 def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
@@ -109,33 +118,47 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "mount_sd_with_probe_config" in sketch
     assert "if (mount_sd_seeed_sample_path(true, false))" in sketch
     assert "mounted_snapshot_from_current_config" in sketch
-    assert "last_present_probe" in sketch
-    assert "for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i)" in sketch
     assert "return mount_sd_with_power(s_sd_power_high, probe.force_power_cycle)" in sketch
-    assert "if (mount_sd_with_probe_config(probes[i]))" in sketch
-    assert "raw_probe_rejected_card(probes[0])" in sketch
-    assert 'snapshot.note = "sd_probe_rejected_card"' in sketch
     assert "SPI1.begin()" in sketch
     assert "delay(50)" in sketch
     assert "SdSpiConfig(SD_CS_PIN, options, SD_SPI_HZ, &SPI1)" in sketch
     assert "SdCardFactory card_factory" in sketch
     assert "manual_probe_card(DEDICATED_SPI, true, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, true, false)" in sketch
-    assert "manual_probe_card(DEDICATED_SPI, true)" in sketch
-    assert "manual_probe_card(SHARED_SPI, true)" in sketch
     assert "manual_probe_card(DEDICATED_SPI, false)" in sketch
     assert "manual_probe_card(SHARED_SPI, false)" in sketch
     assert 'SdSnapshot snapshot = pending_snapshot("filesystem_mounting")' in sketch
     assert 'snapshot = pending_snapshot("filesystem_mounting_power_cycle")' in sketch
     assert "publish_mount_progress(snapshot)" in sketch
     assert "if (s_worker_busy)" in sketch
-    assert 'snapshot = pending_snapshot("probing_card")' in sketch
-    assert sketch.index('SdSnapshot snapshot = pending_snapshot("filesystem_mounting")') < sketch.index("if (mount_sd_seeed_sample_path(true, false))")
-    assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index('snapshot = pending_snapshot("probing_card")')
-    assert sketch.index("if (mount_sd_seeed_sample_path(true, false))") < sketch.index("if (mount_sd_seeed_sample_path(true, true))")
-    assert sketch.index("if (mount_sd_seeed_sample_path(true, true))") < sketch.index('snapshot = pending_snapshot("probing_card")')
-    assert sketch.index('snapshot = pending_snapshot("probing_card")') < sketch.index("manual_probe_card(DEDICATED_SPI, true, false)")
-    assert sketch.index("manual_probe_card(SHARED_SPI, true)") < sketch.index("if (mount_sd_with_probe_config(probes[i]))")
+    mount_body = sketch.split("SdSnapshot mount_status_blocking()", 1)[1].split(
+        "SdSnapshot mount_status()", 1
+    )[0]
+    assert mount_body.count("mount_sd_seeed_sample_path(true,") == 2
+    assert "mount_sd_with_probe_config(" not in mount_body
+    assert "manual_probe_card(" not in mount_body
+    assert "raw_probe_rejected_card(" not in mount_body
+    assert "sd_mount_failed_official_seeed_path" in mount_body
+    assert "filesystem_mounting_power_cycle" in mount_body
+    assert mount_body.index('pending_snapshot("filesystem_mounting")') < mount_body.index(
+        "if (mount_sd_seeed_sample_path(true, false))"
+    )
+    assert mount_body.index("if (mount_sd_seeed_sample_path(true, false))") < mount_body.index(
+        "if (mount_sd_seeed_sample_path(true, true))"
+    )
+    assert mount_body.index("if (mount_sd_seeed_sample_path(true, true))") < mount_body.index(
+        "sd_mount_failed_official_seeed_path"
+    )
+    diag_body = sketch.split("DiagSnapshot diag_status_blocking()", 1)[1].split(
+        "String bool_token", 1
+    )[0]
+    assert "previous_power_high" in diag_body
+    assert "previous_spi_options" in diag_body
+    assert "s_sd_power_high = selected->power_high" not in diag_body
+    assert "s_sd_spi_options = selected->options" not in diag_body
+    assert "s_sd_power_high = previous_power_high" in diag_body
+    assert "s_sd_spi_options = previous_spi_options" in diag_body
+    assert "configure_seeed_sd_bus(true, false)" in diag_body
     assert "s_last_mount_error = card->errorCode()" in sketch
     assert "s_last_mount_data = card->errorData()" in sketch
     assert '" mount_err="' in sketch
@@ -231,6 +254,20 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "MeshCore DeskOS D1L SD" in sketch
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
+    assert "bool mounted_fs_is_fat32()" in sketch
+    assert "SD.fatType() == 32" in sketch
+    assert "bool snapshot_fs_is_fat32" in sketch
+    assert 'strcmp(snapshot.fs, "fat32") == 0' in sketch
+    mounted_body = sketch.split("SdSnapshot mounted_snapshot_from_current_config()", 1)[1].split(
+        "SdSnapshot mount_status_blocking()", 1
+    )[0]
+    assert mounted_body.index("if (!mounted_fs_is_fat32())") < mounted_body.index(
+        "prepare_deskos_structure(&prepare_note)"
+    )
+    snapshot_body = sketch.split("void send_snapshot", 1)[1].split(
+        "void append_probe_tokens", 1
+    )[0]
+    assert "snapshot_fs_is_fat32(snapshot)" in snapshot_body
     assert '"none",\n        false,\n        0,\n        0,' in sketch
     assert '"none",\n        false,\n        false,\n        0,\n        0,' not in sketch
 
@@ -263,9 +300,7 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         "mount_not_checked",
         "filesystem_mounting",
         "filesystem_mounting_power_cycle",
-        "probing_card",
-        "sd_probe_rejected_card",
-        "card_detected_mounting",
+        "sd_mount_failed_official_seeed_path",
         "deskos_root_missing",
         "deskos_manifest_invalid",
         "deskos_map_manifest_invalid",
@@ -320,9 +355,51 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "REPLACE_BACKUP_SUFFIX" in sketch
     assert "SD.rename(target_path, backup_path)" in sketch
     assert "(void)SD.rename(backup_path, target_path)" in sketch
+    assert 'constexpr char REPLACE_BACKUP_SUFFIX[] = ".bak";' in sketch
+    assert "sizeof(REPLACE_BACKUP_SUFFIX)" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
+
+
+def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
+    smoke = OFFICIAL_SMOKE.read_text(encoding="utf-8")
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "#include <SD.h>" in smoke
+    assert "#include <SPI.h>" in smoke
+    assert "#include <Wire.h>" in smoke
+    assert "constexpr uint8_t SD_CS_PIN = 13;" in smoke
+    assert "constexpr uint8_t SD_SCK_PIN = 10;" in smoke
+    assert "constexpr uint8_t SD_MOSI_PIN = 11;" in smoke
+    assert "constexpr uint8_t SD_MISO_PIN = 12;" in smoke
+    assert "constexpr uint8_t SD_POWER_PIN = 18;" in smoke
+    assert "constexpr uint8_t SD_I2C_SDA_PIN = 20;" in smoke
+    assert "constexpr uint8_t SD_I2C_SCL_PIN = 21;" in smoke
+    assert "constexpr uint32_t SD_SPI_HZ = 1000000U;" in smoke
+    assert "constexpr uint8_t MAX_CARD_GB = 32;" in smoke
+    assert "delay(1000)" in smoke
+    assert "Wire.setSDA(SD_I2C_SDA_PIN)" in smoke
+    assert "Wire.setSCL(SD_I2C_SCL_PIN)" in smoke
+    assert "SPI1.setSCK(SD_SCK_PIN)" in smoke
+    assert "SPI1.setTX(SD_MOSI_PIN)" in smoke
+    assert "SPI1.setRX(SD_MISO_PIN)" in smoke
+    assert "SD.begin(SD_CS_PIN, SD_SPI_HZ, SPI1)" in smoke
+    assert 'SD.open("/")' in smoke
+    assert "SD.mkdir(SMOKE_DIR)" in smoke
+    assert "SD.open(SMOKE_TMP, FILE_WRITE)" in smoke
+    assert "SD.rename(SMOKE_TMP, SMOKE_FINAL)" in smoke
+    assert "SD.remove(SMOKE_FINAL)" in smoke
+    assert "seeed_official_sd_smoke" in smoke
+    assert "max_card_gb" in smoke
+    assert "public_rf_tx" in smoke
+    assert "formats_sd" in smoke
+    assert "SD.format" not in smoke
+    assert "SDFS.format" not in smoke
+    assert "FatFormatter" not in smoke
+    assert "firmware/rp2040_sd_bridge/smoke/seeed_official_sd_smoke" in workflow
+    assert "rp2040-seeed-official-sd-smoke-firmware" in workflow
+    assert "python ./scripts/verify_checksums.py artifacts/rp2040-seeed-official-sd-smoke" in workflow
 
 
 def test_rp2040_docs_mark_ci_build_and_store_migration_pending():
