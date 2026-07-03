@@ -1549,6 +1549,32 @@ bool write_verify_remove_text_file(const char *path, const char *payload) {
     return ok;
 }
 
+bool deskos_root_accepts_file_ops() {
+    (void)remove_file_if_present(DESKOS_FILE_OPS_PROBE);
+    return write_verify_remove_text_file(DESKOS_FILE_OPS_PROBE,
+                                         DESKOS_FILE_OPS_PROBE_PAYLOAD);
+}
+
+bool repair_deskos_root_for_file_ops() {
+    if (deskos_root_accepts_file_ops()) {
+        return true;
+    }
+    (void)remove_file_if_present(DESKOS_FILE_OPS_PROBE);
+    (void)remove_file_if_present(DESKOS_JSON_PROBE);
+
+    (void)SD.remove(DESKOS_ROOT);
+    if (SD.exists(DESKOS_ROOT)) {
+        (void)SD.rmdir(DESKOS_ROOT);
+    }
+    if (SD.exists(DESKOS_ROOT)) {
+        return false;
+    }
+    if (!SD.mkdir(DESKOS_ROOT) && !SD.exists(DESKOS_ROOT)) {
+        return false;
+    }
+    return deskos_root_accepts_file_ops();
+}
+
 using ManifestValidator = bool (*)(const char *);
 
 bool write_atomic_text_file(const char *final_path,
@@ -1643,10 +1669,13 @@ bool prepare_deskos_structure(const char **note) {
     } else {
         created = true;
         if (!write_manifest()) {
-            if (!write_verify_remove_text_file(DESKOS_FILE_OPS_PROBE,
-                                               DESKOS_FILE_OPS_PROBE_PAYLOAD)) {
+            if (!repair_deskos_root_for_file_ops()) {
                 *note = "deskos_write_unavailable";
                 return false;
+            }
+            if (write_manifest()) {
+                *note = "structure_created_after_root_repair";
+                return true;
             }
             if (!write_verify_remove_text_file(DESKOS_JSON_PROBE,
                                                DESKOS_JSON_PROBE_PAYLOAD)) {
