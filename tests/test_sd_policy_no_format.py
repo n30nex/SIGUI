@@ -40,3 +40,57 @@ def test_sd_user_policy_copy_is_fat32_only():
     assert "prepare_fat32_on_computer" in storage
     assert "not_fat32_or_unmountable" in bridge
     assert "needs_fat32=" in bridge
+
+
+def test_release_docs_match_no_format_sd_policy():
+    release_docs = [
+        "README.md",
+        "docs/DESKOSFINAL.md",
+        "docs/ROADMAP.md",
+        "docs/KNOWN_LIMITATIONS.md",
+        "docs/RELEASE_CHECKLIST.md",
+        "docs/RP2040_SD_BRIDGE_FLASH_D1L.md",
+        "docs/SD_BRIDGE_PROTOCOL_D1L.md",
+        "docs/TEST_PLAN_D1L.md",
+    ]
+    forbidden = [
+        "status/format",
+        "format once",
+        "format cards on boot",
+        "auto_format_unformatted",
+        "auto-prepare clearly blank",
+        "auto-prepare unformatted/new cards",
+        "format would risk existing user data",
+        "Fresh blank/unformatted card: format",
+        "formats/prepares according to setting",
+        "user-confirmed format flow",
+        "format with internal confirmation",
+        "Require confirmation for ambiguous/existing-data formats",
+        "Blank/unformatted card: prepare according to production policy",
+        "never reformat a card that already",
+        "Download and cache allowed attributed map tiles after Wi-Fi",
+        "download one center tile when Wi-Fi",
+        "touch Map Tiles provider/download sheet",
+        "provider/center-tile download UX",
+    ]
+
+    offenders: list[str] = []
+    for rel in release_docs:
+        lowered = read(rel).lower()
+        for phrase in forbidden:
+            if phrase.lower() in lowered:
+                offenders.append(f"{rel}: {phrase}")
+    assert offenders == []
+
+    combined = "\n".join(read(rel) for rel in release_docs).lower()
+    for phrase in [
+        "users prepare fat32 sd cards on a computer",
+        "no device-side sd formatting path",
+        "nvs fallback",
+        "non-fat32",
+        "official seeed smoke",
+        "filecanary",
+        "retained-canary",
+        "fat32 matrix",
+    ]:
+        assert phrase in combined

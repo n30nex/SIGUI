@@ -14,7 +14,7 @@ This plan supersedes the older roadmap where the product direction conflicts wit
 1. **Crash-proofing the LVGL shell.** Opening `Msg`, `Nodes`, and `Pkts` must never reboot/panic/freeze.
 2. **Replacing the dense developer-style UI with a user-first desk companion UI.** Hide low-level data unless the user opens diagnostics.
 3. **Making every long page scroll by touch.** No fixed-position data dumps that run off-screen.
-4. **Finishing SD-card boot/use behavior.** Detect, validate, prepare, mount, and use SD automatically when safe; never reformat a card that already has the correct DeskOS structure.
+4. **Finishing SD-card boot/use behavior.** Detect, validate, mount, create the DeskOS structure on FAT32 media, and use SD automatically when safe; never format SD on-device.
 5. **Completing Messaging, Nodes, Map, Packets, Settings as real user workflows.** Not just preview rows and status cards.
 
 The Codex team should work in large parallel chunks, but merge through one integration lead. Do not allow agents to independently rewrite the same UI file at the same time.
@@ -84,14 +84,14 @@ Then use that constant consistently in Public messages, DMs, composer max length
 
 ### 1.6 SD foundation exists, but production behavior is not finished
 
-The current firmware has RP2040 SD bridge status, format guard, file protocol constants, retained blob-store switching, exports, and map tile canaries. What is still missing for the user’s requested behavior is the complete boot-time SD state machine:
+The current firmware has RP2040 SD bridge status, no-format policy enforcement, file protocol constants, retained blob-store switching, exports, and map tile canaries. What is still missing for the user’s requested behavior is the complete boot-time SD state machine:
 
 - Detect card on boot.
 - Mount/validate card.
-- If it already has the correct DeskOS structure, use it and do not format.
-- If it has a valid filesystem but is missing the DeskOS structure, create the structure without formatting.
-- If it is blank/unformatted/unsupported and allowed by the configured policy, format once, create the structure, then use it.
-- If format would risk existing user data, require explicit confirmation and keep NVS fallback active.
+- If it already has the correct DeskOS structure, use it.
+- If it is a FAT32 card but missing the DeskOS structure, create the structure without formatting.
+- If no card is present, keep NVS fallback active.
+- If the card is non-FAT32, unmountable, blank, or unsupported, keep NVS fallback active and tell the user to prepare FAT32 on a computer.
 - Prove retained stores, exports, map-tile cache, and remount after reboot.
 
 ---
@@ -112,7 +112,7 @@ The normal user should be able to:
 - Sort nodes by last heard, signal, role, name, and favorites.
 - See local repeaters with last heard and signal strength.
 - See a local node map after picking the D1L location.
-- Download and cache allowed attributed map tiles after Wi-Fi, SD cache, D1L location, and provider setup are configured.
+- Configure allowed attributed map tile sources and validate the SD tile cache through serial until touch tile rendering and live-download proof exists.
 - View live RX/TX packets in a terminal-style diagnostic screen.
 - Configure Wi-Fi/BLE/Radio/SD/Display safely from Settings.
 
@@ -180,9 +180,9 @@ The firmware is not production-ready until all of these pass on real D1L hardwar
 
 - Boot detects SD state without crashing or blocking indefinitely.
 - Correct DeskOS card: mount and use; no format.
-- Valid filesystem without DeskOS root: create root and manifest; no format.
-- Blank/unformatted card: prepare according to production policy, then use.
-- Card with unrelated existing data: do not wipe silently; ask for confirmation or stay NVS fallback.
+- FAT32 filesystem without DeskOS root: create root and manifest; no format.
+- Blank, unformatted, non-FAT32, or unmountable card: stay on NVS fallback and show FAT32-on-computer guidance.
+- Card with unrelated existing data: do not wipe; stay on NVS fallback unless the user backs it up and prepares FAT32 on a computer.
 - SD-backed Public/DM/routes/packets/map tiles survive reboot/remount.
 - Removing or failing SD falls back cleanly to onboard state.
 
@@ -232,7 +232,7 @@ Owns node data models, sort/filter, local repeater panel, node details, route/pa
 
 ### Agent E — SD, Map, and Offline Tiles
 
-Owns RP2040 SD boot state machine, DeskOS card structure, format policy, retained SD stores, map location setup, tile cache, tile sideload/download, and map node display.
+Owns RP2040 SD boot state machine, DeskOS card structure, no-format policy, retained SD stores, map location setup, tile cache, tile sideload/serial validation, and map node display.
 
 ### Agent F — Packets and Diagnostics
 
@@ -756,35 +756,25 @@ boot
       use NVS fallback, show SD absent
   if card ready + /deskos/manifest valid:
       mount + use SD stores
-  if valid FS but missing /deskos:
+  if FAT32 FS but missing /deskos:
       create /deskos structure + manifest, run write canary, use SD stores
-  if blank/unformatted:
-      if auto_prepare_new_cards enabled:
-          format with internal confirmation, create structure, run canary, use SD stores
-      else:
-          show setup required, use NVS fallback
+  if blank/unformatted/non-FAT32:
+      show prepare-FAT32-on-computer guidance, use NVS fallback
   if unknown FS or existing unrelated data:
-      do not wipe silently; show confirmation UI, use NVS fallback
+      do not wipe; show FAT32 guidance, use NVS fallback
   if any timeout/error:
       use NVS fallback, show friendly Storage status
 ```
 
-### 9.3 Reconciling “format cards on boot” with safety
+### 9.3 FAT32-only no-format SD policy
 
-Production setting:
+Production policy:
 
-```c
-settings.sd.auto_prepare_new_cards = true;
-settings.sd.auto_format_unformatted = true;
-settings.sd.require_confirmation_for_existing_data = true;
-```
-
-This satisfies the product goal while avoiding accidental data loss:
-
-- Correct DeskOS card: never format.
-- Fresh blank/unformatted card: format on boot and use.
-- Existing FAT/exFAT card without DeskOS root: create root, no format.
-- Card with unrelated files or ambiguous state: ask before destructive format.
+- Users prepare FAT32 SD cards on a computer.
+- Correct DeskOS card: use it.
+- FAT32 card without `/deskos`: create the DeskOS structure and run canaries without formatting.
+- No card, blank card, non-FAT32 card, unmountable card, or ambiguous card: keep NVS fallback active and show FAT32-on-computer guidance.
+- ESP32 firmware, RP2040 firmware, serial commands, scripts, and touch UI must never format SD cards.
 
 ### 9.4 Retained store migration
 
@@ -812,9 +802,9 @@ Run these scenarios on hardware:
 
 1. No card → boot OK, NVS fallback, no crash.
 2. Correct DeskOS card → boot uses SD, no format.
-3. Valid blank FAT/exFAT card without `/deskos` → creates structure, no format.
-4. Unformatted card → formats/prepares according to setting, creates structure, uses SD.
-5. Existing unrelated files → does not silently wipe.
+3. FAT32 card without `/deskos` → creates structure, no format.
+4. Blank, unformatted, non-FAT32, or unmountable card → NVS fallback plus FAT32-on-computer guidance.
+5. Existing unrelated files → does not wipe.
 6. SD removed after boot → UI reports fallback/no crash.
 7. Reboot after messages/routes/packets/map tile canary → data survives.
 8. RP2040 bridge unavailable → boot OK with friendly warning.
@@ -887,7 +877,7 @@ Map → Tiles
   Zooms: 8-13 default
   Estimated tiles: N
   Estimated storage: N MB
-  [Download]
+  [Download unavailable until tile rendering proof]
   [Pause]
   [Clear cache]
 ```
@@ -896,8 +886,8 @@ Requirements:
 
 - Wi-Fi must be connected.
 - SD must be ready.
-- User must opt in.
-- Downloads must be resumable.
+- User must opt in through serial validation until touch rendering proof exists.
+- Touch live downloads must stay hidden or unavailable as `tile_render_pending`.
 - Never block UI task during download.
 - Save progress and errors.
 
@@ -1290,10 +1280,10 @@ entries.
 
 - [x] Implement `d1l_storage_boot_prepare()` with bounded async-mount polling before retained stores initialize.
 - [x] Add `/deskos/manifest.json` schema.
-- [x] Create structure without format when FS is valid.
-- [ ] Auto-prepare unformatted/new cards according to production policy.
-- [x] Never format correct DeskOS cards.
-- [x] Require confirmation for ambiguous/existing-data formats.
+- [x] Create structure without format when FAT32 is valid.
+- [ ] Report unformatted/new/non-FAT32 cards with NVS fallback and FAT32-on-computer guidance.
+- [x] Never format SD cards on-device.
+- [x] Keep NVS fallback for ambiguous/existing-data cards and guide backup/reformat on a computer.
 - [x] Add reboot/remount acceptance script.
 
 Current blocker: fresh FAT32-only SD matrix evidence is still needed. The bridge
@@ -1359,7 +1349,7 @@ Hard requirements:
 7. Map must first ask the user to choose/drop the D1L location by touch, persist it, then show nearby GPS nodes. Add SD-backed free/offline tile cache and Wi-Fi/user-confirmed downloads or sideloaded tiles.
 8. Packets must become a terminal-style live RX/TX feed with color-coded rows, pause/filter/search, and details.
 9. Settings must be friendly and grouped: Wi-Fi, BLE, MeshCore radio, Storage, Display, Diagnostics, About.
-10. SD behavior: on boot, detect card, validate /deskos structure, use it if correct, create structure without formatting if filesystem is valid, auto-prepare clearly blank/unformatted cards according to production policy, and never format an already-correct DeskOS card. Ambiguous/existing-data destructive format must require confirmation and NVS fallback must remain safe.
+10. SD behavior: on boot, detect card, validate `/deskos` structure, use it if correct, create structure without formatting when a FAT32 filesystem is valid, keep NVS fallback for no-card or unusable-card states, and never format SD cards from firmware, serial, scripts, or UI.
 11. Preserve Canada/USA MeshCore defaults: 910.525 MHz, BW62.5, SF7, CR5, 20 dBm, TCXO NONE unless hardware/regulatory checks justify changes.
 12. Keep flash/testing scripts explicit-port only via D1L_PORT or --port. Do not hardcode COM ports.
 
