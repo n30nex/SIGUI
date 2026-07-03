@@ -33,7 +33,7 @@ def ready_storage_line() -> str:
 
 def mount_line() -> str:
     return (
-        '{"schema":1,"ok":true,"cmd":"storage mount",'
+        '{"schema":1,"ok":true,"cmd":"storage remount",'
         '"sd":{"state":"ready","present":true,"mounted":true},'
         '"public_rf_tx":false,"formats_sd":false}\n'
     )
@@ -145,5 +145,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert report["post_map_tile_canary_passed"] is True
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
+    assert "storage remount\n" in pre_serial.writes
+    assert "storage remount\n" in post_serial.writes
     assert "storage map-tile-check remount1\n" in post_serial.writes
     assert "storage map-tile-check remount1" in report["commands"]

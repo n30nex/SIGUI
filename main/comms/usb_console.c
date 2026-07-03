@@ -899,7 +899,13 @@ static void cmd_storage_status(void)
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     ok_begin("storage status");
-    printf(",\"sd\":{\"state\":");
+    printf(",\"manager\":{\"running\":%s,\"state\":",
+           bool_json(status.manager_running));
+    print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+           (unsigned long)status.manager_attempt,
+           (unsigned long)status.manager_backoff_ms,
+           bool_json(status.force_nvs));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
     printf(",\"interface\":");
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
@@ -1023,6 +1029,63 @@ static void cmd_storage_mount(void)
     printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"note\":");
     print_json_string(status.note ? status.note : "");
     printf("}\n");
+}
+
+static void print_storage_manager_result(const char *cmd, esp_err_t ret)
+{
+    d1l_storage_status_t status = {0};
+    d1l_storage_status(&status);
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":",
+           D1L_CONSOLE_SCHEMA,
+           bool_json(ret == ESP_OK));
+    print_json_string(cmd);
+    printf(",\"code\":\"%s\",\"manager\":{\"running\":%s,\"state\":",
+           esp_err_to_name(ret),
+           bool_json(status.manager_running));
+    print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+           (unsigned long)status.manager_attempt,
+           (unsigned long)status.manager_backoff_ms,
+           bool_json(status.force_nvs));
+    print_json_string(status.sd_state ? status.sd_state : "unknown");
+    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s},\"setup_action\":",
+           bool_json(status.rp2040_bridge_ready),
+           bool_json(status.rp2040_sd_protocol_supported),
+           bool_json(status.sd_present),
+           bool_json(status.sd_mounted),
+           bool_json(status.sd_data_root_ready));
+    print_json_string(status.setup_action ? status.setup_action : "not_available");
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"note\":");
+    print_json_string(status.note ? status.note : "");
+    printf("}\n");
+}
+
+static void cmd_storage_remount(void)
+{
+    esp_err_t ret = d1l_storage_manager_request_remount();
+    print_storage_manager_result("storage remount", ret);
+}
+
+static void cmd_storage_reset_bridge(void)
+{
+    esp_err_t ret = d1l_storage_manager_reset_bridge();
+    print_storage_manager_result("storage reset-bridge", ret);
+}
+
+static void cmd_storage_force_nvs(const char *line)
+{
+    bool force = true;
+    if (strcmp(line, "storage force-nvs off") == 0) {
+        force = false;
+    } else if (strcmp(line, "storage force-nvs") != 0 &&
+               strcmp(line, "storage force-nvs on") != 0) {
+        err_result("storage force-nvs", "INVALID_MODE",
+                   "usage: storage force-nvs [on|off]");
+        return;
+    }
+    d1l_storage_manager_force_nvs(force);
+    esp_err_t ret = d1l_storage_manager_start();
+    print_storage_manager_result(force ? "storage force-nvs" : "storage force-nvs off", ret);
 }
 
 static void print_storage_diag_probe(const char *name,
@@ -3900,7 +3963,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 ping\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -3985,6 +4048,12 @@ static void handle_line(const char *line)
         cmd_storage_status();
     } else if (strcmp(line, "storage mount") == 0) {
         cmd_storage_mount();
+    } else if (strcmp(line, "storage remount") == 0) {
+        cmd_storage_remount();
+    } else if (strcmp(line, "storage reset-bridge") == 0) {
+        cmd_storage_reset_bridge();
+    } else if (strncmp(line, "storage force-nvs", strlen("storage force-nvs")) == 0) {
+        cmd_storage_force_nvs(line);
     } else if (strcmp(line, "storage diag") == 0) {
         cmd_storage_diag();
     } else if (strcmp(line, "storage diag raw") == 0) {

@@ -40,7 +40,7 @@ def command_plan(scenario: str) -> list[str]:
     if scenario == "rp2040-unavailable":
         return ["rp2040 ping", "storage status", "health"]
 
-    commands = ["rp2040 ping", "storage status", "storage mount", "storage status"]
+    commands = ["rp2040 ping", "storage status", "storage remount", "storage status"]
     if scenario in FILE_GATE_SCENARIOS:
         commands.append("storage filecanary")
     if scenario in SETUP_SCENARIOS:
@@ -248,7 +248,7 @@ def boot_prepare_passed(
 
 
 def send_with_timeout(ser, command: str, timeout: float) -> dict:
-    if command in {"storage mount", "storage filecanary"}:
+    if command in {"storage mount", "storage remount", "storage filecanary"}:
         command_timeout = max(timeout, 15.0)
     else:
         command_timeout = timeout
@@ -293,7 +293,7 @@ def run_acceptance(
         filecanary = None
 
         if scenario != "rp2040-unavailable":
-            run_command(ser, "storage mount")
+            run_command(ser, "storage remount")
             storage_after = run_command(ser, "storage status")
             for _attempt in range(mount_poll_attempts):
                 if sd_state(storage_after) != "mount_pending":

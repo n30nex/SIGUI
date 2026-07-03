@@ -23,9 +23,17 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
     assert "d1l_storage_boot_prepare" in header
+    assert "d1l_storage_manager_start" in header
+    assert "d1l_storage_manager_request_remount" in header
+    assert "d1l_storage_manager_reset_bridge" in header
+    assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
     assert "rp2040_sd_protocol_supported" in header
     assert "sd_needs_fat32" in header
+    assert "manager_state" in header
+    assert "manager_running" in header
+    assert "force_nvs" in header
+    assert "manager_backoff_ms" in header
     assert "setup_action" in header
     assert '"storage/storage_status.c"' in cmake
     assert '"storage/export_store.c"' in cmake
@@ -35,9 +43,33 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_rp2040_bridge_init()") < app_main.index("d1l_message_store_init()")
     assert app_main.index("d1l_storage_boot_prepare") < app_main.index("d1l_message_store_init()")
+    assert app_main.index("d1l_packet_log_init()") < app_main.index("d1l_storage_manager_start()")
+    assert app_main.index("d1l_storage_manager_start()") < app_main.index("d1l_board_init()")
     assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
+    assert "storage manager start failed" in app_main
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
+    for state in [
+        "BRIDGE_WAIT",
+        "PING",
+        "STATUS",
+        "MOUNT",
+        "READY_SD",
+        "READY_NVS",
+        "NEEDS_FAT32",
+        "NO_CARD",
+        "ERROR_BACKOFF",
+    ]:
+        assert state in source
+    assert "storage_manager_task" in source
+    assert 'xTaskCreate(storage_manager_task' in source
+    assert "d1l_rp2040_bridge_ping" in source
+    assert "d1l_rp2040_bridge_reset" in source
+    assert "storage_sd_ready_for_files" in source
+    assert "apply_force_nvs_status" in source
+    assert "d1l_storage_manager_request_remount" in source
+    assert "d1l_storage_manager_reset_bridge" in source
+    assert "d1l_storage_manager_force_nvs" in source
     assert 's_status.sd_interface = "rp2040"' in source
     assert 's_status.sd_state = "pending_bridge"' in source
     assert '"protocol_pending"' in source
@@ -96,9 +128,10 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "esp_err_t d1l_storage_status_mount", 1
     )[0]
     assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
-    assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in boot_prepare
-    assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in boot_prepare
-    assert 'strcmp(s_status.sd_state, "mount_pending")' in boot_prepare
+    assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
+    assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in source
+    assert 'strcmp(s_status.sd_state, "mount_pending")' in source
+    assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
 
@@ -176,6 +209,12 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'ok_begin("storage map-policy")' in console
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "d1l_storage_manager_request_remount" in console
+    assert "d1l_storage_manager_reset_bridge" in console
+    assert "d1l_storage_manager_force_nvs" in console
+    assert '\\"manager\\":{\\"running\\":%s' in console
+    assert '\\"backoff_ms\\":%lu' in console
+    assert '\\"force_nvs\\":%s' in console
     assert 'cmd_storage_diag' in console
     assert 'ok_begin("storage setup")' in console
     assert 'ok_begin("storage filecanary")' in console
@@ -183,6 +222,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'ok_begin("storage export-canary")' in console
     assert '"storage status"' in console
     assert '"storage mount"' in console
+    assert '"storage remount"' in console
+    assert '"storage reset-bridge"' in console
+    assert "storage force-nvs [on|off]" in console
     assert '"storage diag"' in console
     assert '"storage setup"' in console
     assert "storage map-policy" in console
@@ -194,6 +236,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage export-canary <token>" in console
     assert 'strcmp(line, "storage status")' in console
     assert 'strcmp(line, "storage mount")' in console
+    assert 'strcmp(line, "storage remount")' in console
+    assert 'strcmp(line, "storage reset-bridge")' in console
+    assert 'strncmp(line, "storage force-nvs"' in console
     assert 'strcmp(line, "storage diag")' in console
     assert 'strcmp(line, "storage map-policy")' in console
     assert 'strcmp(line, "storage setup")' in console

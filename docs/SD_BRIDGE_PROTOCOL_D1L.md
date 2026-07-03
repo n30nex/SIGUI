@@ -56,7 +56,7 @@ latest SD state.
 ## Mount Request
 
 ESP32 sends this explicit SD-touch command when the operator runs
-`storage mount`:
+`storage mount` or when the storage manager services `storage remount`:
 
 ```text
 DESKOS_SD_MOUNT
@@ -193,6 +193,14 @@ enable SD-backed retained history before store load. It must stay bounded by the
 boot timeout, must not send any formatting command, and must leave onboard NVS
 fallback active if the bridge is unavailable, the card is absent, the mount is
 still pending, or the ready file-operation gate is not available.
+
+After retained stores initialize, `storage_manager` continues convergence in
+the background with explicit states `BRIDGE_WAIT`, `PING`, `STATUS`, `MOUNT`,
+`READY_SD`, `READY_NVS`, `NEEDS_FAT32`, `NO_CARD`, and `ERROR_BACKOFF`.
+`storage remount` queues a new non-formatting mount attempt, `storage
+reset-bridge` resets the RP2040 bridge and remounts, and `storage force-nvs
+[on|off]` provides an operator fallback override without formatting or Public
+RF.
 
 ## FAT32-Only Storage Policy
 

@@ -35,7 +35,7 @@ MOUNT_POLL_INTERVAL_SECONDS = 2.0
 def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
     commands = [
         "storage status",
-        "storage mount",
+        "storage remount",
         "storage status",
         "storage filecanary",
         f"storage retained-canary {token}",
@@ -47,7 +47,7 @@ def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
             [
                 "reboot",
                 "storage status",
-                "storage mount",
+                "storage remount",
                 "storage status",
                 *retained_readback_commands(token),
                 f"storage map-tile-check {token}",
@@ -138,7 +138,7 @@ def run_command(ser, command: str, timeout: float) -> dict:
         raise RuntimeError(f"refusing destructive/RF command in SD remount acceptance: {command}")
     command_timeout = (
         max(timeout, 15.0)
-        if command in {"storage mount", "storage filecanary"}
+        if command in {"storage mount", "storage remount", "storage filecanary"}
         or command.startswith("storage map-tile-")
         else timeout
     )
@@ -152,10 +152,10 @@ def run_mount_sequence(
     mount_poll_attempts: int,
     mount_poll_interval_sec: float,
 ) -> tuple[list[str], list[dict], dict]:
-    commands = ["storage status", "storage mount", "storage status"]
+    commands = ["storage status", "storage remount", "storage status"]
     results = [
         run_command(ser, "storage status", timeout),
-        run_command(ser, "storage mount", timeout),
+        run_command(ser, "storage remount", timeout),
         run_command(ser, "storage status", timeout),
     ]
     storage_after = results[-1]

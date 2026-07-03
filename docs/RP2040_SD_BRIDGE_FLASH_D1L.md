@@ -44,7 +44,8 @@ flashed the ESP32 image and copied the RP2040 UF2 after the ESP32
 `rp2040 ping` works with `sd_touched=false`, but the SD-touching status/diag
 path still timed out. Current preflight therefore includes `rp2040 ping` to
 prove the flashed bridge app answers without touching SD, then uses explicit
-`storage mount` for the SD-touch attempt.
+`storage mount` for the direct SD-touch attempt and `storage remount` in the
+acceptance runners to prove storage-manager convergence.
 
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
@@ -113,8 +114,9 @@ python .\scripts\soak_d1l.py --port COM12 --duration-sec 90 --sample-interval-se
 Expected proof with a ready card:
 
 - `storage status` reports `sd.rp2040_protocol_supported=true`.
-- `storage mount` returns `ok=true` and a ready SD state before file canaries
-  are attempted.
+- `storage remount` returns `ok=true`, `storage status` exposes a
+  `manager.state`, and the ready SD state is visible before file canaries are
+  attempted.
 - `sd_boot_prepare_acceptance_d1l.py` reports ready file gates for correct and
   missing-structure FAT32 cards without formatting. Unmountable or non-FAT32
   media must remain on NVS fallback and tell the user to prepare FAT32 on a

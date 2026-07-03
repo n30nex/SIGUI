@@ -76,7 +76,7 @@ def firmware_mount_error_storage_line() -> str:
 
 def storage_mount_line(state: str = "ready") -> str:
     return (
-        f'{{"schema":1,"ok":true,"cmd":"storage mount",'
+        f'{{"schema":1,"ok":true,"cmd":"storage remount",'
         f'"sd":{{"state":"{state}","rp2040_protocol_supported":true}},'
         f'"public_rf_tx":false,"formats_sd":false}}\n'
     )
@@ -135,7 +135,7 @@ def test_dry_run_unformatted_never_formats():
     assert report["commands"] == [
         "rp2040 ping",
         "storage status",
-        "storage mount",
+        "storage remount",
         "storage status",
         "storage setup",
         "health",
@@ -171,7 +171,7 @@ def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
     assert ser.writes == [
         "rp2040 ping\n",
         "storage status\n",
-        "storage mount\n",
+        "storage remount\n",
         "storage status\n",
         "storage filecanary\n",
         "health\n",

@@ -51,7 +51,6 @@ void app_main(void)
     } else {
         ESP_LOGW(TAG, "RP2040 bridge UART init failed: %s", esp_err_to_name(rp2040_ret));
     }
-
     esp_err_t crash_log_ret = d1l_crash_log_init();
     if (crash_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "crash/reset log init failed: %s", esp_err_to_name(crash_log_ret));
@@ -88,6 +87,10 @@ void app_main(void)
     esp_err_t packet_log_ret = d1l_packet_log_init();
     if (packet_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
+    }
+    esp_err_t storage_manager_ret = d1l_storage_manager_start();
+    if (storage_manager_ret != ESP_OK) {
+        ESP_LOGW(TAG, "storage manager start failed: %s", esp_err_to_name(storage_manager_ret));
     }
     esp_err_t connectivity_ret = d1l_connectivity_init();
     if (connectivity_ret != ESP_OK) {
