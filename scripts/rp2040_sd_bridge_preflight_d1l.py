@@ -153,6 +153,15 @@ def classify_preflight(
     elif protocol_supported and sd.get("state") == "mount_pending":
         state = "sd_mount_pending"
         next_action = "wait_for_storage_mount_or_reset_rp2040_bridge"
+    elif bridge_uart_ready and ping_supported and not protocol_supported:
+        state = "sd_status_pending"
+        next_action = "inspect_storage_status_and_run_storage_diag"
+    elif bridge_uart_ready and not protocol_supported:
+        state = "rp2040_protocol_pending"
+        next_action = (
+            "dry_run_then_copy_rp2040_uf2" if uf2_volume_available
+            else "put_rp2040_in_uf2_bootloader"
+        )
     elif mount_attempted and mount_ok is False:
         state = "sd_mount_pending"
         next_action = "inspect_rp2040_sd_mount_timeout_and_reset_bridge"
@@ -170,15 +179,6 @@ def classify_preflight(
             "inspect_rp2040_sd_mount_error_firmware_path"
             if sd_has_mount_error(sd)
             else "confirm_fat32_card_or_inspect_rp2040_sd_mount_path"
-        )
-    elif bridge_uart_ready and ping_supported and not protocol_supported:
-        state = "sd_status_pending"
-        next_action = "inspect_storage_status_and_run_storage_diag"
-    elif bridge_uart_ready and not protocol_supported:
-        state = "rp2040_protocol_pending"
-        next_action = (
-            "dry_run_then_copy_rp2040_uf2" if uf2_volume_available
-            else "put_rp2040_in_uf2_bootloader"
         )
     elif not bridge_uart_ready:
         state = "rp2040_uart_unavailable"
@@ -248,22 +248,43 @@ def run_preflight(
         ser.reset_input_buffer()
         rp2040_status = send_command(ser, "rp2040 status", timeout)
         rp2040_ping = send_command(ser, "rp2040 ping", timeout)
-        initial_storage_status = send_command(ser, "storage status", timeout)
-        command = "storage mount"
-        command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
-        storage_mount = send_command(ser, command, command_timeout)
-        storage_status = send_command(ser, "storage status", timeout)
-        post_mount_statuses = [storage_status]
-        for _attempt in range(MOUNT_POLL_ATTEMPTS):
-            if sd_state(storage_status) != "mount_pending":
-                break
-            time.sleep(MOUNT_POLL_INTERVAL_SECONDS)
+        if rp2040_ping.get("ok") is not True:
+            bridge_ready = bool(rp2040_status.get("uart_ready") or rp2040_ping.get("bridge_ready"))
+            storage_status = {
+                "schema": 1,
+                "ok": False,
+                "cmd": "storage status",
+                "skipped": True,
+                "reason": "rp2040_ping_failed",
+                "sd": {
+                    "state": "protocol_pending" if bridge_ready else "pending_bridge",
+                    "rp2040_bridge_ready": bridge_ready,
+                    "rp2040_protocol_supported": False,
+                    "last_error": rp2040_ping.get("code") or rp2040_ping.get("error") or "ESP_ERR_TIMEOUT",
+                },
+            }
+            initial_storage_status = storage_status
+            storage_mount = {"ok": None, "cmd": "storage mount", "skipped": True, "reason": "rp2040_ping_failed"}
+            storage_diag = {"ok": None, "cmd": "storage diag", "skipped": True, "reason": "rp2040_ping_failed"}
+            post_mount_statuses = []
+            health = send_command(ser, "health", timeout)
+        else:
+            initial_storage_status = send_command(ser, "storage status", timeout)
+            command = "storage mount"
+            command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
+            storage_mount = send_command(ser, command, command_timeout)
             storage_status = send_command(ser, "storage status", timeout)
-            post_mount_statuses.append(storage_status)
-        command = "storage diag"
-        command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
-        storage_diag = send_command(ser, command, command_timeout)
-        health = send_command(ser, "health", timeout)
+            post_mount_statuses = [storage_status]
+            for _attempt in range(MOUNT_POLL_ATTEMPTS):
+                if sd_state(storage_status) != "mount_pending":
+                    break
+                time.sleep(MOUNT_POLL_INTERVAL_SECONDS)
+                storage_status = send_command(ser, "storage status", timeout)
+                post_mount_statuses.append(storage_status)
+            command = "storage diag"
+            command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
+            storage_diag = send_command(ser, command, command_timeout)
+            health = send_command(ser, "health", timeout)
     classification = classify_preflight(
         rp2040_status,
         rp2040_ping,

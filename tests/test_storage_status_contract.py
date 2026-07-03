@@ -213,6 +213,21 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '#include "storage/storage_status.h"' in console
     assert 'ok_begin("storage status")' in console
     assert 'ok_begin("storage map-policy")' in console
+    status_body = console.split("static void cmd_storage_status(void)", 1)[1].split(
+        "static void cmd_storage_mount", 1
+    )[0]
+    map_policy_body = console.split("static void cmd_storage_map_policy(void)", 1)[1].split(
+        "static void print_storage_setup_payload", 1
+    )[0]
+    setup_body = console.split("static void cmd_storage_setup", 1)[1].split(
+        "static void print_packet_entry_json", 1
+    )[0]
+    assert "d1l_storage_status(&status)" in status_body
+    assert "d1l_storage_status(&status)" in map_policy_body
+    assert "d1l_storage_status(&status)" in setup_body
+    assert "d1l_storage_status_refresh(" not in status_body
+    assert "d1l_storage_status_refresh(" not in map_policy_body
+    assert "d1l_storage_status_refresh(" not in setup_body
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_manager_request_remount" in console

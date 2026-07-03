@@ -153,6 +153,14 @@ def rp2040_ping_line() -> str:
     )
 
 
+def rp2040_ping_failed_line() -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"rp2040 ping","code":"ESP_ERR_TIMEOUT",'
+        '"bridge_ready":true,"protocol_supported":false,"sd_touched":false,'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
 def test_preflight_dry_run_is_non_destructive():
     report = preflight.dry_run_report("artifact-dir")
 
@@ -524,6 +532,39 @@ def test_run_preflight_tolerates_rp2040_status_timeout_when_storage_proves_bridg
     assert report["rp2040_status_optional_ok"] is True
     assert report["classification"]["rp2040_uart_ready"] is True
     assert report["classification"]["state"] == "sd_status_pending"
+
+
+def test_run_preflight_skips_storage_mount_and_diag_after_ping_failure(monkeypatch):
+    ser = CommandAwareSerial(
+        {
+            "rp2040 status": ['{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n'],
+            "rp2040 ping": [rp2040_ping_failed_line()],
+            "health": ['{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'],
+        }
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is False
+    assert report["commands"] == ["rp2040 status", "rp2040 ping", "health"]
+    assert report["classification"]["state"] == "rp2040_protocol_pending"
+    assert report["storage_mount"]["skipped"] is True
+    assert report["storage_diag"]["skipped"] is True
+    assert ser.writes == ["rp2040 status\n", "rp2040 ping\n", "health\n"]
 
 
 def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):

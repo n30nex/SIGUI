@@ -965,7 +965,6 @@ static void cmd_rp2040_ping(void)
 
 static void cmd_storage_status(void)
 {
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     ok_begin("storage status");
@@ -1247,7 +1246,6 @@ static void cmd_storage_diag_raw(void)
 
 static void cmd_storage_map_policy(void)
 {
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     d1l_connectivity_status_t connectivity = {0};
@@ -2729,7 +2727,6 @@ static void cmd_storage_retained_canary(const char *line)
 static void cmd_storage_setup(const char *line)
 {
     (void)line;
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
 

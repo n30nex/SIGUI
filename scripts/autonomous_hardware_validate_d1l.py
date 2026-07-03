@@ -156,6 +156,14 @@ def artifact_dirs(ctx: RunContext) -> dict[str, Path]:
     }
 
 
+def official_sd_smoke_out(ctx: RunContext) -> Path:
+    return ctx.rp2040_hardware_dir / f"rp2040_seeed_official_sd_smoke_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.rp2040_port}.json"
+
+
+def bridge_restore_out(ctx: RunContext) -> Path:
+    return ctx.root / "artifacts" / "rp2040-flash" / f"rp2040-bridge-restore-copy-{ctx.short_commit}-{ctx.rp2040_port}.json"
+
+
 def require_path(path: Path, label: str) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"missing {label}: {path}")
@@ -413,7 +421,7 @@ def capture_official_smoke(port: str, baud: int, timeout: float) -> dict:
 
 
 def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: float, smoke_timeout: float, dry_run: bool) -> dict:
-    out = ctx.rp2040_hardware_dir / f"rp2040_seeed_official_sd_smoke_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.rp2040_port}.json"
+    out = official_sd_smoke_out(ctx)
     report: dict[str, Any] = {
         "schema": 1,
         "kind": "seeed_official_sd_smoke_capture",
@@ -450,7 +458,7 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
 
 
 def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, dry_run: bool) -> dict:
-    out = ctx.root / "artifacts" / "rp2040-flash" / f"rp2040-bridge-restore-copy-{ctx.short_commit}-{ctx.rp2040_port}.json"
+    out = bridge_restore_out(ctx)
     report: dict[str, Any] = {
         "schema": 1,
         "kind": "rp2040_bridge_restore",
@@ -474,6 +482,16 @@ def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, d
             timeout_sec=uf2_timeout,
         )
         time.sleep(2.0)
+        report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
+        time.sleep(2.0)
+        report["ping"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0)
+        report["ok"] = (
+            report["copy"].get("ok") is True
+            and report["ping"].get("ok") is True
+            and report["ping"].get("protocol_supported") is True
+        )
+        if not report["ok"]:
+            report["error"] = "bridge_restore_not_verified"
     write_json(out, report)
     report["path"] = str(out)
     return report
@@ -616,8 +634,8 @@ def run_release_gate(ctx: RunContext, dry_run: bool) -> dict:
     return report
 
 
-def exception_step(ctx: RunContext, kind: str, exc: Exception) -> dict:
-    return {
+def exception_step(ctx: RunContext, kind: str, exc: Exception, *, out: Path | None = None, port: str | None = None) -> dict:
+    report = {
         "schema": 1,
         "kind": kind,
         "mode": "hardware",
@@ -628,6 +646,12 @@ def exception_step(ctx: RunContext, kind: str, exc: Exception) -> dict:
         "ok": False,
         "error": str(exc),
     }
+    if port is not None:
+        report["port"] = port
+    if out is not None:
+        report["path"] = str(out)
+        write_json(out, report)
+    return report
 
 
 def download_artifacts(ctx: RunContext, dry_run: bool) -> dict:
@@ -695,6 +719,42 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
     }
 
 
+def release_gate_summary(runs: list[dict]) -> dict:
+    gate = next((step for step in runs if step.get("kind") == "release_gate_audit"), {})
+    return {
+        "path": gate.get("path"),
+        "ready_for_public_release": gate.get("ready_for_public_release"),
+        "failed_count": gate.get("failed_count"),
+        "p0_failed_count": gate.get("p0_failed_count"),
+    }
+
+
+def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace, runs: list[dict]) -> dict:
+    last_report: dict[str, Any] = {}
+    for attempt in range(2):
+        try:
+            report = restore_bridge(
+                ctx,
+                volume=args.uf2_volume,
+                uf2_timeout=args.uf2_timeout,
+                dry_run=args.dry_run,
+            )
+        except Exception as exc:
+            report = exception_step(
+                ctx,
+                "rp2040_bridge_restore",
+                exc,
+                out=bridge_restore_out(ctx),
+                port=ctx.rp2040_port,
+            )
+        report["attempt"] = attempt + 1
+        runs.append(report)
+        last_report = report
+        if report.get("ok") is True:
+            break
+    return last_report
+
+
 def run_validation(args: argparse.Namespace) -> dict:
     ctx = build_context(args)
     ctx.hardware_dir.mkdir(parents=True, exist_ok=True)
@@ -729,30 +789,25 @@ def run_validation(args: argparse.Namespace) -> dict:
                     )
                 )
             except Exception as exc:
-                runs.append(exception_step(ctx, "seeed_official_sd_smoke_capture", exc))
-            try:
                 runs.append(
-                    restore_bridge(
+                    exception_step(
                         ctx,
-                        volume=args.uf2_volume,
-                        uf2_timeout=args.uf2_timeout,
-                        dry_run=args.dry_run,
+                        "seeed_official_sd_smoke_capture",
+                        exc,
+                        out=official_sd_smoke_out(ctx),
+                        port=ctx.rp2040_port,
                     )
                 )
-            except Exception as exc:
-                runs.append(exception_step(ctx, "rp2040_bridge_restore", exc))
+            bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
         else:
-            try:
-                runs.append(
-                    restore_bridge(
-                        ctx,
-                        volume=args.uf2_volume,
-                        uf2_timeout=args.uf2_timeout,
-                        dry_run=args.dry_run,
-                    )
-                )
-            except Exception as exc:
-                runs.append(exception_step(ctx, "rp2040_bridge_restore", exc))
+            bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
+
+        if bridge_restore.get("ok") is not True and not args.dry_run:
+            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+            report["error"] = "bridge_restore_not_verified"
+            report["ok"] = False
+            report["release_gate"] = release_gate_summary(runs)
+            return report
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
@@ -764,13 +819,7 @@ def run_validation(args: argparse.Namespace) -> dict:
         report["ok"] = False
     else:
         report["ok"] = all(step.get("ok") is True for step in runs if step.get("kind") != "release_gate_audit")
-        gate = next((step for step in runs if step.get("kind") == "release_gate_audit"), {})
-        report["release_gate"] = {
-            "path": gate.get("path"),
-            "ready_for_public_release": gate.get("ready_for_public_release"),
-            "failed_count": gate.get("failed_count"),
-            "p0_failed_count": gate.get("p0_failed_count"),
-        }
+        report["release_gate"] = release_gate_summary(runs)
     return report
 
 

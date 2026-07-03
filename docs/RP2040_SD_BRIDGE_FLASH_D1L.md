@@ -88,8 +88,10 @@ fields (`diag_ran`, `detect`, `raw_cmd0`, `raw_cmd8`, `raw_r70`..`raw_r73`,
 `raw_acmd41`, and OCR/MISO samples) so the next action can distinguish power,
 CS, command-response, CMD8 echo, ACMD41, and filesystem failures. `power_state`
 means GPIO18 was commanded high; it is not a substitute for the separate SD
-socket voltage/signal measurement artifact. Then flash the production bridge
-artifact below.
+socket voltage/signal measurement artifact. If the autonomous runner fails
+before capture starts, it must still archive the same COM16 smoke path as an
+`ok=false` artifact with the exception text, `public_rf_tx=false`, and
+`formats_sd=false`. Then flash the production bridge artifact below.
 
 1. Put the D1L RP2040, not the ESP32-S3, into UF2/BOOTSEL mass-storage mode.
 2. Confirm Windows mounted a UF2 bootloader volume. The volume should expose
