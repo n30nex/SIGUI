@@ -340,6 +340,7 @@ def diag_line(scenario: SdScenario) -> str:
         f"{diag_probe_tokens('hs', False, 254, 0)}"
         f"{diag_probe_tokens('ld', False, 254, 0)}"
         f"{diag_probe_tokens('ls', False, 254, 0)}"
+        f"{diag_probe_tokens('bb', scenario.present, err, capacity)}"
     )
 
 

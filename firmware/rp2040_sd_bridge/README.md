@@ -131,7 +131,8 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `rp2040 ping` for bridge-app validation before any SD-specific request.
 - `DESKOS_SD_DIAG` is a manual diagnostic request used by `storage diag`. It
   reports the pin contract, selected rail/SPI mode, and the high/dedicated,
-  high/shared, low/dedicated, and low/shared raw probe result. It returns a
+  high/shared, low/dedicated, low/shared, and high-power bit-banged raw probe
+  result. It returns a
   pending-shaped diagnostic line instead of blocking the UART while another SD
   worker is running, uses only the bounded raw SPI probe, is non-formatting, and
   does not write to the card. Probe tokens include SPI pin-acceptance flags,
@@ -139,7 +140,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   echo bytes (`*_c0r`, `*_c8r`, `*_c0`, `*_c8`, `*_r70`..`*_r73`), MISO line samples
   (`*_miso_pull`, `*_miso_spi`, `*_miso_idle`), and the first
   CS-high idle transfer byte (`*_idle_ff`) so all-zero bus behavior can be
-  separated from a real card echo mismatch. Diagnostic replies also include
+  separated from a real card echo mismatch. The `bb_*` fields bypass the SPI1
+  peripheral with direct GPIO clocking and are diagnostic-only; they do not
+  enable file operations. Diagnostic replies also include
   raw GPIO7 detect samples so hardware insert-detect behavior can be correlated
   with the SPI response path.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
