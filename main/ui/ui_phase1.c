@@ -5001,30 +5001,45 @@ static void render_ble_sheet(void)
     label_set_dot_width(state, 408);
     lv_obj_set_pos(state, 8, 54);
 
+    const bool ble_transport_supported = s_snapshot.ble_transport_supported;
     lv_obj_t *purpose = create_label(s_ble_sheet,
-                                     "Companion BLE is for official app pairing and local setup when enabled.",
+                                     ble_transport_supported ?
+                                     "Companion BLE is available for measured local setup." :
+                                     "BLE companion transport is unavailable in this release.",
                                      0xE5EDF5);
     lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(purpose, 408);
     lv_obj_set_pos(purpose, 8, 88);
 
     lv_obj_t *runtime = create_label(s_ble_sheet,
-                                     "Pairing controls are gated until the measured BLE runtime is enabled.",
+                                     ble_transport_supported ?
+                                     "Pairing controls require a measured BLE runtime artifact." :
+                                     "No BLE pairing or transport artifact is present for public release.",
                                      0xFBBF24);
     lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(runtime, 408);
     lv_obj_set_pos(runtime, 8, 144);
 
-    lv_obj_t *enable = create_button(s_ble_sheet,
-                                     s_snapshot.ble_companion_enabled ? "Disable" : "Enable",
-                                     8, 206, 98, 40, ble_toggle_event_cb, NULL);
-    lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
-    lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
-    if (pair) {
-        lv_obj_add_state(pair, LV_STATE_DISABLED);
-    }
-    if (forget) {
-        lv_obj_add_state(forget, LV_STATE_DISABLED);
+    if (ble_transport_supported) {
+        lv_obj_t *enable = create_button(s_ble_sheet,
+                                         s_snapshot.ble_companion_enabled ? "Disable" : "Enable",
+                                         8, 206, 98, 40, ble_toggle_event_cb, NULL);
+        lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
+        lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
+        if (pair) {
+            lv_obj_add_state(pair, LV_STATE_DISABLED);
+        }
+        if (forget) {
+            lv_obj_add_state(forget, LV_STATE_DISABLED);
+        }
+        (void)enable;
+    } else {
+        lv_obj_t *enable_status = create_label(s_ble_sheet, "Enable unavailable", 0xFBBF24);
+        lv_obj_t *pair = create_label(s_ble_sheet, "Pair unavailable", 0x8EA0AE);
+        lv_obj_t *forget = create_label(s_ble_sheet, "Forget unavailable", 0x8EA0AE);
+        lv_obj_set_pos(enable_status, 8, 206);
+        lv_obj_set_pos(pair, 8, 232);
+        lv_obj_set_pos(forget, 210, 232);
     }
 
     lv_obj_t *note = create_label(s_ble_sheet,
@@ -5032,7 +5047,7 @@ static void render_ble_sheet(void)
                                   0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 408);
-    lv_obj_set_pos(note, 8, 264);
+    lv_obj_set_pos(note, 8, 278);
 }
 
 static void render_display_sheet(void)

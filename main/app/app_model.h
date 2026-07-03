@@ -27,6 +27,7 @@
 #define D1L_HOME_MESSAGE_PREVIEW 5U
 #define D1L_HOME_REPEATER_PREVIEW 3U
 #define D1L_MAP_TILE_RENDER_SUPPORTED false
+#define D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false
 
 typedef struct {
     bool is_dm;
@@ -88,6 +89,7 @@ typedef struct {
     bool onboarding_complete;
     bool wifi_build_enabled;
     bool ble_build_enabled;
+    bool ble_transport_supported;
     bool storage_direct_supported;
     bool storage_rp2040_bridge_required;
     bool storage_rp2040_bridge_ready;

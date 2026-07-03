@@ -794,6 +794,7 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_ssid" in header
     assert "wifi_ip" in header
     assert "wifi_last_error" in header
+    assert "ble_transport_supported" in header
     assert "coexistence_policy" in header
     assert '"Setup Dashboard"' in source
     assert '"SD Card"' in source
@@ -832,7 +833,9 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "d1l_app_model_wifi_connect()" in source
     assert "d1l_app_model_clear_wifi_profile()" in source
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
-    assert "d1l_app_model_set_ble_enabled(!s_snapshot.ble_companion_enabled)" in source
+    assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
+    assert "snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in read("main/app/app_model.c")
+    assert "if (ble_transport_supported)" in source
     assert "lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U)" in source
     assert "lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U)" in source
     assert '"Network name"' in source
@@ -841,7 +844,11 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"Connect"' in source
     assert "wifi_scan_event_cb" in source
     assert "wifi_connect_event_cb" in source
-    assert '"Pairing controls are gated until the measured BLE runtime is enabled."' in source
+    assert '"BLE companion transport is unavailable in this release."' in source
+    assert '"No BLE pairing or transport artifact is present for public release."' in source
+    assert '"Enable unavailable"' in source
+    assert '"Pair unavailable"' in source
+    assert '"Forget unavailable"' in source
     assert '"Touch display controls are staged until backlight/runtime persistence is wired."' in source
     assert '"Advanced details stay here so normal screens remain simple."' in source
     assert "render_health_line" in source

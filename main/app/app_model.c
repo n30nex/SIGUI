@@ -287,6 +287,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->onboarding_complete = settings->onboarding_complete;
     snapshot->wifi_build_enabled = connectivity.wifi_build_enabled;
     snapshot->ble_build_enabled = connectivity.ble_build_enabled;
+    snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED;
     snapshot->wifi_state = connectivity.wifi_state;
     snapshot->wifi_last_error = connectivity.wifi_last_error;
     snapshot->wifi_rssi_dbm = connectivity.wifi_rssi_dbm;

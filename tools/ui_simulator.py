@@ -71,6 +71,7 @@ class Snapshot:
     tx_total: int
     unread_public: int
     unread_dm: int
+    ble_transport_supported: bool
     latest_signal: str
     rooms: tuple[Node, ...]
     repeaters: tuple[Node, ...]
@@ -119,6 +120,7 @@ def sample_snapshot() -> Snapshot:
         tx_total=34,
         unread_public=2,
         unread_dm=1,
+        ble_transport_supported=False,
         latest_signal="-41 dBm / 30 dB",
         rooms=(room,),
         repeaters=(repeater,),
@@ -239,6 +241,7 @@ def large_mesh_snapshot() -> Snapshot:
         tx_total=1024,
         unread_public=12,
         unread_dm=7,
+        ble_transport_supported=False,
         latest_signal="-42 dBm / 30 dB",
         rooms=heard[:6],
         repeaters=heard[6:18],
@@ -1528,12 +1531,19 @@ def render_ble_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "BLE Setup", "Companion state")
     draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="home")
     s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
-    s.text("Companion BLE is for official app pairing and local setup when enabled.", (44, 194, 436, 236), 13, TEXT)
-    s.text("Pairing controls are gated until the measured BLE runtime is enabled.", (44, 252, 436, 294), 13, AMBER)
-    draw_button(s, (44, 318, 142, 360), "Enable", BLUE, action="ble_enable")
-    draw_button(s, (154, 318, 252, 360), "Pair", GREEN, action="ble_pair")
-    draw_button(s, (264, 318, 362, 360), "Forget", AMBER, action="ble_forget")
-    s.text("USB remains the reliable companion path for production validation.", (44, 374, 436, 404), 12, MUTED)
+    if snap.ble_transport_supported:
+        s.text("Companion BLE is available for measured local setup.", (44, 194, 436, 236), 13, TEXT)
+        s.text("Pairing controls require a measured BLE runtime artifact.", (44, 252, 436, 294), 13, AMBER)
+        draw_button(s, (44, 318, 142, 360), "Enable", BLUE, action="ble_enable")
+        draw_button(s, (154, 318, 252, 360), "Pair", GREEN, action="ble_pair")
+        draw_button(s, (264, 318, 362, 360), "Forget", AMBER, action="ble_forget")
+    else:
+        s.text("BLE companion transport is unavailable in this release.", (44, 194, 436, 236), 13, TEXT)
+        s.text("No BLE pairing or transport artifact is present for public release.", (44, 252, 436, 294), 13, AMBER)
+        s.text("Enable unavailable", (44, 318, 210, 340), 13, AMBER, True)
+        s.text("Pair unavailable", (44, 346, 210, 366), 12, MUTED)
+        s.text("Forget unavailable", (224, 346, 436, 366), 12, MUTED)
+    s.text("USB remains the reliable companion path for production validation.", (44, 386, 436, 416), 12, MUTED)
     draw_dock(s, "Home")
 
 
@@ -1874,9 +1884,11 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "BLE Setup",
         "Companion state",
         "State off  build disabled",
-        "Enable",
-        "Pair",
-        "Forget",
+        "BLE companion transport is unavailable in this release.",
+        "No BLE pairing or transport artifact is present for public release.",
+        "Enable unavailable",
+        "Pair unavailable",
+        "Forget unavailable",
         "Close",
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),

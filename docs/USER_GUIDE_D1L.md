@@ -12,7 +12,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
 - Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
-- Home Wi-Fi and BLE chips open setup/status sheets. They show current build/runtime support honestly and keep scan/connect/pairing controls staged until those runtimes are enabled.
+- Home Wi-Fi and BLE chips open setup/status sheets. Wi-Fi scan/connect controls are available only when the Wi-Fi runtime is enabled; BLE pairing/transport controls are unavailable until a measured BLE transport artifact exists.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.

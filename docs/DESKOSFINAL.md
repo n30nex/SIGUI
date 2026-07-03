@@ -200,7 +200,7 @@ The firmware is not production-ready until all of these pass on real D1L hardwar
 - Settings is grouped, plain-language, and touch-friendly.
 - Wi-Fi and BLE logos/status chips are tappable from Home and go to setup.
 - Wi-Fi setup can scan/connect/save local network credentials.
-- BLE setup shows enabled/disabled, pairing state, and support status.
+- BLE setup shows build/runtime support status and keeps pairing/transport controls unavailable until measured BLE transport proof exists.
 - Radio settings are clearly labeled as advanced and warn before isolating the user from the mesh.
 - Storage setup shows friendly card state and only exposes destructive actions behind confirmation.
 

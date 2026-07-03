@@ -165,7 +165,15 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Clear",
         "Enable",
     } <= labels_by_view["wifi_setup_sheet"]
-    assert {"BLE Setup", "Companion state", "Enable", "Pair", "Forget"} <= labels_by_view["ble_setup_sheet"]
+    assert {
+        "BLE Setup",
+        "Companion state",
+        "BLE companion transport is unavailable in this release.",
+        "No BLE pairing or transport artifact is present for public release.",
+        "Enable unavailable",
+        "Pair unavailable",
+        "Forget unavailable",
+    } <= labels_by_view["ble_setup_sheet"]
     assert {"Display", "Screen controls", "Brightness", "Night", "Contrast", "Timeout"} <= labels_by_view["display_settings_sheet"]
     assert {"Diagnostics", "Advanced health", "Health", "Crashlog", "Export", "Soak"} <= labels_by_view["diagnostics_sheet"]
     assert {"Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
