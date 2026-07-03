@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -60,6 +61,45 @@ REQUIRED_ROUTE_PROBE_CHECKS = {
 }
 SAFE_SD_NEXT_ACTION = "confirm_fat32_card_or_inspect_rp2040_sd_mount_path"
 OBSOLETE_SD_NEXT_ACTION_TOKENS = ("format", "mkfs", "erase", "wipe")
+SD_BOOT_PREPARE_SCENARIOS = (
+    "no-card",
+    "correct-structure",
+    "missing-structure",
+    "unformatted",
+    "existing-data",
+    "rp2040-unavailable",
+)
+SD_BOOT_PREPARE_EXPECTED_CLASSIFICATIONS = {
+    "no-card": {"no_card_fallback"},
+    "correct-structure": {"ready_sd_file_gate"},
+    "missing-structure": {"ready_sd_file_gate"},
+    "unformatted": {"computer_fat32_required", "firmware_mount_error_fallback"},
+    "existing-data": {
+        "existing_data_preserved_ready",
+        "existing_data_firmware_mount_fallback",
+        "existing_data_not_wiped",
+    },
+    "rp2040-unavailable": {"bridge_unavailable_fallback"},
+}
+RAW_DIAG_PROBE_PREFIXES = ("hd", "hs", "ld", "ls", "bb", "bi", "bs", "bcm", "bsc")
+RAW_DIAG_PROBE_SUFFIXES = (
+    "_p",
+    "_e",
+    "_d",
+    "_c0r",
+    "_c8r",
+    "_c0",
+    "_c8",
+    "_miso_pull",
+    "_miso_spi",
+    "_miso_idle",
+)
+UNSAFE_SD_COMMAND_TOKENS = ("setup confirm", "storage format", "format confirm", "mkfs", "erase sd", "wipe sd")
+SD_FILE_LIMITS = {
+    "file_line_max": 512,
+    "file_chunk_max": 192,
+    "path_max": 96,
+}
 TOP_LEVEL_COMMIT_FIELDS = (
     "commit",
     "commit_sha",
@@ -227,6 +267,46 @@ def newest_commit_json(root: Path, commit: str | None, *patterns: str) -> Path |
     files: list[Path] = []
     for pattern in patterns:
         files.extend(path for path in root.glob(pattern) if path.is_file())
+    for candidate in sorted(set(files), key=lambda path: path.stat().st_mtime, reverse=True):
+        if artifact_commit_matches(candidate, read_json(candidate), commit):
+            return candidate
+    return None
+
+
+def unique_dirs(paths: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    unique: list[Path] = []
+    for path in paths:
+        try:
+            key = str(path.resolve()).lower()
+        except OSError:
+            key = str(path).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(path)
+    return unique
+
+
+def sd_artifact_roots(
+    root: Path,
+    github_run_dir: Path | None,
+    hardware_dir: Path,
+    *artifact_dirs: str,
+) -> list[Path]:
+    roots = [hardware_dir]
+    for artifact_dir in artifact_dirs:
+        roots.append(root / "artifacts" / artifact_dir)
+        if github_run_dir:
+            roots.append(github_run_dir / "d1l-host-artifacts" / artifact_dir)
+    return unique_dirs(roots)
+
+
+def newest_commit_json_from_roots(roots: list[Path], commit: str | None, *patterns: str) -> Path | None:
+    files: list[Path] = []
+    for root in roots:
+        for pattern in patterns:
+            files.extend(path for path in root.glob(pattern) if path.is_file())
     for candidate in sorted(set(files), key=lambda path: path.stat().st_mtime, reverse=True):
         if artifact_commit_matches(candidate, read_json(candidate), commit):
             return candidate
@@ -443,6 +523,322 @@ def int_value(value: Any) -> int | None:
         return None
 
 
+def first_number(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value)
+        if match:
+            try:
+                return float(match.group(0))
+            except ValueError:
+                return None
+    return None
+
+
+def bool_field(data: dict, *names: str) -> bool:
+    containers = [data]
+    for key in ("checks", "measurements", "evidence"):
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    return any(container.get(name) is True for container in containers for name in names)
+
+
+def first_numeric_field(data: dict, *names: str) -> float | None:
+    containers = [data]
+    for key in ("checks", "measurements", "evidence"):
+        nested = data.get(key)
+        if isinstance(nested, dict):
+            containers.append(nested)
+    for container in containers:
+        for name in names:
+            number = first_number(container.get(name))
+            if number is not None:
+                return number
+    return None
+
+
+def path_for_details(path: Path | None, root: Path) -> str | None:
+    return rel(path, root) if path else None
+
+
+def exact_port_ok(data: dict, expected_port: str) -> bool:
+    return data.get("port") == expected_port
+
+
+def optional_port_ok(data: dict, expected_port: str) -> bool:
+    port = data.get("port")
+    return port in (None, expected_port)
+
+
+def nested_flag_true(data: dict, *flags: str) -> bool:
+    for candidate in iter_nested_dicts(data):
+        for flag in flags:
+            if candidate.get(flag) is True:
+                return True
+    return False
+
+
+def report_is_no_rf_no_format(data: dict) -> bool:
+    return (
+        data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and not nested_flag_true(data, "public_rf_tx", "formats_sd", "format_performed", "format_confirmed")
+    )
+
+
+def unsafe_sd_commands(data: dict) -> list[str]:
+    commands = data.get("commands")
+    if not isinstance(commands, list):
+        return []
+    unsafe: list[str] = []
+    for command in commands:
+        if not isinstance(command, str):
+            continue
+        lowered = command.lower()
+        if any(token in lowered for token in UNSAFE_SD_COMMAND_TOKENS):
+            unsafe.append(command)
+    return unsafe
+
+
+def storage_file_gate_ready_status(storage_status: dict) -> bool:
+    sd = storage_status.get("sd")
+    if not isinstance(sd, dict):
+        return False
+    return (
+        sd.get("state") == "ready"
+        and sd.get("present") is True
+        and sd.get("mounted") is True
+        and sd.get("data_root_ready") is True
+        and sd.get("rp2040_protocol_supported") is True
+        and sd.get("file_ops") is True
+        and sd.get("atomic_rename") is True
+        and all(int_value(sd.get(key)) is not None and int_value(sd.get(key)) >= minimum for key, minimum in SD_FILE_LIMITS.items())
+    )
+
+
+def storage_setup_no_format_policy(storage_setup: dict | None) -> bool:
+    if not isinstance(storage_setup, dict):
+        return False
+    return (
+        storage_setup.get("policy") == "no_device_format"
+        and storage_setup.get("will_format") is False
+        and storage_setup.get("format_performed") is False
+    )
+
+
+def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("canary_passed") is True
+        and data.get("canary_unavailable_ok") is not True
+        and data.get("allow_unavailable") is not True
+        and data.get("storage_file_gate_ready_before") is True
+        and data.get("storage_file_gate_ready_after") is True
+    )
+
+
+def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("allow_unavailable") is not True
+        and data.get("retained_canary_passed") is True
+        and data.get("filecanary_passed") is True
+        and data.get("pre_reboot_readbacks_ok") is True
+        and data.get("post_reboot_readbacks_ok") is True
+        and "reboot" in (data.get("commands") or [])
+    )
+
+
+def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("pre_remount_ready") is True
+        and data.get("post_remount_ready") is True
+        and data.get("retained_canary_passed") is True
+        and data.get("pre_reboot_readbacks_ok") is True
+        and data.get("post_reboot_readbacks_ok") is True
+        and data.get("pre_map_tile_canary_passed") is True
+        and data.get("post_map_tile_canary_passed") is True
+        and "reboot" in (data.get("commands") or [])
+    )
+
+
+def sd_map_tile_canary_artifact_ok(data: dict, expected_port: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("canary_passed") is True
+        and data.get("canary_unavailable_ok") is not True
+        and data.get("allow_unavailable") is not True
+        and data.get("storage_file_gate_ready_before") is True
+        and data.get("storage_file_gate_ready_after") is True
+        and data.get("map_tile_backend_ready_before") is True
+        and data.get("map_tile_backend_ready_after") is True
+    )
+
+
+def raw_diag_line(data: dict) -> str:
+    for key in ("raw_line", "diag"):
+        value = data.get(key)
+        if isinstance(value, str) and "DESKOS_SD_DIAG" in value:
+            return value
+    lines = data.get("lines")
+    if isinstance(lines, list):
+        for line in lines:
+            if isinstance(line, str) and "DESKOS_SD_DIAG" in line:
+                return line
+    storage_diag = data.get("storage_diag")
+    if isinstance(storage_diag, dict):
+        value = storage_diag.get("raw_line")
+        if isinstance(value, str) and "DESKOS_SD_DIAG" in value:
+            return value
+    return ""
+
+
+def raw_diag_fields(data: dict) -> dict[str, str]:
+    fields = data.get("fields")
+    if isinstance(fields, dict):
+        return {str(key): str(value) for key, value in fields.items()}
+    line = raw_diag_line(data)
+    parsed: dict[str, str] = {}
+    for token in line.split():
+        if "=" not in token:
+            continue
+        key, value = token.split("=", 1)
+        parsed[key] = value
+    return parsed
+
+
+def raw_diag_complete(data: dict, expected_port: str) -> bool:
+    fields = raw_diag_fields(data)
+    required_fields = {"pins", "hz", "pin_sck", "pin_mosi", "pin_miso", "pin_cs", "selected_power", "selected_mode"}
+    required_fields.update(f"{prefix}{suffix}" for prefix in RAW_DIAG_PROBE_PREFIXES for suffix in RAW_DIAG_PROBE_SUFFIXES)
+    return (
+        data.get("ok") is True
+        and optional_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and data.get("response_truncated") is not True
+        and raw_diag_line(data).startswith("DESKOS_SD_DIAG")
+        and required_fields.issubset(fields)
+    )
+
+
+def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -> bool:
+    classification = data.get("classification")
+    storage_after = data.get("storage_after") if isinstance(data.get("storage_after"), dict) else {}
+    file_gate_ok = data.get("storage_file_gate_ready") is True or storage_file_gate_ready_status(storage_after)
+    format_policy_ok = (
+        scenario not in {"unformatted", "existing-data"}
+        or data.get("format_allowed") is False
+        or storage_setup_no_format_policy(data.get("storage_setup") if isinstance(data.get("storage_setup"), dict) else None)
+    )
+    if scenario in {"correct-structure", "missing-structure"}:
+        format_policy_ok = format_policy_ok and file_gate_ok and data.get("retained_store_gate_ready") is True
+        format_policy_ok = format_policy_ok and data.get("filecanary_passed") is True
+    if scenario == "unformatted":
+        format_policy_ok = format_policy_ok and storage_setup_no_format_policy(
+            data.get("storage_setup") if isinstance(data.get("storage_setup"), dict) else None
+        )
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and data.get("scenario") == scenario
+        and data.get("ok") is True
+        and report_is_no_rf_no_format(data)
+        and data.get("commands_safe") is True
+        and not unsafe_sd_commands(data)
+        and classification in SD_BOOT_PREPARE_EXPECTED_CLASSIFICATIONS[scenario]
+        and format_policy_ok
+    )
+
+
+def sd_power_rail_evidence_ok(data: dict, expected_port: str) -> bool:
+    vcc = first_numeric_field(
+        data,
+        "vcc_at_socket_volts",
+        "sd_vcc_volts",
+        "vcc_after_gpio18_high_volts",
+        "sd_power_rail_volts",
+    )
+    vcc_ok = vcc is not None and 3.0 <= vcc <= 3.6
+    return (
+        data.get("ok") is True
+        and optional_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and (data.get("mode") in (None, "hardware", "hardware-electrical", "electrical"))
+        and (data.get("sd_power_rail_measured") is True or bool_field(data, "sd_power_rail_measured", "power_rail_measured"))
+        and vcc_ok
+        and bool_field(data, "gpio18_high", "gpio18_asserted")
+        and bool_field(data, "gnd_continuity", "ground_continuity_ok")
+        and bool_field(data, "cs_toggles_at_socket", "cs_toggle_seen")
+        and bool_field(data, "sck_clocks_at_socket", "sck_clocks_seen")
+        and bool_field(data, "mosi_commands_at_socket", "mosi_commands_seen")
+        and bool_field(data, "miso_response_or_idle_high", "miso_idle_high", "miso_response_seen")
+        and bool(data.get("sku") or data.get("board_revision") or data.get("board"))
+    )
+
+
+def card_capacity_gb(card: dict) -> float | None:
+    for key in ("capacity_gb", "card_gb", "size_gb", "max_card_gb"):
+        value = first_number(card.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def card_is_fat32(card: dict) -> bool:
+    fat_type = int_value(card.get("fat_type"))
+    if fat_type == 32:
+        return True
+    for key in ("fs", "format", "filesystem"):
+        value = card.get(key)
+        if isinstance(value, str) and value.lower() == "fat32":
+            return True
+    return False
+
+
+def card_matrix_entries(data: dict) -> list[dict]:
+    for key in ("cards", "matrix", "results"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def sd_matrix_artifact_ok(data: dict, expected_port: str) -> bool:
+    cards = card_matrix_entries(data)
+    capacities = [card_capacity_gb(card) for card in cards]
+    return (
+        data.get("ok") is True
+        and optional_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and len(cards) >= 3
+        and all(capacity is not None and capacity <= 32 for capacity in capacities)
+        and any(capacity == 32 for capacity in capacities)
+        and all(card_is_fat32(card) for card in cards)
+        and all(card.get("ok") is True or card.get("official_seeed_smoke_passed") is True for card in cards)
+        and all(card.get("formats_sd") is not True and card.get("public_rf_tx") is not True for card in cards)
+    )
+
+
 def official_seeed_sd_smoke_ok(data: dict, expected_port: str) -> bool:
     payload = first_official_seeed_smoke_payload(data)
     required_steps = ("mount", "root_open", "mkdir", "write", "read", "rename", "stat", "delete")
@@ -561,6 +957,386 @@ def sd_gate(preflight_path: Path | None, root: Path) -> GateResult:
         [rel(preflight_path, root)] if preflight_path else [],
         message,
         details,
+    )
+
+
+def sd_filecanary_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    canary = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-file-canary-*.json",
+        "sd_file_canary_*.json",
+        "sd_filecanary_*.json",
+        "filecanary_*.json",
+    )
+    data = read_json(canary)
+    ok = bool(canary and data and sd_file_canary_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_filecanary_independent",
+        "P0",
+        ok,
+        "Independent RP2040 SD file-operation canary",
+        [rel(canary, root)] if canary else [],
+        "Raw RP2040 file-operation canary passes without requiring retained-store migration."
+        if ok else "No passing current-commit hardware SD file-operation canary artifact was found.",
+        {
+            "path_found": bool(canary),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "canary_passed": data.get("canary_passed") if data else None,
+            "storage_file_gate_ready_before": data.get("storage_file_gate_ready_before") if data else None,
+            "storage_file_gate_ready_after": data.get("storage_file_gate_ready_after") if data else None,
+            "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
+            "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
+        },
+    )
+
+
+def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    retained = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-retained-history-*.json",
+        "sd_retained_history_*.json",
+        "sd_retained_canary_*.json",
+        "retained_history_*.json",
+    )
+    data = read_json(retained)
+    ok = bool(retained and data and sd_retained_canary_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_retained_canary_passed",
+        "P0",
+        ok,
+        "SD retained-history canary",
+        [rel(retained, root)] if retained else [],
+        "Retained Public/DM/routes/packet canary survives reboot and readback without Public RF or formatting."
+        if ok else "No passing current-commit hardware retained-history SD canary artifact was found.",
+        {
+            "path_found": bool(retained),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "retained_canary_passed": data.get("retained_canary_passed") if data else None,
+            "filecanary_passed": data.get("filecanary_passed") if data else None,
+            "pre_reboot_readbacks_ok": data.get("pre_reboot_readbacks_ok") if data else None,
+            "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
+        },
+    )
+
+
+def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    remount = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-reboot-remount-*.json",
+        "sd_reboot_remount_*.json",
+        "reboot_remount_*.json",
+    )
+    data = read_json(remount)
+    ok = bool(remount and data and sd_reboot_remount_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_reboot_remount_passed",
+        "P0",
+        ok,
+        "SD reboot/remount convergence",
+        [rel(remount, root)] if remount else [],
+        "SD retained data and map-tile canary survive reboot/remount without Public RF or formatting."
+        if ok else "No passing current-commit hardware SD reboot/remount artifact was found.",
+        {
+            "path_found": bool(remount),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "pre_remount_ready": data.get("pre_remount_ready") if data else None,
+            "post_remount_ready": data.get("post_remount_ready") if data else None,
+            "pre_map_tile_canary_passed": data.get("pre_map_tile_canary_passed") if data else None,
+            "post_map_tile_canary_passed": data.get("post_map_tile_canary_passed") if data else None,
+        },
+    )
+
+
+def sd_map_tile_canary_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    canary = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-map-tile-canary-*.json",
+        "sd_map_tile_canary_*.json",
+        "map_tile_canary_*.json",
+    )
+    data = read_json(canary)
+    ok = bool(canary and data and sd_map_tile_canary_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_map_tile_canary_passed",
+        "P0",
+        ok,
+        "SD map-tile cache canary",
+        [rel(canary, root)] if canary else [],
+        "Map-tile cache canary writes through temp/read/atomic-rename/final-read on SD."
+        if ok else "No passing current-commit hardware SD map-tile canary artifact was found.",
+        {
+            "path_found": bool(canary),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "canary_passed": data.get("canary_passed") if data else None,
+            "map_tile_backend_ready_before": data.get("map_tile_backend_ready_before") if data else None,
+            "map_tile_backend_ready_after": data.get("map_tile_backend_ready_after") if data else None,
+        },
+    )
+
+
+def sd_raw_diag_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    diag = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "storage_diag_raw_*.json",
+        "sd_diag_raw_*.json",
+        "rp2040_raw_diag_*.json",
+        "rp2040_direct_diag_*.json",
+        "rp2040_direct_diag_poll_*.json",
+        "rp2040_direct_preflight_*.json",
+    )
+    data = read_json(diag)
+    fields = raw_diag_fields(data)
+    missing_prefixes = [
+        prefix
+        for prefix in RAW_DIAG_PROBE_PREFIXES
+        if not all(f"{prefix}{suffix}" in fields for suffix in RAW_DIAG_PROBE_SUFFIXES)
+    ]
+    ok = bool(diag and data and raw_diag_complete(data, expected_port))
+    return GateResult(
+        "sd_raw_diag_complete",
+        "P0",
+        ok,
+        "Raw RP2040 SD diagnostic matrix",
+        [rel(diag, root)] if diag else [],
+        "Raw SD diagnostic artifact includes normal, power, bitbang, inverted-CS, swapped-pin, command, and MISO fields."
+        if ok else "No complete current-commit raw SD diagnostic artifact was found.",
+        {
+            "path_found": bool(diag),
+            "artifact_ok": data.get("ok") if data else None,
+            "port": data.get("port") if data else None,
+            "response_truncated": data.get("response_truncated") if data else None,
+            "field_count": len(fields),
+            "missing_probe_prefixes": missing_prefixes,
+        },
+    )
+
+
+def newest_boot_prepare_artifact(
+    artifact_roots: list[Path],
+    commit: str | None,
+    scenario: str,
+) -> Path | None:
+    underscored = scenario.replace("-", "_")
+    return newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        f"d1l-sd-boot-prepare-{scenario}-*.json",
+        f"d1l-sd-boot-prepare-{underscored}-*.json",
+        f"sd_boot_prepare_{scenario}_*.json",
+        f"sd_boot_prepare_{underscored}_*.json",
+        f"*boot*prepare*{scenario}*.json",
+        f"*boot*prepare*{underscored}*.json",
+    )
+
+
+def sd_boot_prepare_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    missing: list[str] = []
+    failed: list[str] = []
+    evidence: list[str] = []
+    details: dict[str, Any] = {}
+    for scenario in SD_BOOT_PREPARE_SCENARIOS:
+        path = newest_boot_prepare_artifact(artifact_roots, commit, scenario)
+        data = read_json(path)
+        if path:
+            evidence.append(rel(path, root))
+        ok = bool(path and data and sd_boot_prepare_artifact_ok(data, scenario, expected_port))
+        if not path:
+            missing.append(scenario)
+        elif not ok:
+            failed.append(scenario)
+        details[scenario] = {
+            "path": path_for_details(path, root),
+            "ok": ok,
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "classification": data.get("classification") if data else None,
+            "formats_sd": data.get("formats_sd") if data else None,
+            "public_rf_tx": data.get("public_rf_tx") if data else None,
+        }
+    ok = not missing and not failed
+    details["missing_scenarios"] = missing
+    details["failed_scenarios"] = failed
+    return GateResult(
+        "sd_boot_retry_manager",
+        "P0",
+        ok,
+        "SD boot/retry manager scenario matrix",
+        evidence,
+        "All SD boot/retry manager scenarios pass on current hardware evidence."
+        if ok else "SD boot/retry manager scenario evidence is missing or incomplete.",
+        details,
+    )
+
+
+def sd_fat32_policy_gate(unformatted_path: Path | None, root: Path, expected_port: str) -> GateResult:
+    data = read_json(unformatted_path)
+    storage_after = data.get("storage_after") if isinstance(data.get("storage_after"), dict) else {}
+    storage_setup = data.get("storage_setup") if isinstance(data.get("storage_setup"), dict) else {}
+    sd = storage_after.get("sd") if isinstance(storage_after.get("sd"), dict) else {}
+    ok = bool(
+        unformatted_path
+        and data
+        and data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and data.get("scenario") == "unformatted"
+        and report_is_no_rf_no_format(data)
+        and data.get("classification") in SD_BOOT_PREPARE_EXPECTED_CLASSIFICATIONS["unformatted"]
+        and storage_setup_no_format_policy(storage_setup)
+        and (sd.get("needs_fat32") is True or storage_setup.get("needs_fat32") is True)
+        and data.get("storage_file_gate_ready") is not True
+    )
+    return GateResult(
+        "sd_fat32_only_enforced",
+        "P0",
+        ok,
+        "FAT32-only SD policy enforcement",
+        [rel(unformatted_path, root)] if unformatted_path else [],
+        "Unformatted/non-FAT32 evidence keeps NVS fallback active and instructs computer-side FAT32 preparation."
+        if ok else "No current hardware evidence proves non-FAT32 cards are rejected without enabling SD file ops.",
+        {
+            "path_found": bool(unformatted_path),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "classification": data.get("classification") if data else None,
+            "sd_state": sd.get("state") if sd else None,
+            "needs_fat32": sd.get("needs_fat32") if sd else storage_setup.get("needs_fat32") if storage_setup else None,
+            "storage_file_gate_ready": data.get("storage_file_gate_ready") if data else None,
+        },
+    )
+
+
+def sd_no_format_policy_gate(preflight_path: Path | None, unformatted_path: Path | None, root: Path) -> GateResult:
+    preflight = read_json(preflight_path)
+    classification = preflight.get("classification") if isinstance(preflight.get("classification"), dict) else {}
+    _, obsolete_format_action = sanitized_sd_classification(preflight, classification)
+    unformatted = read_json(unformatted_path)
+    storage_setup = unformatted.get("storage_setup") if isinstance(unformatted.get("storage_setup"), dict) else {}
+    preflight_ok = bool(
+        preflight_path
+        and preflight
+        and preflight.get("formats_sd") is False
+        and preflight.get("copies_uf2") is not True
+        and not obsolete_format_action
+    )
+    unformatted_ok = bool(
+        unformatted_path
+        and unformatted
+        and report_is_no_rf_no_format(unformatted)
+        and storage_setup_no_format_policy(storage_setup)
+        and unformatted.get("format_command_sent") is False
+        and unformatted.get("format_confirmed") is False
+        and unformatted.get("format_allowed") is False
+        and not unsafe_sd_commands(unformatted)
+    )
+    ok = preflight_ok and unformatted_ok
+    evidence = []
+    if preflight_path:
+        evidence.append(rel(preflight_path, root))
+    if unformatted_path:
+        evidence.append(rel(unformatted_path, root))
+    return GateResult(
+        "sd_no_format_language",
+        "P0",
+        ok,
+        "No-device-format SD evidence policy",
+        evidence,
+        "Preflight and setup evidence preserve no-device-format language and never request formatting."
+        if ok else "Current SD evidence is missing no-device-format policy proof or contains stale format guidance.",
+        {
+            "preflight_path_found": bool(preflight_path),
+            "preflight_formats_sd": preflight.get("formats_sd") if preflight else None,
+            "preflight_copies_uf2": preflight.get("copies_uf2") if preflight else None,
+            "obsolete_format_action_blocked": obsolete_format_action,
+            "unformatted_path_found": bool(unformatted_path),
+            "format_command_sent": unformatted.get("format_command_sent") if unformatted else None,
+            "format_confirmed": unformatted.get("format_confirmed") if unformatted else None,
+            "format_allowed": unformatted.get("format_allowed") if unformatted else None,
+            "storage_setup_policy": storage_setup.get("policy") if storage_setup else None,
+            "unsafe_commands": unsafe_sd_commands(unformatted) if unformatted else [],
+        },
+    )
+
+
+def sd_power_rail_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    power = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "sd_electrical_*.json",
+        "sd_power_rail_*.json",
+        "sd_slot_electrical_*.json",
+        "sd_power_matrix_*.json",
+    )
+    data = read_json(power)
+    ok = bool(power and data and sd_power_rail_evidence_ok(data, expected_port))
+    return GateResult(
+        "sd_power_rail_measured",
+        "P0",
+        ok,
+        "SD slot power-rail and signal measurement",
+        [rel(power, root)] if power else [],
+        "Measured SD socket VCC/GND/SPI evidence is present for the release hardware."
+        if ok else "No current hardware SD power-rail/electrical measurement artifact was found.",
+        {
+            "path_found": bool(power),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "vcc_at_socket_volts": first_numeric_field(
+                data,
+                "vcc_at_socket_volts",
+                "sd_vcc_volts",
+                "vcc_after_gpio18_high_volts",
+                "sd_power_rail_volts",
+            ) if data else None,
+            "sd_power_rail_measured": data.get("sd_power_rail_measured") if data else None,
+        },
+    )
+
+
+def sd_32gb_matrix_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    matrix = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "sd_32gb_matrix_*.json",
+        "sd_fat32_matrix_*.json",
+        "sd_card_matrix_*.json",
+        "sd_matrix_*.json",
+    )
+    data = read_json(matrix)
+    cards = card_matrix_entries(data)
+    capacities = [card_capacity_gb(card) for card in cards]
+    ok = bool(matrix and data and sd_matrix_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_32gb_max_matrix_passed",
+        "P0",
+        ok,
+        "FAT32 <=32GB SD card matrix",
+        [rel(matrix, root)] if matrix else [],
+        "At least three FAT32 cards, including a 32GB card, pass non-formatting SD acceptance."
+        if ok else "No passing current-commit FAT32 <=32GB SD matrix artifact was found.",
+        {
+            "path_found": bool(matrix),
+            "artifact_ok": data.get("ok") if data else None,
+            "port": data.get("port") if data else None,
+            "card_count": len(cards),
+            "capacities_gb": capacities,
+            "all_fat32": all(card_is_fat32(card) for card in cards) if cards else False,
+            "has_32gb_card": any(capacity == 32 for capacity in capacities),
+        },
     )
 
 
@@ -691,6 +1467,23 @@ def build_audit(args: argparse.Namespace) -> dict:
     hardware_dir = Path(args.hardware_dir).resolve()
     soak_dir = Path(args.soak_dir).resolve()
     gates: list[GateResult] = []
+    preflight_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
+    boot_prepare_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-boot-prepare")
+    file_canary_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-canary")
+    retained_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-retained-history")
+    reboot_remount_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-reboot-remount")
+    map_tile_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-map-tile-canary")
+    raw_diag_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
+    sd_matrix_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-matrix")
+    sd_power_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-electrical", "sd-matrix")
+    preflight_path = newest_commit_json_from_roots(
+        preflight_roots,
+        args.commit,
+        "rp2040_preflight_*.json",
+        "rp2040_sd_preflight_*.json",
+        "d1l-rp2040-sd-bridge-preflight-*.json",
+    )
+    unformatted_boot_path = newest_boot_prepare_artifact(boot_prepare_roots, args.commit, "unformatted")
 
     gates.append(checksum_gate(github_run_dir, root))
     gates.append(notices_gate(github_run_dir, root))
@@ -740,7 +1533,17 @@ def build_audit(args: argparse.Namespace) -> dict:
     )
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(official_seeed_sd_smoke_gate(hardware_dir, root, args.commit, args.d1l_port))
-    gates.append(sd_gate(newest_commit_json(hardware_dir, args.commit, "rp2040_preflight_*.json", "rp2040_sd_preflight_*.json"), root))
+    gates.append(sd_gate(preflight_path, root))
+    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_boot_prepare_gate(boot_prepare_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_reboot_remount_gate(reboot_remount_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_map_tile_canary_gate(map_tile_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_fat32_policy_gate(unformatted_boot_path, root, args.d1l_port))
+    gates.append(sd_no_format_policy_gate(preflight_path, unformatted_boot_path, root))
+    gates.append(sd_power_rail_gate(sd_power_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_32gb_matrix_gate(sd_matrix_roots, root, args.commit, args.d1l_port))
     gates.append(full_soak_gate(soak_dir, root, args.commit))
     gates.append(manual_evidence_gate(hardware_dir, root, args.commit))
     gates.append(full_rf_gate(hardware_dir, root, args.commit))

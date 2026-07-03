@@ -2,6 +2,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
 
 
@@ -19,6 +20,18 @@ SCROLL_SURFACES = {
     "wifi": "settings",
     "map": "map",
 }
+STRICT_SD_GATE_IDS = (
+    "sd_raw_diag_complete",
+    "sd_boot_retry_manager",
+    "sd_filecanary_independent",
+    "sd_retained_canary_passed",
+    "sd_reboot_remount_passed",
+    "sd_map_tile_canary_passed",
+    "sd_fat32_only_enforced",
+    "sd_no_format_language",
+    "sd_power_rail_measured",
+    "sd_32gb_max_matrix_passed",
+)
 
 
 def ui_tab_abuse_payload(**overrides: object) -> dict:
@@ -237,6 +250,356 @@ def write_routes_probe_evidence(root: Path, commit: str = COMMIT) -> None:
     write_json(root / "artifacts" / "hardware" / "com12" / f"routes_probe_{commit[:7]}.json", payload)
 
 
+def ready_storage_status() -> dict:
+    return {
+        "ok": True,
+        "cmd": "storage status",
+        "sd": {
+            "state": "ready",
+            "present": True,
+            "mounted": True,
+            "data_root_ready": True,
+            "rp2040_protocol_supported": True,
+            "file_ops": True,
+            "atomic_rename": True,
+            "file_line_max": 512,
+            "file_chunk_max": 192,
+            "path_max": 96,
+        },
+        "data_enabled": True,
+        "data_backend": "mixed",
+        "message_store_backend": "sd",
+        "dm_store_backend": "sd",
+        "route_store_backend": "sd",
+        "packet_log_backend": "sd",
+        "stores": {"messages": "sd", "dm": "sd", "routes": "sd", "packets": "sd"},
+    }
+
+
+def no_format_storage_setup() -> dict:
+    return {
+        "cmd": "storage setup",
+        "ok": True,
+        "policy": "no_device_format",
+        "needs_fat32": True,
+        "will_format": False,
+        "format_requested": False,
+        "format_performed": False,
+        "fallback": "nvs",
+    }
+
+
+def write_ready_sd_preflight(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"rp2040_preflight_{commit[:7]}.json",
+        {
+            "ok": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "copies_uf2": False,
+            "ready_for_sd_acceptance": True,
+            "candidate_volumes": [],
+            "classification": {
+                "storage_file_gate_ready": True,
+                "sd_state": "ready",
+                "next_action": "run_sd_file_and_export_acceptance",
+            },
+            "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_raw_diag_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    fields = {
+        "pins": "det7-cs13-sck10-mosi11-miso12-pwr18",
+        "hz": "1000000",
+        "pin_sck": "1",
+        "pin_mosi": "1",
+        "pin_miso": "1",
+        "pin_cs": "1",
+        "selected_power": "high",
+        "selected_mode": "dedicated",
+    }
+    for prefix in audit.RAW_DIAG_PROBE_PREFIXES:
+        for suffix in audit.RAW_DIAG_PROBE_SUFFIXES:
+            fields[f"{prefix}{suffix}"] = "1"
+    line = "DESKOS_SD_DIAG " + " ".join(f"{key}={value}" for key, value in fields.items())
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"rp2040_direct_diag_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "ok": True,
+            "port": "COM12",
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "diag": line,
+            "fields": fields,
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def boot_prepare_payload(
+    scenario: str,
+    classification: str,
+    *,
+    commit: str | None = None,
+    storage_after: dict | None = None,
+    storage_setup: dict | None = None,
+    storage_file_gate_ready: bool = False,
+    retained_store_gate_ready: bool = False,
+    filecanary_passed: bool | None = None,
+) -> dict:
+    payload = {
+        "schema": 1,
+        "mode": "hardware",
+        "port": "COM12",
+        "scenario": scenario,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "format_command_sent": False,
+        "format_confirmed": False,
+        "format_allowed": False,
+        "commands_safe": True,
+        "scenario_passed": True,
+        "classification": classification,
+        "storage_file_gate_ready": storage_file_gate_ready,
+        "retained_store_gate_ready": retained_store_gate_ready,
+        "filecanary_passed": filecanary_passed,
+        "ok": True,
+        "storage_after": storage_after or {},
+        "storage_setup": storage_setup,
+        "health": {"ok": True},
+        "commands": ["rp2040 ping", "storage status", "storage remount", "storage status", "health"],
+    }
+    if commit:
+        payload["firmware_commit"] = commit
+    return payload
+
+
+def write_boot_prepare_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    target_commit = metadata_commit or commit
+    hardware = root / "artifacts" / "hardware" / "com12"
+    ready = ready_storage_status()
+    unformatted_storage = {
+        "ok": True,
+        "cmd": "storage status",
+        "setup_action": "prepare_fat32_on_computer",
+        "data_backend": "nvs",
+        "sd": {
+            "state": "not_fat32_or_unmountable",
+            "present": True,
+            "mounted": False,
+            "data_root_ready": False,
+            "rp2040_protocol_supported": True,
+            "needs_fat32": True,
+            "file_ops": False,
+            "atomic_rename": False,
+        },
+    }
+    scenarios = {
+        "no-card": boot_prepare_payload(
+            "no-card",
+            "no_card_fallback",
+            commit=target_commit,
+            storage_after={"ok": True, "sd": {"state": "no_card", "present": False}},
+        ),
+        "correct-structure": boot_prepare_payload(
+            "correct-structure",
+            "ready_sd_file_gate",
+            commit=target_commit,
+            storage_after=ready,
+            storage_file_gate_ready=True,
+            retained_store_gate_ready=True,
+            filecanary_passed=True,
+        ),
+        "missing-structure": boot_prepare_payload(
+            "missing-structure",
+            "ready_sd_file_gate",
+            commit=target_commit,
+            storage_after=ready,
+            storage_file_gate_ready=True,
+            retained_store_gate_ready=True,
+            filecanary_passed=True,
+        ),
+        "unformatted": boot_prepare_payload(
+            "unformatted",
+            "computer_fat32_required",
+            commit=target_commit,
+            storage_after=unformatted_storage,
+            storage_setup=no_format_storage_setup(),
+        ),
+        "existing-data": boot_prepare_payload(
+            "existing-data",
+            "existing_data_not_wiped",
+            commit=target_commit,
+            storage_after={
+                "ok": True,
+                "setup_action": "prepare_fat32_on_computer",
+                "sd": {"state": "deskos_manifest_invalid", "needs_fat32": True},
+            },
+            storage_setup=no_format_storage_setup(),
+        ),
+        "rp2040-unavailable": boot_prepare_payload(
+            "rp2040-unavailable",
+            "bridge_unavailable_fallback",
+            commit=target_commit,
+            storage_after={"ok": True, "sd": {"state": "rp2040_unavailable"}},
+        ),
+    }
+    for scenario, payload in scenarios.items():
+        underscored = scenario.replace("-", "_")
+        write_json(hardware / f"sd_boot_prepare_{underscored}_{commit[:7]}.json", payload)
+
+
+def write_file_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_file_canary_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "mode": "hardware",
+            "port": "COM12",
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": True,
+            "allow_unavailable": False,
+            "canary_passed": True,
+            "canary_unavailable_ok": False,
+            "storage_file_gate_ready_before": True,
+            "storage_file_gate_ready_after": True,
+            "retained_history_sd_ready_before": False,
+            "retained_history_sd_ready_after": False,
+            "commands": ["storage status", "storage filecanary", "storage status", "packets", "health"],
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_retained_history_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "mode": "hardware",
+            "port": "COM12",
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": True,
+            "allow_unavailable": False,
+            "retained_canary_passed": True,
+            "filecanary_passed": True,
+            "pre_reboot_readbacks_ok": True,
+            "post_reboot_readbacks_ok": True,
+            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "reboot", "health"],
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_reboot_remount_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "mode": "hardware",
+            "port": "COM12",
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": True,
+            "pre_remount_ready": True,
+            "post_remount_ready": True,
+            "retained_canary_passed": True,
+            "pre_reboot_readbacks_ok": True,
+            "post_reboot_readbacks_ok": True,
+            "pre_map_tile_canary_passed": True,
+            "post_map_tile_canary_passed": True,
+            "commands": ["storage status", "storage remount", "storage map-tile-canary sd1", "reboot", "storage map-tile-check sd1", "health"],
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_map_tile_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_map_tile_canary_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "mode": "hardware",
+            "port": "COM12",
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": True,
+            "allow_unavailable": False,
+            "canary_passed": True,
+            "canary_unavailable_ok": False,
+            "storage_file_gate_ready_before": True,
+            "storage_file_gate_ready_after": True,
+            "map_tile_backend_ready_before": True,
+            "map_tile_backend_ready_after": True,
+            "commands": ["storage status", "storage map-tile-canary map1", "storage status", "health"],
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_power_rail_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_electrical_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "mode": "hardware-electrical",
+            "port": "COM12",
+            "ok": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "sd_power_rail_measured": True,
+            "vcc_at_socket_volts": 3.29,
+            "sku": "SenseCAP Indicator D1L",
+            "checks": {
+                "gpio18_high": True,
+                "gnd_continuity": True,
+                "cs_toggles_at_socket": True,
+                "sck_clocks_at_socket": True,
+                "mosi_commands_at_socket": True,
+                "miso_response_or_idle_high": True,
+            },
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_sd_matrix_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    cards = [
+        {"label": "8gb-fat32", "capacity_gb": 8, "fat_type": 32, "ok": True, "official_seeed_smoke_passed": True},
+        {"label": "16gb-fat32", "capacity_gb": 16, "fat_type": 32, "ok": True, "official_seeed_smoke_passed": True},
+        {"label": "32gb-fat32", "capacity_gb": 32, "fat_type": 32, "ok": True, "official_seeed_smoke_passed": True},
+    ]
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_matrix_{commit[:7]}.json",
+        {
+            "schema": 1,
+            "port": "COM12",
+            "ok": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "cards": cards,
+            **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+        },
+    )
+
+
+def write_strict_sd_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_raw_diag_evidence(root, commit, metadata_commit)
+    write_boot_prepare_evidence(root, commit, metadata_commit)
+    write_file_canary_evidence(root, commit, metadata_commit)
+    write_retained_canary_evidence(root, commit, metadata_commit)
+    write_reboot_remount_evidence(root, commit, metadata_commit)
+    write_map_tile_canary_evidence(root, commit, metadata_commit)
+    write_power_rail_evidence(root, commit, metadata_commit)
+    write_sd_matrix_evidence(root, commit, metadata_commit)
+
+
 def audit_args(root: Path):
     return parse_args(
         [
@@ -306,29 +669,14 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_duration_idle_soak"]["ok"] is False
     assert gates["manual_physical_ui_review"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["ok"] is False
-    assert report["p0_failed_count"] == 5
+    for gate_id in STRICT_SD_GATE_IDS:
+        assert gates[gate_id]["ok"] is False
+    assert report["p0_failed_count"] == 15
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
     write_core_evidence(tmp_path)
-    hardware = tmp_path / "artifacts" / "hardware" / "com12"
-    write_json(
-        hardware / "rp2040_preflight_68350bf.json",
-        {
-            "ok": True,
-            "public_rf_tx": False,
-            "formats_sd": False,
-            "copies_uf2": False,
-            "ready_for_sd_acceptance": True,
-            "candidate_volumes": [],
-            "classification": {
-                "storage_file_gate_ready": True,
-                "sd_state": "ready",
-                "next_action": "run_sd_file_and_export_acceptance",
-            },
-            "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
-        },
-    )
+    write_ready_sd_preflight(tmp_path)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
@@ -336,6 +684,9 @@ def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path)
     assert gates["sd_acceptance_matrix"]["ok"] is True
     assert gates["sd_acceptance_matrix"]["details"]["formats_sd"] is False
     assert gates["sd_acceptance_matrix"]["details"]["no_device_format_policy_ok"] is True
+    assert gates["sd_filecanary_independent"]["ok"] is False
+    assert gates["sd_retained_canary_passed"]["ok"] is False
+    assert report["ready_for_public_release"] is False
 
 
 def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: Path):
@@ -351,7 +702,48 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     ]
     assert gates["sd_official_seeed_smoke_passed"]["details"]["inner_test"] == "seeed_official_sd_smoke"
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
-    assert report["p0_failed_count"] == 4
+    assert report["p0_failed_count"] == 14
+
+
+def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_official_seeed_smoke_evidence(tmp_path)
+    write_ready_sd_preflight(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["sd_acceptance_matrix"]["ok"] is True
+    for gate_id in STRICT_SD_GATE_IDS:
+        assert gates[gate_id]["ok"] is True
+    assert gates["sd_filecanary_independent"]["details"]["retained_history_sd_ready_before"] is False
+    assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
+    assert report["ready_for_public_release"] is False
+    assert report["p0_failed_count"] == 3
+
+
+def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(
+        hardware / "sd_file_canary_68350bf.json",
+        {
+            "schema": 1,
+            "mode": "dry-run",
+            "hardware_required": False,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "ok": True,
+            "commands": ["storage status", "storage filecanary"],
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["sd_filecanary_independent"]["ok"] is False
+    assert gates["sd_filecanary_independent"]["details"]["mode"] == "dry-run"
 
 
 def test_release_gate_audit_rejects_old_smoke_wrapper_when_inner_sd_failed(tmp_path: Path):
@@ -431,7 +823,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 5
+    assert report["p0_failed_count"] == 15
 
 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
@@ -605,6 +997,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
             },
         },
     )
+    write_strict_sd_evidence(tmp_path, metadata_commit=STALE_COMMIT)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
@@ -616,6 +1009,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
         "outbound_dm_com11",
         "sd_official_seeed_smoke_passed",
         "sd_acceptance_matrix",
+        *STRICT_SD_GATE_IDS,
         "full_duration_idle_soak",
         "manual_physical_ui_review",
         "full_rf_dm_acceptance",
@@ -627,6 +1021,8 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     assert gates["outbound_dm_com11"]["details"]["path_found"] is False
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == []
     assert gates["sd_acceptance_matrix"]["evidence"] == []
+    for gate_id in STRICT_SD_GATE_IDS:
+        assert gates[gate_id]["evidence"] == []
     assert gates["full_duration_idle_soak"]["evidence"] == []
     assert gates["manual_physical_ui_review"]["details"]["review_found"] is False
     assert gates["manual_physical_ui_review"]["details"]["photo_count"] == 1
