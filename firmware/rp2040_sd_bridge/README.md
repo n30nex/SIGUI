@@ -179,7 +179,9 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   reset-entry byte recovery without formatting or writing the card.
 - The bridge has no SD formatting command. If a FAT32 card is mounted and the
   `/deskos` structure is missing, the bridge creates the DeskOS directories and
-  manifests. If the card is absent, unmountable, not FAT32, or has invalid
+  manifests. If an existing DeskOS manifest is invalid, the bridge preserves it
+  as `.bad`, reports `deskos_manifest_invalid`, and keeps file operations
+  disabled. If the card is absent, unmountable, not FAT32, or has invalid
   DeskOS manifests, the ESP32 keeps NVS fallback active and tells the user what
   to fix on a computer.
 - `DESKOS_SD_FILE v=1 ...` provides bounded generic file operations under

@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 from tools.rp2040_sd_protocol import (
@@ -216,7 +217,7 @@ def test_format_protocol_is_not_exposed():
         raise AssertionError("old SD format request unexpectedly succeeded")
 
 
-def test_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
+def test_manifest_invalid_is_preserved_as_bad_and_blocks_sd_backend():
     partial_manifest = b'{"schema":'
     stale_tmp = b'{"name":"partial tmp"'
     fs = SdFileSystem(
@@ -227,30 +228,35 @@ def test_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
     )
 
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"], fs))
+    invalid = replace(
+        SCENARIOS["ready"],
+        state="deskos_manifest_invalid",
+        deskos=False,
+        note="deskos_manifest_invalid",
+    )
     stat = parse_tokens(
         reply_for_request(
             file_request(21, "stat", path=encode_path(DESKOS_MANIFEST_PATH)),
-            SCENARIOS["ready"],
+            invalid,
             fs,
         )
     )
 
     assert mounted["prefix"] == MOUNT_REPLY
-    assert mounted["state"] == "ready"
-    assert mounted["deskos"] == "1"
-    assert mounted["file_ops"] == "1"
+    assert mounted["state"] == "deskos_manifest_invalid"
+    assert mounted["deskos"] == "0"
+    assert mounted["file_ops"] == "0"
     assert mounted["needs_fat32"] == "0"
-    assert mounted["note"] == "structure_created"
-    assert fs.files[DESKOS_MANIFEST_PATH] == DESKOS_MANIFEST_PAYLOAD
+    assert mounted["note"] == "deskos_manifest_invalid"
+    assert DESKOS_MANIFEST_PATH not in fs.files
     assert fs.files[DESKOS_MANIFEST_BAD_PATH] == partial_manifest
     assert DESKOS_MANIFEST_TMP_PATH not in fs.files
     assert stale_tmp not in fs.files.values()
-    assert stat["ok"] == "1"
-    assert stat["exists"] == "1"
-    assert stat["size"] == str(len(DESKOS_MANIFEST_PAYLOAD))
+    assert stat["ok"] == "0"
+    assert stat["err"] == "not_ready"
 
 
-def test_map_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
+def test_map_manifest_invalid_is_preserved_as_bad_and_blocks_sd_backend():
     partial_manifest = b'{"kind":"partial"'
     fs = SdFileSystem(
         files={
@@ -261,24 +267,29 @@ def test_map_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
     )
 
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"], fs))
+    invalid = replace(
+        SCENARIOS["ready"],
+        state="deskos_manifest_invalid",
+        deskos=False,
+        note="deskos_map_manifest_invalid",
+    )
     stat = parse_tokens(
         reply_for_request(
             file_request(22, "stat", path=encode_path(DESKOS_MAP_MANIFEST_PATH)),
-            SCENARIOS["ready"],
+            invalid,
             fs,
         )
     )
 
-    assert mounted["state"] == "ready"
-    assert mounted["deskos"] == "1"
-    assert mounted["file_ops"] == "1"
-    assert mounted["note"] == "structure_created"
-    assert fs.files[DESKOS_MAP_MANIFEST_PATH] == DESKOS_MAP_MANIFEST_PAYLOAD
+    assert mounted["state"] == "deskos_manifest_invalid"
+    assert mounted["deskos"] == "0"
+    assert mounted["file_ops"] == "0"
+    assert mounted["note"] == "deskos_map_manifest_invalid"
+    assert DESKOS_MAP_MANIFEST_PATH not in fs.files
     assert fs.files[DESKOS_MAP_MANIFEST_BAD_PATH] == partial_manifest
     assert DESKOS_MAP_MANIFEST_TMP_PATH not in fs.files
-    assert stat["ok"] == "1"
-    assert stat["exists"] == "1"
-    assert stat["size"] == str(len(DESKOS_MAP_MANIFEST_PAYLOAD))
+    assert stat["ok"] == "0"
+    assert stat["err"] == "not_ready"
 
 
 def test_non_fat32_mounted_card_blocks_file_ops_before_deskos_prepare():

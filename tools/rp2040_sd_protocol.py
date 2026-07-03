@@ -421,21 +421,28 @@ def write_atomic_text_file(
     return validator(fs, final_path)
 
 
-def prepare_deskos_filesystem(fs: SdFileSystem) -> tuple[bool, bool]:
+def preserve_invalid_manifest(fs: SdFileSystem, final_path: str, tmp_path: str, bad_path: str) -> bool:
+    fs.files.pop(tmp_path, None)
+    if final_path not in fs.files:
+        return False
+    fs.files.pop(bad_path, None)
+    fs.files[bad_path] = fs.files.pop(final_path)
+    return True
+
+
+def prepare_deskos_filesystem(fs: SdFileSystem) -> tuple[bool, bool, str]:
     created = not set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
     fs.dirs.update(DESKOS_REQUIRED_DIRS)
     if DESKOS_MANIFEST_PATH in fs.files:
         if not manifest_valid(fs):
-            created = True
-            if not write_atomic_text_file(
+            if not preserve_invalid_manifest(
                 fs,
                 DESKOS_MANIFEST_PATH,
                 DESKOS_MANIFEST_TMP_PATH,
                 DESKOS_MANIFEST_BAD_PATH,
-                DESKOS_MANIFEST_PAYLOAD,
-                manifest_valid,
             ):
-                return False, created
+                return False, created, "deskos_manifest_unavailable"
+            return False, created, "deskos_manifest_invalid"
     else:
         created = True
         if not write_atomic_text_file(
@@ -446,19 +453,17 @@ def prepare_deskos_filesystem(fs: SdFileSystem) -> tuple[bool, bool]:
             DESKOS_MANIFEST_PAYLOAD,
             manifest_valid,
         ):
-            return False, created
+            return False, created, "deskos_manifest_unavailable"
     if DESKOS_MAP_MANIFEST_PATH in fs.files:
         if not map_manifest_valid(fs):
-            created = True
-            if not write_atomic_text_file(
+            if not preserve_invalid_manifest(
                 fs,
                 DESKOS_MAP_MANIFEST_PATH,
                 DESKOS_MAP_MANIFEST_TMP_PATH,
                 DESKOS_MAP_MANIFEST_BAD_PATH,
-                DESKOS_MAP_MANIFEST_PAYLOAD,
-                map_manifest_valid,
             ):
-                return False, created
+                return False, created, "deskos_map_manifest_unavailable"
+            return False, created, "deskos_map_manifest_invalid"
     else:
         created = True
         if not write_atomic_text_file(
@@ -469,8 +474,8 @@ def prepare_deskos_filesystem(fs: SdFileSystem) -> tuple[bool, bool]:
             DESKOS_MAP_MANIFEST_PAYLOAD,
             map_manifest_valid,
         ):
-            return False, created
-    return True, created
+            return False, created, "deskos_map_manifest_unavailable"
+    return True, created, "structure_created" if created else "ready"
 
 
 def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
@@ -488,15 +493,15 @@ def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
             needs_fat32=True,
             note="needs_fat32_on_computer",
         )
-    prepared, created = prepare_deskos_filesystem(fs)
+    prepared, created, prepare_note = prepare_deskos_filesystem(fs)
     if not prepared:
-        note = (
+        state = (
             "deskos_manifest_invalid"
-            if DESKOS_MANIFEST_PATH in fs.files and not manifest_valid(fs)
-            else "deskos_map_manifest_invalid"
+            if prepare_note in {"deskos_manifest_invalid", "deskos_map_manifest_invalid"}
+            else "error"
         )
-        return replace(scenario, state="deskos_manifest_invalid", deskos=False, note=note)
-    note = "structure_created" if created or not scenario.deskos else scenario.note
+        return replace(scenario, state=state, deskos=False, note=prepare_note)
+    note = prepare_note if created or not scenario.deskos else scenario.note
     return replace(
         scenario,
         state="ready",

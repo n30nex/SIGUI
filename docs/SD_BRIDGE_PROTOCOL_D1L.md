@@ -206,11 +206,13 @@ RF.
 
 There is no RP2040 or ESP32 formatting request. Users must provide a FAT32 SD
 card prepared on a computer. When a FAT32 card mounts and `/deskos` is missing,
-the bridge creates the required DeskOS folders and manifests. When no card is
-present, the ESP32 uses NVS fallback. When a card is not FAT32, unmountable, or
-contains invalid DeskOS manifests, the ESP32 keeps NVS fallback active and
-shows user-facing repair guidance. Do not add developer-only, serial-only, UI,
-or script-only format paths.
+the bridge creates the required DeskOS folders and manifests. If an existing
+DeskOS manifest is invalid, the bridge preserves it as `.bad`, reports
+`deskos_manifest_invalid`, and leaves file operations disabled so the ESP32
+keeps NVS fallback active with user-facing repair guidance. When no card is
+present, the ESP32 uses NVS fallback. When a card is not FAT32 or unmountable,
+the ESP32 also keeps NVS fallback active. Do not add developer-only,
+serial-only, UI, or script-only format paths.
 
 ## Generic File Operations
 

@@ -1535,6 +1535,19 @@ bool write_atomic_text_file(const char *final_path,
     return validator(final_path);
 }
 
+bool preserve_invalid_manifest(const char *final_path,
+                               const char *tmp_path,
+                               const char *bad_path) {
+    (void)remove_file_if_present(tmp_path);
+    if (!SD.exists(final_path)) {
+        return false;
+    }
+    if (!remove_file_if_present(bad_path)) {
+        return false;
+    }
+    return SD.rename(final_path, bad_path);
+}
+
 bool write_manifest() {
     return write_atomic_text_file(DESKOS_MANIFEST,
                                   DESKOS_MANIFEST_TMP,
@@ -1571,11 +1584,14 @@ bool prepare_deskos_structure(const char **note) {
     }
     if (SD.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
-            created = true;
-            if (!write_manifest()) {
+            if (!preserve_invalid_manifest(DESKOS_MANIFEST,
+                                           DESKOS_MANIFEST_TMP,
+                                           DESKOS_MANIFEST_BAD)) {
                 *note = "deskos_manifest_unavailable";
                 return false;
             }
+            *note = "deskos_manifest_invalid";
+            return false;
         }
     } else {
         created = true;
@@ -1586,11 +1602,14 @@ bool prepare_deskos_structure(const char **note) {
     }
     if (SD.exists(DESKOS_MAP_MANIFEST)) {
         if (!map_manifest_valid()) {
-            created = true;
-            if (!write_map_manifest()) {
+            if (!preserve_invalid_manifest(DESKOS_MAP_MANIFEST,
+                                           DESKOS_MAP_MANIFEST_TMP,
+                                           DESKOS_MAP_MANIFEST_BAD)) {
                 *note = "deskos_map_manifest_unavailable";
                 return false;
             }
+            *note = "deskos_map_manifest_invalid";
+            return false;
         }
     } else {
         created = true;

@@ -260,10 +260,13 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
     assert "write_atomic_text_file" in sketch
+    assert "preserve_invalid_manifest" in sketch
     assert "write_text_file_direct(tmp_path, payload)" in sketch
     assert "validator(tmp_path)" in sketch
     assert "SD.rename(final_path, bad_path)" in sketch
     assert "SD.rename(tmp_path, final_path)" in sketch
+    assert '"deskos_manifest_invalid"' in sketch
+    assert '"deskos_map_manifest_invalid"' in sketch
     assert "manifest_file_valid" in sketch
     assert "map_manifest_file_valid" in sketch
     assert "write_text_file_direct(DESKOS_MANIFEST" not in sketch
