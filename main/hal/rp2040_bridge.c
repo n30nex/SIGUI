@@ -599,7 +599,13 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
     parse_word_token(line, "probe_power", status->probe_power, sizeof(status->probe_power));
     parse_word_token(line, "probe_mode", status->probe_mode, sizeof(status->probe_mode));
 
-    if (status->card_present && !status->filesystem_mounted) {
+    const bool probe_rejected_card =
+        strcmp(status->note, "sd_probe_rejected_card") == 0 ||
+        (strcmp(status->state, "error") == 0 &&
+         (status->probe_error == 3U || status->probe_error == 4U));
+    if (probe_rejected_card) {
+        status->needs_fat32 = false;
+    } else if (status->card_present && !status->filesystem_mounted) {
         status->needs_fat32 = true;
     }
     status->data_ready = status->card_present &&
@@ -623,6 +629,7 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
         snprintf(status->note, sizeof(status->note), "%s",
                  status->data_ready ? "SD card is ready for DeskOS data" :
                  mount_failed_with_diag ? "RP2040 SD filesystem mount failed; inspect firmware mount diagnostics" :
+                 probe_rejected_card ? "RP2040 SD probe rejected the card init response; inspect CMD0/CMD8 diagnostics" :
                  status->needs_fat32 ? "Prepare a FAT32 card on a computer before using SD storage" :
                  "SD card is not ready for DeskOS data");
     }

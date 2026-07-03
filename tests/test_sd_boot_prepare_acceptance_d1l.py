@@ -207,6 +207,33 @@ def test_unformatted_default_reports_computer_fat32_without_format(monkeypatch):
     assert all("setup confirm" not in write for write in ser.writes)
 
 
+def test_unformatted_ready_card_does_not_satisfy_rejection_evidence(monkeypatch):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_line("ready"),
+            ready_storage_line(),
+            storage_setup_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="unformatted",
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "unformatted_policy_not_reported"
+    assert report["formats_sd"] is False
+    assert report["format_command_sent"] is False
+    assert report["format_confirmed"] is False
+
+
 def test_unformatted_mount_error_is_classified_as_firmware_path(monkeypatch):
     ser = FakeSerial(
         [

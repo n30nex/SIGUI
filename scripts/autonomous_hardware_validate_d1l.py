@@ -1139,6 +1139,14 @@ def release_gate_summary(runs: list[dict]) -> dict:
     }
 
 
+def attach_release_gate_summary(report: dict, runs: list[dict]) -> dict:
+    summary = release_gate_summary(runs)
+    report["release_gate"] = summary
+    report["ready_for_public_release"] = summary.get("ready_for_public_release")
+    report["release_ready"] = summary.get("ready_for_public_release") is True
+    return summary
+
+
 def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace, runs: list[dict]) -> dict:
     last_report: dict[str, Any] = {}
     for attempt in range(2):
@@ -1191,7 +1199,7 @@ def run_validation(args: argparse.Namespace) -> dict:
                 runs.append(run_release_gate(ctx, dry_run=args.dry_run))
                 report["error"] = "esp32_flash_failed"
                 report["ok"] = False
-                report["release_gate"] = release_gate_summary(runs)
+                attach_release_gate_summary(report, runs)
                 return report
 
         access_precheck = rp2040_access_precheck(ctx, dry_run=args.dry_run)
@@ -1200,7 +1208,7 @@ def run_validation(args: argparse.Namespace) -> dict:
             runs.append(run_release_gate(ctx, dry_run=args.dry_run))
             report["error"] = access_precheck.get("error", "rp2040_bootloader_unavailable")
             report["ok"] = False
-            report["release_gate"] = release_gate_summary(runs)
+            attach_release_gate_summary(report, runs)
             return report
 
         if not args.skip_rp2040_official_smoke:
@@ -1232,7 +1240,7 @@ def run_validation(args: argparse.Namespace) -> dict:
             runs.append(run_release_gate(ctx, dry_run=args.dry_run))
             report["error"] = "bridge_restore_not_verified"
             report["ok"] = False
-            report["release_gate"] = release_gate_summary(runs)
+            attach_release_gate_summary(report, runs)
             return report
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
@@ -1246,7 +1254,7 @@ def run_validation(args: argparse.Namespace) -> dict:
         report["ok"] = False
     else:
         report["ok"] = all(step.get("ok") is True for step in runs if step.get("kind") != "release_gate_audit")
-        report["release_gate"] = release_gate_summary(runs)
+        attach_release_gate_summary(report, runs)
     return report
 
 

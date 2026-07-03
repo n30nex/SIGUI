@@ -451,6 +451,33 @@ def test_preflight_classifies_error_with_cmd8_echo_rejection_as_firmware_path():
     assert report["next_action"] == "inspect_rp2040_sd_cmd0_firmware_path"
 
 
+def test_preflight_prioritizes_present_rejected_probe_over_fat32_guidance():
+    report = preflight.classify_preflight(
+        {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
+        {"ok": True, "cmd": "rp2040 ping", "protocol_supported": True, "sd_touched": False},
+        {
+            "ok": True,
+            "cmd": "storage status",
+            "sd": {
+                "state": "error",
+                "present": True,
+                "mounted": False,
+                "needs_fat32": True,
+                "note": "sd_probe_rejected_card",
+                "rp2040_bridge_ready": True,
+                "rp2040_protocol_supported": True,
+                "probe_error": 3,
+                "probe_data": 0,
+            },
+        },
+        [],
+        {"ok": True},
+    )
+
+    assert report["state"] == "sd_probe_rejected_card"
+    assert report["next_action"] == "inspect_rp2040_sd_cmd0_firmware_path"
+
+
 def test_run_preflight_queries_only_safe_serial_commands(monkeypatch):
     ser = FakeSerial(
         [

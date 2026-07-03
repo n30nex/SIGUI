@@ -115,11 +115,12 @@ def sd_has_mount_error(sd: dict) -> bool:
 
 
 def sd_has_rejected_probe(sd: dict) -> bool:
-    probe_error = sd.get("probe_error")
-    probe_data = sd.get("probe_data")
-    if probe_error in (3, 4):
+    if sd.get("note") == "sd_probe_rejected_card":
         return True
-    return isinstance(probe_data, (int, float)) and probe_data not in (0, 0xFF)
+    probe_error = sd.get("probe_error")
+    if sd.get("state") == "error" and probe_error in (3, 4):
+        return True
+    return probe_error in (3, 4)
 
 
 def classify_preflight(
@@ -168,6 +169,9 @@ def classify_preflight(
     elif protocol_supported and sd.get("state") == "mount_required":
         state = "sd_mount_required"
         next_action = "run_storage_mount"
+    elif protocol_supported and sd_has_rejected_probe(sd):
+        state = "sd_probe_rejected_card"
+        next_action = "inspect_rp2040_sd_cmd0_firmware_path"
     elif (
         protocol_supported
         and sd.get("present") is True
@@ -183,9 +187,6 @@ def classify_preflight(
     elif not bridge_uart_ready:
         state = "rp2040_uart_unavailable"
         next_action = "check_d1l_power_cable_and_rp2040_uart"
-    elif protocol_supported and sd_has_rejected_probe(sd):
-        state = "sd_probe_rejected_card"
-        next_action = "inspect_rp2040_sd_cmd0_firmware_path"
     elif protocol_supported and sd.get("present") is not True:
         if diag_attempted and not diag_supported and artifact_ok:
             state = "sd_card_not_present_diag_pending"

@@ -215,8 +215,6 @@ def boot_prepare_passed(
         return False, "ready_sd_file_gate_missing"
 
     if scenario == "unformatted":
-        if state == "ready" and storage_file_gate_ready(storage_after):
-            return True, "prepared_ready_without_runner_format"
         if setup_policy_reported(storage_setup) and (
             setup_action == FIRMWARE_MOUNT_ERROR_ACTION
             or sd_mount_error_present(storage_after)

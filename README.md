@@ -23,7 +23,7 @@ python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 1
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 ```
 
-Firmware binaries are built by GitHub Actions only. The `d1l-ci` workflow produces ESP32 firmware/release artifacts and the RP2040 SD bridge artifact.
+Firmware binaries are built by GitHub Actions only. The `d1l-ci` workflow produces ESP32 firmware/release artifacts, `rp2040-sd-bridge-firmware`, and `rp2040-seeed-official-sd-smoke-firmware` for SD hardware proof.
 
 Hardware flow, once the user supplies the D1L port:
 
