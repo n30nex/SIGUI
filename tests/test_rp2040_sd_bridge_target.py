@@ -250,10 +250,23 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "send_format_result" not in sketch
     assert "/deskos" in sketch
     assert "/deskos/manifest.json" in sketch
+    assert "/deskos/manifest.json.tmp" in sketch
+    assert "/deskos/manifest.json.bad" in sketch
     assert "/deskos/map/manifest.json" in sketch
+    assert "/deskos/map/manifest.json.tmp" in sketch
+    assert "/deskos/map/manifest.json.bad" in sketch
     assert "MeshCore DeskOS D1L SD" in sketch
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
+    assert "write_atomic_text_file" in sketch
+    assert "write_text_file_direct(tmp_path, payload)" in sketch
+    assert "validator(tmp_path)" in sketch
+    assert "SD.rename(final_path, bad_path)" in sketch
+    assert "SD.rename(tmp_path, final_path)" in sketch
+    assert "manifest_file_valid" in sketch
+    assert "map_manifest_file_valid" in sketch
+    assert "write_text_file_direct(DESKOS_MANIFEST" not in sketch
+    assert "write_text_file_direct(DESKOS_MAP_MANIFEST" not in sketch
     assert "bool mounted_fs_is_fat32()" in sketch
     assert "SD.fatType() == 32" in sketch
     assert "bool snapshot_fs_is_fat32" in sketch

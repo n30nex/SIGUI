@@ -37,7 +37,11 @@ MAP_TILE_CANARY_DEFAULT_TOKEN = "map1"
 DATA_EXPORT_START_ID = 120
 DATA_EXPORT_DEFAULT_TOKEN = "data1"
 DESKOS_MANIFEST_PATH = "manifest.json"
+DESKOS_MANIFEST_TMP_PATH = "manifest.json.tmp"
+DESKOS_MANIFEST_BAD_PATH = "manifest.json.bad"
 DESKOS_MAP_MANIFEST_PATH = "map/manifest.json"
+DESKOS_MAP_MANIFEST_TMP_PATH = "map/manifest.json.tmp"
+DESKOS_MAP_MANIFEST_BAD_PATH = "map/manifest.json.bad"
 DESKOS_MANIFEST_PAYLOAD = (
     b'{"name":"MeshCore DeskOS D1L SD","schema":1,'
     b'"created_by":"MeshCore DeskOS D1L",'
@@ -359,8 +363,8 @@ def diag_line(scenario: SdScenario) -> str:
     )
 
 
-def manifest_valid(fs: SdFileSystem) -> bool:
-    payload = fs.files.get(DESKOS_MANIFEST_PATH)
+def manifest_valid(fs: SdFileSystem, path: str = DESKOS_MANIFEST_PATH) -> bool:
+    payload = fs.files.get(path)
     return (
         payload is not None
         and len(payload) <= 512
@@ -371,8 +375,8 @@ def manifest_valid(fs: SdFileSystem) -> bool:
     )
 
 
-def map_manifest_valid(fs: SdFileSystem) -> bool:
-    payload = fs.files.get(DESKOS_MAP_MANIFEST_PATH)
+def map_manifest_valid(fs: SdFileSystem, path: str = DESKOS_MAP_MANIFEST_PATH) -> bool:
+    payload = fs.files.get(path)
     return (
         payload is not None
         and len(payload) <= 512
@@ -382,19 +386,79 @@ def map_manifest_valid(fs: SdFileSystem) -> bool:
     )
 
 
-def prepare_deskos_filesystem(fs: SdFileSystem) -> bool:
+def write_atomic_text_file(
+    fs: SdFileSystem,
+    final_path: str,
+    tmp_path: str,
+    bad_path: str,
+    payload: bytes,
+    validator,
+) -> bool:
+    fs.files.pop(tmp_path, None)
+    fs.files[tmp_path] = payload
+    if not validator(fs, tmp_path):
+        fs.files.pop(tmp_path, None)
+        return False
+    if final_path in fs.files:
+        if validator(fs, final_path):
+            fs.files.pop(tmp_path, None)
+            return True
+        fs.files.pop(bad_path, None)
+        fs.files[bad_path] = fs.files.pop(final_path)
+    fs.files[final_path] = fs.files.pop(tmp_path)
+    return validator(fs, final_path)
+
+
+def prepare_deskos_filesystem(fs: SdFileSystem) -> tuple[bool, bool]:
+    created = not set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
     fs.dirs.update(DESKOS_REQUIRED_DIRS)
     if DESKOS_MANIFEST_PATH in fs.files:
         if not manifest_valid(fs):
-            return False
+            created = True
+            if not write_atomic_text_file(
+                fs,
+                DESKOS_MANIFEST_PATH,
+                DESKOS_MANIFEST_TMP_PATH,
+                DESKOS_MANIFEST_BAD_PATH,
+                DESKOS_MANIFEST_PAYLOAD,
+                manifest_valid,
+            ):
+                return False, created
     else:
-        fs.files[DESKOS_MANIFEST_PATH] = DESKOS_MANIFEST_PAYLOAD
+        created = True
+        if not write_atomic_text_file(
+            fs,
+            DESKOS_MANIFEST_PATH,
+            DESKOS_MANIFEST_TMP_PATH,
+            DESKOS_MANIFEST_BAD_PATH,
+            DESKOS_MANIFEST_PAYLOAD,
+            manifest_valid,
+        ):
+            return False, created
     if DESKOS_MAP_MANIFEST_PATH in fs.files:
         if not map_manifest_valid(fs):
-            return False
+            created = True
+            if not write_atomic_text_file(
+                fs,
+                DESKOS_MAP_MANIFEST_PATH,
+                DESKOS_MAP_MANIFEST_TMP_PATH,
+                DESKOS_MAP_MANIFEST_BAD_PATH,
+                DESKOS_MAP_MANIFEST_PAYLOAD,
+                map_manifest_valid,
+            ):
+                return False, created
     else:
-        fs.files[DESKOS_MAP_MANIFEST_PATH] = DESKOS_MAP_MANIFEST_PAYLOAD
-    return True
+        created = True
+        if not write_atomic_text_file(
+            fs,
+            DESKOS_MAP_MANIFEST_PATH,
+            DESKOS_MAP_MANIFEST_TMP_PATH,
+            DESKOS_MAP_MANIFEST_BAD_PATH,
+            DESKOS_MAP_MANIFEST_PAYLOAD,
+            map_manifest_valid,
+        ):
+            return False, created
+    return True, created
 
 
 def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
@@ -412,14 +476,15 @@ def mounted_scenario(scenario: SdScenario, fs: SdFileSystem) -> SdScenario:
             needs_fat32=True,
             note="needs_fat32_on_computer",
         )
-    if not prepare_deskos_filesystem(fs):
+    prepared, created = prepare_deskos_filesystem(fs)
+    if not prepared:
         note = (
             "deskos_manifest_invalid"
             if DESKOS_MANIFEST_PATH in fs.files and not manifest_valid(fs)
             else "deskos_map_manifest_invalid"
         )
         return replace(scenario, state="deskos_manifest_invalid", deskos=False, note=note)
-    note = "structure_created" if not scenario.deskos else scenario.note
+    note = "structure_created" if created or not scenario.deskos else scenario.note
     return replace(
         scenario,
         state="ready",

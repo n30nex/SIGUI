@@ -33,8 +33,12 @@ from tools.rp2040_sd_protocol import (
     DIAGNOSTIC_EXPORT_DEFAULT_TOKEN,
     DIAGNOSTIC_EXPORT_START_ID,
     DESKOS_MANIFEST_PATH,
+    DESKOS_MANIFEST_TMP_PATH,
+    DESKOS_MANIFEST_BAD_PATH,
     DESKOS_MANIFEST_PAYLOAD,
     DESKOS_MAP_MANIFEST_PATH,
+    DESKOS_MAP_MANIFEST_TMP_PATH,
+    DESKOS_MAP_MANIFEST_BAD_PATH,
     DESKOS_MAP_MANIFEST_PAYLOAD,
     DESKOS_REQUIRED_DIRS,
     MAP_TILE_CANARY_DEFAULT_TOKEN,
@@ -142,6 +146,10 @@ def test_mount_protocol_is_explicit_sd_touch_request():
     assert DESKOS_MANIFEST_PATH not in fat16_fs.files
     assert DESKOS_MANIFEST_PATH in fs.files
     assert DESKOS_MAP_MANIFEST_PATH in fs.files
+    assert DESKOS_MANIFEST_TMP_PATH not in fs.files
+    assert DESKOS_MAP_MANIFEST_TMP_PATH not in fs.files
+    assert DESKOS_MANIFEST_BAD_PATH not in fs.files
+    assert DESKOS_MAP_MANIFEST_BAD_PATH not in fs.files
     assert set(DESKOS_REQUIRED_DIRS).issubset(fs.dirs)
     assert b'"map_tiles"' in fs.files[DESKOS_MANIFEST_PATH]
     assert b'"kind":"map_cache"' in fs.files[DESKOS_MAP_MANIFEST_PATH]
@@ -208,26 +216,69 @@ def test_format_protocol_is_not_exposed():
         raise AssertionError("old SD format request unexpectedly succeeded")
 
 
-def test_manifest_invalid_blocks_file_ops_without_formatting():
-    fs = SdFileSystem(files={DESKOS_MANIFEST_PATH: b'{"schema":99}\n'})
+def test_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
+    partial_manifest = b'{"schema":'
+    stale_tmp = b'{"name":"partial tmp"'
+    fs = SdFileSystem(
+        files={
+            DESKOS_MANIFEST_PATH: partial_manifest,
+            DESKOS_MANIFEST_TMP_PATH: stale_tmp,
+        }
+    )
 
     mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"], fs))
     stat = parse_tokens(
         reply_for_request(
             file_request(21, "stat", path=encode_path(DESKOS_MANIFEST_PATH)),
-            SCENARIOS["root-missing"],
+            SCENARIOS["ready"],
             fs,
         )
     )
 
     assert mounted["prefix"] == MOUNT_REPLY
-    assert mounted["state"] == "deskos_manifest_invalid"
-    assert mounted["deskos"] == "0"
+    assert mounted["state"] == "ready"
+    assert mounted["deskos"] == "1"
+    assert mounted["file_ops"] == "1"
     assert mounted["needs_fat32"] == "0"
-    assert mounted["note"] == "deskos_manifest_invalid"
-    assert fs.files[DESKOS_MANIFEST_PATH] == b'{"schema":99}\n'
-    assert stat["ok"] == "0"
-    assert stat["err"] == "not_ready"
+    assert mounted["note"] == "structure_created"
+    assert fs.files[DESKOS_MANIFEST_PATH] == DESKOS_MANIFEST_PAYLOAD
+    assert fs.files[DESKOS_MANIFEST_BAD_PATH] == partial_manifest
+    assert DESKOS_MANIFEST_TMP_PATH not in fs.files
+    assert stale_tmp not in fs.files.values()
+    assert stat["ok"] == "1"
+    assert stat["exists"] == "1"
+    assert stat["size"] == str(len(DESKOS_MANIFEST_PAYLOAD))
+
+
+def test_map_manifest_invalid_is_preserved_as_bad_and_recreated_atomically():
+    partial_manifest = b'{"kind":"partial"'
+    fs = SdFileSystem(
+        files={
+            DESKOS_MANIFEST_PATH: DESKOS_MANIFEST_PAYLOAD,
+            DESKOS_MAP_MANIFEST_PATH: partial_manifest,
+            DESKOS_MAP_MANIFEST_TMP_PATH: b"stale",
+        }
+    )
+
+    mounted = parse_tokens(reply_for_request(MOUNT_REQUEST, SCENARIOS["ready"], fs))
+    stat = parse_tokens(
+        reply_for_request(
+            file_request(22, "stat", path=encode_path(DESKOS_MAP_MANIFEST_PATH)),
+            SCENARIOS["ready"],
+            fs,
+        )
+    )
+
+    assert mounted["state"] == "ready"
+    assert mounted["deskos"] == "1"
+    assert mounted["file_ops"] == "1"
+    assert mounted["note"] == "structure_created"
+    assert fs.files[DESKOS_MAP_MANIFEST_PATH] == DESKOS_MAP_MANIFEST_PAYLOAD
+    assert fs.files[DESKOS_MAP_MANIFEST_BAD_PATH] == partial_manifest
+    assert DESKOS_MAP_MANIFEST_TMP_PATH not in fs.files
+    assert stat["ok"] == "1"
+    assert stat["exists"] == "1"
+    assert stat["size"] == str(len(DESKOS_MAP_MANIFEST_PAYLOAD))
 
 
 def test_non_fat32_mounted_card_blocks_file_ops_before_deskos_prepare():

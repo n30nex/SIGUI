@@ -45,7 +45,11 @@ constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;
 constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;
 constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
+constexpr const char *DESKOS_MANIFEST_TMP = "/deskos/manifest.json.tmp";
+constexpr const char *DESKOS_MANIFEST_BAD = "/deskos/manifest.json.bad";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
+constexpr const char *DESKOS_MAP_MANIFEST_TMP = "/deskos/map/manifest.json.tmp";
+constexpr const char *DESKOS_MAP_MANIFEST_BAD = "/deskos/map/manifest.json.bad";
 constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
     "{\"name\":\"MeshCore DeskOS D1L SD\",\"schema\":1,"
     "\"created_by\":\"MeshCore DeskOS D1L\","
@@ -1410,11 +1414,11 @@ bool ensure_directory(const char *path) {
     return SD.mkdir(path) && path_is_directory(path);
 }
 
-bool manifest_valid() {
-    if (!SD.exists(DESKOS_MANIFEST)) {
+bool manifest_file_valid(const char *path) {
+    if (!SD.exists(path)) {
         return false;
     }
-    File file = SD.open(DESKOS_MANIFEST, FILE_READ);
+    File file = SD.open(path, FILE_READ);
     if (!file || file.isDirectory()) {
         if (file) {
             file.close();
@@ -1440,11 +1444,15 @@ bool manifest_valid() {
            text.indexOf("\"map_tiles\"") >= 0;
 }
 
-bool map_manifest_valid() {
-    if (!SD.exists(DESKOS_MAP_MANIFEST)) {
+bool manifest_valid() {
+    return manifest_file_valid(DESKOS_MANIFEST);
+}
+
+bool map_manifest_file_valid(const char *path) {
+    if (!SD.exists(path)) {
         return false;
     }
-    File file = SD.open(DESKOS_MAP_MANIFEST, FILE_READ);
+    File file = SD.open(path, FILE_READ);
     if (!file || file.isDirectory()) {
         if (file) {
             file.close();
@@ -1469,7 +1477,15 @@ bool map_manifest_valid() {
            text.indexOf("\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\"") >= 0;
 }
 
-bool write_text_file(const char *path, const char *payload) {
+bool map_manifest_valid() {
+    return map_manifest_file_valid(DESKOS_MAP_MANIFEST);
+}
+
+bool remove_file_if_present(const char *path) {
+    return !SD.exists(path) || SD.remove(path);
+}
+
+bool write_text_file_direct(const char *path, const char *payload) {
     File file = SD.open(path, "w");
     if (!file) {
         return false;
@@ -1480,13 +1496,57 @@ bool write_text_file(const char *path, const char *payload) {
     return written == strlen(payload);
 }
 
+using ManifestValidator = bool (*)(const char *);
+
+bool write_atomic_text_file(const char *final_path,
+                            const char *tmp_path,
+                            const char *bad_path,
+                            const char *payload,
+                            ManifestValidator validator) {
+    if (!remove_file_if_present(tmp_path)) {
+        return false;
+    }
+    if (!write_text_file_direct(tmp_path, payload)) {
+        (void)remove_file_if_present(tmp_path);
+        return false;
+    }
+    if (!validator(tmp_path)) {
+        (void)remove_file_if_present(tmp_path);
+        return false;
+    }
+    if (SD.exists(final_path)) {
+        if (validator(final_path)) {
+            return remove_file_if_present(tmp_path);
+        }
+        if (!remove_file_if_present(bad_path)) {
+            (void)remove_file_if_present(tmp_path);
+            return false;
+        }
+        if (!SD.rename(final_path, bad_path)) {
+            (void)remove_file_if_present(tmp_path);
+            return false;
+        }
+    }
+    if (!SD.rename(tmp_path, final_path)) {
+        return false;
+    }
+    return validator(final_path);
+}
+
 bool write_manifest() {
-    return write_text_file(DESKOS_MANIFEST, DESKOS_MANIFEST_PAYLOAD) && manifest_valid();
+    return write_atomic_text_file(DESKOS_MANIFEST,
+                                  DESKOS_MANIFEST_TMP,
+                                  DESKOS_MANIFEST_BAD,
+                                  DESKOS_MANIFEST_PAYLOAD,
+                                  manifest_file_valid);
 }
 
 bool write_map_manifest() {
-    return write_text_file(DESKOS_MAP_MANIFEST, DESKOS_MAP_MANIFEST_PAYLOAD) &&
-           map_manifest_valid();
+    return write_atomic_text_file(DESKOS_MAP_MANIFEST,
+                                  DESKOS_MAP_MANIFEST_TMP,
+                                  DESKOS_MAP_MANIFEST_BAD,
+                                  DESKOS_MAP_MANIFEST_PAYLOAD,
+                                  map_manifest_file_valid);
 }
 
 bool prepare_deskos_structure(const char **note) {
@@ -1509,8 +1569,11 @@ bool prepare_deskos_structure(const char **note) {
     }
     if (SD.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
-            *note = "deskos_manifest_invalid";
-            return false;
+            created = true;
+            if (!write_manifest()) {
+                *note = "deskos_manifest_unavailable";
+                return false;
+            }
         }
     } else {
         created = true;
@@ -1521,8 +1584,11 @@ bool prepare_deskos_structure(const char **note) {
     }
     if (SD.exists(DESKOS_MAP_MANIFEST)) {
         if (!map_manifest_valid()) {
-            *note = "deskos_map_manifest_invalid";
-            return false;
+            created = true;
+            if (!write_map_manifest()) {
+                *note = "deskos_map_manifest_unavailable";
+                return false;
+            }
         }
     } else {
         created = true;
