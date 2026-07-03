@@ -79,6 +79,7 @@ struct RawProbe {
     uint8_t cmd8_response;
     uint8_t cmd8_echo[4];
     uint8_t cmd55_response;
+    uint8_t cmd59_response;
     uint8_t acmd41_response;
     uint8_t acmd41_attempts;
     uint8_t ocr[4];
@@ -241,6 +242,28 @@ uint8_t sd_command(uint8_t command,
     return response;
 }
 
+uint8_t sd_command_crc(uint8_t command, uint32_t argument) {
+    uint8_t crc = 0;
+    const uint8_t bytes[] = {
+        static_cast<uint8_t>(0x40U | command),
+        static_cast<uint8_t>(argument >> 24),
+        static_cast<uint8_t>(argument >> 16),
+        static_cast<uint8_t>(argument >> 8),
+        static_cast<uint8_t>(argument),
+    };
+    for (size_t i = 0; i < sizeof(bytes); ++i) {
+        uint8_t data = bytes[i];
+        for (uint8_t bit = 0; bit < 8; ++bit) {
+            crc <<= 1;
+            if (((data ^ crc) & 0x80U) != 0U) {
+                crc ^= 0x09U;
+            }
+            data <<= 1;
+        }
+    }
+    return static_cast<uint8_t>((crc << 1) | 1U);
+}
+
 uint32_t read_le32(const uint8_t *bytes) {
     return static_cast<uint32_t>(bytes[0]) |
            (static_cast<uint32_t>(bytes[1]) << 8) |
@@ -274,7 +297,7 @@ bool raw_read_sector(uint32_t lba, bool high_capacity, uint8_t *sector,
     (void)spi_transfer(static_cast<uint8_t>(address >> 16));
     (void)spi_transfer(static_cast<uint8_t>(address >> 8));
     (void)spi_transfer(static_cast<uint8_t>(address));
-    (void)spi_transfer(0xFF);
+    (void)spi_transfer(sd_command_crc(17, address));
     const uint8_t response = wait_sd_response();
     if (response_out) {
         *response_out = response;
@@ -371,6 +394,7 @@ RawProbe run_raw_probe() {
     probe.cmd0_ready_byte = 0xFF;
     probe.cmd8_ready_byte = 0xFF;
     probe.cmd55_response = 0xFF;
+    probe.cmd59_response = 0xFF;
     probe.acmd41_response = 0xFF;
     probe.idle_rx_ff = 0xFF;
     for (size_t i = 0; i < sizeof(probe.cmd8_echo); ++i) {
@@ -436,6 +460,8 @@ RawProbe run_raw_probe() {
         return probe;
     }
 
+    probe.cmd59_response = sd_command(59, 0, sd_command_crc(59, 0),
+                                      nullptr, 0, nullptr);
     (void)sd_command(58, 0, 0xFD, probe.ocr, sizeof(probe.ocr), nullptr);
     probe.high_capacity = (probe.ocr[0] & 0x40U) != 0U;
     parse_raw_sector0(probe);
@@ -630,6 +656,7 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
     print_u8_field("raw_r72", probe.cmd8_echo[2]);
     print_u8_field("raw_r73", probe.cmd8_echo[3]);
     print_u8_field("raw_cmd55", probe.cmd55_response);
+    print_u8_field("raw_cmd59", probe.cmd59_response);
     print_u8_field("raw_acmd41", probe.acmd41_response);
     print_u8_field("raw_acmd41_attempts", probe.acmd41_attempts);
     print_u8_field("raw_sector0_response", probe.sector0_response);

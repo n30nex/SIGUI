@@ -427,11 +427,14 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "sd_command(0, 0, 0x95" in smoke
     assert "sd_command(8, 0x1AA, 0x87" in smoke
     assert "sd_command(41, sd_v2 ? 0x40000000UL : 0, 0x77" in smoke
+    assert "sd_command_crc(17, address)" in smoke
+    assert "sd_command(59, 0, sd_command_crc(59, 0)" in smoke
     assert "raw_cmd0" in smoke
     assert "raw_cmd0_ready" in smoke
     assert "raw_cmd8" in smoke
     assert "raw_cmd8_ready" in smoke
     assert "raw_acmd41" in smoke
+    assert "raw_cmd59" in smoke
     assert "raw_cmd8_echo_ok" in smoke
     assert "raw_sector0_read" in smoke
     assert "raw_sector0_response" in smoke
