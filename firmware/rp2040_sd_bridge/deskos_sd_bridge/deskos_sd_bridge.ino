@@ -2139,6 +2139,8 @@ void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) 
     line += String(static_cast<unsigned long>(FILE_PATH_MAX));
     line += " atomic_rename=";
     line += bool_token(file_ready && REPLACE_RENAME_PRESERVES_OLD_ON_FAILURE);
+    line += " sd_use_sd_crc=";
+    line += String(static_cast<unsigned int>(USE_SD_CRC));
     out.println(line);
 }
 

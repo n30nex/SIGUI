@@ -39,7 +39,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert '#include <SPI.h>' in sketch
     assert '#include <Wire.h>' in sketch
     assert '#include <hardware/gpio.h>' in sketch
-    assert "USE_SD_CRC" not in sketch
+    assert "sd_use_sd_crc=" in sketch
     assert "USE_SPI_ARRAY_TRANSFER" not in sketch
     assert "requires byte-wise SdFat SPI transfers" not in sketch
     assert "Serial1.setRX(RP2040_ESP32_RX_PIN)" in sketch
@@ -454,6 +454,7 @@ def test_official_seeed_sd_smoke_sketch_and_ci_artifact_are_non_formatting():
     assert "detect_pulldown" in smoke
     assert "seeed_official_sd_smoke" in smoke
     assert "max_card_gb" in smoke
+    assert "sd_use_sd_crc" in smoke
     assert "public_rf_tx" in smoke
     assert "formats_sd" in smoke
     assert "SD.format" not in smoke

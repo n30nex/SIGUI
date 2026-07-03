@@ -676,6 +676,8 @@ void print_result(const SmokeResult &result, const RawProbe &probe,
     print_string_field("power_state", "gpio18_commanded_high_not_measured");
     Serial.print("\"format\":\"non_destructive\",\"max_card_gb\":");
     Serial.print(MAX_CARD_GB);
+    Serial.print(",\"sd_use_sd_crc\":");
+    Serial.print(static_cast<unsigned int>(USE_SD_CRC));
     Serial.println("}");
 }
 

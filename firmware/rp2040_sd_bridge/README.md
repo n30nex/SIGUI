@@ -47,10 +47,11 @@ plain ASCII rather than Seeed's sensor `PacketSerial` framing.
 Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
 adds the `earlephilhower/arduino-pico` board package URL, installs
 `rp2040:rp2040`, and compiles the sketch with FQBN
-`rp2040:rp2040:seeed_indicator_rp2040` using the board package's default SD
-library settings. The current validation card is user-confirmed FAT32 but still
-reports RP2040 init/probe failures before the filesystem layer, so the bridge
-stays close to Seeed's documented SD pin/power path while using Arduino-Pico's second-port SD support,
+`rp2040:rp2040:seeed_indicator_rp2040` and
+`compiler.cpp.extra_flags="-DUSE_SD_CRC=1"`. The current validation card is
+user-confirmed FAT32 and accepts raw sector reads only when SD command CRC is
+valid, so the bridge stays close to Seeed's documented SD pin/power path while
+using Arduino-Pico's second-port SD support,
 Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and the Arduino-Pico
 maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.

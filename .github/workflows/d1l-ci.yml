@@ -102,6 +102,7 @@ jobs:
           mkdir -p artifacts/rp2040-sd-bridge
           arduino-cli compile \
             --fqbn rp2040:rp2040:seeed_indicator_rp2040 \
+            --build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1" \
             --output-dir artifacts/rp2040-sd-bridge \
             firmware/rp2040_sd_bridge/deskos_sd_bridge
           (cd artifacts/rp2040-sd-bridge && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
@@ -122,6 +123,7 @@ jobs:
           mkdir -p artifacts/rp2040-sd-smoke
           arduino-cli compile \
             --fqbn rp2040:rp2040:seeed_indicator_rp2040 \
+            --build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1" \
             --output-dir artifacts/rp2040-sd-smoke \
             firmware/rp2040_sd_smoke/seeed_sd_smoke
           (cd artifacts/rp2040-sd-smoke && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
@@ -142,6 +144,7 @@ jobs:
           mkdir -p artifacts/rp2040-seeed-official-sd-smoke
           arduino-cli compile \
             --fqbn rp2040:rp2040:seeed_indicator_rp2040 \
+            --build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1" \
             --output-dir artifacts/rp2040-seeed-official-sd-smoke \
             firmware/rp2040_sd_bridge/smoke/seeed_official_sd_smoke
           (cd artifacts/rp2040-seeed-official-sd-smoke && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
