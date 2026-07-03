@@ -132,6 +132,7 @@ struct DiagSnapshot {
     CardProbe low_dedicated;
     CardProbe low_shared;
     CardProbe bitbang;
+    CardProbe bitbang_inverted_cs;
     bool pin_sck_ok;
     bool pin_mosi_ok;
     bool pin_miso_ok;
@@ -474,11 +475,20 @@ uint8_t sd_bitbang_clock_bit(bool mosi_high) {
     return received;
 }
 
-void configure_sd_bitbang_bus(bool power_high, bool force_power_cycle = false) {
+uint8_t sd_cs_idle_level(bool cs_active_high) {
+    return cs_active_high ? LOW : HIGH;
+}
+
+uint8_t sd_cs_selected_level(bool cs_active_high) {
+    return cs_active_high ? HIGH : LOW;
+}
+
+void configure_sd_bitbang_bus(bool power_high, bool force_power_cycle = false,
+                              bool cs_active_high = false) {
     bias_sd_spi_lines_for_power();
     settle_sd_power(power_high, force_power_cycle);
     pinMode(SD_CS_PIN, OUTPUT);
-    digitalWrite(SD_CS_PIN, HIGH);
+    digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     pinMode(SD_MOSI_PIN, OUTPUT);
     digitalWrite(SD_MOSI_PIN, HIGH);
     pinMode(SD_SCK_PIN, OUTPUT);
@@ -489,6 +499,13 @@ void configure_sd_bitbang_bus(bool power_high, bool force_power_cycle = false) {
 
 void bitbang_clock_sd_cs_high(uint8_t count) {
     digitalWrite(SD_CS_PIN, HIGH);
+    for (uint8_t i = 0; i < count; ++i) {
+        (void)sd_bitbang_transfer(0xFF);
+    }
+}
+
+void bitbang_clock_sd_idle(uint8_t count, bool cs_active_high = false) {
+    digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     for (uint8_t i = 0; i < count; ++i) {
         (void)sd_bitbang_transfer(0xFF);
     }
@@ -511,10 +528,11 @@ uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint
                            size_t extra_len, uint8_t *ready_byte = nullptr,
                            bool wait_selected_ready = true, uint8_t pre_clock_bits = 0,
                            bool ignore_leading_zero = false,
-                           uint32_t selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS) {
-    digitalWrite(SD_CS_PIN, HIGH);
+                           uint32_t selected_ready_wait_ms = SD_SELECTED_READY_WAIT_MS,
+                           bool cs_active_high = false) {
+    digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     (void)sd_bitbang_transfer(0xFF);
-    digitalWrite(SD_CS_PIN, LOW);
+    digitalWrite(SD_CS_PIN, sd_cs_selected_level(cs_active_high));
     for (uint8_t i = 0; i < pre_clock_bits; ++i) {
         (void)sd_bitbang_clock_bit(true);
     }
@@ -541,7 +559,7 @@ uint8_t bitbang_sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint
     for (size_t i = 0; i < extra_len; ++i) {
         extra[i] = sd_bitbang_transfer(0xFF);
     }
-    digitalWrite(SD_CS_PIN, HIGH);
+    digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     (void)sd_bitbang_transfer(0xFF);
     return response;
 }
@@ -676,13 +694,15 @@ CardProbe manual_probe_card(uint8_t options, bool power_high, bool force_power_c
     return probe;
 }
 
-CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = false) {
-    CardProbe probe = empty_probe(power_token(power_high), "bitbang", power_high, DEDICATED_SPI,
-                                  force_power_cycle);
-    configure_sd_bitbang_bus(power_high, force_power_cycle);
+CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = false,
+                                    bool cs_active_high = false) {
+    CardProbe probe = empty_probe(power_token(power_high),
+                                  cs_active_high ? "bitbang-inverted-cs" : "bitbang",
+                                  power_high, DEDICATED_SPI, force_power_cycle);
+    configure_sd_bitbang_bus(power_high, force_power_cycle, cs_active_high);
     probe.miso_pullup_level = sample_sd_miso_level();
     probe.miso_spi_level = probe.miso_pullup_level;
-    digitalWrite(SD_CS_PIN, HIGH);
+    digitalWrite(SD_CS_PIN, sd_cs_idle_level(cs_active_high));
     probe.idle_rx_ff = sd_bitbang_transfer(0xFF);
     for (uint8_t i = 1; i < 10; ++i) {
         (void)sd_bitbang_transfer(0xFF);
@@ -692,14 +712,15 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
     uint8_t cmd0 = 0xFFU;
     for (uint8_t attempt = 0; attempt < SD_CMD0_RETRIES; ++attempt) {
         cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true,
-                                  SD_CMD0_READY_SAMPLE_MS);
+                                  SD_CMD0_READY_SAMPLE_MS, cs_active_high);
         if (cmd0 == 0x01U) {
             break;
         }
         if (cmd0 == 0x00U) {
             for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip) {
                 cmd0 = bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte,
-                                          true, slip, true, SD_CMD0_READY_SAMPLE_MS);
+                                          true, slip, true, SD_CMD0_READY_SAMPLE_MS,
+                                          cs_active_high);
                 if (cmd0 == 0x01U) {
                     break;
                 }
@@ -708,7 +729,7 @@ CardProbe manual_probe_card_bitbang(bool power_high, bool force_power_cycle = fa
                 break;
             }
         }
-        bitbang_clock_sd_cs_high(SD_CMD0_RECOVERY_CLOCKS);
+        bitbang_clock_sd_idle(SD_CMD0_RECOVERY_CLOCKS, cs_active_high);
         delay(10);
     }
     probe.cmd0_response = cmd0;
@@ -1219,6 +1240,7 @@ DiagSnapshot pending_diag_snapshot() {
         empty_probe("low", "dedicated", false, DEDICATED_SPI),
         empty_probe("low", "shared", false, SHARED_SPI),
         empty_probe("high", "bitbang", true, DEDICATED_SPI),
+        empty_probe("high", "bitbang-inverted-cs", true, DEDICATED_SPI),
         s_sd_pin_sck_ok,
         s_sd_pin_mosi_ok,
         s_sd_pin_miso_ok,
@@ -1243,6 +1265,7 @@ DiagSnapshot diag_status_blocking() {
     diag.low_dedicated = manual_probe_card(DEDICATED_SPI, false);
     diag.low_shared = manual_probe_card(SHARED_SPI, false);
     diag.bitbang = manual_probe_card_bitbang(true, false);
+    diag.bitbang_inverted_cs = manual_probe_card_bitbang(true, true, true);
     const CardProbe probes[] = {diag.high_dedicated, diag.high_shared, diag.low_dedicated, diag.low_shared};
     const CardProbe *selected = first_present_probe(probes, sizeof(probes) / sizeof(probes[0]));
     if (selected) {
@@ -1691,6 +1714,7 @@ void send_diag_snapshot(const DiagSnapshot &diag) {
     append_probe_tokens(line, "ld", diag.low_dedicated);
     append_probe_tokens(line, "ls", diag.low_shared);
     append_probe_tokens(line, "bb", diag.bitbang);
+    append_probe_tokens(line, "bi", diag.bitbang_inverted_cs);
     reply_stream->println(line);
 }
 
