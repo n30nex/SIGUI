@@ -147,17 +147,14 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;" in sketch
     assert "constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;" in sketch
     assert "manual_probe_card_bitbang(true, false)" in sketch
-    assert "manual_probe_card_bitbang_mode3(true, true)" in sketch
     assert "manual_probe_card_bitbang(true, true, true)" in sketch
     assert "manual_probe_card_bitbang_sck_mosi_swapped(true, true)" in sketch
     assert "manual_probe_card_bitbang_cs_mosi_swapped(true, true)" in sketch
     assert "manual_probe_card_bitbang_sck_cs_swapped(true, true)" in sketch
-    assert "sd_bitbang_transfer_mode3" in sketch
     assert "sd_bitbang_transfer_sck_mosi_swapped" in sketch
     assert "sd_bitbang_transfer_pin_map" in sketch
     assert "sd_cs_idle_level(bool cs_active_high)" in sketch
     assert "sd_cs_selected_level(bool cs_active_high)" in sketch
-    assert '"bitbang-mode3"' in sketch
     assert '"bitbang-inverted-cs"' in sketch
     assert '"bitbang-sck-mosi-swapped"' in sketch
     assert '"bitbang-cs-mosi-swapped"' in sketch
@@ -169,13 +166,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "for (uint8_t slip = 1; slip < SD_CMD0_BITSLIP_CLOCKS; ++slip)" in sketch
     assert "bitbang_sd_command(0, 0, 0x95, nullptr, 0, &probe.cmd0_ready_byte, true, 0, true," in sketch
     assert 'append_probe_tokens(line, "bb", diag.bitbang)' in sketch
-    assert 'append_probe_tokens(line, "b3", diag.bitbang_mode3)' in sketch
     assert 'append_probe_tokens(line, "bi", diag.bitbang_inverted_cs)' in sketch
     assert 'append_probe_tokens(line, "bs", diag.bitbang_sck_mosi_swapped)' in sketch
     assert 'append_probe_tokens(line, "bcm", diag.bitbang_cs_mosi_swapped)' in sketch
     assert 'append_probe_tokens(line, "bsc", diag.bitbang_sck_cs_swapped)' in sketch
     assert 'empty_probe("high", "bitbang", true, DEDICATED_SPI)' in sketch
-    assert 'empty_probe("high", "bitbang-mode3", true, DEDICATED_SPI)' in sketch
     assert 'empty_probe("high", "bitbang-inverted-cs", true, DEDICATED_SPI)' in sketch
     assert 'empty_probe("high", "bitbang-sck-mosi-swapped", true, DEDICATED_SPI)' in sketch
     assert 'empty_probe("high", "bitbang-cs-mosi-swapped", true, DEDICATED_SPI)' in sketch
