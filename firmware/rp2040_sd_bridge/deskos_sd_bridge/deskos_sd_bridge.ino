@@ -61,25 +61,6 @@ constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
     "{\"schema\":1,\"kind\":\"map_cache\","
     "\"tile_template\":\"map/tiles/z{z}/x{x}/y{y}.tile\","
     "\"download_supported\":false}\n";
-constexpr const char *DESKOS_REQUIRED_DIRS[] = {
-    "/deskos/stores",
-    "/deskos/stores/messages",
-    "/deskos/stores/messages/public",
-    "/deskos/stores/messages/dm",
-    "/deskos/stores/nodes",
-    "/deskos/stores/contacts",
-    "/deskos/stores/routes",
-    "/deskos/stores/packet_log",
-    "/deskos/map",
-    "/deskos/map/tiles",
-    "/deskos/map/packs",
-    "/deskos/exports",
-    "/deskos/exports/diagnostics",
-    "/deskos/exports/data",
-    "/deskos/tmp",
-    "/deskos/logs",
-};
-
 constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
 constexpr size_t FILE_PATH_MAX = 96;
@@ -1603,15 +1584,6 @@ bool prepare_deskos_structure(const char **note) {
         *note = "deskos_root_unavailable";
         return false;
     }
-    for (size_t i = 0; i < sizeof(DESKOS_REQUIRED_DIRS) / sizeof(DESKOS_REQUIRED_DIRS[0]); ++i) {
-        if (!SD.exists(DESKOS_REQUIRED_DIRS[i])) {
-            created = true;
-        }
-        if (!ensure_directory(DESKOS_REQUIRED_DIRS[i])) {
-            *note = "deskos_structure_unavailable";
-            return false;
-        }
-    }
     if (SD.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
             if (!preserve_invalid_manifest(DESKOS_MANIFEST,
@@ -1627,24 +1599,6 @@ bool prepare_deskos_structure(const char **note) {
         created = true;
         if (!write_manifest()) {
             *note = "deskos_manifest_unavailable";
-            return false;
-        }
-    }
-    if (SD.exists(DESKOS_MAP_MANIFEST)) {
-        if (!map_manifest_valid()) {
-            if (!preserve_invalid_manifest(DESKOS_MAP_MANIFEST,
-                                           DESKOS_MAP_MANIFEST_TMP,
-                                           DESKOS_MAP_MANIFEST_BAD)) {
-                *note = "deskos_map_manifest_unavailable";
-                return false;
-            }
-            *note = "deskos_map_manifest_invalid";
-            return false;
-        }
-    } else {
-        created = true;
-        if (!write_map_manifest()) {
-            *note = "deskos_map_manifest_unavailable";
             return false;
         }
     }
