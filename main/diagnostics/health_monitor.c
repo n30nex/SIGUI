@@ -7,6 +7,10 @@
 
 static TaskHandle_t s_ui_task;
 static bool s_lvgl_ready;
+static portMUX_TYPE s_lvgl_metrics_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_lvgl_free_bytes;
+static uint32_t s_lvgl_largest_free_bytes;
+static uint8_t s_lvgl_used_pct;
 
 const char *d1l_health_reset_reason_name(int reason)
 {
@@ -33,6 +37,32 @@ void d1l_health_monitor_register_ui_task(TaskHandle_t task)
 void d1l_health_monitor_set_lvgl_ready(bool ready)
 {
     s_lvgl_ready = ready;
+    if (!ready) {
+        portENTER_CRITICAL(&s_lvgl_metrics_lock);
+        s_lvgl_free_bytes = 0;
+        s_lvgl_largest_free_bytes = 0;
+        s_lvgl_used_pct = 0;
+        portEXIT_CRITICAL(&s_lvgl_metrics_lock);
+    }
+}
+
+void d1l_health_monitor_sample_lvgl(void)
+{
+    if (!s_lvgl_ready) {
+        return;
+    }
+    if (s_ui_task && xTaskGetCurrentTaskHandle() != s_ui_task) {
+        return;
+    }
+
+    lv_mem_monitor_t monitor;
+    lv_mem_monitor(&monitor);
+
+    portENTER_CRITICAL(&s_lvgl_metrics_lock);
+    s_lvgl_free_bytes = (uint32_t)monitor.free_size;
+    s_lvgl_largest_free_bytes = (uint32_t)monitor.free_biggest_size;
+    s_lvgl_used_pct = monitor.used_pct;
+    portEXIT_CRITICAL(&s_lvgl_metrics_lock);
 }
 
 d1l_health_snapshot_t d1l_health_snapshot(void)
@@ -49,12 +79,10 @@ d1l_health_snapshot_t d1l_health_snapshot(void)
         .ui_task_stack_free_words = s_ui_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_ui_task) : 0U,
         .reset_reason = d1l_health_reset_reason_name(esp_reset_reason()),
     };
-    if (s_lvgl_ready) {
-        lv_mem_monitor_t monitor;
-        lv_mem_monitor(&monitor);
-        snapshot.lvgl_free_bytes = (uint32_t)monitor.free_size;
-        snapshot.lvgl_largest_free_bytes = (uint32_t)monitor.free_biggest_size;
-        snapshot.lvgl_used_pct = monitor.used_pct;
-    }
+    portENTER_CRITICAL(&s_lvgl_metrics_lock);
+    snapshot.lvgl_free_bytes = s_lvgl_free_bytes;
+    snapshot.lvgl_largest_free_bytes = s_lvgl_largest_free_bytes;
+    snapshot.lvgl_used_pct = s_lvgl_used_pct;
+    portEXIT_CRITICAL(&s_lvgl_metrics_lock);
     return snapshot;
 }

@@ -25,4 +25,5 @@ typedef struct {
 const char *d1l_health_reset_reason_name(int reason);
 void d1l_health_monitor_register_ui_task(TaskHandle_t task);
 void d1l_health_monitor_set_lvgl_ready(bool ready);
+void d1l_health_monitor_sample_lvgl(void);
 d1l_health_snapshot_t d1l_health_snapshot(void);

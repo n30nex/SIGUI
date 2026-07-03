@@ -6642,6 +6642,7 @@ static void ui_task(void *arg)
     (void)arg;
     while (true) {
         uint32_t wait_ms = lv_timer_handler();
+        d1l_health_monitor_sample_lvgl();
         process_pending_tab_switch();
         process_pending_scroll_probe();
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {

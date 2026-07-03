@@ -42,7 +42,9 @@ def test_health_monitor_reports_stack_lvgl_and_largest_blocks():
     assert "uxTaskGetStackHighWaterMark(NULL)" in source
     assert "uxTaskGetStackHighWaterMark(s_ui_task)" in source
     assert "lv_mem_monitor" in source
+    assert "d1l_health_monitor_sample_lvgl" in header
     assert "d1l_health_monitor_register_ui_task" in ui
+    assert "d1l_health_monitor_sample_lvgl();" in ui
     assert "d1l_health_monitor_set_lvgl_ready(true)" in ui
     assert '\\"ui_task_stack_free_words\\":%lu' in console
     assert '\\"lvgl_used_pct\\":%u' in console

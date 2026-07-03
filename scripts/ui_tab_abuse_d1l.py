@@ -62,11 +62,14 @@ def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, 
     deadline = time.monotonic() + timeout
     statuses: list[dict] = []
     while time.monotonic() < deadline:
-        status = send_console_command(ser, "ui status", timeout)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        status = send_console_command(ser, "ui status", remaining)
         statuses.append(status)
         if status.get("ok") and status.get("active_tab") == tab and status.get("pending") is False:
             return True, statuses
-        time.sleep(poll_sec)
+        time.sleep(min(poll_sec, max(0.0, deadline - time.monotonic())))
     return False, statuses
 
 

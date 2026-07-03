@@ -190,11 +190,11 @@ def write_core_evidence(root: Path) -> None:
 
 def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> None:
     write_json(
-        root / "artifacts" / "hardware" / "com12" / f"seeed_official_sd_smoke_{commit[:7]}.json",
+        root / "artifacts" / "hardware" / "com16" / f"seeed_official_sd_smoke_{commit[:7]}.json",
         {
             "schema": 1,
             "kind": "seeed_official_sd_smoke_capture",
-            "port": "COM12",
+            "port": "COM16",
             "firmware_commit": commit,
             "public_rf_tx": False,
             "formats_sd": False,
@@ -633,6 +633,8 @@ def audit_args(root: Path):
             COMMIT,
             "--hardware-dir",
             str(root / "artifacts" / "hardware" / "com12"),
+            "--rp2040-hardware-dir",
+            str(root / "artifacts" / "hardware" / "com16"),
             "--soak-dir",
             str(root / "artifacts" / "soak"),
         ]
@@ -720,7 +722,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
 
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == [
-        "artifacts/hardware/com12/seeed_official_sd_smoke_68350bf.json"
+        "artifacts/hardware/com16/seeed_official_sd_smoke_68350bf.json"
     ]
     assert gates["sd_official_seeed_smoke_passed"]["details"]["inner_test"] == "seeed_official_sd_smoke"
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
@@ -770,13 +772,13 @@ def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp
 
 def test_release_gate_audit_rejects_old_smoke_wrapper_when_inner_sd_failed(tmp_path: Path):
     write_core_evidence(tmp_path)
-    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    hardware = tmp_path / "artifacts" / "hardware" / "com16"
     write_json(
         hardware / "rp2040_seeed_official_sd_smoke_68350bf.json",
         {
             "schema": 1,
             "kind": "rp2040_seeed_sd_smoke",
-            "port": "COM12",
+            "port": "COM16",
             "commit": COMMIT,
             "public_rf_tx": False,
             "formats_sd": False,
@@ -980,11 +982,11 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
         },
     )
     write_json(
-        hardware / "seeed_official_sd_smoke_68350bf.json",
+        tmp_path / "artifacts" / "hardware" / "com16" / "seeed_official_sd_smoke_68350bf.json",
         {
             "schema": 1,
             "kind": "seeed_official_sd_smoke_capture",
-            "port": "COM12",
+            "port": "COM16",
             "firmware_commit": STALE_COMMIT,
             "result": {
                 "test": "seeed_official_sd_smoke",
@@ -1082,6 +1084,46 @@ def test_release_gate_audit_accepts_matching_commit_metadata_without_commit_file
 
     assert gates["ui_tab_abuse"]["ok"] is True
     assert gates["ui_tab_abuse"]["evidence"] == ["artifacts/hardware/com12/ui_tab_abuse_latest.json"]
+
+
+def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    (hardware / "smoke_68350bf.json").unlink()
+    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    (hardware / "scroll_probe_68350bf.json").unlink()
+
+    write_json(
+        tmp_path / "artifacts" / "smoke" / "d1l-smoke-COM12-actions-68350bf.json",
+        {"ok": True, "port": "COM12", "firmware_commit": COMMIT},
+    )
+    write_json(
+        tmp_path / "artifacts" / "ui-tab-abuse" / "d1l-ui-tab-abuse-COM12-actions-68350bf.json",
+        ui_tab_abuse_payload(firmware_commit=COMMIT),
+    )
+    write_json(
+        tmp_path / "artifacts" / "scroll-probe" / "d1l-scroll-probe-COM12-actions-68350bf.json",
+        scroll_probe_payload(firmware_commit=COMMIT),
+    )
+    write_official_seeed_smoke_evidence(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["com12_smoke"]["ok"] is True
+    assert gates["com12_smoke"]["evidence"] == ["artifacts/smoke/d1l-smoke-COM12-actions-68350bf.json"]
+    assert gates["ui_tab_abuse"]["ok"] is True
+    assert gates["ui_tab_abuse"]["evidence"] == [
+        "artifacts/ui-tab-abuse/d1l-ui-tab-abuse-COM12-actions-68350bf.json"
+    ]
+    assert gates["ui_scroll_probe"]["ok"] is True
+    assert gates["ui_scroll_probe"]["evidence"] == [
+        "artifacts/scroll-probe/d1l-scroll-probe-COM12-actions-68350bf.json"
+    ]
+    assert gates["sd_official_seeed_smoke_passed"]["ok"] is True
+    assert gates["sd_official_seeed_smoke_passed"]["evidence"] == [
+        "artifacts/hardware/com16/seeed_official_sd_smoke_68350bf.json"
+    ]
 
 
 def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):

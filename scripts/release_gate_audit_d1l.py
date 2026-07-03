@@ -168,8 +168,16 @@ def default_meshbot_port() -> str:
     return "COM" + "11"
 
 
+def default_rp2040_port() -> str:
+    return "COM" + "16"
+
+
 def default_hardware_dir() -> str:
     return str(Path("artifacts") / "hardware" / default_d1l_port().lower())
+
+
+def default_rp2040_hardware_dir() -> str:
+    return str(Path("artifacts") / "hardware" / default_rp2040_port().lower())
 
 
 @dataclass
@@ -890,13 +898,13 @@ def official_seeed_sd_smoke_ok(data: dict, expected_port: str) -> bool:
 
 
 def official_seeed_sd_smoke_gate(
-    hardware_dir: Path,
+    artifact_roots: list[Path],
     root: Path,
     commit: str | None,
     expected_port: str,
 ) -> GateResult:
-    smoke = newest_commit_json(
-        hardware_dir,
+    smoke = newest_commit_json_from_roots(
+        artifact_roots,
         commit,
         "seeed_official_sd_smoke_*.json",
         "sd_official_seeed_smoke_*.json",
@@ -1495,8 +1503,16 @@ def build_audit(args: argparse.Namespace) -> dict:
         args.github_run_dir = str(root / "artifacts" / "github" / args.github_run_id)
     github_run_dir = Path(args.github_run_dir).resolve() if args.github_run_dir else None
     hardware_dir = Path(args.hardware_dir).resolve()
+    rp2040_hardware_dir = Path(args.rp2040_hardware_dir).resolve()
     soak_dir = Path(args.soak_dir).resolve()
     gates: list[GateResult] = []
+    smoke_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "smoke")
+    tab_abuse_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-tab-abuse")
+    scroll_probe_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "scroll-probe")
+    official_smoke_roots = unique_dirs(
+        sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-official-sd-smoke")
+        + [hardware_dir]
+    )
     preflight_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
     boot_prepare_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-boot-prepare")
     file_canary_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-canary")
@@ -1521,7 +1537,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "com12_smoke",
             "D1L hardware smoke",
-            newest_commit_json(hardware_dir, args.commit, "smoke_*.json"),
+            newest_commit_json_from_roots(smoke_roots, args.commit, "smoke_*.json", "d1l-smoke-*.json"),
             root,
             lambda data: data.get("ok") is True and data.get("port") == args.d1l_port,
             "Current-commit D1L smoke artifact passes.",
@@ -1532,7 +1548,12 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "ui_tab_abuse",
             "500-cycle D1L tab abuse",
-            newest_commit_json(hardware_dir, args.commit, "ui_tab_abuse_*.json"),
+            newest_commit_json_from_roots(
+                tab_abuse_roots,
+                args.commit,
+                "ui_tab_abuse_*.json",
+                "d1l-ui-tab-abuse-*.json",
+            ),
             root,
             lambda data: ui_tab_abuse_ok(data, args.d1l_port),
             "500-cycle D1L tab abuse artifact passes.",
@@ -1543,7 +1564,12 @@ def build_audit(args: argparse.Namespace) -> dict:
         simple_json_ok_gate(
             "ui_scroll_probe",
             "D1L scroll probe",
-            newest_commit_json(hardware_dir, args.commit, "scroll_probe_*.json"),
+            newest_commit_json_from_roots(
+                scroll_probe_roots,
+                args.commit,
+                "scroll_probe_*.json",
+                "d1l-scroll-probe-*.json",
+            ),
             root,
             lambda data: scroll_probe_ok(data, args.d1l_port),
             "D1L scroll probe artifact passes.",
@@ -1562,7 +1588,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         )
     )
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
-    gates.append(official_seeed_sd_smoke_gate(hardware_dir, root, args.commit, args.d1l_port))
+    gates.append(official_seeed_sd_smoke_gate(official_smoke_roots, root, args.commit, args.rp2040_port))
     gates.append(sd_gate(preflight_path, root))
     gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.d1l_port))
     gates.append(sd_boot_prepare_gate(boot_prepare_roots, root, args.commit, args.d1l_port))
@@ -1590,6 +1616,8 @@ def build_audit(args: argparse.Namespace) -> dict:
         "github_run_dir": str(github_run_dir) if github_run_dir else None,
         "commit": args.commit,
         "hardware_dir": str(hardware_dir),
+        "rp2040_port": args.rp2040_port,
+        "rp2040_hardware_dir": str(rp2040_hardware_dir),
         "ready_for_public_release": not p0_failed,
         "p0_failed_count": len(p0_failed),
         "failed_count": len(failed),
@@ -1604,8 +1632,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--github-run-dir")
     parser.add_argument("--commit")
     parser.add_argument("--d1l-port", default=default_d1l_port())
+    parser.add_argument("--rp2040-port", default=default_rp2040_port())
     parser.add_argument("--meshbot-port", default=default_meshbot_port())
     parser.add_argument("--hardware-dir", default=default_hardware_dir())
+    parser.add_argument("--rp2040-hardware-dir", default=default_rp2040_hardware_dir())
     parser.add_argument("--soak-dir", default="artifacts/soak")
     parser.add_argument("--out")
     parser.add_argument("--fail-on-open-p0", action="store_true")

@@ -89,17 +89,38 @@ def dry_run_report() -> dict:
 
 
 def read_command_result(ser, command: str, timeout: float) -> dict:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        raw = ser.readline().decode("utf-8", errors="replace")
-        parsed = parse_jsonl_line(raw)
-        if parsed and parsed.get("cmd") == command:
-            return parsed
+    deadline = time.monotonic() + timeout
+    ignored: list[dict] = []
+    original_timeout = getattr(ser, "timeout", None)
+    try:
+        while time.monotonic() < deadline:
+            remaining = max(0.0, deadline - time.monotonic())
+            if hasattr(ser, "timeout"):
+                ser.timeout = max(0.001, min(timeout, remaining))
+            raw_bytes = ser.readline()
+            if not raw_bytes:
+                continue
+            raw = raw_bytes.decode("utf-8", errors="replace")
+            parsed = parse_jsonl_line(raw)
+            if parsed and parsed.get("cmd") == command:
+                return parsed
+            if parsed:
+                ignored.append(
+                    {
+                        "cmd": parsed.get("cmd"),
+                        "ok": parsed.get("ok"),
+                    }
+                )
+    finally:
+        if hasattr(ser, "timeout"):
+            ser.timeout = original_timeout
     return {
         "schema": 1,
         "ok": False,
         "cmd": command,
         "code": "TIMEOUT",
+        "ignored_json_count": len(ignored),
+        "ignored_json": ignored[-5:],
     }
 
 

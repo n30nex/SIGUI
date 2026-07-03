@@ -5,6 +5,19 @@ from scripts import scroll_probe_d1l, smoke_d1l, ui_tab_abuse_d1l
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class FakeSerial:
+    def __init__(self, responses: list[bytes]):
+        self.responses = list(responses)
+        self.timeout = 99.0
+        self.seen_timeouts: list[float | None] = []
+
+    def readline(self) -> bytes:
+        self.seen_timeouts.append(self.timeout)
+        if self.responses:
+            return self.responses.pop(0)
+        return b""
+
+
 def test_ui_tab_abuse_dry_run_is_explicit_port_safe():
     report = ui_tab_abuse_d1l.dry_run_report(
         cycles=500,
@@ -81,3 +94,32 @@ def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"
     assert smoke_d1l.expected_command_name("ui scroll-probe storage") == "ui scroll-probe"
+
+
+def test_smoke_command_reader_bounds_readline_timeout_and_restores_serial_timeout():
+    ser = FakeSerial(
+        [
+            b'{"schema":1,"ok":true,"cmd":"noise"}\n',
+            b'{"schema":1,"ok":true,"cmd":"ui status","active_tab":"home"}\n',
+        ]
+    )
+
+    result = smoke_d1l.read_command_result(ser, "ui status", timeout=0.25)
+
+    assert result["ok"] is True
+    assert result["cmd"] == "ui status"
+    assert ser.timeout == 99.0
+    assert ser.seen_timeouts
+    assert max(timeout for timeout in ser.seen_timeouts if timeout is not None) <= 0.25
+
+
+def test_smoke_command_reader_reports_ignored_json_on_timeout():
+    ser = FakeSerial([b'{"schema":1,"ok":true,"cmd":"stale"}\n'])
+
+    result = smoke_d1l.read_command_result(ser, "health", timeout=0.01)
+
+    assert result["ok"] is False
+    assert result["code"] == "TIMEOUT"
+    assert result["ignored_json_count"] == 1
+    assert result["ignored_json"] == [{"cmd": "stale", "ok": True}]
+    assert ser.timeout == 99.0
