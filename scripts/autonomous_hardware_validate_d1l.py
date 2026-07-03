@@ -616,6 +616,20 @@ def run_release_gate(ctx: RunContext, dry_run: bool) -> dict:
     return report
 
 
+def exception_step(ctx: RunContext, kind: str, exc: Exception) -> dict:
+    return {
+        "schema": 1,
+        "kind": kind,
+        "mode": "hardware",
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "ok": False,
+        "error": str(exc),
+    }
+
+
 def download_artifacts(ctx: RunContext, dry_run: bool) -> dict:
     cmd = ["gh", "run", "download", ctx.github_run_id, "--dir", str(ctx.github_run_dir)]
     report = {
@@ -714,7 +728,9 @@ def run_validation(args: argparse.Namespace) -> dict:
                         dry_run=args.dry_run,
                     )
                 )
-            finally:
+            except Exception as exc:
+                runs.append(exception_step(ctx, "seeed_official_sd_smoke_capture", exc))
+            try:
                 runs.append(
                     restore_bridge(
                         ctx,
@@ -723,15 +739,20 @@ def run_validation(args: argparse.Namespace) -> dict:
                         dry_run=args.dry_run,
                     )
                 )
+            except Exception as exc:
+                runs.append(exception_step(ctx, "rp2040_bridge_restore", exc))
         else:
-            runs.append(
-                restore_bridge(
-                    ctx,
-                    volume=args.uf2_volume,
-                    uf2_timeout=args.uf2_timeout,
-                    dry_run=args.dry_run,
+            try:
+                runs.append(
+                    restore_bridge(
+                        ctx,
+                        volume=args.uf2_volume,
+                        uf2_timeout=args.uf2_timeout,
+                        dry_run=args.dry_run,
+                    )
                 )
-            )
+            except Exception as exc:
+                runs.append(exception_step(ctx, "rp2040_bridge_restore", exc))
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
