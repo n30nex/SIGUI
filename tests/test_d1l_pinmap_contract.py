@@ -27,6 +27,7 @@ def test_phase1_smoke_covers_button_rp2040_and_packets():
     assert "rp2040 status" in SMOKE_COMMANDS
     assert "rp2040 ping" not in SMOKE_COMMANDS
     assert "rp2040 bootloader" not in SMOKE_COMMANDS
+    assert "rp2040 double-reset" not in SMOKE_COMMANDS
     assert "rp2040 reset" not in SMOKE_COMMANDS
     assert "packets" in SMOKE_COMMANDS
 
@@ -36,6 +37,7 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     rp2040_header = (ROOT / "main" / "hal" / "rp2040_bridge.h").read_text(encoding="utf-8")
     rp2040_source = (ROOT / "main" / "hal" / "rp2040_bridge.c").read_text(encoding="utf-8")
     assert "d1l_rp2040_bridge_reset" in rp2040_header
+    assert "d1l_rp2040_bridge_double_reset" in rp2040_header
     assert "d1l_rp2040_bridge_ping" in rp2040_header
     assert "d1l_rp2040_bridge_enter_bootloader" in rp2040_header
     assert "D1L_RP2040_PING_QUERY" in rp2040_source
@@ -50,6 +52,9 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert '"rp2040 bootloader"' in console
     assert 'cmd_rp2040_bootloader' in console
     assert 'strcmp(line, "rp2040 bootloader")' in console
+    assert '"rp2040 double-reset"' in console
+    assert 'cmd_rp2040_double_reset' in console
+    assert 'strcmp(line, "rp2040 double-reset")' in console
     assert '"rp2040 reset"' in console
     assert 'strcmp(line, "rp2040 reset")' in console
     assert "public_rf_tx" in console

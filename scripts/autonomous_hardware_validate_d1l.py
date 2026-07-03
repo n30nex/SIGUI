@@ -441,6 +441,26 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["ended_at"] = utc_now()
         return report
 
+    double_reset = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 double-reset", 8.0)
+    report["double_reset"] = double_reset
+    time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+    report["uf2_volume_after_double_reset"] = uf2_volume_snapshot()
+    port_after_double_reset = rp2040_port_snapshot(ctx.rp2040_port)
+    report["rp2040_port_after_double_reset"] = port_after_double_reset
+    if report["uf2_volume_after_double_reset"].get("available"):
+        report["ok"] = True
+        report["method"] = "double_reset_revealed_uf2"
+        report["ended_at"] = utc_now()
+        return report
+    if port_after_double_reset.get("present"):
+        report["usb_touch_after_double_reset"] = enter_rp2040_bootloader_usb_touch(ctx.rp2040_port)
+        time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+        report["uf2_volume_after_double_reset_touch"] = uf2_volume_snapshot()
+        report["ok"] = True
+        report["method"] = "double_reset_then_rp2040_1200_baud_touch"
+        report["ended_at"] = utc_now()
+        return report
+
     reset = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0, settle_sec=3.0)
     report["reset"] = reset
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
@@ -537,6 +557,17 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
     if d1l_console_ok(report["ping"], require_protocol=True):
         report["state"] = "bridge_protocol_ready"
         report["bootloader_entry"] = "rp2040 bootloader"
+        return finish()
+
+    report["double_reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 double-reset", 8.0)
+    time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
+    report["uf2_volume_after_double_reset"] = uf2_volume_snapshot()
+    report["rp2040_port_after_double_reset"] = rp2040_port_snapshot(ctx.rp2040_port)
+    if report["uf2_volume_after_double_reset"].get("available"):
+        report["state"] = "uf2_volume_available_after_double_reset"
+        return finish()
+    if report["rp2040_port_after_double_reset"].get("present"):
+        report["state"] = "usb_cdc_available_after_double_reset"
         return finish()
 
     report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)

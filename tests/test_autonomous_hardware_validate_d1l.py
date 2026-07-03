@@ -136,7 +136,7 @@ def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path,
         commands.append(command)
         if command == "rp2040 status":
             return {"ok": True, "cmd": command, "uart_ready": True}
-        if command == "rp2040 reset":
+        if command in {"rp2040 double-reset", "rp2040 reset"}:
             return {"ok": True, "cmd": command}
         return {"ok": False, "cmd": command, "code": "ESP_ERR_TIMEOUT", "protocol_supported": False}
 
@@ -151,7 +151,13 @@ def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path,
     assert report["manual_user_required"] is False
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
-    assert commands == ["rp2040 status", "rp2040 ping", "rp2040 reset", "rp2040 ping"]
+    assert commands == [
+        "rp2040 status",
+        "rp2040 ping",
+        "rp2040 double-reset",
+        "rp2040 reset",
+        "rp2040 ping",
+    ]
     assert payload["state"] == "no_autonomous_bootloader_path"
 
 

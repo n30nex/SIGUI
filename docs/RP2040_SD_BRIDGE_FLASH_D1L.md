@@ -75,9 +75,10 @@ python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --
 The runner touches only COM12 and COM16, refuses COM11/COM29, flashes the
 ESP32 image when not skipped, then performs a short RP2040 access precheck
 before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks whether
-COM16 is present, asks COM12 for `rp2040 ping`, tries one `rp2040 reset`, and
-fails closed if no autonomous bootloader path is available. It does not format
-SD, does not send Public RF, and does not require user action. When access is
+COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
+`rp2040 double-reset` bootloader-entry pattern, then tries one `rp2040 reset`,
+and fails closed if no autonomous bootloader path is available. It does not
+format SD, does not send Public RF, and does not require user action. When access is
 available, the runner can flash the official Seeed SD smoke UF2, capture its
 COM16 JSON, restore the production bridge UF2, run short COM12 SD preflight and
 smoke evidence, and regenerate the fail-closed release gate. 500-cycle UI
