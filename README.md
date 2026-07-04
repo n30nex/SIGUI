@@ -8,7 +8,7 @@ Current public-release status: **not ready to tag**. Core SD card support is wor
 
 | Area | Status | Notes |
 |---|---|---|
-| GitHub Actions firmware package | Working | Builds ESP32 firmware, release package, RP2040 SD bridge UF2, and official Seeed SD smoke UF2 with checksums. |
+| GitHub Actions firmware package | Working | Default ESP32/UI CI builds the ESP32 firmware and release package without rebuilding RP2040 artifacts. `include_sd_bridge=true` or SD/RP2040 path changes opt into the RP2040 SD bridge UF2 and official Seeed SD smoke UF2 checksums. |
 | Touch shell | Partial | Home now uses a SiguredOS-style icon launcher with quick Mesh/Wi-Fi/BLE/SD status, plus Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets current-commit hardware pixel proof, split-page redraw review, and broader keyboard/sheet layout polish. |
 | Public messages | Hardware-proven core | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
@@ -41,7 +41,9 @@ These committed host simulator screenshots are representative of the current UI 
 
 ## Host Checks
 
-No hardware required:
+No hardware required. The local full suite remains available; CI runs ESP32/UI host
+checks by default and runs SD/RP2040 dry-runs only when the SD bridge scope is
+explicitly included.
 
 ```powershell
 python -m pytest tests
@@ -60,7 +62,11 @@ python .\scripts\sd_data_export_d1l.py --dry-run --token dryrun
 python .\scripts\release_gate_audit_d1l.py --out artifacts\release-gate\d1l-release-gate-audit-local.json
 ```
 
-Firmware binaries are built by GitHub Actions only. The Windows host should use downloaded Actions artifacts for ESP32 and RP2040 hardware proof.
+Firmware binaries are built by GitHub Actions only. The normal workflow path is
+ESP32-first; it does not rebuild or package RP2040 artifacts unless
+`include_sd_bridge=true` is selected or SD/RP2040 sources changed. The Windows
+host should use downloaded Actions artifacts for any ESP32 or opt-in RP2040
+hardware proof.
 
 ## Hardware Route
 

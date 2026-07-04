@@ -172,6 +172,33 @@ def test_generated_flash_scripts_require_explicit_port(tmp_path):
     assert "COM11" not in ps1
 
 
+def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path):
+    root = tmp_path
+    build = root / "build"
+    out = root / "artifacts" / "release"
+    write_fake_build(build)
+    write_fake_notices(root)
+    write_fake_config(root)
+
+    manifest = package_release_d1l.create_release_package(
+        root=root,
+        build_dir=build,
+        out_dir=out,
+        package_name="d1l-esp32-only",
+        full_size=0x20000,
+    )
+
+    package_dir = out / "d1l-esp32-only"
+    assert manifest["rp2040_artifacts"] == []
+    assert not (package_dir / "rp2040").exists()
+    sha_text = (package_dir / "SHA256SUMS.txt").read_text(encoding="ascii")
+    assert "./firmware/meshcore_deskos_d1l.bin" in sha_text
+    assert "./rp2040/" not in sha_text
+    readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
+    assert "`rp2040/` is omitted from this ESP32-only package" in readme
+    assert "`include_sd_bridge=true`" in readme
+
+
 def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
     def fake_git_value(root, *args):
         if args == ("status", "--porcelain"):

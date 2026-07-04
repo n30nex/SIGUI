@@ -283,6 +283,12 @@ def write_core_evidence(root: Path) -> None:
         )
 
 
+def write_esp32_only_actions_package(root: Path) -> None:
+    run_dir = root / "artifacts" / "github" / RUN_ID
+    write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
+    write_release_package(run_dir)
+
+
 def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> None:
     write_json(
         root / "artifacts" / "hardware" / "com16" / f"seeed_official_sd_smoke_{commit[:7]}.json",
@@ -834,6 +840,20 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+def test_release_gate_checksum_allows_esp32_only_actions_package(tmp_path: Path):
+    write_esp32_only_actions_package(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["ci_artifacts_checksums"]
+
+    assert gate["ok"] is True
+    assert gate["details"]["missing"] == []
+    assert sorted(gate["details"]["optional_missing"]) == [
+        f"artifacts/github/{RUN_ID}/rp2040-sd-bridge-firmware/SHA256SUMS.txt",
+        f"artifacts/github/{RUN_ID}/rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
+    ]
 
 
 def test_release_gate_audit_dry_run_without_downloaded_actions_artifacts_fails_closed(tmp_path: Path):

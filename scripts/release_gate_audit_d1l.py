@@ -337,21 +337,31 @@ def find_release_package(github_run_dir: Path | None) -> Path | None:
 
 def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
     manifests: list[Path] = []
-    labels = [
-        "d1l-firmware-artifacts/SHA256SUMS.txt",
+    required_labels = ["d1l-firmware-artifacts/SHA256SUMS.txt"]
+    optional_rp2040_labels = [
         "rp2040-sd-bridge-firmware/SHA256SUMS.txt",
         "rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
     ]
     package = None
+    package_manifest: dict = {}
     if github_run_dir:
-        manifests.extend(github_run_dir / label for label in labels)
         package = find_release_package(github_run_dir)
+        package_manifest = read_json(package / "manifest.json" if package else None)
+        if package_manifest.get("rp2040_artifacts"):
+            required_labels.extend(optional_rp2040_labels)
+        manifests.extend(github_run_dir / label for label in required_labels)
         if package:
             manifests.append(package / "SHA256SUMS.txt")
+        optional_rp2040_manifests = [github_run_dir / label for label in optional_rp2040_labels]
+    else:
+        optional_rp2040_manifests = []
     present = [path for path in manifests if path.is_file()]
     missing = [path for path in manifests if not path.is_file()]
+    optional_present = [path for path in optional_rp2040_manifests if path.is_file() and path not in present]
+    optional_missing = [path for path in optional_rp2040_manifests if not path.is_file()]
     failed = [path for path in present if not verify_sha256_manifest(path)]
-    expected_count = len(labels) + (1 if package else 0)
+    failed.extend(path for path in optional_present if not verify_sha256_manifest(path))
+    expected_count = len(required_labels) + (1 if package else 0)
     ok = bool(present) and not missing and not failed and len(present) == expected_count
     return GateResult(
         "ci_artifacts_checksums",
@@ -363,6 +373,8 @@ def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
         if ok else "Downloaded Actions artifacts are missing or have a checksum failure.",
         {
             "missing": [rel(path, root) for path in missing],
+            "optional_missing": [rel(path, root) for path in optional_missing],
+            "optional_present": [rel(path, root) for path in optional_present],
             "failed": [rel(path, root) for path in failed],
         },
     )
