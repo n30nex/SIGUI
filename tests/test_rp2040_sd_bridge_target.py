@@ -402,6 +402,15 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert 'make_snapshot("error", "file_ops_remount_failed")' in sketch
     assert "s_cached_snapshot_valid = false;" in sketch
     assert "mount_sd_seeed_sample_path(true, true)" in sketch
+    request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
+        "bool recover_file_ops_mount()", 1
+    )[0]
+    assert "SdSnapshot mounted = mounted_snapshot_from_current_config();" in request_mount_body
+    assert "snapshot_ready_for_file_ops(mounted)" in request_mount_body
+    assert "recover_file_ops_mount()" in request_mount_body
+    assert request_mount_body.index("snapshot_ready_for_file_ops(mounted)") < request_mount_body.index(
+        "recover_file_ops_mount()"
+    )
     assert "bool prepare_file_write_target" in sketch
     assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch
@@ -440,6 +449,14 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "SD.open(full_path, FILE_WRITE)" not in sketch
     assert 'SD.open(full_path, "r")' not in sketch
     assert "file.seek(offset)" in sketch
+    file_line_body = sketch.split("void handle_file_line", 1)[1].split(
+        "void handle_line", 1
+    )[0]
+    assert "status.mounted && snapshot_fs_is_fat32(status) && recover_file_ops_mount()" in file_line_body
+    assert "status = current_status();" in file_line_body
+    assert file_line_body.index("recover_file_ops_mount()") < file_line_body.index(
+        'send_file_error(request_id, op, "not_ready")'
+    )
     assert "ensure_parent_dirs" in sketch
     assert "!recover_file_ops_mount() || !ensure_parent_dirs(full_path)" in sketch
     assert "!recover_file_ops_mount() || !ensure_parent_dirs(target_path)" in sketch

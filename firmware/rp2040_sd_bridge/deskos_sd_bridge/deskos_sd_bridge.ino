@@ -222,6 +222,7 @@ const char *spi_mode_token(uint8_t options) {
 
 SdSpiConfig sd_spi_config(uint8_t options);
 uint8_t sd_spi_transfer(uint8_t value);
+bool recover_file_ops_mount();
 
 DetectSample sample_sd_detect() {
     pinMode(SD_DET_PIN, INPUT_PULLUP);
@@ -1823,7 +1824,14 @@ SdSnapshot request_mount_status() {
     refresh_worker_results();
     SdSnapshot status = current_status();
     if (status.mounted && snapshot_fs_is_fat32(status)) {
-        return cache_status(mounted_snapshot_from_current_config());
+        SdSnapshot mounted = mounted_snapshot_from_current_config();
+        if (snapshot_ready_for_file_ops(mounted)) {
+            return cache_status(mounted);
+        }
+        if (recover_file_ops_mount()) {
+            return current_status();
+        }
+        return cache_status(mounted);
     }
     if (s_worker_busy || s_worker_request != SD_WORKER_NONE) {
         return cache_status(pending_snapshot("sd_worker_busy"));
@@ -2745,9 +2753,14 @@ void handle_file_line(const char *line) {
         return;
     }
     if (!snapshot_ready_for_file_ops(status)) {
-        s_file_command_active = false;
-        send_file_error(request_id, op, "not_ready");
-        return;
+        if (status.mounted && snapshot_fs_is_fat32(status) && recover_file_ops_mount()) {
+            status = current_status();
+        }
+        if (!snapshot_ready_for_file_ops(status)) {
+            s_file_command_active = false;
+            send_file_error(request_id, op, "not_ready");
+            return;
+        }
     }
 
     if (strcmp(op, "stat") == 0) {
