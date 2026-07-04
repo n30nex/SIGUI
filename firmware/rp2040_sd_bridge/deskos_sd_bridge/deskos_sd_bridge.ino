@@ -49,9 +49,11 @@ constexpr const char *DESKOS_ROOT = "/deskos";
 constexpr const char *DESKOS_MANIFEST = "/deskos/manifest.json";
 constexpr const char *DESKOS_MANIFEST_TMP = "/deskos/manifest.json.tmp";
 constexpr const char *DESKOS_MANIFEST_BAD = "/deskos/manifest.json.bad";
+constexpr const char *DESKOS_MAP_DIR = "/deskos/map";
 constexpr const char *DESKOS_MAP_MANIFEST = "/deskos/map/manifest.json";
 constexpr const char *DESKOS_MAP_MANIFEST_TMP = "/deskos/map/manifest.json.tmp";
 constexpr const char *DESKOS_MAP_MANIFEST_BAD = "/deskos/map/manifest.json.bad";
+constexpr const char *DESKOS_CANARY_DIR = "/deskos/canary";
 constexpr const char *DESKOS_FILE_OPS_PROBE = "/deskos/probe.tmp";
 constexpr const char *DESKOS_JSON_PROBE = "/deskos/probe.json";
 constexpr const char DESKOS_MANIFEST_PAYLOAD[] =
@@ -1673,6 +1675,14 @@ bool prepare_deskos_structure(const char **note) {
         *note = "deskos_root_unavailable";
         return false;
     }
+    if (!ensure_directory(DESKOS_MAP_DIR)) {
+        *note = "deskos_map_dir_unavailable";
+        return false;
+    }
+    if (!ensure_directory(DESKOS_CANARY_DIR)) {
+        *note = "deskos_canary_dir_unavailable";
+        return false;
+    }
     if (SD.exists(DESKOS_MANIFEST)) {
         if (!manifest_valid()) {
             if (!preserve_invalid_manifest(DESKOS_MANIFEST,
@@ -1702,6 +1712,24 @@ bool prepare_deskos_structure(const char **note) {
             }
             *note = "manifest_deferred_file_ops_ready";
             return true;
+        }
+    }
+    if (SD.exists(DESKOS_MAP_MANIFEST)) {
+        if (!map_manifest_valid()) {
+            if (!preserve_invalid_manifest(DESKOS_MAP_MANIFEST,
+                                           DESKOS_MAP_MANIFEST_TMP,
+                                           DESKOS_MAP_MANIFEST_BAD)) {
+                *note = "deskos_map_manifest_unavailable";
+                return false;
+            }
+            *note = "deskos_map_manifest_invalid";
+            return false;
+        }
+    } else {
+        created = true;
+        if (!write_map_manifest()) {
+            *note = "deskos_map_manifest_unavailable";
+            return false;
         }
     }
     *note = created ? "structure_created" : "ready";

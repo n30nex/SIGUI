@@ -67,6 +67,7 @@ DESKOS_REQUIRED_DIRS = (
     "map",
     "map/tiles",
     "map/packs",
+    "canary",
     "exports",
     "exports/diagnostics",
     "exports/data",
