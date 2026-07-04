@@ -842,6 +842,58 @@ def sd_map_tile_canary_artifact_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def sd_export_artifact_common_ok(data: dict, expected_port: str, passed_field: str, unavailable_field: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("allow_unavailable") is not True
+        and data.get(passed_field) is True
+        and data.get(unavailable_field) is not True
+        and data.get("storage_file_gate_ready_before") is True
+        and data.get("storage_file_gate_ready_after") is True
+        and data.get("export_backend_ready_before") is True
+        and data.get("export_backend_ready_after") is True
+    )
+
+
+def sd_export_canary_artifact_ok(data: dict, expected_port: str) -> bool:
+    return sd_export_artifact_common_ok(data, expected_port, "canary_passed", "canary_unavailable_ok")
+
+
+def sd_diagnostic_export_artifact_ok(data: dict, expected_port: str) -> bool:
+    export = data.get("export") if isinstance(data.get("export"), dict) else {}
+    return (
+        sd_export_artifact_common_ok(
+            data,
+            expected_port,
+            "diagnostic_export_passed",
+            "diagnostic_export_unavailable_ok",
+        )
+        and int_value(export.get("bytes")) is not None
+        and int_value(export.get("bytes")) > 192
+        and int_value(export.get("chunks_written")) is not None
+        and int_value(export.get("chunks_written")) >= 2
+        and int_value(export.get("final_verified_bytes")) == int_value(export.get("bytes"))
+    )
+
+
+def sd_data_export_artifact_ok(data: dict, expected_port: str) -> bool:
+    export = data.get("export") if isinstance(data.get("export"), dict) else {}
+    return (
+        sd_export_artifact_common_ok(data, expected_port, "data_export_passed", "data_export_unavailable_ok")
+        and export.get("private_identity_exported") is False
+        and export.get("sampled") is True
+        and int_value(export.get("bytes")) is not None
+        and int_value(export.get("bytes")) > 192
+        and int_value(export.get("chunks_written")) is not None
+        and int_value(export.get("chunks_written")) >= 2
+        and int_value(export.get("final_verified_bytes")) == int_value(export.get("bytes"))
+    )
+
+
 def raw_diag_line(data: dict) -> str:
     for key in ("raw_line", "diag"):
         value = data.get(key)
@@ -1271,6 +1323,107 @@ def sd_map_tile_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
     )
 
 
+def sd_export_canary_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    canary = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-export-canary-*.json",
+        "sd_export_canary_*.json",
+        "sd_export_canary*.json",
+        "export_canary_*.json",
+    )
+    data = read_json(canary)
+    ok = bool(canary and data and sd_export_canary_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_export_canary_passed",
+        "P0",
+        ok,
+        "SD export-store canary",
+        [rel(canary, root)] if canary else [],
+        "Export-store canary writes through temp/read/atomic-rename/final-read on SD."
+        if ok else "No passing current-commit hardware SD export canary artifact was found.",
+        {
+            "path_found": bool(canary),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "canary_passed": data.get("canary_passed") if data else None,
+            "storage_file_gate_ready_before": data.get("storage_file_gate_ready_before") if data else None,
+            "storage_file_gate_ready_after": data.get("storage_file_gate_ready_after") if data else None,
+            "export_backend_ready_before": data.get("export_backend_ready_before") if data else None,
+            "export_backend_ready_after": data.get("export_backend_ready_after") if data else None,
+        },
+    )
+
+
+def sd_diagnostic_export_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    export = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-diagnostic-export-*.json",
+        "sd_diagnostic_export_*.json",
+        "sd_diagnostic_export*.json",
+        "diagnostic_export_*.json",
+    )
+    data = read_json(export)
+    inner = data.get("export") if isinstance(data.get("export"), dict) else {}
+    ok = bool(export and data and sd_diagnostic_export_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_diagnostic_export_passed",
+        "P0",
+        ok,
+        "SD diagnostic export",
+        [rel(export, root)] if export else [],
+        "Diagnostic export writes a multi-chunk SD JSON export through atomic rename and verifies final bytes."
+        if ok else "No passing current-commit hardware SD diagnostic export artifact was found.",
+        {
+            "path_found": bool(export),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "diagnostic_export_passed": data.get("diagnostic_export_passed") if data else None,
+            "bytes": inner.get("bytes") if inner else None,
+            "chunks_written": inner.get("chunks_written") if inner else None,
+            "final_verified_bytes": inner.get("final_verified_bytes") if inner else None,
+        },
+    )
+
+
+def sd_data_export_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    export = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-data-export-*.json",
+        "sd_data_export_*.json",
+        "sd_data_export*.json",
+        "data_export_*.json",
+    )
+    data = read_json(export)
+    inner = data.get("export") if isinstance(data.get("export"), dict) else {}
+    ok = bool(export and data and sd_data_export_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_data_export_passed",
+        "P0",
+        ok,
+        "SD sampled data export",
+        [rel(export, root)] if export else [],
+        "Sampled data export writes a multi-chunk SD JSON export without private identity material."
+        if ok else "No passing current-commit hardware SD sampled data export artifact was found.",
+        {
+            "path_found": bool(export),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "data_export_passed": data.get("data_export_passed") if data else None,
+            "private_identity_exported": inner.get("private_identity_exported") if inner else None,
+            "sampled": inner.get("sampled") if inner else None,
+            "bytes": inner.get("bytes") if inner else None,
+            "chunks_written": inner.get("chunks_written") if inner else None,
+            "final_verified_bytes": inner.get("final_verified_bytes") if inner else None,
+        },
+    )
+
+
 def sd_raw_diag_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
     diag = newest_commit_json_from_roots(
         artifact_roots,
@@ -1672,6 +1825,9 @@ def build_audit(args: argparse.Namespace) -> dict:
     retained_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-retained-history")
     reboot_remount_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-reboot-remount")
     map_tile_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-map-tile-canary")
+    export_canary_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-export-canary")
+    diagnostic_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-diagnostic-export")
+    data_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-data-export")
     raw_diag_roots = unique_dirs(
         sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-preflight")
         + sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
@@ -1784,6 +1940,9 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
     gates.append(sd_reboot_remount_gate(reboot_remount_roots, root, args.commit, args.d1l_port))
     gates.append(sd_map_tile_canary_gate(map_tile_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_export_canary_gate(export_canary_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_diagnostic_export_gate(diagnostic_export_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_data_export_gate(data_export_roots, root, args.commit, args.d1l_port))
     gates.append(sd_fat32_policy_gate(unformatted_boot_path, root, args.d1l_port))
     gates.append(sd_no_format_policy_gate(preflight_path, unformatted_boot_path, root))
     gates.append(sd_power_rail_gate(sd_power_roots, root, args.commit, args.d1l_port))

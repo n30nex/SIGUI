@@ -2,7 +2,7 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set from commit `708deea` / GitHub Actions run `28712724435`, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the physical SD matrix, manual physical photos/review, and long soak evidence. `scripts/release_gate_audit_d1l.py` currently reports `ready_for_public_release=false`. No release tag should be cut until that gate is green on the release commit.
+Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set from commit `1a29876` / GitHub Actions run `28714355561`, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the remaining physical SD matrix, manual physical photos/review, and long soak evidence. The latest local autonomous audit reports `ready_for_public_release=false`, `failed_count=13`, and `p0_failed_count=12`. No release tag should be cut until that gate is green on the release commit.
 
 ## Feature Matrix
 
@@ -14,8 +14,8 @@ Current public-release status: **not ready to tag**. Core SD card support is wor
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
 | Packet diagnostics | Working core | Packet list, filter/search, raw preview, detail sheet, and retained packet storage paths exist. |
-| SD core file operations | Hardware-proven core | Current COM12/COM16 evidence from `708deea` / Actions `28712724435` proves official Seeed FAT32 smoke, FAT32 `READY_SD`, filecanary, retained-canary, retained history after reboot, reboot/remount, map-tile canary, and RP2040 raw diagnostics without Public RF or formatting. |
-| SD release matrix | Partial | Still needs physical no-card/unformatted/non-FAT32 scenario proof, <=32GB FAT32 multi-card matrix, no-format language proof tied to unusable-media behavior, and power/electrical evidence. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. |
+| SD core file operations | Hardware-proven core | Current COM12/COM16 evidence from `1a29876` / Actions `28714355561` proves official Seeed FAT32 smoke, FAT32 `READY_SD`, raw diagnostics, filecanary, safe boot scenarios for correct/missing/existing data plus RP2040-unavailable fallback, retained history after reboot, reboot/remount, map-tile canary, export canary, diagnostic export, and sampled data export without Public RF or formatting. |
+| SD release matrix | Partial | Still needs physical no-card and unformatted/non-FAT32 scenario proof, <=32GB FAT32 multi-card matrix, no-format language proof tied to unusable-media behavior, and power/electrical evidence. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. |
 | Map and offline tiles | Partial | Manual center, provider setup, SD map-tile canary, and policy UI exist. GPS, tile rendering proof, and live touch tile browsing remain pending. |
 | Wi-Fi | Experimental | Setup UI and bounded serial controls exist; disabled by default and not release-proven for map downloads. |
 | BLE, OTA, GPS | Not release-ready | BLE companion transport, OTA, GPS/location-source integration, and nearby GPS node pins remain pending. |
@@ -54,6 +54,9 @@ python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
 python .\scripts\sd_map_tile_canary_d1l.py --dry-run --token dryrun
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --dry-run --token dryrun
+python .\scripts\sd_export_canary_d1l.py --dry-run --token dryrun
+python .\scripts\sd_diagnostic_export_d1l.py --dry-run --token dryrun
+python .\scripts\sd_data_export_d1l.py --dry-run --token dryrun
 python .\scripts\release_gate_audit_d1l.py --out artifacts\release-gate\d1l-release-gate-audit-local.json
 ```
 
@@ -74,6 +77,8 @@ Autonomous validation:
 ```powershell
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --include-ui-probes
 ```
+
+For SD-only refreshes where the ESP32 app is already flashed from the matching Actions artifact, use `--skip-esp32-flash`. The autonomous runner captures official RP2040 SD smoke, the RP2040-unavailable fallback window, bridge restore, preflight, raw diag, file/export/map/retained/reboot canaries, smoke, and the final release-gate audit.
 
 Focused UI proof:
 

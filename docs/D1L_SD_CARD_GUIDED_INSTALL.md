@@ -1,9 +1,10 @@
 # D1L SD Card Guided Install
 
-Use this when COM12 is working but the RP2040 does not answer the DeskOS bridge
-protocol and no autonomous UF2 path appears. The only manual action is putting
-the RP2040 into BOOTSEL/UF2 mode twice: once for the official SD smoke proof and
-once to restore the DeskOS SD bridge.
+Prefer `scripts/autonomous_hardware_validate_d1l.py` for COM12/COM16 hardware
+validation. Use this guided flow only when COM12 is working but the RP2040 does
+not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
+only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
+the official SD smoke proof and once to restore the DeskOS SD bridge.
 
 ## Before Running
 
@@ -22,6 +23,13 @@ From the repository root:
 python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
 ```
 
+Autonomous SD refresh, when the ESP32 app is already flashed from the matching
+Actions artifact:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-esp32-flash
+```
+
 The script will:
 
 1. Verify `rp2040-seeed-official-sd-smoke-firmware` and
@@ -34,7 +42,8 @@ The script will:
 7. Verify `rp2040 ping` on COM12.
 8. Run the RP2040 SD bridge preflight.
 9. If preflight reports the SD file gate ready, run the short SD file/export
-   canaries.
+   canaries. The autonomous runner additionally captures raw diagnostics,
+   map-tile, retained-history, reboot/remount, and RP2040-unavailable evidence.
 
 The report is written to:
 
@@ -64,6 +73,10 @@ For SD support to be considered working:
 - Preflight reports `ready_for_sd_acceptance=true`.
 - SD canaries report `ok=true`.
 - Every report keeps `public_rf_tx=false` and `formats_sd=false`.
+
+This proves the installed FAT32 card path. Public release still requires actual
+no-card and unformatted/non-FAT32 evidence, <=32GB multi-card evidence, and
+SD-slot electrical/power evidence.
 
 If official smoke fails, preserve the generated artifact; it contains the raw
 SD diagnostic fields needed to distinguish card/power/SPI/filesystem failures.

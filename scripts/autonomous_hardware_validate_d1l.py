@@ -73,6 +73,15 @@ RP2040_RESTORE_PING_ATTEMPTS = 5
 RP2040_RESTORE_PING_INTERVAL_SECONDS = 3.0
 SD_FILE_CANARY_TIMEOUT_SECONDS = 45
 SD_FILE_CANARY_MOUNT_WAIT_SECONDS = 60
+SD_BOOT_PREPARE_SCENARIOS = (
+    "no-card",
+    "correct-structure",
+    "missing-structure",
+    "unformatted",
+    "existing-data",
+    "rp2040-unavailable",
+)
+AUTONOMOUS_SAFE_SD_SCENARIOS = ("correct-structure", "missing-structure", "existing-data")
 
 
 @dataclass(frozen=True)
@@ -250,6 +259,31 @@ def command_report(name: str, args: list[str], cwd: Path, timeout: int | None = 
         "stdout_tail": result.stdout[-4000:],
         "stderr_tail": result.stderr[-4000:],
     }
+
+
+def terminate_process_tree(proc: subprocess.Popen) -> None:
+    if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        run_kwargs: dict[str, Any] = {}
+        if hasattr(subprocess, "CREATE_NO_WINDOW"):
+            run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=5,
+                **run_kwargs,
+            )
+            return
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
 
 
 def esptool_flash_command(build_dir: Path, port: str, baud: int) -> list[str]:
@@ -478,23 +512,35 @@ def enter_rp2040_bootloader_usb_touch(port: str) -> dict:
     run_kwargs: dict[str, Any] = {}
     if os.name == "nt" and hasattr(subprocess, "CREATE_NO_WINDOW"):
         run_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    proc: subprocess.Popen[str] | None = None
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-c", touch_code, port],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=BOOTLOADER_TOUCH_TIMEOUT_SECONDS,
             **run_kwargs,
         )
-        report["returncode"] = result.returncode
-        if result.stdout:
-            report["stdout_tail"] = result.stdout[-1000:]
-        if result.stderr:
-            report["stderr_tail"] = result.stderr[-1000:]
+        stdout, stderr = proc.communicate(timeout=BOOTLOADER_TOUCH_TIMEOUT_SECONDS)
+        report["returncode"] = proc.returncode
+        if stdout:
+            report["stdout_tail"] = stdout[-1000:]
+        if stderr:
+            report["stderr_tail"] = stderr[-1000:]
     except subprocess.TimeoutExpired as exc:
         report["ok"] = True
         report["warning"] = f"1200-baud touch timed out after {BOOTLOADER_TOUCH_TIMEOUT_SECONDS}s"
+        if proc is not None:
+            terminate_process_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=1)
+                report["returncode"] = proc.returncode
+                if stdout:
+                    report["stdout_tail"] = stdout[-1000:]
+                if stderr:
+                    report["stderr_tail"] = stderr[-1000:]
+            except Exception:
+                report["returncode"] = proc.poll()
         if exc.stderr:
             text = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else str(exc.stderr)
             report["stderr_tail"] = text[-1000:]
@@ -568,10 +614,12 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["usb_touch"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_usb_touch"] = uf2_volume_snapshot()
-        report["ok"] = True
-        report["method"] = "rp2040_1200_baud_touch"
-        report["ended_at"] = utc_now()
-        return report
+        if report["uf2_volume_after_usb_touch"].get("available"):
+            report["ok"] = True
+            report["method"] = "rp2040_1200_baud_touch"
+            report["ended_at"] = utc_now()
+            return report
+        report["usb_touch_warning"] = "1200_baud_touch_did_not_reveal_uf2"
 
     sweep, success = rp2040_double_reset_sweep(ctx)
     report["double_reset_sweep"] = sweep
@@ -591,11 +639,13 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["usb_touch_after_double_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_double_reset_touch"] = uf2_volume_snapshot()
-        report["ok"] = True
-        report["method"] = "double_reset_sweep_then_rp2040_1200_baud_touch"
-        report["successful_double_reset"] = success
-        report["ended_at"] = utc_now()
-        return report
+        if report["uf2_volume_after_double_reset_touch"].get("available"):
+            report["ok"] = True
+            report["method"] = "double_reset_sweep_then_rp2040_1200_baud_touch"
+            report["successful_double_reset"] = success
+            report["ended_at"] = utc_now()
+            return report
+        report["double_reset_touch_warning"] = "1200_baud_touch_did_not_reveal_uf2"
 
     reset = send_d1l_console(
         ctx.d1l_port,
@@ -618,8 +668,10 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["usb_touch_after_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         report["uf2_volume_after_reset_touch"] = uf2_volume_snapshot()
-        report["ok"] = True
-        report["method"] = "reset_then_rp2040_1200_baud_touch"
+        report["ok"] = report["uf2_volume_after_reset_touch"].get("available") is True
+        report["method"] = "reset_then_rp2040_1200_baud_touch" if report["ok"] else "none"
+        if not report["ok"]:
+            report["error"] = "rp2040_bootloader_unavailable_after_usb_touch"
     else:
         report["ok"] = False
         report["method"] = "none"
@@ -1018,6 +1070,125 @@ def run_sd_file_canary(ctx: RunContext, dry_run: bool) -> dict:
     return run_existing_script(ctx, "sd_file_canary", args, out, timeout=120, dry_run=dry_run)
 
 
+def token_for(ctx: RunContext, prefix: str) -> str:
+    return f"{prefix}{ctx.short_commit}"[:31]
+
+
+def run_sd_raw_diag(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_diag_raw_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "rp2040_raw_diag_capture_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "10",
+        "--diag-settle-sec",
+        "20",
+    ]
+    return run_existing_script(ctx, "sd_raw_diag", args, out, timeout=90, dry_run=dry_run)
+
+
+def run_sd_boot_prepare_scenario(ctx: RunContext, scenario: str, dry_run: bool) -> dict:
+    underscored = scenario.replace("-", "_")
+    out = ctx.hardware_dir / (
+        f"sd_boot_prepare_{underscored}_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+    args = [
+        str(ctx.root / "scripts" / "sd_boot_prepare_acceptance_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--scenario",
+        scenario,
+    ]
+    return run_existing_script(ctx, f"sd_boot_prepare_{underscored}", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_sd_map_tile_canary(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_map_tile_canary_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_map_tile_canary_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "map"),
+    ]
+    return run_existing_script(ctx, "sd_map_tile_canary", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_sd_export_canary(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_export_canary_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_export_canary_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "ex"),
+    ]
+    return run_existing_script(ctx, "sd_export_canary", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_sd_diagnostic_export(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_diagnostic_export_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_diagnostic_export_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "diag"),
+    ]
+    return run_existing_script(ctx, "sd_diagnostic_export", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_sd_data_export(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_data_export_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_data_export_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "data"),
+    ]
+    return run_existing_script(ctx, "sd_data_export", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_sd_retained_history(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_retained_history_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_retained_history_acceptance_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "ret"),
+    ]
+    return run_existing_script(ctx, "sd_retained_history", args, out, timeout=240, dry_run=dry_run)
+
+
+def run_sd_reboot_remount(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_reboot_remount_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_reboot_remount_acceptance_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "90",
+        "--token",
+        token_for(ctx, "rem"),
+    ]
+    return run_existing_script(ctx, "sd_reboot_remount", args, out, timeout=240, dry_run=dry_run)
+
+
 def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
     out = ctx.hardware_dir / f"smoke_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
     args = [
@@ -1224,6 +1395,7 @@ def verify_inputs(ctx: RunContext, *, allow_download: bool, dry_run: bool) -> di
 
 
 def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
+    safe_scenarios = list(args.sd_scenarios)
     return {
         "schema": 1,
         "kind": "d1l_autonomous_hardware_validation",
@@ -1241,9 +1413,18 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
             *(["flash_esp32"] if not args.skip_esp32_flash else []),
             "rp2040_autonomous_access_precheck",
             *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if not args.skip_rp2040_official_smoke else []),
+            *(["sd_boot_prepare_rp2040_unavailable"] if not args.skip_rp2040_official_smoke and not args.skip_rp2040_unavailable_capture else []),
             "restore_rp2040_bridge",
             "rp2040_bridge_preflight",
+            "sd_raw_diag",
             "sd_file_canary",
+            *(f"sd_boot_prepare_{scenario.replace('-', '_')}" for scenario in safe_scenarios),
+            "sd_map_tile_canary",
+            "sd_export_canary",
+            "sd_diagnostic_export",
+            "sd_data_export",
+            "sd_retained_history",
+            "sd_reboot_remount",
             "d1l_smoke",
             *(
                 [
@@ -1363,6 +1544,8 @@ def run_validation(args: argparse.Namespace) -> dict:
                         port=ctx.rp2040_port,
                     )
                 )
+            if not args.skip_rp2040_unavailable_capture:
+                runs.append(run_sd_boot_prepare_scenario(ctx, "rp2040-unavailable", dry_run=args.dry_run))
             bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
         else:
             bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
@@ -1375,6 +1558,7 @@ def run_validation(args: argparse.Namespace) -> dict:
             return report
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_raw_diag(ctx, dry_run=args.dry_run))
         sd_file_canary = run_sd_file_canary(ctx, dry_run=args.dry_run)
         runs.append(sd_file_canary)
         if sd_file_canary.get("ok") is not True and not args.dry_run:
@@ -1383,6 +1567,14 @@ def run_validation(args: argparse.Namespace) -> dict:
             report["ok"] = False
             attach_release_gate_summary(report, runs)
             return report
+        for scenario in args.sd_scenarios:
+            runs.append(run_sd_boot_prepare_scenario(ctx, scenario, dry_run=args.dry_run))
+        runs.append(run_sd_map_tile_canary(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_export_canary(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_diagnostic_export(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_data_export(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_retained_history(ctx, dry_run=args.dry_run))
+        runs.append(run_sd_reboot_remount(ctx, dry_run=args.dry_run))
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
         if args.include_ui_probes:
             runs.append(run_ui_corruption_probe(ctx, rounds=args.ui_rounds, dry_run=args.dry_run))
@@ -1413,6 +1605,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--esp32-flash-baud", type=int, default=460800)
     parser.add_argument("--skip-esp32-flash", action="store_true")
     parser.add_argument("--skip-rp2040-official-smoke", action="store_true")
+    parser.add_argument("--skip-rp2040-unavailable-capture", action="store_true")
+    parser.add_argument(
+        "--sd-scenarios",
+        default="safe",
+        help="Comma-separated boot-prepare scenarios to run after bridge restore; use safe, all, none, or scenario names.",
+    )
     parser.add_argument("--include-ui-probes", action="store_true")
     parser.add_argument("--ui-rounds", type=int, default=20)
     parser.add_argument("--uf2-volume")
@@ -1423,7 +1621,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.ui_rounds <= 0:
         parser.error("--ui-rounds must be positive")
+    try:
+        args.sd_scenarios = parse_sd_scenarios(args.sd_scenarios)
+    except ValueError as exc:
+        parser.error(str(exc))
     return args
+
+
+def parse_sd_scenarios(value: str) -> tuple[str, ...]:
+    normalized = (value or "").strip().lower()
+    if normalized in {"", "safe", "default"}:
+        return AUTONOMOUS_SAFE_SD_SCENARIOS
+    if normalized == "none":
+        return ()
+    if normalized == "all":
+        return SD_BOOT_PREPARE_SCENARIOS
+    scenarios = tuple(item.strip().lower() for item in normalized.split(",") if item.strip())
+    unknown = [scenario for scenario in scenarios if scenario not in SD_BOOT_PREPARE_SCENARIOS]
+    if unknown:
+        raise ValueError(f"unknown --sd-scenarios value(s): {', '.join(unknown)}")
+    return scenarios
 
 
 def main(argv: list[str] | None = None) -> int:

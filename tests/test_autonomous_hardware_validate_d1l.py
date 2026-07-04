@@ -9,6 +9,21 @@ from scripts import autonomous_hardware_validate_d1l as runner
 COMMIT = "1600d649223d8f5cbf35cf587d44bd94c0f21293"
 
 
+def patch_sd_evidence_runners(monkeypatch, ok_step):
+    monkeypatch.setattr(runner, "run_sd_raw_diag", lambda ctx, dry_run: ok_step("sd_raw_diag"))
+    monkeypatch.setattr(
+        runner,
+        "run_sd_boot_prepare_scenario",
+        lambda ctx, scenario, dry_run: ok_step(f"sd_boot_prepare_{scenario.replace('-', '_')}"),
+    )
+    monkeypatch.setattr(runner, "run_sd_map_tile_canary", lambda ctx, dry_run: ok_step("sd_map_tile_canary"))
+    monkeypatch.setattr(runner, "run_sd_export_canary", lambda ctx, dry_run: ok_step("sd_export_canary"))
+    monkeypatch.setattr(runner, "run_sd_diagnostic_export", lambda ctx, dry_run: ok_step("sd_diagnostic_export"))
+    monkeypatch.setattr(runner, "run_sd_data_export", lambda ctx, dry_run: ok_step("sd_data_export"))
+    monkeypatch.setattr(runner, "run_sd_retained_history", lambda ctx, dry_run: ok_step("sd_retained_history"))
+    monkeypatch.setattr(runner, "run_sd_reboot_remount", lambda ctx, dry_run: ok_step("sd_reboot_remount"))
+
+
 def write_flasher_args(build: Path) -> None:
     (build / "bootloader").mkdir(parents=True)
     (build / "partition_table").mkdir(parents=True)
@@ -180,6 +195,13 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
     assert "rp2040_autonomous_access_precheck" in plan["steps"]
+    assert "sd_raw_diag" in plan["steps"]
+    assert "sd_boot_prepare_correct_structure" in plan["steps"]
+    assert "sd_boot_prepare_missing_structure" in plan["steps"]
+    assert "sd_boot_prepare_existing_data" in plan["steps"]
+    assert "sd_export_canary" in plan["steps"]
+    assert "sd_diagnostic_export" in plan["steps"]
+    assert "sd_data_export" in plan["steps"]
     assert "d1l_500_cycle_tab_abuse" not in plan["steps"]
     assert "d1l_ui_corruption_probe" not in plan["steps"]
     assert "d1l_scroll_probe" not in plan["steps"]
@@ -457,8 +479,12 @@ def test_bootloader_entry_uses_discovered_rp2040_usb_cdc_port(tmp_path, monkeypa
     )
     commands = []
     touched = []
+    snapshots = [
+        {"available": False, "candidates": []},
+        {"available": True, "candidates": [{"drive": "G:"}]},
+    ]
 
-    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []})
+    monkeypatch.setattr(runner, "uf2_volume_snapshot", lambda: snapshots.pop(0))
     monkeypatch.setattr(
         runner,
         "rp2040_port_discovery",
@@ -515,6 +541,7 @@ def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monk
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
+    patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
     monkeypatch.setattr(
         runner,
@@ -647,6 +674,7 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
+    patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
     monkeypatch.setattr(
         runner,
@@ -695,6 +723,7 @@ def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_pa
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
+    patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
     monkeypatch.setattr(runner, "run_ui_corruption_probe", lambda ctx, rounds, dry_run: ok_step("ui_corruption_probe"))
     monkeypatch.setattr(runner, "run_scroll_probe", lambda ctx, dry_run: ok_step("scroll_probe"))
@@ -724,7 +753,17 @@ def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_pa
         "rp2040_autonomous_access_precheck",
         "rp2040_bridge_restore",
         "rp2040_bridge_preflight",
+        "sd_raw_diag",
         "sd_file_canary",
+        "sd_boot_prepare_correct_structure",
+        "sd_boot_prepare_missing_structure",
+        "sd_boot_prepare_existing_data",
+        "sd_map_tile_canary",
+        "sd_export_canary",
+        "sd_diagnostic_export",
+        "sd_data_export",
+        "sd_retained_history",
+        "sd_reboot_remount",
         "d1l_smoke",
         "ui_corruption_probe",
         "scroll_probe",

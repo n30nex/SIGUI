@@ -27,6 +27,9 @@ STRICT_SD_GATE_IDS = (
     "sd_retained_canary_passed",
     "sd_reboot_remount_passed",
     "sd_map_tile_canary_passed",
+    "sd_export_canary_passed",
+    "sd_diagnostic_export_passed",
+    "sd_data_export_passed",
     "sd_fat32_only_enforced",
     "sd_no_format_language",
     "sd_power_rail_measured",
@@ -681,6 +684,59 @@ def write_map_tile_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
     )
 
 
+def write_export_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    common = {
+        "schema": 1,
+        "mode": "hardware",
+        "port": "COM12",
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "allow_unavailable": False,
+        "ok": True,
+        "storage_file_gate_ready_before": True,
+        "storage_file_gate_ready_after": True,
+        "export_backend_ready_before": True,
+        "export_backend_ready_after": True,
+        **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+    }
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_export_canary_{commit[:7]}.json",
+        {
+            **common,
+            "canary_passed": True,
+            "canary_unavailable_ok": False,
+            "canary": {"write_tmp": True, "read_tmp": True, "rename_replace": True, "read_final": True},
+            "commands": ["storage status", "storage export-canary ex1", "storage status", "health"],
+        },
+    )
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_diagnostic_export_{commit[:7]}.json",
+        {
+            **common,
+            "diagnostic_export_passed": True,
+            "diagnostic_export_unavailable_ok": False,
+            "export": {"bytes": 512, "chunks_written": 3, "final_verified_bytes": 512},
+            "commands": ["storage status", "storage export-diagnostics diag1", "storage status", "health", "crashlog"],
+        },
+    )
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_data_export_{commit[:7]}.json",
+        {
+            **common,
+            "data_export_passed": True,
+            "data_export_unavailable_ok": False,
+            "export": {
+                "bytes": 512,
+                "chunks_written": 3,
+                "final_verified_bytes": 512,
+                "private_identity_exported": False,
+                "sampled": True,
+            },
+            "commands": ["storage status", "storage export-data data1", "storage status", "health"],
+        },
+    )
+
+
 def write_power_rail_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
     write_json(
         root / "artifacts" / "hardware" / "com12" / f"sd_electrical_{commit[:7]}.json",
@@ -734,6 +790,7 @@ def write_strict_sd_evidence(root: Path, commit: str = COMMIT, metadata_commit: 
     write_retained_canary_evidence(root, commit, metadata_commit)
     write_reboot_remount_evidence(root, commit, metadata_commit)
     write_map_tile_canary_evidence(root, commit, metadata_commit)
+    write_export_evidence(root, commit, metadata_commit)
     write_power_rail_evidence(root, commit, metadata_commit)
     write_sd_matrix_evidence(root, commit, metadata_commit)
 
@@ -813,7 +870,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 15
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -846,7 +903,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 14
+    assert report["p0_failed_count"] == 17
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -1039,7 +1096,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 15
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
