@@ -25,7 +25,7 @@ This folder contains only active release-facing documentation. Historical phase 
 - [RP2040 SD bridge flash and proof](RP2040_SD_BRIDGE_FLASH_D1L.md)
 - [RP2040 SD bridge protocol](SD_BRIDGE_PROTOCOL_D1L.md)
 
-Policy summary: users prepare FAT32 SD cards on a computer; DeskOS has no device-side SD formatting path. Current core SD evidence is good, but official Seeed smoke, non-FAT32 behavior, FAT32 matrix, no-format evidence, and power/electrical proof still gate public release.
+Policy summary: users prepare FAT32 SD cards on a computer; DeskOS has no device-side SD formatting path. Current `708deea` / Actions `28712724435` COM12/COM16 evidence proves the installed FAT32 card path, official Seeed smoke, retained-history survival, reboot/remount, map-tile canary, export canaries, and raw diagnostics. Non-FAT32/no-card/unformatted behavior, FAT32 multi-card matrix, no-format guidance evidence, and power/electrical proof still gate public release.
 
 ## Compatibility And Attribution
 

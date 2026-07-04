@@ -2,20 +2,20 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the broader SD matrix, manual physical photos/review, and long soak evidence. `scripts/release_gate_audit_d1l.py` currently reports `ready_for_public_release=false`. No release tag should be cut until that gate is green on the release commit.
+Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set from commit `708deea` / GitHub Actions run `28712724435`, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the physical SD matrix, manual physical photos/review, and long soak evidence. `scripts/release_gate_audit_d1l.py` currently reports `ready_for_public_release=false`. No release tag should be cut until that gate is green on the release commit.
 
 ## Feature Matrix
 
 | Area | Status | Notes |
 |---|---|---|
 | GitHub Actions firmware package | Working | Builds ESP32 firmware, release package, RP2040 SD bridge UF2, and official Seeed SD smoke UF2 with checksums. |
-| Touch shell | Partial | Home, Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage exist. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets split-page redraw corruption and broader keyboard/sheet layout polish. |
+| Touch shell | Partial | Home, Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage exist. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets split-page redraw corruption, SiguredOS-style icon Home redesign, and broader keyboard/sheet layout polish. |
 | Public messages | Hardware-proven core | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
 | Packet diagnostics | Working core | Packet list, filter/search, raw preview, detail sheet, and retained packet storage paths exist. |
-| SD core file operations | Hardware-proven core | Current COM12/COM16 evidence proves FAT32 `READY_SD`, filecanary, retained-canary, retained history after reboot, reboot/remount, map-tile canary, and RP2040 raw diagnostics without Public RF or formatting. |
-| SD release matrix | Partial | Still needs current official Seeed smoke, boot/retry manager proof, non-FAT32 behavior, <=32GB FAT32 matrix, no-format evidence policy, and power/electrical evidence. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. |
+| SD core file operations | Hardware-proven core | Current COM12/COM16 evidence from `708deea` / Actions `28712724435` proves official Seeed FAT32 smoke, FAT32 `READY_SD`, filecanary, retained-canary, retained history after reboot, reboot/remount, map-tile canary, and RP2040 raw diagnostics without Public RF or formatting. |
+| SD release matrix | Partial | Still needs physical no-card/unformatted/non-FAT32 scenario proof, <=32GB FAT32 multi-card matrix, no-format language proof tied to unusable-media behavior, and power/electrical evidence. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. |
 | Map and offline tiles | Partial | Manual center, provider setup, SD map-tile canary, and policy UI exist. GPS, tile rendering proof, and live touch tile browsing remain pending. |
 | Wi-Fi | Experimental | Setup UI and bounded serial controls exist; disabled by default and not release-proven for map downloads. |
 | BLE, OTA, GPS | Not release-ready | BLE companion transport, OTA, GPS/location-source integration, and nearby GPS node pins remain pending. |
@@ -25,7 +25,7 @@ Retained Public/DM message history, route history, packet history, diagnostic ex
 
 ## Screenshots
 
-These are current host simulator screenshots from the `e3c0510` / Actions `28690375628` artifact set. Physical device photos are still required before release.
+These committed host simulator screenshots are representative of the current UI surfaces, but they are not a substitute for physical device photos or COM12 pixel-capture PNGs from the release commit. Physical device photos are still required before release.
 
 | Home | Messages | Packets |
 |---|---|---|
