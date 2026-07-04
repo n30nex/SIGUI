@@ -72,4 +72,5 @@ esp_err_t d1l_storage_manager_reset_bridge(void);
 void d1l_storage_manager_force_nvs(bool force_nvs);
 esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms);
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms);
+esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms);
 void d1l_storage_status(d1l_storage_status_t *out_status);

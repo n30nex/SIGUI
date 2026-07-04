@@ -1537,7 +1537,8 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
 
 static void cmd_storage_remount(void)
 {
-    esp_err_t ret = d1l_storage_manager_request_remount();
+    esp_err_t ret =
+        d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     print_storage_manager_result("storage remount", ret);
 }
 

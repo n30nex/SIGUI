@@ -29,6 +29,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_reset_bridge" in header
     assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
+    assert "d1l_storage_status_remount_blocking" in header
     assert "rp2040_sd_protocol_supported" in header
     assert "sd_needs_fat32" in header
     assert "manager_state" in header
@@ -72,6 +73,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_request_remount" in source
     assert "d1l_storage_manager_reset_bridge" in source
     assert "d1l_storage_manager_force_nvs" in source
+    assert "d1l_storage_status_remount_blocking" in source
     assert 's_status.sd_interface = "rp2040"' in source
     assert 's_status.sd_state = "pending_bridge"' in source
     assert '"protocol_pending"' in source
@@ -142,14 +144,22 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
-    mount_body = source.split("esp_err_t d1l_storage_status_mount", 1)[1].split(
-        "void d1l_storage_status", 1
+    mount_body = source.split("static esp_err_t storage_status_mount", 1)[1].split(
+        "esp_err_t d1l_storage_status_mount", 1
     )[0]
     assert "storage_sd_ready_for_files()" in mount_body
     assert mount_body.index("storage_sd_ready_for_files()") < mount_body.index(
         "d1l_rp2040_bridge_mount_sd(&sd, timeout_ms)"
     )
     assert "s_status.last_error = ESP_OK" in mount_body
+    remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
+        "void d1l_storage_status", 1
+    )[0]
+    assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" in remount_body
+    assert "d1l_storage_status_note_rp2040(ESP_OK)" in remount_body
+    assert "d1l_storage_status_refresh(timeout_ms)" in remount_body
+    assert "storage_status_mount(timeout_ms, true)" in remount_body
+    assert "classify_storage_manager_state(ret)" in remount_body
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
@@ -275,7 +285,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_storage_status_refresh(" not in setup_body
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
-    assert "d1l_storage_manager_request_remount" in console
+    assert "d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_manager_reset_bridge" in console
     assert "d1l_storage_manager_force_nvs" in console
     assert '\\"manager\\":{\\"running\\":%s' in console
