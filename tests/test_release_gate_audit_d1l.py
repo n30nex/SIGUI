@@ -461,11 +461,11 @@ def write_raw_diag_evidence(root: Path, commit: str = COMMIT, metadata_commit: s
             fields[f"{prefix}{suffix}"] = "1"
     line = "DESKOS_SD_DIAG " + " ".join(f"{key}={value}" for key, value in fields.items())
     write_json(
-        root / "artifacts" / "hardware" / "com16" / f"rp2040_direct_diag_{commit[:7]}.json",
+        root / "artifacts" / "hardware" / "com12" / f"rp2040_raw_diag_{commit[:7]}_COM12.json",
         {
             "schema": 1,
             "ok": True,
-            "port": "COM16",
+            "port": "COM12",
             "public_rf_tx": False,
             "formats_sd": False,
             "diag": line,

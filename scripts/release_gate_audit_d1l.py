@@ -1775,7 +1775,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(official_seeed_sd_smoke_gate(official_smoke_roots, root, args.commit, args.rp2040_port))
     gates.append(sd_gate(preflight_path, root))
-    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.rp2040_port))
+    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.d1l_port))
     gates.append(sd_boot_prepare_gate(boot_prepare_roots, root, args.commit, args.d1l_port))
     gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
