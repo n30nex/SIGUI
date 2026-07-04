@@ -401,10 +401,14 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "sizeof(REPLACE_BACKUP_SUFFIX)" in sketch
     assert "rename replace backup path must fit the .bak suffix" in sketch
     assert "max file path buffer must include the replace backup suffix" in sketch
-    assert 'SD.open(full_path, "r")' in sketch
-    assert 'SD.open(full_path, write_mode)' in sketch
-    assert 'const char *write_mode = truncate ? "w" : "a";' in sketch
-    assert "SD.open(full_path, FILE_WRITE)" not in sketch
+    assert "SD.open(full_path, FILE_READ)" in sketch
+    assert "SD.open(full_path, FILE_WRITE)" in sketch
+    assert 'SD.open(full_path, "r")' not in sketch
+    assert 'SD.open(full_path, "w")' not in sketch
+    assert 'SD.open(full_path, "a")' not in sketch
+    assert 'SD.open(full_path, write_mode)' not in sketch
+    assert 'const char *write_mode = truncate ? "w" : "a";' not in sketch
+    assert "file.seek(offset)" in sketch
     assert "ensure_parent_dirs" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch

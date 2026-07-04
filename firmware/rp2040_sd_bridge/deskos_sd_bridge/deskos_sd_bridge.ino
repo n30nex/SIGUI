@@ -2399,7 +2399,7 @@ void handle_file_stat(uint32_t request_id, const char *line) {
     out += " v=1 id=";
     out += String(static_cast<unsigned long>(request_id));
     out += " ok=1 op=stat exists=";
-    File file = SD.open(full_path, "r");
+    File file = SD.open(full_path, FILE_READ);
     if (!file) {
         out += "0 kind=none size=0 note=ok";
         reply_stream->println(out);
@@ -2435,7 +2435,7 @@ void handle_file_read(uint32_t request_id, const char *line) {
         send_file_error(request_id, "read", "too_large");
         return;
     }
-    File file = SD.open(full_path, "r");
+    File file = SD.open(full_path, FILE_READ);
     if (!file || file.isDirectory()) {
         send_file_error(request_id, "read", file && file.isDirectory() ? "is_dir" : "not_found");
         if (file) {
@@ -2519,7 +2519,7 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
 
     uint32_t current_size = 0;
     if (!truncate) {
-        File existing = SD.open(full_path, "r");
+        File existing = SD.open(full_path, FILE_READ);
         if (existing) {
             if (existing.isDirectory()) {
                 existing.close();
@@ -2540,10 +2540,14 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     if (truncate) {
         (void)SD.remove(full_path);
     }
-    const char *write_mode = truncate ? "w" : "a";
-    File file = SD.open(full_path, write_mode);
+    File file = SD.open(full_path, FILE_WRITE);
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
+        return;
+    }
+    if (!file.seek(offset)) {
+        file.close();
+        send_file_error(request_id, op_name, "range");
         return;
     }
     const size_t written = data_len == 0 ? 0 : file.write(data, data_len);
