@@ -458,6 +458,24 @@ static esp_err_t poll_mount_pending(void)
     return last_ret;
 }
 
+static bool remount_timeout_needs_bridge_reset(void)
+{
+    return strcmp(s_status.sd_state, "protocol_pending") == 0 ||
+           strcmp(s_status.sd_state, "rp2040_unavailable") == 0 ||
+           !s_status.rp2040_bridge_ready ||
+           !s_status.rp2040_sd_protocol_supported;
+}
+
+static void request_bridge_reset_remount_recovery(void)
+{
+    s_force_nvs = false;
+    s_status.force_nvs = false;
+    s_manager_reset_bridge_requested = true;
+    s_manager_remount_requested = true;
+    s_status.manager_backoff_ms = 0;
+    set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+}
+
 static void classify_storage_manager_state(esp_err_t ret)
 {
     s_status.force_nvs = s_force_nvs;
@@ -544,6 +562,10 @@ static void storage_manager_run_once(void)
             if (poll_ret != ESP_OK && ret == ESP_OK) {
                 ret = poll_ret;
             }
+        }
+        if (ret == ESP_ERR_TIMEOUT && remount_requested &&
+            remount_timeout_needs_bridge_reset()) {
+            request_bridge_reset_remount_recovery();
         }
     }
 
@@ -735,6 +757,10 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
         if (poll_ret != ESP_OK && ret == ESP_OK) {
             ret = poll_ret;
         }
+    }
+    if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
+        request_bridge_reset_remount_recovery();
+        (void)d1l_storage_manager_start();
     }
 
     classify_storage_manager_state(ret);
