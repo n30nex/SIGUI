@@ -34,6 +34,12 @@ FALLBACK_SETUP_ACTIONS = {
 }
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+TRANSIENT_RESYNC_STATES = {
+    "bridge_unavailable",
+    "mount_pending",
+    "protocol_pending",
+    "rp2040_unavailable",
+}
 
 
 def command_plan(scenario: str) -> list[str]:
@@ -143,6 +149,15 @@ def filecanary_passed(result: dict | None) -> bool:
     )
 
 
+def storage_converged_for_scenario(scenario: str, storage_status: dict | None) -> bool:
+    state = sd_state(storage_status)
+    if scenario in FILE_GATE_SCENARIOS:
+        if storage_file_gate_ready(storage_status) and retained_store_gate_ready(storage_status):
+            return True
+        return state not in TRANSIENT_RESYNC_STATES and state != "ready"
+    return state not in TRANSIENT_RESYNC_STATES
+
+
 def any_flag(results: list[dict], flag: str) -> bool:
     return any(result.get(flag) is True for result in results)
 
@@ -245,6 +260,50 @@ def boot_prepare_passed(
     return False, "unknown_scenario"
 
 
+def scenario_prerequisite_report(
+    scenario: str,
+    storage_after: dict | None,
+    storage_setup: dict | None,
+) -> dict:
+    sd = sd_status(storage_after)
+    state = sd_state(storage_after)
+    setup_action = storage_after.get("setup_action") if isinstance(storage_after, dict) else None
+    if scenario == "no-card":
+        satisfied = state == "no_card" or sd.get("present") is False or setup_action == "insert_card"
+        expected = "card physically absent"
+    elif scenario == "unformatted":
+        satisfied = bool(
+            setup_policy_reported(storage_setup)
+            and (
+                setup_action in FALLBACK_SETUP_ACTIONS
+                or setup_action == FIRMWARE_MOUNT_ERROR_ACTION
+                or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error"}
+                or sd_mount_error_present(storage_after)
+            )
+        )
+        expected = "non-FAT32 or unmountable card physically inserted"
+    elif scenario == "rp2040-unavailable":
+        satisfied = state in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}
+        expected = "RP2040 DeskOS bridge unavailable"
+    elif scenario in FILE_GATE_SCENARIOS:
+        satisfied = storage_file_gate_ready(storage_after) and retained_store_gate_ready(storage_after)
+        expected = "FAT32 card ready for file operations"
+    elif scenario == "existing-data":
+        satisfied = state == "ready" or setup_policy_reported(storage_setup)
+        expected = "existing card data preserved or rejected without formatting"
+    else:
+        satisfied = False
+        expected = "known SD boot-prepare scenario"
+    return {
+        "scenario": scenario,
+        "expected": expected,
+        "satisfied": satisfied,
+        "observed_sd_state": state,
+        "observed_present": sd.get("present") if sd else None,
+        "observed_setup_action": setup_action,
+    }
+
+
 def send_with_timeout(ser, command: str, timeout: float) -> dict:
     if command in {"storage mount", "storage remount", "storage filecanary"}:
         command_timeout = max(timeout, 15.0)
@@ -294,7 +353,7 @@ def run_acceptance(
             run_command(ser, "storage remount")
             storage_after = run_command(ser, "storage status")
             for _attempt in range(mount_poll_attempts):
-                if sd_state(storage_after) != "mount_pending":
+                if storage_converged_for_scenario(scenario, storage_after):
                     break
                 time.sleep(mount_poll_interval_sec)
                 storage_after = run_command(ser, "storage status")
@@ -327,6 +386,7 @@ def run_acceptance(
         )
         for command in commands
     )
+    prerequisite = scenario_prerequisite_report(scenario, storage_after, storage_setup)
 
     return {
         "schema": 1,
@@ -343,6 +403,8 @@ def run_acceptance(
         "commands_safe": commands_safe,
         "scenario_passed": scenario_ok,
         "classification": classification,
+        "scenario_prerequisite": prerequisite,
+        "scenario_state_mismatch": None if scenario_ok else classification,
         "storage_file_gate_ready": storage_file_gate_ready(storage_after),
         "retained_store_gate_ready": retained_store_gate_ready(storage_after),
         "filecanary_passed": filecanary_passed(filecanary) if filecanary is not None else None,

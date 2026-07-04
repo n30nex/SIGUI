@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from tools import ui_simulator
@@ -8,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def test_ui_references_only_enabled_lvgl_fonts():
+    source = read("main/ui/ui_phase1.c")
+    sdkconfig = read("sdkconfig.defaults")
+    referenced = set(re.findall(r"lv_font_montserrat_(\d+)", source))
+    enabled = set(re.findall(r"CONFIG_LV_FONT_MONTSERRAT_(\d+)=y", sdkconfig))
+    assert referenced <= enabled
 
 
 def test_app_model_exposes_bounded_ui_snapshot():
@@ -118,29 +127,44 @@ def test_home_screen_is_user_first_companion_dashboard():
     header = read("main/app/app_model.h")
 
     assert "home_sd_state" in source
+    assert "render_home_launcher_tile" in source
     assert "render_home_chip" in source
+    assert '"Chats"' in source
+    assert '"Rooms"' in source
+    assert '"Contacts"' in source
+    assert '"Repeaters"' in source
+    assert '"Advertise"' in source
+    assert '"Map"' in source
+    assert '"Terminal"' in source
+    assert '"Packets"' in source
+    assert '"Settings"' in source
+    assert '"Setup"' in source
+    assert '"Signal"' in source
     assert '"Time"' in source
     assert '"Wi-Fi"' in source
     assert '"BLE"' in source
     assert '"SD"' in source
-    assert '"Public"' in source
     assert '"DMs"' in source
-    assert '"Last Messages"' in source
-    assert '"Local Repeaters"' in source
     assert "render_home_message_preview" in source
     assert "render_home_repeater_preview" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
-    assert "snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW" in source
-    assert "snapshot->home_repeater_count && i < D1L_HOME_REPEATER_PREVIEW" in source
+    assert "snapshot->recent_room_count" in source
+    assert "snapshot->recent_repeater_count" in source
+    assert "snapshot->packet_count" in source
+    assert "snapshot->signal_summary.sample_count" in source
     assert "open_messages_public_event_cb" in source
     assert "open_messages_dm_event_cb" in source
-    assert "open_home_dm_preview_event_cb" in source
     assert "request_tab_event_cb" in source
+    assert "open_mesh_roles_event_cb" in source
+    assert "open_sheet_event_cb" in source
+    assert "open_diagnostics_sheet_event_cb" in source
     assert "open_storage_sheet_event_cb" in source
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
+    assert "Last Messages" not in home_body
+    assert "Local Repeaters" not in home_body
     assert "RF Packets" not in home_body
     assert "System" not in home_body
     assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
@@ -200,10 +224,24 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "static lv_obj_t *s_dock" in source
     assert "set_dock_hidden(true)" in source
     assert "set_dock_hidden(false)" in source
-    assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in compose
-    assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in compose
-    assert "lv_obj_set_size(s_compose_keyboard, 448, 244)" in compose
-    assert "lv_obj_set_pos(s_compose_keyboard, 16, 168)" in compose
+    layout = source.split("static void layout_compose_sheet_controls", 1)[1].split(
+        "static void show_public_compose_sheet", 1
+    )[0]
+    assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in layout
+    assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in layout
+    assert "lv_obj_set_style_pad_all(s_compose_sheet, 0, 0)" in layout
+    assert "lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE)" in layout
+    assert "lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF)" in layout
+    assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in layout
+    assert "lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT)" in layout
+    assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in layout
+    assert "configure_compose_keyboard(s_compose_keyboard)" in compose
+    assert "layout_compose_sheet_controls()" in compose
+    probe = source.split("static void open_compose_probe_on_ui_task", 1)[1].split(
+        "static void fill_compose_probe_geometry", 1
+    )[0]
+    assert "lv_obj_update_layout(s_screen);\n    layout_compose_sheet_controls();\n    lv_obj_update_layout(s_screen);" in probe
+    assert "request_full_screen_repaint()" in probe
 
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
@@ -225,6 +263,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_status" in console
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
+    assert "cmd_ui_compose_probe" in console
     assert "cmd_ui_data_canary" in console
     assert "cmd_ui_capture_status" in console
     assert "cmd_ui_capture_begin" in console
@@ -233,6 +272,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "ui compose-probe <public|public-long|dm|dm-long>" in console
     assert "ui data-canary <token>" in console
     assert "ui capture status" in console
     assert "ui capture begin" in console
@@ -242,6 +282,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "fgets(" not in console
     assert "LINE_TOO_LONG" in console
     assert "d1l_ui_capture_status_t" in header
+    assert "d1l_ui_compose_probe_result_t" in header
+    assert "d1l_ui_phase1_compose_probe" in header
     assert "d1l_ui_capture_begin" in header
     assert "d1l_ui_capture_chunk" in header
     assert 'ok_begin("ui data-canary")' in console
@@ -249,6 +291,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '\\"public_rf_tx\\":false' in console
     assert '\\"formats_sd\\":false' in console
     assert "process_pending_scroll_probe()" in source
+    assert "process_pending_compose_probe()" in source
     assert "lv_obj_get_scroll_bottom(target)" in source
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert '"Scroll Probe DM"' in source
@@ -273,6 +316,38 @@ def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
     assert "copy_rect_to_capture_shadow" in source
     assert "d1l_ui_capture_begin" in source
 
+    direct_copy = source.split("static void lcd_direct_mode_copy_cb(void)", 1)[1].split(
+        "#endif\n\nstatic void flush_cb", 1
+    )[0]
+    assert "memcpy(to, from, bytes_per_line)" in direct_copy
+    assert "copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end" in direct_copy
+
+
+def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
+    source = read("main/ui/ui_phase1.c")
+
+    assert "static void request_full_screen_repaint(void)" in source
+    assert "lv_obj_invalidate(s_screen)" in source
+
+    render_body = source.split("static void render_active_tab(void)", 1)[1].split(
+        "esp_err_t d1l_ui_phase1_request_tab", 1
+    )[0]
+    assert "request_full_screen_repaint();" in render_body
+
+    compose_hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
+        "static void hide_public_history_sheet", 1
+    )[0]
+    assert "request_full_screen_repaint();" in compose_hide
+
+    public_compose = source.split("static void show_public_compose_sheet", 1)[1].split(
+        "static void public_test_event_cb", 1
+    )[0]
+    dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
+        "static void open_dm_compose_event_cb", 1
+    )[0]
+    assert "request_full_screen_repaint();" in public_compose
+    assert "request_full_screen_repaint();" in dm_compose
+
 
 def test_serial_tab_state_stays_pending_until_render_finishes():
     source = read("main/ui/ui_phase1.c")
@@ -295,6 +370,7 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
     assert process_body.index("render_active_tab();") < process_body.index(
         "finish_pending_tab_switch(rendered_tab);"
     )
+    assert "s_content_refresh_pending = false;" not in process_body
 
     for name in [
         "d1l_ui_phase1_active_tab_name",
@@ -323,6 +399,11 @@ def test_content_refreshes_are_coalesced_on_ui_task():
     assert "request_content_refresh();" in process_body
     assert "render_active_tab();" in process_body
 
+    finish_body = source.split("static void finish_pending_tab_switch", 1)[1].split(
+        "static void request_content_refresh", 1
+    )[0]
+    assert "s_content_refresh_pending = false;" not in finish_body
+
     loop_body = source.split("static void ui_task(void *arg)", 1)[1].split(
         "static void touch_poll_task", 1
     )[0]
@@ -332,6 +413,38 @@ def test_content_refreshes_are_coalesced_on_ui_task():
     assert loop_body.index("process_pending_content_refresh();") < loop_body.index(
         "process_pending_scroll_probe();"
     )
+
+
+def test_ui_data_canary_uses_volatile_store_paths():
+    console = read("main/comms/usb_console.c")
+    message_store = read("main/mesh/message_store.h")
+    dm_store = read("main/mesh/dm_store.h")
+    route_store = read("main/mesh/route_store.h")
+    packet_log = read("main/mesh/packet_log.h")
+
+    assert "d1l_message_store_append_public_volatile" in message_store
+    assert "d1l_dm_store_append_volatile" in dm_store
+    assert "d1l_route_store_upsert_observation_volatile" in route_store
+    assert "d1l_packet_log_append_raw_volatile" in packet_log
+
+    canary = console.split("static void cmd_ui_data_canary", 1)[1].split(
+        "static void cmd_storage_retained_canary", 1
+    )[0]
+    assert "d1l_message_store_append_public_volatile" in canary
+    assert "d1l_dm_store_append_volatile" in canary
+    assert "d1l_route_store_upsert_observation_volatile" in canary
+    assert "d1l_packet_log_append_raw_volatile" in canary
+    assert '\\"retention\\":\\"volatile\\"' in canary
+
+    for rel in [
+        "main/mesh/message_store.c",
+        "main/mesh/dm_store.c",
+        "main/mesh/route_store.c",
+        "main/mesh/packet_log.c",
+    ]:
+        source = read(rel)
+        assert "static bool is_volatile_ui_canary" in source
+        assert "is_volatile_ui_canary" in source.split("static void fill", 1)[1]
 
 
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
@@ -392,6 +505,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
     assert {
         "first_boot_onboarding",
         "lock_overlay_unlock",
+        "home_launcher_navigation",
         "public_compose_and_send",
         "public_history_search",
         "dm_thread_read_and_reply",
@@ -431,6 +545,9 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "save_contact_alias": "save_contact_edit_event_cb",
         "forget_contact": "forget_contact_edit_event_cb",
         "open_map": "dock_event_cb",
+        "open_nodes": "dock_event_cb",
+        "open_packets": "dock_event_cb",
+        "open_settings": "dock_event_cb",
         "open_map_location_picker": "open_map_location_sheet_event_cb",
         "edit_map_latitude": "s_map_lat_textarea",
         "edit_map_longitude": "s_map_lon_textarea",
@@ -444,6 +561,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_packet_detail": "open_packet_detail_event_cb",
         "open_route_detail": "open_route_detail_event_cb",
         "open_mesh_roles": "open_mesh_roles_event_cb",
+        "open_repeaters": "open_mesh_roles_event_cb",
+        "open_signal": "open_mesh_roles_event_cb",
         "open_radio_settings": "open_radio_settings_event_cb",
         "radio_freq_down": "radio_edit_adjust_event_cb",
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
@@ -478,6 +597,16 @@ def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
     assert 'create_button(s_onboarding_sheet, "Use Defaults"' in source
     assert "lv_textarea_set_max_length(s_onboarding_name_textarea, D1L_NODE_NAME_LEN - 1U)" in source
     assert "lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea)" in source
+    onboarding_body = source.split("static void create_onboarding_sheet", 1)[1].split(
+        "static void create_lock_overlay", 1
+    )[0]
+    assert "lv_obj_set_size(s_onboarding_sheet, 480, 480)" in onboarding_body
+    assert "lv_obj_set_pos(s_onboarding_sheet, 0, 0)" in onboarding_body
+    assert "lv_obj_set_style_border_width(s_onboarding_sheet, 0, 0)" in onboarding_body
+    update_body = source.split("static void update_onboarding_visibility", 1)[1].split(
+        "static void update_chrome", 1
+    )[0]
+    assert "request_full_screen_repaint();" in update_body
     assert "snapshot->onboarding_complete" in source
 
 
@@ -517,6 +646,8 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "lv_textarea_get_text" in source
     assert "lv_keyboard_create" in source
     assert "lv_keyboard_set_textarea" in source
+    assert "lv_keyboard_set_map" in source
+    assert "d1l_compose_kb_map_lc" in source
     assert "LV_EVENT_READY" in source
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source

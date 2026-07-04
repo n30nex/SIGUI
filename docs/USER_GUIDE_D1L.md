@@ -12,7 +12,7 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
 - Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
-- Home Wi-Fi and BLE chips open setup/status sheets. Wi-Fi scan/connect controls are available only when the Wi-Fi runtime is enabled; BLE pairing/transport controls are unavailable until a measured BLE transport artifact exists.
+- Home uses large launcher tiles for Chats, DMs, Rooms, Contacts, Repeaters, Advertise, Map, Terminal, Packets, Settings, Setup, and Signal. The Home footer keeps Wi-Fi, BLE, and SD setup/status chips reachable; Wi-Fi scan/connect controls are available only when the Wi-Fi runtime is enabled, and BLE pairing/transport controls are unavailable until a measured BLE transport artifact exists.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
 - 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
@@ -36,7 +36,7 @@ $env:D1L_PORT = "COMx"
 .\flash_project.ps1 -Port $env:D1L_PORT
 ```
 
-Do not use COM11 or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
+Do not use COM8, COM11, or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
 
 The full 8MB image is for factory/recovery workflows and can overwrite persisted settings, contacts, messages, and logs. It requires typed confirmation:
 
@@ -78,6 +78,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `ui capture begin`
 - `ui capture chunk <offset> <len>`
 - `ui capture end`
+- `ui compose-probe <public|public-long|dm|dm-long>`
 - `messages public`
 - `messages public offset 8`
 - `messages public search test`
@@ -119,7 +120,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Current Limits
 
 - Manual physical review of the touch UI is still pending.
-- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures, but the simulator/reference diff still needs release-gate proof.
+- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures. `scripts/ui_compose_keyboard_capture_d1l.py` opens `ui compose-probe public|public-long|dm|dm-long` and writes four compose-keyboard PNG/RGB565 captures for the `ui_compose_keyboard_capture` release gate, but the simulator/reference diff still needs release-gate proof.
 - Manual touch review of the Settings dashboard and Radio Settings sheet is still pending.
 - Manual touch review of the Contact Edit rename/Forget sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.

@@ -141,7 +141,66 @@ def require_capture_geometry(begin: dict[str, Any]) -> tuple[int, int, int]:
     return width, height, total
 
 
-def capture_frame(port: str, baud: int, timeout: float, chunk_size: int) -> dict[str, Any]:
+def _int_or_none(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def capture_status_is_ready(status: dict[str, Any], baseline: dict[str, Any] | None) -> bool:
+    if status.get("ok") is not True or status.get("shadow_ready") is not True:
+        return False
+    if status.get("render_pending") is True or status.get("tab_pending") is True:
+        return False
+    if status.get("content_pending") is True:
+        return False
+    if not baseline:
+        return True
+    frame_seq = _int_or_none(status.get("frame_seq"))
+    flush_count = _int_or_none(status.get("flush_count"))
+    base_frame_seq = _int_or_none(baseline.get("frame_seq"))
+    base_flush_count = _int_or_none(baseline.get("flush_count"))
+    if baseline.get("ok") is not True or (base_frame_seq is None and base_flush_count is None):
+        return True
+    frame_advanced = (
+        frame_seq is not None
+        and base_frame_seq is not None
+        and frame_seq > base_frame_seq
+    )
+    flush_advanced = (
+        flush_count is not None
+        and base_flush_count is not None
+        and flush_count > base_flush_count
+    )
+    return frame_advanced or flush_advanced
+
+
+def wait_for_capture_ready(ser: Any, timeout: float, baseline: dict[str, Any] | None) -> tuple[bool, list[dict[str, Any]]]:
+    deadline = time.monotonic() + max(timeout, 1.0)
+    statuses: list[dict[str, Any]] = []
+    while time.monotonic() < deadline:
+        remaining = max(0.05, deadline - time.monotonic())
+        status = send_console_command(ser, "ui capture status", min(timeout, remaining))
+        statuses.append(status)
+        if capture_status_is_ready(status, baseline):
+            return True, statuses
+        time.sleep(0.05)
+    return False, statuses
+
+
+def capture_frame(
+    port: str,
+    baud: int,
+    timeout: float,
+    chunk_size: int,
+    prep_commands: list[str] | None = None,
+    prep_ok_required: bool = True,
+    post_prep_settle_sec: float = 0.0,
+) -> dict[str, Any]:
     try:
         import serial
     except ImportError as exc:
@@ -149,12 +208,58 @@ def capture_frame(port: str, baud: int, timeout: float, chunk_size: int) -> dict
 
     chunk_size = max(1, min(chunk_size, MAX_CHUNK_BYTES))
     events: list[dict[str, Any]] = []
+    prep_failures: list[dict[str, Any]] = []
     raw = bytearray()
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
-        status = send_console_command(ser, "ui capture status", timeout)
-        events.append(status)
+        baseline_status = send_console_command(ser, "ui capture status", timeout)
+        events.append(baseline_status)
+        for prep_command in prep_commands or []:
+            prep = send_console_command(ser, prep_command, timeout)
+            events.append(prep)
+            if prep.get("ok") is not True:
+                prep_failures.append(prep)
+                if not prep_ok_required:
+                    continue
+                return {
+                    "schema": 1,
+                    "kind": "ui_pixel_capture",
+                    "mode": "hardware",
+                    "ok": False,
+                    "port": port,
+                    "baud": baud,
+                    "events": events,
+                    "error": "ui_capture_prep_failed",
+                    "prep_command": prep_command,
+                    "prep_ok": False,
+                    "prep_failures": prep_failures,
+                    "public_rf_tx": False,
+                    "formats_sd": False,
+                }
+        if prep_commands and post_prep_settle_sec > 0:
+            time.sleep(post_prep_settle_sec)
+        ready, ready_statuses = wait_for_capture_ready(
+            ser,
+            timeout,
+            baseline_status if prep_commands else None,
+        )
+        events.extend(ready_statuses)
+        if not ready:
+            return {
+                "schema": 1,
+                "kind": "ui_pixel_capture",
+                "mode": "hardware",
+                "ok": False,
+                "port": port,
+                "baud": baud,
+                "events": events,
+                "error": "ui_capture_not_ready",
+                "prep_ok": len(prep_failures) == 0,
+                "prep_failures": prep_failures,
+                "public_rf_tx": False,
+                "formats_sd": False,
+            }
         begin = send_console_command(ser, "ui capture begin", timeout)
         events.append(begin)
         if begin.get("ok") is not True:
@@ -191,12 +296,17 @@ def capture_frame(port: str, baud: int, timeout: float, chunk_size: int) -> dict
 
     capture_crc32 = crc32_hex(raw)
     expected_crc32 = str(begin.get("crc32") or "").upper()
-    ok = len(raw) == total and (not expected_crc32 or capture_crc32 == expected_crc32)
+    pixel_capture_ok = len(raw) == total and (not expected_crc32 or capture_crc32 == expected_crc32)
+    prep_ok = len(prep_failures) == 0
+    ok = pixel_capture_ok and prep_ok
     return {
         "schema": 1,
         "kind": "ui_pixel_capture",
         "mode": "hardware",
         "ok": ok,
+        "pixel_capture_ok": pixel_capture_ok,
+        "prep_ok": prep_ok,
+        "prep_failures": prep_failures,
         "port": port,
         "baud": baud,
         "width": width,

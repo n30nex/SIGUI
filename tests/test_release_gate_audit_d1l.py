@@ -27,6 +27,9 @@ STRICT_SD_GATE_IDS = (
     "sd_retained_canary_passed",
     "sd_reboot_remount_passed",
     "sd_map_tile_canary_passed",
+    "sd_export_canary_passed",
+    "sd_diagnostic_export_passed",
+    "sd_data_export_passed",
     "sd_fat32_only_enforced",
     "sd_no_format_language",
     "sd_power_rail_measured",
@@ -90,6 +93,54 @@ def ui_pixel_capture_payload(**overrides: object) -> dict:
         "firmware_crc32": "1234ABCD",
         "png_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.png",
         "raw_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.rgb565",
+        "onboarding_visible": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def compose_keyboard_capture_payload(**overrides: object) -> dict:
+    def capture(target: str) -> dict:
+        probe_target = target.replace("-", "_")
+        return {
+            "target": target,
+            "ok": True,
+            "compose_probe": {
+                "ok": True,
+                "cmd": "ui compose-probe",
+                "target": probe_target,
+                "target_supported": True,
+                "sheet_visible": True,
+                "textarea_visible": True,
+                "keyboard_visible": True,
+                "onboarding_visible": False,
+                "dock_hidden": True,
+                "dm_mode": target.startswith("dm"),
+                "active_tab": "messages",
+                "sheet": {"x": 0, "y": 56, "w": 480, "h": 424},
+                "textarea": {"x": 16, "y": 58, "w": 448, "h": 78},
+                "keyboard": {"x": 16, "y": 158, "w": 448, "h": 258},
+                "public_rf_tx": False,
+                "formats_sd": False,
+            },
+            "capture": ui_pixel_capture_payload(),
+            "png_path": f"artifacts/hardware/com12/ui_compose_{target}.png",
+            "raw_path": f"artifacts/hardware/com12/ui_compose_{target}.rgb565",
+            "target_visible": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+
+    payload = {
+        "ok": True,
+        "kind": "ui_compose_keyboard_capture",
+        "mode": "hardware",
+        "port": "COM12",
+        "targets": ["public", "public-long", "dm", "dm-long"],
+        "captures": [capture(target) for target in ("public", "public-long", "dm", "dm-long")],
+        "capture_count": 4,
         "public_rf_tx": False,
         "formats_sd": False,
     }
@@ -185,6 +236,7 @@ def write_core_evidence(root: Path) -> None:
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
     write_json(hardware / "ui_corruption_probe_68350bf.json", ui_corruption_probe_payload())
     write_json(hardware / "ui_pixel_capture_68350bf.json", ui_pixel_capture_payload())
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", compose_keyboard_capture_payload())
     write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
     write_json(
         hardware / "dm_probe_68350bf.json",
@@ -229,6 +281,12 @@ def write_core_evidence(root: Path) -> None:
             "release_gate_audit_d1l.py\nready_for_public_release=false\nNo release tag should be cut until\n",
             encoding="utf-8",
         )
+
+
+def write_esp32_only_actions_package(root: Path) -> None:
+    run_dir = root / "artifacts" / "github" / RUN_ID
+    write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
+    write_release_package(run_dir)
 
 
 def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> None:
@@ -415,11 +473,11 @@ def write_raw_diag_evidence(root: Path, commit: str = COMMIT, metadata_commit: s
             fields[f"{prefix}{suffix}"] = "1"
     line = "DESKOS_SD_DIAG " + " ".join(f"{key}={value}" for key, value in fields.items())
     write_json(
-        root / "artifacts" / "hardware" / "com16" / f"rp2040_direct_diag_{commit[:7]}.json",
+        root / "artifacts" / "hardware" / "com12" / f"rp2040_raw_diag_{commit[:7]}_COM12.json",
         {
             "schema": 1,
             "ok": True,
-            "port": "COM16",
+            "port": "COM12",
             "public_rf_tx": False,
             "formats_sd": False,
             "diag": line,
@@ -632,6 +690,59 @@ def write_map_tile_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
     )
 
 
+def write_export_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    common = {
+        "schema": 1,
+        "mode": "hardware",
+        "port": "COM12",
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "allow_unavailable": False,
+        "ok": True,
+        "storage_file_gate_ready_before": True,
+        "storage_file_gate_ready_after": True,
+        "export_backend_ready_before": True,
+        "export_backend_ready_after": True,
+        **({"firmware_commit": metadata_commit} if metadata_commit else {}),
+    }
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_export_canary_{commit[:7]}.json",
+        {
+            **common,
+            "canary_passed": True,
+            "canary_unavailable_ok": False,
+            "canary": {"write_tmp": True, "read_tmp": True, "rename_replace": True, "read_final": True},
+            "commands": ["storage status", "storage export-canary ex1", "storage status", "health"],
+        },
+    )
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_diagnostic_export_{commit[:7]}.json",
+        {
+            **common,
+            "diagnostic_export_passed": True,
+            "diagnostic_export_unavailable_ok": False,
+            "export": {"bytes": 512, "chunks_written": 3, "final_verified_bytes": 512},
+            "commands": ["storage status", "storage export-diagnostics diag1", "storage status", "health", "crashlog"],
+        },
+    )
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"sd_data_export_{commit[:7]}.json",
+        {
+            **common,
+            "data_export_passed": True,
+            "data_export_unavailable_ok": False,
+            "export": {
+                "bytes": 512,
+                "chunks_written": 3,
+                "final_verified_bytes": 512,
+                "private_identity_exported": False,
+                "sampled": True,
+            },
+            "commands": ["storage status", "storage export-data data1", "storage status", "health"],
+        },
+    )
+
+
 def write_power_rail_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
     write_json(
         root / "artifacts" / "hardware" / "com12" / f"sd_electrical_{commit[:7]}.json",
@@ -685,6 +796,7 @@ def write_strict_sd_evidence(root: Path, commit: str = COMMIT, metadata_commit: 
     write_retained_canary_evidence(root, commit, metadata_commit)
     write_reboot_remount_evidence(root, commit, metadata_commit)
     write_map_tile_canary_evidence(root, commit, metadata_commit)
+    write_export_evidence(root, commit, metadata_commit)
     write_power_rail_evidence(root, commit, metadata_commit)
     write_sd_matrix_evidence(root, commit, metadata_commit)
 
@@ -723,10 +835,25 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["com12_smoke"]["ok"] is True
     assert gates["ui_corruption_probe"]["ok"] is True
     assert gates["ui_pixel_capture"]["ok"] is True
+    assert gates["ui_compose_keyboard_capture"]["ok"] is True
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+def test_release_gate_checksum_allows_esp32_only_actions_package(tmp_path: Path):
+    write_esp32_only_actions_package(tmp_path)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["ci_artifacts_checksums"]
+
+    assert gate["ok"] is True
+    assert gate["details"]["missing"] == []
+    assert sorted(gate["details"]["optional_missing"]) == [
+        f"artifacts/github/{RUN_ID}/rp2040-sd-bridge-firmware/SHA256SUMS.txt",
+        f"artifacts/github/{RUN_ID}/rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
+    ]
 
 
 def test_release_gate_audit_dry_run_without_downloaded_actions_artifacts_fails_closed(tmp_path: Path):
@@ -763,7 +890,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 15
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -796,7 +923,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 14
+    assert report["p0_failed_count"] == 17
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -989,7 +1116,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 15
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
@@ -1061,6 +1188,36 @@ def test_release_gate_audit_requires_hardware_ui_pixel_capture(tmp_path: Path):
     assert gates["ui_pixel_capture"]["details"]["path_found"] is True
 
 
+def test_release_gate_audit_requires_compose_keyboard_capture_geometry(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = compose_keyboard_capture_payload()
+    payload["captures"][0]["compose_probe"]["keyboard"]["h"] = 180
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_compose_keyboard_capture"]["ok"] is False
+    assert gates["ui_compose_keyboard_capture"]["details"]["path_found"] is True
+
+
+def test_release_gate_audit_rejects_onboarding_covered_compose_capture(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = compose_keyboard_capture_payload()
+    payload["captures"][0]["compose_probe"]["onboarding_visible"] = True
+    payload["captures"][0]["capture"]["onboarding_visible"] = True
+    payload["captures"][0]["target_visible"] = False
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_compose_keyboard_capture"]["ok"] is False
+    assert gates["ui_compose_keyboard_capture"]["details"]["path_found"] is True
+
+
 def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
@@ -1097,6 +1254,26 @@ def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):
     gates = gate_by_id(report)
 
     assert gates["ui_scroll_probe"]["ok"] is False
+
+
+def test_release_gate_audit_allows_static_home_launcher_scroll_probe(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload()
+    payload["probe_results"]["home"]["ok"] = False
+    payload["probe_results"]["home"]["moved"] = False
+    payload["probe_results"]["home"]["after_y"] = 0
+    payload["probe_results"]["home"]["scroll_bottom_before"] = 0
+    payload["probe_results"]["home"]["scroll_bottom_after"] = 0
+    for event in payload["events"]:
+        if event["screen"] == "home":
+            event["probe"] = payload["probe_results"]["home"]
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_scroll_probe"]["ok"] is True
 
 
 def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filename_matches(tmp_path: Path):
@@ -1253,6 +1430,7 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     (hardware / "smoke_68350bf.json").unlink()
     (hardware / "ui_corruption_probe_68350bf.json").unlink()
+    (hardware / "ui_compose_keyboard_capture_68350bf.json").unlink()
     (hardware / "scroll_probe_68350bf.json").unlink()
 
     write_json(
@@ -1266,6 +1444,10 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     write_json(
         tmp_path / "artifacts" / "scroll-probe" / "d1l-scroll-probe-COM12-actions-68350bf.json",
         scroll_probe_payload(firmware_commit=COMMIT),
+    )
+    write_json(
+        tmp_path / "artifacts" / "ui-capture" / "d1l-compose-keyboard-capture-COM12-actions-68350bf.json",
+        compose_keyboard_capture_payload(firmware_commit=COMMIT),
     )
     write_official_seeed_smoke_evidence(tmp_path)
 
@@ -1281,6 +1463,10 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["ui_scroll_probe"]["evidence"] == [
         "artifacts/scroll-probe/d1l-scroll-probe-COM12-actions-68350bf.json"
+    ]
+    assert gates["ui_compose_keyboard_capture"]["ok"] is True
+    assert gates["ui_compose_keyboard_capture"]["evidence"] == [
+        "artifacts/ui-capture/d1l-compose-keyboard-capture-COM12-actions-68350bf.json"
     ]
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == [

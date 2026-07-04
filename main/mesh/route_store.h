@@ -44,6 +44,11 @@ esp_err_t d1l_route_store_upsert_observation(const char *target, const char *lab
                                              const char *direction, int rssi_dbm,
                                              int snr_tenths, uint8_t path_hash_bytes,
                                              uint8_t path_hops, uint16_t payload_len);
+esp_err_t d1l_route_store_upsert_observation_volatile(const char *target, const char *label,
+                                                      const char *kind, const char *route,
+                                                      const char *direction, int rssi_dbm,
+                                                      int snr_tenths, uint8_t path_hash_bytes,
+                                                      uint8_t path_hops, uint16_t payload_len);
 d1l_route_store_stats_t d1l_route_store_stats(void);
 size_t d1l_route_store_copy_recent(d1l_route_entry_t *out_entries, size_t max_entries);
 size_t d1l_route_store_copy_for_target(const char *target, d1l_route_entry_t *out_entries,

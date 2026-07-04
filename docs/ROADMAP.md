@@ -10,9 +10,10 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 |---|---|---|
 | UI split-page redraw corruption | Firmware now defers content rebuilds out of LVGL event callbacks and queues live-data refreshes on the UI task. | Run `ui_corruption_probe_d1l.py` on COM12 from the current Actions artifact. |
 | Hardware pixel capture | Firmware exposes a serial RGB565 capture path so the PC can reconstruct the actual 480x480 UI frame. | Run `ui_capture_d1l.py` on COM12 and compare the PNG to the simulator/reference view. |
-| On-screen keyboard and sheets | Functional but too small/cut off in some flows. | Redesign compact keyboard/sheets, rerun simulator and physical review. |
+| On-screen keyboard and sheets | Compose now uses a compact D1L keyboard map and has serial-only Public/DM compose probes. Other keyboard sheets still need the same capture-driven pass. | Run `ui_compose_keyboard_capture_d1l.py` on COM12 from the current Actions artifact and review the four PNG/RGB565 captures. |
+| SiguredOS-style icon Home | Firmware and simulator now render a 480x480 icon-first launcher tracked by GitHub issue #27, with quick Mesh, Wi-Fi, BLE, SD, unread, packet, room, repeater, and signal status. | Capture current-commit COM12 pixel-readback evidence for the new Home screen from the Actions-built artifact, then close #27 if the physical screen matches. |
 | Full RF/DM acceptance | Public and outbound DM foundations exist; full inbound DM, ACK/PATH, direct-route proof remains open. | Produce `rf_full_acceptance_*.json` with health and no-Public-command proof. |
-| SD release matrix | Core SD file/history/remount/map canaries pass on the current FAT32 card. | Add official Seeed smoke, boot/retry proof, non-FAT32 behavior, <=32GB FAT32 matrix, no-format evidence, and power/electrical evidence. |
+| SD release matrix | Core SD file/history/remount/map/export canaries, raw diagnostics, RP2040-unavailable fallback, and the official Seeed FAT32 smoke pass on the current FAT32 card from `1a29876` / Actions `28714355561`. | Add physical no-card and unformatted/non-FAT32 proof, <=32GB FAT32 matrix, no-format language proof for unusable media, and power/electrical evidence. |
 | Physical screenshots/review | Host simulator screenshots are committed under `docs/screenshots`. | Add physical device photos and manual UI review artifact. |
 | Long soak | Short evidence exists. | Run 12-hour idle/listening soak on the release artifact. |
 
@@ -26,12 +27,13 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 
 ## Active Work Queue
 
-1. Finish targeted UI corruption fix and hardware proof.
-2. Rework keyboard/sheet sizing and rerun simulator screenshots.
-3. Complete README/current-doc polish and physical screenshots.
-4. Finish RF/DM acceptance without reserved local ports.
-5. Complete the SD release matrix now that core SD works.
-6. Run final soak and release gate.
+1. Finish targeted UI corruption fix and hardware pixel proof.
+2. Prove compose keyboard sizing on hardware, then repeat the capture-driven pass for remaining keyboard sheets.
+3. Capture current-commit COM12 pixel-readback evidence for the #27 SiguredOS-style icon Home and compare it with the refreshed simulator screenshot.
+4. Complete README/current-doc polish and physical screenshots.
+5. Finish RF/DM acceptance without reserved local ports.
+6. Complete the remaining physical SD release matrix now that core SD works.
+7. Run final soak and release gate.
 
 ## Validation Notes
 

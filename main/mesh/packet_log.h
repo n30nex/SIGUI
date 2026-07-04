@@ -54,6 +54,8 @@ esp_err_t d1l_packet_log_clear(void);
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry);
 bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
                                size_t raw_len);
+bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
+                                        const uint8_t *raw, size_t raw_len);
 esp_err_t d1l_packet_log_flush(void);
 d1l_packet_log_stats_t d1l_packet_log_stats(void);
 size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t max_entries);

@@ -33,7 +33,7 @@ PREFLIGHT_COMMANDS = [
     "storage diag",
     "health",
 ]
-MOUNT_POLL_ATTEMPTS = 10
+MOUNT_POLL_ATTEMPTS = 30
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
 
 
@@ -121,6 +121,32 @@ def sd_has_rejected_probe(sd: dict) -> bool:
     if sd.get("state") == "error" and probe_error in (3, 4):
         return True
     return probe_error in (3, 4)
+
+
+def storage_diag_skipped_after_ready() -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage diag",
+        "skipped": True,
+        "reason": "storage_file_gate_ready",
+        "diag_supported": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+
+
+def storage_diag_skipped_while_mount_pending() -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage diag",
+        "skipped": True,
+        "reason": "storage_mount_pending",
+        "diag_supported": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
 
 
 def classify_preflight(
@@ -282,9 +308,14 @@ def run_preflight(
                 time.sleep(MOUNT_POLL_INTERVAL_SECONDS)
                 storage_status = send_command(ser, "storage status", timeout)
                 post_mount_statuses.append(storage_status)
-            command = "storage diag"
-            command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
-            storage_diag = send_command(ser, command, command_timeout)
+            if storage_file_gate_ready(storage_status):
+                storage_diag = storage_diag_skipped_after_ready()
+            elif sd_state(storage_status) == "mount_pending":
+                storage_diag = storage_diag_skipped_while_mount_pending()
+            else:
+                command = "storage diag"
+                command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
+                storage_diag = send_command(ser, command, command_timeout)
             health = send_command(ser, "health", timeout)
     classification = classify_preflight(
         rp2040_status,

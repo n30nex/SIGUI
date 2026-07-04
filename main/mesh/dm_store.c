@@ -89,6 +89,13 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
 }
 
+static bool is_volatile_ui_canary(const d1l_dm_entry_t *entry)
+{
+    return entry &&
+           strncmp(entry->contact_alias, "UI Canary", sizeof(entry->contact_alias)) == 0 &&
+           strncmp(entry->text, "ui-data-canary ", strlen("ui-data-canary ")) == 0;
+}
+
 static void fill_blob(d1l_dm_store_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
@@ -96,9 +103,16 @@ static void fill_blob(d1l_dm_store_blob_t *blob)
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    blob->head = (uint32_t)s_head;
-    blob->count = (uint32_t)s_count;
-    memcpy(blob->entries, s_entries, sizeof(s_entries));
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (!is_volatile_ui_canary(entry) && blob->count < D1L_DM_STORE_CAPACITY) {
+            blob->entries[blob->count++] = *entry;
+        }
+    }
+    blob->head = blob->count % D1L_DM_STORE_CAPACITY;
 }
 
 static esp_err_t persist_store(void)
@@ -242,11 +256,11 @@ esp_err_t d1l_dm_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *contact_alias,
-                              const char *direction, const char *text, int rssi_dbm,
-                              int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
-                              uint8_t attempt, bool delivered, bool acked,
-                              uint32_t ack_hash)
+static esp_err_t append_internal(const char *contact_fingerprint, const char *contact_alias,
+                                 const char *direction, const char *text, int rssi_dbm,
+                                 int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
+                                 uint8_t attempt, bool delivered, bool acked,
+                                 uint32_t ack_hash, bool persist)
 {
     if (!contact_fingerprint || contact_fingerprint[0] == '\0' || !text || text[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -285,9 +299,31 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *conta
         s_dropped_oldest++;
     }
     s_total_written++;
-    esp_err_t ret = persist_store();
+    esp_err_t ret = persist ? persist_store() : ESP_OK;
     d1l_store_lock_give(&s_store_lock);
     return ret;
+}
+
+esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *contact_alias,
+                              const char *direction, const char *text, int rssi_dbm,
+                              int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
+                              uint8_t attempt, bool delivered, bool acked,
+                              uint32_t ack_hash)
+{
+    return append_internal(contact_fingerprint, contact_alias, direction, text, rssi_dbm,
+                           snr_tenths, path_hash_bytes, path_hops, attempt, delivered,
+                           acked, ack_hash, true);
+}
+
+esp_err_t d1l_dm_store_append_volatile(const char *contact_fingerprint, const char *contact_alias,
+                                       const char *direction, const char *text, int rssi_dbm,
+                                       int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,
+                                       uint8_t attempt, bool delivered, bool acked,
+                                       uint32_t ack_hash)
+{
+    return append_internal(contact_fingerprint, contact_alias, direction, text, rssi_dbm,
+                           snr_tenths, path_hash_bytes, path_hops, attempt, delivered,
+                           acked, ack_hash, false);
 }
 
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash, d1l_dm_entry_t *out_entry)

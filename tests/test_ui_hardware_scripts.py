@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from scripts import scroll_probe_d1l, smoke_d1l, ui_capture_d1l, ui_corruption_probe_d1l
+from scripts import (
+    scroll_probe_d1l,
+    smoke_d1l,
+    ui_capture_d1l,
+    ui_compose_keyboard_capture_d1l,
+    ui_corruption_probe_d1l,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -91,6 +97,31 @@ def test_scroll_probe_rejects_unknown_screen():
         raise AssertionError("parse_screens accepted an unknown screen")
 
 
+def test_scroll_probe_allows_static_home_but_requires_other_surfaces_to_move():
+    def event(screen: str) -> dict:
+        tab = "home" if screen == "home" else "settings"
+        return {
+            "screen": screen,
+            "tab": tab,
+            "request": {"ok": True},
+            "tab_active": True,
+            "probe": {
+                "ok": screen != "home",
+                "surface": screen,
+                "tab": tab,
+                "target_found": True,
+                "scrollable": True,
+                "moved": False,
+            },
+            "status": {"active_tab": tab},
+            "health": {"ok": True},
+            "crashlog": {"entries": []},
+        }
+
+    assert scroll_probe_d1l.event_failed(event("home")) is False
+    assert scroll_probe_d1l.event_failed(event("storage")) is True
+
+
 def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     release_docs = [
         "README.md",
@@ -114,6 +145,7 @@ def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"
     assert smoke_d1l.expected_command_name("ui scroll-probe storage") == "ui scroll-probe"
+    assert smoke_d1l.expected_command_name("ui compose-probe public-long") == "ui compose-probe"
     assert smoke_d1l.expected_command_name("ui data-canary uiRx0001") == "ui data-canary"
     assert smoke_d1l.expected_command_name("ui capture chunk 0 1024") == "ui capture chunk"
 
@@ -140,6 +172,115 @@ def test_ui_capture_dry_run_and_png_writer(tmp_path):
     ui_capture_d1l.write_png_from_rgb565_le(bytes(raw), png, 480, 480)
 
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():
+    baseline = {"ok": True, "shadow_ready": True, "frame_seq": 10, "flush_count": 20}
+
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 10, "flush_count": 20},
+        baseline,
+    ) is False
+    assert ui_capture_d1l.capture_status_is_ready(
+        {
+            "ok": True,
+            "shadow_ready": True,
+            "frame_seq": 11,
+            "flush_count": 20,
+            "render_pending": True,
+        },
+        baseline,
+    ) is False
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 11, "flush_count": 20},
+        baseline,
+    ) is True
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 1, "flush_count": 1},
+        {"ok": False, "code": "TIMEOUT"},
+    ) is True
+
+
+def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
+    report = ui_compose_keyboard_capture_d1l.dry_run_report(
+        targets=["public", "public-long", "dm", "dm-long"],
+        chunk_size=2048,
+    )
+
+    assert report["ok"] is True
+    assert report["kind"] == "ui_compose_keyboard_capture"
+    assert report["mode"] == "dry-run"
+    assert report["explicit_port_required"] is True
+    assert report["targets"] == ["public", "public-long", "dm", "dm-long"]
+    assert "ui compose-probe public" in report["commands"]
+    assert "ui compose-probe dm-long" in report["commands"]
+    assert "ui capture chunk 0 1024" in report["commands"]
+    assert report["chunk_size"] == 1024
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
+
+
+def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(tmp_path, monkeypatch):
+    def fake_capture_frame(**kwargs):
+        assert kwargs["prep_commands"] == ["ui compose-probe public"]
+        assert kwargs["prep_ok_required"] is False
+        assert kwargs["post_prep_settle_sec"] == 0.25
+        return {
+            "schema": 1,
+            "kind": "ui_pixel_capture",
+            "mode": "hardware",
+            "ok": False,
+            "pixel_capture_ok": True,
+            "prep_ok": False,
+            "prep_failures": [
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": "ui compose-probe",
+                    "target": "public",
+                    "keyboard": {"x": 16, "y": 322, "w": 448, "h": 258},
+                }
+            ],
+            "events": [
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": "ui compose-probe",
+                    "target": "public",
+                    "keyboard": {"x": 16, "y": 322, "w": 448, "h": 258},
+                }
+            ],
+            "width": 2,
+            "height": 1,
+            "bytes_per_pixel": 2,
+            "pixel_format": "rgb565-le",
+            "total_bytes": 4,
+            "onboarding_visible": False,
+            "raw_bytes": bytes([0x00, 0xF8, 0xE0, 0x07]),
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+
+    monkeypatch.setattr(ui_compose_keyboard_capture_d1l, "capture_frame", fake_capture_frame)
+
+    result = ui_compose_keyboard_capture_d1l.capture_target(
+        "public",
+        "COM12",
+        115200,
+        0.1,
+        1024,
+        tmp_path,
+        "compose-bad-geometry",
+    )
+
+    assert result["ok"] is False
+    assert result["capture"]["pixel_capture_ok"] is True
+    assert result["capture"]["prep_ok"] is False
+    assert result["target_visible"] is False
+    assert result["png_path"].endswith("compose-bad-geometry-public.png")
+    assert result["raw_path"].endswith("compose-bad-geometry-public.rgb565")
+    assert Path(result["png_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert Path(result["raw_path"]).read_bytes() == bytes([0x00, 0xF8, 0xE0, 0x07])
 
 
 def test_smoke_command_reader_bounds_readline_timeout_and_restores_serial_timeout():

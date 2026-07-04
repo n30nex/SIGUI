@@ -82,6 +82,16 @@ def storage_mount_line(state: str = "ready") -> str:
     )
 
 
+def protocol_pending_storage_line(state: str = "protocol_pending") -> str:
+    return (
+        f'{{"schema":1,"ok":true,"cmd":"storage status",'
+        f'"sd":{{"state":"{state}","present":false,"mounted":false,'
+        f'"data_root_ready":false,"rp2040_protocol_supported":false,'
+        f'"file_ops":false,"atomic_rename":false}},'
+        f'"setup_action":"bridge_protocol_pending","data_backend":"nvs"}}\n'
+    )
+
+
 def storage_setup_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage setup",'
@@ -172,6 +182,44 @@ def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
         "rp2040 ping\n",
         "storage status\n",
         "storage remount\n",
+        "storage status\n",
+        "storage filecanary\n",
+        "health\n",
+    ]
+
+
+def test_correct_structure_waits_through_bridge_resync_states(monkeypatch):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_line("protocol_pending"),
+            protocol_pending_storage_line("protocol_pending"),
+            protocol_pending_storage_line("rp2040_unavailable"),
+            ready_storage_line(),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+        mount_poll_attempts=5,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is True
+    assert report["classification"] == "ready_sd_file_gate"
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage status\n",
         "storage status\n",
         "storage filecanary\n",
         "health\n",

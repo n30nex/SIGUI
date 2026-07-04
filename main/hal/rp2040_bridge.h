@@ -8,6 +8,7 @@
 
 #define D1L_RP2040_FILE_PROTOCOL_VERSION 1U
 #define D1L_RP2040_FILE_LINE_MAX 512U
+#define D1L_RP2040_SD_DIAG_LINE_MAX 4096U
 #define D1L_RP2040_FILE_PATH_MAX 96U
 #define D1L_RP2040_FILE_CHUNK_MAX 192U
 #define D1L_RP2040_STOCK_PROBE_MAX_BYTES 192U
@@ -93,7 +94,7 @@ typedef struct {
     char selected_power[8];
     char selected_mode[16];
     char note[64];
-    char raw_line[D1L_RP2040_FILE_LINE_MAX + 1U];
+    char raw_line[D1L_RP2040_SD_DIAG_LINE_MAX + 1U];
 } d1l_rp2040_sd_diag_t;
 
 typedef struct {

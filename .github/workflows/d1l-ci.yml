@@ -2,11 +2,66 @@ name: d1l-ci
 
 on:
   workflow_dispatch:
+    inputs:
+      include_sd_bridge:
+        description: "Build RP2040 SD bridge artifacts and run SD bridge host dry-runs"
+        required: false
+        type: boolean
+        default: false
   push:
   pull_request:
 
 jobs:
+  change-filter:
+    runs-on: ubuntu-latest
+    outputs:
+      include_sd_bridge: ${{ steps.scope.outputs.include_sd_bridge }}
+      reason: ${{ steps.scope.outputs.reason }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide SD bridge scope
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          include_sd_bridge=false
+          reason=esp32_only
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.include_sd_bridge }}" == "true" ]]; then
+            include_sd_bridge=true
+            reason=manual_dispatch
+          else
+            : > changed-files.txt
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              git fetch --no-tags --prune --depth=1 origin "${{ github.base_ref }}" || true
+              git fetch --no-tags --prune --depth=1 origin "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" || true
+              git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > changed-files.txt \
+                || git diff --name-only "origin/${{ github.base_ref }}"...HEAD > changed-files.txt \
+                || true
+            elif [[ "${{ github.event_name }}" == "push" && "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]]; then
+              git diff --name-only "${{ github.event.before }}" "${{ github.sha }}" > changed-files.txt \
+                || git diff --name-only HEAD~1 HEAD > changed-files.txt \
+                || true
+            else
+              git diff --name-only HEAD~1 HEAD > changed-files.txt || git ls-files > changed-files.txt
+            fi
+
+            if grep -E '^(firmware/rp2040_sd_bridge/|firmware/rp2040_sd_smoke/|tools/rp2040_sd_protocol.py|scripts/(rp2040_|sd_).*_d1l.py|scripts/flash_rp2040_sd_bridge_uf2.py|tests/test_rp2040_sd_bridge_target.py|tests/test_storage_status_contract.py|docs/(SD_BRIDGE_PROTOCOL_D1L|RP2040_SD_BRIDGE_FLASH_D1L|D1L_SD_CARD_GUIDED_INSTALL)\.md)' changed-files.txt >/dev/null; then
+              include_sd_bridge=true
+              reason=sd_bridge_paths
+            fi
+          fi
+
+          echo "include_sd_bridge=${include_sd_bridge}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          echo "include_sd_bridge=${include_sd_bridge} (${reason})"
+
   host-checks:
+    needs: change-filter
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -32,30 +87,39 @@ jobs:
         run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 
       - name: SD file canary dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_file_canary_d1l.py --dry-run
 
       - name: SD retained history acceptance dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run
 
       - name: SD map tile canary dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run
 
       - name: SD reboot remount acceptance dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_reboot_remount_acceptance_d1l.py --dry-run --token ci-dry-run
 
       - name: SD export canary dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_export_canary_d1l.py --dry-run --token ci-dry-run
 
       - name: SD diagnostic export dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_diagnostic_export_d1l.py --dry-run --token ci-dry-run
 
       - name: SD data export dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_data_export_d1l.py --dry-run --token ci-dry-run
 
       - name: RP2040 SD bridge preflight dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge
 
       - name: SD boot prepare acceptance dry run
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 
       - name: RF full acceptance dry run
@@ -81,6 +145,8 @@ jobs:
           retention-days: 14
 
   rp2040-sd-bridge-build:
+    needs: change-filter
+    if: needs.change-filter.outputs.include_sd_bridge == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -160,7 +226,8 @@ jobs:
           retention-days: 14
 
   firmware-build:
-    needs: rp2040-sd-bridge-build
+    needs: [change-filter, rp2040-sd-bridge-build]
+    if: ${{ always() && needs.change-filter.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
     runs-on: ubuntu-latest
     container: espressif/idf:release-v5.1
     steps:
@@ -183,6 +250,7 @@ jobs:
           (cd artifacts/firmware && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
       - name: Download RP2040 release artifacts
+        if: needs.change-filter.outputs.include_sd_bridge == 'true'
         uses: actions/download-artifact@v7
         with:
           pattern: rp2040-*-firmware
@@ -192,7 +260,11 @@ jobs:
       - name: Package D1L release
         shell: bash
         run: |
-          python scripts/package_release_d1l.py --build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --rp2040-artifact-root artifacts/rp2040-release-inputs
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}")
+          if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
+            package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
+          fi
+          python scripts/package_release_d1l.py "${package_args[@]}"
 
       - name: Verify firmware and release checksums
         run: |

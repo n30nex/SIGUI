@@ -157,6 +157,10 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     )[0]
     assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
     assert "mount_status_blocking()" not in request_mount_body
+    assert 'pending_snapshot("sd_worker_busy")' in request_mount_body
+    assert 'pending_snapshot("filesystem_mounting")' in request_mount_body
+    assert "s_file_command_active = true" not in request_mount_body
+    assert "s_file_command_active = false" not in request_mount_body
     send_mount_body = sketch.split("void send_mount_status()", 1)[1].split(
         "void send_ping()", 1
     )[0]
@@ -268,6 +272,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "/deskos/map/manifest.json" in sketch
     assert "/deskos/map/manifest.json.tmp" in sketch
     assert "/deskos/map/manifest.json.bad" in sketch
+    assert "/deskos/canary" in sketch
     assert "MeshCore DeskOS D1L SD" in sketch
     assert "map_cache" in sketch
     assert "prepare_deskos_structure" in sketch
@@ -284,6 +289,8 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     assert "write_text_file_direct(DESKOS_MANIFEST, DESKOS_MANIFEST_PAYLOAD)" in sketch
     assert "manifest_valid()" in sketch
     assert "write_text_file_direct(DESKOS_MAP_MANIFEST" not in sketch
+    assert "ensure_directory(DESKOS_CANARY_DIR)" in sketch
+    assert "write_map_manifest()" in sketch
     assert "bool mounted_fs_is_fat32()" in sketch
     assert "SD.fatType() == 32" in sketch
     assert "bool snapshot_fs_is_fat32" in sketch
@@ -297,7 +304,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     snapshot_body = sketch.split("void send_snapshot", 1)[1].split(
         "void append_probe_tokens", 1
     )[0]
-    assert "snapshot_fs_is_fat32(snapshot)" in snapshot_body
+    assert "snapshot_ready_for_file_ops(snapshot)" in snapshot_body
     directory_body = sketch.split("bool ensure_directory", 1)[1].split(
         "bool manifest_file_valid", 1
     )[0]
@@ -391,6 +398,23 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "crc32_bytes" in sketch
     assert "crc_mismatch" in sketch
     assert '"too_large"' in sketch
+    assert "bool snapshot_ready_for_file_ops" in sketch
+    assert "bool recover_file_ops_mount()" in sketch
+    assert 'make_snapshot("error", "file_ops_remount_failed")' in sketch
+    assert "s_cached_snapshot_valid = false;" in sketch
+    assert "mount_sd_seeed_sample_path(true, true)" in sketch
+    request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
+        "bool recover_file_ops_mount()", 1
+    )[0]
+    assert "SdSnapshot mounted = mounted_snapshot_from_current_config();" in request_mount_body
+    assert "snapshot_ready_for_file_ops(mounted)" in request_mount_body
+    assert "recover_file_ops_mount()" not in request_mount_body
+    assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
+    file_line_body = sketch.split("void handle_file_line", 1)[1].split(
+        "void handle_line", 1
+    )[0]
+    assert "recover_file_ops_mount()" in file_line_body
+    assert "bool prepare_file_write_target" in sketch
     assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch
     assert "handle_file_read" in sketch
@@ -411,21 +435,41 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "rename replace backup path must fit the .bak suffix" in sketch
     assert "max file path buffer must include the replace backup suffix" in sketch
     assert "SD.open(full_path, FILE_READ)" in sketch
-    assert "SD.open(full_path, FILE_WRITE)" in sketch
+    assert 'const char *write_mode = truncate ? "w" : "a";' in sketch
+    assert "SD.open(full_path, write_mode)" in sketch
+    write_body = sketch.split("void handle_file_write", 1)[1].split(
+        "void handle_file_delete", 1
+    )[0]
+    assert "recover_file_ops_mount()" in write_body
+    assert write_body.count("SD.open(full_path, write_mode)") == 2
+    assert write_body.index("SD.open(full_path, write_mode)") < write_body.index(
+        "recover_file_ops_mount()"
+    )
+    assert (
+        "prepare_file_write_target(full_path, append_mode, truncate, &offset, &write_err)"
+        in write_body
+    )
+    assert "SD.open(full_path, FILE_WRITE)" not in sketch
     assert 'SD.open(full_path, "r")' not in sketch
-    assert 'SD.open(full_path, "w")' not in sketch
-    assert 'SD.open(full_path, "a")' not in sketch
-    assert 'SD.open(full_path, write_mode)' not in sketch
-    assert 'const char *write_mode = truncate ? "w" : "a";' not in sketch
     assert "file.seek(offset)" in sketch
+    file_line_body = sketch.split("void handle_file_line", 1)[1].split(
+        "void handle_line", 1
+    )[0]
+    assert "status.mounted && snapshot_fs_is_fat32(status) && recover_file_ops_mount()" in file_line_body
+    assert "status = current_status();" in file_line_body
+    assert file_line_body.index("recover_file_ops_mount()") < file_line_body.index(
+        'send_file_error(request_id, op, "not_ready")'
+    )
     assert "ensure_parent_dirs" in sketch
+    assert "!recover_file_ops_mount() || !ensure_parent_dirs(full_path)" in sketch
+    assert "!recover_file_ops_mount() || !ensure_parent_dirs(target_path)" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
     parent_body = sketch.split("bool ensure_parent_dirs", 1)[1].split(
         "bool make_backup_path", 1
     )[0]
-    assert "SD.mkdir(tmp)" in parent_body
-    assert "SD.exists" not in parent_body
+    assert "ensure_directory(tmp)" in parent_body
+    assert "return false" in parent_body
     replace_body = sketch.split("const char *rename_replace_preserving_old", 1)[1].split(
         "void send_snapshot", 1
     )[0]

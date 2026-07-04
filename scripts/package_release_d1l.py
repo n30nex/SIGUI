@@ -442,6 +442,13 @@ def write_flash_scripts(package_dir: Path, entries: list[dict], flasher_args: di
 def write_release_readme(package_dir: Path, package_name: str, manifest: dict) -> None:
     readme = package_dir / "README_RELEASE.md"
     app = app_entry(manifest["flash_files"])
+    if manifest.get("rp2040_artifacts"):
+        rp2040_contents = "- `rp2040/` contains the Actions-built RP2040 SD bridge, legacy smoke, and official Seeed SD smoke UF2 artifacts."
+    else:
+        rp2040_contents = (
+            "- `rp2040/` is omitted from this ESP32-only package. Re-run `d1l-ci` with "
+            "`include_sd_bridge=true`, or change SD/RP2040 sources, when bridge UF2 artifacts are required."
+        )
     readme.write_text(
         f"""# {PROJECT} Release Package
 
@@ -452,7 +459,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 ## Contents
 
 - `firmware/` contains the bootloader, partition table, app binary, and `flasher_args.json`.
-- `rp2040/` contains the Actions-built RP2040 SD bridge, legacy smoke, and official Seeed SD smoke UF2 artifacts when packaged by CI.
+{rp2040_contents}
 - `update/meshcore_deskos_d1l-app.bin` is the application image for future OTA/update flows.
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.

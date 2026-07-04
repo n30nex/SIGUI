@@ -108,6 +108,7 @@ static lv_obj_t *s_onboarding_name_textarea;
 static lv_obj_t *s_onboarding_keyboard;
 static bool s_lock_visible;
 static bool s_onboarding_visible;
+static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
@@ -142,6 +143,7 @@ static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 1500U;
+static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
 static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
@@ -155,6 +157,11 @@ static portMUX_TYPE s_scroll_probe_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_scroll_probe_pending;
 static char s_scroll_probe_surface[24];
 static d1l_ui_scroll_probe_result_t s_scroll_probe_result;
+static SemaphoreHandle_t s_compose_probe_done_sem;
+static portMUX_TYPE s_compose_probe_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_compose_probe_pending;
+static char s_compose_probe_target[16];
+static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
 #if CONFIG_FREERTOS_UNICORE
 #define D1L_UI_TASK_CORE 0
@@ -198,6 +205,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event);
 static void open_ble_sheet_event_cb(lv_event_t *event);
 static void open_display_sheet_event_cb(lv_event_t *event);
 static void open_diagnostics_sheet_event_cb(lv_event_t *event);
+static void open_sheet_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
@@ -367,10 +375,6 @@ static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)
         s_tab_switch_pending = false;
     }
     portEXIT_CRITICAL(&s_tab_lock);
-
-    portENTER_CRITICAL(&s_content_refresh_lock);
-    s_content_refresh_pending = false;
-    portEXIT_CRITICAL(&s_content_refresh_lock);
 }
 
 static void request_content_refresh(void)
@@ -388,6 +392,36 @@ static bool begin_pending_content_refresh(void)
     pending = s_content_refresh_pending;
     s_content_refresh_pending = false;
     portEXIT_CRITICAL(&s_content_refresh_lock);
+    return pending;
+}
+
+static bool content_refresh_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_content_refresh_lock);
+    pending = s_content_refresh_pending;
+    portEXIT_CRITICAL(&s_content_refresh_lock);
+    return pending;
+}
+
+static bool scroll_probe_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    pending = s_scroll_probe_pending;
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+    return pending;
+}
+
+static bool compose_probe_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    pending = s_compose_probe_pending;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
     return pending;
 }
 
@@ -416,6 +450,8 @@ static void map_location_keyboard_event_cb(lv_event_t *event);
 static void map_tiles_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 static void process_pending_scroll_probe(void);
+static void process_pending_compose_probe(void);
+static bool object_is_visible(lv_obj_t *obj);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -518,6 +554,45 @@ static bool scroll_surface_from_name(const char *name, char *out_surface,
     return true;
 }
 
+static bool compose_probe_target_from_name(const char *name, char *out_target,
+                                           size_t out_target_len)
+{
+    char normalized[16] = {0};
+    if (!name || !out_target || out_target_len == 0) {
+        return false;
+    }
+    size_t len = 0;
+    while (*name && len + 1U < sizeof(normalized)) {
+        char ch = (char)tolower((unsigned char)*name++);
+        normalized[len++] = (ch == '-' || ch == ' ') ? '_' : ch;
+    }
+    normalized[len] = '\0';
+    if (*name || len == 0) {
+        return false;
+    }
+
+    const char *target = NULL;
+    if (strcmp(normalized, "public") == 0 ||
+        strcmp(normalized, "public_short") == 0) {
+        target = "public";
+    } else if (strcmp(normalized, "public_long") == 0) {
+        target = "public_long";
+    } else if (strcmp(normalized, "dm") == 0 ||
+               strcmp(normalized, "direct") == 0 ||
+               strcmp(normalized, "dm_short") == 0 ||
+               strcmp(normalized, "direct_short") == 0) {
+        target = "dm";
+    } else if (strcmp(normalized, "dm_long") == 0 ||
+               strcmp(normalized, "direct_long") == 0) {
+        target = "dm_long";
+    } else {
+        return false;
+    }
+
+    snprintf(out_target, out_target_len, "%s", target);
+    return true;
+}
+
 static void configure_content_scroll_root(lv_obj_t *root)
 {
     if (!root) {
@@ -530,6 +605,23 @@ static void configure_content_scroll_root(lv_obj_t *root)
     lv_obj_set_style_border_width(root, 0, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_set_style_pad_bottom(root, 12, 0);
+}
+
+static void request_full_screen_repaint(void)
+{
+    if (s_screen) {
+        lv_obj_invalidate(s_screen);
+    }
+}
+
+static void force_ui_layout_repaint(void)
+{
+    if (!s_screen) {
+        return;
+    }
+    lv_obj_update_layout(s_screen);
+    request_full_screen_repaint();
+    lv_refr_now(NULL);
 }
 
 static void configure_sheet_scroll(lv_obj_t *sheet)
@@ -682,25 +774,20 @@ static void lcd_direct_mode_copy_cb(void)
         if (disp_refr->inv_area_joined[i] != 0) {
             continue;
         }
-        const lv_coord_t x_start = disp_refr->inv_areas[i].x1;
-        const lv_coord_t x_end = disp_refr->inv_areas[i].x2 + 1;
         const lv_coord_t y_start = disp_refr->inv_areas[i].y1;
         const lv_coord_t y_end = disp_refr->inv_areas[i].y2 + 1;
-        const uint32_t copy_bytes_per_line =
-            (uint32_t)(x_end - x_start) * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
-
-        uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+        uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res) *
                                   D1L_UI_CAPTURE_BYTES_PER_PIXEL;
-        uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+        uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res) *
                               D1L_UI_CAPTURE_BYTES_PER_PIXEL;
         for (lv_coord_t y = y_start; y < y_end; ++y) {
-            memcpy(to, from, copy_bytes_per_line);
+            memcpy(to, from, bytes_per_line);
             from += bytes_per_line;
             to += bytes_per_line;
         }
 
-        copy_rect_to_capture_shadow(x_start, y_start, x_end, y_end,
-                                    fb_from, 0, 0, h_res);
+        copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end,
+                                    fb_to, 0, 0, h_res);
         uint8_t *flush_ptr = fb_to + (uint32_t)y_start * bytes_per_line;
         const uint32_t bytes_to_flush = (uint32_t)(y_end - y_start) * bytes_per_line;
         Cache_WriteBack_Addr((uint32_t)flush_ptr, bytes_to_flush);
@@ -898,6 +985,86 @@ static lv_obj_t *create_keyboard(lv_obj_t *parent, const char *name)
     return keyboard;
 }
 
+static const char *d1l_compose_kb_map_lc[] = {
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+    "z", "x", "c", "v", "b", "n", "m", ".", "?", "\n",
+    "1#", "ABC", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_lc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_uc[] = {
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+    "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
+    "Z", "X", "C", "V", "B", "N", "M", ".", "?", "\n",
+    "1#", "abc", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_uc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_spec[] = {
+    "abc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
+    "0", "+", "-", "/", "*", "=", "%", "!", "?", "#", "\n",
+    "@", "&", "(", ")", ":", ";", "\"", "'", ".", ",", "\n",
+    "ABC", "_", " ", "/", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    6,
+    1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static void configure_compose_keyboard(lv_obj_t *keyboard)
+{
+    if (!keyboard) {
+        return;
+    }
+    lv_keyboard_set_popovers(keyboard, false);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER,
+                        d1l_compose_kb_map_lc, d1l_compose_kb_ctrl_lc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER,
+                        d1l_compose_kb_map_uc, d1l_compose_kb_ctrl_uc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_1,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(keyboard, 4, 0);
+    lv_obj_set_style_pad_row(keyboard, 6, 0);
+    lv_obj_set_style_pad_column(keyboard, 4, 0);
+}
+
 #if LV_USE_QRCODE
 static lv_obj_t *create_qrcode(lv_obj_t *parent, lv_coord_t size,
                                lv_color_t dark, lv_color_t light, const char *name)
@@ -1021,6 +1188,7 @@ static void set_dock_hidden(bool hidden)
     } else {
         lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_HIDDEN);
     }
+    request_full_screen_repaint();
 }
 
 static void hide_sheet(void)
@@ -1035,9 +1203,11 @@ static void hide_compose_sheet(void)
     if (s_compose_sheet) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_onboarding_probe_suppressed = false;
     set_dock_hidden(false);
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
+    request_full_screen_repaint();
 }
 
 static void hide_public_history_sheet(void)
@@ -1214,6 +1384,7 @@ static void hide_onboarding_sheet(void)
         lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     }
     s_onboarding_visible = false;
+    request_full_screen_repaint();
 }
 
 static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
@@ -1222,12 +1393,18 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         return;
     }
     if (snapshot->onboarding_complete) {
+        s_onboarding_probe_suppressed = false;
+        hide_onboarding_sheet();
+        return;
+    }
+    if (s_onboarding_probe_suppressed && object_is_visible(s_compose_sheet)) {
         hide_onboarding_sheet();
         return;
     }
     s_onboarding_visible = true;
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_onboarding_sheet);
+    request_full_screen_repaint();
 }
 
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
@@ -1526,6 +1703,47 @@ static lv_obj_t *render_home_chip(lv_obj_t *parent,
     return chip;
 }
 
+static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
+                                           int x,
+                                           int y,
+                                           const char *icon,
+                                           const char *title,
+                                           const char *detail,
+                                           uint32_t accent,
+                                           lv_event_cb_t cb,
+                                           void *user_data)
+{
+    lv_obj_t *tile = create_panel(parent, x, y, 110, 76);
+    if (!tile) {
+        return NULL;
+    }
+    lv_obj_set_style_radius(tile, 4, 0);
+    lv_obj_set_style_bg_color(tile, lv_color_hex(0x0F1712), 0);
+    lv_obj_set_style_border_color(tile, lv_color_hex(0x1F372E), 0);
+    lv_obj_set_style_pad_all(tile, 6, 0);
+    if (cb) {
+        lv_obj_add_flag(tile, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(tile, cb, LV_EVENT_CLICKED, user_data);
+    }
+
+    lv_obj_t *icon_label = create_label(tile, icon, accent);
+    obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
+    label_set_dot_width(icon_label, 98);
+    lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(icon_label, 0, 2);
+
+    lv_obj_t *title_label = create_label(tile, title, 0xF4F7FB);
+    label_set_dot_width(title_label, 98);
+    lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(title_label, 0, 34);
+
+    lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
+    label_set_dot_width(detail_label, 98);
+    lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(detail_label, 0, 54);
+    return tile;
+}
+
 static void format_age_label(char *dest, size_t dest_size, uint32_t age_sec)
 {
     if (!dest || dest_size == 0) {
@@ -1615,70 +1833,93 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     char value[32];
     char detail[64];
 
-    render_home_chip(s_content, 18, 12, 92, "Time",
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->public_unread_count);
+    snprintf(detail, sizeof(detail), "%s new", value);
+    render_home_launcher_tile(s_content, 8, 8, LV_SYMBOL_ENVELOPE, "Chats", detail,
+                              snapshot->public_unread_count ? 0xFBBF24 : 0x00C2FF,
+                              open_messages_public_event_cb, NULL);
+
+    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
+    snprintf(detail, sizeof(detail), "%s new", value);
+    render_home_launcher_tile(s_content, 126, 8, LV_SYMBOL_FILE, "DMs", detail,
+                              snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0,
+                              open_messages_dm_event_cb, NULL);
+
+    snprintf(detail, sizeof(detail), "%lu seen", (unsigned long)snapshot->recent_room_count);
+    render_home_launcher_tile(s_content, 244, 8, LV_SYMBOL_DIRECTORY, "Rooms", detail,
+                              snapshot->recent_room_count ? 0x5EEAD4 : 0x8EA0AE,
+                              open_mesh_roles_event_cb, NULL);
+
+    snprintf(detail, sizeof(detail), "%lu saved", (unsigned long)snapshot->contact_count);
+    render_home_launcher_tile(s_content, 362, 8, LV_SYMBOL_CALL, "Contacts", detail,
+                              snapshot->contact_count ? 0x5EEAD4 : 0x8EA0AE,
+                              request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_NODES);
+
+    snprintf(detail, sizeof(detail), "%lu heard", (unsigned long)snapshot->recent_repeater_count);
+    render_home_launcher_tile(s_content, 8, 92, LV_SYMBOL_REFRESH, "Repeaters", detail,
+                              snapshot->recent_repeater_count ? 0xFBBF24 : 0x8EA0AE,
+                              open_mesh_roles_event_cb, NULL);
+
+    render_home_launcher_tile(s_content, 126, 92, LV_SYMBOL_BELL, "Advertise", "manual",
+                              0x00C2FF, open_sheet_event_cb, NULL);
+
+    render_home_launcher_tile(s_content, 244, 92, LV_SYMBOL_GPS, "Map",
+                              snapshot->map_tile_cache_ready ? "tiles ready" : "offline",
+                              snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
+                              request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_MAP);
+
+    render_home_launcher_tile(s_content, 362, 92, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
+                              0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
+
+    snprintf(detail, sizeof(detail), "%lu rows", (unsigned long)snapshot->packet_count);
+    render_home_launcher_tile(s_content, 8, 176, LV_SYMBOL_LIST, "Packets", detail,
+                              snapshot->packet_count ? 0x5EEAD4 : 0x8EA0AE,
+                              request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_PACKETS);
+
+    render_home_launcher_tile(s_content, 126, 176, LV_SYMBOL_SETTINGS, "Settings", "setup",
+                              0x00C2FF, request_tab_event_cb,
+                              (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
+
+    render_home_launcher_tile(s_content, 244, 176, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
+                              snapshot->storage_data_enabled ? 0x5EEAD4 :
+                              (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
+                              open_storage_sheet_event_cb, NULL);
+
+    if (snapshot->signal_summary.sample_count > 0U) {
+        snprintf(detail, sizeof(detail), "%d dBm", snapshot->signal_summary.latest_rssi_dbm);
+    } else {
+        snprintf(detail, sizeof(detail), "waiting");
+    }
+    render_home_launcher_tile(s_content, 362, 176, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
+                              snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
+                              open_mesh_roles_event_cb, NULL);
+
+    lv_obj_t *summary = create_label(s_content, "", 0xD7E1EA);
+    label_set_fmt(summary, "Mesh %s  RX %lu  TX %lu  Pub %lu  DM %lu",
+                  snapshot->mesh_state ? snapshot->mesh_state : "starting",
+                  (unsigned long)snapshot->rx_packets,
+                  (unsigned long)snapshot->tx_packets,
+                  (unsigned long)snapshot->public_unread_count,
+                  (unsigned long)snapshot->dm_unread_count);
+    label_set_dot_width(summary, 448);
+    lv_obj_set_style_text_align(summary, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(summary, 16, 262);
+
+    render_home_chip(s_content, 8, 296, 110, "Time",
                      snapshot->time_label[0] ? snapshot->time_label : "--:--",
                      snapshot->time_available ? 0x5EEAD4 : 0x8EA0AE, NULL, NULL);
-    render_home_chip(s_content, 118, 12, 96, "Wi-Fi",
+    render_home_chip(s_content, 126, 296, 110, "Wi-Fi",
                      snapshot->wifi_state ? snapshot->wifi_state : "off",
                      snapshot->wifi_enabled ? 0x5EEAD4 : 0x8EA0AE,
                      open_wifi_sheet_event_cb, NULL);
-    render_home_chip(s_content, 222, 12, 96, "BLE",
+    render_home_chip(s_content, 244, 296, 110, "BLE",
                      snapshot->ble_state ? snapshot->ble_state : "off",
                      snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
                      open_ble_sheet_event_cb, NULL);
-    render_home_chip(s_content, 326, 12, 116, "SD", home_sd_state(snapshot),
+    render_home_chip(s_content, 362, 296, 110, "SD", home_sd_state(snapshot),
                      snapshot->storage_data_enabled ? 0x5EEAD4 :
                      (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
                      open_storage_sheet_event_cb, NULL);
-
-    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->public_unread_count);
-    snprintf(detail, sizeof(detail), "Public unread");
-    lv_obj_t *public_card = render_metric_card(s_content, 18, 68, "Public", value, detail,
-                                               snapshot->public_unread_count ? 0xFBBF24 : 0x5EEAD4);
-    if (public_card) {
-        lv_obj_add_flag(public_card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(public_card, open_messages_public_event_cb, LV_EVENT_CLICKED, NULL);
-    }
-
-    snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
-    snprintf(detail, sizeof(detail), "Direct messages");
-    lv_obj_t *dm_card = render_metric_card(s_content, 238, 68, "DMs", value, detail,
-                                           snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0);
-    if (dm_card) {
-        lv_obj_add_flag(dm_card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(dm_card, open_messages_dm_event_cb, LV_EVENT_CLICKED, NULL);
-    }
-
-    lv_obj_t *messages_title = create_label(s_content, "Last Messages", 0xF4F7FB);
-    obj_set_style_text_font_if(messages_title, &lv_font_montserrat_24);
-    obj_set_pos_if(messages_title, 18, 190);
-
-    int y = 220;
-    for (size_t i = 0; i < snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW; ++i) {
-        render_home_message_preview(s_content, y, &snapshot->home_messages[i]);
-        y += 84;
-    }
-    if (snapshot->home_message_count == 0U) {
-        lv_obj_t *empty = create_label(s_content, "No messages yet", 0x8EA0AE);
-        obj_set_pos_if(empty, 18, y);
-        y += 32;
-    }
-
-    y += 8;
-    lv_obj_t *repeaters_title = create_label(s_content, "Local Repeaters", 0xF4F7FB);
-    obj_set_style_text_font_if(repeaters_title, &lv_font_montserrat_24);
-    obj_set_pos_if(repeaters_title, 18, y);
-    y += 30;
-    if (snapshot->home_repeater_count == 0U) {
-        lv_obj_t *empty = create_label(s_content, "No repeaters heard yet", 0x8EA0AE);
-        obj_set_pos_if(empty, 18, y);
-        y += 32;
-    } else {
-        for (size_t i = 0; i < snapshot->home_repeater_count && i < D1L_HOME_REPEATER_PREVIEW; ++i) {
-            render_home_repeater_preview(s_content, y, &snapshot->home_repeaters[i]);
-            y += 56;
-        }
-    }
 }
 
 static void render_storage_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -2031,6 +2272,32 @@ static void update_compose_counter(void)
                                 0);
 }
 
+static void layout_compose_sheet_controls(void)
+{
+    if (s_compose_sheet) {
+        lv_obj_set_size(s_compose_sheet, 480, 424);
+        lv_obj_set_pos(s_compose_sheet, 0, 56);
+        lv_obj_set_style_pad_all(s_compose_sheet, 0, 0);
+        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE);
+        lv_obj_set_scrollbar_mode(s_compose_sheet, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF);
+    }
+    if (s_compose_textarea) {
+        lv_obj_set_size(s_compose_textarea, 448, 78);
+        lv_obj_set_pos(s_compose_textarea, 16, 58);
+    }
+    if (s_compose_counter) {
+        lv_obj_set_width(s_compose_counter, 86);
+        lv_obj_set_pos(s_compose_counter, 378, 140);
+    }
+    if (s_compose_keyboard) {
+        lv_obj_set_size(s_compose_keyboard, 448, 258);
+        lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT);
+        lv_obj_set_pos(s_compose_keyboard, 16, 158);
+    }
+}
+
 static void show_public_compose_sheet(const char *title, const char *placeholder)
 {
     hide_sheet();
@@ -2063,8 +2330,10 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
         lv_textarea_set_placeholder_text(s_compose_textarea,
                                          placeholder && placeholder[0] ? placeholder : "Public message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
         update_compose_counter();
     }
+    request_full_screen_repaint();
 }
 
 static void public_test_event_cb(lv_event_t *event)
@@ -2128,8 +2397,10 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         lv_textarea_set_text(s_compose_textarea, "");
         lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
         update_compose_counter();
     }
+    request_full_screen_repaint();
 }
 
 static void open_dm_compose_event_cb(lv_event_t *event)
@@ -5919,6 +6190,7 @@ static void render_active_tab(void)
     }
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
+    request_full_screen_repaint();
 }
 
 esp_err_t d1l_ui_phase1_request_tab(const char *name)
@@ -5973,6 +6245,44 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
     return ESP_OK;
 }
 
+esp_err_t d1l_ui_phase1_compose_probe(const char *target,
+                                       d1l_ui_compose_probe_result_t *result)
+{
+    char canonical[16] = {0};
+    if (!result || !compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_started || !s_content || !s_compose_probe_done_sem) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    while (xSemaphoreTake(s_compose_probe_done_sem, 0) == pdTRUE) {
+    }
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_pending) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&s_compose_probe_result, 0, sizeof(s_compose_probe_result));
+    snprintf(s_compose_probe_target, sizeof(s_compose_probe_target), "%s", canonical);
+    s_compose_probe_pending = true;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+
+    if (xSemaphoreTake(s_compose_probe_done_sem,
+                       pdMS_TO_TICKS(D1L_UI_COMPOSE_PROBE_TIMEOUT_MS)) != pdTRUE) {
+        portENTER_CRITICAL(&s_compose_probe_lock);
+        s_compose_probe_pending = false;
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    *result = s_compose_probe_result;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    return ESP_OK;
+}
+
 const char *d1l_ui_phase1_active_tab_name(void)
 {
     d1l_ui_tab_t tab;
@@ -6015,6 +6325,10 @@ static void fill_capture_status(d1l_ui_capture_status_t *status)
     status->started = s_started;
     status->onboarding_visible = s_onboarding_visible;
     status->lock_visible = s_lock_visible;
+    status->tab_pending = d1l_ui_phase1_tab_switch_pending();
+    status->content_pending = content_refresh_pending();
+    status->render_pending = status->tab_pending || status->content_pending ||
+        scroll_probe_pending() || compose_probe_pending();
     status->width = D1L_UI_CAPTURE_WIDTH;
     status->height = D1L_UI_CAPTURE_HEIGHT;
     status->bytes_per_pixel = D1L_UI_CAPTURE_BYTES_PER_PIXEL;
@@ -6158,6 +6472,7 @@ static void process_pending_tab_switch(void)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_active_tab();
+    force_ui_layout_repaint();
     finish_pending_tab_switch(rendered_tab);
 }
 
@@ -6171,6 +6486,7 @@ static void process_pending_content_refresh(void)
         return;
     }
     render_active_tab();
+    force_ui_layout_repaint();
 }
 
 static lv_obj_t *find_scrollable_descendant(lv_obj_t *root, lv_obj_t **fallback)
@@ -6284,6 +6600,7 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     process_pending_tab_switch();
 
     lv_obj_t *target = scroll_probe_open_surface(canonical);
+    force_ui_layout_repaint();
     measure_scroll_probe_target(target, result);
 }
 
@@ -6321,6 +6638,175 @@ static void process_pending_scroll_probe(void)
     d1l_ui_scroll_probe_result_t result = {0};
     run_scroll_probe_on_ui_task(surface, &result);
     finish_pending_scroll_probe(&result);
+}
+
+static bool object_is_visible(lv_obj_t *obj)
+{
+    return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static bool object_is_hidden_or_missing(lv_obj_t *obj)
+{
+    return !obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static const char *compose_probe_sample_text(const char *target)
+{
+    if (target && strstr(target, "long")) {
+        return "Long hardware compose validation text checks the 480 screen keyboard without RF.";
+    }
+    return "test from DeskOS D1L";
+}
+
+static bool compose_probe_target_is_dm(const char *target)
+{
+    return target && strncmp(target, "dm", 2) == 0;
+}
+
+static void open_compose_probe_on_ui_task(const char *target)
+{
+    s_onboarding_probe_suppressed = true;
+    request_tab_switch(D1L_UI_TAB_MESSAGES);
+    process_pending_tab_switch();
+    s_messages_show_dms = compose_probe_target_is_dm(target);
+    render_active_tab();
+    hide_onboarding_sheet();
+
+    if (compose_probe_target_is_dm(target)) {
+        d1l_contact_entry_t contact = {0};
+        snprintf(contact.fingerprint, sizeof(contact.fingerprint), "%s", "0000000000000000");
+        snprintf(contact.public_key_hex, sizeof(contact.public_key_hex), "%s", "00");
+        snprintf(contact.alias, sizeof(contact.alias), "%s", "Probe DM");
+        open_dm_compose_for_contact(&contact);
+    } else {
+        show_public_compose_sheet("Compose Public", "Public message");
+    }
+
+    if (s_compose_textarea) {
+        lv_textarea_set_text(s_compose_textarea, compose_probe_sample_text(target));
+        update_compose_counter();
+    }
+    if (s_compose_keyboard) {
+        lv_keyboard_set_mode(s_compose_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+        lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
+    }
+    lv_obj_update_layout(s_screen);
+    layout_compose_sheet_controls();
+    lv_obj_update_layout(s_screen);
+    request_full_screen_repaint();
+    force_ui_layout_repaint();
+}
+
+static void fill_compose_probe_geometry(d1l_ui_compose_probe_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+    if (s_compose_sheet) {
+        result->sheet_x = (int32_t)lv_obj_get_x(s_compose_sheet);
+        result->sheet_y = (int32_t)lv_obj_get_y(s_compose_sheet);
+        result->sheet_w = (int32_t)lv_obj_get_width(s_compose_sheet);
+        result->sheet_h = (int32_t)lv_obj_get_height(s_compose_sheet);
+    }
+    if (s_compose_textarea) {
+        result->textarea_x = (int32_t)lv_obj_get_x(s_compose_textarea);
+        result->textarea_y = (int32_t)lv_obj_get_y(s_compose_textarea);
+        result->textarea_w = (int32_t)lv_obj_get_width(s_compose_textarea);
+        result->textarea_h = (int32_t)lv_obj_get_height(s_compose_textarea);
+    }
+    if (s_compose_keyboard) {
+        result->keyboard_x = (int32_t)lv_obj_get_x(s_compose_keyboard);
+        result->keyboard_y = (int32_t)lv_obj_get_y(s_compose_keyboard);
+        result->keyboard_w = (int32_t)lv_obj_get_width(s_compose_keyboard);
+        result->keyboard_h = (int32_t)lv_obj_get_height(s_compose_keyboard);
+    }
+}
+
+static void run_compose_probe_on_ui_task(const char *target,
+                                         d1l_ui_compose_probe_result_t *result)
+{
+    char canonical[16] = {0};
+    if (!compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
+        return;
+    }
+    result->target_supported = true;
+    snprintf(result->target, sizeof(result->target), "%s", canonical);
+    snprintf(result->active_tab, sizeof(result->active_tab), "%s", tab_name(D1L_UI_TAB_MESSAGES));
+
+    open_compose_probe_on_ui_task(canonical);
+    result->sheet_visible = object_is_visible(s_compose_sheet);
+    result->textarea_visible = object_is_visible(s_compose_textarea);
+    result->keyboard_visible = object_is_visible(s_compose_keyboard);
+    result->onboarding_visible = s_onboarding_visible;
+    result->dock_hidden = object_is_hidden_or_missing(s_dock);
+    result->dm_mode = s_compose_dm;
+    fill_compose_probe_geometry(result);
+
+    const bool keyboard_inside_sheet =
+        result->keyboard_x >= 0 &&
+        result->keyboard_y >= 0 &&
+        result->keyboard_x + result->keyboard_w <= result->sheet_w &&
+        result->keyboard_y + result->keyboard_h <= result->sheet_h;
+    const bool keyboard_inside_screen =
+        result->sheet_x + result->keyboard_x >= 0 &&
+        result->sheet_y + result->keyboard_y >= 0 &&
+        result->sheet_x + result->keyboard_x + result->keyboard_w <= (int32_t)D1L_UI_CAPTURE_WIDTH &&
+        result->sheet_y + result->keyboard_y + result->keyboard_h <= (int32_t)D1L_UI_CAPTURE_HEIGHT;
+    const bool textarea_inside_sheet =
+        result->textarea_x >= 0 &&
+        result->textarea_y >= 0 &&
+        result->textarea_x + result->textarea_w <= result->sheet_w &&
+        result->textarea_y + result->textarea_h <= result->keyboard_y;
+
+    result->ok = result->target_supported &&
+        result->sheet_visible &&
+        result->textarea_visible &&
+        result->keyboard_visible &&
+        !result->onboarding_visible &&
+        result->dock_hidden &&
+        result->dm_mode == compose_probe_target_is_dm(canonical) &&
+        result->keyboard_w >= 440 &&
+        result->keyboard_h >= 250 &&
+        keyboard_inside_sheet &&
+        keyboard_inside_screen &&
+        textarea_inside_sheet;
+}
+
+static bool begin_pending_compose_probe(char *target, size_t target_len)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    pending = s_compose_probe_pending;
+    if (pending && target && target_len > 0) {
+        snprintf(target, target_len, "%s", s_compose_probe_target);
+        s_compose_probe_pending = false;
+    }
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    return pending;
+}
+
+static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result)
+{
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    s_compose_probe_result = *result;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_done_sem) {
+        (void)xSemaphoreGive(s_compose_probe_done_sem);
+    }
+}
+
+static void process_pending_compose_probe(void)
+{
+    char target[16] = {0};
+    if (!begin_pending_compose_probe(target, sizeof(target))) {
+        return;
+    }
+
+    d1l_ui_compose_probe_result_t result = {0};
+    run_compose_probe_on_ui_task(target, &result);
+    finish_pending_compose_probe(&result);
 }
 
 static void lock_event_cb(lv_event_t *event)
@@ -6453,32 +6939,26 @@ static void create_compose_sheet(lv_obj_t *screen)
     if (!s_compose_sheet) {
         return;
     }
-    lv_obj_set_size(s_compose_sheet, 480, 424);
-    lv_obj_set_pos(s_compose_sheet, 0, 56);
     lv_obj_set_style_radius(s_compose_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_compose_sheet, 12, 0);
-    lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
     s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
     lv_obj_set_style_text_font(s_compose_title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(s_compose_title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_compose_title, 210);
-    lv_obj_set_pos(s_compose_title, 16, 10);
+    lv_obj_set_pos(s_compose_title, 16, 8);
 
-    create_button(s_compose_sheet, "Send", 252, 10, 62, 40, send_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Clear", 322, 10, 62, 40, clear_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Close", 392, 10, 72, 40, close_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Send", 252, 8, 62, 40, send_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Clear", 322, 8, 62, 40, clear_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Close", 392, 8, 72, 40, close_compose_event_cb, NULL);
 
     s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
     if (!s_compose_textarea) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_textarea, 448, 82);
-    lv_obj_set_pos(s_compose_textarea, 16, 62);
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
     lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS);
     lv_textarea_set_one_line(s_compose_textarea, false);
@@ -6493,17 +6973,15 @@ static void create_compose_sheet(lv_obj_t *screen)
 
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_compose_counter, 86);
-    lv_obj_set_pos(s_compose_counter, 378, 148);
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
     if (!s_compose_keyboard) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_keyboard, 448, 244);
-    lv_obj_set_pos(s_compose_keyboard, 16, 168);
+    configure_compose_keyboard(s_compose_keyboard);
     lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    layout_compose_sheet_controls();
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 
@@ -7015,12 +7493,11 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     if (!s_onboarding_sheet) {
         return;
     }
-    lv_obj_set_size(s_onboarding_sheet, 456, 430);
-    lv_obj_set_pos(s_onboarding_sheet, 12, 25);
-    lv_obj_set_style_radius(s_onboarding_sheet, 8, 0);
+    lv_obj_set_size(s_onboarding_sheet, 480, 480);
+    lv_obj_set_pos(s_onboarding_sheet, 0, 0);
+    lv_obj_set_style_radius(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_onboarding_sheet, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_onboarding_sheet, lv_color_hex(0x5EEAD4), 0);
-    lv_obj_set_style_border_width(s_onboarding_sheet, 1, 0);
+    lv_obj_set_style_border_width(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_onboarding_sheet, 12, 0);
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -7116,6 +7593,10 @@ static void ui_task(void *arg)
         process_pending_tab_switch();
         process_pending_content_refresh();
         process_pending_scroll_probe();
+        process_pending_compose_probe();
+        if (d1l_ui_phase1_tab_switch_pending()) {
+            wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
+        }
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {
@@ -7200,6 +7681,12 @@ esp_err_t d1l_ui_phase1_start(void)
     if (!s_scroll_probe_done_sem) {
         s_scroll_probe_done_sem = xSemaphoreCreateBinary();
         if (!s_scroll_probe_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_compose_probe_done_sem) {
+        s_compose_probe_done_sem = xSemaphoreCreateBinary();
+        if (!s_compose_probe_done_sem) {
             return ESP_ERR_NO_MEM;
         }
     }

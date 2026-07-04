@@ -11,7 +11,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 ## Implemented Shell Slice
 
 - Top status bar with MeshCore state, RX/TX counters, identity state, and lock action.
-- Home dashboard cards for mesh readiness, identity, RF packet/route counters, and system memory.
+- Home icon launcher with 12 large touch tiles for Chats, DMs, Rooms, Contacts, Repeaters, Advertise, Map, Terminal, Packets, Settings, Setup, and Signal, plus compact Mesh/Wi-Fi/BLE/SD status.
 - Bottom dock navigation for Home, Messages, Nodes, Map, Packets, and Settings.
 - Public message screen with persisted recent Public rows, a touch `test` send action, and a free-text composer sheet routed through the app model.
 - Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows.

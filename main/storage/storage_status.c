@@ -5,6 +5,7 @@
 
 #include "sdkconfig.h"
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -13,14 +14,16 @@
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
 
-#define D1L_STORAGE_BOOT_POLL_INTERVAL_MS 150U
-#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 250U
-#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 10U
+#define D1L_STORAGE_BOOT_POLL_INTERVAL_MS 250U
+#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U
+#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U
 #define D1L_STORAGE_MANAGER_STACK_BYTES 4096U
 #define D1L_STORAGE_MANAGER_IDLE_INTERVAL_MS 2000U
 #define D1L_STORAGE_MANAGER_BACKOFF_MS 5000U
 #define D1L_STORAGE_MANAGER_RESET_HOLD_MS 500U
-#define D1L_STORAGE_MANAGER_RESET_SETTLE_MS 500U
+#define D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U
+#define D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS 8U
+#define D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS 500U
 
 typedef enum {
     D1L_STORAGE_MANAGER_BRIDGE_WAIT,
@@ -39,7 +42,11 @@ static TaskHandle_t s_storage_manager_task;
 static d1l_storage_manager_state_t s_manager_state = D1L_STORAGE_MANAGER_BRIDGE_WAIT;
 static volatile bool s_manager_remount_requested;
 static volatile bool s_manager_reset_bridge_requested;
+static int64_t s_manager_pause_until_us;
+static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_force_nvs;
+
+static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mount);
 
 static void refresh_retained_sd_health(d1l_storage_status_t *status)
 {
@@ -455,6 +462,66 @@ static esp_err_t poll_mount_pending(void)
     return last_ret;
 }
 
+static bool remount_timeout_needs_bridge_reset(void)
+{
+    return strcmp(s_status.sd_state, "protocol_pending") == 0 ||
+           strcmp(s_status.sd_state, "rp2040_unavailable") == 0 ||
+           !s_status.rp2040_bridge_ready ||
+           !s_status.rp2040_sd_protocol_supported;
+}
+
+static void request_bridge_reset_remount_recovery(void)
+{
+    s_force_nvs = false;
+    s_status.force_nvs = false;
+    s_manager_reset_bridge_requested = true;
+    s_manager_remount_requested = true;
+    s_status.manager_backoff_ms = 0;
+    set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+}
+
+static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
+{
+    s_manager_reset_bridge_requested = false;
+    s_manager_remount_requested = false;
+    set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+
+    esp_err_t ret =
+        d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
+                                D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
+    d1l_storage_status_note_rp2040(ret);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    set_manager_state(D1L_STORAGE_MANAGER_PING);
+    for (uint32_t attempt = 0; attempt < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS;
+         ++attempt) {
+        d1l_rp2040_ping_t ping = {0};
+        ret = d1l_rp2040_bridge_ping(&ping,
+                                      D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        if (ret == ESP_OK) {
+            break;
+        }
+        d1l_storage_status_note_rp2040(ret);
+        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS));
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_storage_status_note_rp2040(ESP_OK);
+
+    set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
+    ret = storage_status_mount(timeout_ms, true);
+    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
+        esp_err_t poll_ret = poll_mount_pending();
+        if (poll_ret != ESP_OK && ret == ESP_OK) {
+            ret = poll_ret;
+        }
+    }
+    return ret;
+}
+
 static void classify_storage_manager_state(esp_err_t ret)
 {
     s_status.force_nvs = s_force_nvs;
@@ -542,15 +609,52 @@ static void storage_manager_run_once(void)
                 ret = poll_ret;
             }
         }
+        if (ret == ESP_ERR_TIMEOUT && remount_requested &&
+            remount_timeout_needs_bridge_reset()) {
+            request_bridge_reset_remount_recovery();
+        }
     }
 
     classify_storage_manager_state(ret);
+}
+
+static uint32_t storage_manager_pause_delay_ms(void)
+{
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    const int64_t pause_until_us = s_manager_pause_until_us;
+    portEXIT_CRITICAL(&s_manager_pause_lock);
+
+    if (pause_until_us <= 0) {
+        return 0;
+    }
+
+    const int64_t now_us = esp_timer_get_time();
+    if (pause_until_us <= now_us) {
+        portENTER_CRITICAL(&s_manager_pause_lock);
+        if (s_manager_pause_until_us <= now_us) {
+            s_manager_pause_until_us = 0;
+        }
+        portEXIT_CRITICAL(&s_manager_pause_lock);
+        return 0;
+    }
+
+    int64_t remaining_us = pause_until_us - now_us;
+    const int64_t max_sleep_us = 1000000LL;
+    if (remaining_us > max_sleep_us) {
+        remaining_us = max_sleep_us;
+    }
+    return (uint32_t)((remaining_us + 999LL) / 1000LL);
 }
 
 static void storage_manager_task(void *arg)
 {
     (void)arg;
     for (;;) {
+        const uint32_t pause_delay_ms = storage_manager_pause_delay_ms();
+        if (pause_delay_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(pause_delay_ms));
+            continue;
+        }
         storage_manager_run_once();
         const uint32_t delay_ms = s_status.manager_backoff_ms > 0 ?
             s_status.manager_backoff_ms : D1L_STORAGE_MANAGER_IDLE_INTERVAL_MS;
@@ -613,6 +717,27 @@ esp_err_t d1l_storage_manager_reset_bridge(void)
     return d1l_storage_manager_start();
 }
 
+void d1l_storage_manager_pause(uint32_t pause_ms)
+{
+    if (pause_ms == 0) {
+        return;
+    }
+    const int64_t now_us = esp_timer_get_time();
+    const int64_t pause_until_us = now_us + ((int64_t)pause_ms * 1000LL);
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    if (pause_until_us > s_manager_pause_until_us) {
+        s_manager_pause_until_us = pause_until_us;
+    }
+    portEXIT_CRITICAL(&s_manager_pause_lock);
+}
+
+void d1l_storage_manager_resume(void)
+{
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    s_manager_pause_until_us = 0;
+    portEXIT_CRITICAL(&s_manager_pause_lock);
+}
+
 void d1l_storage_manager_force_nvs(bool force_nvs)
 {
     s_force_nvs = force_nvs;
@@ -624,7 +749,7 @@ void d1l_storage_manager_force_nvs(bool force_nvs)
     }
 }
 
-esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
+static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mount)
 {
     if (!s_status.initialized) {
         (void)d1l_storage_status_init();
@@ -635,7 +760,7 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    if (!s_force_nvs && storage_sd_ready_for_files()) {
+    if (!force_bridge_mount && !s_force_nvs && storage_sd_ready_for_files()) {
         s_status.last_error = ESP_OK;
         return ESP_OK;
     }
@@ -646,6 +771,48 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
     if (s_force_nvs) {
         apply_force_nvs_status();
     }
+    return ret;
+}
+
+esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
+{
+    return storage_status_mount(timeout_ms, false);
+}
+
+esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
+{
+    if (!s_status.initialized) {
+        (void)d1l_storage_status_init();
+    }
+
+    if (!s_status.rp2040_bridge_required) {
+        s_status.last_error = ESP_ERR_NOT_SUPPORTED;
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    s_force_nvs = false;
+    s_status.force_nvs = false;
+    s_manager_remount_requested = false;
+
+    d1l_storage_status_note_rp2040(ESP_OK);
+
+    set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
+    esp_err_t ret = storage_status_mount(timeout_ms, true);
+    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
+        esp_err_t poll_ret = poll_mount_pending();
+        if (poll_ret != ESP_OK && ret == ESP_OK) {
+            ret = poll_ret;
+        }
+    }
+    if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
+        ret = reset_bridge_and_remount_blocking(timeout_ms);
+        if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
+            request_bridge_reset_remount_recovery();
+            (void)d1l_storage_manager_start();
+        }
+    }
+
+    classify_storage_manager_state(ret);
     return ret;
 }
 

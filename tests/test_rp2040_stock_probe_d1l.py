@@ -61,4 +61,4 @@ def test_rp2040_baud_probe_console_contract_is_no_sd_no_rf():
     assert "RP2040_BAUD_PROBE_TIMEOUT_MS = 700" in validation
     assert "rp2040 baud-probe" in validation
     assert "rp2040 set-baud" in validation
-    assert 'FORBIDDEN_PORTS = {"COM" + "11", "COM" + "29"}' in validation
+    assert 'FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}' in validation

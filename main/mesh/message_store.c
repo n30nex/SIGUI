@@ -109,6 +109,13 @@ static bool message_matches_query(const d1l_message_entry_t *entry, const char *
            contains_casefold(entry->direction, query);
 }
 
+static bool is_volatile_ui_canary(const d1l_message_entry_t *entry)
+{
+    return entry &&
+           strncmp(entry->author, "UI Canary", sizeof(entry->author)) == 0 &&
+           strncmp(entry->text, "ui-data-canary ", strlen("ui-data-canary ")) == 0;
+}
+
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
@@ -126,9 +133,16 @@ static void fill_blob(d1l_message_store_blob_t *blob)
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    blob->head = (uint32_t)s_head;
-    blob->count = (uint32_t)s_count;
-    memcpy(blob->entries, s_entries, sizeof(s_entries));
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_message_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
+        if (!is_volatile_ui_canary(entry) && blob->count < D1L_MESSAGE_STORE_CAPACITY) {
+            blob->entries[blob->count++] = *entry;
+        }
+    }
+    blob->head = blob->count % D1L_MESSAGE_STORE_CAPACITY;
 }
 
 static esp_err_t persist_store(void)
@@ -267,10 +281,10 @@ esp_err_t d1l_message_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_message_store_append_public(const char *direction, const char *author,
-                                          const char *text, int rssi_dbm, int snr_tenths,
-                                          uint8_t path_hash_bytes, uint8_t path_hops,
-                                          bool delivered)
+static esp_err_t append_public_internal(const char *direction, const char *author,
+                                        const char *text, int rssi_dbm, int snr_tenths,
+                                        uint8_t path_hash_bytes, uint8_t path_hops,
+                                        bool delivered, bool persist)
 {
     if (!text || text[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -310,9 +324,27 @@ esp_err_t d1l_message_store_append_public(const char *direction, const char *aut
         s_dropped_oldest++;
     }
     s_total_written++;
-    esp_err_t ret = persist_store();
+    esp_err_t ret = persist ? persist_store() : ESP_OK;
     d1l_store_lock_give(&s_store_lock);
     return ret;
+}
+
+esp_err_t d1l_message_store_append_public(const char *direction, const char *author,
+                                          const char *text, int rssi_dbm, int snr_tenths,
+                                          uint8_t path_hash_bytes, uint8_t path_hops,
+                                          bool delivered)
+{
+    return append_public_internal(direction, author, text, rssi_dbm, snr_tenths,
+                                  path_hash_bytes, path_hops, delivered, true);
+}
+
+esp_err_t d1l_message_store_append_public_volatile(const char *direction, const char *author,
+                                                   const char *text, int rssi_dbm, int snr_tenths,
+                                                   uint8_t path_hash_bytes, uint8_t path_hops,
+                                                   bool delivered)
+{
+    return append_public_internal(direction, author, text, rssi_dbm, snr_tenths,
+                                  path_hash_bytes, path_hops, delivered, false);
 }
 
 d1l_message_store_stats_t d1l_message_store_stats(void)

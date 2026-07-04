@@ -29,13 +29,17 @@ python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 
 ## Firmware Build
 
-Do not build firmware on the Windows host. Use GitHub Actions for ESP32 and RP2040 binaries:
+Do not build firmware on the Windows host. Use GitHub Actions for ESP32
+binaries. RP2040 SD bridge binaries are opt-in for bridge/SD work only:
 
 ```powershell
-gh workflow run d1l-ci.yml --ref feature/meshcore-deskos-d1l
+gh workflow run d1l-ci.yml --ref feature/meshcore-deskos-d1l -f include_sd_bridge=false
 gh run watch
 gh run download <run-id> -D artifacts\github\<run-id>
 ```
+
+For a bridge/SD release artifact refresh, run the same workflow with
+`-f include_sd_bridge=true`.
 
 The local `scripts/build_d1l.ps1` path is host-only and rejects `-RequireFirmware`.
 
@@ -82,12 +86,21 @@ Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, U
 
 ## GitHub Actions
 
-The `d1l-ci` workflow runs host checks on Windows, ESP32 firmware build/package generation in `espressif/idf:release-v5.1`, and the RP2040 SD bridge build with Arduino CLI. Expected artifacts:
+The `d1l-ci` workflow runs host checks on Windows plus ESP32 firmware
+build/package generation in `espressif/idf:release-v5.1`. The default path
+skips SD/RP2040 dry-runs and RP2040 Arduino builds so ESP32/UI fixes do not
+rebuild or revalidate the already-working bridge. Expected default artifacts:
 
 - `d1l-host-artifacts`
 - `d1l-firmware-artifacts`
 - `d1l-release-package`
+
+When `include_sd_bridge=true` is selected, or SD/RP2040 paths changed, the
+workflow also emits:
+
 - `rp2040-sd-bridge-firmware`
+- `rp2040-sd-smoke-firmware`
+- `rp2040-seeed-official-sd-smoke-firmware`
 
 `d1l-host-artifacts` includes `ui-sim/` screenshots and `ui-sim-report.json`, including the first-boot onboarding surface.
 

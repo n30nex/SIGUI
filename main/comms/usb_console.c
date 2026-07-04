@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -39,6 +40,8 @@
 #include "ui/ui_phase1.h"
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
+static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
+static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -539,6 +542,10 @@ static void print_ui_capture_status_fields(const d1l_ui_capture_status_t *status
     print_json_string(status->active_tab);
     printf(",\"pending_tab\":");
     print_json_string(status->pending_tab);
+    printf(",\"tab_pending\":%s,\"content_pending\":%s,\"render_pending\":%s",
+           bool_json(status->tab_pending),
+           bool_json(status->content_pending),
+           bool_json(status->render_pending));
     printf(",\"onboarding_visible\":%s,\"lock_visible\":%s",
            bool_json(status->onboarding_visible),
            bool_json(status->lock_visible));
@@ -721,6 +728,62 @@ static void cmd_ui_scroll_probe(const char *line)
            (long)probe.scroll_top_before, (long)probe.scroll_bottom_before);
     printf(",\"scroll_top_after\":%ld,\"scroll_bottom_after\":%ld}\n",
            (long)probe.scroll_top_after, (long)probe.scroll_bottom_after);
+}
+
+static void cmd_ui_compose_probe(const char *line)
+{
+    const char *arg = line + strlen("ui compose-probe ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char target[16] = {0};
+    size_t len = 0;
+    while (arg[len] != '\0' && !isspace((unsigned char)arg[len]) &&
+           len + 1U < sizeof(target)) {
+        target[len] = (char)tolower((unsigned char)arg[len]);
+        if (target[len] == '-') {
+            target[len] = '_';
+        }
+        len++;
+    }
+    if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
+        err_result("ui compose-probe", "INVALID_TARGET",
+                   "usage: ui compose-probe <public|public-long|dm|dm-long>");
+        return;
+    }
+
+    d1l_ui_compose_probe_result_t probe = {0};
+    esp_err_t ret = d1l_ui_phase1_compose_probe(target, &probe);
+    if (ret != ESP_OK) {
+        err_result("ui compose-probe", esp_err_to_name(ret),
+                   "usage: ui compose-probe <public|public-long|dm|dm-long>");
+        return;
+    }
+
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"ui compose-probe\",\"target\":",
+           D1L_CONSOLE_SCHEMA, bool_json(probe.ok));
+    print_json_string(probe.target);
+    printf(",\"target_supported\":%s,\"sheet_visible\":%s,\"textarea_visible\":%s,"
+           "\"keyboard_visible\":%s,\"onboarding_visible\":%s,"
+           "\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
+           bool_json(probe.target_supported),
+           bool_json(probe.sheet_visible),
+           bool_json(probe.textarea_visible),
+           bool_json(probe.keyboard_visible),
+           bool_json(probe.onboarding_visible),
+           bool_json(probe.dock_hidden),
+           bool_json(probe.dm_mode));
+    print_json_string(probe.active_tab);
+    printf(",\"sheet\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"textarea\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"keyboard\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n",
+           (long)probe.sheet_x, (long)probe.sheet_y,
+           (long)probe.sheet_w, (long)probe.sheet_h,
+           (long)probe.textarea_x, (long)probe.textarea_y,
+           (long)probe.textarea_w, (long)probe.textarea_h,
+           (long)probe.keyboard_x, (long)probe.keyboard_y,
+           (long)probe.keyboard_w, (long)probe.keyboard_h);
 }
 
 static void cmd_identity_status(void)
@@ -1173,7 +1236,7 @@ static void cmd_rp2040_baud_probe(const char *line)
 static void cmd_rp2040_reset(void)
 {
     const uint32_t hold_ms = 100U;
-    const uint32_t settle_ms = 500U;
+    const uint32_t settle_ms = 8000U;
     esp_err_t ret = d1l_rp2040_bridge_reset(hold_ms, settle_ms);
     if (ret != ESP_OK) {
         err_result("rp2040 reset", esp_err_to_name(ret),
@@ -1483,7 +1546,8 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
 
 static void cmd_storage_remount(void)
 {
-    esp_err_t ret = d1l_storage_manager_request_remount();
+    esp_err_t ret =
+        d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     print_storage_manager_result("storage remount", ret);
 }
 
@@ -1524,58 +1588,60 @@ static void print_storage_diag_probe(const char *name,
            (unsigned long)capacity_kb);
 }
 
+static d1l_rp2040_sd_diag_t s_console_storage_diag;
+
 static void cmd_storage_diag(void)
 {
-    d1l_rp2040_sd_diag_t diag = {0};
-    esp_err_t ret = d1l_rp2040_bridge_sd_diag(&diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_rp2040_sd_diag_t *diag = &s_console_storage_diag;
+    esp_err_t ret = d1l_rp2040_bridge_sd_diag(diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"storage diag\",\"code\":\"%s\",\"bridge_ready\":%s,\"diag_supported\":%s,\"response_truncated\":%s,\"pins\":",
-           D1L_CONSOLE_SCHEMA,
-           bool_json(ret == ESP_OK),
-           esp_err_to_name(ret),
-           bool_json(diag.bridge_ready),
-           bool_json(diag.protocol_supported),
-           bool_json(diag.response_truncated));
-    print_json_string(diag.pins[0] ? diag.pins : "unknown");
+            D1L_CONSOLE_SCHEMA,
+            bool_json(ret == ESP_OK),
+            esp_err_to_name(ret),
+            bool_json(diag->bridge_ready),
+            bool_json(diag->protocol_supported),
+            bool_json(diag->response_truncated));
+    print_json_string(diag->pins[0] ? diag->pins : "unknown");
     printf(",\"spi_hz\":%lu,\"selected_power\":",
-           (unsigned long)diag.spi_hz);
-    print_json_string(diag.selected_power[0] ? diag.selected_power : "unknown");
+            (unsigned long)diag->spi_hz);
+    print_json_string(diag->selected_power[0] ? diag->selected_power : "unknown");
     printf(",\"selected_mode\":");
-    print_json_string(diag.selected_mode[0] ? diag.selected_mode : "unknown");
+    print_json_string(diag->selected_mode[0] ? diag->selected_mode : "unknown");
     printf(",\"mount_selected\":%s,\"probes\":{",
-           bool_json(diag.mount_selected));
+            bool_json(diag->mount_selected));
     printf("\"high_dedicated\":{\"present\":%s,\"error\":%lu,\"data\":%lu,\"capacity_kb\":%lu}",
-           bool_json(diag.high_dedicated_present),
-           (unsigned long)diag.high_dedicated_error,
-           (unsigned long)diag.high_dedicated_data,
-           (unsigned long)diag.high_dedicated_capacity_kb);
-    print_storage_diag_probe("high_shared", diag.high_shared_present,
-                             diag.high_shared_error, diag.high_shared_data,
-                             diag.high_shared_capacity_kb);
-    print_storage_diag_probe("low_dedicated", diag.low_dedicated_present,
-                             diag.low_dedicated_error, diag.low_dedicated_data,
-                             diag.low_dedicated_capacity_kb);
-    print_storage_diag_probe("low_shared", diag.low_shared_present,
-                             diag.low_shared_error, diag.low_shared_data,
-                             diag.low_shared_capacity_kb);
+            bool_json(diag->high_dedicated_present),
+            (unsigned long)diag->high_dedicated_error,
+            (unsigned long)diag->high_dedicated_data,
+            (unsigned long)diag->high_dedicated_capacity_kb);
+    print_storage_diag_probe("high_shared", diag->high_shared_present,
+                             diag->high_shared_error, diag->high_shared_data,
+                             diag->high_shared_capacity_kb);
+    print_storage_diag_probe("low_dedicated", diag->low_dedicated_present,
+                             diag->low_dedicated_error, diag->low_dedicated_data,
+                             diag->low_dedicated_capacity_kb);
+    print_storage_diag_probe("low_shared", diag->low_shared_present,
+                             diag->low_shared_error, diag->low_shared_data,
+                             diag->low_shared_capacity_kb);
     printf("},\"formats_sd\":false,\"public_rf_tx\":false,\"note\":");
-    print_json_string(diag.note[0] ? diag.note : "");
+    print_json_string(diag->note[0] ? diag->note : "");
     printf("}\n");
 }
 
 static void cmd_storage_diag_raw(void)
 {
-    d1l_rp2040_sd_diag_t diag = {0};
-    esp_err_t ret = d1l_rp2040_bridge_sd_diag(&diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_rp2040_sd_diag_t *diag = &s_console_storage_diag;
+    esp_err_t ret = d1l_rp2040_bridge_sd_diag(diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"storage diag raw\",\"code\":\"%s\",\"bridge_ready\":%s,\"diag_supported\":%s,\"response_truncated\":%s,\"raw_line\":",
-           D1L_CONSOLE_SCHEMA,
-           bool_json(ret == ESP_OK),
-           esp_err_to_name(ret),
-           bool_json(diag.bridge_ready),
-           bool_json(diag.protocol_supported),
-           bool_json(diag.response_truncated));
-    print_json_string(diag.raw_line[0] ? diag.raw_line : "");
+            D1L_CONSOLE_SCHEMA,
+            bool_json(ret == ESP_OK),
+            esp_err_to_name(ret),
+            bool_json(diag->bridge_ready),
+            bool_json(diag->protocol_supported),
+            bool_json(diag->response_truncated));
+    print_json_string(diag->raw_line[0] ? diag->raw_line : "");
     printf(",\"formats_sd\":false,\"public_rf_tx\":false,\"note\":");
-    print_json_string(diag.note[0] ? diag.note : "");
+    print_json_string(diag->note[0] ? diag->note : "");
     printf("}\n");
 }
 
@@ -1664,23 +1730,36 @@ static void print_storage_filecanary_error(const char *step,
     printf("}\n");
 }
 
-static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_result_t *file)
+static void print_storage_filecanary_error_and_resume(const char *step,
+                                                      esp_err_t ret,
+                                                      const d1l_storage_status_t *status,
+                                                      const d1l_rp2040_file_result_t *file,
+                                                      const char *hint)
 {
-    return ret == ESP_OK || ret == ESP_ERR_NOT_FOUND ||
-           (file && strcmp(file->err, "not_found") == 0);
+    d1l_storage_manager_resume();
+    print_storage_filecanary_error(step, ret, status, file, hint);
+}
+
+static bool storage_filecanary_ready(const d1l_storage_status_t *status)
+{
+    return status &&
+           status->file_ops_supported &&
+           status->atomic_rename_supported &&
+           status->file_line_max >= D1L_RP2040_FILE_LINE_MAX &&
+           status->file_chunk_max >= D1L_RP2040_FILE_CHUNK_MAX &&
+           status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
 static void cmd_storage_filecanary(void)
 {
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
+    if (!storage_filecanary_ready(&status)) {
+        (void)d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+        d1l_storage_status(&status);
+    }
 
-    if (!status.file_ops_supported ||
-        !status.atomic_rename_supported ||
-        status.file_line_max < D1L_RP2040_FILE_LINE_MAX ||
-        status.file_chunk_max < D1L_RP2040_FILE_CHUNK_MAX ||
-        status.path_max < D1L_RP2040_FILE_PATH_MAX) {
+    if (!storage_filecanary_ready(&status)) {
         print_storage_filecanary_error(
             "preflight",
             ESP_ERR_NOT_SUPPORTED,
@@ -1690,80 +1769,93 @@ static void cmd_storage_filecanary(void)
         return;
     }
 
-    static const char tmp_path[] = "canary/filecanary.tmp";
-    static const char final_path[] = "canary/filecanary.bin";
     static const uint8_t payload[] = "DeskOS SD file canary v1";
     const size_t payload_len = sizeof(payload) - 1U;
+    const uint32_t token = esp_random();
+    const uint32_t tick = (uint32_t)xTaskGetTickCount();
+    char tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char final_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX];
     d1l_rp2040_file_result_t file = {0};
 
-    esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file, 3000U);
-    if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error("cleanup_tmp", ret, &status, &file,
-                                       "could not remove stale temp canary path");
-        return;
-    }
-    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
-    if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error("cleanup_final", ret, &status, &file,
-                                       "could not remove stale final canary path");
+    int path_len = snprintf(tmp_path, sizeof(tmp_path), "canary/fc-%08lx-%08lx.tmp",
+                            (unsigned long)token, (unsigned long)tick);
+    int final_len = snprintf(final_path, sizeof(final_path), "canary/fc-%08lx-%08lx.bin",
+                             (unsigned long)token, (unsigned long)tick);
+    if (path_len <= 0 || (size_t)path_len >= sizeof(tmp_path) ||
+        final_len <= 0 || (size_t)final_len >= sizeof(final_path)) {
+        print_storage_filecanary_error(
+            "path",
+            ESP_ERR_INVALID_SIZE,
+            &status,
+            NULL,
+            "could not build unique file canary paths");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
-                                       &file, 3000U);
+    d1l_storage_manager_pause(D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS);
+
+    esp_err_t ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
+                                                 &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len || file.size != payload_len) {
-        print_storage_filecanary_error("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "temp write failed");
+        print_storage_filecanary_error_and_resume("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "temp write failed");
         return;
     }
 
     memset(read_buf, 0, sizeof(read_buf));
-    ret = d1l_rp2040_bridge_file_read(tmp_path, 0U, read_buf, payload_len, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_read(tmp_path, 0U, read_buf, payload_len,
+                                      &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
-        print_storage_filecanary_error("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "temp read-back did not match");
+        print_storage_filecanary_error_and_resume("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "temp read-back did not match");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file,
+                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
-        print_storage_filecanary_error("rename_final", ret, &status, &file,
-                                       "rename replace commit failed");
+        print_storage_filecanary_error_and_resume("rename_final", ret, &status, &file,
+                                                  "rename replace commit failed");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file,
+                                      D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || !file.exists || file.is_directory || file.size != payload_len) {
-        print_storage_filecanary_error("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final canary stat did not match");
+        print_storage_filecanary_error_and_resume("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final canary stat did not match");
         return;
     }
 
     memset(read_buf, 0, sizeof(read_buf));
-    ret = d1l_rp2040_bridge_file_read(final_path, 0U, read_buf, payload_len, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_read(final_path, 0U, read_buf, payload_len,
+                                      &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
-        print_storage_filecanary_error("read_final", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final read-back did not match");
+        print_storage_filecanary_error_and_resume("read_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final read-back did not match");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_delete(final_path, &file,
+                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
-        print_storage_filecanary_error("delete_final", ret, &status, &file,
-                                       "could not delete final canary file");
+        print_storage_filecanary_error_and_resume("delete_final", ret, &status, &file,
+                                                  "could not delete final canary file");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file,
+                                      D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.exists) {
-        print_storage_filecanary_error("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final canary file still exists after delete");
+        print_storage_filecanary_error_and_resume("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final canary file still exists after delete");
         return;
     }
 
+    d1l_storage_manager_resume();
     ok_begin("storage filecanary");
     printf(",\"path\":");
     print_json_string(final_path);
@@ -3010,8 +3102,8 @@ static void cmd_ui_data_canary(const char *line)
     snprintf(text, sizeof(text), "ui-data-canary %s", token);
 
     const uint32_t public_seq = d1l_message_store_stats().next_seq;
-    esp_err_t ret = d1l_message_store_append_public("rx", "UI Canary", text,
-                                                    0, 0, 1, 0, true);
+    esp_err_t ret = d1l_message_store_append_public_volatile("rx", "UI Canary", text,
+                                                             0, 0, 1, 0, true);
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append public UI canary");
@@ -3019,9 +3111,9 @@ static void cmd_ui_data_canary(const char *line)
     }
 
     const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
-    ret = d1l_dm_store_append(fingerprint, "UI Canary", "rx", text,
-                              0, 0, 1, 0, 0, true, true,
-                              retained_canary_hash(token));
+    ret = d1l_dm_store_append_volatile(fingerprint, "UI Canary", "rx", text,
+                                       0, 0, 1, 0, 0, true, true,
+                                       retained_canary_hash(token));
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append DM UI canary");
@@ -3029,9 +3121,9 @@ static void cmd_ui_data_canary(const char *line)
     }
 
     const uint32_t route_seq = d1l_route_store_stats().next_seq;
-    ret = d1l_route_store_upsert_observation(fingerprint, "UI Canary",
-                                             "ui_canary", "local", "rx",
-                                             0, 0, 1, 0, (uint16_t)strlen(text));
+    ret = d1l_route_store_upsert_observation_volatile(fingerprint, "UI Canary",
+                                                      "ui_canary", "local", "rx",
+                                                      0, 0, 1, 0, (uint16_t)strlen(text));
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append route UI canary");
@@ -3051,7 +3143,7 @@ static void cmd_ui_data_canary(const char *line)
         .payload_len = (uint16_t)strlen(text),
     };
     strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
-    if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
+    if (!d1l_packet_log_append_raw_volatile(&packet, (const uint8_t *)text, strlen(text))) {
         err_result("ui data-canary", "ESP_FAIL",
                    "could not append packet UI canary");
         return;
@@ -3066,8 +3158,8 @@ static void cmd_ui_data_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_required\":false,\"public_rf_tx\":false,\"formats_sd\":false");
-    printf(",\"note\":\"Synthetic UI refresh canary rows appended without Public RF, SD readiness, or format command\"}\n");
+    printf(",\"storage_required\":false,\"retention\":\"volatile\",\"public_rf_tx\":false,\"formats_sd\":false");
+    printf(",\"note\":\"Synthetic UI refresh canary rows appended to RAM only, without Public RF, SD readiness, or format command\"}\n");
 }
 
 static void cmd_storage_retained_canary(const char *line)
@@ -4486,7 +4578,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui compose-probe <public|public-long|dm|dm-long>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4515,6 +4607,8 @@ static void handle_line(const char *line)
         cmd_ui_tab(line);
     } else if (strncmp(line, "ui scroll-probe ", strlen("ui scroll-probe ")) == 0) {
         cmd_ui_scroll_probe(line);
+    } else if (strncmp(line, "ui compose-probe ", strlen("ui compose-probe ")) == 0) {
+        cmd_ui_compose_probe(line);
     } else if (strncmp(line, "ui data-canary ", strlen("ui data-canary ")) == 0) {
         cmd_ui_data_canary(line);
     } else if (strcmp(line, "ui capture status") == 0) {

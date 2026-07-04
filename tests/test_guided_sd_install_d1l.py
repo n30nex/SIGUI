@@ -75,7 +75,7 @@ def test_guided_context_refuses_forbidden_ports(tmp_path):
     make_run_dir(tmp_path)
     args = SimpleNamespace(
         root=str(tmp_path),
-        d1l_port="COM11",
+        d1l_port="COM8",
         rp2040_port="COM16",
         commit="a" * 40,
         github_run_id="123",
@@ -84,5 +84,5 @@ def test_guided_context_refuses_forbidden_ports(tmp_path):
         out=None,
     )
 
-    with pytest.raises(ValueError, match="COM11"):
+    with pytest.raises(ValueError, match="COM8"):
         guided.build_context(args)

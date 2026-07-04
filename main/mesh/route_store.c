@@ -66,6 +66,13 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
 }
 
+static bool is_volatile_ui_canary(const d1l_route_entry_t *entry)
+{
+    return entry &&
+           strncmp(entry->label, "UI Canary", sizeof(entry->label)) == 0 &&
+           strncmp(entry->kind, "ui_canary", sizeof(entry->kind)) == 0;
+}
+
 static void fill_blob(d1l_route_store_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
@@ -73,8 +80,11 @@ static void fill_blob(d1l_route_store_blob_t *blob)
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    blob->count = (uint32_t)s_count;
-    memcpy(blob->entries, s_entries, sizeof(s_entries));
+    for (size_t i = 0; i < s_count; ++i) {
+        if (!is_volatile_ui_canary(&s_entries[i]) && blob->count < D1L_ROUTE_STORE_CAPACITY) {
+            blob->entries[blob->count++] = s_entries[i];
+        }
+    }
 }
 
 static esp_err_t persist_store(void)
@@ -182,11 +192,12 @@ esp_err_t d1l_route_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_route_store_upsert_observation(const char *target, const char *label,
+static esp_err_t upsert_observation_internal(const char *target, const char *label,
                                              const char *kind, const char *route,
                                              const char *direction, int rssi_dbm,
                                              int snr_tenths, uint8_t path_hash_bytes,
-                                             uint8_t path_hops, uint16_t payload_len)
+                                             uint8_t path_hops, uint16_t payload_len,
+                                             bool persist)
 {
     if (!target || target[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -234,9 +245,31 @@ esp_err_t d1l_route_store_upsert_observation(const char *target, const char *lab
     sanitize_ascii(entry->route, sizeof(entry->route), route && route[0] ? route : "unknown");
     sanitize_ascii(entry->direction, sizeof(entry->direction), direction && direction[0] ? direction : "rx");
     s_total_written++;
-    esp_err_t ret = persist_store();
+    esp_err_t ret = persist ? persist_store() : ESP_OK;
     d1l_store_lock_give(&s_store_lock);
     return ret;
+}
+
+esp_err_t d1l_route_store_upsert_observation(const char *target, const char *label,
+                                             const char *kind, const char *route,
+                                             const char *direction, int rssi_dbm,
+                                             int snr_tenths, uint8_t path_hash_bytes,
+                                             uint8_t path_hops, uint16_t payload_len)
+{
+    return upsert_observation_internal(target, label, kind, route, direction, rssi_dbm,
+                                       snr_tenths, path_hash_bytes, path_hops,
+                                       payload_len, true);
+}
+
+esp_err_t d1l_route_store_upsert_observation_volatile(const char *target, const char *label,
+                                                      const char *kind, const char *route,
+                                                      const char *direction, int rssi_dbm,
+                                                      int snr_tenths, uint8_t path_hash_bytes,
+                                                      uint8_t path_hops, uint16_t payload_len)
+{
+    return upsert_observation_internal(target, label, kind, route, direction, rssi_dbm,
+                                       snr_tenths, path_hash_bytes, path_hops,
+                                       payload_len, false);
 }
 
 d1l_route_store_stats_t d1l_route_store_stats(void)

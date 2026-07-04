@@ -13,7 +13,7 @@
 #include "hal/indicator_pins.h"
 #include "tca9535.h"
 
-#define D1L_RP2040_UART_BUF_SIZE 1024
+#define D1L_RP2040_UART_BUF_SIZE 4096
 #define D1L_RP2040_PING_QUERY "DESKOS_SD_PING\n"
 #define D1L_RP2040_PING_REPLY_PREFIX "DESKOS_SD_PING"
 #define D1L_RP2040_BOOTLOADER_QUERY "DESKOS_SD_BOOTLOADER\n"
@@ -26,6 +26,7 @@
 #define D1L_RP2040_SD_DIAG_REPLY_PREFIX "DESKOS_SD_DIAG"
 #define D1L_RP2040_FILE_PREFIX "DESKOS_SD_FILE"
 #define D1L_RP2040_LINE_BUFFER_SIZE (D1L_RP2040_FILE_LINE_MAX + 1U)
+#define D1L_RP2040_SD_DIAG_LINE_BUFFER_SIZE (D1L_RP2040_SD_DIAG_LINE_MAX + 1U)
 #define D1L_RP2040_PATH64_MAX (((D1L_RP2040_FILE_PATH_MAX + 2U) / 3U) * 4U)
 #define D1L_RP2040_DATA64_MAX (((D1L_RP2040_FILE_CHUNK_MAX + 2U) / 3U) * 4U)
 #define D1L_RP2040_BRIDGE_LOCK_GRACE_MS 15000U
@@ -719,9 +720,10 @@ static esp_err_t parse_sd_diag_line(const char *line, d1l_rp2040_sd_diag_t *diag
         return ESP_FAIL;
     }
 
-    init_sd_diag(diag, ESP_OK);
     diag->protocol_supported = true;
-    snprintf(diag->raw_line, sizeof(diag->raw_line), "%s", line);
+    if (line != diag->raw_line) {
+        snprintf(diag->raw_line, sizeof(diag->raw_line), "%s", line);
+    }
     parse_word_token(line, "pins", diag->pins, sizeof(diag->pins));
     parse_word_token(line, "selected_power", diag->selected_power, sizeof(diag->selected_power));
     parse_word_token(line, "selected_mode", diag->selected_mode, sizeof(diag->selected_mode));
@@ -954,7 +956,7 @@ esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
 {
     const d1l_rp2040_pins_t *pins = d1l_rp2040_pins();
     const uint32_t hold = hold_ms > 0 ? hold_ms : 100U;
-    const uint32_t settle = settle_ms > 0 ? settle_ms : 500U;
+    const uint32_t settle = settle_ms > 0 ? settle_ms : 8000U;
 
     esp_err_t ret = take_bridge_lock(hold + settle + 1000U);
     if (ret != ESP_OK) {
@@ -1304,13 +1306,12 @@ esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t tim
     }
 
     const char *prefixes[] = {D1L_RP2040_SD_DIAG_REPLY_PREFIX};
-    char line[D1L_RP2040_LINE_BUFFER_SIZE];
     bool truncated = false;
     init_sd_diag(out_diag, ESP_ERR_TIMEOUT);
     esp_err_t ret = exchange_prefixed_line(D1L_RP2040_SD_DIAG_QUERY,
-                                           strlen(D1L_RP2040_SD_DIAG_QUERY),
-                                           prefixes, 1, line, sizeof(line),
-                                           timeout_ms, &truncated);
+                                            strlen(D1L_RP2040_SD_DIAG_QUERY),
+                                            prefixes, 1, out_diag->raw_line, sizeof(out_diag->raw_line),
+                                            timeout_ms, &truncated);
     out_diag->response_truncated = truncated;
     if (ret != ESP_OK) {
         out_diag->last_error = ret;
@@ -1318,7 +1319,7 @@ esp_err_t d1l_rp2040_bridge_sd_diag(d1l_rp2040_sd_diag_t *out_diag, uint32_t tim
                  ret == ESP_ERR_TIMEOUT ? "timeout" : "query_failed");
         return ret;
     }
-    ret = parse_sd_diag_line(line, out_diag);
+    ret = parse_sd_diag_line(out_diag->raw_line, out_diag);
     out_diag->response_truncated = truncated;
     out_diag->last_error = ret;
     return ret;

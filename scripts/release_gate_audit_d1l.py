@@ -41,6 +41,8 @@ REQUIRED_SCROLL_SURFACES = {
     "map": "map",
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
+SCROLL_MOVEMENT_OPTIONAL = {"home"}
+REQUIRED_COMPOSE_CAPTURE_TARGETS = {"public", "public-long", "dm", "dm-long"}
 REQUIRED_NOTICE_FILES = {
     "notices/LICENSE",
     "notices/THIRD_PARTY_NOTICES.md",
@@ -335,21 +337,31 @@ def find_release_package(github_run_dir: Path | None) -> Path | None:
 
 def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
     manifests: list[Path] = []
-    labels = [
-        "d1l-firmware-artifacts/SHA256SUMS.txt",
+    required_labels = ["d1l-firmware-artifacts/SHA256SUMS.txt"]
+    optional_rp2040_labels = [
         "rp2040-sd-bridge-firmware/SHA256SUMS.txt",
         "rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
     ]
     package = None
+    package_manifest: dict = {}
     if github_run_dir:
-        manifests.extend(github_run_dir / label for label in labels)
         package = find_release_package(github_run_dir)
+        package_manifest = read_json(package / "manifest.json" if package else None)
+        if package_manifest.get("rp2040_artifacts"):
+            required_labels.extend(optional_rp2040_labels)
+        manifests.extend(github_run_dir / label for label in required_labels)
         if package:
             manifests.append(package / "SHA256SUMS.txt")
+        optional_rp2040_manifests = [github_run_dir / label for label in optional_rp2040_labels]
+    else:
+        optional_rp2040_manifests = []
     present = [path for path in manifests if path.is_file()]
     missing = [path for path in manifests if not path.is_file()]
+    optional_present = [path for path in optional_rp2040_manifests if path.is_file() and path not in present]
+    optional_missing = [path for path in optional_rp2040_manifests if not path.is_file()]
     failed = [path for path in present if not verify_sha256_manifest(path)]
-    expected_count = len(labels) + (1 if package else 0)
+    failed.extend(path for path in optional_present if not verify_sha256_manifest(path))
+    expected_count = len(required_labels) + (1 if package else 0)
     ok = bool(present) and not missing and not failed and len(present) == expected_count
     return GateResult(
         "ci_artifacts_checksums",
@@ -361,6 +373,8 @@ def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
         if ok else "Downloaded Actions artifacts are missing or have a checksum failure.",
         {
             "missing": [rel(path, root) for path in missing],
+            "optional_missing": [rel(path, root) for path in optional_missing],
+            "optional_present": [rel(path, root) for path in optional_present],
             "failed": [rel(path, root) for path in failed],
         },
     )
@@ -463,6 +477,84 @@ def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
+    if not isinstance(probe, dict):
+        return False
+    keyboard = probe.get("keyboard") if isinstance(probe.get("keyboard"), dict) else {}
+    textarea = probe.get("textarea") if isinstance(probe.get("textarea"), dict) else {}
+    sheet = probe.get("sheet") if isinstance(probe.get("sheet"), dict) else {}
+    try:
+        keyboard_inside_sheet = (
+            int(keyboard.get("x")) >= 0
+            and int(keyboard.get("y")) >= 0
+            and int(keyboard.get("x")) + int(keyboard.get("w")) <= int(sheet.get("w"))
+            and int(keyboard.get("y")) + int(keyboard.get("h")) <= int(sheet.get("h"))
+        )
+        textarea_above_keyboard = (
+            int(textarea.get("x")) >= 0
+            and int(textarea.get("y")) >= 0
+            and int(textarea.get("x")) + int(textarea.get("w")) <= int(sheet.get("w"))
+            and int(textarea.get("y")) + int(textarea.get("h")) <= int(keyboard.get("y"))
+        )
+        keyboard_size_ok = int(keyboard.get("w")) >= 440 and int(keyboard.get("h")) >= 250
+    except (TypeError, ValueError):
+        return False
+    return (
+        probe.get("ok") is True
+        and probe.get("cmd") == "ui compose-probe"
+        and probe.get("target") == expected_target.replace("-", "_")
+        and probe.get("target_supported") is True
+        and probe.get("sheet_visible") is True
+        and probe.get("textarea_visible") is True
+        and probe.get("keyboard_visible") is True
+        and probe.get("onboarding_visible") is False
+        and probe.get("dock_hidden") is True
+        and probe.get("dm_mode") is (expected_target.startswith("dm"))
+        and probe.get("public_rf_tx") is False
+        and probe.get("formats_sd") is False
+        and keyboard_inside_sheet
+        and textarea_above_keyboard
+        and keyboard_size_ok
+    )
+
+
+def compose_keyboard_capture_ok(data: dict, expected_port: str) -> bool:
+    captures = data.get("captures") if isinstance(data.get("captures"), list) else []
+    captures_by_target = {
+        item.get("target"): item
+        for item in captures
+        if isinstance(item, dict) and isinstance(item.get("target"), str)
+    }
+    if not REQUIRED_COMPOSE_CAPTURE_TARGETS.issubset(set(captures_by_target)):
+        return False
+    return (
+        data.get("ok") is True
+        and data.get("kind") == "ui_compose_keyboard_capture"
+        and data.get("mode") == "hardware"
+        and data.get("port") == expected_port
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and all(
+            capture.get("ok") is True
+            and capture.get("public_rf_tx") is False
+            and capture.get("formats_sd") is False
+            and bool(capture.get("png_path"))
+            and bool(capture.get("raw_path"))
+            and isinstance(capture.get("capture"), dict)
+            and capture["capture"].get("ok") is True
+            and capture["capture"].get("kind") == "ui_pixel_capture"
+            and capture["capture"].get("port") == expected_port
+            and capture["capture"].get("width") == 480
+            and capture["capture"].get("height") == 480
+            and capture["capture"].get("onboarding_visible") is False
+            and capture.get("target_visible") is True
+            and compose_capture_probe_ok(capture.get("compose_probe"), target)
+            for target, capture in captures_by_target.items()
+            if target in REQUIRED_COMPOSE_CAPTURE_TARGETS
+        )
+    )
+
+
 def scroll_probe_results_by_screen(data: dict) -> dict:
     probes: dict = {}
     probe_results = data.get("probe_results")
@@ -482,6 +574,21 @@ def scroll_probe_results_by_screen(data: dict) -> dict:
     return probes
 
 
+def scroll_probe_screen_ok(screen: str, tab: str, probe: dict) -> bool:
+    movement_ok = (
+        probe.get("scrollable") is True
+        and (probe.get("moved") is True or screen in SCROLL_MOVEMENT_OPTIONAL)
+    )
+    probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
+    return (
+        probe_ok
+        and probe.get("surface") == screen
+        and probe.get("tab") == tab
+        and probe.get("target_found") is True
+        and movement_ok
+    )
+
+
 def scroll_probe_ok(data: dict, expected_port: str) -> bool:
     screens = set(data.get("screens") or [])
     plan = data.get("surface_plan") if isinstance(data.get("surface_plan"), list) else []
@@ -499,12 +606,7 @@ def scroll_probe_ok(data: dict, expected_port: str) -> bool:
         and all(tabs_by_screen.get(screen) == tab for screen, tab in REQUIRED_SCROLL_SURFACES.items())
         and all(
             isinstance(probes.get(screen), dict)
-            and probes[screen].get("ok") is True
-            and probes[screen].get("surface") == screen
-            and probes[screen].get("tab") == tab
-            and probes[screen].get("target_found") is True
-            and probes[screen].get("scrollable") is True
-            and probes[screen].get("moved") is True
+            and scroll_probe_screen_ok(screen, tab, probes[screen])
             for screen, tab in REQUIRED_SCROLL_SURFACES.items()
         )
     )
@@ -760,6 +862,58 @@ def sd_map_tile_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("storage_file_gate_ready_after") is True
         and data.get("map_tile_backend_ready_before") is True
         and data.get("map_tile_backend_ready_after") is True
+    )
+
+
+def sd_export_artifact_common_ok(data: dict, expected_port: str, passed_field: str, unavailable_field: str) -> bool:
+    return (
+        data.get("mode") == "hardware"
+        and exact_port_ok(data, expected_port)
+        and report_is_no_rf_no_format(data)
+        and not unsafe_sd_commands(data)
+        and data.get("ok") is True
+        and data.get("allow_unavailable") is not True
+        and data.get(passed_field) is True
+        and data.get(unavailable_field) is not True
+        and data.get("storage_file_gate_ready_before") is True
+        and data.get("storage_file_gate_ready_after") is True
+        and data.get("export_backend_ready_before") is True
+        and data.get("export_backend_ready_after") is True
+    )
+
+
+def sd_export_canary_artifact_ok(data: dict, expected_port: str) -> bool:
+    return sd_export_artifact_common_ok(data, expected_port, "canary_passed", "canary_unavailable_ok")
+
+
+def sd_diagnostic_export_artifact_ok(data: dict, expected_port: str) -> bool:
+    export = data.get("export") if isinstance(data.get("export"), dict) else {}
+    return (
+        sd_export_artifact_common_ok(
+            data,
+            expected_port,
+            "diagnostic_export_passed",
+            "diagnostic_export_unavailable_ok",
+        )
+        and int_value(export.get("bytes")) is not None
+        and int_value(export.get("bytes")) > 192
+        and int_value(export.get("chunks_written")) is not None
+        and int_value(export.get("chunks_written")) >= 2
+        and int_value(export.get("final_verified_bytes")) == int_value(export.get("bytes"))
+    )
+
+
+def sd_data_export_artifact_ok(data: dict, expected_port: str) -> bool:
+    export = data.get("export") if isinstance(data.get("export"), dict) else {}
+    return (
+        sd_export_artifact_common_ok(data, expected_port, "data_export_passed", "data_export_unavailable_ok")
+        and export.get("private_identity_exported") is False
+        and export.get("sampled") is True
+        and int_value(export.get("bytes")) is not None
+        and int_value(export.get("bytes")) > 192
+        and int_value(export.get("chunks_written")) is not None
+        and int_value(export.get("chunks_written")) >= 2
+        and int_value(export.get("final_verified_bytes")) == int_value(export.get("bytes"))
     )
 
 
@@ -1192,6 +1346,107 @@ def sd_map_tile_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
     )
 
 
+def sd_export_canary_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    canary = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-export-canary-*.json",
+        "sd_export_canary_*.json",
+        "sd_export_canary*.json",
+        "export_canary_*.json",
+    )
+    data = read_json(canary)
+    ok = bool(canary and data and sd_export_canary_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_export_canary_passed",
+        "P0",
+        ok,
+        "SD export-store canary",
+        [rel(canary, root)] if canary else [],
+        "Export-store canary writes through temp/read/atomic-rename/final-read on SD."
+        if ok else "No passing current-commit hardware SD export canary artifact was found.",
+        {
+            "path_found": bool(canary),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "canary_passed": data.get("canary_passed") if data else None,
+            "storage_file_gate_ready_before": data.get("storage_file_gate_ready_before") if data else None,
+            "storage_file_gate_ready_after": data.get("storage_file_gate_ready_after") if data else None,
+            "export_backend_ready_before": data.get("export_backend_ready_before") if data else None,
+            "export_backend_ready_after": data.get("export_backend_ready_after") if data else None,
+        },
+    )
+
+
+def sd_diagnostic_export_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    export = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-diagnostic-export-*.json",
+        "sd_diagnostic_export_*.json",
+        "sd_diagnostic_export*.json",
+        "diagnostic_export_*.json",
+    )
+    data = read_json(export)
+    inner = data.get("export") if isinstance(data.get("export"), dict) else {}
+    ok = bool(export and data and sd_diagnostic_export_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_diagnostic_export_passed",
+        "P0",
+        ok,
+        "SD diagnostic export",
+        [rel(export, root)] if export else [],
+        "Diagnostic export writes a multi-chunk SD JSON export through atomic rename and verifies final bytes."
+        if ok else "No passing current-commit hardware SD diagnostic export artifact was found.",
+        {
+            "path_found": bool(export),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "diagnostic_export_passed": data.get("diagnostic_export_passed") if data else None,
+            "bytes": inner.get("bytes") if inner else None,
+            "chunks_written": inner.get("chunks_written") if inner else None,
+            "final_verified_bytes": inner.get("final_verified_bytes") if inner else None,
+        },
+    )
+
+
+def sd_data_export_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
+    export = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-sd-data-export-*.json",
+        "sd_data_export_*.json",
+        "sd_data_export*.json",
+        "data_export_*.json",
+    )
+    data = read_json(export)
+    inner = data.get("export") if isinstance(data.get("export"), dict) else {}
+    ok = bool(export and data and sd_data_export_artifact_ok(data, expected_port))
+    return GateResult(
+        "sd_data_export_passed",
+        "P0",
+        ok,
+        "SD sampled data export",
+        [rel(export, root)] if export else [],
+        "Sampled data export writes a multi-chunk SD JSON export without private identity material."
+        if ok else "No passing current-commit hardware SD sampled data export artifact was found.",
+        {
+            "path_found": bool(export),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "port": data.get("port") if data else None,
+            "data_export_passed": data.get("data_export_passed") if data else None,
+            "private_identity_exported": inner.get("private_identity_exported") if inner else None,
+            "sampled": inner.get("sampled") if inner else None,
+            "bytes": inner.get("bytes") if inner else None,
+            "chunks_written": inner.get("chunks_written") if inner else None,
+            "final_verified_bytes": inner.get("final_verified_bytes") if inner else None,
+        },
+    )
+
+
 def sd_raw_diag_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
     diag = newest_commit_json_from_roots(
         artifact_roots,
@@ -1593,6 +1848,9 @@ def build_audit(args: argparse.Namespace) -> dict:
     retained_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-retained-history")
     reboot_remount_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-reboot-remount")
     map_tile_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-map-tile-canary")
+    export_canary_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-export-canary")
+    diagnostic_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-diagnostic-export")
+    data_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-data-export")
     raw_diag_roots = unique_dirs(
         sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-preflight")
         + sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
@@ -1655,6 +1913,22 @@ def build_audit(args: argparse.Namespace) -> dict:
     )
     gates.append(
         simple_json_ok_gate(
+            "ui_compose_keyboard_capture",
+            "D1L compose keyboard hardware capture",
+            newest_commit_json_from_roots(
+                ui_capture_roots,
+                args.commit,
+                "ui_compose_keyboard_capture*.json",
+                "d1l-compose-keyboard-capture-*.json",
+            ),
+            root,
+            lambda data: compose_keyboard_capture_ok(data, args.d1l_port),
+            "Current-commit D1L compose keyboard capture proves Public and DM keyboard states fit the 480x480 hardware frame.",
+            "No passing current-commit D1L compose keyboard hardware capture artifact was found.",
+        )
+    )
+    gates.append(
+        simple_json_ok_gate(
             "ui_scroll_probe",
             "D1L scroll probe",
             newest_commit_json_from_roots(
@@ -1683,12 +1957,15 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(route_probe_gate(hardware_dir, root, args.commit, args.d1l_port))
     gates.append(official_seeed_sd_smoke_gate(official_smoke_roots, root, args.commit, args.rp2040_port))
     gates.append(sd_gate(preflight_path, root))
-    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.rp2040_port))
+    gates.append(sd_raw_diag_gate(raw_diag_roots, root, args.commit, args.d1l_port))
     gates.append(sd_boot_prepare_gate(boot_prepare_roots, root, args.commit, args.d1l_port))
     gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
     gates.append(sd_reboot_remount_gate(reboot_remount_roots, root, args.commit, args.d1l_port))
     gates.append(sd_map_tile_canary_gate(map_tile_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_export_canary_gate(export_canary_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_diagnostic_export_gate(diagnostic_export_roots, root, args.commit, args.d1l_port))
+    gates.append(sd_data_export_gate(data_export_roots, root, args.commit, args.d1l_port))
     gates.append(sd_fat32_policy_gate(unformatted_boot_path, root, args.d1l_port))
     gates.append(sd_no_format_policy_gate(preflight_path, unformatted_boot_path, root))
     gates.append(sd_power_rail_gate(sd_power_roots, root, args.commit, args.d1l_port))

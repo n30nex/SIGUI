@@ -27,8 +27,11 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_start" in header
     assert "d1l_storage_manager_request_remount" in header
     assert "d1l_storage_manager_reset_bridge" in header
+    assert "d1l_storage_manager_pause" in header
+    assert "d1l_storage_manager_resume" in header
     assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
+    assert "d1l_storage_status_remount_blocking" in header
     assert "rp2040_sd_protocol_supported" in header
     assert "sd_needs_fat32" in header
     assert "manager_state" in header
@@ -64,6 +67,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     ]:
         assert state in source
     assert "storage_manager_task" in source
+    assert "D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U" in source
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in source
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in source
     assert 'xTaskCreate(storage_manager_task' in source
     assert "d1l_rp2040_bridge_ping" in source
     assert "d1l_rp2040_bridge_reset" in source
@@ -71,7 +77,11 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "apply_force_nvs_status" in source
     assert "d1l_storage_manager_request_remount" in source
     assert "d1l_storage_manager_reset_bridge" in source
+    assert "d1l_storage_manager_pause" in source
+    assert "d1l_storage_manager_resume" in source
+    assert "storage_manager_pause_delay_ms" in source
     assert "d1l_storage_manager_force_nvs" in source
+    assert "d1l_storage_status_remount_blocking" in source
     assert 's_status.sd_interface = "rp2040"' in source
     assert 's_status.sd_state = "pending_bridge"' in source
     assert '"protocol_pending"' in source
@@ -137,19 +147,53 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     )[0]
     assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
+    assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
+    assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
     assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in source
     assert 'strcmp(s_status.sd_state, "mount_pending")' in source
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
     assert "d1l_rp2040_bridge_format_sd" not in boot_prepare
-    mount_body = source.split("esp_err_t d1l_storage_status_mount", 1)[1].split(
-        "void d1l_storage_status", 1
+    mount_body = source.split("static esp_err_t storage_status_mount", 1)[1].split(
+        "esp_err_t d1l_storage_status_mount", 1
     )[0]
     assert "storage_sd_ready_for_files()" in mount_body
     assert mount_body.index("storage_sd_ready_for_files()") < mount_body.index(
         "d1l_rp2040_bridge_mount_sd(&sd, timeout_ms)"
     )
     assert "s_status.last_error = ESP_OK" in mount_body
+    remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
+        "void d1l_storage_status", 1
+    )[0]
+    assert "d1l_storage_status_note_rp2040(ESP_OK)" in remount_body
+    assert "storage_status_mount(timeout_ms, true)" in remount_body
+    assert "remount_timeout_needs_bridge_reset()" in remount_body
+    assert "reset_bridge_and_remount_blocking(timeout_ms)" in remount_body
+    assert "request_bridge_reset_remount_recovery()" in remount_body
+    assert "d1l_storage_manager_start()" in remount_body
+    assert "classify_storage_manager_state(ret)" in remount_body
+    assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
+    assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
+    sync_recovery_body = source.split("static esp_err_t reset_bridge_and_remount_blocking", 1)[1].split(
+        "static void classify_storage_manager_state", 1
+    )[0]
+    assert "d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS" in sync_recovery_body
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in sync_recovery_body
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in sync_recovery_body
+    assert "d1l_rp2040_bridge_ping(&ping," in sync_recovery_body
+    assert "storage_status_mount(timeout_ms, true)" in sync_recovery_body
+    assert "poll_mount_pending()" in sync_recovery_body
+    manager_run_body = source.split("static void storage_manager_run_once", 1)[1].split(
+        "static uint32_t storage_manager_pause_delay_ms", 1
+    )[0]
+    assert "request_bridge_reset_remount_recovery()" in manager_run_body
+    manager_task_body = source.split("static void storage_manager_task", 1)[1].split(
+        "esp_err_t d1l_storage_boot_prepare", 1
+    )[0]
+    assert "storage_manager_pause_delay_ms()" in manager_task_body
+    assert manager_task_body.index("storage_manager_pause_delay_ms()") < manager_task_body.index(
+        "storage_manager_run_once()"
+    )
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
@@ -275,7 +319,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_storage_status_refresh(" not in setup_body
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
-    assert "d1l_storage_manager_request_remount" in console
+    assert "d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_manager_reset_bridge" in console
     assert "d1l_storage_manager_force_nvs" in console
     assert '\\"manager\\":{\\"running\\":%s' in console
@@ -348,6 +392,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
     assert "d1l_rp2040_bridge_mount_sd" in rp2040_header
     assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
+    assert "D1L_RP2040_SD_DIAG_LINE_MAX 4096U" in rp2040_header
     assert "D1L_RP2040_FILE_CHUNK_MAX 192U" in rp2040_header
     assert "d1l_rp2040_file_result_t" in rp2040_header
     assert "d1l_rp2040_bridge_file_stat" in rp2040_header
@@ -385,7 +430,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'strcmp(line, "storage diag raw")' in console
     assert '\\"cmd\\":\\"storage diag raw\\"' in console
     assert '\\"raw_line\\":' in console
-    assert "char raw_line[D1L_RP2040_FILE_LINE_MAX + 1U]" in rp2040_header
+    assert "char raw_line[D1L_RP2040_SD_DIAG_LINE_MAX + 1U]" in rp2040_header
+    assert "D1L_RP2040_SD_DIAG_LINE_BUFFER_SIZE" in rp2040_source
     assert "snprintf(diag->raw_line, sizeof(diag->raw_line), \"%s\", line)" in rp2040_source
     assert '\\"formats_sd\\":false' in console
     assert '\\"public_rf_tx\\":false' in console
@@ -410,20 +456,40 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
 
     assert "cmd_storage_filecanary" in console
-    assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "storage_filecanary_ready" in console
+    assert "D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U" in console
+    assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_rp2040_bridge_file_write(tmp_path, 0U, payload" in console
     assert "d1l_rp2040_bridge_file_read(tmp_path" in console
     assert "d1l_rp2040_bridge_file_rename(tmp_path, final_path, true" in console
     assert "d1l_rp2040_bridge_file_stat(final_path" in console
     assert "d1l_rp2040_bridge_file_delete(final_path" in console
-    assert '"canary/filecanary.tmp"' in console
-    assert '"canary/filecanary.bin"' in console
+    assert "esp_random()" in console
+    assert "xTaskGetTickCount()" in console
+    assert '"canary/fc-%08lx-%08lx.tmp"' in console
+    assert '"canary/fc-%08lx-%08lx.bin"' in console
+    assert '"canary/filecanary.tmp"' not in console
+    assert '"canary/filecanary.bin"' not in console
     assert "D1L_RP2040_FILE_LINE_MAX" in console
     assert "D1L_RP2040_FILE_CHUNK_MAX" in console
     assert "D1L_RP2040_FILE_PATH_MAX" in console
     filecanary_body = console.split("static void cmd_storage_filecanary(void)", 1)[1].split(
-        "static void cmd_storage_retained_canary", 1
+        "static bool text_equals", 1
     )[0]
+    assert "d1l_storage_status_refresh" not in filecanary_body
+    assert "3000U" not in filecanary_body
+    assert "D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS" in filecanary_body
+    assert "D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS" in console
+    assert "d1l_storage_manager_pause(D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS)" in filecanary_body
+    assert "d1l_storage_manager_resume()" in filecanary_body
+    assert "print_storage_filecanary_error_and_resume" in console
+    assert filecanary_body.index("d1l_storage_status_mount") < filecanary_body.index(
+        "print_storage_filecanary_error"
+    )
+    assert filecanary_body.index("d1l_storage_manager_pause") < filecanary_body.index(
+        "d1l_rp2040_bridge_file_write(tmp_path"
+    )
+    assert "d1l_rp2040_bridge_file_delete(tmp_path" not in filecanary_body
     preflight_body = filecanary_body.split("print_storage_filecanary_error", 1)[0]
     assert "!status.data_enabled" not in preflight_body
     assert "packet_log_backend" not in preflight_body
@@ -453,7 +519,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "sd_retained_history_acceptance_d1l.py" in docs
     assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
     assert "COM12" in runbook
-    assert "Do not use COM11 or COM29" in runbook
+    assert "Do not use COM8, COM11, or COM29" in runbook
     assert "Do not send Public RF" in runbook
     assert "flash_d1l.ps1" in runbook
     assert "flash_rp2040_sd_bridge_uf2.py" in runbook
@@ -600,6 +666,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "esp_http_client_is_complete_data_received(client)" in store_source
     assert "esp_http_client_cleanup(client)" in store_source
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_source
+    assert "D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U" in store_source
+    assert "3000U" not in store_source
     assert "D1L_MAP_TILE_USER_AGENT" in store_source
     assert "map/tiles/attribution.json" in store_source
     assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source
@@ -657,7 +725,7 @@ def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
     validation = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "mesh send public" not in validation
-    assert "Do not use `COM11` or `COM29`" in validation
+    assert "Do not use `COM8`, `COM11`, or `COM29`" in validation
     assert "COM7" not in validation
     assert "flash_d1l" not in validation
     assert "monitor_d1l" not in validation
