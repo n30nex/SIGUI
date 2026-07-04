@@ -2157,6 +2157,31 @@ static void update_compose_counter(void)
                                 0);
 }
 
+static void layout_compose_sheet_controls(void)
+{
+    if (s_compose_sheet) {
+        lv_obj_set_size(s_compose_sheet, 480, 424);
+        lv_obj_set_pos(s_compose_sheet, 0, 56);
+        lv_obj_set_style_pad_all(s_compose_sheet, 0, 0);
+        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE);
+        lv_obj_set_scrollbar_mode(s_compose_sheet, LV_SCROLLBAR_MODE_OFF);
+        lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF);
+    }
+    if (s_compose_textarea) {
+        lv_obj_set_size(s_compose_textarea, 448, 78);
+        lv_obj_set_pos(s_compose_textarea, 16, 58);
+    }
+    if (s_compose_counter) {
+        lv_obj_set_width(s_compose_counter, 86);
+        lv_obj_set_pos(s_compose_counter, 378, 140);
+    }
+    if (s_compose_keyboard) {
+        lv_obj_set_size(s_compose_keyboard, 448, 258);
+        lv_obj_set_pos(s_compose_keyboard, 16, 158);
+    }
+}
+
 static void show_public_compose_sheet(const char *title, const char *placeholder)
 {
     hide_sheet();
@@ -2189,6 +2214,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
         lv_textarea_set_placeholder_text(s_compose_textarea,
                                          placeholder && placeholder[0] ? placeholder : "Public message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
         update_compose_counter();
     }
 }
@@ -2254,6 +2280,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         lv_textarea_set_text(s_compose_textarea, "");
         lv_textarea_set_placeholder_text(s_compose_textarea, "Direct message");
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
         update_compose_counter();
     }
 }
@@ -6535,6 +6562,7 @@ static void open_compose_probe_on_ui_task(const char *target)
     if (s_compose_keyboard) {
         lv_keyboard_set_mode(s_compose_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
         lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+        layout_compose_sheet_controls();
     }
     lv_obj_update_layout(s_screen);
 }
@@ -6778,14 +6806,10 @@ static void create_compose_sheet(lv_obj_t *screen)
     if (!s_compose_sheet) {
         return;
     }
-    lv_obj_set_size(s_compose_sheet, 480, 424);
-    lv_obj_set_pos(s_compose_sheet, 0, 56);
     lv_obj_set_style_radius(s_compose_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_compose_sheet, 0, 0);
-    lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
     s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
     lv_obj_set_style_text_font(s_compose_title, &lv_font_montserrat_24, 0);
@@ -6802,8 +6826,6 @@ static void create_compose_sheet(lv_obj_t *screen)
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_textarea, 448, 78);
-    lv_obj_set_pos(s_compose_textarea, 16, 58);
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
     lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS);
     lv_textarea_set_one_line(s_compose_textarea, false);
@@ -6818,18 +6840,15 @@ static void create_compose_sheet(lv_obj_t *screen)
 
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(s_compose_counter, 86);
-    lv_obj_set_pos(s_compose_counter, 378, 140);
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
     if (!s_compose_keyboard) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_keyboard, 448, 258);
-    lv_obj_set_pos(s_compose_keyboard, 16, 158);
     configure_compose_keyboard(s_compose_keyboard);
     lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    layout_compose_sheet_controls();
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 

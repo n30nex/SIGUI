@@ -209,12 +209,18 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "static lv_obj_t *s_dock" in source
     assert "set_dock_hidden(true)" in source
     assert "set_dock_hidden(false)" in source
-    assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in compose
-    assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in compose
-    assert "lv_obj_set_style_pad_all(s_compose_sheet, 0, 0)" in compose
-    assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in compose
-    assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in compose
+    layout = source.split("static void layout_compose_sheet_controls", 1)[1].split(
+        "static void show_public_compose_sheet", 1
+    )[0]
+    assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in layout
+    assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in layout
+    assert "lv_obj_set_style_pad_all(s_compose_sheet, 0, 0)" in layout
+    assert "lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE)" in layout
+    assert "lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF)" in layout
+    assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in layout
+    assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in layout
     assert "configure_compose_keyboard(s_compose_keyboard)" in compose
+    assert "layout_compose_sheet_controls()" in compose
 
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
