@@ -27,6 +27,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_start" in header
     assert "d1l_storage_manager_request_remount" in header
     assert "d1l_storage_manager_reset_bridge" in header
+    assert "d1l_storage_manager_pause" in header
+    assert "d1l_storage_manager_resume" in header
     assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
     assert "d1l_storage_status_remount_blocking" in header
@@ -73,6 +75,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "apply_force_nvs_status" in source
     assert "d1l_storage_manager_request_remount" in source
     assert "d1l_storage_manager_reset_bridge" in source
+    assert "d1l_storage_manager_pause" in source
+    assert "d1l_storage_manager_resume" in source
+    assert "storage_manager_pause_delay_ms" in source
     assert "d1l_storage_manager_force_nvs" in source
     assert "d1l_storage_status_remount_blocking" in source
     assert 's_status.sd_interface = "rp2040"' in source
@@ -161,6 +166,13 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "classify_storage_manager_state(ret)" in remount_body
     assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
     assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
+    manager_task_body = source.split("static void storage_manager_task", 1)[1].split(
+        "esp_err_t d1l_storage_boot_prepare", 1
+    )[0]
+    assert "storage_manager_pause_delay_ms()" in manager_task_body
+    assert manager_task_body.index("storage_manager_pause_delay_ms()") < manager_task_body.index(
+        "storage_manager_run_once()"
+    )
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
@@ -440,8 +452,15 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_storage_status_refresh" not in filecanary_body
     assert "3000U" not in filecanary_body
     assert "D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS" in filecanary_body
+    assert "D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS" in console
+    assert "d1l_storage_manager_pause(D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS)" in filecanary_body
+    assert "d1l_storage_manager_resume()" in filecanary_body
+    assert "print_storage_filecanary_error_and_resume" in console
     assert filecanary_body.index("d1l_storage_status_mount") < filecanary_body.index(
         "print_storage_filecanary_error"
+    )
+    assert filecanary_body.index("d1l_storage_manager_pause") < filecanary_body.index(
+        "d1l_rp2040_bridge_file_delete(tmp_path"
     )
     preflight_body = filecanary_body.split("print_storage_filecanary_error", 1)[0]
     assert "!status.data_enabled" not in preflight_body

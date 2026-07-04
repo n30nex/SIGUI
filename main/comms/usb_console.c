@@ -40,6 +40,7 @@
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 15000U;
+static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -1720,6 +1721,16 @@ static void print_storage_filecanary_error(const char *step,
     printf("}\n");
 }
 
+static void print_storage_filecanary_error_and_resume(const char *step,
+                                                      esp_err_t ret,
+                                                      const d1l_storage_status_t *status,
+                                                      const d1l_rp2040_file_result_t *file,
+                                                      const char *hint)
+{
+    d1l_storage_manager_resume();
+    print_storage_filecanary_error(step, ret, status, file, hint);
+}
+
 static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_result_t *file)
 {
     return ret == ESP_OK || ret == ESP_ERR_NOT_FOUND ||
@@ -1762,26 +1773,28 @@ static void cmd_storage_filecanary(void)
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX];
     d1l_rp2040_file_result_t file = {0};
 
+    d1l_storage_manager_pause(D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS);
+
     esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file,
                                                   D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error("cleanup_tmp", ret, &status, &file,
-                                       "could not remove stale temp canary path");
+        print_storage_filecanary_error_and_resume("cleanup_tmp", ret, &status, &file,
+                                                  "could not remove stale temp canary path");
         return;
     }
     ret = d1l_rp2040_bridge_file_delete(final_path, &file,
                                         D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error("cleanup_final", ret, &status, &file,
-                                       "could not remove stale final canary path");
+        print_storage_filecanary_error_and_resume("cleanup_final", ret, &status, &file,
+                                                  "could not remove stale final canary path");
         return;
     }
 
     ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
                                        &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len || file.size != payload_len) {
-        print_storage_filecanary_error("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "temp write failed");
+        print_storage_filecanary_error_and_resume("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "temp write failed");
         return;
     }
 
@@ -1790,24 +1803,24 @@ static void cmd_storage_filecanary(void)
                                       &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
-        print_storage_filecanary_error("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "temp read-back did not match");
+        print_storage_filecanary_error_and_resume("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "temp read-back did not match");
         return;
     }
 
     ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file,
                                         D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
-        print_storage_filecanary_error("rename_final", ret, &status, &file,
-                                       "rename replace commit failed");
+        print_storage_filecanary_error_and_resume("rename_final", ret, &status, &file,
+                                                  "rename replace commit failed");
         return;
     }
 
     ret = d1l_rp2040_bridge_file_stat(final_path, &file,
                                       D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || !file.exists || file.is_directory || file.size != payload_len) {
-        print_storage_filecanary_error("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final canary stat did not match");
+        print_storage_filecanary_error_and_resume("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final canary stat did not match");
         return;
     }
 
@@ -1816,27 +1829,28 @@ static void cmd_storage_filecanary(void)
                                       &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
-        print_storage_filecanary_error("read_final", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final read-back did not match");
+        print_storage_filecanary_error_and_resume("read_final", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final read-back did not match");
         return;
     }
 
     ret = d1l_rp2040_bridge_file_delete(final_path, &file,
                                         D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
-        print_storage_filecanary_error("delete_final", ret, &status, &file,
-                                       "could not delete final canary file");
+        print_storage_filecanary_error_and_resume("delete_final", ret, &status, &file,
+                                                  "could not delete final canary file");
         return;
     }
 
     ret = d1l_rp2040_bridge_file_stat(final_path, &file,
                                       D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.exists) {
-        print_storage_filecanary_error("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
-                                       &status, &file, "final canary file still exists after delete");
+        print_storage_filecanary_error_and_resume("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
+                                                  &status, &file, "final canary file still exists after delete");
         return;
     }
 
+    d1l_storage_manager_resume();
     ok_begin("storage filecanary");
     printf(",\"path\":");
     print_json_string(final_path);

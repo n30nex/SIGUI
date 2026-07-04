@@ -5,6 +5,7 @@
 
 #include "sdkconfig.h"
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -39,6 +40,8 @@ static TaskHandle_t s_storage_manager_task;
 static d1l_storage_manager_state_t s_manager_state = D1L_STORAGE_MANAGER_BRIDGE_WAIT;
 static volatile bool s_manager_remount_requested;
 static volatile bool s_manager_reset_bridge_requested;
+static int64_t s_manager_pause_until_us;
+static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_force_nvs;
 
 static void refresh_retained_sd_health(d1l_storage_status_t *status)
@@ -547,10 +550,43 @@ static void storage_manager_run_once(void)
     classify_storage_manager_state(ret);
 }
 
+static uint32_t storage_manager_pause_delay_ms(void)
+{
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    const int64_t pause_until_us = s_manager_pause_until_us;
+    portEXIT_CRITICAL(&s_manager_pause_lock);
+
+    if (pause_until_us <= 0) {
+        return 0;
+    }
+
+    const int64_t now_us = esp_timer_get_time();
+    if (pause_until_us <= now_us) {
+        portENTER_CRITICAL(&s_manager_pause_lock);
+        if (s_manager_pause_until_us <= now_us) {
+            s_manager_pause_until_us = 0;
+        }
+        portEXIT_CRITICAL(&s_manager_pause_lock);
+        return 0;
+    }
+
+    int64_t remaining_us = pause_until_us - now_us;
+    const int64_t max_sleep_us = 1000000LL;
+    if (remaining_us > max_sleep_us) {
+        remaining_us = max_sleep_us;
+    }
+    return (uint32_t)((remaining_us + 999LL) / 1000LL);
+}
+
 static void storage_manager_task(void *arg)
 {
     (void)arg;
     for (;;) {
+        const uint32_t pause_delay_ms = storage_manager_pause_delay_ms();
+        if (pause_delay_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(pause_delay_ms));
+            continue;
+        }
         storage_manager_run_once();
         const uint32_t delay_ms = s_status.manager_backoff_ms > 0 ?
             s_status.manager_backoff_ms : D1L_STORAGE_MANAGER_IDLE_INTERVAL_MS;
@@ -611,6 +647,27 @@ esp_err_t d1l_storage_manager_reset_bridge(void)
     s_manager_reset_bridge_requested = true;
     s_manager_remount_requested = true;
     return d1l_storage_manager_start();
+}
+
+void d1l_storage_manager_pause(uint32_t pause_ms)
+{
+    if (pause_ms == 0) {
+        return;
+    }
+    const int64_t now_us = esp_timer_get_time();
+    const int64_t pause_until_us = now_us + ((int64_t)pause_ms * 1000LL);
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    if (pause_until_us > s_manager_pause_until_us) {
+        s_manager_pause_until_us = pause_until_us;
+    }
+    portEXIT_CRITICAL(&s_manager_pause_lock);
+}
+
+void d1l_storage_manager_resume(void)
+{
+    portENTER_CRITICAL(&s_manager_pause_lock);
+    s_manager_pause_until_us = 0;
+    portEXIT_CRITICAL(&s_manager_pause_lock);
 }
 
 void d1l_storage_manager_force_nvs(bool force_nvs)
