@@ -371,6 +371,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_rp2040_bridge_probe_sd" in rp2040_header
     assert "d1l_rp2040_bridge_mount_sd" in rp2040_header
     assert "D1L_RP2040_FILE_LINE_MAX 512U" in rp2040_header
+    assert "D1L_RP2040_SD_DIAG_LINE_MAX 4096U" in rp2040_header
     assert "D1L_RP2040_FILE_CHUNK_MAX 192U" in rp2040_header
     assert "d1l_rp2040_file_result_t" in rp2040_header
     assert "d1l_rp2040_bridge_file_stat" in rp2040_header
@@ -408,7 +409,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'strcmp(line, "storage diag raw")' in console
     assert '\\"cmd\\":\\"storage diag raw\\"' in console
     assert '\\"raw_line\\":' in console
-    assert "char raw_line[D1L_RP2040_FILE_LINE_MAX + 1U]" in rp2040_header
+    assert "char raw_line[D1L_RP2040_SD_DIAG_LINE_MAX + 1U]" in rp2040_header
+    assert "D1L_RP2040_SD_DIAG_LINE_BUFFER_SIZE" in rp2040_source
     assert "snprintf(diag->raw_line, sizeof(diag->raw_line), \"%s\", line)" in rp2040_source
     assert '\\"formats_sd\\":false' in console
     assert '\\"public_rf_tx\\":false' in console

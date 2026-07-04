@@ -13,6 +13,7 @@ class FakeSerial:
         self.responses = [line.encode("utf-8") for line in responses]
         self.writes = []
         self.reset_count = 0
+        self.timeout = 99.0
 
     def write(self, data):
         self.writes.append(data.decode("utf-8"))
@@ -42,20 +43,39 @@ def test_parse_fields_from_raw_diag_line():
 
 
 def test_dry_run_is_non_rf_and_non_formatting():
-    report = raw_diag.dry_run_report("COM16")
+    report = raw_diag.dry_run_report("COM12")
 
     assert report["ok"] is True
-    assert report["commands"] == ["DESKOS_SD_DIAG", "DESKOS_SD_STATUS", "DESKOS_SD_PING"]
+    assert report["commands"] == ["storage diag raw", "storage diag raw", "storage status", "rp2040 ping"]
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
 
 
-def test_capture_diag_reads_safe_rp2040_commands(monkeypatch):
+def test_capture_diag_waits_for_worker_then_reads_safe_console_commands(monkeypatch):
     ser = FakeSerial(
         [
-            RAW_LINE + "\n",
-            "DESKOS_SD_STATUS state=ready fs=fat32 file_ops=1\n",
-            "DESKOS_SD_PING v=1 file_line_max=512\n",
+            (
+                '{"schema":1,"ok":true,"cmd":"storage diag raw",'
+                '"response_truncated":false,'
+                '"raw_line":"DESKOS_SD_DIAG pins=det7-cs13-sck10-mosi11-miso12-pwr18 '
+                'selected_power=pending selected_mode=pending",'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ),
+            (
+                '{"schema":1,"ok":true,"cmd":"storage diag raw",'
+                f'"response_truncated":false,"raw_line":"{RAW_LINE}",'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ),
+            (
+                '{"schema":1,"ok":true,"cmd":"storage status",'
+                '"sd":{"state":"ready","filesystem":"fat32","file_ops":true},'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ),
+            (
+                '{"schema":1,"ok":true,"cmd":"rp2040 ping",'
+                '"file_line_max":512,"sd_touched":false,'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ),
         ]
     )
 
@@ -65,14 +85,15 @@ def test_capture_diag_reads_safe_rp2040_commands(monkeypatch):
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
     monkeypatch.setattr(raw_diag.time, "sleep", lambda _seconds: None)
 
-    report = raw_diag.capture_diag("COM16", 115200, 1.0)
+    report = raw_diag.capture_diag("COM12", 115200, 1.0)
 
     assert report["ok"] is True
-    assert report["port"] == "COM16"
+    assert report["port"] == "COM12"
+    assert report["initial_storage_diag"]["raw_line"].endswith("selected_power=pending selected_mode=pending")
     assert report["raw_line"] == RAW_LINE
     assert report["fields"]["selected_mode"] == "dedicated"
-    assert report["status_fields"]["state"] == "ready"
-    assert report["ping_fields"]["file_line_max"] == "512"
+    assert report["storage_status"]["sd"]["state"] == "ready"
+    assert report["rp2040_ping"]["file_line_max"] == 512
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
-    assert ser.writes == ["DESKOS_SD_DIAG\n", "DESKOS_SD_STATUS\n", "DESKOS_SD_PING\n"]
+    assert ser.writes == ["storage diag raw\n", "storage diag raw\n", "storage status\n", "rp2040 ping\n"]

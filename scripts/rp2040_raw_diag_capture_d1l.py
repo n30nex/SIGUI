@@ -12,11 +12,15 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
+    from smoke_d1l import send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
+    from scripts.smoke_d1l import send_console_command
 
 
-SAFE_COMMANDS = ("DESKOS_SD_DIAG", "DESKOS_SD_STATUS", "DESKOS_SD_PING")
+DIAG_COMMAND = "storage diag raw"
+SAFE_COMMANDS = (DIAG_COMMAND, DIAG_COMMAND, "storage status", "rp2040 ping")
+DEFAULT_DIAG_SETTLE_SECONDS = 20.0
 
 
 def utc_stamp() -> str:
@@ -46,48 +50,52 @@ def dry_run_report(port: str | None) -> dict:
     }
 
 
-def read_reply(ser, command: str, timeout: float) -> tuple[str, list[str]]:
-    deadline = time.monotonic() + timeout
-    lines: list[str] = []
-    while time.monotonic() < deadline:
-        raw = ser.readline()
-        if not raw:
-            continue
-        line = raw.decode("utf-8", errors="replace").strip()
-        if not line:
-            continue
-        lines.append(line)
-        if line.startswith(command):
-            return line, lines
-    return "", lines
+def raw_diag_is_pending(fields: dict[str, str]) -> bool:
+    return fields.get("selected_power") == "pending" or fields.get("selected_mode") == "pending"
 
 
-def capture_diag(port: str, baud: int, timeout: float) -> dict:
+def capture_diag(port: str, baud: int, timeout: float,
+                 diag_settle_seconds: float = DEFAULT_DIAG_SETTLE_SECONDS) -> dict:
     try:
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
-    replies: dict[str, str] = {}
-    captured_lines: list[str] = []
+    replies: dict[str, dict] = {}
+    initial_storage_diag: dict = {}
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
-        for command in SAFE_COMMANDS:
-            ser.write((command + "\n").encode("utf-8"))
-            if hasattr(ser, "flush"):
-                ser.flush()
-            reply, lines = read_reply(ser, command, timeout)
-            captured_lines.extend(lines)
-            replies[command] = reply
+        initial_storage_diag = send_console_command(ser, DIAG_COMMAND, timeout)
+        initial_raw = (
+            initial_storage_diag.get("raw_line")
+            if isinstance(initial_storage_diag.get("raw_line"), str)
+            else ""
+        )
+        needs_cached_retry = (
+            initial_storage_diag.get("ok") is not True
+            or raw_diag_is_pending(parse_fields(initial_raw))
+        )
+        if needs_cached_retry and diag_settle_seconds > 0:
+            time.sleep(diag_settle_seconds)
+        replies[DIAG_COMMAND] = (
+            send_console_command(ser, DIAG_COMMAND, timeout)
+            if needs_cached_retry
+            else initial_storage_diag
+        )
+        replies["storage status"] = send_console_command(ser, "storage status", timeout)
+        replies["rp2040 ping"] = send_console_command(ser, "rp2040 ping", timeout)
 
-    raw_line = replies.get("DESKOS_SD_DIAG", "")
-    status_line = replies.get("DESKOS_SD_STATUS", "")
-    ping_line = replies.get("DESKOS_SD_PING", "")
+    storage_diag = replies.get("storage diag raw", {})
+    storage_status = replies.get("storage status", {})
+    rp2040_ping = replies.get("rp2040 ping", {})
+    raw_line = storage_diag.get("raw_line") if isinstance(storage_diag.get("raw_line"), str) else ""
     fields = parse_fields(raw_line)
-    status_fields = parse_fields(status_line)
-    ping_fields = parse_fields(ping_line)
-    ok = raw_line.startswith("DESKOS_SD_DIAG")
+    ok = (
+        storage_diag.get("ok") is True
+        and raw_line.startswith("DESKOS_SD_DIAG")
+        and storage_diag.get("response_truncated") is not True
+    )
     return {
         "schema": 1,
         "mode": "hardware",
@@ -97,15 +105,15 @@ def capture_diag(port: str, baud: int, timeout: float) -> dict:
         "commands": list(SAFE_COMMANDS),
         "public_rf_tx": False,
         "formats_sd": False,
-        "response_truncated": False,
+        "response_truncated": storage_diag.get("response_truncated") is True,
         "ok": ok,
         "raw_line": raw_line,
         "fields": fields,
-        "status_line": status_line,
-        "status_fields": status_fields,
-        "ping_line": ping_line,
-        "ping_fields": ping_fields,
-        "lines": captured_lines,
+        "initial_storage_diag": initial_storage_diag,
+        "storage_diag": storage_diag,
+        "storage_status": storage_status,
+        "rp2040_ping": rp2040_ping,
+        "results": [initial_storage_diag, replies[DIAG_COMMAND], replies["storage status"], replies["rp2040 ping"]],
     }
 
 
@@ -126,6 +134,7 @@ def main() -> int:
     parser.add_argument("--port", default=os.environ.get("D1L_RP2040_PORT") or os.environ.get("D1L_RP2040_UF2_PORT"))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=10.0)
+    parser.add_argument("--diag-settle-sec", type=float, default=DEFAULT_DIAG_SETTLE_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args()
@@ -135,7 +144,7 @@ def main() -> int:
     else:
         if not args.port:
             parser.error("No RP2040 port supplied. Set D1L_RP2040_PORT or pass --port.")
-        report = capture_diag(args.port, args.baud, args.timeout)
+        report = capture_diag(args.port, args.baud, args.timeout, args.diag_settle_sec)
 
     written = write_report(report, Path(args.out) if args.out else None)
     print(json.dumps({"ok": report["ok"], "out": str(written), "mode": report["mode"]}))

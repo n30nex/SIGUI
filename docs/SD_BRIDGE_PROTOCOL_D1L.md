@@ -185,6 +185,11 @@ For each probe, `_p` is present, `_e` is
 the SdFat error code, `_d` is error data, and `_kb` is detected capacity. The
 command does not format, copy UF2 files, or send RF.
 
+The full raw diagnostic line is intentionally longer than the generic
+`DESKOS_SD_FILE` line cap. The ESP32 bridge must capture it with the dedicated
+raw-diagnostic buffer while keeping file-operation request and reply lines at
+512 bytes.
+
 ## Boot Prepare Contract
 
 `d1l_storage_boot_prepare()` runs before retained stores initialize. It may use
