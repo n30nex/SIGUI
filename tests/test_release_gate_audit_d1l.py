@@ -1314,6 +1314,7 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     (hardware / "smoke_68350bf.json").unlink()
     (hardware / "ui_corruption_probe_68350bf.json").unlink()
+    (hardware / "ui_compose_keyboard_capture_68350bf.json").unlink()
     (hardware / "scroll_probe_68350bf.json").unlink()
 
     write_json(
@@ -1327,6 +1328,10 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     write_json(
         tmp_path / "artifacts" / "scroll-probe" / "d1l-scroll-probe-COM12-actions-68350bf.json",
         scroll_probe_payload(firmware_commit=COMMIT),
+    )
+    write_json(
+        tmp_path / "artifacts" / "ui-capture" / "d1l-compose-keyboard-capture-COM12-actions-68350bf.json",
+        compose_keyboard_capture_payload(firmware_commit=COMMIT),
     )
     write_official_seeed_smoke_evidence(tmp_path)
 
@@ -1342,6 +1347,10 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["ui_scroll_probe"]["evidence"] == [
         "artifacts/scroll-probe/d1l-scroll-probe-COM12-actions-68350bf.json"
+    ]
+    assert gates["ui_compose_keyboard_capture"]["ok"] is True
+    assert gates["ui_compose_keyboard_capture"]["evidence"] == [
+        "artifacts/ui-capture/d1l-compose-keyboard-capture-COM12-actions-68350bf.json"
     ]
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == [

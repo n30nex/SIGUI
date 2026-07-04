@@ -2,14 +2,14 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set, but release remains blocked by targeted UI corruption proof, full RF/DM acceptance, the broader SD matrix, manual physical photos/review, and long soak evidence. `scripts/release_gate_audit_d1l.py` currently reports `ready_for_public_release=false`. No release tag should be cut until that gate is green on the release commit.
+Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the broader SD matrix, manual physical photos/review, and long soak evidence. `scripts/release_gate_audit_d1l.py` currently reports `ready_for_public_release=false`. No release tag should be cut until that gate is green on the release commit.
 
 ## Feature Matrix
 
 | Area | Status | Notes |
 |---|---|---|
 | GitHub Actions firmware package | Working | Builds ESP32 firmware, release package, RP2040 SD bridge UF2, and official Seeed SD smoke UF2 with checksums. |
-| Touch shell | Partial | Home, Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage exist. Current work targets split-page redraw corruption and keyboard/sheet layout polish. |
+| Touch shell | Partial | Home, Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage exist. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets split-page redraw corruption and broader keyboard/sheet layout polish. |
 | Public messages | Hardware-proven core | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
@@ -48,6 +48,7 @@ python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\ui_capture_d1l.py --dry-run
+python .\scripts\ui_compose_keyboard_capture_d1l.py --dry-run --targets public,public-long,dm,dm-long
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
@@ -80,6 +81,7 @@ Focused UI proof:
 $env:D1L_PORT = "COM12"
 python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
+python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
 ```
 
 Guided SD install, only when autonomous RP2040 access is not available:

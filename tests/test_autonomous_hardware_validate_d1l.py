@@ -626,3 +626,69 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
     assert report["ready_for_public_release"] is False
     assert report["release_ready"] is False
     assert report["release_gate"]["p0_failed_count"] == 2
+
+
+def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_path, monkeypatch):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--skip-esp32-flash",
+            "--skip-rp2040-official-smoke",
+            "--include-ui-probes",
+        ]
+    )
+
+    def ok_step(kind: str) -> dict:
+        return {"schema": 1, "kind": kind, "ok": True, "public_rf_tx": False, "formats_sd": False}
+
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: ok_step("input_artifact_check"))
+    monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
+    monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
+    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
+    monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
+    monkeypatch.setattr(runner, "run_ui_corruption_probe", lambda ctx, rounds, dry_run: ok_step("ui_corruption_probe"))
+    monkeypatch.setattr(runner, "run_scroll_probe", lambda ctx, dry_run: ok_step("scroll_probe"))
+    monkeypatch.setattr(runner, "run_ui_pixel_capture", lambda ctx, dry_run: ok_step("ui_pixel_capture"))
+    monkeypatch.setattr(
+        runner,
+        "run_ui_compose_keyboard_capture",
+        lambda ctx, dry_run: ok_step("ui_compose_keyboard_capture"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_release_gate",
+        lambda ctx, dry_run: {
+            "schema": 1,
+            "kind": "release_gate_audit",
+            "ok": True,
+            "ready_for_public_release": False,
+            "failed_count": 3,
+            "p0_failed_count": 2,
+        },
+    )
+
+    report = runner.run_validation(args)
+
+    assert [step["kind"] for step in report["runs"]] == [
+        "input_artifact_check",
+        "rp2040_autonomous_access_precheck",
+        "rp2040_bridge_restore",
+        "rp2040_bridge_preflight",
+        "sd_file_canary",
+        "d1l_smoke",
+        "ui_corruption_probe",
+        "scroll_probe",
+        "ui_pixel_capture",
+        "ui_compose_keyboard_capture",
+        "release_gate_audit",
+    ]
+    assert report["ok"] is True
