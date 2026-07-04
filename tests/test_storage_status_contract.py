@@ -147,6 +147,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     )[0]
     assert "d1l_storage_status_mount(timeout_ms)" in boot_prepare
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
+    assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
+    assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
     assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in source
     assert 'strcmp(s_status.sd_state, "mount_pending")' in source
     assert "poll_mount_pending()" in boot_prepare

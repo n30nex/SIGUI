@@ -155,11 +155,12 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
         "DiagSnapshot pending_diag_snapshot()", 1
     )[0]
-    assert "start_sd_worker(SD_WORKER_MOUNT)" not in request_mount_body
-    assert "mount_status_blocking()" in request_mount_body
+    assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
+    assert "mount_status_blocking()" not in request_mount_body
     assert 'pending_snapshot("sd_worker_busy")' in request_mount_body
-    assert "s_file_command_active = true" in request_mount_body
-    assert "s_file_command_active = false" in request_mount_body
+    assert 'pending_snapshot("filesystem_mounting")' in request_mount_body
+    assert "s_file_command_active = true" not in request_mount_body
+    assert "s_file_command_active = false" not in request_mount_body
     send_mount_body = sketch.split("void send_mount_status()", 1)[1].split(
         "void send_ping()", 1
     )[0]
@@ -407,10 +408,12 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     )[0]
     assert "SdSnapshot mounted = mounted_snapshot_from_current_config();" in request_mount_body
     assert "snapshot_ready_for_file_ops(mounted)" in request_mount_body
-    assert "recover_file_ops_mount()" in request_mount_body
-    assert request_mount_body.index("snapshot_ready_for_file_ops(mounted)") < request_mount_body.index(
-        "recover_file_ops_mount()"
-    )
+    assert "recover_file_ops_mount()" not in request_mount_body
+    assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
+    file_line_body = sketch.split("void handle_file_line", 1)[1].split(
+        "void handle_line", 1
+    )[0]
+    assert "recover_file_ops_mount()" in file_line_body
     assert "bool prepare_file_write_target" in sketch
     assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch

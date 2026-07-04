@@ -1823,24 +1823,23 @@ SdSnapshot mount_status_blocking() {
 SdSnapshot request_mount_status() {
     refresh_worker_results();
     SdSnapshot status = current_status();
+    if (snapshot_ready_for_file_ops(status)) {
+        return status;
+    }
     if (status.mounted && snapshot_fs_is_fat32(status)) {
         SdSnapshot mounted = mounted_snapshot_from_current_config();
         if (snapshot_ready_for_file_ops(mounted)) {
             return cache_status(mounted);
         }
-        if (recover_file_ops_mount()) {
-            return current_status();
-        }
-        return cache_status(mounted);
     }
     if (s_worker_busy || s_worker_request != SD_WORKER_NONE) {
         return cache_status(pending_snapshot("sd_worker_busy"));
     }
 
-    s_file_command_active = true;
-    SdSnapshot mounted = mount_status_blocking();
-    s_file_command_active = false;
-    return cache_status(mounted);
+    if (start_sd_worker(SD_WORKER_MOUNT)) {
+        return cache_status(pending_snapshot("filesystem_mounting"));
+    }
+    return cache_status(pending_snapshot("sd_worker_busy"));
 }
 
 bool recover_file_ops_mount() {
