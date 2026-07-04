@@ -1581,58 +1581,60 @@ static void print_storage_diag_probe(const char *name,
            (unsigned long)capacity_kb);
 }
 
+static d1l_rp2040_sd_diag_t s_console_storage_diag;
+
 static void cmd_storage_diag(void)
 {
-    d1l_rp2040_sd_diag_t diag = {0};
-    esp_err_t ret = d1l_rp2040_bridge_sd_diag(&diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_rp2040_sd_diag_t *diag = &s_console_storage_diag;
+    esp_err_t ret = d1l_rp2040_bridge_sd_diag(diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"storage diag\",\"code\":\"%s\",\"bridge_ready\":%s,\"diag_supported\":%s,\"response_truncated\":%s,\"pins\":",
-           D1L_CONSOLE_SCHEMA,
-           bool_json(ret == ESP_OK),
-           esp_err_to_name(ret),
-           bool_json(diag.bridge_ready),
-           bool_json(diag.protocol_supported),
-           bool_json(diag.response_truncated));
-    print_json_string(diag.pins[0] ? diag.pins : "unknown");
+            D1L_CONSOLE_SCHEMA,
+            bool_json(ret == ESP_OK),
+            esp_err_to_name(ret),
+            bool_json(diag->bridge_ready),
+            bool_json(diag->protocol_supported),
+            bool_json(diag->response_truncated));
+    print_json_string(diag->pins[0] ? diag->pins : "unknown");
     printf(",\"spi_hz\":%lu,\"selected_power\":",
-           (unsigned long)diag.spi_hz);
-    print_json_string(diag.selected_power[0] ? diag.selected_power : "unknown");
+            (unsigned long)diag->spi_hz);
+    print_json_string(diag->selected_power[0] ? diag->selected_power : "unknown");
     printf(",\"selected_mode\":");
-    print_json_string(diag.selected_mode[0] ? diag.selected_mode : "unknown");
+    print_json_string(diag->selected_mode[0] ? diag->selected_mode : "unknown");
     printf(",\"mount_selected\":%s,\"probes\":{",
-           bool_json(diag.mount_selected));
+            bool_json(diag->mount_selected));
     printf("\"high_dedicated\":{\"present\":%s,\"error\":%lu,\"data\":%lu,\"capacity_kb\":%lu}",
-           bool_json(diag.high_dedicated_present),
-           (unsigned long)diag.high_dedicated_error,
-           (unsigned long)diag.high_dedicated_data,
-           (unsigned long)diag.high_dedicated_capacity_kb);
-    print_storage_diag_probe("high_shared", diag.high_shared_present,
-                             diag.high_shared_error, diag.high_shared_data,
-                             diag.high_shared_capacity_kb);
-    print_storage_diag_probe("low_dedicated", diag.low_dedicated_present,
-                             diag.low_dedicated_error, diag.low_dedicated_data,
-                             diag.low_dedicated_capacity_kb);
-    print_storage_diag_probe("low_shared", diag.low_shared_present,
-                             diag.low_shared_error, diag.low_shared_data,
-                             diag.low_shared_capacity_kb);
+            bool_json(diag->high_dedicated_present),
+            (unsigned long)diag->high_dedicated_error,
+            (unsigned long)diag->high_dedicated_data,
+            (unsigned long)diag->high_dedicated_capacity_kb);
+    print_storage_diag_probe("high_shared", diag->high_shared_present,
+                             diag->high_shared_error, diag->high_shared_data,
+                             diag->high_shared_capacity_kb);
+    print_storage_diag_probe("low_dedicated", diag->low_dedicated_present,
+                             diag->low_dedicated_error, diag->low_dedicated_data,
+                             diag->low_dedicated_capacity_kb);
+    print_storage_diag_probe("low_shared", diag->low_shared_present,
+                             diag->low_shared_error, diag->low_shared_data,
+                             diag->low_shared_capacity_kb);
     printf("},\"formats_sd\":false,\"public_rf_tx\":false,\"note\":");
-    print_json_string(diag.note[0] ? diag.note : "");
+    print_json_string(diag->note[0] ? diag->note : "");
     printf("}\n");
 }
 
 static void cmd_storage_diag_raw(void)
 {
-    d1l_rp2040_sd_diag_t diag = {0};
-    esp_err_t ret = d1l_rp2040_bridge_sd_diag(&diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    d1l_rp2040_sd_diag_t *diag = &s_console_storage_diag;
+    esp_err_t ret = d1l_rp2040_bridge_sd_diag(diag, D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"storage diag raw\",\"code\":\"%s\",\"bridge_ready\":%s,\"diag_supported\":%s,\"response_truncated\":%s,\"raw_line\":",
-           D1L_CONSOLE_SCHEMA,
-           bool_json(ret == ESP_OK),
-           esp_err_to_name(ret),
-           bool_json(diag.bridge_ready),
-           bool_json(diag.protocol_supported),
-           bool_json(diag.response_truncated));
-    print_json_string(diag.raw_line[0] ? diag.raw_line : "");
+            D1L_CONSOLE_SCHEMA,
+            bool_json(ret == ESP_OK),
+            esp_err_to_name(ret),
+            bool_json(diag->bridge_ready),
+            bool_json(diag->protocol_supported),
+            bool_json(diag->response_truncated));
+    print_json_string(diag->raw_line[0] ? diag->raw_line : "");
     printf(",\"formats_sd\":false,\"public_rf_tx\":false,\"note\":");
-    print_json_string(diag.note[0] ? diag.note : "");
+    print_json_string(diag->note[0] ? diag->note : "");
     printf("}\n");
 }
 
