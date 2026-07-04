@@ -75,6 +75,34 @@ def test_esptool_command_uses_actions_build_files(tmp_path):
     assert str((build / "meshcore_deskos_d1l.bin").resolve()) in command
 
 
+def test_flash_esp32_waits_after_successful_hard_reset(tmp_path, monkeypatch):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    write_flasher_args(run_dir / "d1l-firmware-artifacts" / "build")
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=run_dir,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    sleeps = []
+
+    monkeypatch.setattr(runner, "command_report", lambda *args, **kwargs: {"ok": True})
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    report = runner.flash_esp32(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert report["post_flash_settle_sec"] == runner.POST_ESP32_FLASH_SETTLE_SEC
+    assert sleeps == [runner.POST_ESP32_FLASH_SETTLE_SEC]
+
+
 def test_release_gate_command_disables_meshbot_port(tmp_path):
     ctx = runner.RunContext(
         root=tmp_path,

@@ -48,6 +48,7 @@ DEFAULT_D1L_PORT = "COM" + "12"
 DEFAULT_RP2040_PORT = "COM" + "16"
 FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
 DEFAULT_ONBOARDING_NAME = "D1L Desk"
+POST_ESP32_FLASH_SETTLE_SEC = 8.0
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
@@ -352,11 +353,14 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
         "public_rf_tx": False,
         "formats_sd": False,
         "command": cmd,
+        "post_flash_settle_sec": POST_ESP32_FLASH_SETTLE_SEC,
         "ok": True,
     }
     if not dry_run:
         report["result"] = command_report("esp32_flash", cmd, ctx.root, timeout=240)
         report["ok"] = report["result"].get("ok") is True
+        if report["ok"]:
+            time.sleep(POST_ESP32_FLASH_SETTLE_SEC)
     write_json(out, report)
     report["path"] = str(out)
     return report
