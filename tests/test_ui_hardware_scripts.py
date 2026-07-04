@@ -49,6 +49,35 @@ def test_ui_corruption_probe_dry_run_is_explicit_port_safe():
     assert "ui tab packets" in report["commands"]
     assert "ui data-canary uiRx0001" in report["commands"]
     assert report["checks"]["data_refresh_exercised"] is True
+    assert report["checks"]["no_stuck_pending"] is True
+    assert report["checks"]["final_active_tab_known"] is True
+
+
+def test_ui_corruption_probe_uses_nested_refresh_status_for_final_pending():
+    report = ui_corruption_probe_d1l.summarize_telemetry(
+        [
+            {
+                "kind": "tab",
+                "statuses": [{"ok": True, "active_tab": "settings", "pending": False}],
+                "health": {"ok": True, "uptime_ms": 1000},
+            },
+            {
+                "kind": "data_refresh",
+                "packet_tab": {
+                    "statuses": [{"ok": True, "active_tab": "packets", "pending": False}],
+                },
+                "messages_tab": {
+                    "statuses": [{"ok": True, "active_tab": "messages", "pending": False}],
+                },
+                "status": {"ok": True, "active_tab": "messages", "pending": False},
+                "health": {"ok": True, "uptime_ms": 1200},
+            },
+        ]
+    )
+
+    assert report["uptime_monotonic"] is True
+    assert report["final_active_tab"] == "messages"
+    assert report["final_pending"] is False
 
 
 def test_ui_corruption_probe_requires_token_in_result_entries():

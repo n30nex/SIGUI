@@ -55,10 +55,14 @@ def ui_corruption_probe_payload(**overrides: object) -> dict:
             "data_refreshes_pass": True,
             "no_public_rf": True,
             "no_formatting": True,
+            "no_stuck_pending": True,
+            "final_active_tab_known": True,
         },
         "telemetry": {
             "health_sample_count": 180,
             "uptime_monotonic": True,
+            "final_active_tab": "messages",
+            "final_pending": False,
             "telemetry_fields": [
                 "heap_free",
                 "heap_min_free",
@@ -1188,6 +1192,20 @@ def test_release_gate_audit_requires_targeted_ui_corruption_rounds(tmp_path: Pat
         hardware / "ui_corruption_probe_68350bf.json",
         ui_corruption_probe_payload(rounds=3, data_refresh_events=3),
     )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_corruption_probe"]["ok"] is False
+
+
+def test_release_gate_audit_requires_ui_corruption_probe_to_finish_not_pending(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = ui_corruption_probe_payload()
+    payload["checks"]["no_stuck_pending"] = False
+    payload["telemetry"]["final_pending"] = True
+    write_json(hardware / "ui_corruption_probe_68350bf.json", payload)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)

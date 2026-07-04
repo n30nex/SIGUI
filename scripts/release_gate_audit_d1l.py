@@ -447,12 +447,16 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
         and int(data.get("failure_count") or 0) == 0
         and int(telemetry.get("health_sample_count") or 0) > 0
         and telemetry.get("uptime_monotonic") is True
+        and telemetry.get("final_pending") is False
+        and telemetry.get("final_active_tab") in REQUIRED_SCROLL_SURFACES.values()
         and REQUIRED_UI_TELEMETRY_FIELDS.issubset(telemetry_fields)
         and checks.get("tab_switches_settle") is True
         and checks.get("data_refresh_exercised") is True
         and checks.get("data_refreshes_pass") is True
         and checks.get("no_public_rf") is True
         and checks.get("no_formatting") is True
+        and checks.get("no_stuck_pending") is True
+        and checks.get("final_active_tab_known") is True
     )
 
 

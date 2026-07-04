@@ -83,6 +83,8 @@ def dry_run_report(
             "data_refreshes_pass": not skip_data_canary,
             "no_public_rf": True,
             "no_formatting": True,
+            "no_stuck_pending": True,
+            "final_active_tab_known": True,
         },
     }
 
@@ -142,6 +144,15 @@ def summarize_telemetry(events: list[dict]) -> dict:
         statuses = event.get("statuses") or []
         if statuses and isinstance(statuses[-1], dict):
             status_rows.append(statuses[-1])
+        status = event.get("status")
+        if isinstance(status, dict):
+            status_rows.append(status)
+        for nested_name in ("packet_tab", "messages_tab"):
+            nested = event.get(nested_name)
+            if isinstance(nested, dict):
+                nested_statuses = nested.get("statuses") or []
+                if nested_statuses and isinstance(nested_statuses[-1], dict):
+                    status_rows.append(nested_statuses[-1])
 
     metrics = {}
     for field in TELEMETRY_FIELDS:
@@ -315,6 +326,10 @@ def run_probe(
     telemetry_failures = []
     if not telemetry.get("uptime_monotonic"):
         telemetry_failures.append({"check": "uptime_monotonic", "ok": False})
+    if telemetry.get("final_pending") is not False:
+        telemetry_failures.append({"check": "no_stuck_pending", "ok": False})
+    if telemetry.get("final_active_tab") not in TAB_SEQUENCE:
+        telemetry_failures.append({"check": "final_active_tab_known", "ok": False})
     report = {
         "schema": 1,
         "kind": "ui_corruption_probe",
@@ -349,6 +364,8 @@ def run_probe(
             "no_public_rf": True,
             "no_formatting": True,
             "uptime_monotonic": telemetry.get("uptime_monotonic") is True,
+            "no_stuck_pending": telemetry.get("final_pending") is False,
+            "final_active_tab_known": telemetry.get("final_active_tab") in TAB_SEQUENCE,
         },
         "setup_events": setup_events,
         "events": events,
