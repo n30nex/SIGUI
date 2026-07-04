@@ -172,6 +172,7 @@ def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(
     def fake_capture_frame(**kwargs):
         assert kwargs["prep_commands"] == ["ui compose-probe public"]
         assert kwargs["prep_ok_required"] is False
+        assert kwargs["post_prep_settle_sec"] == 0.25
         return {
             "schema": 1,
             "kind": "ui_pixel_capture",

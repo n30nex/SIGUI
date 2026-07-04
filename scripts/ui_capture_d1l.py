@@ -148,6 +148,7 @@ def capture_frame(
     chunk_size: int,
     prep_commands: list[str] | None = None,
     prep_ok_required: bool = True,
+    post_prep_settle_sec: float = 0.0,
 ) -> dict[str, Any]:
     try:
         import serial
@@ -183,6 +184,8 @@ def capture_frame(
                     "public_rf_tx": False,
                     "formats_sd": False,
                 }
+        if prep_commands and post_prep_settle_sec > 0:
+            time.sleep(post_prep_settle_sec)
         status = send_console_command(ser, "ui capture status", timeout)
         events.append(status)
         begin = send_console_command(ser, "ui capture begin", timeout)

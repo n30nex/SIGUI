@@ -105,6 +105,7 @@ def capture_target(
         chunk_size=chunk_size,
         prep_commands=[f"ui compose-probe {target}"],
         prep_ok_required=False,
+        post_prep_settle_sec=0.25,
     )
     raw = bytes(frame.pop("raw_bytes", b""))
     target_slug = slug(target)

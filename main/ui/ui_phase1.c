@@ -2180,6 +2180,7 @@ static void layout_compose_sheet_controls(void)
     }
     if (s_compose_keyboard) {
         lv_obj_set_size(s_compose_keyboard, 448, 258);
+        lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT);
         lv_obj_set_pos(s_compose_keyboard, 16, 158);
     }
 }
@@ -6570,6 +6571,9 @@ static void open_compose_probe_on_ui_task(const char *target)
         layout_compose_sheet_controls();
     }
     lv_obj_update_layout(s_screen);
+    layout_compose_sheet_controls();
+    lv_obj_update_layout(s_screen);
+    request_full_screen_repaint();
 }
 
 static void fill_compose_probe_geometry(d1l_ui_compose_probe_result_t *result)

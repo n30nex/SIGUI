@@ -218,9 +218,15 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "lv_obj_set_scroll_dir(s_compose_sheet, LV_DIR_NONE)" in layout
     assert "lv_obj_scroll_to_y(s_compose_sheet, 0, LV_ANIM_OFF)" in layout
     assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in layout
+    assert "lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT)" in layout
     assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in layout
     assert "configure_compose_keyboard(s_compose_keyboard)" in compose
     assert "layout_compose_sheet_controls()" in compose
+    probe = source.split("static void open_compose_probe_on_ui_task", 1)[1].split(
+        "static void fill_compose_probe_geometry", 1
+    )[0]
+    assert "lv_obj_update_layout(s_screen);\n    layout_compose_sheet_controls();\n    lv_obj_update_layout(s_screen);" in probe
+    assert "request_full_screen_repaint()" in probe
 
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
