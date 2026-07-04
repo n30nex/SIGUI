@@ -27,6 +27,13 @@ def canary_success() -> str:
     )
 
 
+def canary_timeout() -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"storage filecanary",'
+        '"code":"ESP_ERR_TIMEOUT","step":"write_tmp","file_note":"timeout"}\n'
+    )
+
+
 class FakeSerial:
     def __init__(self, responses):
         self.responses = [line.encode("utf-8") for line in responses]
@@ -120,10 +127,48 @@ def test_sd_file_canary_success_requires_canary_ok(monkeypatch):
     assert report["ok"] is True
     assert report["canary_passed"] is True
     assert report["canary_unavailable_ok"] is False
+    assert report["canary_retried"] is False
     assert report["storage_file_gate_ready_before"] is True
     assert report["storage_file_gate_ready_after"] is True
     assert report["retained_history_sd_ready_before"] is True
     assert report["retained_history_sd_ready_after"] is True
+
+
+def test_sd_file_canary_retries_single_transient_timeout_when_storage_stays_ready(monkeypatch):
+    ser = FakeSerial(
+        [
+            ready_storage_status(),
+            canary_timeout(),
+            ready_storage_status(),
+            canary_success(),
+            ready_storage_status(),
+            '{"schema":1,"ok":true,"cmd":"packets","count":1,"persisted":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(sd_file_canary_d1l.time, "sleep", lambda _seconds: None)
+    report = sd_file_canary_d1l.run_canary("COM12", 115200, 1.0, allow_unavailable=False)
+
+    assert report["ok"] is True
+    assert report["canary_passed"] is True
+    assert report["canary_retried"] is True
+    assert report["canary_retry_ready"] is True
+    assert report["initial_canary"]["step"] == "write_tmp"
+    assert report["canary"]["ok"] is True
+    assert ser.writes == [
+        "storage status\n",
+        "storage filecanary\n",
+        "storage status\n",
+        "storage filecanary\n",
+        "storage status\n",
+        "packets\n",
+        "health\n",
+    ]
 
 
 def test_sd_file_canary_waits_for_storage_manager_ready_sd(monkeypatch):

@@ -97,6 +97,17 @@ def filecanary_passed(canary: dict) -> bool:
     )
 
 
+def filecanary_transient_timeout(canary: dict) -> bool:
+    return (
+        canary.get("ok") is False
+        and canary.get("cmd") == "storage filecanary"
+        and (
+            canary.get("code") in {"ESP_ERR_TIMEOUT", "TIMEOUT"}
+            or canary.get("file_note") == "timeout"
+        )
+    )
+
+
 def dry_run_report() -> dict:
     return {
         "schema": 1,
@@ -162,10 +173,22 @@ def run_canary(
         )
         results.extend(ready_wait_results)
         canary = send_console_command(ser, "storage filecanary", timeout)
+        initial_canary = canary
+        results.append(canary)
+        canary_retry_status = None
+        canary_retry = None
+        if filecanary_transient_timeout(canary):
+            canary_retry_status = send_console_command(ser, "storage status", timeout)
+            results.append(canary_retry_status)
+            if storage_ready_for_filecanary(canary_retry_status):
+                time.sleep(1.0)
+                canary_retry = send_console_command(ser, "storage filecanary", timeout)
+                results.append(canary_retry)
+                canary = canary_retry
         after = send_console_command(ser, "storage status", timeout)
         packets = send_console_command(ser, "packets", timeout)
         health = send_console_command(ser, "health", timeout)
-        results.extend([canary, after, packets, health])
+        results.extend([after, packets, health])
 
     retained_history_sd_before = retained_history_backends_ready(before)
     retained_history_sd_after = retained_history_backends_ready(after)
@@ -196,6 +219,11 @@ def run_canary(
         "allow_unavailable": allow_unavailable,
         "canary_passed": canary_ok,
         "canary_unavailable_ok": unavailable_ok,
+        "canary_retried": canary_retry is not None,
+        "canary_retry_ready": (
+            storage_ready_for_filecanary(canary_retry_status)
+            if canary_retry_status is not None else None
+        ),
         "storage_file_gate_ready_before": storage_file_gate_ready(before),
         "storage_file_gate_ready_after": storage_file_gate_ready(after),
         "storage_manager_ready_before": storage_manager_ready_for_file_ops(before),
@@ -211,6 +239,9 @@ def run_canary(
         "storage_before": before,
         "storage_after": after,
         "canary": canary,
+        "initial_canary": initial_canary,
+        "canary_retry_status": canary_retry_status,
+        "canary_retry": canary_retry,
         "packets": packets,
         "health": health,
         "results": results,

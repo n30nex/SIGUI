@@ -605,8 +605,6 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
             '"rp2040_protocol_supported":true,"file_ops":true,"atomic_rename":true,'
             '"file_line_max":512,"file_chunk_max":192,"path_max":96}}\n',
             ready_storage_line(),
-            '{"schema":1,"ok":true,"cmd":"storage diag","diag_supported":true,'
-            '"mount_selected":true,"public_rf_tx":false,"formats_sd":false}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
     )
@@ -629,8 +627,18 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
 
     assert report["ok"] is True
     assert report["storage_diag_ok"] is True
+    assert report["storage_diag"]["skipped"] is True
+    assert report["storage_diag"]["reason"] == "storage_file_gate_ready"
     assert report["ready_for_sd_acceptance"] is True
     assert report["classification"]["state"] == "sd_bridge_ready"
+    assert ser.writes == [
+        "rp2040 status\n",
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage mount\n",
+        "storage status\n",
+        "health\n",
+    ]
 
 
 def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):
