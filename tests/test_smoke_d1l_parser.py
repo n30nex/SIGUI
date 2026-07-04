@@ -71,9 +71,11 @@ def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
             '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":3}\n',
             '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3,"wifi_enabled":false,"ble_companion_enabled":false}\n',
             '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
             '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Smoke Persist","path_hash_bytes":3,"wifi_enabled":false,"ble_companion_enabled":false}\n',
             '{"schema":1,"ok":true,"cmd":"settings reset","node_name":"D1L Desk"}\n',
             '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
             '{"schema":1,"ok":true,"cmd":"settings get","node_name":"D1L Desk","path_hash_bytes":1,"wifi_enabled":false,"ble_companion_enabled":false}\n',
         ]
     )
@@ -91,9 +93,11 @@ def test_persistence_check_reboots_and_restores_defaults(monkeypatch):
         "settings set pathhash 3\n",
         "settings get\n",
         "reboot\n",
+        "health\n",
         "settings get\n",
         "settings reset\n",
         "reboot\n",
+        "health\n",
         "settings get\n",
     ]
     assert ser.reset_count == 2

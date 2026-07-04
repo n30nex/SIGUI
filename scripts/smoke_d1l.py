@@ -181,6 +181,23 @@ def wait_after_reboot(ser, settle_seconds: float) -> None:
     ser.reset_input_buffer()
 
 
+def wait_for_console_ready(ser, timeout: float, attempts: int = 3) -> dict:
+    last: dict | None = None
+    for attempt in range(max(1, attempts)):
+        last = send_console_command(ser, "health", max(timeout, 8.0))
+        if last.get("ok") is True:
+            return last
+        if attempt + 1 < attempts:
+            time.sleep(1.0)
+            ser.reset_input_buffer()
+    return last or {
+        "schema": 1,
+        "ok": False,
+        "cmd": "health",
+        "code": "CONSOLE_NOT_READY",
+    }
+
+
 def run_persistence_check(ser, timeout: float) -> dict:
     test_name = "D1L Smoke Persist"
     steps: list[dict] = []
@@ -201,6 +218,7 @@ def run_persistence_check(ser, timeout: float) -> dict:
     steps.append(reboot)
     if reboot.get("ok"):
         wait_after_reboot(ser, max(2.5, timeout / 2.0))
+        steps.append(wait_for_console_ready(ser, timeout))
 
     after = send_console_command(ser, "settings get", timeout)
     steps.append(after)
@@ -212,6 +230,7 @@ def run_persistence_check(ser, timeout: float) -> dict:
     steps.append(cleanup_reboot)
     if cleanup_reboot.get("ok"):
         wait_after_reboot(ser, max(2.5, timeout / 2.0))
+        steps.append(wait_for_console_ready(ser, timeout))
 
     cleanup = send_console_command(ser, "settings get", timeout)
     steps.append(cleanup)
