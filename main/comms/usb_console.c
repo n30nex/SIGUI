@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "esp_err.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -1733,12 +1734,6 @@ static void print_storage_filecanary_error_and_resume(const char *step,
 {
     d1l_storage_manager_resume();
     print_storage_filecanary_error(step, ret, status, file, hint);
-}
-
-static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_result_t *file)
-{
-    return ret == ESP_OK || ret == ESP_ERR_NOT_FOUND ||
-           (file && strcmp(file->err, "not_found") == 0);
 }
 
 static bool storage_filecanary_ready(const d1l_storage_status_t *status)
