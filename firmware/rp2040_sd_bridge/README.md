@@ -36,7 +36,7 @@ It speaks the newline-delimited protocol documented in
   RP2040 internal pull-up and input buffer before and after SPI1 claims the pin
   so a floating or open card-response line does not read as a false all-zero
   response.
-- UART baud: 921600, matching Seeed's ESP32/RP2040 internal UART example.
+- UART baud: 115200 for reliable bounded ESP32/RP2040 command exchange.
 
 The pin values are based on Seeed's SenseCAP Indicator RP2040 Arduino examples.
 This bridge code is original project code and intentionally keeps the protocol
