@@ -27,7 +27,7 @@ Autonomous SD refresh, when the ESP32 app is already flashed from the matching
 Actions artifact:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-esp32-flash
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-esp32-flash --refresh-rp2040-smoke
 ```
 
 The script will:
@@ -44,6 +44,17 @@ The script will:
 9. If preflight reports the SD file gate ready, run the short SD file/export
    canaries. The autonomous runner additionally captures raw diagnostics,
    map-tile, retained-history, reboot/remount, and RP2040-unavailable evidence.
+
+For ESP32/UI-only firmware validation after the RP2040 bridge has already been
+proved, do not run the refresh command above. Use the default existing-bridge
+path, or skip the SD suite entirely when the fix does not touch storage:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
+```
+
+That path flashes only the ESP32 artifact on COM12 and does not copy any RP2040
+UF2 file.
 
 The report is written to:
 

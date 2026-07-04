@@ -97,6 +97,31 @@ def test_scroll_probe_rejects_unknown_screen():
         raise AssertionError("parse_screens accepted an unknown screen")
 
 
+def test_scroll_probe_allows_static_home_but_requires_other_surfaces_to_move():
+    def event(screen: str) -> dict:
+        tab = "home" if screen == "home" else "settings"
+        return {
+            "screen": screen,
+            "tab": tab,
+            "request": {"ok": True},
+            "tab_active": True,
+            "probe": {
+                "ok": screen != "home",
+                "surface": screen,
+                "tab": tab,
+                "target_found": True,
+                "scrollable": True,
+                "moved": False,
+            },
+            "status": {"active_tab": tab},
+            "health": {"ok": True},
+            "crashlog": {"entries": []},
+        }
+
+    assert scroll_probe_d1l.event_failed(event("home")) is False
+    assert scroll_probe_d1l.event_failed(event("storage")) is True
+
+
 def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     release_docs = [
         "README.md",

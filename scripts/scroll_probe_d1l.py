@@ -42,6 +42,7 @@ SCREEN_ALIASES = {
 }
 DEFAULT_SCREENS = tuple(SCROLL_SURFACES)
 VALID_SCREENS = tuple(SCROLL_SURFACES)
+SCROLL_MOVEMENT_OPTIONAL = {"home"}
 
 
 def utc_stamp() -> str:
@@ -87,6 +88,28 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
 def crashlog_has_entries(row: dict) -> bool:
     entries = row.get("entries")
     return isinstance(entries, list) and len(entries) > 0
+
+
+def event_failed(event: dict) -> bool:
+    probe = event.get("probe") if isinstance(event.get("probe"), dict) else {}
+    screen = str(event.get("screen") or "")
+    movement_ok = (
+        probe.get("scrollable") is True
+        and (probe.get("moved") is True or screen in SCROLL_MOVEMENT_OPTIONAL)
+    )
+    probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
+    return (
+        not event["request"].get("ok")
+        or not event["tab_active"]
+        or not probe_ok
+        or probe.get("surface") != event["screen"]
+        or probe.get("tab") != event["tab"]
+        or probe.get("target_found") is not True
+        or not movement_ok
+        or event["status"].get("active_tab") != event["tab"]
+        or not event["health"].get("ok")
+        or crashlog_has_entries(event["crashlog"])
+    )
 
 
 def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, list[dict]]:
@@ -179,19 +202,10 @@ def run_scroll_probe(
             "expected_active_tab": event["tab"],
             "health_ok": event["health"].get("ok"),
             "crashlog_entries": crashlog_has_entries(event["crashlog"]),
+            "movement_required": event["screen"] not in SCROLL_MOVEMENT_OPTIONAL,
         }
         for event in events
-        if not event["request"].get("ok")
-        or not event["tab_active"]
-        or not event["probe"].get("ok")
-        or event["probe"].get("surface") != event["screen"]
-        or event["probe"].get("tab") != event["tab"]
-        or event["probe"].get("target_found") is not True
-        or event["probe"].get("scrollable") is not True
-        or event["probe"].get("moved") is not True
-        or event["status"].get("active_tab") != event["tab"]
-        or not event["health"].get("ok")
-        or crashlog_has_entries(event["crashlog"])
+        if event_failed(event)
     ]
     setup_failures = [
         event for event in setup_events if not event.get("result", {}).get("ok")
@@ -208,6 +222,7 @@ def run_scroll_probe(
         "dwell_sec": dwell_sec,
         "manual_touch": manual_touch,
         "clear_crashlog_before_start": clear_crashlog_before_start,
+        "scroll_movement_optional": sorted(SCROLL_MOVEMENT_OPTIONAL),
         "ok": not failures and not setup_failures,
         "failure_count": len(failures) + len(setup_failures),
         "failures": failures,

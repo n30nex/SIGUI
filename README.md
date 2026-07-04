@@ -78,7 +78,26 @@ Autonomous validation:
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --include-ui-probes
 ```
 
-For SD-only refreshes where the ESP32 app is already flashed from the matching Actions artifact, use `--skip-esp32-flash`. The autonomous runner captures official RP2040 SD smoke, the RP2040-unavailable fallback window, bridge restore, preflight, raw diag, file/export/map/retained/reboot canaries, smoke, and the final release-gate audit.
+The default runner flashes/tests the ESP32 side on COM12, reuses the already
+validated RP2040 bridge, and does not copy RP2040 UF2 files. For ESP32/UI-only
+fixes, skip the SD suite too:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
+```
+
+Only use the RP2040 refresh path when the bridge firmware, official SD smoke, or
+SD electrical evidence actually changed or needs to be re-proven:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
+```
+
+That refresh path captures official RP2040 SD smoke, the RP2040-unavailable
+fallback window, bridge restore, preflight, raw diag,
+file/export/map/retained/reboot canaries, smoke, and the final release-gate
+audit. For SD-only refreshes where the ESP32 app is already flashed from the
+matching Actions artifact, add `--skip-esp32-flash`.
 
 Focused UI proof:
 

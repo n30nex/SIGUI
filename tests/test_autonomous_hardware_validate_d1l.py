@@ -194,7 +194,11 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "COM8" not in json.dumps(plan["steps"])
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
-    assert "rp2040_autonomous_access_precheck" in plan["steps"]
+    assert plan["rp2040_uf2_flash"] is False
+    assert plan["rp2040_flash_mode"] == "use_existing_bridge"
+    assert "rp2040_autonomous_access_precheck" not in plan["steps"]
+    assert "flash_official_rp2040_sd_smoke" not in plan["steps"]
+    assert "restore_rp2040_bridge" not in plan["steps"]
     assert "sd_raw_diag" in plan["steps"]
     assert "sd_boot_prepare_correct_structure" in plan["steps"]
     assert "sd_boot_prepare_missing_structure" in plan["steps"]
@@ -231,6 +235,7 @@ def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
     ctx = runner.build_context(args)
     plan = runner.plan_report(ctx, args)
 
+    assert "d1l_onboarding_complete_for_ui_probes" in plan["steps"]
     assert "d1l_ui_corruption_probe" in plan["steps"]
     assert "d1l_scroll_probe" in plan["steps"]
     assert "d1l_ui_pixel_capture" in plan["steps"]
@@ -238,6 +243,39 @@ def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
     assert "COM8" not in json.dumps(plan["steps"])
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
+
+
+def test_dry_run_plan_can_focus_esp32_ui_without_sd_or_rp2040_flash(tmp_path):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--dry-run",
+            "--skip-sd-suite",
+            "--include-ui-probes",
+        ]
+    )
+
+    ctx = runner.build_context(args)
+    plan = runner.plan_report(ctx, args)
+
+    assert plan["rp2040_uf2_flash"] is False
+    assert plan["sd_suite_enabled"] is False
+    assert "flash_esp32" in plan["steps"]
+    assert "rp2040_autonomous_access_precheck" not in plan["steps"]
+    assert "restore_rp2040_bridge" not in plan["steps"]
+    assert "rp2040_bridge_preflight" not in plan["steps"]
+    assert "sd_file_canary" not in plan["steps"]
+    assert "d1l_onboarding_complete_for_ui_probes" in plan["steps"]
+    assert "d1l_ui_corruption_probe" in plan["steps"]
+    assert "d1l_ui_pixel_capture" in plan["steps"]
 
 
 def test_rp2040_port_discovery_selects_allowed_usb_cdc_and_skips_protected_ports(monkeypatch):
@@ -393,10 +431,11 @@ def test_validation_stops_at_access_precheck_before_official_smoke_or_restore(tm
             "--github-run-dir",
             str(run_dir),
             "--skip-esp32-flash",
+            "--refresh-rp2040-smoke",
         ]
     )
 
-    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
     monkeypatch.setattr(
         runner,
         "rp2040_access_precheck",
@@ -529,17 +568,18 @@ def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monk
             "--github-run-dir",
             str(run_dir),
             "--skip-esp32-flash",
+            "--refresh-rp2040-smoke",
         ]
     )
 
     def ok_step(kind: str) -> dict:
         return {"schema": 1, "kind": kind, "ok": True, "public_rf_tx": False, "formats_sd": False}
 
-    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: ok_step("input_artifact_check"))
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"))
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "run_official_sd_smoke", lambda *args, **kwargs: (_ for _ in ()).throw(OSError(22, "Invalid argument")))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
-    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run, verify_artifact: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
@@ -616,7 +656,7 @@ def test_validation_stops_before_preflight_when_bridge_restore_not_verified(tmp_
             "--github-run-dir",
             str(run_dir),
             "--skip-esp32-flash",
-            "--skip-rp2040-official-smoke",
+            "--refresh-rp2040-smoke",
         ]
     )
 
@@ -626,10 +666,10 @@ def test_validation_stops_before_preflight_when_bridge_restore_not_verified(tmp_
         restore_attempts.append(1)
         return {"schema": 1, "kind": "rp2040_bridge_restore", "ok": False, "error": "bridge_restore_not_verified"}
 
-    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: {"schema": 1, "kind": "input_artifact_check", "ok": True})
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: {"schema": 1, "kind": "rp2040_autonomous_access_precheck", "ok": True})
     monkeypatch.setattr(runner, "restore_bridge", failed_restore)
-    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: (_ for _ in ()).throw(AssertionError("preflight should not run")))
+    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run, verify_artifact: (_ for _ in ()).throw(AssertionError("preflight should not run")))
     monkeypatch.setattr(runner, "run_release_gate", lambda ctx, dry_run: {"schema": 1, "kind": "release_gate_audit", "ok": True, "ready_for_public_release": False, "failed_count": 1, "p0_failed_count": 1})
 
     report = runner.run_validation(args)
@@ -640,6 +680,8 @@ def test_validation_stops_before_preflight_when_bridge_restore_not_verified(tmp_
     assert [step["kind"] for step in report["runs"]] == [
         "input_artifact_check",
         "rp2040_autonomous_access_precheck",
+        "seeed_official_sd_smoke_capture",
+        "sd_boot_prepare_rp2040_unavailable",
         "rp2040_bridge_restore",
         "rp2040_bridge_restore",
         "release_gate_audit",
@@ -669,10 +711,10 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
     def ok_step(kind: str) -> dict:
         return {"schema": 1, "kind": kind, "ok": True, "public_rf_tx": False, "formats_sd": False}
 
-    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: ok_step("input_artifact_check"))
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"))
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
-    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run, verify_artifact: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
@@ -718,13 +760,14 @@ def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_pa
     def ok_step(kind: str) -> dict:
         return {"schema": 1, "kind": kind, "ok": True, "public_rf_tx": False, "formats_sd": False}
 
-    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, allow_download, dry_run: ok_step("input_artifact_check"))
+    monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"))
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
-    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run, verify_artifact: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     patch_sd_evidence_runners(monkeypatch, ok_step)
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
+    monkeypatch.setattr(runner, "run_onboarding_complete", lambda ctx, dry_run: ok_step("onboarding_complete"))
     monkeypatch.setattr(runner, "run_ui_corruption_probe", lambda ctx, rounds, dry_run: ok_step("ui_corruption_probe"))
     monkeypatch.setattr(runner, "run_scroll_probe", lambda ctx, dry_run: ok_step("scroll_probe"))
     monkeypatch.setattr(runner, "run_ui_pixel_capture", lambda ctx, dry_run: ok_step("ui_pixel_capture"))
@@ -750,8 +793,6 @@ def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_pa
 
     assert [step["kind"] for step in report["runs"]] == [
         "input_artifact_check",
-        "rp2040_autonomous_access_precheck",
-        "rp2040_bridge_restore",
         "rp2040_bridge_preflight",
         "sd_raw_diag",
         "sd_file_canary",
@@ -765,6 +806,7 @@ def test_completed_validation_runs_compose_capture_when_ui_probes_enabled(tmp_pa
         "sd_retained_history",
         "sd_reboot_remount",
         "d1l_smoke",
+        "onboarding_complete",
         "ui_corruption_probe",
         "scroll_probe",
         "ui_pixel_capture",

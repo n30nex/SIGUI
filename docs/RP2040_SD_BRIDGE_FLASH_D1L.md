@@ -83,23 +83,29 @@ again.
 ## Flash
 
 For unattended validation on the current D1L bench route, use the autonomous
-runner from the repository root:
+runner from the repository root only when RP2040 SD smoke/bridge evidence needs
+to be refreshed:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha>
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
 ```
 
-The runner touches only COM12 and COM16, refuses COM8/COM11/COM29, flashes the
-ESP32 image when not skipped, then performs a short RP2040 access precheck
-before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks whether
-COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
+The refresh runner touches only COM12 and COM16, refuses COM8/COM11/COM29,
+flashes the ESP32 image when not skipped, then performs a short RP2040 access
+precheck before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks
+whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
 `rp2040 double-reset` bootloader-entry pattern, then tries one `rp2040 reset`,
 and fails closed if no autonomous bootloader path is available. It does not
-format SD, does not send Public RF, and does not require user action. When access is
-available, the runner can flash the official Seeed SD smoke UF2, capture its
-COM16 JSON, restore the production bridge UF2, run short COM12 SD preflight and
-smoke evidence, and regenerate the fail-closed release gate. Targeted UI
-corruption and scroll probes are opt-in with `--include-ui-probes`.
+format SD, does not send Public RF, and does not require user action. When
+access is available, the runner flashes the official Seeed SD smoke UF2,
+captures its COM16 JSON, restores the production bridge UF2, runs short COM12
+SD preflight and smoke evidence, and regenerates the fail-closed release gate.
+Targeted UI corruption and scroll probes are opt-in with `--include-ui-probes`.
+
+For ESP32-side fixes after the RP2040 bridge is already validated, do not use
+`--refresh-rp2040-smoke`. The default autonomous runner reuses the installed
+bridge and copies no RP2040 UF2 files; add `--skip-sd-suite --include-ui-probes`
+for UI-only validation that should flash only the ESP32 artifact on COM12.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under

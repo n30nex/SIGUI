@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 DEFAULT_D1L_PORT = "COM" + "12"
 DEFAULT_RP2040_PORT = "COM" + "16"
 FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
+DEFAULT_ONBOARDING_NAME = "D1L Desk"
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
@@ -185,6 +186,22 @@ def artifact_dirs(ctx: RunContext) -> dict[str, Path]:
         "bridge": ctx.github_run_dir / "rp2040-sd-bridge-firmware",
         "official_smoke": ctx.github_run_dir / "rp2040-seeed-official-sd-smoke-firmware",
     }
+
+
+def rp2040_refresh_requested(args: argparse.Namespace) -> bool:
+    return bool(args.refresh_rp2040_smoke and not args.skip_rp2040_official_smoke)
+
+
+def required_artifact_dirs(ctx: RunContext, args: argparse.Namespace) -> dict[str, Path]:
+    dirs = artifact_dirs(ctx)
+    required = {
+        "esp32": dirs["esp32"],
+        "esp32_build": dirs["esp32_build"],
+    }
+    if rp2040_refresh_requested(args):
+        required["bridge"] = dirs["bridge"]
+        required["official_smoke"] = dirs["official_smoke"]
+    return required
 
 
 def official_sd_smoke_out(ctx: RunContext) -> Path:
@@ -1019,7 +1036,9 @@ def bridge_sha(ctx: RunContext) -> str:
 
 
 def run_existing_script(ctx: RunContext, name: str, args: list[str], out: Path, timeout: int | None, dry_run: bool) -> dict:
-    command = [sys.executable, *args, "--out", str(out)]
+    command = [sys.executable, *args]
+    if "--out" not in command:
+        command.extend(["--out", str(out)])
     if dry_run and "--dry-run" not in command:
         command.append("--dry-run")
     report = {
@@ -1040,7 +1059,7 @@ def run_existing_script(ctx: RunContext, name: str, args: list[str], out: Path, 
     return report
 
 
-def run_preflight(ctx: RunContext, dry_run: bool) -> dict:
+def run_preflight(ctx: RunContext, dry_run: bool, *, verify_artifact: bool) -> dict:
     out = ctx.hardware_dir / f"rp2040_preflight_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
     args = [
         str(ctx.root / "scripts" / "rp2040_sd_bridge_preflight_d1l.py"),
@@ -1048,11 +1067,14 @@ def run_preflight(ctx: RunContext, dry_run: bool) -> dict:
         ctx.d1l_port,
         "--timeout",
         "8",
-        "--artifact-dir",
-        str(artifact_dirs(ctx)["bridge"]),
-        "--expected-sha256",
-        bridge_sha(ctx),
     ]
+    if verify_artifact:
+        args.extend([
+            "--artifact-dir",
+            str(artifact_dirs(ctx)["bridge"]),
+            "--expected-sha256",
+            bridge_sha(ctx),
+        ])
     return run_existing_script(ctx, "rp2040_preflight", args, out, timeout=90, dry_run=dry_run)
 
 
@@ -1200,6 +1222,55 @@ def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
         "--persistence-test",
     ]
     return run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_onboarding_complete(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / (
+        f"onboarding_complete_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+    commands = [
+        f"settings onboarding complete {DEFAULT_ONBOARDING_NAME}",
+        "settings onboarding status",
+        "ui status",
+        "health",
+    ]
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "onboarding_complete",
+        "mode": "dry-run" if dry_run else "hardware",
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "port": ctx.d1l_port,
+        "commands": commands,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "ok": True,
+    }
+    if not dry_run:
+        results = []
+        for command in commands:
+            timeout = 8.0 if command.startswith("settings onboarding complete ") else 5.0
+            result = send_d1l_console(ctx.d1l_port, ctx.baud, command, timeout)
+            results.append(result)
+            if command.startswith("settings onboarding complete "):
+                time.sleep(0.5)
+        report["results"] = results
+        complete = results[0] if results else {}
+        status = results[1] if len(results) > 1 else {}
+        health = results[3] if len(results) > 3 else {}
+        report["onboarding_complete"] = (
+            complete.get("ok") is True and
+            (status.get("onboarding_complete") is True or status.get("complete") is True)
+        )
+        report["ok"] = (
+            complete.get("ok") is True and
+            report["onboarding_complete"] is True and
+            health.get("board_ready") is True and
+            health.get("ui_ready") is True
+        )
+    write_json(out, report)
+    report["path"] = str(out)
+    return report
 
 
 def run_ui_corruption_probe(ctx: RunContext, rounds: int, dry_run: bool) -> dict:
@@ -1373,14 +1444,17 @@ def download_artifacts(ctx: RunContext, dry_run: bool) -> dict:
     return report
 
 
-def verify_inputs(ctx: RunContext, *, allow_download: bool, dry_run: bool) -> dict:
-    dirs = artifact_dirs(ctx)
+def verify_inputs(ctx: RunContext, args: argparse.Namespace, *, allow_download: bool, dry_run: bool) -> dict:
+    dirs = required_artifact_dirs(ctx, args)
     missing = [str(path) for path in dirs.values() if not path.exists()]
     report = {
         "schema": 1,
         "kind": "input_artifact_check",
         "mode": "dry-run" if dry_run else "check",
         "github_run_dir": str(ctx.github_run_dir),
+        "required_artifacts": sorted(dirs),
+        "rp2040_refresh_requested": rp2040_refresh_requested(args),
+        "sd_suite_enabled": not args.skip_sd_suite,
         "missing": missing,
         "ok": not missing,
     }
@@ -1396,6 +1470,8 @@ def verify_inputs(ctx: RunContext, *, allow_download: bool, dry_run: bool) -> di
 
 def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
     safe_scenarios = list(args.sd_scenarios)
+    refresh_rp2040 = rp2040_refresh_requested(args)
+    sd_suite = not args.skip_sd_suite
     return {
         "schema": 1,
         "kind": "d1l_autonomous_hardware_validation",
@@ -1408,24 +1484,30 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
         "public_rf_tx": False,
         "formats_sd": False,
         "manual_user_required": False,
+        "rp2040_uf2_flash": refresh_rp2040,
+        "rp2040_flash_mode": "refresh_official_smoke_and_restore_bridge" if refresh_rp2040 else "use_existing_bridge",
+        "sd_suite_enabled": sd_suite,
         "steps": [
             "verify_input_artifacts",
             *(["flash_esp32"] if not args.skip_esp32_flash else []),
-            "rp2040_autonomous_access_precheck",
-            *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if not args.skip_rp2040_official_smoke else []),
-            *(["sd_boot_prepare_rp2040_unavailable"] if not args.skip_rp2040_official_smoke and not args.skip_rp2040_unavailable_capture else []),
-            "restore_rp2040_bridge",
-            "rp2040_bridge_preflight",
-            "sd_raw_diag",
-            "sd_file_canary",
-            *(f"sd_boot_prepare_{scenario.replace('-', '_')}" for scenario in safe_scenarios),
-            "sd_map_tile_canary",
-            "sd_export_canary",
-            "sd_diagnostic_export",
-            "sd_data_export",
-            "sd_retained_history",
-            "sd_reboot_remount",
+            *(["rp2040_autonomous_access_precheck"] if refresh_rp2040 else []),
+            *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if refresh_rp2040 else []),
+            *(["sd_boot_prepare_rp2040_unavailable"] if refresh_rp2040 and not args.skip_rp2040_unavailable_capture else []),
+            *(["restore_rp2040_bridge"] if refresh_rp2040 else []),
+            *((
+                "rp2040_bridge_preflight",
+                "sd_raw_diag",
+                "sd_file_canary",
+                *(f"sd_boot_prepare_{scenario.replace('-', '_')}" for scenario in safe_scenarios),
+                "sd_map_tile_canary",
+                "sd_export_canary",
+                "sd_diagnostic_export",
+                "sd_data_export",
+                "sd_retained_history",
+                "sd_reboot_remount",
+            ) if sd_suite else ()),
             "d1l_smoke",
+            *(["d1l_onboarding_complete_for_ui_probes"] if args.include_ui_probes else []),
             *(
                 [
                     "d1l_ui_corruption_probe",
@@ -1497,7 +1579,7 @@ def run_validation(args: argparse.Namespace) -> dict:
     report["runs"] = runs
 
     try:
-        inputs = verify_inputs(ctx, allow_download=args.download_artifacts, dry_run=args.dry_run)
+        inputs = verify_inputs(ctx, args, allow_download=args.download_artifacts, dry_run=args.dry_run)
         runs.append(inputs)
         if not inputs.get("ok") and not args.dry_run:
             report["ok"] = False
@@ -1514,16 +1596,17 @@ def run_validation(args: argparse.Namespace) -> dict:
                 attach_release_gate_summary(report, runs)
                 return report
 
-        access_precheck = rp2040_access_precheck(ctx, dry_run=args.dry_run)
-        runs.append(access_precheck)
-        if access_precheck.get("ok") is not True and not args.dry_run:
-            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
-            report["error"] = access_precheck.get("error", "rp2040_bootloader_unavailable")
-            report["ok"] = False
-            attach_release_gate_summary(report, runs)
-            return report
+        refresh_rp2040 = rp2040_refresh_requested(args)
+        if refresh_rp2040:
+            access_precheck = rp2040_access_precheck(ctx, dry_run=args.dry_run)
+            runs.append(access_precheck)
+            if access_precheck.get("ok") is not True and not args.dry_run:
+                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+                report["error"] = access_precheck.get("error", "rp2040_bootloader_unavailable")
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
 
-        if not args.skip_rp2040_official_smoke:
             try:
                 runs.append(
                     run_official_sd_smoke(
@@ -1547,36 +1630,43 @@ def run_validation(args: argparse.Namespace) -> dict:
             if not args.skip_rp2040_unavailable_capture:
                 runs.append(run_sd_boot_prepare_scenario(ctx, "rp2040-unavailable", dry_run=args.dry_run))
             bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
-        else:
-            bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
 
-        if bridge_restore.get("ok") is not True and not args.dry_run:
-            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
-            report["error"] = "bridge_restore_not_verified"
-            report["ok"] = False
-            attach_release_gate_summary(report, runs)
-            return report
+            if bridge_restore.get("ok") is not True and not args.dry_run:
+                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+                report["error"] = "bridge_restore_not_verified"
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
 
-        runs.append(run_preflight(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_raw_diag(ctx, dry_run=args.dry_run))
-        sd_file_canary = run_sd_file_canary(ctx, dry_run=args.dry_run)
-        runs.append(sd_file_canary)
-        if sd_file_canary.get("ok") is not True and not args.dry_run:
-            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
-            report["error"] = "sd_file_canary_failed"
-            report["ok"] = False
-            attach_release_gate_summary(report, runs)
-            return report
-        for scenario in args.sd_scenarios:
-            runs.append(run_sd_boot_prepare_scenario(ctx, scenario, dry_run=args.dry_run))
-        runs.append(run_sd_map_tile_canary(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_export_canary(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_diagnostic_export(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_data_export(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_retained_history(ctx, dry_run=args.dry_run))
-        runs.append(run_sd_reboot_remount(ctx, dry_run=args.dry_run))
+        if not args.skip_sd_suite:
+            runs.append(run_preflight(ctx, dry_run=args.dry_run, verify_artifact=refresh_rp2040))
+            runs.append(run_sd_raw_diag(ctx, dry_run=args.dry_run))
+            sd_file_canary = run_sd_file_canary(ctx, dry_run=args.dry_run)
+            runs.append(sd_file_canary)
+            if sd_file_canary.get("ok") is not True and not args.dry_run:
+                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+                report["error"] = "sd_file_canary_failed"
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
+            for scenario in args.sd_scenarios:
+                runs.append(run_sd_boot_prepare_scenario(ctx, scenario, dry_run=args.dry_run))
+            runs.append(run_sd_map_tile_canary(ctx, dry_run=args.dry_run))
+            runs.append(run_sd_export_canary(ctx, dry_run=args.dry_run))
+            runs.append(run_sd_diagnostic_export(ctx, dry_run=args.dry_run))
+            runs.append(run_sd_data_export(ctx, dry_run=args.dry_run))
+            runs.append(run_sd_retained_history(ctx, dry_run=args.dry_run))
+            runs.append(run_sd_reboot_remount(ctx, dry_run=args.dry_run))
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
         if args.include_ui_probes:
+            onboarding = run_onboarding_complete(ctx, dry_run=args.dry_run)
+            runs.append(onboarding)
+            if onboarding.get("ok") is not True and not args.dry_run:
+                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+                report["error"] = "onboarding_complete_failed"
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
             runs.append(run_ui_corruption_probe(ctx, rounds=args.ui_rounds, dry_run=args.dry_run))
             runs.append(run_scroll_probe(ctx, dry_run=args.dry_run))
             runs.append(run_ui_pixel_capture(ctx, dry_run=args.dry_run))
@@ -1604,8 +1694,22 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--esp32-flash-baud", type=int, default=460800)
     parser.add_argument("--skip-esp32-flash", action="store_true")
-    parser.add_argument("--skip-rp2040-official-smoke", action="store_true")
+    parser.add_argument(
+        "--refresh-rp2040-smoke",
+        action="store_true",
+        help="Flash the official RP2040 SD smoke UF2, capture it, then restore the DeskOS bridge UF2.",
+    )
+    parser.add_argument(
+        "--skip-rp2040-official-smoke",
+        action="store_true",
+        help="Compatibility flag; RP2040 UF2 flashing is skipped unless --refresh-rp2040-smoke is supplied.",
+    )
     parser.add_argument("--skip-rp2040-unavailable-capture", action="store_true")
+    parser.add_argument(
+        "--skip-sd-suite",
+        action="store_true",
+        help="Skip RP2040 bridge preflight and SD canaries for ESP32/UI-only validation.",
+    )
     parser.add_argument(
         "--sd-scenarios",
         default="safe",
@@ -1619,6 +1723,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args(argv)
+    if args.refresh_rp2040_smoke and args.skip_rp2040_official_smoke:
+        parser.error("--refresh-rp2040-smoke conflicts with --skip-rp2040-official-smoke")
     if args.ui_rounds <= 0:
         parser.error("--ui-rounds must be positive")
     try:

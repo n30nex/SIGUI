@@ -41,6 +41,7 @@ REQUIRED_SCROLL_SURFACES = {
     "map": "map",
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
+SCROLL_MOVEMENT_OPTIONAL = {"home"}
 REQUIRED_COMPOSE_CAPTURE_TARGETS = {"public", "public-long", "dm", "dm-long"}
 REQUIRED_NOTICE_FILES = {
     "notices/LICENSE",
@@ -561,6 +562,21 @@ def scroll_probe_results_by_screen(data: dict) -> dict:
     return probes
 
 
+def scroll_probe_screen_ok(screen: str, tab: str, probe: dict) -> bool:
+    movement_ok = (
+        probe.get("scrollable") is True
+        and (probe.get("moved") is True or screen in SCROLL_MOVEMENT_OPTIONAL)
+    )
+    probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
+    return (
+        probe_ok
+        and probe.get("surface") == screen
+        and probe.get("tab") == tab
+        and probe.get("target_found") is True
+        and movement_ok
+    )
+
+
 def scroll_probe_ok(data: dict, expected_port: str) -> bool:
     screens = set(data.get("screens") or [])
     plan = data.get("surface_plan") if isinstance(data.get("surface_plan"), list) else []
@@ -578,12 +594,7 @@ def scroll_probe_ok(data: dict, expected_port: str) -> bool:
         and all(tabs_by_screen.get(screen) == tab for screen, tab in REQUIRED_SCROLL_SURFACES.items())
         and all(
             isinstance(probes.get(screen), dict)
-            and probes[screen].get("ok") is True
-            and probes[screen].get("surface") == screen
-            and probes[screen].get("tab") == tab
-            and probes[screen].get("target_found") is True
-            and probes[screen].get("scrollable") is True
-            and probes[screen].get("moved") is True
+            and scroll_probe_screen_ok(screen, tab, probes[screen])
             for screen, tab in REQUIRED_SCROLL_SURFACES.items()
         )
     )

@@ -1236,6 +1236,26 @@ def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):
     assert gates["ui_scroll_probe"]["ok"] is False
 
 
+def test_release_gate_audit_allows_static_home_launcher_scroll_probe(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload()
+    payload["probe_results"]["home"]["ok"] = False
+    payload["probe_results"]["home"]["moved"] = False
+    payload["probe_results"]["home"]["after_y"] = 0
+    payload["probe_results"]["home"]["scroll_bottom_before"] = 0
+    payload["probe_results"]["home"]["scroll_bottom_after"] = 0
+    for event in payload["events"]:
+        if event["screen"] == "home":
+            event["probe"] = payload["probe_results"]["home"]
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_scroll_probe"]["ok"] is True
+
+
 def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filename_matches(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
