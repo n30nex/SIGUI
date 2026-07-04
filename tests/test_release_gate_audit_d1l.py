@@ -90,6 +90,7 @@ def ui_pixel_capture_payload(**overrides: object) -> dict:
         "firmware_crc32": "1234ABCD",
         "png_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.png",
         "raw_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.rgb565",
+        "onboarding_visible": False,
         "public_rf_tx": False,
         "formats_sd": False,
     }
@@ -111,6 +112,7 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
                 "sheet_visible": True,
                 "textarea_visible": True,
                 "keyboard_visible": True,
+                "onboarding_visible": False,
                 "dock_hidden": True,
                 "dm_mode": target.startswith("dm"),
                 "active_tab": "messages",
@@ -123,6 +125,7 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
             "capture": ui_pixel_capture_payload(),
             "png_path": f"artifacts/hardware/com12/ui_compose_{target}.png",
             "raw_path": f"artifacts/hardware/com12/ui_compose_{target}.rgb565",
+            "target_visible": True,
             "public_rf_tx": False,
             "formats_sd": False,
         }
@@ -1113,6 +1116,22 @@ def test_release_gate_audit_requires_compose_keyboard_capture_geometry(tmp_path:
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     payload = compose_keyboard_capture_payload()
     payload["captures"][0]["compose_probe"]["keyboard"]["h"] = 180
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_compose_keyboard_capture"]["ok"] is False
+    assert gates["ui_compose_keyboard_capture"]["details"]["path_found"] is True
+
+
+def test_release_gate_audit_rejects_onboarding_covered_compose_capture(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = compose_keyboard_capture_payload()
+    payload["captures"][0]["compose_probe"]["onboarding_visible"] = True
+    payload["captures"][0]["capture"]["onboarding_visible"] = True
+    payload["captures"][0]["target_visible"] = False
     write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", payload)
 
     report = build_audit(audit_args(tmp_path))

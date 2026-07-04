@@ -494,6 +494,7 @@ def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
         and probe.get("sheet_visible") is True
         and probe.get("textarea_visible") is True
         and probe.get("keyboard_visible") is True
+        and probe.get("onboarding_visible") is False
         and probe.get("dock_hidden") is True
         and probe.get("dm_mode") is (expected_target.startswith("dm"))
         and probe.get("public_rf_tx") is False
@@ -532,6 +533,8 @@ def compose_keyboard_capture_ok(data: dict, expected_port: str) -> bool:
             and capture["capture"].get("port") == expected_port
             and capture["capture"].get("width") == 480
             and capture["capture"].get("height") == 480
+            and capture["capture"].get("onboarding_visible") is False
+            and capture.get("target_visible") is True
             and compose_capture_probe_ok(capture.get("compose_probe"), target)
             for target, capture in captures_by_target.items()
             if target in REQUIRED_COMPOSE_CAPTURE_TARGETS

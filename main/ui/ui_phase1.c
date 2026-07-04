@@ -108,6 +108,7 @@ static lv_obj_t *s_onboarding_name_textarea;
 static lv_obj_t *s_onboarding_keyboard;
 static bool s_lock_visible;
 static bool s_onboarding_visible;
+static bool s_onboarding_probe_suppressed;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
@@ -419,6 +420,7 @@ static void map_tiles_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 static void process_pending_scroll_probe(void);
 static void process_pending_compose_probe(void);
+static bool object_is_visible(lv_obj_t *obj);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -1160,6 +1162,7 @@ static void hide_compose_sheet(void)
     if (s_compose_sheet) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_onboarding_probe_suppressed = false;
     set_dock_hidden(false);
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
@@ -1349,6 +1352,11 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         return;
     }
     if (snapshot->onboarding_complete) {
+        s_onboarding_probe_suppressed = false;
+        hide_onboarding_sheet();
+        return;
+    }
+    if (s_onboarding_probe_suppressed && object_is_visible(s_compose_sheet)) {
         hide_onboarding_sheet();
         return;
     }
@@ -6545,6 +6553,7 @@ static bool compose_probe_target_is_dm(const char *target)
 
 static void open_compose_probe_on_ui_task(const char *target)
 {
+    s_onboarding_probe_suppressed = true;
     request_tab_switch(D1L_UI_TAB_MESSAGES);
     process_pending_tab_switch();
     s_messages_show_dms = compose_probe_target_is_dm(target);
@@ -6616,6 +6625,7 @@ static void run_compose_probe_on_ui_task(const char *target,
     result->sheet_visible = object_is_visible(s_compose_sheet);
     result->textarea_visible = object_is_visible(s_compose_textarea);
     result->keyboard_visible = object_is_visible(s_compose_keyboard);
+    result->onboarding_visible = s_onboarding_visible;
     result->dock_hidden = object_is_hidden_or_missing(s_dock);
     result->dm_mode = s_compose_dm;
     fill_compose_probe_geometry(result);
@@ -6640,6 +6650,7 @@ static void run_compose_probe_on_ui_task(const char *target,
         result->sheet_visible &&
         result->textarea_visible &&
         result->keyboard_visible &&
+        !result->onboarding_visible &&
         result->dock_hidden &&
         result->dm_mode == compose_probe_target_is_dm(canonical) &&
         result->keyboard_w >= 440 &&

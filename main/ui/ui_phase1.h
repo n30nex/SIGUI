@@ -53,6 +53,7 @@ typedef struct {
     bool sheet_visible;
     bool textarea_visible;
     bool keyboard_visible;
+    bool onboarding_visible;
     bool dock_hidden;
     bool dm_mode;
     char target[16];

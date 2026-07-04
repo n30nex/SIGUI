@@ -203,6 +203,7 @@ def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(
             "bytes_per_pixel": 2,
             "pixel_format": "rgb565-le",
             "total_bytes": 4,
+            "onboarding_visible": False,
             "raw_bytes": bytes([0x00, 0xF8, 0xE0, 0x07]),
             "public_rf_tx": False,
             "formats_sd": False,
@@ -223,6 +224,7 @@ def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(
     assert result["ok"] is False
     assert result["capture"]["pixel_capture_ok"] is True
     assert result["capture"]["prep_ok"] is False
+    assert result["target_visible"] is False
     assert result["png_path"].endswith("compose-bad-geometry-public.png")
     assert result["raw_path"].endswith("compose-bad-geometry-public.rgb565")
     assert Path(result["png_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")

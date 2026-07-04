@@ -117,13 +117,18 @@ def capture_target(
         frame["raw_path"] = str(raw_path)
         frame["png_path"] = str(png_path)
     probe = compose_probe_event(frame)
+    target_visible = (
+        frame.get("onboarding_visible") is False
+        and bool(probe and probe.get("onboarding_visible") is False)
+    )
     return {
         "target": target,
-        "ok": frame.get("ok") is True and bool(probe and probe.get("ok") is True),
+        "ok": frame.get("ok") is True and bool(probe and probe.get("ok") is True) and target_visible,
         "compose_probe": probe,
         "capture": frame,
         "png_path": frame.get("png_path"),
         "raw_path": frame.get("raw_path"),
+        "target_visible": target_visible,
         "public_rf_tx": False,
         "formats_sd": False,
     }

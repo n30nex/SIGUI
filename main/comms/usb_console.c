@@ -759,11 +759,13 @@ static void cmd_ui_compose_probe(const char *line)
            D1L_CONSOLE_SCHEMA, bool_json(probe.ok));
     print_json_string(probe.target);
     printf(",\"target_supported\":%s,\"sheet_visible\":%s,\"textarea_visible\":%s,"
-           "\"keyboard_visible\":%s,\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
+           "\"keyboard_visible\":%s,\"onboarding_visible\":%s,"
+           "\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
            bool_json(probe.target_supported),
            bool_json(probe.sheet_visible),
            bool_json(probe.textarea_visible),
            bool_json(probe.keyboard_visible),
+           bool_json(probe.onboarding_visible),
            bool_json(probe.dock_hidden),
            bool_json(probe.dm_mode));
     print_json_string(probe.active_tab);
