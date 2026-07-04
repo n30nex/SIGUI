@@ -1,8 +1,14 @@
 # Fast D1L Release Workflow
 
 Use this loop until the release gate is green. The rule is simple: one issue, one
-small PR, one targeted hardware proof. Do not rerun RP2040/SD work unless the
-issue changes SD/RP2040 code or SD evidence is the selected blocker.
+small PR, one targeted hardware proof. The goal is to close release blockers
+without spending bench time re-proving unrelated UI, SD, RF, or soak surfaces on
+every PR.
+
+Do not rerun RP2040/SD work unless the issue changes SD/RP2040 code or SD
+evidence is the selected blocker. Do not run the bundled UI validator just
+because an issue is "UI"; run the one COM12 proof that matches the issue's
+acceptance criteria.
 
 ## Default Cycle
 
@@ -13,8 +19,8 @@ issue changes SD/RP2040 code or SD evidence is the selected blocker.
 5. Run `python -m pytest tests -q` only after the focused set passes.
 6. Push and use the default `d1l-ci` path. It should skip RP2040/SD work unless
    SD/RP2040 files changed.
-7. Download the ESP32 Actions artifacts.
-8. Run one targeted COM12 hardware validator for the issue.
+7. Download the ESP32 Actions artifacts and verify checksums.
+8. Run exactly one targeted COM12 hardware proof for the selected issue.
 9. Update the issue and PR with artifact paths.
 10. Merge the PR if checks and targeted hardware proof pass.
 
@@ -23,6 +29,7 @@ issue changes SD/RP2040 code or SD evidence is the selected blocker.
 ### ESP32/UI Issue
 
 Use this for UI, compose, docs, simulator, serial command, and ESP32 app fixes.
+This is the normal fast path for most remaining P0s.
 
 ```powershell
 python -m pytest tests\test_ci_workflow_contract.py tests\test_release_gate_audit_d1l.py -q
@@ -32,15 +39,33 @@ gh run watch <run-id> --exit-status
 gh run download <run-id> --dir artifacts\github\<run-id>-<sha>
 python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-firmware-artifacts
 python .\scripts\verify_checksums.py artifacts\github\<run-id>-<sha>\d1l-release-package
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-<sha> --commit <sha> --skip-sd-suite --include-ui-probes --out artifacts\hardware\d1l-autonomous-hardware-validation-<sha>-esp32-ui-only.json
 ```
 
-Expected proof:
+Then run one issue proof:
+
+| Selected issue | COM12 proof |
+|---|---|
+| Split-page or stale-column redraw corruption | `python .\scripts\ui_corruption_probe_d1l.py --port COM12 --rounds 20 --clear-crashlog-before-start --out artifacts\hardware\com12\ui_corruption_probe-<sha>-COM12.json` |
+| Hardware pixel capture or SiguredOS Home proof | `python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>` then `python .\scripts\ui_capture_d1l.py --port COM12 --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json` |
+| Compose keyboard geometry | `python .\scripts\ui_compose_keyboard_capture_d1l.py --port COM12 --targets public,public-long,dm,dm-long --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json` |
+| One scroll/layout surface | `python .\scripts\scroll_probe_d1l.py --port COM12 --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start --out artifacts\hardware\com12\scroll_probe-<sha>-COM12.json` |
+| Docs, tests, host simulator, or non-hardware plumbing | No COM12 cycle unless the GitHub issue explicitly names hardware acceptance. Use Actions plus host artifacts. |
+
+Expected proof for ESP32/UI work:
 
 - `rp2040_uf2_flash=false`
 - `sd_suite_enabled=false`
 - no COM16/RP2040 flash/test path
-- release-gate artifact exists, even if public release remains fail-closed
+- the artifact directly matches the selected issue
+- `public_rf_tx=false` and `formats_sd=false`
+
+Use the bundled autonomous UI validator only when the selected issue explicitly
+spans multiple UI gates, or as a final release sweep after the issue-sized P0s
+are closed:
+
+```powershell
+python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-<sha> --commit <sha> --skip-sd-suite --include-ui-probes --out artifacts\hardware\d1l-autonomous-hardware-validation-<sha>-esp32-ui-sweep.json
+```
 
 ### SD/RP2040 Issue
 
@@ -88,3 +113,11 @@ Stop the cycle only when one of these is true:
 
 Do not stop because broad release remains blocked after a narrow issue is
 closed. Move to the next P0.
+
+## Final Production Sweep
+
+When the issue-sized P0 list is empty, run the full production sweep: release
+gate audit, current COM12 smoke/UI evidence, required RF/DM proof, remaining SD
+matrix evidence, manual photos/review, and the long soak. This sweep is what
+turns "all blockers closed" into "safe to tag"; it is not the default proof for
+every small PR.

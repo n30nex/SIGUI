@@ -37,6 +37,10 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 
 ## Validation Notes
 
+- Keep the release loop issue-sized: each open P0 should name the one proof that
+  closes it. Do not run the bundled COM12 UI sweep unless a P0 spans multiple UI
+  gates or the issue-sized P0 list is done and final production sweep evidence is
+  being collected.
 - `tools/ui_simulator.py` produces deterministic 480x480 screenshots and schema checks.
 - The simulator must keep `large-mesh` coverage for oversized node/message stores.
 - Serial diagnostics include `routes`, `routes detail <seq>`, `routes trace <fingerprint>`, `routes probe <fingerprint>`, and `routes clear`.

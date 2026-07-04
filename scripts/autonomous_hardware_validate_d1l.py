@@ -1329,10 +1329,59 @@ def run_scroll_probe(ctx: RunContext, dry_run: bool) -> dict:
     return run_existing_script(ctx, "scroll_probe", args, out, timeout=180, dry_run=dry_run)
 
 
+def run_ui_reference_simulator(ctx: RunContext, view: str, dry_run: bool) -> dict:
+    out_dir = ctx.root / "artifacts" / "ui-sim-reference" / f"{ctx.short_commit}-actions{ctx.github_run_id}"
+    report_path = out_dir / "ui-sim-report.json"
+    png_path = out_dir / f"{view}.png"
+    command = [
+        sys.executable,
+        str(ctx.root / "tools" / "ui_simulator.py"),
+        "--out",
+        str(out_dir),
+        "--view",
+        view,
+    ]
+    report = {
+        "schema": 1,
+        "kind": "ui_simulator_reference",
+        "mode": "dry-run" if dry_run else "host",
+        "view": view,
+        "command": command,
+        "path": str(report_path),
+        "png_path": str(png_path),
+        "ok": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+    if not dry_run:
+        report["result"] = command_report("ui_simulator_reference", command, ctx.root, timeout=60)
+        report["ok"] = (
+            report["result"].get("ok") is True
+            and report_path.is_file()
+            and png_path.is_file()
+        )
+    return report
+
+
 def run_ui_pixel_capture(ctx: RunContext, dry_run: bool) -> dict:
+    reference = run_ui_reference_simulator(ctx, "home", dry_run)
+    if reference.get("ok") is not True and not dry_run:
+        return {
+            "schema": 1,
+            "kind": "ui_pixel_capture",
+            "mode": "hardware",
+            "commit": ctx.commit,
+            "github_actions_run": ctx.github_run_id,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "reference": reference,
+            "ok": False,
+            "error": "ui_simulator_reference_failed",
+        }
     out = ctx.hardware_dir / f"ui_pixel_capture_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
     png_out = out.with_suffix(".png")
     raw_out = out.with_suffix(".rgb565")
+    diff_out = out.with_name(f"{out.stem}_simdiff.json")
     args = [
         str(ctx.root / "scripts" / "ui_capture_d1l.py"),
         "--port",
@@ -1347,8 +1396,23 @@ def run_ui_pixel_capture(ctx: RunContext, dry_run: bool) -> dict:
         str(png_out),
         "--raw-out",
         str(raw_out),
+        "--prep-command",
+        "ui tab home",
+        "--post-prep-settle-sec",
+        "0.25",
+        "--reference-png",
+        str(reference["png_path"]),
+        "--reference-view",
+        "home",
+        "--diff-out",
+        str(diff_out),
     ]
-    return run_existing_script(ctx, "ui_pixel_capture", args, out, timeout=420, dry_run=dry_run)
+    report = run_existing_script(ctx, "ui_pixel_capture", args, out, timeout=420, dry_run=dry_run)
+    report["reference"] = reference
+    report["reference_png_path"] = reference["png_path"]
+    report["simulator_diff_path"] = str(diff_out)
+    report["ok"] = report.get("ok") is True and reference.get("ok") is True
+    return report
 
 
 def run_ui_compose_keyboard_capture(ctx: RunContext, dry_run: bool) -> dict:

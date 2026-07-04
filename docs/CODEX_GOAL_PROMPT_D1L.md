@@ -25,7 +25,8 @@ Objective:
    - The SD bridge is considered working unless this issue breaks it.
 8. Download Actions artifacts and verify checksums.
 9. Validate only the hardware surface required by the issue:
-   - ESP32/UI default: COM12 only, `--skip-sd-suite --include-ui-probes`.
+   - ESP32/UI default: COM12 only, using the narrow proof command that matches the selected issue.
+   - Use `--skip-sd-suite --include-ui-probes` only when the selected issue explicitly spans multiple UI gates or when running a final production sweep.
    - Do not touch COM8, COM11, COM16, or COM29 unless the issue explicitly requires that route and the route is safe.
 10. Update the GitHub issue and PR with evidence paths.
 11. Merge the PR if checks and targeted hardware proof pass.
@@ -38,7 +39,7 @@ Hard constraints:
 - COM16 is the D1L RP2040/UF2 side and must not be used for ESP32/UI issues.
 - Do not touch COM8, COM11, or COM29 during D1L ESP32/UI validation.
 - Do not format SD cards. Keep `formats_sd=false`.
-- Do not run 500-cycle tab-abuse tests. Use targeted UI corruption, pixel capture, compose capture, scroll probe, or the issue-specific validator.
+- Do not run 500-cycle tab-abuse tests. Do not run every UI probe for a one-surface issue. Use targeted UI corruption, pixel capture, compose capture, scroll probe, RF/DM proof, SD proof, or the issue-specific validator.
 - Prefer short issue-sized PRs over broad release sweeps.
 - If release remains blocked after the issue closes, move to the next P0 rather than expanding scope.
 ```
