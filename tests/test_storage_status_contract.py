@@ -65,7 +65,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     ]:
         assert state in source
     assert "storage_manager_task" in source
-    assert "D1L_STORAGE_MANAGER_RESET_SETTLE_MS 2500U" in source
+    assert "D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U" in source
     assert 'xTaskCreate(storage_manager_task' in source
     assert "d1l_rp2040_bridge_ping" in source
     assert "d1l_rp2040_bridge_reset" in source

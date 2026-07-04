@@ -68,6 +68,9 @@ RP2040_DOUBLE_RESET_SWEEP_MS = (
 )
 RP2040_BAUD_PROBE_TIMEOUT_MS = 700
 RP2040_BAUD_PROBE_COMMAND_TIMEOUT_SECONDS = 20.0
+RP2040_RESET_COMMAND_TIMEOUT_SECONDS = 15.0
+RP2040_RESTORE_PING_ATTEMPTS = 5
+RP2040_RESTORE_PING_INTERVAL_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -592,7 +595,13 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["ended_at"] = utc_now()
         return report
 
-    reset = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0, settle_sec=3.0)
+    reset = send_d1l_console(
+        ctx.d1l_port,
+        ctx.baud,
+        "rp2040 reset",
+        RP2040_RESET_COMMAND_TIMEOUT_SECONDS,
+        settle_sec=3.0,
+    )
     report["reset"] = reset
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
     port_after_reset = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
@@ -647,6 +656,26 @@ def send_d1l_console(port: str, baud: int, command: str, timeout: float, *, sett
         time.sleep(settle_sec)
         ser.reset_input_buffer()
         return send_console_command(ser, command, timeout)
+
+
+def poll_d1l_bridge_ping(ctx: RunContext, *, attempts: int, interval_sec: float) -> dict:
+    report = {
+        "ok": False,
+        "attempts": [],
+    }
+    for attempt in range(1, attempts + 1):
+        ping = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0)
+        ping["attempt"] = attempt
+        report["attempts"].append(ping)
+        if d1l_console_ok(ping, require_protocol=True):
+            report["ok"] = True
+            report["selected_attempt"] = attempt
+            report["ping"] = ping
+            return report
+        if attempt < attempts:
+            time.sleep(interval_sec)
+    report["ping"] = report["attempts"][-1] if report["attempts"] else {}
+    return report
 
 
 def baud_probe_selected_deskos(result: dict) -> int | None:
@@ -744,7 +773,12 @@ def rp2040_access_precheck(ctx: RunContext, *, dry_run: bool) -> dict:
         report["selected_rp2040_port"] = success["rp2040_port"].get("selected_port")
         return finish()
 
-    report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
+    report["reset"] = send_d1l_console(
+        ctx.d1l_port,
+        ctx.baud,
+        "rp2040 reset",
+        RP2040_RESET_COMMAND_TIMEOUT_SECONDS,
+    )
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
     report["uf2_volume_after_reset"] = uf2_volume_snapshot()
     report["rp2040_port_after_reset"] = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
@@ -839,7 +873,12 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
             timeout_sec=uf2_timeout,
         )
         time.sleep(2.0)
-        report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
+        report["reset"] = send_d1l_console(
+            ctx.d1l_port,
+            ctx.baud,
+            "rp2040 reset",
+            RP2040_RESET_COMMAND_TIMEOUT_SECONDS,
+        )
         capture_discovery = rp2040_port_discovery(
             str(report["bootloader_entry"].get("selected_rp2040_port") or ctx.rp2040_port),
             ctx.d1l_port,
@@ -849,7 +888,12 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
         report["capture_port"] = capture_port
         capture = capture_official_smoke(capture_port, ctx.baud, smoke_timeout)
         if not capture.get("result"):
-            report["reset_retry"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
+            report["reset_retry"] = send_d1l_console(
+                ctx.d1l_port,
+                ctx.baud,
+                "rp2040 reset",
+                RP2040_RESET_COMMAND_TIMEOUT_SECONDS,
+            )
             capture_discovery = rp2040_port_discovery(capture_port, ctx.d1l_port)
             report["rp2040_port_for_smoke_capture_retry"] = capture_discovery
             capture_port = str(capture_discovery.get("selected_port") or capture_port)
@@ -892,9 +936,18 @@ def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, d
             timeout_sec=uf2_timeout,
         )
         time.sleep(2.0)
-        report["reset"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 reset", 8.0)
-        time.sleep(2.0)
-        report["ping"] = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0)
+        report["reset"] = send_d1l_console(
+            ctx.d1l_port,
+            ctx.baud,
+            "rp2040 reset",
+            RP2040_RESET_COMMAND_TIMEOUT_SECONDS,
+        )
+        report["ping_poll"] = poll_d1l_bridge_ping(
+            ctx,
+            attempts=RP2040_RESTORE_PING_ATTEMPTS,
+            interval_sec=RP2040_RESTORE_PING_INTERVAL_SECONDS,
+        )
+        report["ping"] = report["ping_poll"].get("ping", {})
         report["ok"] = (
             report["copy"].get("ok") is True
             and report["ping"].get("ok") is True

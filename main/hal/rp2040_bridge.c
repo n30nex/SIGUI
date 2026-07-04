@@ -954,7 +954,7 @@ esp_err_t d1l_rp2040_bridge_reset(uint32_t hold_ms, uint32_t settle_ms)
 {
     const d1l_rp2040_pins_t *pins = d1l_rp2040_pins();
     const uint32_t hold = hold_ms > 0 ? hold_ms : 100U;
-    const uint32_t settle = settle_ms > 0 ? settle_ms : 2500U;
+    const uint32_t settle = settle_ms > 0 ? settle_ms : 8000U;
 
     esp_err_t ret = take_bridge_lock(hold + settle + 1000U);
     if (ret != ESP_OK) {

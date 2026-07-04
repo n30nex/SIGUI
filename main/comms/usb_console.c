@@ -1227,7 +1227,7 @@ static void cmd_rp2040_baud_probe(const char *line)
 static void cmd_rp2040_reset(void)
 {
     const uint32_t hold_ms = 100U;
-    const uint32_t settle_ms = 2500U;
+    const uint32_t settle_ms = 8000U;
     esp_err_t ret = d1l_rp2040_bridge_reset(hold_ms, settle_ms);
     if (ret != ESP_OK) {
         err_result("rp2040 reset", esp_err_to_name(ret),
