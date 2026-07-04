@@ -36,7 +36,7 @@ $env:D1L_PORT = "COMx"
 .\flash_project.ps1 -Port $env:D1L_PORT
 ```
 
-Do not use COM11 or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
+Do not use COM8, COM11, or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
 
 The full 8MB image is for factory/recovery workflows and can overwrite persisted settings, contacts, messages, and logs. It requires typed confirmation:
 

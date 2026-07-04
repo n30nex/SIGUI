@@ -44,7 +44,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 DEFAULT_D1L_PORT = "COM" + "12"
 DEFAULT_RP2040_PORT = "COM" + "16"
-FORBIDDEN_PORTS = {"COM" + "11", "COM" + "29"}
+FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 

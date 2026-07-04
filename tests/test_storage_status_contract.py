@@ -453,7 +453,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "sd_retained_history_acceptance_d1l.py" in docs
     assert "docs/RP2040_SD_BRIDGE_FLASH_D1L.md" in docs
     assert "COM12" in runbook
-    assert "Do not use COM11 or COM29" in runbook
+    assert "Do not use COM8, COM11, or COM29" in runbook
     assert "Do not send Public RF" in runbook
     assert "flash_d1l.ps1" in runbook
     assert "flash_rp2040_sd_bridge_uf2.py" in runbook
@@ -657,7 +657,7 @@ def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
     validation = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "mesh send public" not in validation
-    assert "Do not use `COM11` or `COM29`" in validation
+    assert "Do not use `COM8`, `COM11`, or `COM29`" in validation
     assert "COM7" not in validation
     assert "flash_d1l" not in validation
     assert "monitor_d1l" not in validation

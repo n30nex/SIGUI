@@ -14,7 +14,7 @@ ESP32-S3 DeskOS firmware flash path.
 - Do not format from ESP32 firmware, RP2040 firmware, serial commands, scripts,
   or UI.
 - Use `COM12` only for post-flash ESP32 serial validation.
-- Do not use COM11 or COM29 for this work.
+- Do not use COM8, COM11, or COM29 for this work.
 - Do not send Public RF.
 
 ## Verify Artifact
@@ -38,7 +38,7 @@ python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-
 ```
 
 The guided flow is documented in `docs/D1L_SD_CARD_GUIDED_INSTALL.md`. It still
-verifies Actions-built checksums, refuses COM11/COM29, never formats SD, never
+verifies Actions-built checksums, refuses COM8/COM11/COM29, never formats SD, never
 sends Public RF, captures the official Seeed SD smoke proof, restores the
 DeskOS RP2040 bridge, runs COM12 preflight, and runs short SD canaries when the
 file gate is ready. The only manual operation is putting the RP2040 into
@@ -89,7 +89,7 @@ runner from the repository root:
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha>
 ```
 
-The runner touches only COM12 and COM16, refuses COM11/COM29, flashes the
+The runner touches only COM12 and COM16, refuses COM8/COM11/COM29, flashes the
 ESP32 image when not skipped, then performs a short RP2040 access precheck
 before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks whether
 COM16 is present, asks COM12 for `rp2040 ping`, tries a precise

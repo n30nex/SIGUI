@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 DEFAULT_PORT = "COM" + "12"
-FORBIDDEN_PORTS = {"COM" + "11", "COM" + "29"}
+FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
 COMMANDS = ("rp2040 status", "rp2040 baud-probe 700", "rp2040 ping", "rp2040 stock-probe")
 
 

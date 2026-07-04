@@ -10,7 +10,7 @@ once to restore the DeskOS SD bridge.
 - Use the latest green GitHub Actions run artifacts.
 - Prepare the SD card as FAT32 on a computer, then insert it in the D1L.
 - Keep D1L post-flash validation on `COM12`.
-- Do not use `COM11` or `COM29`.
+- Do not use `COM8`, `COM11`, or `COM29`.
 - Do not format the SD card from the device, script, serial console, or UI.
 - Do not send Public RF.
 

@@ -5,7 +5,7 @@
 - Never default a serial port.
 - Use `D1L_PORT` or pass `-Port` / `--port`.
 - Back up flash before the first erase/full flash when possible.
-- Do not use COM11 or COM29 for the D1L.
+- Do not use COM8, COM11, or COM29 for the D1L.
 
 ## Backup
 

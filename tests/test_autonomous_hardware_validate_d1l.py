@@ -40,6 +40,8 @@ def test_port_guard_blocks_forbidden_ports():
         runner.enforce_port_guard("COM12", "COM29")
     with pytest.raises(ValueError):
         runner.enforce_port_guard("com11")
+    with pytest.raises(ValueError):
+        runner.enforce_port_guard("COM8")
 
 
 def test_esptool_command_uses_actions_build_files(tmp_path):
@@ -77,6 +79,7 @@ def test_release_gate_command_disables_meshbot_port(tmp_path):
 
     assert "--meshbot-port" in command
     assert command[command.index("--meshbot-port") + 1] == "COM_DISABLED"
+    assert "COM8" not in command
     assert "COM11" not in command
     assert "COM29" not in command
 
@@ -109,6 +112,7 @@ def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(t
     assert captured["kind"] == "ui_compose_keyboard_capture"
     assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
     assert captured["args"][captured["args"].index("--targets") + 1] == "public,public-long,dm,dm-long"
+    assert "COM8" not in json.dumps(captured["args"])
     assert "COM11" not in json.dumps(captured["args"])
     assert "COM29" not in json.dumps(captured["args"])
     assert captured["out"].name == "ui_compose_keyboard_capture_1600d64_actions_28663994079_COM12.json"
@@ -139,6 +143,7 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert plan["manual_user_required"] is False
     assert plan["ports"]["d1l"] == "COM12"
     assert plan["ports"]["rp2040"] == "COM16"
+    assert "COM8" not in json.dumps(plan["steps"])
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
     assert "rp2040_autonomous_access_precheck" in plan["steps"]
@@ -175,6 +180,7 @@ def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
     assert "d1l_scroll_probe" in plan["steps"]
     assert "d1l_ui_pixel_capture" in plan["steps"]
     assert "d1l_ui_compose_keyboard_capture" in plan["steps"]
+    assert "COM8" not in json.dumps(plan["steps"])
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
 
@@ -185,6 +191,7 @@ def test_rp2040_port_discovery_selects_allowed_usb_cdc_and_skips_protected_ports
         runner,
         "serial_port_inventory",
         lambda: [
+            {"device": "COM8", "description": "Raspberry Pi Pico", "vid": "2E8A", "pid": "000A"},
             {"device": "COM12", "description": "USB-SERIAL CH340", "vid": "1A86", "pid": "7523"},
             {"device": "COM29", "description": "Adafruit Feather RP2040", "vid": "239A", "pid": "8029"},
             {"device": "COM17", "description": "Raspberry Pi Pico", "vid": "2E8A", "pid": "000A"},
@@ -197,6 +204,7 @@ def test_rp2040_port_discovery_selects_allowed_usb_cdc_and_skips_protected_ports
     assert report["selected_port"] == "COM17"
     assert report["selected_reason"] == "rp2040_usb_descriptor"
     assert report["candidates"][0]["match_reasons"] == ["keyword:pico", "keyword:raspberry pi pico", "vid:2E8A"]
+    assert {"device": "COM8", "reason": "forbidden_port"} in report["skipped"]
     assert {"device": "COM12", "reason": "d1l_console_port"} in report["skipped"]
     assert {"device": "COM29", "reason": "forbidden_port"} in report["skipped"]
 
