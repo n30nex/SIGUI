@@ -49,6 +49,8 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert "tca9535_set_direction(pins->expander_reset, true)" in rp2040_source
     assert "tca9535_set_level(pins->expander_reset, false)" in rp2040_source
     assert "tca9535_set_level(pins->expander_reset, true)" in rp2040_source
+    assert "settle_ms = 2500U" in console
+    assert "settle_ms : 2500U" in rp2040_source
     assert 'ok_begin("rp2040 reset")' in console
     assert '"rp2040 ping"' in console
     assert 'cmd_rp2040_ping' in console
