@@ -155,11 +155,11 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
         "void d1l_storage_status", 1
     )[0]
-    assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" in remount_body
     assert "d1l_storage_status_note_rp2040(ESP_OK)" in remount_body
-    assert "d1l_storage_status_refresh(timeout_ms)" in remount_body
     assert "storage_status_mount(timeout_ms, true)" in remount_body
     assert "classify_storage_manager_state(ret)" in remount_body
+    assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
+    assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():

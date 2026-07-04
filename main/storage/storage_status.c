@@ -669,25 +669,10 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
     s_status.force_nvs = false;
     s_manager_remount_requested = false;
 
-    set_manager_state(D1L_STORAGE_MANAGER_PING);
-    d1l_rp2040_ping_t ping = {0};
-    esp_err_t ret = d1l_rp2040_bridge_ping(&ping, timeout_ms);
-    if (ret != ESP_OK) {
-        d1l_storage_status_note_rp2040(ret);
-        classify_storage_manager_state(ret);
-        return ret;
-    }
     d1l_storage_status_note_rp2040(ESP_OK);
 
-    set_manager_state(D1L_STORAGE_MANAGER_STATUS);
-    ret = d1l_storage_status_refresh(timeout_ms);
-    if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
-        classify_storage_manager_state(ret);
-        return ret;
-    }
-
     set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
-    ret = storage_status_mount(timeout_ms, true);
+    esp_err_t ret = storage_status_mount(timeout_ms, true);
     if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
         esp_err_t poll_ret = poll_mount_pending();
         if (poll_ret != ESP_OK && ret == ESP_OK) {
