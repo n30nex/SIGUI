@@ -15,6 +15,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     source = read("main/storage/storage_status.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
+    sdkconfig = read("sdkconfig.defaults")
 
     assert "D1L_STORAGE_SD_MOUNT_POINT \"/sdcard\"" in header
     assert "D1L_STORAGE_SD_DATA_ROOT \"/sdcard/deskos\"" in header
@@ -48,6 +49,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert app_main.index("D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS") < app_main.index("d1l_message_store_init()")
     assert "d1l_storage_status_note_rp2040(rp2040_ret)" in app_main
     assert "storage manager start failed" in app_main
+    assert "CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192" in sdkconfig
     assert "CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L" in source
     for state in [
         "BRIDGE_WAIT",

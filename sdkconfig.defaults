@@ -28,6 +28,10 @@ CONFIG_LV_USE_QRCODE=y
 # allocator, matching Seeed's heavier LVGL examples.
 CONFIG_LV_MEM_CUSTOM=y
 
+# The serial console runs on app_main and can perform SD-backed retained-store
+# writes during validation, so keep explicit stack headroom for those commands.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y

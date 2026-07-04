@@ -14,8 +14,10 @@ from pathlib import Path
 
 try:
     from smoke_d1l import send_console_command
+    from sd_file_canary_d1l import storage_file_gate_ready, wait_for_storage_ready
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.smoke_d1l import send_console_command
+    from scripts.sd_file_canary_d1l import storage_file_gate_ready, wait_for_storage_ready
 
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
@@ -46,6 +48,8 @@ def retained_readback_commands(token: str) -> list[str]:
 
 def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
     commands = [
+        "storage status",
+        "storage mount",
         "storage status",
         "storage filecanary",
         f"storage retained-canary {token}",
@@ -120,6 +124,7 @@ def run_acceptance(
     *,
     include_reboot: bool,
     reboot_settle_sec: float,
+    mount_wait_sec: float,
     allow_unavailable: bool,
 ) -> dict:
     try:
@@ -128,8 +133,7 @@ def run_acceptance(
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
     fingerprint = fingerprint_for_token(token)
-    pre_commands = [
-        "storage status",
+    retained_commands = [
         "storage filecanary",
         f"storage retained-canary {token}",
         *retained_readback_commands(token),
@@ -138,9 +142,19 @@ def run_acceptance(
     results: list[dict] = []
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
-        results.extend(run_commands(ser, pre_commands, timeout))
+        storage_before, ready_wait_results, mount_attempt = wait_for_storage_ready(
+            ser,
+            timeout,
+            mount_wait_sec=mount_wait_sec,
+            allow_unavailable=allow_unavailable,
+        )
+        results.extend(ready_wait_results)
+        results.extend(run_commands(ser, retained_commands, timeout))
 
-    retained_result = results[2]
+    retained_start = len(ready_wait_results)
+    filecanary_result = results[retained_start]
+    retained_result = results[retained_start + 1]
+    pre_commands = [row.get("cmd", "") for row in ready_wait_results] + retained_commands
     if allow_unavailable and allowed_unavailable(retained_result):
         report = {
             "schema": 1,
@@ -154,7 +168,13 @@ def run_acceptance(
             "formats_sd": False,
             "allow_unavailable": allow_unavailable,
             "retained_canary_unavailable_ok": True,
-            "filecanary_unavailable_ok": filecanary_unavailable(results[1]),
+            "filecanary_unavailable_ok": filecanary_unavailable(filecanary_result),
+            "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
+            "storage_ready_waited": len(ready_wait_results) > 1,
+            "storage_ready_poll_count": sum(
+                1 for result in ready_wait_results if result.get("cmd") == "storage status"
+            ),
+            "mount_attempt": mount_attempt,
             "ok": True,
             "results": results,
         }
@@ -182,7 +202,7 @@ def run_acceptance(
         cmd: result for cmd, result in zip(post_commands, results[post_start: post_start + len(post_commands)])
     }
     canary_ok = retained_result.get("ok") is True
-    filecanary_ok = results[1].get("ok") is True
+    filecanary_ok = filecanary_result.get("ok") is True
     pre_readbacks_ok = readbacks_pass(pre_by_command, token, fingerprint)
     post_readbacks_ok = readbacks_pass(post_by_command, token, fingerprint) if include_reboot else True
     health_ok = by_command.get("health", {}).get("ok") is True
@@ -201,6 +221,12 @@ def run_acceptance(
         "allow_unavailable": allow_unavailable,
         "retained_canary_passed": canary_ok,
         "filecanary_passed": filecanary_ok,
+        "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
+        "storage_ready_waited": len(ready_wait_results) > 1,
+        "storage_ready_poll_count": sum(
+            1 for result in ready_wait_results if result.get("cmd") == "storage status"
+        ),
+        "mount_attempt": mount_attempt,
         "pre_reboot_readbacks_ok": pre_readbacks_ok,
         "post_reboot_readbacks_ok": post_readbacks_ok,
         "storage_after": storage_after,
@@ -218,6 +244,7 @@ def main() -> int:
     parser.add_argument("--token", default=datetime.now(timezone.utc).strftime("sd%Y%m%d%H%M%S"))
     parser.add_argument("--no-reboot", action="store_true")
     parser.add_argument("--reboot-settle-sec", type=float, default=8.0)
+    parser.add_argument("--mount-wait-sec", type=float, default=30.0)
     parser.add_argument("--allow-unavailable", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
@@ -245,6 +272,7 @@ def main() -> int:
             args.token,
             include_reboot=include_reboot,
             reboot_settle_sec=args.reboot_settle_sec,
+            mount_wait_sec=args.mount_wait_sec,
             allow_unavailable=args.allow_unavailable,
         )
 

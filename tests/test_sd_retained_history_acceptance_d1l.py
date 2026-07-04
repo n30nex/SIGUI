@@ -1,6 +1,17 @@
 from scripts import sd_retained_history_acceptance_d1l as retained_accept
 
 
+READY_STORAGE = (
+    '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready",'
+    '"present":true,"mounted":true,"data_root_ready":true,'
+    '"rp2040_protocol_supported":true,"file_ops":true,"atomic_rename":true,'
+    '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
+    '"data_enabled":true,"data_backend":"mixed","message_store_backend":"sd",'
+    '"dm_store_backend":"sd","route_store_backend":"sd","packet_log_backend":"sd",'
+    '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
+)
+
+
 class FakeSerial:
     instances = []
 
@@ -74,6 +85,7 @@ def test_allow_unavailable_accepts_pre_bridge_refusal(monkeypatch):
         token,
         include_reboot=True,
         reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
         allow_unavailable=True,
     )
 
@@ -88,7 +100,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
     token = "sdToken1"
     fp = retained_accept.fingerprint_for_token(token)
     responses = [
-        '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready"}}\n',
+        READY_STORAGE,
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         f'{{"schema":1,"ok":true,"cmd":"storage retained-canary","token":"{token}","fingerprint":"{fp}"}}\n',
         f'{{"schema":1,"ok":true,"cmd":"messages public","entries":[{{"text":"sd-retained-canary {token}"}}]}}\n',
@@ -117,6 +129,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
         token,
         include_reboot=True,
         reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
         allow_unavailable=False,
     )
 
