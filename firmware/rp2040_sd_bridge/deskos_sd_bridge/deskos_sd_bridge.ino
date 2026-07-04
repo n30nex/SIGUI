@@ -2803,6 +2803,7 @@ void setup() {
 void loop() {
     poll_stream(Serial1, Serial1, bridge_rx);
     poll_stream(Serial, Serial, usb_rx);
+    sd_worker_loop_once();
     delay(1);
 }
 
@@ -2811,5 +2812,5 @@ void setup1() {
 }
 
 void loop1() {
-    sd_worker_loop_once();
+    delay(10);
 }

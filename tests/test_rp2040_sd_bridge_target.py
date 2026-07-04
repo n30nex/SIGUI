@@ -364,7 +364,13 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "poll_stream(Serial, Serial, usb_rx)" in sketch
     assert "void setup1()" in sketch
     assert "void loop1()" in sketch
-    assert "sd_worker_loop_once()" in sketch
+    loop_body = sketch.split("void loop()", 1)[1].split("void setup1()", 1)[0]
+    assert "sd_worker_loop_once()" in loop_body
+    assert loop_body.index("poll_stream(Serial1, Serial1, bridge_rx)") < loop_body.index(
+        "sd_worker_loop_once()"
+    )
+    loop1_body = sketch.split("void loop1()", 1)[1]
+    assert "sd_worker_loop_once()" not in loop1_body
     assert "SD_WORKER_MOUNT" in sketch
     assert "SD_WORKER_DIAG" in sketch
     assert "Stream *reply_stream = &Serial1;" in sketch
