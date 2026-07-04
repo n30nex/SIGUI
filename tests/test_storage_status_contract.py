@@ -434,7 +434,7 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
 
     assert "cmd_storage_filecanary" in console
     assert "storage_filecanary_ready" in console
-    assert "D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 15000U" in console
+    assert "D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_rp2040_bridge_file_write(tmp_path, 0U, payload" in console
     assert "d1l_rp2040_bridge_file_read(tmp_path" in console

@@ -39,7 +39,7 @@
 #include "ui/ui_phase1.h"
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
-static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 15000U;
+static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
