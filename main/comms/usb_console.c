@@ -145,6 +145,17 @@ static void print_json_string(const char *text)
     putchar('"');
 }
 
+static void print_hex_bytes_json(const uint8_t *bytes, size_t len)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    putchar('"');
+    for (size_t i = 0; bytes && i < len; ++i) {
+        putchar(hex[(bytes[i] >> 4U) & 0x0FU]);
+        putchar(hex[bytes[i] & 0x0FU]);
+    }
+    putchar('"');
+}
+
 static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_t *stats)
 {
     const d1l_retained_blob_store_sd_stats_t empty = {0};
@@ -495,6 +506,146 @@ static void cmd_ui_status(void)
     printf(",\"pending\":%s,\"pending_tab\":",
            bool_json(d1l_ui_phase1_tab_switch_pending()));
     print_json_string(d1l_ui_phase1_pending_tab_name());
+    printf("}\n");
+}
+
+static void print_ui_capture_status_fields(const d1l_ui_capture_status_t *status)
+{
+    const d1l_ui_capture_status_t empty = {
+        .width = D1L_UI_CAPTURE_WIDTH,
+        .height = D1L_UI_CAPTURE_HEIGHT,
+        .bytes_per_pixel = D1L_UI_CAPTURE_BYTES_PER_PIXEL,
+        .total_bytes = D1L_UI_CAPTURE_TOTAL_BYTES,
+        .max_chunk_bytes = D1L_UI_CAPTURE_MAX_CHUNK_BYTES,
+    };
+    if (!status) {
+        status = &empty;
+    }
+    printf(",\"available\":%s,\"active\":%s,\"shadow_ready\":%s,\"started\":%s",
+           bool_json(status->available), bool_json(status->active),
+           bool_json(status->shadow_ready), bool_json(status->started));
+    printf(",\"width\":%u,\"height\":%u,\"bytes_per_pixel\":%u,\"pixel_format\":\"rgb565-le\"",
+           (unsigned)status->width,
+           (unsigned)status->height,
+           (unsigned)status->bytes_per_pixel);
+    printf(",\"total_bytes\":%lu,\"max_chunk_bytes\":%lu",
+           (unsigned long)status->total_bytes,
+           (unsigned long)status->max_chunk_bytes);
+    printf(",\"frame_seq\":%lu,\"flush_count\":%lu,\"crc32\":\"%08lX\"",
+           (unsigned long)status->frame_seq,
+           (unsigned long)status->flush_count,
+           (unsigned long)status->capture_crc32);
+    printf(",\"active_tab\":");
+    print_json_string(status->active_tab);
+    printf(",\"pending_tab\":");
+    print_json_string(status->pending_tab);
+    printf(",\"onboarding_visible\":%s,\"lock_visible\":%s",
+           bool_json(status->onboarding_visible),
+           bool_json(status->lock_visible));
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false");
+}
+
+static void cmd_ui_capture_status(void)
+{
+    d1l_ui_capture_status_t status = {0};
+    esp_err_t ret = d1l_ui_capture_status(&status);
+    if (ret != ESP_OK) {
+        err_result("ui capture status", esp_err_to_name(ret),
+                   "UI capture status is unavailable");
+        return;
+    }
+    ok_begin("ui capture status");
+    print_ui_capture_status_fields(&status);
+    printf("}\n");
+}
+
+static void cmd_ui_capture_begin(void)
+{
+    d1l_ui_capture_status_t status = {0};
+    esp_err_t ret = d1l_ui_capture_begin(&status);
+    if (ret != ESP_OK) {
+        err_result("ui capture begin", esp_err_to_name(ret),
+                   "UI capture requires a started display with at least one flushed frame");
+        return;
+    }
+    ok_begin("ui capture begin");
+    print_ui_capture_status_fields(&status);
+    printf("}\n");
+}
+
+static bool parse_ui_capture_chunk_args(const char *line, size_t *out_offset, size_t *out_len)
+{
+    static const char prefix[] = "ui capture chunk ";
+    if (strncmp(line, prefix, strlen(prefix)) != 0 || !out_offset || !out_len) {
+        return false;
+    }
+    const char *cursor = line + strlen(prefix);
+    char *end = NULL;
+    unsigned long offset = strtoul(cursor, &end, 10);
+    if (end == cursor || !isspace((unsigned char)*end)) {
+        return false;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    cursor = end;
+    unsigned long len = strtoul(cursor, &end, 10);
+    if (end == cursor) {
+        return false;
+    }
+    while (*end && isspace((unsigned char)*end)) {
+        end++;
+    }
+    if (*end != '\0') {
+        return false;
+    }
+    *out_offset = (size_t)offset;
+    *out_len = (size_t)len;
+    return true;
+}
+
+static void cmd_ui_capture_chunk(const char *line)
+{
+    size_t offset = 0;
+    size_t requested_len = 0;
+    if (!parse_ui_capture_chunk_args(line, &offset, &requested_len)) {
+        err_result("ui capture chunk", "INVALID_ARG",
+                   "usage: ui capture chunk <offset> <len>");
+        return;
+    }
+    uint8_t bytes[D1L_UI_CAPTURE_MAX_CHUNK_BYTES];
+    size_t len = 0;
+    uint32_t chunk_crc32 = 0;
+    d1l_ui_capture_status_t status = {0};
+    esp_err_t ret = d1l_ui_capture_chunk(offset, requested_len, bytes, sizeof(bytes),
+                                         &len, &chunk_crc32, &status);
+    if (ret != ESP_OK) {
+        err_result("ui capture chunk", esp_err_to_name(ret),
+                   "call ui capture begin first, then request chunks inside total_bytes");
+        return;
+    }
+    ok_begin("ui capture chunk");
+    print_ui_capture_status_fields(&status);
+    printf(",\"offset\":%lu,\"requested_len\":%lu,\"len\":%lu,\"chunk_crc32\":\"%08lX\",\"data_hex\":",
+           (unsigned long)offset,
+           (unsigned long)requested_len,
+           (unsigned long)len,
+           (unsigned long)chunk_crc32);
+    print_hex_bytes_json(bytes, len);
+    printf("}\n");
+}
+
+static void cmd_ui_capture_end(void)
+{
+    d1l_ui_capture_status_t status = {0};
+    esp_err_t ret = d1l_ui_capture_end(&status);
+    if (ret != ESP_OK) {
+        err_result("ui capture end", esp_err_to_name(ret),
+                   "UI capture was not initialized");
+        return;
+    }
+    ok_begin("ui capture end");
+    print_ui_capture_status_fields(&status);
     printf("}\n");
 }
 
@@ -4335,7 +4486,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui data-canary <token>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4366,6 +4517,14 @@ static void handle_line(const char *line)
         cmd_ui_scroll_probe(line);
     } else if (strncmp(line, "ui data-canary ", strlen("ui data-canary ")) == 0) {
         cmd_ui_data_canary(line);
+    } else if (strcmp(line, "ui capture status") == 0) {
+        cmd_ui_capture_status();
+    } else if (strcmp(line, "ui capture begin") == 0) {
+        cmd_ui_capture_begin();
+    } else if (strncmp(line, "ui capture chunk ", strlen("ui capture chunk ")) == 0) {
+        cmd_ui_capture_chunk(line);
+    } else if (strcmp(line, "ui capture end") == 0) {
+        cmd_ui_capture_end();
     } else if (strcmp(line, "map center") == 0) {
         cmd_map_center();
     } else if (strncmp(line, "map center set ", strlen("map center set ")) == 0) {

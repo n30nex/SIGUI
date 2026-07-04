@@ -147,6 +147,7 @@ def expected_command_name(command: str) -> str:
         "ui tab ",
         "ui scroll-probe ",
         "ui data-canary ",
+        "ui capture chunk ",
         "radio set freq ",
         "radio set bw ",
         "radio set sf ",

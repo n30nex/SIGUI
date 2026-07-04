@@ -9,6 +9,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 | Blocker | Current State | Next Proof |
 |---|---|---|
 | UI split-page redraw corruption | Firmware now defers content rebuilds out of LVGL event callbacks and queues live-data refreshes on the UI task. | Run `ui_corruption_probe_d1l.py` on COM12 from the current Actions artifact. |
+| Hardware pixel capture | Firmware exposes a serial RGB565 capture path so the PC can reconstruct the actual 480x480 UI frame. | Run `ui_capture_d1l.py` on COM12 and compare the PNG to the simulator/reference view. |
 | On-screen keyboard and sheets | Functional but too small/cut off in some flows. | Redesign compact keyboard/sheets, rerun simulator and physical review. |
 | Full RF/DM acceptance | Public and outbound DM foundations exist; full inbound DM, ACK/PATH, direct-route proof remains open. | Produce `rf_full_acceptance_*.json` with health and no-Public-command proof. |
 | SD release matrix | Core SD file/history/remount/map canaries pass on the current FAT32 card. | Add official Seeed smoke, boot/retry proof, non-FAT32 behavior, <=32GB FAT32 matrix, no-format evidence, and power/electrical evidence. |
@@ -38,6 +39,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 - The simulator must keep `large-mesh` coverage for oversized node/message stores.
 - Serial diagnostics include `routes`, `routes detail <seq>`, `routes trace <fingerprint>`, `routes probe <fingerprint>`, and `routes clear`.
 - `ui_corruption_probe_d1l.py` replaces the old high-count tab stress gate. It exercises tabs, serial-only UI data refresh through `ui data-canary`, Packet search, Public search, health, and crashlog checks with `public_rf_tx=false` and `formats_sd=false`.
+- `ui_capture_d1l.py` freezes the firmware-maintained RGB565 display shadow, reconstructs a PNG on the PC, and gives the release gate real pixel evidence for split/stale hardware frames.
 
 ## Active Docs
 

@@ -72,6 +72,31 @@ def ui_corruption_probe_payload(**overrides: object) -> dict:
     return payload
 
 
+def ui_pixel_capture_payload(**overrides: object) -> dict:
+    payload = {
+        "ok": True,
+        "kind": "ui_pixel_capture",
+        "mode": "hardware",
+        "port": "COM12",
+        "width": 480,
+        "height": 480,
+        "bytes_per_pixel": 2,
+        "pixel_format": "rgb565-le",
+        "total_bytes": 480 * 480 * 2,
+        "captured_bytes": 480 * 480 * 2,
+        "chunk_size": 1024,
+        "chunk_count": 450,
+        "crc32": "1234ABCD",
+        "firmware_crc32": "1234ABCD",
+        "png_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.png",
+        "raw_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.rgb565",
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def scroll_probe_payload(**overrides: object) -> dict:
     probe_results = {
         screen: {
@@ -159,6 +184,7 @@ def write_core_evidence(root: Path) -> None:
     hardware = root / "artifacts" / "hardware" / "com12"
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
     write_json(hardware / "ui_corruption_probe_68350bf.json", ui_corruption_probe_payload())
+    write_json(hardware / "ui_pixel_capture_68350bf.json", ui_pixel_capture_payload())
     write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
     write_json(
         hardware / "dm_probe_68350bf.json",
@@ -696,6 +722,7 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["release_notices_included"]["ok"] is True
     assert gates["com12_smoke"]["ok"] is True
     assert gates["ui_corruption_probe"]["ok"] is True
+    assert gates["ui_pixel_capture"]["ok"] is True
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
@@ -1017,6 +1044,21 @@ def test_release_gate_audit_requires_targeted_ui_corruption_rounds(tmp_path: Pat
     gates = gate_by_id(report)
 
     assert gates["ui_corruption_probe"]["ok"] is False
+
+
+def test_release_gate_audit_requires_hardware_ui_pixel_capture(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    write_json(
+        hardware / "ui_pixel_capture_68350bf.json",
+        ui_pixel_capture_payload(captured_bytes=1024, crc32=""),
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_pixel_capture"]["ok"] is False
+    assert gates["ui_pixel_capture"]["details"]["path_found"] is True
 
 
 def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):

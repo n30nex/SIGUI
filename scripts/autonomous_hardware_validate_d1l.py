@@ -986,7 +986,7 @@ def run_ui_corruption_probe(ctx: RunContext, rounds: int, dry_run: bool) -> dict
         "--port",
         ctx.d1l_port,
         "--timeout",
-        "5",
+        "15",
         "--rounds",
         str(rounds),
         "--clear-crashlog-before-start",
@@ -1014,6 +1014,28 @@ def run_scroll_probe(ctx: RunContext, dry_run: bool) -> dict:
         "--clear-crashlog-before-start",
     ]
     return run_existing_script(ctx, "scroll_probe", args, out, timeout=180, dry_run=dry_run)
+
+
+def run_ui_pixel_capture(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"ui_pixel_capture_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    png_out = out.with_suffix(".png")
+    raw_out = out.with_suffix(".rgb565")
+    args = [
+        str(ctx.root / "scripts" / "ui_capture_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "15",
+        "--chunk-size",
+        "1024",
+        "--out",
+        str(out),
+        "--png-out",
+        str(png_out),
+        "--raw-out",
+        str(raw_out),
+    ]
+    return run_existing_script(ctx, "ui_pixel_capture", args, out, timeout=420, dry_run=dry_run)
 
 
 def release_gate_command(ctx: RunContext, out: Path) -> list[str]:
@@ -1148,7 +1170,7 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
             "rp2040_bridge_preflight",
             "sd_file_canary",
             "d1l_smoke",
-            *(["d1l_ui_corruption_probe", "d1l_scroll_probe"] if args.include_ui_probes else []),
+            *(["d1l_ui_corruption_probe", "d1l_scroll_probe", "d1l_ui_pixel_capture"] if args.include_ui_probes else []),
             "release_gate_audit",
         ],
     }
@@ -1281,6 +1303,7 @@ def run_validation(args: argparse.Namespace) -> dict:
         if args.include_ui_probes:
             runs.append(run_ui_corruption_probe(ctx, rounds=args.ui_rounds, dry_run=args.dry_run))
             runs.append(run_scroll_probe(ctx, dry_run=args.dry_run))
+            runs.append(run_ui_pixel_capture(ctx, dry_run=args.dry_run))
         runs.append(run_release_gate(ctx, dry_run=args.dry_run))
     except Exception as exc:
         report["error"] = str(exc)

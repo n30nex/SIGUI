@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "rom/cache.h"
 
 #include "app/app_model.h"
 #include "app/settings_model.h"
@@ -29,8 +30,18 @@ static const char *TAG = "d1l_ui";
 #define D1L_DM_THREAD_UI_LOAD_OLDER_STEP 5U
 
 static lv_disp_draw_buf_t s_draw_buf;
+static lv_disp_drv_t s_disp_drv;
 static lv_color_t *s_buf1;
 static lv_color_t *s_buf2;
+static uint8_t *s_capture_shadow;
+static uint8_t *s_capture_snapshot;
+static SemaphoreHandle_t s_capture_lock;
+static bool s_capture_shadow_ready;
+static bool s_capture_active;
+static bool s_bsp_flush_ready_registered;
+static uint32_t s_capture_frame_seq;
+static uint32_t s_capture_flush_count;
+static uint32_t s_capture_crc32;
 static TaskHandle_t s_ui_task_handle;
 static TaskHandle_t s_touch_task_handle;
 static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -95,6 +106,8 @@ static lv_obj_t *s_lock_overlay;
 static lv_obj_t *s_onboarding_sheet;
 static lv_obj_t *s_onboarding_name_textarea;
 static lv_obj_t *s_onboarding_keyboard;
+static bool s_lock_visible;
+static bool s_onboarding_visible;
 static uint32_t s_toast_until;
 static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
@@ -535,13 +548,180 @@ static void lv_tick_task(void *arg)
     lv_tick_inc(5);
 }
 
+static uint32_t crc32_update(uint32_t crc, const uint8_t *data, size_t len)
+{
+    crc = ~crc;
+    for (size_t i = 0; i < len; ++i) {
+        crc ^= data[i];
+        for (uint8_t bit = 0; bit < 8U; ++bit) {
+            crc = (crc >> 1U) ^ (0xEDB88320UL & (uint32_t)-(int32_t)(crc & 1U));
+        }
+    }
+    return ~crc;
+}
+
+static uint32_t crc32_bytes(const uint8_t *data, size_t len)
+{
+    return crc32_update(0U, data, len);
+}
+
+static esp_err_t init_capture_buffers(void)
+{
+    if (!s_capture_lock) {
+        s_capture_lock = xSemaphoreCreateMutex();
+        if (!s_capture_lock) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_capture_shadow) {
+        s_capture_shadow = heap_caps_malloc(D1L_UI_CAPTURE_TOTAL_BYTES,
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_capture_shadow) {
+            s_capture_shadow = heap_caps_malloc(D1L_UI_CAPTURE_TOTAL_BYTES, MALLOC_CAP_8BIT);
+        }
+        if (!s_capture_shadow) {
+            return ESP_ERR_NO_MEM;
+        }
+        memset(s_capture_shadow, 0, D1L_UI_CAPTURE_TOTAL_BYTES);
+    }
+    if (!s_capture_snapshot) {
+        s_capture_snapshot = heap_caps_malloc(D1L_UI_CAPTURE_TOTAL_BYTES,
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!s_capture_snapshot) {
+            s_capture_snapshot = heap_caps_malloc(D1L_UI_CAPTURE_TOTAL_BYTES, MALLOC_CAP_8BIT);
+        }
+        if (!s_capture_snapshot) {
+            return ESP_ERR_NO_MEM;
+        }
+        memset(s_capture_snapshot, 0, D1L_UI_CAPTURE_TOTAL_BYTES);
+    }
+    return ESP_OK;
+}
+
+static void copy_rect_to_capture_shadow(int x1,
+                                        int y1,
+                                        int x2,
+                                        int y2,
+                                        const uint8_t *src,
+                                        int src_origin_x,
+                                        int src_origin_y,
+                                        int src_stride_pixels)
+{
+    if (!s_capture_shadow || !src || !s_capture_lock || src_stride_pixels <= 0) {
+        return;
+    }
+    if (x1 < 0) {
+        x1 = 0;
+    }
+    if (y1 < 0) {
+        y1 = 0;
+    }
+    if (x2 > (int)D1L_UI_CAPTURE_WIDTH) {
+        x2 = (int)D1L_UI_CAPTURE_WIDTH;
+    }
+    if (y2 > (int)D1L_UI_CAPTURE_HEIGHT) {
+        y2 = (int)D1L_UI_CAPTURE_HEIGHT;
+    }
+    if (x1 >= x2 || y1 >= y2) {
+        return;
+    }
+    if (x1 < src_origin_x || y1 < src_origin_y) {
+        return;
+    }
+
+    const size_t copy_bytes = (size_t)(x2 - x1) * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+    xSemaphoreTake(s_capture_lock, portMAX_DELAY);
+    for (int y = y1; y < y2; ++y) {
+        const size_t src_offset =
+            ((size_t)(y - src_origin_y) * (size_t)src_stride_pixels + (size_t)(x1 - src_origin_x)) *
+            D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+        const size_t dest_offset =
+            ((size_t)y * D1L_UI_CAPTURE_WIDTH + (size_t)x1) *
+            D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+        memcpy(s_capture_shadow + dest_offset, src + src_offset, copy_bytes);
+    }
+    s_capture_shadow_ready = true;
+    s_capture_flush_count++;
+    s_capture_frame_seq++;
+    xSemaphoreGive(s_capture_lock);
+}
+
+static bool lcd_flush_ready_cb(void *data)
+{
+    lv_disp_drv_t *drv = data ? (lv_disp_drv_t *)data : &s_disp_drv;
+    lv_disp_flush_ready(drv);
+    return false;
+}
+
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+static bool lcd_flush_is_last_cb(void)
+{
+    return lv_disp_flush_is_last(&s_disp_drv);
+}
+
+static void lcd_direct_mode_copy_cb(void)
+{
+    lv_disp_t *disp_refr = _lv_refr_get_disp_refreshing();
+    if (!disp_refr || !disp_refr->driver || !disp_refr->driver->draw_buf) {
+        return;
+    }
+
+    uint8_t *buf_act = disp_refr->driver->draw_buf->buf_act;
+    uint8_t *buf1 = disp_refr->driver->draw_buf->buf1;
+    uint8_t *buf2 = disp_refr->driver->draw_buf->buf2;
+    const int h_res = disp_refr->driver->hor_res;
+
+    if (!buf_act || !buf1 || !buf2 || h_res <= 0) {
+        return;
+    }
+    uint8_t *fb_from = buf_act;
+    uint8_t *fb_to = (fb_from == buf1) ? buf2 : buf1;
+    const uint32_t bytes_per_line = (uint32_t)h_res * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+
+    for (int32_t i = 0; i < disp_refr->inv_p; ++i) {
+        if (disp_refr->inv_area_joined[i] != 0) {
+            continue;
+        }
+        const lv_coord_t x_start = disp_refr->inv_areas[i].x1;
+        const lv_coord_t x_end = disp_refr->inv_areas[i].x2 + 1;
+        const lv_coord_t y_start = disp_refr->inv_areas[i].y1;
+        const lv_coord_t y_end = disp_refr->inv_areas[i].y2 + 1;
+        const uint32_t copy_bytes_per_line =
+            (uint32_t)(x_end - x_start) * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+
+        uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+                                  D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+        uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+                              D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+        for (lv_coord_t y = y_start; y < y_end; ++y) {
+            memcpy(to, from, copy_bytes_per_line);
+            from += bytes_per_line;
+            to += bytes_per_line;
+        }
+
+        copy_rect_to_capture_shadow(x_start, y_start, x_end, y_end,
+                                    fb_from, 0, 0, h_res);
+        uint8_t *flush_ptr = fb_to + (uint32_t)y_start * bytes_per_line;
+        const uint32_t bytes_to_flush = (uint32_t)(y_end - y_start) * bytes_per_line;
+        Cache_WriteBack_Addr((uint32_t)flush_ptr, bytes_to_flush);
+    }
+}
+#endif
+
 static void flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_map)
 {
     esp_err_t ret = bsp_lcd_flush(area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_map);
+#if !CONFIG_LCD_LVGL_DIRECT_MODE
+    copy_rect_to_capture_shadow(area->x1, area->y1, area->x2 + 1, area->y2 + 1,
+                                (const uint8_t *)color_map, area->x1, area->y1,
+                                area->x2 - area->x1 + 1);
+#endif
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "flush failed: %s", esp_err_to_name(ret));
     }
-    lv_disp_flush_ready(drv);
+    if (ret != ESP_OK || !s_bsp_flush_ready_registered) {
+        lv_disp_flush_ready(drv);
+    }
 }
 
 static lv_coord_t clamp_touch_coord(int32_t value, lv_coord_t max_value)
@@ -1033,6 +1213,7 @@ static void hide_onboarding_sheet(void)
     if (s_onboarding_sheet) {
         lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     }
+    s_onboarding_visible = false;
 }
 
 static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
@@ -1044,6 +1225,7 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         hide_onboarding_sheet();
         return;
     }
+    s_onboarding_visible = true;
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_onboarding_sheet);
 }
@@ -5821,6 +6003,123 @@ bool d1l_ui_phase1_tab_switch_pending(void)
     return pending;
 }
 
+static void fill_capture_status(d1l_ui_capture_status_t *status)
+{
+    if (!status) {
+        return;
+    }
+    memset(status, 0, sizeof(*status));
+    status->available = s_capture_shadow != NULL && s_capture_snapshot != NULL && s_capture_lock != NULL;
+    status->active = s_capture_active;
+    status->shadow_ready = s_capture_shadow_ready;
+    status->started = s_started;
+    status->onboarding_visible = s_onboarding_visible;
+    status->lock_visible = s_lock_visible;
+    status->width = D1L_UI_CAPTURE_WIDTH;
+    status->height = D1L_UI_CAPTURE_HEIGHT;
+    status->bytes_per_pixel = D1L_UI_CAPTURE_BYTES_PER_PIXEL;
+    status->total_bytes = D1L_UI_CAPTURE_TOTAL_BYTES;
+    status->max_chunk_bytes = D1L_UI_CAPTURE_MAX_CHUNK_BYTES;
+    status->frame_seq = s_capture_frame_seq;
+    status->flush_count = s_capture_flush_count;
+    status->capture_crc32 = s_capture_crc32;
+    snprintf(status->active_tab, sizeof(status->active_tab), "%s", d1l_ui_phase1_active_tab_name());
+    snprintf(status->pending_tab, sizeof(status->pending_tab), "%s", d1l_ui_phase1_pending_tab_name());
+}
+
+esp_err_t d1l_ui_capture_status(d1l_ui_capture_status_t *out_status)
+{
+    if (!out_status) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_capture_lock) {
+        fill_capture_status(out_status);
+        return ESP_OK;
+    }
+    xSemaphoreTake(s_capture_lock, portMAX_DELAY);
+    fill_capture_status(out_status);
+    xSemaphoreGive(s_capture_lock);
+    return ESP_OK;
+}
+
+esp_err_t d1l_ui_capture_begin(d1l_ui_capture_status_t *out_status)
+{
+    if (!s_capture_lock || !s_capture_shadow || !s_capture_snapshot) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_capture_lock, portMAX_DELAY);
+    if (!s_capture_shadow_ready) {
+        xSemaphoreGive(s_capture_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    memcpy(s_capture_snapshot, s_capture_shadow, D1L_UI_CAPTURE_TOTAL_BYTES);
+    s_capture_crc32 = crc32_bytes(s_capture_snapshot, D1L_UI_CAPTURE_TOTAL_BYTES);
+    s_capture_active = true;
+    fill_capture_status(out_status);
+    xSemaphoreGive(s_capture_lock);
+    return ESP_OK;
+}
+
+esp_err_t d1l_ui_capture_chunk(size_t offset,
+                               size_t requested_len,
+                               uint8_t *out_data,
+                               size_t out_capacity,
+                               size_t *out_len,
+                               uint32_t *out_crc32,
+                               d1l_ui_capture_status_t *out_status)
+{
+    if (!out_data || !out_len || out_capacity == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_len = 0U;
+    if (out_crc32) {
+        *out_crc32 = 0U;
+    }
+    if (!s_capture_lock || !s_capture_snapshot) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_capture_lock, portMAX_DELAY);
+    if (!s_capture_active) {
+        xSemaphoreGive(s_capture_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (offset >= D1L_UI_CAPTURE_TOTAL_BYTES || requested_len == 0U) {
+        xSemaphoreGive(s_capture_lock);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    size_t len = requested_len;
+    const size_t remaining = D1L_UI_CAPTURE_TOTAL_BYTES - offset;
+    if (len > remaining) {
+        len = remaining;
+    }
+    if (len > D1L_UI_CAPTURE_MAX_CHUNK_BYTES) {
+        len = D1L_UI_CAPTURE_MAX_CHUNK_BYTES;
+    }
+    if (len > out_capacity) {
+        len = out_capacity;
+    }
+    memcpy(out_data, s_capture_snapshot + offset, len);
+    if (out_crc32) {
+        *out_crc32 = crc32_bytes(out_data, len);
+    }
+    *out_len = len;
+    fill_capture_status(out_status);
+    xSemaphoreGive(s_capture_lock);
+    return ESP_OK;
+}
+
+esp_err_t d1l_ui_capture_end(d1l_ui_capture_status_t *out_status)
+{
+    if (!s_capture_lock) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(s_capture_lock, portMAX_DELAY);
+    s_capture_active = false;
+    fill_capture_status(out_status);
+    xSemaphoreGive(s_capture_lock);
+    return ESP_OK;
+}
+
 static void request_tab_event_cb(lv_event_t *event)
 {
     request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event));
@@ -6028,6 +6327,7 @@ static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_lock_overlay) {
+        s_lock_visible = true;
         lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -6036,6 +6336,7 @@ static void unlock_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_lock_overlay) {
+        s_lock_visible = false;
         lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -6777,7 +7078,10 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_onboarding_keyboard, onboarding_keyboard_event_cb, LV_EVENT_READY, NULL);
 
     if (d1l_settings_current()->onboarding_complete) {
+        s_onboarding_visible = false;
         lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        s_onboarding_visible = true;
     }
 }
 
@@ -6799,6 +7103,7 @@ static void create_lock_overlay(lv_obj_t *screen)
     lv_obj_align(title, LV_ALIGN_CENTER, 0, -24);
     lv_obj_t *hint = create_label(s_lock_overlay, "Tap to unlock", 0x5EEAD4);
     lv_obj_align(hint, LV_ALIGN_CENTER, 0, 24);
+    s_lock_visible = false;
     lv_obj_add_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -6901,26 +7206,40 @@ esp_err_t d1l_ui_phase1_start(void)
 
     lv_init();
     d1l_health_monitor_set_lvgl_ready(true);
-    const size_t buffer_pixels = 480 * 40;
-    s_buf1 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    s_buf2 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_buf1 || !s_buf2) {
-        s_buf1 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_8BIT);
-        s_buf2 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_8BIT);
-    }
+    ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG, "capture buffer init failed");
+
+    const size_t buffer_pixels = D1L_UI_CAPTURE_WIDTH * D1L_UI_CAPTURE_HEIGHT;
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+    void *fb1 = NULL;
+    void *fb2 = NULL;
+    bsp_lcd_get_frame_buffer(&fb1, &fb2);
+    s_buf1 = (lv_color_t *)fb1;
+    s_buf2 = (lv_color_t *)fb2;
+#else
+    s_buf1 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_buf2 = heap_caps_malloc(buffer_pixels * sizeof(lv_color_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
     if (!s_buf1 || !s_buf2) {
         return ESP_ERR_NO_MEM;
     }
 
     lv_disp_draw_buf_init(&s_draw_buf, s_buf1, s_buf2, buffer_pixels);
 
-    static lv_disp_drv_t disp_drv;
-    lv_disp_drv_init(&disp_drv);
-    disp_drv.hor_res = 480;
-    disp_drv.ver_res = 480;
-    disp_drv.flush_cb = flush_cb;
-    disp_drv.draw_buf = &s_draw_buf;
-    lv_disp_drv_register(&disp_drv);
+    lv_disp_drv_init(&s_disp_drv);
+    s_disp_drv.hor_res = D1L_UI_CAPTURE_WIDTH;
+    s_disp_drv.ver_res = D1L_UI_CAPTURE_HEIGHT;
+    s_disp_drv.flush_cb = flush_cb;
+    s_disp_drv.draw_buf = &s_draw_buf;
+#if CONFIG_LCD_LVGL_DIRECT_MODE
+    s_disp_drv.direct_mode = 1;
+    bsp_lcd_flush_is_last_register(lcd_flush_is_last_cb);
+    bsp_lcd_direct_mode_register(lcd_direct_mode_copy_cb);
+#endif
+    s_bsp_flush_ready_registered = (bsp_lcd_set_cb(lcd_flush_ready_cb, &s_disp_drv) == ESP_OK);
+    if (!s_bsp_flush_ready_registered) {
+        ESP_LOGW(TAG, "BSP LCD flush callback registration failed; falling back to immediate ready");
+    }
+    lv_disp_drv_register(&s_disp_drv);
 
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);

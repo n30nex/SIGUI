@@ -47,6 +47,7 @@ No hardware required:
 python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
+python .\scripts\ui_capture_d1l.py --dry-run
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
@@ -78,6 +79,7 @@ Focused UI proof:
 ```powershell
 $env:D1L_PORT = "COM12"
 python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
 ```
 
 Guided SD install, only when autonomous RP2040 access is not available:

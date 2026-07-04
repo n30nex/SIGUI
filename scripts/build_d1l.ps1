@@ -21,26 +21,6 @@ $manifest = [ordered]@{
     artifacts = @()
 }
 
-function Set-D1lSafeSdkconfig {
-    param([string]$ConfigPath)
-
-    if (-not (Test-Path -LiteralPath $ConfigPath)) {
-        return
-    }
-
-    $text = Get-Content -Raw -LiteralPath $ConfigPath
-    $updated = $text
-    $updated = $updated -replace '(?m)^CONFIG_LCD_AVOID_TEAR=y$', '# CONFIG_LCD_AVOID_TEAR is not set'
-    $updated = $updated -replace '(?m)^CONFIG_LCD_LVGL_DIRECT_MODE=y$', '# CONFIG_LCD_LVGL_DIRECT_MODE is not set'
-
-    if ($updated -ne $text) {
-        Set-Content -Encoding ASCII -LiteralPath $ConfigPath -Value $updated
-        Write-Host "Updated local sdkconfig to disable LCD avoid-tear/direct-mode for D1L stability"
-    }
-}
-
-Set-D1lSafeSdkconfig -ConfigPath (Join-Path $root "sdkconfig")
-
 $manifestPath = Join-Path $out "build-manifest.json"
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -Encoding ASCII -LiteralPath $manifestPath
 Write-Host "Wrote $manifestPath"

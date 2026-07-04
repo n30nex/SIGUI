@@ -77,13 +77,12 @@ def test_console_exposes_explicit_rp2040_reset_and_bootloader_commands():
     assert "formats_sd" in console
 
 
-def test_phase1_lvgl_uses_basic_flush_path():
+def test_phase1_lvgl_uses_seeed_direct_anti_tear_path():
     defaults = (ROOT / "sdkconfig.defaults").read_text(encoding="utf-8")
     assert "CONFIG_SENSECAP_INDICATOR_SCREEN_GX=y" in defaults
     assert "# CONFIG_SENSECAP_INDICATOR_SCREEN_DX is not set" in defaults
-    assert "CONFIG_LCD_AVOID_TEAR=y" not in defaults
-    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" not in defaults
-    assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in defaults
+    assert "CONFIG_LCD_AVOID_TEAR=y" in defaults
+    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" in defaults
     assert "CONFIG_LV_MEM_CUSTOM=y" in defaults
     assert "CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y" in defaults
     assert "# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set" in defaults
@@ -148,13 +147,11 @@ def test_cmake_applies_parent_owned_seeed_touch_patch():
     assert "ft5x06_write_byte(FT5x06_ID_G_PMODE, 0x00)" in patch
 
 
-def test_build_script_is_host_only_and_rewrites_stale_unsafe_lcd_config():
+def test_build_script_is_host_only_and_does_not_rewrite_lcd_config():
     script = (ROOT / "scripts" / "build_d1l.ps1").read_text(encoding="utf-8")
-    assert "Set-D1lSafeSdkconfig" in script
-    assert "CONFIG_LCD_AVOID_TEAR=y" in script
-    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" in script
-    assert "# CONFIG_LCD_AVOID_TEAR is not set" in script
-    assert "# CONFIG_LCD_LVGL_DIRECT_MODE is not set" in script
+    assert "Set-D1lSafeSdkconfig" not in script
+    assert "CONFIG_LCD_AVOID_TEAR" not in script
+    assert "CONFIG_LCD_LVGL_DIRECT_MODE" not in script
     assert "disabled_local_github_actions_only" in script
     assert "Use GitHub Actions d1l-ci firmware-build" in script
     assert "& idf.py build" not in script

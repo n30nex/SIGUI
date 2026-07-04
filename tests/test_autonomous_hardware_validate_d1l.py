@@ -111,6 +111,36 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "d1l_500_cycle_tab_abuse" not in plan["steps"]
     assert "d1l_ui_corruption_probe" not in plan["steps"]
     assert "d1l_scroll_probe" not in plan["steps"]
+    assert "d1l_ui_pixel_capture" not in plan["steps"]
+
+
+def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--dry-run",
+            "--skip-esp32-flash",
+            "--skip-rp2040-official-smoke",
+            "--include-ui-probes",
+        ]
+    )
+
+    ctx = runner.build_context(args)
+    plan = runner.plan_report(ctx, args)
+
+    assert "d1l_ui_corruption_probe" in plan["steps"]
+    assert "d1l_scroll_probe" in plan["steps"]
+    assert "d1l_ui_pixel_capture" in plan["steps"]
+    assert "COM11" not in json.dumps(plan["steps"])
+    assert "COM29" not in json.dumps(plan["steps"])
 
 
 def test_rp2040_port_discovery_selects_allowed_usb_cdc_and_skips_protected_ports(monkeypatch):

@@ -74,6 +74,10 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `radio set preset uscan`
 - `radio set txpower 20`
 - `radio set rxboost <0|1>`
+- `ui capture status`
+- `ui capture begin`
+- `ui capture chunk <offset> <len>`
+- `ui capture end`
 - `messages public`
 - `messages public offset 8`
 - `messages public search test`
@@ -115,6 +119,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Current Limits
 
 - Manual physical review of the touch UI is still pending.
+- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures, but the simulator/reference diff still needs release-gate proof.
 - Manual touch review of the Settings dashboard and Radio Settings sheet is still pending.
 - Manual touch review of the Contact Edit rename/Forget sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.

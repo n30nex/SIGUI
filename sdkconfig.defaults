@@ -14,10 +14,10 @@ CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L=y
 CONFIG_SENSECAP_INDICATOR_SCREEN_GX=y
 # CONFIG_SENSECAP_INDICATOR_SCREEN_DX is not set
 CONFIG_LCD_EVB_SCREEN_ROTATION_0=y
-# Keep Phase 1 LVGL flushing on the BSP draw_bitmap path. Seeed direct mode
-# requires extra callbacks; without them the BSP dereferences a null callback.
-# CONFIG_LCD_AVOID_TEAR is not set
-# CONFIG_LCD_LVGL_DIRECT_MODE is not set
+# Use Seeed's double-framebuffer/direct-mode RGB path. The D1L panel scans
+# continuously, so small strip flushes can show split/stale columns on hardware.
+CONFIG_LCD_AVOID_TEAR=y
+CONFIG_LCD_LVGL_DIRECT_MODE=y
 CONFIG_LCD_TASK_REFRESH_TIME=10
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_FONT_MONTSERRAT_14=y

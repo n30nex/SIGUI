@@ -21,6 +21,7 @@ python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-larg
 python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-storage
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
+python .\scripts\ui_capture_d1l.py --dry-run
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
@@ -68,13 +69,16 @@ Use only the supplied D1L port:
 $env:D1L_PORT = "COMx"
 .\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
 ```
 
-For current local validation, `COM12` is the D1L and `COM11` has been a local MeshCore bot. Re-check Windows serial enumeration after replugging, and do not bake those ports into scripts or defaults.
+For current local validation, `COM12` is the D1L ESP32/UI console and `COM16` is the D1L RP2040 SD bridge/UF2 side. Do not touch `COM8`, `COM11`, or `COM29` for D1L validation.
 
 The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
 
 Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, UI, or scripts. Production validation assumes users provide FAT32 cards prepared on a computer; the current validation device has a fresh FAT32 32 GB card installed. DeskOS may create the `/deskos` folders/manifests on a mounted FAT32 card and otherwise falls back to NVS.
+
+`ui_capture_d1l.py` is the hardware display truth path for the split-page UI blocker. It reads the 480x480 RGB565 frame back over the COM12 console, writes JSON/PNG/raw artifacts, and must stay non-destructive: no RF send, no SD format, and no manual touch requirement.
 
 ## GitHub Actions
 

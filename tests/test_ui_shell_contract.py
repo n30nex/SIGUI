@@ -226,10 +226,21 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
     assert "cmd_ui_data_canary" in console
+    assert "cmd_ui_capture_status" in console
+    assert "cmd_ui_capture_begin" in console
+    assert "cmd_ui_capture_chunk" in console
+    assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
     assert "ui data-canary <token>" in console
+    assert "ui capture status" in console
+    assert "ui capture begin" in console
+    assert "ui capture chunk <offset> <len>" in console
+    assert "ui capture end" in console
+    assert "d1l_ui_capture_status_t" in header
+    assert "d1l_ui_capture_begin" in header
+    assert "d1l_ui_capture_chunk" in header
     assert 'ok_begin("ui data-canary")' in console
     assert '\\"storage_required\\":false' in console
     assert '\\"public_rf_tx\\":false' in console
@@ -240,6 +251,24 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '"Scroll Probe DM"' in source
     assert '"Thread keeps delivery, ACK, and PATH state together."' in source
     assert '"Scroll proof keeps this empty-state layout validated too."' in source
+
+
+def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
+    source = read("main/ui/ui_phase1.c")
+    defaults = read("sdkconfig.defaults")
+
+    assert "CONFIG_LCD_AVOID_TEAR=y" in defaults
+    assert "CONFIG_LCD_LVGL_DIRECT_MODE=y" in defaults
+    assert "bsp_lcd_get_frame_buffer(&fb1, &fb2)" in source
+    assert "s_disp_drv.direct_mode = 1" in source
+    assert "bsp_lcd_set_cb(lcd_flush_ready_cb, &s_disp_drv)" in source
+    assert "bsp_lcd_flush_is_last_register(lcd_flush_is_last_cb)" in source
+    assert "bsp_lcd_direct_mode_register(lcd_direct_mode_copy_cb)" in source
+    assert "lv_disp_flush_ready(drv)" in source
+    assert "if (ret != ESP_OK || !s_bsp_flush_ready_registered)" in source
+    assert "D1L_UI_CAPTURE_TOTAL_BYTES" in source
+    assert "copy_rect_to_capture_shadow" in source
+    assert "d1l_ui_capture_begin" in source
 
 
 def test_serial_tab_state_stays_pending_until_render_finishes():

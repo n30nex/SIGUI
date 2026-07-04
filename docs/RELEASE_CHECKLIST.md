@@ -110,6 +110,7 @@
 - [x] Host-side fix for live-packet UI corruption added: RF-mutated packet/message/DM/node/route/contact stores and mesh-inspector scratch buffers now serialize reads/writes before UI snapshots.
 - [x] UI refresh race fix added: touch callbacks request coalesced content refreshes instead of rebuilding the active tab inline, and live data generation changes queue redraws on the UI task.
 - [ ] Current COM12 targeted UI corruption probe artifact captured with tab, button/search, retained-data refresh, health, crashlog, `public_rf_tx=false`, and `formats_sd=false` proof.
+- [ ] Current COM12 hardware pixel capture artifact captured with `scripts/ui_capture_d1l.py`, 480x480 RGB565 PNG reconstruction, matching CRC, and `public_rf_tx=false` / `formats_sd=false` proof.
 - [ ] Manual screen photos and physical touch review for the newest COM12 UI stability build.
 - [ ] 12-hour idle/listening soak without crash.
 - [x] 1-hour active Public messaging soak without UI freeze passed on `COM7`.
@@ -133,7 +134,7 @@
 - [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched UI/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. The SD gate rejects obsolete format-capable preflight guidance and requires no-device-format evidence (`formats_sd=false`). Current `e3c0510` local audit reports `ready_for_public_release=false` with open P0 evidence gates.
 - [x] Older COM12 smoke, shorter historical tab stress, scroll probe, outbound DM proof, supplemental route-probe proof, RP2040 preflight, UF2 scan, full RF partial proof, Actions checksums, and packaged notices captured for `a1afd4b` after flashing the verified Actions package from run `28569851955`.
 - [x] Current `e3c0510` / Actions run `28690375628` COM12 core SD evidence captured: smoke, file canary, retained-history retry, reboot/remount, map-tile canary, and COM16 raw RP2040 diagnostic all pass without Public RF or formatting.
-- [ ] Fresh current-commit targeted UI corruption probe, full RF/DM acceptance, official Seeed SD smoke, broader SD release matrix, physical photos/manual UI review, and 12-hour soak still required before public release.
+- [ ] Fresh current-commit targeted UI corruption probe, hardware pixel capture PNG, full RF/DM acceptance, official Seeed SD smoke, broader SD release matrix, physical photos/manual UI review, and 12-hour soak still required before public release.
 - [ ] Physical screen photos captured.
 - [x] Manual physical UI review artifact helper added: `scripts/manual_ui_review_d1l.py` requires current photos plus explicit display/touch/navigation/workflow confirmations before producing an `ok=true` review JSON.
 - [ ] Final full-duration soak evidence added.

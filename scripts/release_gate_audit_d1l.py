@@ -442,6 +442,27 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
+    return (
+        data.get("ok") is True
+        and data.get("kind") == "ui_pixel_capture"
+        and data.get("mode") == "hardware"
+        and data.get("port") == expected_port
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and data.get("width") == 480
+        and data.get("height") == 480
+        and data.get("bytes_per_pixel") == 2
+        and data.get("pixel_format") == "rgb565-le"
+        and data.get("total_bytes") == 480 * 480 * 2
+        and data.get("captured_bytes") == 480 * 480 * 2
+        and int(data.get("chunk_count") or 0) > 0
+        and bool(data.get("crc32"))
+        and bool(data.get("png_path"))
+        and bool(data.get("raw_path"))
+    )
+
+
 def scroll_probe_results_by_screen(data: dict) -> dict:
     probes: dict = {}
     probe_results = data.get("probe_results")
@@ -1560,6 +1581,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates: list[GateResult] = []
     smoke_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "smoke")
     ui_corruption_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-corruption-probe")
+    ui_capture_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-capture")
     scroll_probe_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "scroll-probe")
     official_smoke_roots = unique_dirs(
         sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-official-sd-smoke")
@@ -1613,6 +1635,22 @@ def build_audit(args: argparse.Namespace) -> dict:
             lambda data: ui_corruption_probe_ok(data, args.d1l_port),
             "Targeted D1L UI corruption probe artifact passes.",
             "No passing targeted D1L UI corruption probe artifact was found.",
+        )
+    )
+    gates.append(
+        simple_json_ok_gate(
+            "ui_pixel_capture",
+            "D1L hardware pixel capture",
+            newest_commit_json_from_roots(
+                ui_capture_roots,
+                args.commit,
+                "ui_pixel_capture_*.json",
+                "d1l-ui-capture-*.json",
+            ),
+            root,
+            lambda data: ui_pixel_capture_ok(data, args.d1l_port),
+            "Current-commit D1L hardware pixel capture reconstructs a 480x480 RGB565 frame.",
+            "No passing current-commit D1L hardware pixel capture artifact was found.",
         )
     )
     gates.append(
