@@ -9,7 +9,7 @@ Current public-release status: **not ready to tag**. Core SD card support is wor
 | Area | Status | Notes |
 |---|---|---|
 | GitHub Actions firmware package | Working | Builds ESP32 firmware, release package, RP2040 SD bridge UF2, and official Seeed SD smoke UF2 with checksums. |
-| Touch shell | Partial | Home, Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage exist. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets split-page redraw corruption, SiguredOS-style icon Home redesign, and broader keyboard/sheet layout polish. |
+| Touch shell | Partial | Home now uses a SiguredOS-style icon launcher with quick Mesh/Wi-Fi/BLE/SD status, plus Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets current-commit hardware pixel proof, split-page redraw review, and broader keyboard/sheet layout polish. |
 | Public messages | Hardware-proven core | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |

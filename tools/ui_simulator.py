@@ -736,6 +736,83 @@ def draw_chip(
         s.touch_target(title, box, kind="chip", action=action, destination=destination)
 
 
+def draw_launcher_icon(s: Surface, box: tuple[int, int, int, int], icon: str, color: tuple[int, int, int]):
+    x0, y0, x1, y1 = box
+    cx = (x0 + x1) // 2
+    cy = (y0 + y1) // 2
+    w = x1 - x0
+    h = y1 - y0
+    if icon == "chat":
+        s.round_rect((cx - 13, cy - 8, cx + 13, cy + 9), (15, 28, 24), color, 3)
+        s.line(((cx - 12, cy - 7), (cx, cy + 2)), color)
+        s.line(((cx + 12, cy - 7), (cx, cy + 2)), color)
+    elif icon == "dm":
+        s.rect((cx - 9, cy - 13, cx + 8, cy + 13), color)
+        s.rect((cx + 2, cy - 13, cx + 8, cy - 7), (15, 28, 24))
+    elif icon == "folder":
+        s.round_rect((cx - 16, cy - 5, cx + 17, cy + 12), (15, 28, 24), color, 3)
+        s.rect((cx - 15, cy - 12, cx - 3, cy - 5), color)
+    elif icon == "phone":
+        s.draw.arc((cx - 17, cy - 16, cx + 17, cy + 18), 35, 145, fill=color, width=4)
+        s.draw.arc((cx - 17, cy - 16, cx + 17, cy + 18), 215, 325, fill=color, width=4)
+    elif icon == "repeat":
+        s.draw.arc((cx - 18, cy - 17, cx + 18, cy + 17), 205, 335, fill=color, width=3)
+        s.draw.arc((cx - 18, cy - 17, cx + 18, cy + 17), 25, 155, fill=color, width=3)
+        s.draw.polygon(((cx + 15, cy + 4), (cx + 23, cy + 4), (cx + 19, cy + 12)), fill=color)
+        s.draw.polygon(((cx - 15, cy - 4), (cx - 23, cy - 4), (cx - 19, cy - 12)), fill=color)
+    elif icon == "bell":
+        s.draw.arc((cx - 15, cy - 15, cx + 15, cy + 18), 205, 335, fill=color, width=4)
+        s.line(((cx - 14, cy + 10), (cx + 14, cy + 10)), color)
+        s.draw.ellipse((cx - 3, cy + 13, cx + 3, cy + 19), fill=color)
+    elif icon == "map":
+        s.draw.polygon(((cx + 14, cy - 17), (cx - 10, cy + 4), (cx - 1, cy + 8), (cx - 7, cy + 18)), fill=color)
+    elif icon == "terminal":
+        s.round_rect((cx - 18, cy - 14, cx + 18, cy + 15), (15, 28, 24), color, 3)
+        s.line(((cx - 12, cy - 4), (cx - 5, cy + 2)), color)
+        s.line(((cx - 12, cy + 8), (cx - 5, cy + 2)), color)
+        s.line(((cx + 1, cy + 8), (cx + 11, cy + 8)), color)
+    elif icon == "packets":
+        for i in range(3):
+            y = cy - 13 + i * 11
+            s.rect((cx - 15, y, cx - 9, y + 6), color)
+            s.line(((cx - 4, y + 3), (cx + 16, y + 3)), color)
+    elif icon == "settings":
+        s.draw.ellipse((cx - 13, cy - 13, cx + 13, cy + 13), outline=color, width=4)
+        s.draw.ellipse((cx - 4, cy - 4, cx + 4, cy + 4), fill=color)
+        s.line(((cx, cy - 20), (cx, cy - 14)), color)
+        s.line(((cx, cy + 14), (cx, cy + 20)), color)
+        s.line(((cx - 20, cy), (cx - 14, cy)), color)
+        s.line(((cx + 14, cy), (cx + 20, cy)), color)
+    elif icon == "setup":
+        s.draw.polygon(((cx - 17, cy + 2), (cx, cy - 14), (cx + 17, cy + 2)), outline=color)
+        s.rect((cx - 12, cy + 2, cx + 12, cy + 17), color)
+        s.rect((cx - 4, cy + 8, cx + 4, cy + 17), (15, 28, 24))
+    elif icon == "signal":
+        for i in range(4):
+            s.rect((cx - 18 + i * 10, cy + 13 - i * 8, cx - 12 + i * 10, cy + 15), color)
+    else:
+        s.text(icon[:3].upper(), (x0, y0, x1, y1), min(w, h) // 3, color, True, "center")
+
+
+def draw_launcher_tile(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    icon: str,
+    label: str,
+    detail: str,
+    color: tuple[int, int, int],
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+):
+    x0, y0, x1, y1 = box
+    s.round_rect(box, (13, 23, 18), (31, 55, 46), 4)
+    draw_launcher_icon(s, (x0 + 28, y0 + 8, x1 - 28, y0 + 42), icon, color)
+    s.text(label, (x0 + 5, y0 + 42, x1 - 5, y0 + 60), 11, TEXT, True, "center")
+    s.text(detail, (x0 + 5, y0 + 60, x1 - 5, y1 - 4), 9, MUTED, False, "center")
+    s.touch_target(label, box, kind="launcher_tile", action=action, destination=destination)
+
+
 def draw_settings_group(
     s: Surface,
     box: tuple[int, int, int, int],
@@ -814,38 +891,35 @@ def draw_row(
 
 
 def draw_home_body(s: Surface, snap: Snapshot):
-    draw_chip(s, (16, 64, 108, 108), "Time", "--:--", MUTED)
-    draw_chip(s, (116, 64, 212, 108), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="wifi_setup_sheet")
-    draw_chip(s, (220, 64, 316, 108), "BLE", "off", MUTED, action="open_ble_settings", destination="ble_setup_sheet")
-    draw_chip(s, (324, 64, 464, 108), "SD", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else MUTED, action="open_storage_setup", destination="storage_setup_sheet")
+    tiles = (
+        ((8, 64, 118, 144), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
+        ((126, 64, 236, 144), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
+        ((244, 64, 354, 144), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
+        ((362, 64, 472, 144), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
+        ((8, 152, 118, 232), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
+        ((126, 152, 236, 232), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
+        ((244, 152, 354, 232), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
+        ((362, 152, 472, 232), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
+        ((8, 240, 118, 320), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
+        ((126, 240, 236, 320), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
+        ((244, 240, 354, 320), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
+        ((362, 240, 472, 320), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
+    )
+    for box, icon, label, detail, color, action, destination in tiles:
+        draw_launcher_tile(s, box, icon, label, detail, color, action=action, destination=destination)
 
-    draw_metric(s, (16, 120, 230, 184), "Public", str(snap.unread_public), "Public unread", AMBER if snap.unread_public else GREEN, action="open_messages_public", destination="messages")
-    draw_metric(s, (250, 120, 464, 184), "DMs", str(snap.unread_dm), "Direct messages", AMBER if snap.unread_dm else GREEN, action="open_messages_dm", destination="messages")
-
-    s.text("Last Messages", (16, 194, 210, 216), 17, TEXT, True)
-    previews: list[Message] = [*snap.public_messages, *snap.dm_messages][:5]
-    y = 222
-    for msg in previews:
-        s.round_rect((16, y, 464, y + 58), SURFACE, BORDER, 8)
-        s.text(msg.source, (28, y + 6, 294, y + 24), 12, AMBER if msg.unread else ACCENT, True)
-        if msg.unread:
-            s.text("new", (332, y + 6, 452, y + 24), 11, AMBER, True, "right")
-        s.text(msg.text, (28, y + 26, 452, y + 42), 12, TEXT, True)
-        s.text(msg.meta, (28, y + 42, 452, y + 56), 10, MUTED, True)
-        y += 66
-
-    s.text("Local Repeaters", (16, y + 4, 220, y + 24), 16, TEXT, True)
-    if snap.repeaters:
-        node = snap.repeaters[0]
-        draw_row(
-            s,
-            (16, y + 30, 464, y + 76),
-            node.name,
-            f"{node.meta}  {node.signal}",
-            None,
-        )
-    else:
-        s.text("No repeaters heard yet", (16, y + 30, 464, y + 54), 11, MUTED)
+    s.text(
+        f"Mesh {snap.mesh_state}  RX {snap.rx_total}  TX {snap.tx_total}  Pub {snap.unread_public}  DM {snap.unread_dm}",
+        (16, 326, 464, 352),
+        12,
+        TEXT,
+        True,
+        "center",
+    )
+    draw_chip(s, (8, 366, 118, 410), "Time", "--:--", MUTED)
+    draw_chip(s, (126, 366, 236, 410), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="wifi_setup_sheet")
+    draw_chip(s, (244, 366, 354, 410), "BLE", "off", MUTED, action="open_ble_settings", destination="ble_setup_sheet")
+    draw_chip(s, (362, 366, 472, 410), "SD", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else MUTED, action="open_storage_setup", destination="storage_setup_sheet")
 
 
 def render_home(s: Surface, snap: Snapshot):
@@ -1779,14 +1853,22 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "MeshCore DeskOS",
         "Home",
+        "Chats",
+        "DMs",
+        "Rooms",
+        "Contacts",
+        "Repeaters",
+        "Advertise",
+        "Map",
+        "Terminal",
+        "Packets",
+        "Settings",
+        "Setup",
+        "Signal",
         "Time",
         "Wi-Fi",
         "BLE",
         "SD",
-        "Public",
-        "DMs",
-        "Last Messages",
-        "Local Repeaters",
     ),
     "messages": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"),
     "messages_dm": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "DM Conversations"),
@@ -1950,8 +2032,19 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": ({"view": "lock_overlay", "action": "unlock", "destination": "home"},),
     },
     {
-        "name": "home_chip_setup_sheets",
+        "name": "home_launcher_navigation",
         "steps": (
+            {"view": "home", "action": "open_messages_public", "destination": "messages"},
+            {"view": "home", "action": "open_messages_dm", "destination": "messages_dm"},
+            {"view": "home", "action": "open_nodes", "destination": "nodes"},
+            {"view": "home", "action": "open_repeaters", "destination": "mesh_roles_sheet"},
+            {"view": "home", "action": "open_map", "destination": "map"},
+            {"view": "home", "action": "open_packets", "destination": "packets"},
+            {"view": "home", "action": "open_settings", "destination": "settings"},
+            {"view": "home", "action": "open_advert_sheet", "destination": "advert_sheet"},
+            {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "home", "action": "open_mesh_roles", "destination": "mesh_roles_sheet"},
+            {"view": "home", "action": "open_signal", "destination": "mesh_roles_sheet"},
             {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
             {"view": "wifi_setup_sheet", "action": "wifi_scan"},
             {"view": "wifi_setup_sheet", "action": "wifi_connect"},

@@ -104,7 +104,24 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     report = ui_simulator.generate(tmp_path)
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
 
-    assert {"Time", "Wi-Fi", "BLE", "SD", "Public", "DMs", "Last Messages", "Local Repeaters"} <= labels_by_view["home"]
+    assert {
+        "Chats",
+        "DMs",
+        "Rooms",
+        "Contacts",
+        "Repeaters",
+        "Advertise",
+        "Map",
+        "Terminal",
+        "Packets",
+        "Settings",
+        "Setup",
+        "Signal",
+        "Time",
+        "Wi-Fi",
+        "BLE",
+        "SD",
+    } <= labels_by_view["home"]
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
     assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
     assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
@@ -220,7 +237,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert {
         "first_boot_onboarding",
         "lock_overlay_unlock",
-        "home_chip_setup_sheets",
+        "home_launcher_navigation",
         "public_compose_and_send",
         "public_history_search",
         "public_message_detail",
@@ -246,9 +263,20 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
+    assert actions_by_view["home"]["open_messages_public"]["destination"] == "messages"
+    assert actions_by_view["home"]["open_messages_dm"]["destination"] == "messages_dm"
+    assert actions_by_view["home"]["open_mesh_roles"]["destination"] == "mesh_roles_sheet"
+    assert actions_by_view["home"]["open_nodes"]["destination"] == "nodes"
+    assert actions_by_view["home"]["open_repeaters"]["destination"] == "mesh_roles_sheet"
+    assert actions_by_view["home"]["open_advert_sheet"]["destination"] == "advert_sheet"
+    assert actions_by_view["home"]["open_map"]["destination"] == "map"
+    assert actions_by_view["home"]["open_diagnostics"]["destination"] == "diagnostics_sheet"
+    assert actions_by_view["home"]["open_packets"]["destination"] == "packets"
+    assert actions_by_view["home"]["open_settings"]["destination"] == "settings"
+    assert actions_by_view["home"]["open_storage_setup"]["destination"] == "storage_setup_sheet"
+    assert actions_by_view["home"]["open_signal"]["destination"] == "mesh_roles_sheet"
     assert actions_by_view["home"]["open_wifi_settings"]["destination"] == "wifi_setup_sheet"
     assert actions_by_view["home"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
-    assert actions_by_view["home"]["open_map"]["destination"] == "map"
     assert actions_by_view["wifi_setup_sheet"]["close_wifi_setup"]["destination"] == "home"
     assert actions_by_view["wifi_setup_sheet"]["wifi_scan"]["destination"] is None
     assert actions_by_view["wifi_setup_sheet"]["wifi_connect"]["destination"] is None

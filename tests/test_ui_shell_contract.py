@@ -127,29 +127,44 @@ def test_home_screen_is_user_first_companion_dashboard():
     header = read("main/app/app_model.h")
 
     assert "home_sd_state" in source
+    assert "render_home_launcher_tile" in source
     assert "render_home_chip" in source
+    assert '"Chats"' in source
+    assert '"Rooms"' in source
+    assert '"Contacts"' in source
+    assert '"Repeaters"' in source
+    assert '"Advertise"' in source
+    assert '"Map"' in source
+    assert '"Terminal"' in source
+    assert '"Packets"' in source
+    assert '"Settings"' in source
+    assert '"Setup"' in source
+    assert '"Signal"' in source
     assert '"Time"' in source
     assert '"Wi-Fi"' in source
     assert '"BLE"' in source
     assert '"SD"' in source
-    assert '"Public"' in source
     assert '"DMs"' in source
-    assert '"Last Messages"' in source
-    assert '"Local Repeaters"' in source
     assert "render_home_message_preview" in source
     assert "render_home_repeater_preview" in source
     assert "snapshot->public_unread_count" in source
     assert "snapshot->dm_unread_count" in source
-    assert "snapshot->home_message_count && i < D1L_HOME_MESSAGE_PREVIEW" in source
-    assert "snapshot->home_repeater_count && i < D1L_HOME_REPEATER_PREVIEW" in source
+    assert "snapshot->recent_room_count" in source
+    assert "snapshot->recent_repeater_count" in source
+    assert "snapshot->packet_count" in source
+    assert "snapshot->signal_summary.sample_count" in source
     assert "open_messages_public_event_cb" in source
     assert "open_messages_dm_event_cb" in source
-    assert "open_home_dm_preview_event_cb" in source
     assert "request_tab_event_cb" in source
+    assert "open_mesh_roles_event_cb" in source
+    assert "open_sheet_event_cb" in source
+    assert "open_diagnostics_sheet_event_cb" in source
     assert "open_storage_sheet_event_cb" in source
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
+    assert "Last Messages" not in home_body
+    assert "Local Repeaters" not in home_body
     assert "RF Packets" not in home_body
     assert "System" not in home_body
     assert "#define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in header
@@ -458,6 +473,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
     assert {
         "first_boot_onboarding",
         "lock_overlay_unlock",
+        "home_launcher_navigation",
         "public_compose_and_send",
         "public_history_search",
         "dm_thread_read_and_reply",
@@ -497,6 +513,9 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "save_contact_alias": "save_contact_edit_event_cb",
         "forget_contact": "forget_contact_edit_event_cb",
         "open_map": "dock_event_cb",
+        "open_nodes": "dock_event_cb",
+        "open_packets": "dock_event_cb",
+        "open_settings": "dock_event_cb",
         "open_map_location_picker": "open_map_location_sheet_event_cb",
         "edit_map_latitude": "s_map_lat_textarea",
         "edit_map_longitude": "s_map_lon_textarea",
@@ -510,6 +529,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_packet_detail": "open_packet_detail_event_cb",
         "open_route_detail": "open_route_detail_event_cb",
         "open_mesh_roles": "open_mesh_roles_event_cb",
+        "open_repeaters": "open_mesh_roles_event_cb",
+        "open_signal": "open_mesh_roles_event_cb",
         "open_radio_settings": "open_radio_settings_event_cb",
         "radio_freq_down": "radio_edit_adjust_event_cb",
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
