@@ -640,6 +640,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "esp_http_client_is_complete_data_received(client)" in store_source
     assert "esp_http_client_cleanup(client)" in store_source
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_source
+    assert "D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U" in store_source
+    assert "3000U" not in store_source
     assert "D1L_MAP_TILE_USER_AGENT" in store_source
     assert "map/tiles/attribution.json" in store_source
     assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source

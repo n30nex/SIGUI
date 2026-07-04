@@ -11,6 +11,7 @@
 #define D1L_MAP_TILE_CANARY_X 1U
 #define D1L_MAP_TILE_CANARY_Y 2U
 #define D1L_MAP_TILE_HTTP_TIMEOUT_MS 15000
+#define D1L_MAP_TILE_SD_FILE_TIMEOUT_MS 10000U
 #define D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 offline-tile-cache"
 #define D1L_MAP_TILE_ATTRIBUTION_PATH "map/tiles/attribution.json"
 #define D1L_MAP_TILE_ATTRIBUTION_TMP_PATH "map/tiles/attribution.tmp"
@@ -306,14 +307,15 @@ static esp_err_t write_attribution_metadata(d1l_map_tile_download_result_t *resu
     d1l_rp2040_file_result_t file = {0};
     esp_err_t ret = d1l_rp2040_bridge_file_write(result->attribution_tmp_path, 0U,
                                                  (const uint8_t *)payload,
-                                                 (size_t)len, true, &file, 3000U);
+                                                 (size_t)len, true, &file,
+                                                 D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != (uint32_t)len) {
         download_step(result, "write_attribution", ret == ESP_OK ? ESP_FAIL : ret, &file);
         return result->last_error;
     }
     ret = d1l_rp2040_bridge_file_rename(result->attribution_tmp_path,
                                         result->attribution_path, true,
-                                        &file, 3000U);
+                                        &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
         download_step(result, "rename_attribution", ret, &file);
         return ret;
@@ -395,7 +397,8 @@ esp_err_t d1l_map_tile_store_download(const char *url_template,
     }
 
     d1l_rp2040_file_result_t file = {0};
-    (void)d1l_rp2040_bridge_file_delete(result.tmp_path, &file, 3000U);
+    (void)d1l_rp2040_bridge_file_delete(result.tmp_path, &file,
+                                        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     esp_err_t ret = esp_http_client_open(client, 0);
     if (ret != ESP_OK) {
         download_step(&result, "http_open", ret, NULL);
@@ -454,7 +457,8 @@ esp_err_t d1l_map_tile_store_download(const char *url_template,
         }
         ret = d1l_rp2040_bridge_file_write(result.tmp_path, (uint32_t)result.bytes,
                                            buffer, (size_t)read_len,
-                                           result.bytes == 0U, &file, 3000U);
+                                           result.bytes == 0U, &file,
+                                           D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
         if (ret != ESP_OK || file.length != (uint32_t)read_len) {
             download_step(&result, "write_tmp", ret == ESP_OK ? ESP_FAIL : ret, &file);
             esp_http_client_close(client);
@@ -480,7 +484,8 @@ esp_err_t d1l_map_tile_store_download(const char *url_template,
         *out_result = result;
         return ret;
     }
-    ret = d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true, &file,
+                                        D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
         download_step(&result, "rename_final", ret, &file);
         *out_result = result;
@@ -534,7 +539,8 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
 
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX] = {0};
     d1l_rp2040_file_result_t file = {0};
-    esp_err_t ret = d1l_rp2040_bridge_file_delete(result.tmp_path, &file, 3000U);
+    esp_err_t ret = d1l_rp2040_bridge_file_delete(result.tmp_path, &file,
+                                                  D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND && strcmp(file.err, "not_found") != 0) {
         result_step(&result, "cleanup_tmp", ret, &file);
         *out_result = result;
@@ -542,7 +548,8 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
     }
 
     ret = d1l_rp2040_bridge_file_write(result.tmp_path, 0U, payload,
-                                       (size_t)payload_len, true, &file, 3000U);
+                                       (size_t)payload_len, true, &file,
+                                       D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
         file.size != (uint32_t)payload_len) {
         result_step(&result, "write_tmp", ret == ESP_OK ? ESP_FAIL : ret, &file);
@@ -552,7 +559,8 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
     result.write_tmp = true;
 
     ret = d1l_rp2040_bridge_file_read(result.tmp_path, 0U, read_buf,
-                                      (size_t)payload_len, &file, 3000U);
+                                      (size_t)payload_len, &file,
+                                      D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
         memcmp(read_buf, payload, (size_t)payload_len) != 0) {
         result_step(&result, "read_tmp", ret == ESP_OK ? ESP_FAIL : ret, &file);
@@ -562,7 +570,7 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
     result.read_tmp = true;
 
     ret = d1l_rp2040_bridge_file_rename(result.tmp_path, result.path, true,
-                                        &file, 3000U);
+                                        &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK) {
         result_step(&result, "rename_final", ret, &file);
         *out_result = result;
@@ -570,7 +578,8 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
     }
     result.rename_replace = true;
 
-    ret = d1l_rp2040_bridge_file_stat(result.path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_stat(result.path, &file,
+                                      D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || !file.exists || file.is_directory ||
         file.size != (uint32_t)payload_len) {
         result_step(&result, "stat_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
@@ -581,7 +590,8 @@ esp_err_t d1l_map_tile_store_write_canary(const char *token,
 
     memset(read_buf, 0, sizeof(read_buf));
     ret = d1l_rp2040_bridge_file_read(result.path, 0U, read_buf,
-                                      (size_t)payload_len, &file, 3000U);
+                                      (size_t)payload_len, &file,
+                                      D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
         memcmp(read_buf, payload, (size_t)payload_len) != 0) {
         result_step(&result, "read_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
@@ -635,7 +645,8 @@ esp_err_t d1l_map_tile_store_check_canary(const char *token,
     result.bytes = payload_len;
 
     d1l_rp2040_file_result_t file = {0};
-    esp_err_t ret = d1l_rp2040_bridge_file_stat(result.path, &file, 3000U);
+    esp_err_t ret = d1l_rp2040_bridge_file_stat(result.path, &file,
+                                                D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || !file.exists || file.is_directory ||
         file.size != (uint32_t)payload_len) {
         result_step(&result, "stat_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
@@ -646,7 +657,7 @@ esp_err_t d1l_map_tile_store_check_canary(const char *token,
 
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX] = {0};
     ret = d1l_rp2040_bridge_file_read(result.path, 0U, read_buf, payload_len,
-                                      &file, 3000U);
+                                      &file, D1L_MAP_TILE_SD_FILE_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != (uint32_t)payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
         result_step(&result, "read_final", ret == ESP_OK ? ESP_FAIL : ret, &file);
