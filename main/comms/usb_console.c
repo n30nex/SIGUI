@@ -1725,17 +1725,26 @@ static bool storage_delete_missing_ok(esp_err_t ret, const d1l_rp2040_file_resul
            (file && strcmp(file->err, "not_found") == 0);
 }
 
+static bool storage_filecanary_ready(const d1l_storage_status_t *status)
+{
+    return status &&
+           status->file_ops_supported &&
+           status->atomic_rename_supported &&
+           status->file_line_max >= D1L_RP2040_FILE_LINE_MAX &&
+           status->file_chunk_max >= D1L_RP2040_FILE_CHUNK_MAX &&
+           status->path_max >= D1L_RP2040_FILE_PATH_MAX;
+}
+
 static void cmd_storage_filecanary(void)
 {
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
+    if (!storage_filecanary_ready(&status)) {
+        (void)d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+        d1l_storage_status(&status);
+    }
 
-    if (!status.file_ops_supported ||
-        !status.atomic_rename_supported ||
-        status.file_line_max < D1L_RP2040_FILE_LINE_MAX ||
-        status.file_chunk_max < D1L_RP2040_FILE_CHUNK_MAX ||
-        status.path_max < D1L_RP2040_FILE_PATH_MAX) {
+    if (!storage_filecanary_ready(&status)) {
         print_storage_filecanary_error(
             "preflight",
             ESP_ERR_NOT_SUPPORTED,

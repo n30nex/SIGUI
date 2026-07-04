@@ -421,7 +421,8 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     runbook = read("docs/RP2040_SD_BRIDGE_FLASH_D1L.md")
 
     assert "cmd_storage_filecanary" in console
-    assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "storage_filecanary_ready" in console
+    assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_rp2040_bridge_file_write(tmp_path, 0U, payload" in console
     assert "d1l_rp2040_bridge_file_read(tmp_path" in console
     assert "d1l_rp2040_bridge_file_rename(tmp_path, final_path, true" in console
@@ -433,8 +434,12 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_RP2040_FILE_CHUNK_MAX" in console
     assert "D1L_RP2040_FILE_PATH_MAX" in console
     filecanary_body = console.split("static void cmd_storage_filecanary(void)", 1)[1].split(
-        "static void cmd_storage_retained_canary", 1
+        "static bool text_equals", 1
     )[0]
+    assert "d1l_storage_status_refresh" not in filecanary_body
+    assert filecanary_body.index("d1l_storage_status_mount") < filecanary_body.index(
+        "print_storage_filecanary_error"
+    )
     preflight_body = filecanary_body.split("print_storage_filecanary_error", 1)[0]
     assert "!status.data_enabled" not in preflight_body
     assert "packet_log_backend" not in preflight_body

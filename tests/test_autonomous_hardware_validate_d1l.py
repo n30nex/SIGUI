@@ -146,7 +146,7 @@ def test_sd_file_canary_uses_post_restore_timing_window(tmp_path, monkeypatch):
     assert report["ok"] is True
     assert captured["kind"] == "sd_file_canary"
     assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
-    assert captured["args"][captured["args"].index("--timeout") + 1] == "10"
+    assert captured["args"][captured["args"].index("--timeout") + 1] == "20"
     assert captured["args"][captured["args"].index("--mount-wait-sec") + 1] == "60"
     assert captured["out"].name == "sd_file_canary_1600d64_actions_28663994079_COM12.json"
     assert captured["timeout"] == 120
