@@ -2096,7 +2096,9 @@ bool ensure_parent_dirs(const char *full_path) {
             continue;
         }
         *p = '\0';
-        (void)SD.mkdir(tmp);
+        if (!ensure_directory(tmp)) {
+            return false;
+        }
         *p = '/';
     }
     return true;
@@ -2553,7 +2555,8 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
     if (truncate) {
         (void)SD.remove(full_path);
     }
-    File file = SD.open(full_path, FILE_WRITE);
+    const char *write_mode = truncate ? "w" : "a";
+    File file = SD.open(full_path, write_mode);
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
         return;
