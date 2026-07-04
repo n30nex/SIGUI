@@ -33,7 +33,7 @@ PREFLIGHT_COMMANDS = [
     "storage diag",
     "health",
 ]
-MOUNT_POLL_ATTEMPTS = 10
+MOUNT_POLL_ATTEMPTS = 30
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
 
 
@@ -130,6 +130,19 @@ def storage_diag_skipped_after_ready() -> dict:
         "cmd": "storage diag",
         "skipped": True,
         "reason": "storage_file_gate_ready",
+        "diag_supported": True,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+
+
+def storage_diag_skipped_while_mount_pending() -> dict:
+    return {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage diag",
+        "skipped": True,
+        "reason": "storage_mount_pending",
         "diag_supported": True,
         "public_rf_tx": False,
         "formats_sd": False,
@@ -297,6 +310,8 @@ def run_preflight(
                 post_mount_statuses.append(storage_status)
             if storage_file_gate_ready(storage_status):
                 storage_diag = storage_diag_skipped_after_ready()
+            elif sd_state(storage_status) == "mount_pending":
+                storage_diag = storage_diag_skipped_while_mount_pending()
             else:
                 command = "storage diag"
                 command_timeout = max(timeout, 15.0) if command in {"storage mount", "storage diag"} else timeout
