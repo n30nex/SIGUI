@@ -64,6 +64,7 @@ def test_sd_map_tile_canary_dry_run_is_serial_only():
     assert report["formats_sd"] is False
     assert report["commands"] == [
         "storage status",
+        "storage remount",
         f"storage map-tile-canary {TOKEN}",
         "storage status",
         "health",
@@ -76,7 +77,11 @@ def test_sd_map_tile_canary_allows_pre_flash_unavailable_state(monkeypatch):
     ser = FakeSerial(
         [
             '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"},"map_tile_backend":"unavailable"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage remount","public_rf_tx":false,"formats_sd":false}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"},"map_tile_backend":"unavailable"}\n',
             '{"schema":1,"ok":false,"cmd":"storage map-tile-canary","code":"ESP_ERR_NOT_SUPPORTED","step":"preflight","public_rf_tx":false,"formats_sd":false}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"},"map_tile_backend":"unavailable"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage remount","public_rf_tx":false,"formats_sd":false}\n',
             '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"},"map_tile_backend":"unavailable"}\n',
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
@@ -86,7 +91,16 @@ def test_sd_map_tile_canary_allows_pre_flash_unavailable_state(monkeypatch):
         Serial = lambda self, **_kwargs: ser
 
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
-    report = sd_map_tile_canary_d1l.run_canary("COM12", 115200, 1.0, TOKEN, allow_unavailable=True)
+    monkeypatch.setattr(sd_map_tile_canary_d1l.time, "sleep", lambda _seconds: None)
+    report = sd_map_tile_canary_d1l.run_canary(
+        "COM12",
+        115200,
+        1.0,
+        TOKEN,
+        allow_unavailable=True,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
 
     assert report["ok"] is True
     assert report["canary_passed"] is False
@@ -96,7 +110,11 @@ def test_sd_map_tile_canary_allows_pre_flash_unavailable_state(monkeypatch):
     assert ser.reset_count == 1
     assert ser.writes == [
         "storage status\n",
+        "storage remount\n",
+        "storage status\n",
         f"storage map-tile-canary {TOKEN}\n",
+        "storage status\n",
+        "storage remount\n",
         "storage status\n",
         "health\n",
     ]
@@ -131,7 +149,11 @@ def test_sd_map_tile_canary_success_fails_when_backend_not_ready(monkeypatch):
     ser = FakeSerial(
         [
             ready_storage_status(map_tile_backend="unavailable"),
+            '{"schema":1,"ok":true,"cmd":"storage remount","public_rf_tx":false,"formats_sd":false}\n',
+            ready_storage_status(map_tile_backend="unavailable"),
             map_tile_canary_success(),
+            ready_storage_status(map_tile_backend="unavailable"),
+            '{"schema":1,"ok":true,"cmd":"storage remount","public_rf_tx":false,"formats_sd":false}\n',
             ready_storage_status(map_tile_backend="unavailable"),
             '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
         ]
@@ -141,9 +163,55 @@ def test_sd_map_tile_canary_success_fails_when_backend_not_ready(monkeypatch):
         Serial = lambda self, **_kwargs: ser
 
     monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
-    report = sd_map_tile_canary_d1l.run_canary("COM12", 115200, 1.0, TOKEN, allow_unavailable=False)
+    monkeypatch.setattr(sd_map_tile_canary_d1l.time, "sleep", lambda _seconds: None)
+    report = sd_map_tile_canary_d1l.run_canary(
+        "COM12",
+        115200,
+        1.0,
+        TOKEN,
+        allow_unavailable=False,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
 
     assert report["ok"] is False
     assert report["canary_passed"] is True
     assert report["map_tile_backend_ready_before"] is False
     assert report["map_tile_backend_ready_after"] is False
+
+
+def test_sd_map_tile_canary_polls_until_ready_before_canary(monkeypatch):
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"},"map_tile_backend":"unavailable"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage remount","public_rf_tx":false,"formats_sd":false}\n',
+            ready_storage_status(),
+            map_tile_canary_success(),
+            ready_storage_status(),
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(sd_map_tile_canary_d1l.time, "sleep", lambda _seconds: None)
+    report = sd_map_tile_canary_d1l.run_canary(
+        "COM12",
+        115200,
+        1.0,
+        TOKEN,
+        allow_unavailable=False,
+        mount_poll_attempts=2,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is True
+    assert report["storage_file_gate_ready_before"] is True
+    assert report["map_tile_backend_ready_before"] is True
+    assert ser.writes[:3] == [
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+    ]

@@ -31,6 +31,14 @@ def ready_storage_line() -> str:
     )
 
 
+def bridge_wait_storage_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"rp2040_unavailable","present":false,"mounted":false,'
+        '"data_root_ready":false,"file_ops":false,"atomic_rename":false}}\n'
+    )
+
+
 def mount_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage remount",'
@@ -149,3 +157,59 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert "storage remount\n" in post_serial.writes
     assert "storage map-tile-check remount1\n" in post_serial.writes
     assert "storage map-tile-check remount1" in report["commands"]
+
+
+def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
+    token = "remount1"
+    pre = [
+        bridge_wait_storage_line(),
+        mount_line(),
+        bridge_wait_storage_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+    ]
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n']
+    post = [
+        bridge_wait_storage_line(),
+        mount_line(),
+        bridge_wait_storage_line(),
+        ready_storage_line(),
+        *readback_lines(token),
+        map_tile_check_line(token),
+        health_line(),
+    ]
+    pre_serial = FakeSerial(pre)
+    reboot_serial = FakeSerial(reboot)
+    post_serial = FakeSerial(post)
+    install_fake_serial(monkeypatch, [pre_serial, reboot_serial, post_serial])
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=2,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is True
+    assert report["pre_remount_ready"] is True
+    assert report["post_remount_ready"] is True
+    assert pre_serial.writes[:4] == [
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage status\n",
+    ]
+    assert post_serial.writes[:4] == [
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage status\n",
+    ]

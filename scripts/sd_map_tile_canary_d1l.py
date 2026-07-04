@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,11 +19,14 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 READY_MAP_BACKENDS = {"sd_map_tiles_ready"}
+MOUNT_POLL_ATTEMPTS = 12
+MOUNT_POLL_INTERVAL_SECONDS = 2.0
 
 
 def command_plan(token: str) -> list[str]:
     return [
         "storage status",
+        "storage remount",
         f"storage map-tile-canary {token}",
         "storage status",
         "health",
@@ -53,6 +57,35 @@ def storage_file_gate_ready(storage_status: dict) -> bool:
         and _number_at_least(sd.get("file_chunk_max"), 192)
         and _number_at_least(sd.get("path_max"), 96)
     )
+
+
+def wait_for_ready_storage(
+    ser,
+    *,
+    timeout: float,
+    commands: list[str],
+    results: list[dict],
+    mount_poll_attempts: int,
+    mount_poll_interval_sec: float,
+) -> dict:
+    commands.append("storage status")
+    storage = send_console_command(ser, "storage status", timeout)
+    results.append(storage)
+    if storage_file_gate_ready(storage) and map_tile_backend_ready(storage):
+        return storage
+
+    commands.append("storage remount")
+    remount = send_console_command(ser, "storage remount", max(timeout, 15.0))
+    results.append(remount)
+
+    for _attempt in range(max(1, mount_poll_attempts)):
+        commands.append("storage status")
+        storage = send_console_command(ser, "storage status", timeout)
+        results.append(storage)
+        if storage_file_gate_ready(storage) and map_tile_backend_ready(storage):
+            return storage
+        time.sleep(mount_poll_interval_sec)
+    return storage
 
 
 def map_tile_backend_ready(storage_status: dict) -> bool:
@@ -107,23 +140,48 @@ def dry_run_report(token: str) -> dict:
     }
 
 
-def run_canary(port: str, baud: int, timeout: float, token: str, allow_unavailable: bool) -> dict:
+def run_canary(
+    port: str,
+    baud: int,
+    timeout: float,
+    token: str,
+    allow_unavailable: bool,
+    *,
+    mount_poll_attempts: int = MOUNT_POLL_ATTEMPTS,
+    mount_poll_interval_sec: float = MOUNT_POLL_INTERVAL_SECONDS,
+) -> dict:
     try:
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
-    commands = command_plan(token)
+    commands: list[str] = []
     results: list[dict] = []
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
-        for command in commands:
-            results.append(send_console_command(ser, command, timeout))
+        before = wait_for_ready_storage(
+            ser,
+            timeout=timeout,
+            commands=commands,
+            results=results,
+            mount_poll_attempts=mount_poll_attempts,
+            mount_poll_interval_sec=mount_poll_interval_sec,
+        )
+        commands.append(f"storage map-tile-canary {token}")
+        canary = send_console_command(ser, f"storage map-tile-canary {token}", max(timeout, 15.0))
+        results.append(canary)
+        after = wait_for_ready_storage(
+            ser,
+            timeout=timeout,
+            commands=commands,
+            results=results,
+            mount_poll_attempts=mount_poll_attempts,
+            mount_poll_interval_sec=mount_poll_interval_sec,
+        )
+        commands.append("health")
+        health = send_console_command(ser, "health", timeout)
+        results.append(health)
 
-    before = results[0]
-    canary = results[1]
-    after = results[2]
-    health = results[3]
     gate_ready_before = storage_file_gate_ready(before)
     gate_ready_after = storage_file_gate_ready(after)
     map_backend_ready_before = map_tile_backend_ready(before)
@@ -177,6 +235,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--token", default=datetime.now(timezone.utc).strftime("map%Y%m%d%H%M%S"))
     parser.add_argument("--allow-unavailable", action="store_true")
+    parser.add_argument("--mount-poll-attempts", type=int, default=MOUNT_POLL_ATTEMPTS)
+    parser.add_argument("--mount-poll-interval-sec", type=float, default=MOUNT_POLL_INTERVAL_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
     parser.add_argument("--out")
@@ -195,7 +255,15 @@ def main() -> int:
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = run_canary(args.port, args.baud, args.timeout, args.token, args.allow_unavailable)
+        report = run_canary(
+            args.port,
+            args.baud,
+            args.timeout,
+            args.token,
+            args.allow_unavailable,
+            mount_poll_attempts=args.mount_poll_attempts,
+            mount_poll_interval_sec=args.mount_poll_interval_sec,
+        )
 
     root = Path(__file__).resolve().parents[1]
     if args.out:

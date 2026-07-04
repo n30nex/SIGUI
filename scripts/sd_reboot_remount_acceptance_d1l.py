@@ -136,12 +136,14 @@ def any_flag(results: list[dict], flag: str) -> bool:
 def run_command(ser, command: str, timeout: float) -> dict:
     if command.startswith("mesh send public"):
         raise RuntimeError(f"refusing destructive/RF command in SD remount acceptance: {command}")
-    command_timeout = (
-        max(timeout, 15.0)
-        if command in {"storage mount", "storage remount", "storage filecanary"}
+    command_timeout = timeout
+    if command.startswith("storage retained-canary "):
+        command_timeout = max(timeout, 25.0)
+    elif (
+        command in {"storage mount", "storage remount", "storage filecanary"}
         or command.startswith("storage map-tile-")
-        else timeout
-    )
+    ):
+        command_timeout = max(timeout, 15.0)
     return send_console_command(ser, command, command_timeout)
 
 
@@ -160,7 +162,7 @@ def run_mount_sequence(
     ]
     storage_after = results[-1]
     for _attempt in range(mount_poll_attempts):
-        if sd_state(storage_after) != "mount_pending":
+        if storage_ready(storage_after):
             break
         time.sleep(mount_poll_interval_sec)
         commands.append("storage status")

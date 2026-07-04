@@ -89,6 +89,21 @@ def crashlog_has_entries(row: dict) -> bool:
     return isinstance(entries, list) and len(entries) > 0
 
 
+def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, list[dict]]:
+    deadline = time.monotonic() + timeout
+    statuses: list[dict] = []
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        status = send_console_command(ser, "ui status", remaining)
+        statuses.append(status)
+        if status.get("ok") and status.get("active_tab") == tab and status.get("pending") is False:
+            return True, statuses
+        time.sleep(min(poll_sec, max(0.0, deadline - time.monotonic())))
+    return False, statuses
+
+
 def run_scroll_probe(
     *,
     port: str,
@@ -98,6 +113,7 @@ def run_scroll_probe(
     dwell_sec: float,
     manual_touch: bool,
     clear_crashlog_before_start: bool,
+    poll_sec: float,
 ) -> dict:
     try:
         import serial
@@ -123,7 +139,8 @@ def run_scroll_probe(
             label = surface["label"]
             request = send_console_command(ser, f"ui tab {tab}", timeout)
             time.sleep(dwell_sec)
-            probe = send_console_command(ser, f"ui scroll-probe {screen}", timeout)
+            tab_active, statuses = wait_for_tab(ser, tab, max(timeout, 15.0), poll_sec)
+            probe = send_console_command(ser, f"ui scroll-probe {screen}", max(timeout, 15.0))
             if manual_touch:
                 print(f"Manual check: scroll the {label} surface, then press Enter.")
                 input()
@@ -136,6 +153,8 @@ def run_scroll_probe(
                     "tab": tab,
                     "label": label,
                     "request": request,
+                    "tab_active": tab_active,
+                    "statuses": statuses,
                     "probe": probe,
                     "status": status,
                     "health": health,
@@ -149,6 +168,7 @@ def run_scroll_probe(
         {
             "screen": event["screen"],
             "request_ok": event["request"].get("ok"),
+            "tab_active": event["tab_active"],
             "probe_ok": event["probe"].get("ok"),
             "probe_surface": event["probe"].get("surface"),
             "probe_tab": event["probe"].get("tab"),
@@ -162,6 +182,7 @@ def run_scroll_probe(
         }
         for event in events
         if not event["request"].get("ok")
+        or not event["tab_active"]
         or not event["probe"].get("ok")
         or event["probe"].get("surface") != event["screen"]
         or event["probe"].get("tab") != event["tab"]
@@ -213,6 +234,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--screens", default=",".join(DEFAULT_SCREENS))
     parser.add_argument("--dwell-sec", type=float, default=0.5)
+    parser.add_argument("--poll-sec", type=float, default=0.05)
     parser.add_argument("--manual-touch", action="store_true")
     parser.add_argument("--clear-crashlog-before-start", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -221,6 +243,8 @@ def main() -> int:
 
     if args.dwell_sec < 0:
         parser.error("--dwell-sec cannot be negative")
+    if args.poll_sec <= 0:
+        parser.error("--poll-sec must be positive")
     try:
         screens = parse_screens(args.screens)
     except ValueError as exc:
@@ -242,6 +266,7 @@ def main() -> int:
             dwell_sec=args.dwell_sec,
             manual_touch=args.manual_touch,
             clear_crashlog_before_start=args.clear_crashlog_before_start,
+            poll_sec=args.poll_sec,
         )
         mode = "hardware"
 
