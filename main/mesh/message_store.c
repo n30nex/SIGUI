@@ -267,10 +267,10 @@ esp_err_t d1l_message_store_clear(void)
     return ret;
 }
 
-esp_err_t d1l_message_store_append_public(const char *direction, const char *author,
-                                          const char *text, int rssi_dbm, int snr_tenths,
-                                          uint8_t path_hash_bytes, uint8_t path_hops,
-                                          bool delivered)
+static esp_err_t append_public_internal(const char *direction, const char *author,
+                                        const char *text, int rssi_dbm, int snr_tenths,
+                                        uint8_t path_hash_bytes, uint8_t path_hops,
+                                        bool delivered, bool persist)
 {
     if (!text || text[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -310,9 +310,27 @@ esp_err_t d1l_message_store_append_public(const char *direction, const char *aut
         s_dropped_oldest++;
     }
     s_total_written++;
-    esp_err_t ret = persist_store();
+    esp_err_t ret = persist ? persist_store() : ESP_OK;
     d1l_store_lock_give(&s_store_lock);
     return ret;
+}
+
+esp_err_t d1l_message_store_append_public(const char *direction, const char *author,
+                                          const char *text, int rssi_dbm, int snr_tenths,
+                                          uint8_t path_hash_bytes, uint8_t path_hops,
+                                          bool delivered)
+{
+    return append_public_internal(direction, author, text, rssi_dbm, snr_tenths,
+                                  path_hash_bytes, path_hops, delivered, true);
+}
+
+esp_err_t d1l_message_store_append_public_volatile(const char *direction, const char *author,
+                                                   const char *text, int rssi_dbm, int snr_tenths,
+                                                   uint8_t path_hash_bytes, uint8_t path_hops,
+                                                   bool delivered)
+{
+    return append_public_internal(direction, author, text, rssi_dbm, snr_tenths,
+                                  path_hash_bytes, path_hops, delivered, false);
 }
 
 d1l_message_store_stats_t d1l_message_store_stats(void)

@@ -542,6 +542,10 @@ static void print_ui_capture_status_fields(const d1l_ui_capture_status_t *status
     print_json_string(status->active_tab);
     printf(",\"pending_tab\":");
     print_json_string(status->pending_tab);
+    printf(",\"tab_pending\":%s,\"content_pending\":%s,\"render_pending\":%s",
+           bool_json(status->tab_pending),
+           bool_json(status->content_pending),
+           bool_json(status->render_pending));
     printf(",\"onboarding_visible\":%s,\"lock_visible\":%s",
            bool_json(status->onboarding_visible),
            bool_json(status->lock_visible));
@@ -3098,8 +3102,8 @@ static void cmd_ui_data_canary(const char *line)
     snprintf(text, sizeof(text), "ui-data-canary %s", token);
 
     const uint32_t public_seq = d1l_message_store_stats().next_seq;
-    esp_err_t ret = d1l_message_store_append_public("rx", "UI Canary", text,
-                                                    0, 0, 1, 0, true);
+    esp_err_t ret = d1l_message_store_append_public_volatile("rx", "UI Canary", text,
+                                                             0, 0, 1, 0, true);
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append public UI canary");
@@ -3107,9 +3111,9 @@ static void cmd_ui_data_canary(const char *line)
     }
 
     const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
-    ret = d1l_dm_store_append(fingerprint, "UI Canary", "rx", text,
-                              0, 0, 1, 0, 0, true, true,
-                              retained_canary_hash(token));
+    ret = d1l_dm_store_append_volatile(fingerprint, "UI Canary", "rx", text,
+                                       0, 0, 1, 0, 0, true, true,
+                                       retained_canary_hash(token));
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append DM UI canary");
@@ -3117,9 +3121,9 @@ static void cmd_ui_data_canary(const char *line)
     }
 
     const uint32_t route_seq = d1l_route_store_stats().next_seq;
-    ret = d1l_route_store_upsert_observation(fingerprint, "UI Canary",
-                                             "ui_canary", "local", "rx",
-                                             0, 0, 1, 0, (uint16_t)strlen(text));
+    ret = d1l_route_store_upsert_observation_volatile(fingerprint, "UI Canary",
+                                                      "ui_canary", "local", "rx",
+                                                      0, 0, 1, 0, (uint16_t)strlen(text));
     if (ret != ESP_OK) {
         err_result("ui data-canary", esp_err_to_name(ret),
                    "could not append route UI canary");
@@ -3139,7 +3143,7 @@ static void cmd_ui_data_canary(const char *line)
         .payload_len = (uint16_t)strlen(text),
     };
     strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
-    if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
+    if (!d1l_packet_log_append_raw_volatile(&packet, (const uint8_t *)text, strlen(text))) {
         err_result("ui data-canary", "ESP_FAIL",
                    "could not append packet UI canary");
         return;
@@ -3154,8 +3158,8 @@ static void cmd_ui_data_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_required\":false,\"public_rf_tx\":false,\"formats_sd\":false");
-    printf(",\"note\":\"Synthetic UI refresh canary rows appended without Public RF, SD readiness, or format command\"}\n");
+    printf(",\"storage_required\":false,\"retention\":\"volatile\",\"public_rf_tx\":false,\"formats_sd\":false");
+    printf(",\"note\":\"Synthetic UI refresh canary rows appended to RAM only, without Public RF, SD readiness, or format command\"}\n");
 }
 
 static void cmd_storage_retained_canary(const char *line)

@@ -395,6 +395,36 @@ static bool begin_pending_content_refresh(void)
     return pending;
 }
 
+static bool content_refresh_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_content_refresh_lock);
+    pending = s_content_refresh_pending;
+    portEXIT_CRITICAL(&s_content_refresh_lock);
+    return pending;
+}
+
+static bool scroll_probe_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    pending = s_scroll_probe_pending;
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+    return pending;
+}
+
+static bool compose_probe_pending(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    pending = s_compose_probe_pending;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    return pending;
+}
+
 static void render_dm_thread_sheet(void);
 static void render_public_history_sheet(void);
 static void show_public_history_sheet(void);
@@ -582,6 +612,16 @@ static void request_full_screen_repaint(void)
     if (s_screen) {
         lv_obj_invalidate(s_screen);
     }
+}
+
+static void force_ui_layout_repaint(void)
+{
+    if (!s_screen) {
+        return;
+    }
+    lv_obj_update_layout(s_screen);
+    request_full_screen_repaint();
+    lv_refr_now(NULL);
 }
 
 static void configure_sheet_scroll(lv_obj_t *sheet)
@@ -6285,6 +6325,10 @@ static void fill_capture_status(d1l_ui_capture_status_t *status)
     status->started = s_started;
     status->onboarding_visible = s_onboarding_visible;
     status->lock_visible = s_lock_visible;
+    status->tab_pending = d1l_ui_phase1_tab_switch_pending();
+    status->content_pending = content_refresh_pending();
+    status->render_pending = status->tab_pending || status->content_pending ||
+        scroll_probe_pending() || compose_probe_pending();
     status->width = D1L_UI_CAPTURE_WIDTH;
     status->height = D1L_UI_CAPTURE_HEIGHT;
     status->bytes_per_pixel = D1L_UI_CAPTURE_BYTES_PER_PIXEL;
@@ -6428,6 +6472,7 @@ static void process_pending_tab_switch(void)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     render_active_tab();
+    force_ui_layout_repaint();
     finish_pending_tab_switch(rendered_tab);
 }
 
@@ -6441,6 +6486,7 @@ static void process_pending_content_refresh(void)
         return;
     }
     render_active_tab();
+    force_ui_layout_repaint();
 }
 
 static lv_obj_t *find_scrollable_descendant(lv_obj_t *root, lv_obj_t **fallback)
@@ -6554,6 +6600,7 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     process_pending_tab_switch();
 
     lv_obj_t *target = scroll_probe_open_surface(canonical);
+    force_ui_layout_repaint();
     measure_scroll_probe_target(target, result);
 }
 
@@ -6648,6 +6695,7 @@ static void open_compose_probe_on_ui_task(const char *target)
     layout_compose_sheet_controls();
     lv_obj_update_layout(s_screen);
     request_full_screen_repaint();
+    force_ui_layout_repaint();
 }
 
 static void fill_compose_probe_geometry(d1l_ui_compose_probe_result_t *result)
@@ -7546,6 +7594,9 @@ static void ui_task(void *arg)
         process_pending_content_refresh();
         process_pending_scroll_probe();
         process_pending_compose_probe();
+        if (d1l_ui_phase1_tab_switch_pending()) {
+            wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
+        }
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {

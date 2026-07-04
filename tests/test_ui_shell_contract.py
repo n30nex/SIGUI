@@ -415,6 +415,28 @@ def test_content_refreshes_are_coalesced_on_ui_task():
     )
 
 
+def test_ui_data_canary_uses_volatile_store_paths():
+    console = read("main/comms/usb_console.c")
+    message_store = read("main/mesh/message_store.h")
+    dm_store = read("main/mesh/dm_store.h")
+    route_store = read("main/mesh/route_store.h")
+    packet_log = read("main/mesh/packet_log.h")
+
+    assert "d1l_message_store_append_public_volatile" in message_store
+    assert "d1l_dm_store_append_volatile" in dm_store
+    assert "d1l_route_store_upsert_observation_volatile" in route_store
+    assert "d1l_packet_log_append_raw_volatile" in packet_log
+
+    canary = console.split("static void cmd_ui_data_canary", 1)[1].split(
+        "static void cmd_storage_retained_canary", 1
+    )[0]
+    assert "d1l_message_store_append_public_volatile" in canary
+    assert "d1l_dm_store_append_volatile" in canary
+    assert "d1l_route_store_upsert_observation_volatile" in canary
+    assert "d1l_packet_log_append_raw_volatile" in canary
+    assert '\\"retention\\":\\"volatile\\"' in canary
+
+
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
     source = read("main/ui/ui_phase1.c")
     expected_deferred_paths = [

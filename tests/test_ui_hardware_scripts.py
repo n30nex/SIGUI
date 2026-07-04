@@ -149,6 +149,29 @@ def test_ui_capture_dry_run_and_png_writer(tmp_path):
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 
+def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():
+    baseline = {"ok": True, "shadow_ready": True, "frame_seq": 10, "flush_count": 20}
+
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 10, "flush_count": 20},
+        baseline,
+    ) is False
+    assert ui_capture_d1l.capture_status_is_ready(
+        {
+            "ok": True,
+            "shadow_ready": True,
+            "frame_seq": 11,
+            "flush_count": 20,
+            "render_pending": True,
+        },
+        baseline,
+    ) is False
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 11, "flush_count": 20},
+        baseline,
+    ) is True
+
+
 def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     report = ui_compose_keyboard_capture_d1l.dry_run_report(
         targets=["public", "public-long", "dm", "dm-long"],

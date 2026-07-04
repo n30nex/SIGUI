@@ -35,6 +35,9 @@ typedef struct {
     bool started;
     bool onboarding_visible;
     bool lock_visible;
+    bool tab_pending;
+    bool content_pending;
+    bool render_pending;
     uint16_t width;
     uint16_t height;
     uint8_t bytes_per_pixel;

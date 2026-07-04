@@ -534,8 +534,8 @@ bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
     return d1l_packet_log_append_raw(entry, NULL, 0);
 }
 
-bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
-                               size_t raw_len)
+static bool append_raw_internal(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
+                                size_t raw_len, bool persist)
 {
     if (entry == NULL) {
         return false;
@@ -574,10 +574,11 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
         s_dropped_oldest++;
     }
     s_total_written++;
-    if (d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG)) {
+    const bool use_sd = persist &&
+        d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
+    if (use_sd) {
         s_sd_dirty_count++;
     }
-    const bool use_sd = d1l_retained_blob_store_uses_sd(D1L_RETAINED_BLOB_STORE_PACKET_LOG);
     esp_err_t history_ret = ESP_OK;
     if (use_sd) {
         history_ret = append_sd_history_locked(&copy);
@@ -595,9 +596,21 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
         (s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD ||
          s_last_sd_flush_ms == 0 ||
          now_ms - s_last_sd_flush_ms >= D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS);
-    esp_err_t ret = persist_store(flush_primary);
+    esp_err_t ret = persist ? persist_store(flush_primary) : ESP_OK;
     d1l_store_lock_give(&s_store_lock);
     return ret == ESP_OK;
+}
+
+bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
+                               size_t raw_len)
+{
+    return append_raw_internal(entry, raw, raw_len, true);
+}
+
+bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
+                                        const uint8_t *raw, size_t raw_len)
+{
+    return append_raw_internal(entry, raw, raw_len, false);
 }
 
 esp_err_t d1l_packet_log_flush(void)
