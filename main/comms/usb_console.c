@@ -39,6 +39,7 @@
 #include "ui/ui_phase1.h"
 
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
+static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 15000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -1761,13 +1762,15 @@ static void cmd_storage_filecanary(void)
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX];
     d1l_rp2040_file_result_t file = {0};
 
-    esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file, 3000U);
+    esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file,
+                                                  D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (!storage_delete_missing_ok(ret, &file)) {
         print_storage_filecanary_error("cleanup_tmp", ret, &status, &file,
                                        "could not remove stale temp canary path");
         return;
     }
-    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_delete(final_path, &file,
+                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (!storage_delete_missing_ok(ret, &file)) {
         print_storage_filecanary_error("cleanup_final", ret, &status, &file,
                                        "could not remove stale final canary path");
@@ -1775,7 +1778,7 @@ static void cmd_storage_filecanary(void)
     }
 
     ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
-                                       &file, 3000U);
+                                       &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len || file.size != payload_len) {
         print_storage_filecanary_error("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
                                        &status, &file, "temp write failed");
@@ -1783,7 +1786,8 @@ static void cmd_storage_filecanary(void)
     }
 
     memset(read_buf, 0, sizeof(read_buf));
-    ret = d1l_rp2040_bridge_file_read(tmp_path, 0U, read_buf, payload_len, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_read(tmp_path, 0U, read_buf, payload_len,
+                                      &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
         print_storage_filecanary_error("read_tmp", ret == ESP_OK ? ESP_FAIL : ret,
@@ -1791,14 +1795,16 @@ static void cmd_storage_filecanary(void)
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_rename(tmp_path, final_path, true, &file,
+                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
         print_storage_filecanary_error("rename_final", ret, &status, &file,
                                        "rename replace commit failed");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file,
+                                      D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || !file.exists || file.is_directory || file.size != payload_len) {
         print_storage_filecanary_error("stat_final", ret == ESP_OK ? ESP_FAIL : ret,
                                        &status, &file, "final canary stat did not match");
@@ -1806,7 +1812,8 @@ static void cmd_storage_filecanary(void)
     }
 
     memset(read_buf, 0, sizeof(read_buf));
-    ret = d1l_rp2040_bridge_file_read(final_path, 0U, read_buf, payload_len, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_read(final_path, 0U, read_buf, payload_len,
+                                      &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len ||
         memcmp(read_buf, payload, payload_len) != 0) {
         print_storage_filecanary_error("read_final", ret == ESP_OK ? ESP_FAIL : ret,
@@ -1814,14 +1821,16 @@ static void cmd_storage_filecanary(void)
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_delete(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_delete(final_path, &file,
+                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK) {
         print_storage_filecanary_error("delete_final", ret, &status, &file,
                                        "could not delete final canary file");
         return;
     }
 
-    ret = d1l_rp2040_bridge_file_stat(final_path, &file, 3000U);
+    ret = d1l_rp2040_bridge_file_stat(final_path, &file,
+                                      D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.exists) {
         print_storage_filecanary_error("stat_deleted", ret == ESP_OK ? ESP_FAIL : ret,
                                        &status, &file, "final canary file still exists after delete");
