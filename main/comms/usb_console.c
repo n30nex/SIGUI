@@ -4739,6 +4739,8 @@ static void handle_line(const char *line)
 void d1l_usb_console_run(void)
 {
     static char line[256];
+    size_t used = 0;
+    bool dropping_overlong = false;
     cmd_help();
     bool prompt_pending = true;
     while (true) {
@@ -4747,18 +4749,50 @@ void d1l_usb_console_run(void)
             fflush(stdout);
             prompt_pending = false;
         }
-        if (!fgets(line, sizeof(line), stdin)) {
+
+        int ch = fgetc(stdin);
+        if (ch == EOF) {
             clearerr(stdin);
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
-        trim_line(line);
-        if (line[0] == '\0') {
+
+        if (ch == '\n' || ch == '\r') {
+            if (dropping_overlong) {
+                dropping_overlong = false;
+                used = 0;
+                prompt_pending = true;
+                continue;
+            }
+            if (used == 0U) {
+                continue;
+            }
+            line[used] = '\0';
+            used = 0;
+            trim_line(line);
+            if (line[0] == '\0') {
+                prompt_pending = true;
+                continue;
+            }
+            printf("\n");
+            handle_line(line);
             prompt_pending = true;
             continue;
         }
-        printf("\n");
-        handle_line(line);
-        prompt_pending = true;
+
+        if (dropping_overlong) {
+            continue;
+        }
+
+        if (used + 1U >= sizeof(line)) {
+            used = 0;
+            dropping_overlong = true;
+            printf("\n");
+            err_result("console", "LINE_TOO_LONG", "USB console command exceeded the line buffer");
+            prompt_pending = true;
+            continue;
+        }
+
+        line[used++] = (char)ch;
     }
 }

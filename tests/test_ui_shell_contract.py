@@ -238,6 +238,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "ui capture begin" in console
     assert "ui capture chunk <offset> <len>" in console
     assert "ui capture end" in console
+    assert "fgetc(stdin)" in console
+    assert "fgets(" not in console
+    assert "LINE_TOO_LONG" in console
     assert "d1l_ui_capture_status_t" in header
     assert "d1l_ui_capture_begin" in header
     assert "d1l_ui_capture_chunk" in header
