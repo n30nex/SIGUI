@@ -464,8 +464,12 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_rp2040_bridge_file_rename(tmp_path, final_path, true" in console
     assert "d1l_rp2040_bridge_file_stat(final_path" in console
     assert "d1l_rp2040_bridge_file_delete(final_path" in console
-    assert '"canary/filecanary.tmp"' in console
-    assert '"canary/filecanary.bin"' in console
+    assert "esp_random()" in console
+    assert "xTaskGetTickCount()" in console
+    assert '"canary/fc-%08lx-%08lx.tmp"' in console
+    assert '"canary/fc-%08lx-%08lx.bin"' in console
+    assert '"canary/filecanary.tmp"' not in console
+    assert '"canary/filecanary.bin"' not in console
     assert "D1L_RP2040_FILE_LINE_MAX" in console
     assert "D1L_RP2040_FILE_CHUNK_MAX" in console
     assert "D1L_RP2040_FILE_PATH_MAX" in console
@@ -483,8 +487,9 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
         "print_storage_filecanary_error"
     )
     assert filecanary_body.index("d1l_storage_manager_pause") < filecanary_body.index(
-        "d1l_rp2040_bridge_file_delete(tmp_path"
+        "d1l_rp2040_bridge_file_write(tmp_path"
     )
+    assert "d1l_rp2040_bridge_file_delete(tmp_path" not in filecanary_body
     preflight_body = filecanary_body.split("print_storage_filecanary_error", 1)[0]
     assert "!status.data_enabled" not in preflight_body
     assert "packet_log_backend" not in preflight_body

@@ -1770,32 +1770,34 @@ static void cmd_storage_filecanary(void)
         return;
     }
 
-    static const char tmp_path[] = "canary/filecanary.tmp";
-    static const char final_path[] = "canary/filecanary.bin";
     static const uint8_t payload[] = "DeskOS SD file canary v1";
     const size_t payload_len = sizeof(payload) - 1U;
+    const uint32_t token = esp_random();
+    const uint32_t tick = (uint32_t)xTaskGetTickCount();
+    char tmp_path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    char final_path[D1L_RP2040_FILE_PATH_MAX + 1U];
     uint8_t read_buf[D1L_RP2040_FILE_CHUNK_MAX];
     d1l_rp2040_file_result_t file = {0};
 
+    int path_len = snprintf(tmp_path, sizeof(tmp_path), "canary/fc-%08lx-%08lx.tmp",
+                            (unsigned long)token, (unsigned long)tick);
+    int final_len = snprintf(final_path, sizeof(final_path), "canary/fc-%08lx-%08lx.bin",
+                             (unsigned long)token, (unsigned long)tick);
+    if (path_len <= 0 || (size_t)path_len >= sizeof(tmp_path) ||
+        final_len <= 0 || (size_t)final_len >= sizeof(final_path)) {
+        print_storage_filecanary_error(
+            "path",
+            ESP_ERR_INVALID_SIZE,
+            &status,
+            NULL,
+            "could not build unique file canary paths");
+        return;
+    }
+
     d1l_storage_manager_pause(D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS);
 
-    esp_err_t ret = d1l_rp2040_bridge_file_delete(tmp_path, &file,
-                                                  D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
-    if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error_and_resume("cleanup_tmp", ret, &status, &file,
-                                                  "could not remove stale temp canary path");
-        return;
-    }
-    ret = d1l_rp2040_bridge_file_delete(final_path, &file,
-                                        D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
-    if (!storage_delete_missing_ok(ret, &file)) {
-        print_storage_filecanary_error_and_resume("cleanup_final", ret, &status, &file,
-                                                  "could not remove stale final canary path");
-        return;
-    }
-
-    ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
-                                       &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
+    esp_err_t ret = d1l_rp2040_bridge_file_write(tmp_path, 0U, payload, payload_len, true,
+                                                 &file, D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS);
     if (ret != ESP_OK || file.length != payload_len || file.size != payload_len) {
         print_storage_filecanary_error_and_resume("write_tmp", ret == ESP_OK ? ESP_FAIL : ret,
                                                   &status, &file, "temp write failed");
