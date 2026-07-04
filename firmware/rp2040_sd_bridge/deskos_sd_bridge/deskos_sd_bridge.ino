@@ -1792,10 +1792,14 @@ SdSnapshot request_mount_status() {
     if (status.mounted && snapshot_fs_is_fat32(status)) {
         return cache_status(mounted_snapshot_from_current_config());
     }
-    if (!s_worker_busy && s_worker_request == SD_WORKER_NONE) {
-        (void)start_sd_worker(SD_WORKER_MOUNT);
+    if (s_worker_busy || s_worker_request != SD_WORKER_NONE) {
+        return cache_status(pending_snapshot("sd_worker_busy"));
     }
-    return cache_status(pending_snapshot("filesystem_mounting"));
+
+    s_file_command_active = true;
+    SdSnapshot mounted = mount_status_blocking();
+    s_file_command_active = false;
+    return cache_status(mounted);
 }
 
 DiagSnapshot pending_diag_snapshot() {

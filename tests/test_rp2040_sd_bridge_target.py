@@ -155,8 +155,11 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
         "DiagSnapshot pending_diag_snapshot()", 1
     )[0]
-    assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
-    assert "mount_status_blocking()" not in request_mount_body
+    assert "start_sd_worker(SD_WORKER_MOUNT)" not in request_mount_body
+    assert "mount_status_blocking()" in request_mount_body
+    assert 'pending_snapshot("sd_worker_busy")' in request_mount_body
+    assert "s_file_command_active = true" in request_mount_body
+    assert "s_file_command_active = false" in request_mount_body
     send_mount_body = sketch.split("void send_mount_status()", 1)[1].split(
         "void send_ping()", 1
     )[0]
