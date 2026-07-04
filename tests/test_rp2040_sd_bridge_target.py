@@ -441,6 +441,8 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert 'SD.open(full_path, "r")' not in sketch
     assert "file.seek(offset)" in sketch
     assert "ensure_parent_dirs" in sketch
+    assert "!recover_file_ops_mount() || !ensure_parent_dirs(full_path)" in sketch
+    assert "!recover_file_ops_mount() || !ensure_parent_dirs(target_path)" in sketch
     assert "strstr(path, \"..\")" in sketch
     assert "strstr(path, \"//\")" in sketch
     parent_body = sketch.split("bool ensure_parent_dirs", 1)[1].split(

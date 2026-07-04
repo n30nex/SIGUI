@@ -2545,7 +2545,8 @@ void handle_file_read(uint32_t request_id, const char *line) {
 
 bool prepare_file_write_target(const char *full_path, bool append_mode, bool truncate,
                                uint32_t *offset, const char **err) {
-    if (!ensure_parent_dirs(full_path)) {
+    if (!ensure_parent_dirs(full_path) &&
+        (!recover_file_ops_mount() || !ensure_parent_dirs(full_path))) {
         *err = "open_failed";
         return false;
     }
@@ -2669,7 +2670,8 @@ void handle_file_delete(uint32_t request_id, const char *line) {
         send_file_error(request_id, "delete", "bad_path");
         return;
     }
-    if (!ensure_parent_dirs(full_path)) {
+    if (!ensure_parent_dirs(full_path) &&
+        (!recover_file_ops_mount() || !ensure_parent_dirs(full_path))) {
         send_file_error(request_id, "delete", "not_found");
         return;
     }
@@ -2699,7 +2701,8 @@ void handle_file_rename(uint32_t request_id, const char *line) {
         send_file_error(request_id, "rename", "bad_path");
         return;
     }
-    if (!ensure_parent_dirs(target_path)) {
+    if (!ensure_parent_dirs(target_path) &&
+        (!recover_file_ops_mount() || !ensure_parent_dirs(target_path))) {
         send_file_error(request_id, "rename", "open_failed");
         return;
     }
