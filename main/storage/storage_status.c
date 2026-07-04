@@ -44,6 +44,8 @@ static int64_t s_manager_pause_until_us;
 static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_force_nvs;
 
+static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mount);
+
 static void refresh_retained_sd_health(d1l_storage_status_t *status)
 {
     if (!status) {
@@ -476,6 +478,41 @@ static void request_bridge_reset_remount_recovery(void)
     set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
 }
 
+static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
+{
+    s_manager_reset_bridge_requested = false;
+    s_manager_remount_requested = false;
+    set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+
+    esp_err_t ret =
+        d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
+                                D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
+    d1l_storage_status_note_rp2040(ret);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    set_manager_state(D1L_STORAGE_MANAGER_PING);
+    d1l_rp2040_ping_t ping = {0};
+    ret = d1l_rp2040_bridge_ping(&ping,
+                                  D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        d1l_storage_status_note_rp2040(ret);
+        return ret;
+    }
+    d1l_storage_status_note_rp2040(ESP_OK);
+
+    set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
+    ret = storage_status_mount(timeout_ms, true);
+    if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
+        esp_err_t poll_ret = poll_mount_pending();
+        if (poll_ret != ESP_OK && ret == ESP_OK) {
+            ret = poll_ret;
+        }
+    }
+    return ret;
+}
+
 static void classify_storage_manager_state(esp_err_t ret)
 {
     s_status.force_nvs = s_force_nvs;
@@ -759,8 +796,11 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
         }
     }
     if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
-        request_bridge_reset_remount_recovery();
-        (void)d1l_storage_manager_start();
+        ret = reset_bridge_and_remount_blocking(timeout_ms);
+        if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
+            request_bridge_reset_remount_recovery();
+            (void)d1l_storage_manager_start();
+        }
     }
 
     classify_storage_manager_state(ret);
