@@ -124,7 +124,10 @@ def test_console_exposes_phase2_foundation_commands():
     assert "bool prompt_pending = true" in console
     assert "clearerr(stdin)" in console
     assert "vTaskDelay(pdMS_TO_TICKS(20))" in console
-    assert 'printf("\\n");\n        handle_line(line);' in console
+    assert "int ch = fgetc(stdin)" in console
+    assert "line[used++] = (char)ch" in console
+    assert "LINE_TOO_LONG" in console
+    assert "handle_line(line)" in console
     assert '\\"expected\\":[\\"0x20\\",\\"0x48\\"]' in console
     assert "stored_nvs_ed25519" in console
     assert "d1l_connectivity_set_wifi_enabled(false)" in console
