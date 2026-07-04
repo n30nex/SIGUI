@@ -162,6 +162,43 @@ def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(t
     assert captured["timeout"] == 900
 
 
+def test_smoke_retries_once_after_post_flash_console_timeout(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    attempts = []
+    sleeps = []
+
+    def fake_run_existing_script(ctx_arg, kind, args, out, timeout, dry_run):
+        attempts.append(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        ok = len(attempts) == 2
+        out.write_text(json.dumps({"schema": 1, "kind": kind, "ok": ok}), encoding="ascii")
+        return {"schema": 1, "kind": kind, "ok": ok, "path": str(out)}
+
+    monkeypatch.setattr(runner, "run_existing_script", fake_run_existing_script)
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    report = runner.run_smoke(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert report["retry_after_failure"] is True
+    assert report["smoke_retry_settle_sec"] == runner.SMOKE_RETRY_SETTLE_SEC
+    assert sleeps == [runner.SMOKE_RETRY_SETTLE_SEC]
+    assert len(attempts) == 2
+    assert Path(report["first_attempt_path"]).read_text(encoding="ascii")
+
+
 def test_sd_file_canary_uses_post_restore_timing_window(tmp_path, monkeypatch):
     ctx = runner.RunContext(
         root=tmp_path,

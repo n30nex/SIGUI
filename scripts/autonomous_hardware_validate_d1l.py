@@ -49,6 +49,7 @@ DEFAULT_RP2040_PORT = "COM" + "16"
 FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
 DEFAULT_ONBOARDING_NAME = "D1L Desk"
 POST_ESP32_FLASH_SETTLE_SEC = 8.0
+SMOKE_RETRY_SETTLE_SEC = 8.0
 OFFICIAL_SMOKE_UF2 = "seeed_official_sd_smoke.ino.uf2"
 BRIDGE_UF2 = "deskos_sd_bridge.ino.uf2"
 DEFAULT_SCROLL_SCREENS = "home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map"
@@ -1225,7 +1226,18 @@ def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
         "5",
         "--persistence-test",
     ]
-    return run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
+    report = run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
+    if dry_run or report.get("ok") is True:
+        return report
+    first_attempt = out.with_name(f"{out.stem}_attempt1{out.suffix}")
+    if out.exists():
+        shutil.copyfile(out, first_attempt)
+    time.sleep(SMOKE_RETRY_SETTLE_SEC)
+    retry = run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
+    retry["retry_after_failure"] = True
+    retry["first_attempt_path"] = str(first_attempt)
+    retry["smoke_retry_settle_sec"] = SMOKE_RETRY_SETTLE_SEC
+    return retry
 
 
 def run_onboarding_complete(ctx: RunContext, dry_run: bool) -> dict:
