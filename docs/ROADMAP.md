@@ -37,7 +37,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 - `tools/ui_simulator.py` produces deterministic 480x480 screenshots and schema checks.
 - The simulator must keep `large-mesh` coverage for oversized node/message stores.
 - Serial diagnostics include `routes`, `routes detail <seq>`, `routes trace <fingerprint>`, `routes probe <fingerprint>`, and `routes clear`.
-- `ui_corruption_probe_d1l.py` replaces the old high-count tab stress gate. It exercises tabs, retained data refresh, Packet search, Public search, health, and crashlog checks with `public_rf_tx=false` and `formats_sd=false`.
+- `ui_corruption_probe_d1l.py` replaces the old high-count tab stress gate. It exercises tabs, serial-only UI data refresh through `ui data-canary`, Packet search, Public search, health, and crashlog checks with `public_rf_tx=false` and `formats_sd=false`.
 
 ## Active Docs
 

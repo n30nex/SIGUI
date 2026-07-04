@@ -146,6 +146,7 @@ def expected_command_name(command: str) -> str:
         "packets raw ",
         "ui tab ",
         "ui scroll-probe ",
+        "ui data-canary ",
         "radio set freq ",
         "radio set bw ",
         "radio set sf ",

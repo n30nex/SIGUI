@@ -225,9 +225,15 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_status" in console
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
+    assert "cmd_ui_data_canary" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "ui data-canary <token>" in console
+    assert 'ok_begin("ui data-canary")' in console
+    assert '\\"storage_required\\":false' in console
+    assert '\\"public_rf_tx\\":false' in console
+    assert '\\"formats_sd\\":false' in console
     assert "process_pending_scroll_probe()" in source
     assert "lv_obj_get_scroll_bottom(target)" in source
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source

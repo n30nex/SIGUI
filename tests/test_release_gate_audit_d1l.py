@@ -48,8 +48,8 @@ def ui_corruption_probe_payload(**overrides: object) -> dict:
         "failure_count": 0,
         "checks": {
             "tab_switches_settle": True,
-            "retained_data_refresh_exercised": True,
-            "retained_data_refreshes_pass": True,
+            "data_refresh_exercised": True,
+            "data_refreshes_pass": True,
             "no_public_rf": True,
             "no_formatting": True,
         },

@@ -36,8 +36,12 @@ def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
 
-def token_for_round(round_number: int) -> str:
-    return f"uiRx{round_number:04d}"
+def token_for_round(round_number: int, run_prefix: str = "uiRx") -> str:
+    return f"{run_prefix}{round_number:04d}"
+
+
+def token_prefix_for_run(started_at: datetime) -> str:
+    return f"uic{int(started_at.timestamp()) % 1000000:06d}"
 
 
 def dry_run_report(
@@ -49,7 +53,7 @@ def dry_run_report(
     commands = [
         "ui status",
         *[f"ui tab {tab}" for tab in TAB_SEQUENCE],
-        f"storage retained-canary {token_for_round(1)}",
+        f"ui data-canary {token_for_round(1)}",
         f"packets search {token_for_round(1)}",
         f"messages public search {token_for_round(1)}",
         "health",
@@ -75,8 +79,8 @@ def dry_run_report(
         "checks": {
             "tab_switches_settle": True,
             "button_refreshes_deferred": True,
-            "retained_data_refresh_exercised": not skip_data_canary,
-            "retained_data_refreshes_pass": not skip_data_canary,
+            "data_refresh_exercised": not skip_data_canary,
+            "data_refreshes_pass": not skip_data_canary,
             "no_public_rf": True,
             "no_formatting": True,
         },
@@ -88,8 +92,15 @@ def crashlog_has_entries(row: dict) -> bool:
     return isinstance(entries, list) and len(entries) > 0
 
 
-def result_contains_token(row: dict, token: str) -> bool:
-    return token in json.dumps(row, sort_keys=True)
+def result_entries_contain_token(row: dict, token: str) -> bool:
+    entries = row.get("entries")
+    if not isinstance(entries, list):
+        return False
+    return any(
+        token in json.dumps(entry, sort_keys=True)
+        for entry in entries
+        if isinstance(entry, dict)
+    )
 
 
 def wait_for_tab(ser, tab: str, timeout: float, poll_sec: float) -> tuple[bool, list[dict]]:
@@ -173,7 +184,7 @@ def tab_step(ser, tab: str, timeout: float, settle_sec: float, poll_sec: float, 
 
 
 def data_refresh_step(ser, token: str, timeout: float, settle_sec: float, poll_sec: float, round_number: int) -> dict:
-    retained = send_console_command(ser, f"storage retained-canary {token}", timeout)
+    canary = send_console_command(ser, f"ui data-canary {token}", timeout)
     packet_tab = tab_step(ser, "packets", timeout, settle_sec, poll_sec, round_number)
     packets = send_console_command(ser, f"packets search {token}", timeout)
     messages_tab = tab_step(ser, "messages", timeout, settle_sec, poll_sec, round_number)
@@ -185,7 +196,7 @@ def data_refresh_step(ser, token: str, timeout: float, settle_sec: float, poll_s
         "round": round_number,
         "kind": "data_refresh",
         "token": token,
-        "retained_canary": retained,
+        "data_canary": canary,
         "packet_tab": packet_tab,
         "packets_search": packets,
         "messages_tab": messages_tab,
@@ -222,17 +233,17 @@ def event_failures(events: list[dict], *, skip_data_canary: bool) -> list[dict]:
                 )
         elif event.get("kind") == "data_refresh" and not skip_data_canary:
             token = str(event.get("token") or "")
-            retained = event.get("retained_canary", {})
+            canary = event.get("data_canary", {})
             packets = event.get("packets_search", {})
             messages = event.get("messages_search", {})
             health = event.get("health", {})
             crashlog = event.get("crashlog", {})
             if (
-                not retained.get("ok")
+                not canary.get("ok")
                 or not packets.get("ok")
-                or not result_contains_token(packets, token)
+                or not result_entries_contain_token(packets, token)
                 or not messages.get("ok")
-                or not result_contains_token(messages, token)
+                or not result_entries_contain_token(messages, token)
                 or not health.get("ok")
                 or crashlog_has_entries(crashlog)
             ):
@@ -241,11 +252,11 @@ def event_failures(events: list[dict], *, skip_data_canary: bool) -> list[dict]:
                         "round": event.get("round"),
                         "kind": "data_refresh",
                         "token": token,
-                        "retained_ok": retained.get("ok"),
+                        "data_canary_ok": canary.get("ok"),
                         "packets_ok": packets.get("ok"),
-                        "packets_contains_token": result_contains_token(packets, token),
+                        "packets_entries_contain_token": result_entries_contain_token(packets, token),
                         "messages_ok": messages.get("ok"),
-                        "messages_contains_token": result_contains_token(messages, token),
+                        "messages_entries_contain_token": result_entries_contain_token(messages, token),
                         "health_ok": health.get("ok"),
                         "crashlog_entries": crashlog_has_entries(crashlog),
                     }
@@ -272,6 +283,7 @@ def run_probe(
     events: list[dict] = []
     setup_events: list[dict] = []
     started_at = datetime.now(timezone.utc)
+    run_prefix = token_prefix_for_run(started_at)
 
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
@@ -288,7 +300,7 @@ def run_probe(
                 events.append(
                     data_refresh_step(
                         ser,
-                        token_for_round(round_number),
+                        token_for_round(round_number, run_prefix),
                         timeout,
                         settle_sec,
                         poll_sec,
@@ -315,6 +327,7 @@ def run_probe(
         "release_min_rounds": RELEASE_MIN_ROUNDS,
         "settle_sec": settle_sec,
         "poll_sec": poll_sec,
+        "data_canary_prefix": run_prefix,
         "clear_crashlog_before_start": clear_crashlog_before_start,
         "skip_data_canary": skip_data_canary,
         "tabs": list(TAB_SEQUENCE),
@@ -328,9 +341,9 @@ def run_probe(
         "telemetry": telemetry,
         "checks": {
             "tab_switches_settle": not any(failure.get("kind") == "tab" for failure in failures),
-            "retained_data_refresh_exercised": skip_data_canary
+            "data_refresh_exercised": skip_data_canary
             or sum(1 for event in events if event.get("kind") == "data_refresh") == rounds,
-            "retained_data_refreshes_pass": not any(
+            "data_refreshes_pass": not any(
                 failure.get("kind") == "data_refresh" for failure in failures
             ),
             "no_public_rf": True,

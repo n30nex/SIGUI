@@ -40,8 +40,19 @@ def test_ui_corruption_probe_dry_run_is_explicit_port_safe():
     assert report["tabs"] == ["home", "messages", "nodes", "map", "packets", "settings"]
     assert "ui status" in report["commands"]
     assert "ui tab packets" in report["commands"]
-    assert "storage retained-canary uiRx0001" in report["commands"]
-    assert report["checks"]["retained_data_refresh_exercised"] is True
+    assert "ui data-canary uiRx0001" in report["commands"]
+    assert report["checks"]["data_refresh_exercised"] is True
+
+
+def test_ui_corruption_probe_requires_token_in_result_entries():
+    assert ui_corruption_probe_d1l.result_entries_contain_token(
+        {"filter": {"search": "uiRx0001"}, "entries": []},
+        "uiRx0001",
+    ) is False
+    assert ui_corruption_probe_d1l.result_entries_contain_token(
+        {"entries": [{"note": "ui-canary uiRx0001"}]},
+        "uiRx0001",
+    ) is True
 
 
 def test_scroll_probe_dry_run_and_screen_parser():
@@ -103,6 +114,7 @@ def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"
     assert smoke_d1l.expected_command_name("ui scroll-probe storage") == "ui scroll-probe"
+    assert smoke_d1l.expected_command_name("ui data-canary uiRx0001") == "ui data-canary"
 
 
 def test_smoke_command_reader_bounds_readline_timeout_and_restores_serial_timeout():

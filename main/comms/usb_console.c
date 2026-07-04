@@ -2842,6 +2842,83 @@ static void retained_canary_fingerprint(const char *token,
              (unsigned long)(hash ^ 0xA5A5F00DUL));
 }
 
+static void cmd_ui_data_canary(const char *line)
+{
+    static const char prefix[] = "ui data-canary ";
+    char token[32] = {0};
+    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
+        !copy_storage_canary_token(token, sizeof(token), line + strlen(prefix))) {
+        err_result("ui data-canary", "INVALID_TOKEN",
+                   "usage: ui data-canary <token-with-a-z-0-9-dot-dash-underscore>");
+        return;
+    }
+
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    char text[D1L_MESSAGE_TEXT_LEN] = {0};
+    retained_canary_fingerprint(token, fingerprint, sizeof(fingerprint));
+    snprintf(text, sizeof(text), "ui-data-canary %s", token);
+
+    const uint32_t public_seq = d1l_message_store_stats().next_seq;
+    esp_err_t ret = d1l_message_store_append_public("rx", "UI Canary", text,
+                                                    0, 0, 1, 0, true);
+    if (ret != ESP_OK) {
+        err_result("ui data-canary", esp_err_to_name(ret),
+                   "could not append public UI canary");
+        return;
+    }
+
+    const uint32_t dm_seq = d1l_dm_store_stats().next_seq;
+    ret = d1l_dm_store_append(fingerprint, "UI Canary", "rx", text,
+                              0, 0, 1, 0, 0, true, true,
+                              retained_canary_hash(token));
+    if (ret != ESP_OK) {
+        err_result("ui data-canary", esp_err_to_name(ret),
+                   "could not append DM UI canary");
+        return;
+    }
+
+    const uint32_t route_seq = d1l_route_store_stats().next_seq;
+    ret = d1l_route_store_upsert_observation(fingerprint, "UI Canary",
+                                             "ui_canary", "local", "rx",
+                                             0, 0, 1, 0, (uint16_t)strlen(text));
+    if (ret != ESP_OK) {
+        err_result("ui data-canary", esp_err_to_name(ret),
+                   "could not append route UI canary");
+        return;
+    }
+
+    const uint32_t packet_seq = d1l_packet_log_stats().next_seq;
+    char packet_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(packet_note, sizeof(packet_note), "ui-canary %s", token);
+    d1l_packet_log_entry_t packet = {
+        .direction = "rx",
+        .kind = "ui_canary",
+        .rssi_dbm = 0,
+        .snr_tenths = 0,
+        .path_hash_bytes = 1,
+        .path_hops = 0,
+        .payload_len = (uint16_t)strlen(text),
+    };
+    strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
+    if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
+        err_result("ui data-canary", "ESP_FAIL",
+                   "could not append packet UI canary");
+        return;
+    }
+
+    ok_begin("ui data-canary");
+    printf(",\"token\":");
+    print_json_string(token);
+    printf(",\"fingerprint\":\"%s\",\"public_seq\":%lu,\"dm_seq\":%lu,\"route_seq\":%lu,\"packet_seq\":%lu",
+           fingerprint,
+           (unsigned long)public_seq,
+           (unsigned long)dm_seq,
+           (unsigned long)route_seq,
+           (unsigned long)packet_seq);
+    printf(",\"storage_required\":false,\"public_rf_tx\":false,\"formats_sd\":false");
+    printf(",\"note\":\"Synthetic UI refresh canary rows appended without Public RF, SD readiness, or format command\"}\n");
+}
+
 static void cmd_storage_retained_canary(const char *line)
 {
     static const char prefix[] = "storage retained-canary ";
@@ -4258,7 +4335,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui data-canary <token>\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4287,6 +4364,8 @@ static void handle_line(const char *line)
         cmd_ui_tab(line);
     } else if (strncmp(line, "ui scroll-probe ", strlen("ui scroll-probe ")) == 0) {
         cmd_ui_scroll_probe(line);
+    } else if (strncmp(line, "ui data-canary ", strlen("ui data-canary ")) == 0) {
+        cmd_ui_data_canary(line);
     } else if (strcmp(line, "map center") == 0) {
         cmd_map_center();
     } else if (strncmp(line, "map center set ", strlen("map center set ")) == 0) {

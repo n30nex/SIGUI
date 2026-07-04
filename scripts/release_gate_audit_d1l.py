@@ -435,8 +435,8 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
         and telemetry.get("uptime_monotonic") is True
         and REQUIRED_UI_TELEMETRY_FIELDS.issubset(telemetry_fields)
         and checks.get("tab_switches_settle") is True
-        and checks.get("retained_data_refresh_exercised") is True
-        and checks.get("retained_data_refreshes_pass") is True
+        and checks.get("data_refresh_exercised") is True
+        and checks.get("data_refreshes_pass") is True
         and checks.get("no_public_rf") is True
         and checks.get("no_formatting") is True
     )
