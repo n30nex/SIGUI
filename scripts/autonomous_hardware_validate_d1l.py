@@ -71,6 +71,8 @@ RP2040_BAUD_PROBE_COMMAND_TIMEOUT_SECONDS = 20.0
 RP2040_RESET_COMMAND_TIMEOUT_SECONDS = 15.0
 RP2040_RESTORE_PING_ATTEMPTS = 5
 RP2040_RESTORE_PING_INTERVAL_SECONDS = 3.0
+SD_FILE_CANARY_TIMEOUT_SECONDS = 10
+SD_FILE_CANARY_MOUNT_WAIT_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -1009,9 +1011,9 @@ def run_sd_file_canary(ctx: RunContext, dry_run: bool) -> dict:
         "--port",
         ctx.d1l_port,
         "--timeout",
-        "5",
+        str(SD_FILE_CANARY_TIMEOUT_SECONDS),
         "--mount-wait-sec",
-        "45",
+        str(SD_FILE_CANARY_MOUNT_WAIT_SECONDS),
     ]
     return run_existing_script(ctx, "sd_file_canary", args, out, timeout=120, dry_run=dry_run)
 

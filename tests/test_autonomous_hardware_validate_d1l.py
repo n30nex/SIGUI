@@ -119,6 +119,39 @@ def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(t
     assert captured["timeout"] == 900
 
 
+def test_sd_file_canary_uses_post_restore_timing_window(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    captured = {}
+
+    def fake_run_existing_script(ctx_arg, kind, args, out, timeout, dry_run):
+        captured.update({"kind": kind, "args": args, "out": out, "timeout": timeout, "dry_run": dry_run})
+        return {"schema": 1, "kind": kind, "ok": True}
+
+    monkeypatch.setattr(runner, "run_existing_script", fake_run_existing_script)
+
+    report = runner.run_sd_file_canary(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert captured["kind"] == "sd_file_canary"
+    assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
+    assert captured["args"][captured["args"].index("--timeout") + 1] == "10"
+    assert captured["args"][captured["args"].index("--mount-wait-sec") + 1] == "60"
+    assert captured["out"].name == "sd_file_canary_1600d64_actions_28663994079_COM12.json"
+    assert captured["timeout"] == 120
+
+
 def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
     args = runner.parse_args(
