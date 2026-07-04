@@ -37,6 +37,7 @@ static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_board_touch_state_t s_touch_state;
 static bool s_touch_state_ready = false;
 static portMUX_TYPE s_tab_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_content;
@@ -194,6 +195,29 @@ typedef enum {
     D1L_UI_TAB_SETTINGS,
 } d1l_ui_tab_t;
 
+typedef struct {
+    uint32_t rx_packets;
+    uint32_t rx_adverts;
+    uint32_t tx_packets;
+    uint32_t message_total_written;
+    uint32_t dm_total_written;
+    uint32_t node_total_written;
+    uint32_t contact_total_written;
+    uint32_t route_total_written;
+    uint32_t packet_total_written;
+    uint32_t public_unread_count;
+    uint32_t dm_unread_count;
+    uint32_t muted_dm_unread_count;
+    uint32_t last_public_read_seq;
+    uint32_t last_dm_read_seq;
+    size_t message_count;
+    size_t dm_count;
+    size_t node_count;
+    size_t contact_count;
+    size_t route_count;
+    size_t packet_count;
+} d1l_ui_content_generation_t;
+
 typedef enum {
     D1L_PACKET_FILTER_ALL = 0,
     D1L_PACKET_FILTER_RX,
@@ -216,10 +240,82 @@ typedef enum {
 static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
 static bool s_tab_switch_pending = false;
 static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
+static bool s_content_refresh_pending = false;
+static d1l_ui_content_generation_t s_rendered_content_generation;
+static bool s_rendered_content_generation_valid = false;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
+
+static d1l_ui_content_generation_t content_generation_from_snapshot(
+    const d1l_app_snapshot_t *snapshot)
+{
+    return (d1l_ui_content_generation_t) {
+        .rx_packets = snapshot->rx_packets,
+        .rx_adverts = snapshot->rx_adverts,
+        .tx_packets = snapshot->tx_packets,
+        .message_total_written = snapshot->message_total_written,
+        .dm_total_written = snapshot->dm_total_written,
+        .node_total_written = snapshot->node_total_written,
+        .contact_total_written = snapshot->contact_total_written,
+        .route_total_written = snapshot->route_total_written,
+        .packet_total_written = snapshot->packet_total_written,
+        .public_unread_count = snapshot->public_unread_count,
+        .dm_unread_count = snapshot->dm_unread_count,
+        .muted_dm_unread_count = snapshot->muted_dm_unread_count,
+        .last_public_read_seq = snapshot->last_public_read_seq,
+        .last_dm_read_seq = snapshot->last_dm_read_seq,
+        .message_count = snapshot->message_count,
+        .dm_count = snapshot->dm_count,
+        .node_count = snapshot->node_count,
+        .contact_count = snapshot->contact_count,
+        .route_count = snapshot->route_count,
+        .packet_count = snapshot->packet_count,
+    };
+}
+
+static bool content_generation_equal(const d1l_ui_content_generation_t *left,
+                                     const d1l_ui_content_generation_t *right)
+{
+    return left->rx_packets == right->rx_packets &&
+        left->rx_adverts == right->rx_adverts &&
+        left->tx_packets == right->tx_packets &&
+        left->message_total_written == right->message_total_written &&
+        left->dm_total_written == right->dm_total_written &&
+        left->node_total_written == right->node_total_written &&
+        left->contact_total_written == right->contact_total_written &&
+        left->route_total_written == right->route_total_written &&
+        left->packet_total_written == right->packet_total_written &&
+        left->public_unread_count == right->public_unread_count &&
+        left->dm_unread_count == right->dm_unread_count &&
+        left->muted_dm_unread_count == right->muted_dm_unread_count &&
+        left->last_public_read_seq == right->last_public_read_seq &&
+        left->last_dm_read_seq == right->last_dm_read_seq &&
+        left->message_count == right->message_count &&
+        left->dm_count == right->dm_count &&
+        left->node_count == right->node_count &&
+        left->contact_count == right->contact_count &&
+        left->route_count == right->route_count &&
+        left->packet_count == right->packet_count;
+}
+
+static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
+{
+    s_rendered_content_generation = content_generation_from_snapshot(snapshot);
+    s_rendered_content_generation_valid = true;
+}
+
+static bool content_generation_changed_from_rendered(const d1l_app_snapshot_t *snapshot)
+{
+    d1l_ui_content_generation_t current = content_generation_from_snapshot(snapshot);
+    if (!s_rendered_content_generation_valid) {
+        s_rendered_content_generation = current;
+        s_rendered_content_generation_valid = true;
+        return false;
+    }
+    return !content_generation_equal(&current, &s_rendered_content_generation);
+}
 
 static void request_tab_switch(d1l_ui_tab_t tab)
 {
@@ -258,6 +354,28 @@ static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)
         s_tab_switch_pending = false;
     }
     portEXIT_CRITICAL(&s_tab_lock);
+
+    portENTER_CRITICAL(&s_content_refresh_lock);
+    s_content_refresh_pending = false;
+    portEXIT_CRITICAL(&s_content_refresh_lock);
+}
+
+static void request_content_refresh(void)
+{
+    portENTER_CRITICAL(&s_content_refresh_lock);
+    s_content_refresh_pending = true;
+    portEXIT_CRITICAL(&s_content_refresh_lock);
+}
+
+static bool begin_pending_content_refresh(void)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_content_refresh_lock);
+    pending = s_content_refresh_pending;
+    s_content_refresh_pending = false;
+    portEXIT_CRITICAL(&s_content_refresh_lock);
+    return pending;
 }
 
 static void render_dm_thread_sheet(void);
@@ -283,6 +401,7 @@ static const char *packet_filter_kind(void);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
 static void map_tiles_keyboard_event_cb(lv_event_t *event);
+static void process_pending_content_refresh(void);
 static void process_pending_scroll_probe(void);
 
 static const char *tab_name(d1l_ui_tab_t tab)
@@ -1784,7 +1903,7 @@ static void mark_messages_read_event_cb(lv_event_t *event)
     esp_err_t ret = d1l_app_model_mark_messages_read();
     show_toast("Read", ret);
     if (ret == ESP_OK) {
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -2011,7 +2130,7 @@ static void contact_detail_export_event_cb(lv_event_t *event)
 
 static void show_contact_detail_after_edit(void)
 {
-    render_active_tab();
+    request_content_refresh();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
         lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -2061,7 +2180,7 @@ static void forget_contact_edit_event_cb(lv_event_t *event)
             lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
         }
         memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
-        render_active_tab();
+        request_content_refresh();
     }
     show_toast("Forget", ret);
 }
@@ -2370,7 +2489,7 @@ static void update_contact_detail_flags(bool favorite, bool muted)
                                                     favorite, muted, &updated);
     if (ret == ESP_OK) {
         s_contact_detail_contact = updated;
-        render_active_tab();
+        request_content_refresh();
         render_contact_detail_sheet();
         if (s_contact_detail_sheet) {
             lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -2916,7 +3035,7 @@ static void packet_filter_event_cb(lv_event_t *event)
     s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
     s_packet_skip_newest = 0;
     s_packets_paused = false;
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void packet_pause_event_cb(lv_event_t *event)
@@ -2938,7 +3057,7 @@ static void packet_pause_event_cb(lv_event_t *event)
         s_packet_sd_history_page = sd_used;
         s_packets_paused = true;
     }
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void packet_load_older_event_cb(lv_event_t *event)
@@ -2949,7 +3068,7 @@ static void packet_load_older_event_cb(lv_event_t *event)
         s_packet_skip_newest += s_packet_filtered_count;
     }
     s_packets_paused = false;
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void packet_load_newer_event_cb(lv_event_t *event)
@@ -2961,7 +3080,7 @@ static void packet_load_newer_event_cb(lv_event_t *event)
         s_packet_skip_newest = 0;
     }
     s_packets_paused = false;
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void close_packet_search_event_cb(lv_event_t *event)
@@ -2981,7 +3100,7 @@ static void clear_packet_search_event_cb(lv_event_t *event)
     s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
     s_packet_skip_newest = 0;
     hide_packet_search_sheet();
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void apply_packet_search_event_cb(lv_event_t *event)
@@ -2998,7 +3117,7 @@ static void apply_packet_search_event_cb(lv_event_t *event)
     s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
     s_packet_skip_newest = 0;
     hide_packet_search_sheet();
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void packet_search_keyboard_event_cb(lv_event_t *event)
@@ -3190,7 +3309,7 @@ static void send_compose_text(void)
         lv_textarea_set_text(s_compose_textarea, "");
         update_compose_counter();
         hide_compose_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -3232,7 +3351,7 @@ static void complete_onboarding_from_ui(const char *fallback_name)
     esp_err_t ret = d1l_app_model_complete_onboarding(name);
     if (ret == ESP_OK) {
         hide_onboarding_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
     show_toast("Onboarding", ret);
 }
@@ -3531,7 +3650,7 @@ static void read_dm_thread_event_cb(lv_event_t *event)
     esp_err_t ret = d1l_app_model_mark_dm_thread_read(s_dm_thread_fingerprint);
     show_toast("Thread read", ret);
     if (ret == ESP_OK) {
-        render_active_tab();
+        request_content_refresh();
         render_dm_thread_sheet();
         if (s_dm_thread_sheet) {
             lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -3693,7 +3812,7 @@ static void set_messages_mode(bool show_dms)
 {
     s_messages_show_dms = show_dms;
     if (s_active_tab == D1L_UI_TAB_MESSAGES) {
-        render_active_tab();
+        request_content_refresh();
         return;
     }
     request_tab_switch(D1L_UI_TAB_MESSAGES);
@@ -3873,7 +3992,7 @@ static void map_location_save_event_cb(lv_event_t *event)
     if (ret == ESP_OK) {
         hide_map_location_sheet();
         hide_map_tiles_sheet();
-        render_active_tab();
+        request_content_refresh();
         show_toast_text("D1L pin saved", true);
     } else {
         show_toast_text("Location rejected", false);
@@ -3888,7 +4007,7 @@ static void map_location_clear_event_cb(lv_event_t *event)
     if (ret == ESP_OK) {
         map_location_from_snapshot(NULL);
         hide_map_location_sheet();
-        render_active_tab();
+        request_content_refresh();
         show_toast_text("D1L pin cleared", true);
     } else {
         show_toast_text("Clear location failed", false);
@@ -4607,7 +4726,7 @@ static void radio_save_event_cb(lv_event_t *event)
     esp_err_t ret = d1l_app_model_save_radio_profile(&s_radio_edit);
     if (ret == ESP_OK) {
         d1l_app_model_snapshot(&s_snapshot);
-        render_active_tab();
+        request_content_refresh();
         render_radio_settings_sheet();
         if (s_radio_settings_sheet) {
             lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
@@ -4892,7 +5011,7 @@ static void wifi_save_event_cb(lv_event_t *event)
     show_toast("Wi-Fi profile", ret);
     if (ret == ESP_OK) {
         wifi_refresh_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -4913,7 +5032,7 @@ static void wifi_clear_event_cb(lv_event_t *event)
     show_toast("Wi-Fi clear", ret);
     if (ret == ESP_OK) {
         wifi_refresh_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -4924,7 +5043,7 @@ static void wifi_toggle_event_cb(lv_event_t *event)
     show_toast("Wi-Fi", ret);
     if (ret == ESP_OK) {
         wifi_refresh_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -4935,7 +5054,7 @@ static void wifi_scan_event_cb(lv_event_t *event)
     s_wifi_scan_loaded = true;
     show_toast("Wi-Fi scan", ret);
     wifi_refresh_sheet();
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void wifi_connect_event_cb(lv_event_t *event)
@@ -4944,7 +5063,7 @@ static void wifi_connect_event_cb(lv_event_t *event)
     esp_err_t ret = d1l_app_model_wifi_connect();
     show_toast("Wi-Fi connect", ret);
     wifi_refresh_sheet();
-    render_active_tab();
+    request_content_refresh();
 }
 
 static void wifi_keyboard_event_cb(lv_event_t *event)
@@ -4965,7 +5084,7 @@ static void ble_toggle_event_cb(lv_event_t *event)
     if (ret == ESP_OK) {
         d1l_app_model_snapshot(&s_snapshot);
         render_ble_sheet();
-        render_active_tab();
+        request_content_refresh();
     }
 }
 
@@ -5617,6 +5736,7 @@ static void render_active_tab(void)
         break;
     }
     update_onboarding_visibility(&s_snapshot);
+    remember_rendered_content_generation(&s_snapshot);
 }
 
 esp_err_t d1l_ui_phase1_request_tab(const char *name)
@@ -5740,6 +5860,18 @@ static void process_pending_tab_switch(void)
     hide_mesh_roles_sheet();
     render_active_tab();
     finish_pending_tab_switch(rendered_tab);
+}
+
+static void process_pending_content_refresh(void)
+{
+    if (!begin_pending_content_refresh()) {
+        return;
+    }
+    if (d1l_ui_phase1_tab_switch_pending()) {
+        request_content_refresh();
+        return;
+    }
+    render_active_tab();
 }
 
 static lv_obj_t *find_scrollable_descendant(lv_obj_t *root, lv_obj_t **fallback)
@@ -5914,6 +6046,9 @@ static void refresh_timer_cb(lv_timer_t *timer)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_onboarding_visibility(&s_snapshot);
+    if (content_generation_changed_from_rendered(&s_snapshot)) {
+        request_content_refresh();
+    }
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
         lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
         s_toast_until = 0;
@@ -6674,6 +6809,7 @@ static void ui_task(void *arg)
         uint32_t wait_ms = lv_timer_handler();
         d1l_health_monitor_sample_lvgl();
         process_pending_tab_switch();
+        process_pending_content_refresh();
         process_pending_scroll_probe();
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;

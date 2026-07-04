@@ -10,7 +10,7 @@
 - `scripts/` contains host-check, flash, smoke, soak, backup, checksum, and release-package tooling.
 - `firmware/rp2040_sd_bridge/` contains the Arduino RP2040 SD bridge target. It is compiled by GitHub Actions.
 - `tests/` contains host contract tests.
-- `docs/` contains roadmap, validation notes, checklists, and phase checkpoints.
+- `docs/` contains the active README/index, user/developer guides, release checklist, known limitations, test plan, SD runbooks, protocol docs, screenshots, and attribution notes.
 
 ## Host Checks
 
@@ -20,7 +20,7 @@ python .\tools\ui_simulator.py --out artifacts\ui-sim
 python .\tools\ui_simulator.py --scenario large-mesh --out artifacts\ui-sim-large
 python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-storage
 python .\scripts\smoke_d1l.py --dry-run
-python .\scripts\ui_tab_abuse_d1l.py --dry-run --cycles 500
+python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
@@ -108,5 +108,5 @@ python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<
 - Keep flash commands explicit-port only.
 - Keep Wi-Fi/BLE optional and documented when runtime support is disabled.
 - Keep full-flash flows behind typed confirmation.
-- Update `docs/HARDWARE_VALIDATION_D1L_2026-06-29.md`, `docs/KNOWN_LIMITATIONS.md`, and `docs/RELEASE_CHECKLIST.md` when hardware evidence changes.
+- Update `README.md`, `docs/ROADMAP.md`, `docs/KNOWN_LIMITATIONS.md`, and `docs/RELEASE_CHECKLIST.md` when hardware evidence changes.
 - Do not mark the roadmap complete until manual UI review, full DM proof, long soaks, and final release docs/tests are actually complete.

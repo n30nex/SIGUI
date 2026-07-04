@@ -20,8 +20,6 @@ def test_no_on_device_sd_format_command_remains():
         for path in (ROOT / root_name).rglob("*"):
             if not path.is_file() or path.suffix.lower() not in {".c", ".h", ".ino", ".py", ".md", ".ps1", ".sh"}:
                 continue
-            if path.name == "MeshCore_DeskOS_D1L_Final_Roadmap_and_Codex_Handoff_2026-07-02.md":
-                continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             if any(token in text for token in (retired_request, retired_confirmation, retired_api, retired_storage_api)):
                 offenders.append(str(path.relative_to(ROOT)))
@@ -45,7 +43,6 @@ def test_sd_user_policy_copy_is_fat32_only():
 def test_release_docs_match_no_format_sd_policy():
     release_docs = [
         "README.md",
-        "docs/DESKOSFINAL.md",
         "docs/ROADMAP.md",
         "docs/KNOWN_LIMITATIONS.md",
         "docs/RELEASE_CHECKLIST.md",

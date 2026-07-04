@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts import scroll_probe_d1l, smoke_d1l, ui_tab_abuse_d1l
+from scripts import scroll_probe_d1l, smoke_d1l, ui_corruption_probe_d1l
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,24 +18,30 @@ class FakeSerial:
         return b""
 
 
-def test_ui_tab_abuse_dry_run_is_explicit_port_safe():
-    report = ui_tab_abuse_d1l.dry_run_report(
-        cycles=500,
+def test_ui_corruption_probe_dry_run_is_explicit_port_safe():
+    report = ui_corruption_probe_d1l.dry_run_report(
+        rounds=20,
         settle_sec=0.1,
         clear_crashlog_before_start=True,
+        skip_data_canary=False,
     )
 
     assert report["ok"] is True
     assert report["mode"] == "dry-run"
     assert report["hardware_required"] is False
     assert report["explicit_port_required"] is True
-    assert report["cycles"] == 500
-    assert report["release_min_cycles"] == 500
+    assert report["kind"] == "ui_corruption_probe"
+    assert report["rounds"] == 20
+    assert report["release_min_rounds"] == 20
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
     assert "heap_free" in report["telemetry_fields"]
     assert "ui_task_stack_free_words" in report["telemetry_fields"]
     assert report["tabs"] == ["home", "messages", "nodes", "map", "packets", "settings"]
     assert "ui status" in report["commands"]
     assert "ui tab packets" in report["commands"]
+    assert "storage retained-canary uiRx0001" in report["commands"]
+    assert report["checks"]["retained_data_refresh_exercised"] is True
 
 
 def test_scroll_probe_dry_run_and_screen_parser():
@@ -76,7 +82,7 @@ def test_scroll_probe_rejects_unknown_screen():
 
 def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     release_docs = [
-        "docs/DESKOSFINAL.md",
+        "README.md",
         "docs/ROADMAP.md",
         "docs/KNOWN_LIMITATIONS.md",
         "docs/RELEASE_CHECKLIST.md",
@@ -85,7 +91,10 @@ def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     offenders = [
         rel
         for rel in release_docs
-        if "100-cycle" in (ROOT / rel).read_text(encoding="utf-8")
+        if any(
+            phrase in (ROOT / rel).read_text(encoding="utf-8")
+            for phrase in ("100-cycle", "500-cycle tab-abuse", "500-cycle tab abuse")
+        )
     ]
     assert offenders == []
 

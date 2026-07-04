@@ -268,6 +268,48 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
         assert "portEXIT_CRITICAL(&s_tab_lock)" in body
 
 
+def test_content_refreshes_are_coalesced_on_ui_task():
+    source = read("main/ui/ui_phase1.c")
+
+    assert "static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED" in source
+    assert "static void request_content_refresh(void)" in source
+    assert "static bool begin_pending_content_refresh(void)" in source
+    assert "static void process_pending_content_refresh(void)" in source
+    assert "s_content_refresh_pending = false;" in source
+
+    process_body = source.split("static void process_pending_content_refresh(void)", 1)[1].split(
+        "static lv_obj_t *find_scrollable_descendant", 1
+    )[0]
+    assert "begin_pending_content_refresh()" in process_body
+    assert "d1l_ui_phase1_tab_switch_pending()" in process_body
+    assert "request_content_refresh();" in process_body
+    assert "render_active_tab();" in process_body
+
+    loop_body = source.split("static void ui_task(void *arg)", 1)[1].split(
+        "static void touch_poll_task", 1
+    )[0]
+    assert loop_body.index("process_pending_tab_switch();") < loop_body.index(
+        "process_pending_content_refresh();"
+    )
+    assert loop_body.index("process_pending_content_refresh();") < loop_body.index(
+        "process_pending_scroll_probe();"
+    )
+
+
+def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
+    source = read("main/ui/ui_phase1.c")
+    expected_deferred_paths = [
+        "s_packet_search_text[0] = '\\0';\n    if (s_packet_search_textarea)",
+        "hide_packet_search_sheet();\n    request_content_refresh();",
+        "hide_contact_edit_sheet();\n        hide_contact_export_sheet();",
+        "memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));\n        request_content_refresh();",
+        "s_contact_detail_contact = updated;\n        request_content_refresh();\n        render_contact_detail_sheet();",
+        "s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;\n    s_packet_skip_newest = 0;\n    hide_packet_search_sheet();\n    request_content_refresh();",
+    ]
+    for snippet in expected_deferred_paths:
+        assert snippet in source
+
+
 def test_touch_ui_actions_route_through_app_model():
     source = read("main/ui/ui_phase1.c")
     header = read("main/app/app_model.h")
@@ -945,3 +987,10 @@ def test_live_packet_receive_store_reads_are_serialized_for_ui_snapshots():
         "static void create_top_bar", 1
     )[0]
     assert "render_active_tab()" not in refresh_body
+    assert "content_generation_changed_from_rendered(&s_snapshot)" in refresh_body
+    assert "request_content_refresh();" in refresh_body
+    assert "message_total_written" in ui_source
+    assert "dm_total_written" in ui_source
+    assert "node_total_written" in ui_source
+    assert "route_total_written" in ui_source
+    assert "packet_total_written" in ui_source

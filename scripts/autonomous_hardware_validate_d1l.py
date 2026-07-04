@@ -976,19 +976,29 @@ def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
     return run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
 
 
-def run_tab_abuse(ctx: RunContext, cycles: int, dry_run: bool) -> dict:
-    out = ctx.hardware_dir / f"ui_tab_abuse_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+def run_ui_corruption_probe(ctx: RunContext, rounds: int, dry_run: bool) -> dict:
+    out = (
+        ctx.hardware_dir /
+        f"ui_corruption_probe_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
     args = [
-        str(ctx.root / "scripts" / "ui_tab_abuse_d1l.py"),
+        str(ctx.root / "scripts" / "ui_corruption_probe_d1l.py"),
         "--port",
         ctx.d1l_port,
         "--timeout",
         "5",
-        "--cycles",
-        str(cycles),
+        "--rounds",
+        str(rounds),
         "--clear-crashlog-before-start",
     ]
-    return run_existing_script(ctx, "ui_tab_abuse", args, out, timeout=max(600, cycles * 2), dry_run=dry_run)
+    return run_existing_script(
+        ctx,
+        "ui_corruption_probe",
+        args,
+        out,
+        timeout=max(300, rounds * 20),
+        dry_run=dry_run,
+    )
 
 
 def run_scroll_probe(ctx: RunContext, dry_run: bool) -> dict:
@@ -1138,7 +1148,7 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
             "rp2040_bridge_preflight",
             "sd_file_canary",
             "d1l_smoke",
-            *(["d1l_500_cycle_tab_abuse", "d1l_scroll_probe"] if args.include_ui_probes else []),
+            *(["d1l_ui_corruption_probe", "d1l_scroll_probe"] if args.include_ui_probes else []),
             "release_gate_audit",
         ],
     }
@@ -1269,7 +1279,7 @@ def run_validation(args: argparse.Namespace) -> dict:
             return report
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
         if args.include_ui_probes:
-            runs.append(run_tab_abuse(ctx, cycles=args.tab_cycles, dry_run=args.dry_run))
+            runs.append(run_ui_corruption_probe(ctx, rounds=args.ui_rounds, dry_run=args.dry_run))
             runs.append(run_scroll_probe(ctx, dry_run=args.dry_run))
         runs.append(run_release_gate(ctx, dry_run=args.dry_run))
     except Exception as exc:
@@ -1296,15 +1306,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--skip-esp32-flash", action="store_true")
     parser.add_argument("--skip-rp2040-official-smoke", action="store_true")
     parser.add_argument("--include-ui-probes", action="store_true")
-    parser.add_argument("--tab-cycles", type=int, default=500)
+    parser.add_argument("--ui-rounds", type=int, default=20)
     parser.add_argument("--uf2-volume")
     parser.add_argument("--uf2-timeout", type=float, default=30.0)
     parser.add_argument("--smoke-capture-timeout", type=float, default=30.0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args(argv)
-    if args.tab_cycles <= 0:
-        parser.error("--tab-cycles must be positive")
+    if args.ui_rounds <= 0:
+        parser.error("--ui-rounds must be positive")
     return args
 
 

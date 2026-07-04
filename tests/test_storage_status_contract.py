@@ -653,13 +653,11 @@ def test_current_d1l_bsp_keeps_esp32_direct_sd_disabled():
     assert "MicroSD support is handled by the RP2040 side" in roadmap
 
 
-def test_sd_checkpoint_validation_does_not_require_public_rf_or_reserved_ports():
-    checkpoint = read("docs/PHASE6_SD_BRIDGE_SETUP_CHECKPOINT.md")
-    validation = checkpoint.split("## Validation Rules", 1)[1].split("## Remaining SD Work", 1)[0]
+def test_sd_validation_docs_do_not_require_public_rf_or_reserved_ports():
+    validation = read("docs/D1L_SD_CARD_GUIDED_INSTALL.md")
 
     assert "mesh send public" not in validation
-    assert "COM11" not in validation
-    assert "COM29" not in validation
+    assert "Do not use `COM11` or `COM29`" in validation
     assert "COM7" not in validation
     assert "flash_d1l" not in validation
     assert "monitor_d1l" not in validation
@@ -667,6 +665,7 @@ def test_sd_checkpoint_validation_does_not_require_public_rf_or_reserved_ports()
     assert "soak_d1l.py --active-public-text" not in validation
     assert "probe_d1l_dm.py --bot-port" not in validation
     assert "COM12" in validation
+    assert "COM16" in validation
 
 
 def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():

@@ -98,8 +98,8 @@ and fails closed if no autonomous bootloader path is available. It does not
 format SD, does not send Public RF, and does not require user action. When access is
 available, the runner can flash the official Seeed SD smoke UF2, capture its
 COM16 JSON, restore the production bridge UF2, run short COM12 SD preflight and
-smoke evidence, and regenerate the fail-closed release gate. 500-cycle UI
-tab-abuse and scroll probes are opt-in with `--include-ui-probes`.
+smoke evidence, and regenerate the fail-closed release gate. Targeted UI
+corruption and scroll probes are opt-in with `--include-ui-probes`.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under

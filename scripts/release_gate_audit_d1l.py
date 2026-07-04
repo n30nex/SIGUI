@@ -18,8 +18,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
 
-RELEASE_TAB_ABUSE_MIN_CYCLES = 500
-REQUIRED_TAB_TELEMETRY_FIELDS = {
+RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
+REQUIRED_UI_TELEMETRY_FIELDS = {
     "heap_free",
     "heap_min_free",
     "heap_largest_free",
@@ -418,17 +418,27 @@ def all_checks_true(data: dict) -> bool:
     return isinstance(checks, dict) and bool(checks) and all(value is True for value in checks.values())
 
 
-def ui_tab_abuse_ok(data: dict, expected_port: str) -> bool:
+def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
     telemetry = data.get("telemetry") if isinstance(data.get("telemetry"), dict) else {}
     telemetry_fields = set(telemetry.get("telemetry_fields") or data.get("telemetry_fields") or [])
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
     return (
         data.get("ok") is True
         and data.get("port") == expected_port
-        and int(data.get("cycles") or 0) >= RELEASE_TAB_ABUSE_MIN_CYCLES
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and data.get("skip_data_canary") is not True
+        and int(data.get("rounds") or 0) >= RELEASE_UI_CORRUPTION_MIN_ROUNDS
+        and int(data.get("data_refresh_events") or 0) >= int(data.get("rounds") or 0)
         and int(data.get("failure_count") or 0) == 0
         and int(telemetry.get("health_sample_count") or 0) > 0
         and telemetry.get("uptime_monotonic") is True
-        and REQUIRED_TAB_TELEMETRY_FIELDS.issubset(telemetry_fields)
+        and REQUIRED_UI_TELEMETRY_FIELDS.issubset(telemetry_fields)
+        and checks.get("tab_switches_settle") is True
+        and checks.get("retained_data_refresh_exercised") is True
+        and checks.get("retained_data_refreshes_pass") is True
+        and checks.get("no_public_rf") is True
+        and checks.get("no_formatting") is True
     )
 
 
@@ -1508,7 +1518,12 @@ def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResu
 
 
 def docs_freshness_gate(root: Path, commit: str | None, run_id: str | None) -> GateResult:
-    docs = [root / "docs" / name for name in ("DESKOSFINAL.md", "ROADMAP.md", "RELEASE_CHECKLIST.md", "KNOWN_LIMITATIONS.md")]
+    docs = [
+        root / "README.md",
+        root / "docs" / "ROADMAP.md",
+        root / "docs" / "RELEASE_CHECKLIST.md",
+        root / "docs" / "KNOWN_LIMITATIONS.md",
+    ]
     texts = {path: path.read_text(encoding="utf-8") for path in docs if path.is_file()}
     del commit, run_id
     combined = "\n".join(texts.values())
@@ -1544,7 +1559,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     soak_dir = Path(args.soak_dir).resolve()
     gates: list[GateResult] = []
     smoke_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "smoke")
-    tab_abuse_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-tab-abuse")
+    ui_corruption_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-corruption-probe")
     scroll_probe_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "scroll-probe")
     official_smoke_roots = unique_dirs(
         sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-official-sd-smoke")
@@ -1586,18 +1601,18 @@ def build_audit(args: argparse.Namespace) -> dict:
     )
     gates.append(
         simple_json_ok_gate(
-            "ui_tab_abuse",
-            "500-cycle D1L tab abuse",
+            "ui_corruption_probe",
+            "Targeted D1L UI corruption probe",
             newest_commit_json_from_roots(
-                tab_abuse_roots,
+                ui_corruption_roots,
                 args.commit,
-                "ui_tab_abuse_*.json",
-                "d1l-ui-tab-abuse-*.json",
+                "ui_corruption_probe_*.json",
+                "d1l-ui-corruption-probe-*.json",
             ),
             root,
-            lambda data: ui_tab_abuse_ok(data, args.d1l_port),
-            "500-cycle D1L tab abuse artifact passes.",
-            "No passing 500-cycle D1L tab abuse artifact was found.",
+            lambda data: ui_corruption_probe_ok(data, args.d1l_port),
+            "Targeted D1L UI corruption probe artifact passes.",
+            "No passing targeted D1L UI corruption probe artifact was found.",
         )
     )
     gates.append(

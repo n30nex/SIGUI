@@ -109,6 +109,7 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "COM29" not in json.dumps(plan["steps"])
     assert "rp2040_autonomous_access_precheck" in plan["steps"]
     assert "d1l_500_cycle_tab_abuse" not in plan["steps"]
+    assert "d1l_ui_corruption_probe" not in plan["steps"]
     assert "d1l_scroll_probe" not in plan["steps"]
 
 
@@ -408,7 +409,11 @@ def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monk
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
-    monkeypatch.setattr(runner, "run_tab_abuse", lambda ctx, cycles, dry_run: ok_step("tab_abuse"))
+    monkeypatch.setattr(
+        runner,
+        "run_ui_corruption_probe",
+        lambda ctx, rounds, dry_run: ok_step("ui_corruption_probe"),
+    )
     monkeypatch.setattr(runner, "run_scroll_probe", lambda ctx, dry_run: ok_step("scroll_probe"))
     monkeypatch.setattr(runner, "run_release_gate", lambda ctx, dry_run: ok_step("release_gate_audit"))
 

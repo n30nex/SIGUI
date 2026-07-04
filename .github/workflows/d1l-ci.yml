@@ -22,8 +22,8 @@ jobs:
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
 
-      - name: UI tab abuse dry run
-        run: python ./scripts/ui_tab_abuse_d1l.py --dry-run --cycles 500
+      - name: UI corruption probe dry run
+        run: python ./scripts/ui_corruption_probe_d1l.py --dry-run --rounds 20
 
       - name: UI scroll probe dry run
         run: python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map

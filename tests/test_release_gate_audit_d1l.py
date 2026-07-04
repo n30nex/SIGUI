@@ -34,14 +34,27 @@ STRICT_SD_GATE_IDS = (
 )
 
 
-def ui_tab_abuse_payload(**overrides: object) -> dict:
+def ui_corruption_probe_payload(**overrides: object) -> dict:
     payload = {
         "ok": True,
+        "kind": "ui_corruption_probe",
         "port": "COM12",
-        "cycles": 500,
+        "rounds": 20,
+        "release_min_rounds": 20,
+        "data_refresh_events": 20,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "skip_data_canary": False,
         "failure_count": 0,
+        "checks": {
+            "tab_switches_settle": True,
+            "retained_data_refresh_exercised": True,
+            "retained_data_refreshes_pass": True,
+            "no_public_rf": True,
+            "no_formatting": True,
+        },
         "telemetry": {
-            "health_sample_count": 3000,
+            "health_sample_count": 180,
             "uptime_monotonic": True,
             "telemetry_fields": [
                 "heap_free",
@@ -145,7 +158,7 @@ def write_core_evidence(root: Path) -> None:
 
     hardware = root / "artifacts" / "hardware" / "com12"
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
-    write_json(hardware / "ui_tab_abuse_68350bf.json", ui_tab_abuse_payload())
+    write_json(hardware / "ui_corruption_probe_68350bf.json", ui_corruption_probe_payload())
     write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
     write_json(
         hardware / "dm_probe_68350bf.json",
@@ -180,7 +193,11 @@ def write_core_evidence(root: Path) -> None:
             "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
         },
     )
-    for name in ("DESKOSFINAL.md", "ROADMAP.md", "RELEASE_CHECKLIST.md", "KNOWN_LIMITATIONS.md"):
+    (root / "README.md").write_text(
+        "release_gate_audit_d1l.py\nready_for_public_release=false\nNo release tag should be cut until\n",
+        encoding="utf-8",
+    )
+    for name in ("ROADMAP.md", "RELEASE_CHECKLIST.md", "KNOWN_LIMITATIONS.md"):
         (root / "docs").mkdir(exist_ok=True)
         (root / "docs" / name).write_text(
             "release_gate_audit_d1l.py\nready_for_public_release=false\nNo release tag should be cut until\n",
@@ -678,7 +695,7 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["ci_artifacts_checksums"]["ok"] is True
     assert gates["release_notices_included"]["ok"] is True
     assert gates["com12_smoke"]["ok"] is True
-    assert gates["ui_tab_abuse"]["ok"] is True
+    assert gates["ui_corruption_probe"]["ok"] is True
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
@@ -975,28 +992,31 @@ def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp
 def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
-    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    (hardware / "ui_corruption_probe_68350bf.json").unlink()
     write_json(
-        hardware / "ui_tab_abuse_deadbee.json",
-        ui_tab_abuse_payload(),
+        hardware / "ui_corruption_probe_deadbee.json",
+        ui_corruption_probe_payload(),
     )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
-    assert gates["ui_tab_abuse"]["ok"] is False
-    assert gates["ui_tab_abuse"]["details"]["path_found"] is False
+    assert gates["ui_corruption_probe"]["ok"] is False
+    assert gates["ui_corruption_probe"]["details"]["path_found"] is False
 
 
-def test_release_gate_audit_requires_500_cycle_tab_abuse(tmp_path: Path):
+def test_release_gate_audit_requires_targeted_ui_corruption_rounds(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
-    write_json(hardware / "ui_tab_abuse_68350bf.json", ui_tab_abuse_payload(cycles=100))
+    write_json(
+        hardware / "ui_corruption_probe_68350bf.json",
+        ui_corruption_probe_payload(rounds=3, data_refresh_events=3),
+    )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
-    assert gates["ui_tab_abuse"]["ok"] is False
+    assert gates["ui_corruption_probe"]["ok"] is False
 
 
 def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):
@@ -1042,8 +1062,8 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12", "firmware_commit": STALE_COMMIT})
     write_json(
-        hardware / "ui_tab_abuse_68350bf.json",
-        ui_tab_abuse_payload(firmware_commit=STALE_COMMIT),
+        hardware / "ui_corruption_probe_68350bf.json",
+        ui_corruption_probe_payload(firmware_commit=STALE_COMMIT),
     )
     write_json(
         hardware / "scroll_probe_68350bf.json",
@@ -1143,7 +1163,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
 
     for gate_id in (
         "com12_smoke",
-        "ui_tab_abuse",
+        "ui_corruption_probe",
         "ui_scroll_probe",
         "outbound_dm_com11",
         "sd_official_seeed_smoke_passed",
@@ -1155,7 +1175,7 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
     ):
         assert gates[gate_id]["ok"] is False
     assert gates["com12_smoke"]["details"]["path_found"] is False
-    assert gates["ui_tab_abuse"]["details"]["path_found"] is False
+    assert gates["ui_corruption_probe"]["details"]["path_found"] is False
     assert gates["ui_scroll_probe"]["details"]["path_found"] is False
     assert gates["outbound_dm_com11"]["details"]["path_found"] is False
     assert gates["sd_official_seeed_smoke_passed"]["evidence"] == []
@@ -1171,24 +1191,26 @@ def test_release_gate_audit_rejects_mismatched_commit_metadata_even_when_filenam
 def test_release_gate_audit_accepts_matching_commit_metadata_without_commit_filename(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
-    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    (hardware / "ui_corruption_probe_68350bf.json").unlink()
     write_json(
-        hardware / "ui_tab_abuse_latest.json",
-        ui_tab_abuse_payload(firmware_commit=COMMIT),
+        hardware / "ui_corruption_probe_latest.json",
+        ui_corruption_probe_payload(firmware_commit=COMMIT),
     )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
-    assert gates["ui_tab_abuse"]["ok"] is True
-    assert gates["ui_tab_abuse"]["evidence"] == ["artifacts/hardware/com12/ui_tab_abuse_latest.json"]
+    assert gates["ui_corruption_probe"]["ok"] is True
+    assert gates["ui_corruption_probe"]["evidence"] == [
+        "artifacts/hardware/com12/ui_corruption_probe_latest.json"
+    ]
 
 
 def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
     (hardware / "smoke_68350bf.json").unlink()
-    (hardware / "ui_tab_abuse_68350bf.json").unlink()
+    (hardware / "ui_corruption_probe_68350bf.json").unlink()
     (hardware / "scroll_probe_68350bf.json").unlink()
 
     write_json(
@@ -1196,8 +1218,8 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
         {"ok": True, "port": "COM12", "firmware_commit": COMMIT},
     )
     write_json(
-        tmp_path / "artifacts" / "ui-tab-abuse" / "d1l-ui-tab-abuse-COM12-actions-68350bf.json",
-        ui_tab_abuse_payload(firmware_commit=COMMIT),
+        tmp_path / "artifacts" / "ui-corruption-probe" / "d1l-ui-corruption-probe-COM12-actions-68350bf.json",
+        ui_corruption_probe_payload(firmware_commit=COMMIT),
     )
     write_json(
         tmp_path / "artifacts" / "scroll-probe" / "d1l-scroll-probe-COM12-actions-68350bf.json",
@@ -1210,9 +1232,9 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
 
     assert gates["com12_smoke"]["ok"] is True
     assert gates["com12_smoke"]["evidence"] == ["artifacts/smoke/d1l-smoke-COM12-actions-68350bf.json"]
-    assert gates["ui_tab_abuse"]["ok"] is True
-    assert gates["ui_tab_abuse"]["evidence"] == [
-        "artifacts/ui-tab-abuse/d1l-ui-tab-abuse-COM12-actions-68350bf.json"
+    assert gates["ui_corruption_probe"]["ok"] is True
+    assert gates["ui_corruption_probe"]["evidence"] == [
+        "artifacts/ui-corruption-probe/d1l-ui-corruption-probe-COM12-actions-68350bf.json"
     ]
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["ui_scroll_probe"]["evidence"] == [

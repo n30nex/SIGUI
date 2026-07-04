@@ -39,6 +39,9 @@ Important defaults:
 
 ## Hardware Validation Status
 
-COM7 D1L hardware validation was completed on 2026-06-29. See [HARDWARE_VALIDATION_D1L_2026-06-29.md](HARDWARE_VALIDATION_D1L_2026-06-29.md) for exact port, board, GitHub Actions artifact, smoke JSON, and boot log evidence.
+Current hardware validation status is tracked in [ROADMAP.md](ROADMAP.md),
+[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), and
+[KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). Current D1L release validation uses
+COM12 for the ESP32 app/console side and COM16 for the RP2040 USB/CDC/UF2 side.
 
 Scripts still intentionally stop before flashing unless `D1L_PORT` or `--port` is supplied.
