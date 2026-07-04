@@ -1276,22 +1276,42 @@ def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
 def render_compose_sheet(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    s.text("Compose Public", (28, 70, 240, 100), 22, TEXT, True)
-    draw_button(s, (252, 66, 314, 106), "Send", GREEN, action="send_public_text", public_rf_tx=True)
-    draw_button(s, (322, 66, 384, 106), "Clear", ACCENT, action="clear_public_message")
-    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_compose", destination="messages")
-    s.round_rect((16, 118, 464, 200), SURFACE_2, BORDER, 8)
-    s.touch_target("Public message", (16, 118, 464, 200), kind="text_field", action="edit_public_message")
-    s.text("Public message", (28, 126, 220, 148), 13, MUTED, True)
-    s.text("test from DeskOS D1L", (28, 154, 452, 194), 18, TEXT)
-    s.text("20/138", (374, 204, 464, 226), 12, MUTED, True, "right")
-    s.round_rect((16, 224, 464, 468), (10, 16, 24), BORDER, 8)
-    s.text("Keyboard", (28, 236, 452, 258), 13, MUTED, True)
-    keyboard_rows = ("q w e r t y u i o p", "a s d f g h j k l", "z x c v b n m", "space")
-    y = 270
+    s.text("Compose Public", (16, 64, 240, 96), 22, TEXT, True)
+    draw_button(s, (252, 64, 314, 104), "Send", GREEN, action="send_public_text", public_rf_tx=True)
+    draw_button(s, (322, 64, 384, 104), "Clear", ACCENT, action="clear_public_message")
+    draw_button(s, (392, 64, 464, 104), "Close", MUTED, action="close_compose", destination="messages")
+    s.round_rect((16, 114, 464, 192), SURFACE_2, BORDER, 8)
+    s.touch_target("Public message", (16, 114, 464, 192), kind="text_field", action="edit_public_message")
+    s.text("Public message", (28, 122, 220, 144), 13, MUTED, True)
+    s.text("test from DeskOS D1L", (28, 150, 452, 188), 18, TEXT)
+    s.text("20/138", (374, 196, 464, 218), 12, MUTED, True, "right")
+    s.text("Keyboard", (28, 196, 180, 216), 13, MUTED, True)
+    s.round_rect((16, 214, 464, 472), (10, 16, 24), BORDER, 8)
+    keyboard_rows = (
+        ("q", "w", "e", "r", "t", "y", "u", "i", "o", "p"),
+        ("a", "s", "d", "f", "g", "h", "j", "k", "l"),
+        ("z", "x", "c", "v", "b", "n", "m", ".", "?"),
+        ("1#", "ABC", ",", "-", "space", "Bksp", "OK"),
+    )
+    y = 224
+    min_key = 999
     for row in keyboard_rows:
-        s.text(row, (32, y, 448, y + 32), 17, TEXT, False, "center")
-        y += 44
+        gap = 4
+        x = 22
+        fixed_space = 120 if "space" in row else 0
+        available = 436 - gap * (len(row) - 1) - fixed_space
+        variable_keys = len(row) - (1 if fixed_space else 0)
+        key_w = available // variable_keys
+        for label in row:
+            width = key_w
+            if label == "space":
+                width = fixed_space
+            s.round_rect((x, y, x + width, y + 52), SURFACE_2, BORDER, 6)
+            s.text(label, (x + 2, y + 14, x + width - 2, y + 42), 15, TEXT, False, "center")
+            min_key = min(min_key, width, 52)
+            x += width + gap
+        y += 60
+    s.metrics.update({"compose_keyboard_rows": 4, "compose_keyboard_min_key_px": min_key})
 
 
 def render_public_history_sheet(s: Surface, snap: Snapshot):

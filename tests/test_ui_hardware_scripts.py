@@ -1,6 +1,12 @@
 from pathlib import Path
 
-from scripts import scroll_probe_d1l, smoke_d1l, ui_capture_d1l, ui_corruption_probe_d1l
+from scripts import (
+    scroll_probe_d1l,
+    smoke_d1l,
+    ui_capture_d1l,
+    ui_compose_keyboard_capture_d1l,
+    ui_corruption_probe_d1l,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -114,6 +120,7 @@ def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"
     assert smoke_d1l.expected_command_name("ui scroll-probe storage") == "ui scroll-probe"
+    assert smoke_d1l.expected_command_name("ui compose-probe public-long") == "ui compose-probe"
     assert smoke_d1l.expected_command_name("ui data-canary uiRx0001") == "ui data-canary"
     assert smoke_d1l.expected_command_name("ui capture chunk 0 1024") == "ui capture chunk"
 
@@ -140,6 +147,25 @@ def test_ui_capture_dry_run_and_png_writer(tmp_path):
     ui_capture_d1l.write_png_from_rgb565_le(bytes(raw), png, 480, 480)
 
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
+    report = ui_compose_keyboard_capture_d1l.dry_run_report(
+        targets=["public", "public-long", "dm", "dm-long"],
+        chunk_size=2048,
+    )
+
+    assert report["ok"] is True
+    assert report["kind"] == "ui_compose_keyboard_capture"
+    assert report["mode"] == "dry-run"
+    assert report["explicit_port_required"] is True
+    assert report["targets"] == ["public", "public-long", "dm", "dm-long"]
+    assert "ui compose-probe public" in report["commands"]
+    assert "ui compose-probe dm-long" in report["commands"]
+    assert "ui capture chunk 0 1024" in report["commands"]
+    assert report["chunk_size"] == 1024
+    assert report["public_rf_tx"] is False
+    assert report["formats_sd"] is False
 
 
 def test_smoke_command_reader_bounds_readline_timeout_and_restores_serial_timeout():

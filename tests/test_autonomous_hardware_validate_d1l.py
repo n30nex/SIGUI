@@ -81,6 +81,40 @@ def test_release_gate_command_disables_meshbot_port(tmp_path):
     assert "COM29" not in command
 
 
+def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    captured = {}
+
+    def fake_run_existing_script(ctx_arg, kind, args, out, timeout, dry_run):
+        captured.update({"kind": kind, "args": args, "out": out, "timeout": timeout, "dry_run": dry_run})
+        return {"schema": 1, "kind": kind, "ok": True}
+
+    monkeypatch.setattr(runner, "run_existing_script", fake_run_existing_script)
+
+    report = runner.run_ui_compose_keyboard_capture(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert captured["kind"] == "ui_compose_keyboard_capture"
+    assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
+    assert captured["args"][captured["args"].index("--targets") + 1] == "public,public-long,dm,dm-long"
+    assert "COM11" not in json.dumps(captured["args"])
+    assert "COM29" not in json.dumps(captured["args"])
+    assert captured["out"].name == "ui_compose_keyboard_capture_1600d64_actions_28663994079_COM12.json"
+    assert captured["timeout"] == 900
+
+
 def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
     args = runner.parse_args(
@@ -112,6 +146,7 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "d1l_ui_corruption_probe" not in plan["steps"]
     assert "d1l_scroll_probe" not in plan["steps"]
     assert "d1l_ui_pixel_capture" not in plan["steps"]
+    assert "d1l_ui_compose_keyboard_capture" not in plan["steps"]
 
 
 def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
@@ -139,6 +174,7 @@ def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):
     assert "d1l_ui_corruption_probe" in plan["steps"]
     assert "d1l_scroll_probe" in plan["steps"]
     assert "d1l_ui_pixel_capture" in plan["steps"]
+    assert "d1l_ui_compose_keyboard_capture" in plan["steps"]
     assert "COM11" not in json.dumps(plan["steps"])
     assert "COM29" not in json.dumps(plan["steps"])
 

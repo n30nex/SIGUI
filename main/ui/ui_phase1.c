@@ -142,6 +142,7 @@ static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 1500U;
+static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
 static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
@@ -155,6 +156,11 @@ static portMUX_TYPE s_scroll_probe_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_scroll_probe_pending;
 static char s_scroll_probe_surface[24];
 static d1l_ui_scroll_probe_result_t s_scroll_probe_result;
+static SemaphoreHandle_t s_compose_probe_done_sem;
+static portMUX_TYPE s_compose_probe_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_compose_probe_pending;
+static char s_compose_probe_target[16];
+static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
 #if CONFIG_FREERTOS_UNICORE
 #define D1L_UI_TASK_CORE 0
@@ -416,6 +422,7 @@ static void map_location_keyboard_event_cb(lv_event_t *event);
 static void map_tiles_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
 static void process_pending_scroll_probe(void);
+static void process_pending_compose_probe(void);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
@@ -515,6 +522,45 @@ static bool scroll_surface_from_name(const char *name, char *out_surface,
 
     snprintf(out_surface, out_surface_len, "%s", surface);
     *out_tab = tab;
+    return true;
+}
+
+static bool compose_probe_target_from_name(const char *name, char *out_target,
+                                           size_t out_target_len)
+{
+    char normalized[16] = {0};
+    if (!name || !out_target || out_target_len == 0) {
+        return false;
+    }
+    size_t len = 0;
+    while (*name && len + 1U < sizeof(normalized)) {
+        char ch = (char)tolower((unsigned char)*name++);
+        normalized[len++] = (ch == '-' || ch == ' ') ? '_' : ch;
+    }
+    normalized[len] = '\0';
+    if (*name || len == 0) {
+        return false;
+    }
+
+    const char *target = NULL;
+    if (strcmp(normalized, "public") == 0 ||
+        strcmp(normalized, "public_short") == 0) {
+        target = "public";
+    } else if (strcmp(normalized, "public_long") == 0) {
+        target = "public_long";
+    } else if (strcmp(normalized, "dm") == 0 ||
+               strcmp(normalized, "direct") == 0 ||
+               strcmp(normalized, "dm_short") == 0 ||
+               strcmp(normalized, "direct_short") == 0) {
+        target = "dm";
+    } else if (strcmp(normalized, "dm_long") == 0 ||
+               strcmp(normalized, "direct_long") == 0) {
+        target = "dm_long";
+    } else {
+        return false;
+    }
+
+    snprintf(out_target, out_target_len, "%s", target);
     return true;
 }
 
@@ -896,6 +942,86 @@ static lv_obj_t *create_keyboard(lv_obj_t *parent, const char *name)
         ESP_LOGE(TAG, "%s allocation failed", name ? name : "keyboard");
     }
     return keyboard;
+}
+
+static const char *d1l_compose_kb_map_lc[] = {
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+    "z", "x", "c", "v", "b", "n", "m", ".", "?", "\n",
+    "1#", "ABC", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_lc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_uc[] = {
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+    "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
+    "Z", "X", "C", "V", "B", "N", "M", ".", "?", "\n",
+    "1#", "abc", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_uc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_spec[] = {
+    "abc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
+    "0", "+", "-", "/", "*", "=", "%", "!", "?", "#", "\n",
+    "@", "&", "(", ")", ":", ";", "\"", "'", ".", ",", "\n",
+    "ABC", "_", " ", "/", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    6,
+    1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static void configure_compose_keyboard(lv_obj_t *keyboard)
+{
+    if (!keyboard) {
+        return;
+    }
+    lv_keyboard_set_popovers(keyboard, false);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER,
+                        d1l_compose_kb_map_lc, d1l_compose_kb_ctrl_lc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER,
+                        d1l_compose_kb_map_uc, d1l_compose_kb_ctrl_uc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_1,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_18, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(keyboard, 4, 0);
+    lv_obj_set_style_pad_row(keyboard, 6, 0);
+    lv_obj_set_style_pad_column(keyboard, 4, 0);
 }
 
 #if LV_USE_QRCODE
@@ -5973,6 +6099,44 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
     return ESP_OK;
 }
 
+esp_err_t d1l_ui_phase1_compose_probe(const char *target,
+                                       d1l_ui_compose_probe_result_t *result)
+{
+    char canonical[16] = {0};
+    if (!result || !compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_started || !s_content || !s_compose_probe_done_sem) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    while (xSemaphoreTake(s_compose_probe_done_sem, 0) == pdTRUE) {
+    }
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_pending) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&s_compose_probe_result, 0, sizeof(s_compose_probe_result));
+    snprintf(s_compose_probe_target, sizeof(s_compose_probe_target), "%s", canonical);
+    s_compose_probe_pending = true;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+
+    if (xSemaphoreTake(s_compose_probe_done_sem,
+                       pdMS_TO_TICKS(D1L_UI_COMPOSE_PROBE_TIMEOUT_MS)) != pdTRUE) {
+        portENTER_CRITICAL(&s_compose_probe_lock);
+        s_compose_probe_pending = false;
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    *result = s_compose_probe_result;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    return ESP_OK;
+}
+
 const char *d1l_ui_phase1_active_tab_name(void)
 {
     d1l_ui_tab_t tab;
@@ -6323,6 +6487,167 @@ static void process_pending_scroll_probe(void)
     finish_pending_scroll_probe(&result);
 }
 
+static bool object_is_visible(lv_obj_t *obj)
+{
+    return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static bool object_is_hidden_or_missing(lv_obj_t *obj)
+{
+    return !obj || lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static const char *compose_probe_sample_text(const char *target)
+{
+    if (target && strstr(target, "long")) {
+        return "Long hardware compose validation text checks the 480 screen keyboard without RF.";
+    }
+    return "test from DeskOS D1L";
+}
+
+static bool compose_probe_target_is_dm(const char *target)
+{
+    return target && strncmp(target, "dm", 2) == 0;
+}
+
+static void open_compose_probe_on_ui_task(const char *target)
+{
+    request_tab_switch(D1L_UI_TAB_MESSAGES);
+    process_pending_tab_switch();
+    s_messages_show_dms = compose_probe_target_is_dm(target);
+    render_active_tab();
+    hide_onboarding_sheet();
+
+    if (compose_probe_target_is_dm(target)) {
+        d1l_contact_entry_t contact = {0};
+        snprintf(contact.fingerprint, sizeof(contact.fingerprint), "%s", "0000000000000000");
+        snprintf(contact.public_key_hex, sizeof(contact.public_key_hex), "%s", "00");
+        snprintf(contact.alias, sizeof(contact.alias), "%s", "Probe DM");
+        open_dm_compose_for_contact(&contact);
+    } else {
+        show_public_compose_sheet("Compose Public", "Public message");
+    }
+
+    if (s_compose_textarea) {
+        lv_textarea_set_text(s_compose_textarea, compose_probe_sample_text(target));
+        update_compose_counter();
+    }
+    if (s_compose_keyboard) {
+        lv_keyboard_set_mode(s_compose_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+        lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
+    }
+    lv_obj_update_layout(s_screen);
+}
+
+static void fill_compose_probe_geometry(d1l_ui_compose_probe_result_t *result)
+{
+    if (!result) {
+        return;
+    }
+    if (s_compose_sheet) {
+        result->sheet_x = (int32_t)lv_obj_get_x(s_compose_sheet);
+        result->sheet_y = (int32_t)lv_obj_get_y(s_compose_sheet);
+        result->sheet_w = (int32_t)lv_obj_get_width(s_compose_sheet);
+        result->sheet_h = (int32_t)lv_obj_get_height(s_compose_sheet);
+    }
+    if (s_compose_textarea) {
+        result->textarea_x = (int32_t)lv_obj_get_x(s_compose_textarea);
+        result->textarea_y = (int32_t)lv_obj_get_y(s_compose_textarea);
+        result->textarea_w = (int32_t)lv_obj_get_width(s_compose_textarea);
+        result->textarea_h = (int32_t)lv_obj_get_height(s_compose_textarea);
+    }
+    if (s_compose_keyboard) {
+        result->keyboard_x = (int32_t)lv_obj_get_x(s_compose_keyboard);
+        result->keyboard_y = (int32_t)lv_obj_get_y(s_compose_keyboard);
+        result->keyboard_w = (int32_t)lv_obj_get_width(s_compose_keyboard);
+        result->keyboard_h = (int32_t)lv_obj_get_height(s_compose_keyboard);
+    }
+}
+
+static void run_compose_probe_on_ui_task(const char *target,
+                                         d1l_ui_compose_probe_result_t *result)
+{
+    char canonical[16] = {0};
+    if (!compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
+        return;
+    }
+    result->target_supported = true;
+    snprintf(result->target, sizeof(result->target), "%s", canonical);
+    snprintf(result->active_tab, sizeof(result->active_tab), "%s", tab_name(D1L_UI_TAB_MESSAGES));
+
+    open_compose_probe_on_ui_task(canonical);
+    result->sheet_visible = object_is_visible(s_compose_sheet);
+    result->textarea_visible = object_is_visible(s_compose_textarea);
+    result->keyboard_visible = object_is_visible(s_compose_keyboard);
+    result->dock_hidden = object_is_hidden_or_missing(s_dock);
+    result->dm_mode = s_compose_dm;
+    fill_compose_probe_geometry(result);
+
+    const bool keyboard_inside_sheet =
+        result->keyboard_x >= 0 &&
+        result->keyboard_y >= 0 &&
+        result->keyboard_x + result->keyboard_w <= result->sheet_w &&
+        result->keyboard_y + result->keyboard_h <= result->sheet_h;
+    const bool keyboard_inside_screen =
+        result->sheet_x + result->keyboard_x >= 0 &&
+        result->sheet_y + result->keyboard_y >= 0 &&
+        result->sheet_x + result->keyboard_x + result->keyboard_w <= (int32_t)D1L_UI_CAPTURE_WIDTH &&
+        result->sheet_y + result->keyboard_y + result->keyboard_h <= (int32_t)D1L_UI_CAPTURE_HEIGHT;
+    const bool textarea_inside_sheet =
+        result->textarea_x >= 0 &&
+        result->textarea_y >= 0 &&
+        result->textarea_x + result->textarea_w <= result->sheet_w &&
+        result->textarea_y + result->textarea_h <= result->keyboard_y;
+
+    result->ok = result->target_supported &&
+        result->sheet_visible &&
+        result->textarea_visible &&
+        result->keyboard_visible &&
+        result->dock_hidden &&
+        result->dm_mode == compose_probe_target_is_dm(canonical) &&
+        result->keyboard_w >= 440 &&
+        result->keyboard_h >= 250 &&
+        keyboard_inside_sheet &&
+        keyboard_inside_screen &&
+        textarea_inside_sheet;
+}
+
+static bool begin_pending_compose_probe(char *target, size_t target_len)
+{
+    bool pending;
+
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    pending = s_compose_probe_pending;
+    if (pending && target && target_len > 0) {
+        snprintf(target, target_len, "%s", s_compose_probe_target);
+        s_compose_probe_pending = false;
+    }
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    return pending;
+}
+
+static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result)
+{
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    s_compose_probe_result = *result;
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_done_sem) {
+        (void)xSemaphoreGive(s_compose_probe_done_sem);
+    }
+}
+
+static void process_pending_compose_probe(void)
+{
+    char target[16] = {0};
+    if (!begin_pending_compose_probe(target, sizeof(target))) {
+        return;
+    }
+
+    d1l_ui_compose_probe_result_t result = {0};
+    run_compose_probe_on_ui_task(target, &result);
+    finish_pending_compose_probe(&result);
+}
+
 static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -6459,26 +6784,26 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_set_style_bg_color(s_compose_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_compose_sheet, lv_color_hex(0x334155), 0);
     lv_obj_set_style_border_width(s_compose_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_compose_sheet, 12, 0);
+    lv_obj_set_style_pad_all(s_compose_sheet, 0, 0);
     lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_SCROLLABLE);
 
     s_compose_title = create_label(s_compose_sheet, "Public", 0xF4F7FB);
     lv_obj_set_style_text_font(s_compose_title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(s_compose_title, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_compose_title, 210);
-    lv_obj_set_pos(s_compose_title, 16, 10);
+    lv_obj_set_pos(s_compose_title, 16, 8);
 
-    create_button(s_compose_sheet, "Send", 252, 10, 62, 40, send_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Clear", 322, 10, 62, 40, clear_compose_event_cb, NULL);
-    create_button(s_compose_sheet, "Close", 392, 10, 72, 40, close_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Send", 252, 8, 62, 40, send_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Clear", 322, 8, 62, 40, clear_compose_event_cb, NULL);
+    create_button(s_compose_sheet, "Close", 392, 8, 72, 40, close_compose_event_cb, NULL);
 
     s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
     if (!s_compose_textarea) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_textarea, 448, 82);
-    lv_obj_set_pos(s_compose_textarea, 16, 62);
+    lv_obj_set_size(s_compose_textarea, 448, 78);
+    lv_obj_set_pos(s_compose_textarea, 16, 58);
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
     lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS);
     lv_textarea_set_one_line(s_compose_textarea, false);
@@ -6494,15 +6819,16 @@ static void create_compose_sheet(lv_obj_t *screen)
     s_compose_counter = create_label(s_compose_sheet, "0/138", 0x8EA0AE);
     lv_label_set_long_mode(s_compose_counter, LV_LABEL_LONG_DOT);
     lv_obj_set_width(s_compose_counter, 86);
-    lv_obj_set_pos(s_compose_counter, 378, 148);
+    lv_obj_set_pos(s_compose_counter, 378, 140);
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
     if (!s_compose_keyboard) {
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_obj_set_size(s_compose_keyboard, 448, 244);
-    lv_obj_set_pos(s_compose_keyboard, 16, 168);
+    lv_obj_set_size(s_compose_keyboard, 448, 258);
+    lv_obj_set_pos(s_compose_keyboard, 16, 158);
+    configure_compose_keyboard(s_compose_keyboard);
     lv_keyboard_set_textarea(s_compose_keyboard, s_compose_textarea);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
@@ -7116,6 +7442,7 @@ static void ui_task(void *arg)
         process_pending_tab_switch();
         process_pending_content_refresh();
         process_pending_scroll_probe();
+        process_pending_compose_probe();
         if (wait_ms < D1L_UI_TIMER_MIN_SLEEP_MS) {
             wait_ms = D1L_UI_TIMER_MIN_SLEEP_MS;
         } else if (wait_ms > D1L_UI_TIMER_MAX_SLEEP_MS) {
@@ -7200,6 +7527,12 @@ esp_err_t d1l_ui_phase1_start(void)
     if (!s_scroll_probe_done_sem) {
         s_scroll_probe_done_sem = xSemaphoreCreateBinary();
         if (!s_scroll_probe_done_sem) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_compose_probe_done_sem) {
+        s_compose_probe_done_sem = xSemaphoreCreateBinary();
+        if (!s_compose_probe_done_sem) {
             return ESP_ERR_NO_MEM;
         }
     }

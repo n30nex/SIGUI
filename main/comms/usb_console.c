@@ -723,6 +723,60 @@ static void cmd_ui_scroll_probe(const char *line)
            (long)probe.scroll_top_after, (long)probe.scroll_bottom_after);
 }
 
+static void cmd_ui_compose_probe(const char *line)
+{
+    const char *arg = line + strlen("ui compose-probe ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    char target[16] = {0};
+    size_t len = 0;
+    while (arg[len] != '\0' && !isspace((unsigned char)arg[len]) &&
+           len + 1U < sizeof(target)) {
+        target[len] = (char)tolower((unsigned char)arg[len]);
+        if (target[len] == '-') {
+            target[len] = '_';
+        }
+        len++;
+    }
+    if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
+        err_result("ui compose-probe", "INVALID_TARGET",
+                   "usage: ui compose-probe <public|public-long|dm|dm-long>");
+        return;
+    }
+
+    d1l_ui_compose_probe_result_t probe = {0};
+    esp_err_t ret = d1l_ui_phase1_compose_probe(target, &probe);
+    if (ret != ESP_OK) {
+        err_result("ui compose-probe", esp_err_to_name(ret),
+                   "usage: ui compose-probe <public|public-long|dm|dm-long>");
+        return;
+    }
+
+    printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"ui compose-probe\",\"target\":",
+           D1L_CONSOLE_SCHEMA, bool_json(probe.ok));
+    print_json_string(probe.target);
+    printf(",\"target_supported\":%s,\"sheet_visible\":%s,\"textarea_visible\":%s,"
+           "\"keyboard_visible\":%s,\"dock_hidden\":%s,\"dm_mode\":%s,\"active_tab\":",
+           bool_json(probe.target_supported),
+           bool_json(probe.sheet_visible),
+           bool_json(probe.textarea_visible),
+           bool_json(probe.keyboard_visible),
+           bool_json(probe.dock_hidden),
+           bool_json(probe.dm_mode));
+    print_json_string(probe.active_tab);
+    printf(",\"sheet\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"textarea\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"keyboard\":{\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld},"
+           "\"public_rf_tx\":false,\"formats_sd\":false}\n",
+           (long)probe.sheet_x, (long)probe.sheet_y,
+           (long)probe.sheet_w, (long)probe.sheet_h,
+           (long)probe.textarea_x, (long)probe.textarea_y,
+           (long)probe.textarea_w, (long)probe.textarea_h,
+           (long)probe.keyboard_x, (long)probe.keyboard_y,
+           (long)probe.keyboard_w, (long)probe.keyboard_h);
+}
+
 static void cmd_identity_status(void)
 {
     esp_err_t ret = d1l_meshcore_service_ensure_identity();
@@ -4486,7 +4540,7 @@ static void cmd_ble_on(void)
 static void cmd_help(void)
 {
     ok_begin("help");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>\",\"ui compose-probe <public|public-long|dm|dm-long>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4515,6 +4569,8 @@ static void handle_line(const char *line)
         cmd_ui_tab(line);
     } else if (strncmp(line, "ui scroll-probe ", strlen("ui scroll-probe ")) == 0) {
         cmd_ui_scroll_probe(line);
+    } else if (strncmp(line, "ui compose-probe ", strlen("ui compose-probe ")) == 0) {
+        cmd_ui_compose_probe(line);
     } else if (strncmp(line, "ui data-canary ", strlen("ui data-canary ")) == 0) {
         cmd_ui_data_canary(line);
     } else if (strcmp(line, "ui capture status") == 0) {

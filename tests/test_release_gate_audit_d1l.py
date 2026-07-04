@@ -97,6 +97,51 @@ def ui_pixel_capture_payload(**overrides: object) -> dict:
     return payload
 
 
+def compose_keyboard_capture_payload(**overrides: object) -> dict:
+    def capture(target: str) -> dict:
+        probe_target = target.replace("-", "_")
+        return {
+            "target": target,
+            "ok": True,
+            "compose_probe": {
+                "ok": True,
+                "cmd": "ui compose-probe",
+                "target": probe_target,
+                "target_supported": True,
+                "sheet_visible": True,
+                "textarea_visible": True,
+                "keyboard_visible": True,
+                "dock_hidden": True,
+                "dm_mode": target.startswith("dm"),
+                "active_tab": "messages",
+                "sheet": {"x": 0, "y": 56, "w": 480, "h": 424},
+                "textarea": {"x": 16, "y": 58, "w": 448, "h": 78},
+                "keyboard": {"x": 16, "y": 158, "w": 448, "h": 258},
+                "public_rf_tx": False,
+                "formats_sd": False,
+            },
+            "capture": ui_pixel_capture_payload(),
+            "png_path": f"artifacts/hardware/com12/ui_compose_{target}.png",
+            "raw_path": f"artifacts/hardware/com12/ui_compose_{target}.rgb565",
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+
+    payload = {
+        "ok": True,
+        "kind": "ui_compose_keyboard_capture",
+        "mode": "hardware",
+        "port": "COM12",
+        "targets": ["public", "public-long", "dm", "dm-long"],
+        "captures": [capture(target) for target in ("public", "public-long", "dm", "dm-long")],
+        "capture_count": 4,
+        "public_rf_tx": False,
+        "formats_sd": False,
+    }
+    payload.update(overrides)
+    return payload
+
+
 def scroll_probe_payload(**overrides: object) -> dict:
     probe_results = {
         screen: {
@@ -185,6 +230,7 @@ def write_core_evidence(root: Path) -> None:
     write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
     write_json(hardware / "ui_corruption_probe_68350bf.json", ui_corruption_probe_payload())
     write_json(hardware / "ui_pixel_capture_68350bf.json", ui_pixel_capture_payload())
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", compose_keyboard_capture_payload())
     write_json(hardware / "scroll_probe_68350bf.json", scroll_probe_payload())
     write_json(
         hardware / "dm_probe_68350bf.json",
@@ -723,6 +769,7 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["com12_smoke"]["ok"] is True
     assert gates["ui_corruption_probe"]["ok"] is True
     assert gates["ui_pixel_capture"]["ok"] is True
+    assert gates["ui_compose_keyboard_capture"]["ok"] is True
     assert gates["ui_scroll_probe"]["ok"] is True
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
@@ -1059,6 +1106,20 @@ def test_release_gate_audit_requires_hardware_ui_pixel_capture(tmp_path: Path):
 
     assert gates["ui_pixel_capture"]["ok"] is False
     assert gates["ui_pixel_capture"]["details"]["path_found"] is True
+
+
+def test_release_gate_audit_requires_compose_keyboard_capture_geometry(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = compose_keyboard_capture_payload()
+    payload["captures"][0]["compose_probe"]["keyboard"]["h"] = 180
+    write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_compose_keyboard_capture"]["ok"] is False
+    assert gates["ui_compose_keyboard_capture"]["details"]["path_found"] is True
 
 
 def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):

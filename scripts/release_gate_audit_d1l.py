@@ -41,6 +41,7 @@ REQUIRED_SCROLL_SURFACES = {
     "map": "map",
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
+REQUIRED_COMPOSE_CAPTURE_TARGETS = {"public", "public-long", "dm", "dm-long"}
 REQUIRED_NOTICE_FILES = {
     "notices/LICENSE",
     "notices/THIRD_PARTY_NOTICES.md",
@@ -460,6 +461,81 @@ def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
         and bool(data.get("crc32"))
         and bool(data.get("png_path"))
         and bool(data.get("raw_path"))
+    )
+
+
+def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
+    if not isinstance(probe, dict):
+        return False
+    keyboard = probe.get("keyboard") if isinstance(probe.get("keyboard"), dict) else {}
+    textarea = probe.get("textarea") if isinstance(probe.get("textarea"), dict) else {}
+    sheet = probe.get("sheet") if isinstance(probe.get("sheet"), dict) else {}
+    try:
+        keyboard_inside_sheet = (
+            int(keyboard.get("x")) >= 0
+            and int(keyboard.get("y")) >= 0
+            and int(keyboard.get("x")) + int(keyboard.get("w")) <= int(sheet.get("w"))
+            and int(keyboard.get("y")) + int(keyboard.get("h")) <= int(sheet.get("h"))
+        )
+        textarea_above_keyboard = (
+            int(textarea.get("x")) >= 0
+            and int(textarea.get("y")) >= 0
+            and int(textarea.get("x")) + int(textarea.get("w")) <= int(sheet.get("w"))
+            and int(textarea.get("y")) + int(textarea.get("h")) <= int(keyboard.get("y"))
+        )
+        keyboard_size_ok = int(keyboard.get("w")) >= 440 and int(keyboard.get("h")) >= 250
+    except (TypeError, ValueError):
+        return False
+    return (
+        probe.get("ok") is True
+        and probe.get("cmd") == "ui compose-probe"
+        and probe.get("target") == expected_target.replace("-", "_")
+        and probe.get("target_supported") is True
+        and probe.get("sheet_visible") is True
+        and probe.get("textarea_visible") is True
+        and probe.get("keyboard_visible") is True
+        and probe.get("dock_hidden") is True
+        and probe.get("dm_mode") is (expected_target.startswith("dm"))
+        and probe.get("public_rf_tx") is False
+        and probe.get("formats_sd") is False
+        and keyboard_inside_sheet
+        and textarea_above_keyboard
+        and keyboard_size_ok
+    )
+
+
+def compose_keyboard_capture_ok(data: dict, expected_port: str) -> bool:
+    captures = data.get("captures") if isinstance(data.get("captures"), list) else []
+    captures_by_target = {
+        item.get("target"): item
+        for item in captures
+        if isinstance(item, dict) and isinstance(item.get("target"), str)
+    }
+    if not REQUIRED_COMPOSE_CAPTURE_TARGETS.issubset(set(captures_by_target)):
+        return False
+    return (
+        data.get("ok") is True
+        and data.get("kind") == "ui_compose_keyboard_capture"
+        and data.get("mode") == "hardware"
+        and data.get("port") == expected_port
+        and data.get("public_rf_tx") is False
+        and data.get("formats_sd") is False
+        and all(
+            capture.get("ok") is True
+            and capture.get("public_rf_tx") is False
+            and capture.get("formats_sd") is False
+            and bool(capture.get("png_path"))
+            and bool(capture.get("raw_path"))
+            and isinstance(capture.get("capture"), dict)
+            and capture["capture"].get("ok") is True
+            and capture["capture"].get("kind") == "ui_pixel_capture"
+            and capture["capture"].get("port") == expected_port
+            and capture["capture"].get("width") == 480
+            and capture["capture"].get("height") == 480
+            and compose_capture_probe_ok(capture.get("compose_probe"), target)
+            for target, capture in captures_by_target.items()
+            if target in REQUIRED_COMPOSE_CAPTURE_TARGETS
+        )
     )
 
 
@@ -1651,6 +1727,22 @@ def build_audit(args: argparse.Namespace) -> dict:
             lambda data: ui_pixel_capture_ok(data, args.d1l_port),
             "Current-commit D1L hardware pixel capture reconstructs a 480x480 RGB565 frame.",
             "No passing current-commit D1L hardware pixel capture artifact was found.",
+        )
+    )
+    gates.append(
+        simple_json_ok_gate(
+            "ui_compose_keyboard_capture",
+            "D1L compose keyboard hardware capture",
+            newest_commit_json_from_roots(
+                ui_capture_roots,
+                args.commit,
+                "ui_compose_keyboard_capture*.json",
+                "d1l-compose-keyboard-capture-*.json",
+            ),
+            root,
+            lambda data: compose_keyboard_capture_ok(data, args.d1l_port),
+            "Current-commit D1L compose keyboard capture proves Public and DM keyboard states fit the 480x480 hardware frame.",
+            "No passing current-commit D1L compose keyboard hardware capture artifact was found.",
         )
     )
     gates.append(

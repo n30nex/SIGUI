@@ -202,8 +202,10 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "set_dock_hidden(false)" in source
     assert "lv_obj_set_size(s_compose_sheet, 480, 424)" in compose
     assert "lv_obj_set_pos(s_compose_sheet, 0, 56)" in compose
-    assert "lv_obj_set_size(s_compose_keyboard, 448, 244)" in compose
-    assert "lv_obj_set_pos(s_compose_keyboard, 16, 168)" in compose
+    assert "lv_obj_set_style_pad_all(s_compose_sheet, 0, 0)" in compose
+    assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in compose
+    assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in compose
+    assert "configure_compose_keyboard(s_compose_keyboard)" in compose
 
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
@@ -225,6 +227,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_status" in console
     assert "cmd_ui_tab" in console
     assert "cmd_ui_scroll_probe" in console
+    assert "cmd_ui_compose_probe" in console
     assert "cmd_ui_data_canary" in console
     assert "cmd_ui_capture_status" in console
     assert "cmd_ui_capture_begin" in console
@@ -233,6 +236,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "ui compose-probe <public|public-long|dm|dm-long>" in console
     assert "ui data-canary <token>" in console
     assert "ui capture status" in console
     assert "ui capture begin" in console
@@ -242,6 +246,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "fgets(" not in console
     assert "LINE_TOO_LONG" in console
     assert "d1l_ui_capture_status_t" in header
+    assert "d1l_ui_compose_probe_result_t" in header
+    assert "d1l_ui_phase1_compose_probe" in header
     assert "d1l_ui_capture_begin" in header
     assert "d1l_ui_capture_chunk" in header
     assert 'ok_begin("ui data-canary")' in console
@@ -249,6 +255,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '\\"public_rf_tx\\":false' in console
     assert '\\"formats_sd\\":false' in console
     assert "process_pending_scroll_probe()" in source
+    assert "process_pending_compose_probe()" in source
     assert "lv_obj_get_scroll_bottom(target)" in source
     assert "lv_obj_scroll_to_y(target, LV_COORD_MAX, LV_ANIM_OFF)" in source
     assert '"Scroll Probe DM"' in source
@@ -517,6 +524,8 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "lv_textarea_get_text" in source
     assert "lv_keyboard_create" in source
     assert "lv_keyboard_set_textarea" in source
+    assert "lv_keyboard_set_map" in source
+    assert "d1l_compose_kb_map_lc" in source
     assert "LV_EVENT_READY" in source
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source

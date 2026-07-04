@@ -141,7 +141,13 @@ def require_capture_geometry(begin: dict[str, Any]) -> tuple[int, int, int]:
     return width, height, total
 
 
-def capture_frame(port: str, baud: int, timeout: float, chunk_size: int) -> dict[str, Any]:
+def capture_frame(
+    port: str,
+    baud: int,
+    timeout: float,
+    chunk_size: int,
+    prep_commands: list[str] | None = None,
+) -> dict[str, Any]:
     try:
         import serial
     except ImportError as exc:
@@ -153,6 +159,23 @@ def capture_frame(port: str, baud: int, timeout: float, chunk_size: int) -> dict
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
+        for prep_command in prep_commands or []:
+            prep = send_console_command(ser, prep_command, timeout)
+            events.append(prep)
+            if prep.get("ok") is not True:
+                return {
+                    "schema": 1,
+                    "kind": "ui_pixel_capture",
+                    "mode": "hardware",
+                    "ok": False,
+                    "port": port,
+                    "baud": baud,
+                    "events": events,
+                    "error": "ui_capture_prep_failed",
+                    "prep_command": prep_command,
+                    "public_rf_tx": False,
+                    "formats_sd": False,
+                }
         status = send_console_command(ser, "ui capture status", timeout)
         events.append(status)
         begin = send_console_command(ser, "ui capture begin", timeout)

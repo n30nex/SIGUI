@@ -78,6 +78,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `ui capture begin`
 - `ui capture chunk <offset> <len>`
 - `ui capture end`
+- `ui compose-probe <public|public-long|dm|dm-long>`
 - `messages public`
 - `messages public offset 8`
 - `messages public search test`

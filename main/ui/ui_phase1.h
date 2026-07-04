@@ -47,11 +47,37 @@ typedef struct {
     char pending_tab[16];
 } d1l_ui_capture_status_t;
 
+typedef struct {
+    bool ok;
+    bool target_supported;
+    bool sheet_visible;
+    bool textarea_visible;
+    bool keyboard_visible;
+    bool dock_hidden;
+    bool dm_mode;
+    char target[16];
+    char active_tab[16];
+    int32_t sheet_x;
+    int32_t sheet_y;
+    int32_t sheet_w;
+    int32_t sheet_h;
+    int32_t textarea_x;
+    int32_t textarea_y;
+    int32_t textarea_w;
+    int32_t textarea_h;
+    int32_t keyboard_x;
+    int32_t keyboard_y;
+    int32_t keyboard_w;
+    int32_t keyboard_h;
+} d1l_ui_compose_probe_result_t;
+
 esp_err_t d1l_ui_phase1_start(void);
 esp_err_t d1l_ui_phase1_show_home(void);
 esp_err_t d1l_ui_phase1_request_tab(const char *name);
 esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
                                       d1l_ui_scroll_probe_result_t *result);
+esp_err_t d1l_ui_phase1_compose_probe(const char *target,
+                                       d1l_ui_compose_probe_result_t *result);
 const char *d1l_ui_phase1_active_tab_name(void);
 const char *d1l_ui_phase1_pending_tab_name(void);
 bool d1l_ui_phase1_tab_switch_pending(void);
