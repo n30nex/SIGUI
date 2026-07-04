@@ -9,6 +9,8 @@ This folder contains only active release-facing documentation. Historical phase 
 - [Release checklist](RELEASE_CHECKLIST.md): evidence required before tagging.
 - [Known limitations](KNOWN_LIMITATIONS.md): honest current gaps and non-goals.
 - [Test plan](TEST_PLAN_D1L.md): host, hardware, SD, RF, UI, soak, and release-gate validation.
+- [Fast release workflow](FAST_RELEASE_WORKFLOW_D1L.md): short PR loop, fast Actions path, targeted hardware proof.
+- [Codex goal prompt](CODEX_GOAL_PROMPT_D1L.md): copy-paste prompt for the next iterative release cycle.
 
 ## User And Developer Guides
 
