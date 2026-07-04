@@ -164,6 +164,8 @@ def capture_status_is_ready(status: dict[str, Any], baseline: dict[str, Any] | N
     flush_count = _int_or_none(status.get("flush_count"))
     base_frame_seq = _int_or_none(baseline.get("frame_seq"))
     base_flush_count = _int_or_none(baseline.get("flush_count"))
+    if baseline.get("ok") is not True or (base_frame_seq is None and base_flush_count is None):
+        return True
     frame_advanced = (
         frame_seq is not None
         and base_frame_seq is not None

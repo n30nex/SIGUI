@@ -170,6 +170,10 @@ def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():
         {"ok": True, "shadow_ready": True, "frame_seq": 11, "flush_count": 20},
         baseline,
     ) is True
+    assert ui_capture_d1l.capture_status_is_ready(
+        {"ok": True, "shadow_ready": True, "frame_seq": 1, "flush_count": 1},
+        {"ok": False, "code": "TIMEOUT"},
+    ) is True
 
 
 def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():

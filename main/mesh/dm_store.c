@@ -89,6 +89,13 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
 }
 
+static bool is_volatile_ui_canary(const d1l_dm_entry_t *entry)
+{
+    return entry &&
+           strncmp(entry->contact_alias, "UI Canary", sizeof(entry->contact_alias)) == 0 &&
+           strncmp(entry->text, "ui-data-canary ", strlen("ui-data-canary ")) == 0;
+}
+
 static void fill_blob(d1l_dm_store_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
@@ -96,9 +103,16 @@ static void fill_blob(d1l_dm_store_blob_t *blob)
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    blob->head = (uint32_t)s_head;
-    blob->count = (uint32_t)s_count;
-    memcpy(blob->entries, s_entries, sizeof(s_entries));
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        if (!is_volatile_ui_canary(entry) && blob->count < D1L_DM_STORE_CAPACITY) {
+            blob->entries[blob->count++] = *entry;
+        }
+    }
+    blob->head = blob->count % D1L_DM_STORE_CAPACITY;
 }
 
 static esp_err_t persist_store(void)

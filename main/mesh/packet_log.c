@@ -174,6 +174,13 @@ static bool packet_matches(const d1l_packet_log_entry_t *entry, const char *dire
     return true;
 }
 
+static bool is_volatile_ui_canary(const d1l_packet_log_entry_t *entry)
+{
+    return entry &&
+           (strncmp(entry->kind, "ui_canary", sizeof(entry->kind)) == 0 ||
+            strncmp(entry->note, "ui-canary ", strlen("ui-canary ")) == 0);
+}
+
 static uint32_t history_record_checksum(const d1l_packet_log_entry_t *entry)
 {
     const uint8_t *data = (const uint8_t *)entry;
@@ -341,19 +348,38 @@ static void fill_entries(d1l_packet_log_entry_t *dest, size_t dest_capacity,
         return;
     }
     memset(dest, 0, dest_capacity * sizeof(dest[0]));
-    const size_t n = s_count < dest_capacity ? s_count : dest_capacity;
-    *out_head = (uint32_t)(n % dest_capacity);
-    *out_count = (uint32_t)n;
+    if (s_count == 0) {
+        *out_head = 0;
+        *out_count = 0;
+        return;
+    }
 
-    if (n > 0) {
-        size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
-        if (s_count > n) {
-            oldest = (oldest + (s_count - n)) % D1L_PACKET_LOG_CAPACITY;
-        }
-        for (size_t i = 0; i < n; ++i) {
-            dest[i] = s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+    size_t eligible = 0;
+    size_t oldest = (s_head + D1L_PACKET_LOG_CAPACITY - s_count) % D1L_PACKET_LOG_CAPACITY;
+    for (size_t i = 0; i < s_count; ++i) {
+        if (!is_volatile_ui_canary(&s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY])) {
+            eligible++;
         }
     }
+
+    const size_t skip = eligible > dest_capacity ? eligible - dest_capacity : 0;
+    size_t seen = 0;
+    size_t copied = 0;
+    for (size_t i = 0; i < s_count; ++i) {
+        const d1l_packet_log_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+        if (is_volatile_ui_canary(entry)) {
+            continue;
+        }
+        if (seen++ < skip) {
+            continue;
+        }
+        if (copied < dest_capacity) {
+            dest[copied++] = *entry;
+        }
+    }
+    *out_head = (uint32_t)(copied % dest_capacity);
+    *out_count = (uint32_t)copied;
 }
 
 static void fill_fallback_blob(d1l_packet_log_fallback_blob_t *blob)

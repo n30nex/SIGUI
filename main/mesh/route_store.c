@@ -66,6 +66,13 @@ static void clear_ram(void)
     s_dropped_oldest = 0;
 }
 
+static bool is_volatile_ui_canary(const d1l_route_entry_t *entry)
+{
+    return entry &&
+           strncmp(entry->label, "UI Canary", sizeof(entry->label)) == 0 &&
+           strncmp(entry->kind, "ui_canary", sizeof(entry->kind)) == 0;
+}
+
 static void fill_blob(d1l_route_store_blob_t *blob)
 {
     memset(blob, 0, sizeof(*blob));
@@ -73,8 +80,11 @@ static void fill_blob(d1l_route_store_blob_t *blob)
     blob->next_seq = s_next_seq;
     blob->total_written = s_total_written;
     blob->dropped_oldest = s_dropped_oldest;
-    blob->count = (uint32_t)s_count;
-    memcpy(blob->entries, s_entries, sizeof(s_entries));
+    for (size_t i = 0; i < s_count; ++i) {
+        if (!is_volatile_ui_canary(&s_entries[i]) && blob->count < D1L_ROUTE_STORE_CAPACITY) {
+            blob->entries[blob->count++] = s_entries[i];
+        }
+    }
 }
 
 static esp_err_t persist_store(void)

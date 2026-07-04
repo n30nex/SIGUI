@@ -436,6 +436,16 @@ def test_ui_data_canary_uses_volatile_store_paths():
     assert "d1l_packet_log_append_raw_volatile" in canary
     assert '\\"retention\\":\\"volatile\\"' in canary
 
+    for rel in [
+        "main/mesh/message_store.c",
+        "main/mesh/dm_store.c",
+        "main/mesh/route_store.c",
+        "main/mesh/packet_log.c",
+    ]:
+        source = read(rel)
+        assert "static bool is_volatile_ui_canary" in source
+        assert "is_volatile_ui_canary" in source.split("static void fill", 1)[1]
+
 
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
     source = read("main/ui/ui_phase1.c")
