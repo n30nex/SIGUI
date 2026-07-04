@@ -102,6 +102,7 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
 
 def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     report = ui_simulator.generate(tmp_path)
+    views_by_name = {view["name"]: view for view in report["views"]}
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
 
     assert {
@@ -122,6 +123,9 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "BLE",
         "SD",
     } <= labels_by_view["home"]
+    assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
+    for view_name in ("messages", "messages_dm", "nodes", "map", "packets", "settings"):
+        assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
     assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
     assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
