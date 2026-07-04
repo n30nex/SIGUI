@@ -22,6 +22,8 @@
 #define D1L_STORAGE_MANAGER_BACKOFF_MS 5000U
 #define D1L_STORAGE_MANAGER_RESET_HOLD_MS 500U
 #define D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U
+#define D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS 8U
+#define D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS 500U
 
 typedef enum {
     D1L_STORAGE_MANAGER_BRIDGE_WAIT,
@@ -493,11 +495,18 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     }
 
     set_manager_state(D1L_STORAGE_MANAGER_PING);
-    d1l_rp2040_ping_t ping = {0};
-    ret = d1l_rp2040_bridge_ping(&ping,
-                                  D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
-    if (ret != ESP_OK) {
+    for (uint32_t attempt = 0; attempt < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS;
+         ++attempt) {
+        d1l_rp2040_ping_t ping = {0};
+        ret = d1l_rp2040_bridge_ping(&ping,
+                                      D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        if (ret == ESP_OK) {
+            break;
+        }
         d1l_storage_status_note_rp2040(ret);
+        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS));
+    }
+    if (ret != ESP_OK) {
         return ret;
     }
     d1l_storage_status_note_rp2040(ESP_OK);

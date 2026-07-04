@@ -68,6 +68,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         assert state in source
     assert "storage_manager_task" in source
     assert "D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U" in source
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in source
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in source
     assert 'xTaskCreate(storage_manager_task' in source
     assert "d1l_rp2040_bridge_ping" in source
     assert "d1l_rp2040_bridge_reset" in source
@@ -174,6 +176,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "static void classify_storage_manager_state", 1
     )[0]
     assert "d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS" in sync_recovery_body
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in sync_recovery_body
+    assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in sync_recovery_body
     assert "d1l_rp2040_bridge_ping(&ping," in sync_recovery_body
     assert "storage_status_mount(timeout_ms, true)" in sync_recovery_body
     assert "poll_mount_pending()" in sync_recovery_body
