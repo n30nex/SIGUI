@@ -130,6 +130,8 @@ Start with [docs/README.md](docs/README.md). The active docs are intentionally s
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Known limitations](docs/KNOWN_LIMITATIONS.md)
 - [D1L test plan](docs/TEST_PLAN_D1L.md)
+- [Fast release workflow](docs/FAST_RELEASE_WORKFLOW_D1L.md)
+- [Codex goal prompt](docs/CODEX_GOAL_PROMPT_D1L.md)
 - [SD guided install](docs/D1L_SD_CARD_GUIDED_INSTALL.md)
 - [RP2040 SD bridge flash/proof](docs/RP2040_SD_BRIDGE_FLASH_D1L.md)
 - [SD bridge protocol](docs/SD_BRIDGE_PROTOCOL_D1L.md)
