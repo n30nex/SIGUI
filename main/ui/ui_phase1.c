@@ -1191,6 +1191,19 @@ static void set_dock_hidden(bool hidden)
     request_full_screen_repaint();
 }
 
+static void restore_dock_for_active_tab(void)
+{
+    set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME);
+}
+
+static void layout_content_for_active_tab(void)
+{
+    if (s_content) {
+        lv_obj_set_size(s_content, 480, s_active_tab == D1L_UI_TAB_HOME ? 424 : 362);
+    }
+    restore_dock_for_active_tab();
+}
+
 static void hide_sheet(void)
 {
     if (s_sheet) {
@@ -1204,7 +1217,7 @@ static void hide_compose_sheet(void)
         lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
     }
     s_onboarding_probe_suppressed = false;
-    set_dock_hidden(false);
+    restore_dock_for_active_tab();
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
     request_full_screen_repaint();
@@ -1263,7 +1276,7 @@ static void hide_wifi_sheet(void)
     if (s_wifi_sheet) {
         lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
     }
-    set_dock_hidden(false);
+    restore_dock_for_active_tab();
 }
 
 static void hide_ble_sheet(void)
@@ -1292,7 +1305,7 @@ static void hide_map_location_sheet(void)
     if (s_map_location_sheet) {
         lv_obj_add_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
     }
-    set_dock_hidden(false);
+    restore_dock_for_active_tab();
 }
 
 static void hide_map_tiles_sheet(void)
@@ -1300,7 +1313,7 @@ static void hide_map_tiles_sheet(void)
     if (s_map_tiles_sheet) {
         lv_obj_add_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
     }
-    set_dock_hidden(false);
+    restore_dock_for_active_tab();
 }
 
 static void hide_contact_edit_sheet(void)
@@ -6165,6 +6178,7 @@ static void render_active_tab(void)
     }
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
+    layout_content_for_active_tab();
     lv_obj_clean(s_content);
     configure_content_scroll_root(s_content);
     lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);

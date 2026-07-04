@@ -223,7 +223,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     )[0]
     assert "static lv_obj_t *s_dock" in source
     assert "set_dock_hidden(true)" in source
-    assert "set_dock_hidden(false)" in source
+    assert "restore_dock_for_active_tab()" in source
     layout = source.split("static void layout_compose_sheet_controls", 1)[1].split(
         "static void show_public_compose_sheet", 1
     )[0]
@@ -254,6 +254,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_set_scroll_dir(root, LV_DIR_VER)" in source
     assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO)" in source
     assert "configure_content_scroll_root(s_content)" in source
+    assert "layout_content_for_active_tab()" in source
+    assert "lv_obj_set_size(s_content, 480, s_active_tab == D1L_UI_TAB_HOME ? 424 : 362)" in source
+    assert "set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME)" in source
     assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
     assert "lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE)" not in source
     assert "d1l_ui_phase1_request_tab" in header

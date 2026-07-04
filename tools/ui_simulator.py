@@ -487,7 +487,11 @@ class Surface:
         height = y1 - y0
         offscreen = x0 < 0 or y0 < 0 or x1 > WIDTH or y1 > HEIGHT
         top_bar_overlap = kind not in ("screen", "top_bar") and self.view != "lock_overlay" and y0 < TOP_BAR_H
-        dock_overlap = kind != "dock_tab" and self.view not in ("lock_overlay", "onboarding_sheet") and y1 > DOCK_Y
+        dock_overlap = (
+            kind != "dock_tab"
+            and self.view not in ("home", "lock_overlay", "onboarding_sheet")
+            and y1 > DOCK_Y
+        )
         self.touch_targets.append(
             {
                 "label": label,
@@ -925,7 +929,6 @@ def draw_home_body(s: Surface, snap: Snapshot):
 def render_home(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     draw_home_body(s, snap)
-    draw_dock(s, "Home")
 
 
 def render_messages_mode(s: Surface, snap: Snapshot, *, show_dms: bool = False):
@@ -1852,7 +1855,6 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "MeshCore DeskOS",
-        "Home",
         "Chats",
         "DMs",
         "Rooms",
