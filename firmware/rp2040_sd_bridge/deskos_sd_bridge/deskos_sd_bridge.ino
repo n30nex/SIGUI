@@ -65,6 +65,7 @@ constexpr const char DESKOS_MAP_MANIFEST_PAYLOAD[] =
     "\"download_supported\":false}\n";
 constexpr const char DESKOS_FILE_OPS_PROBE_PAYLOAD[] = "d1l-sd-file-ops-ready\n";
 constexpr const char DESKOS_JSON_PROBE_PAYLOAD[] = "{\"schema\":1,\"probe\":\"d1l\"}\n";
+constexpr uint32_t FILE_WORKER_IDLE_WAIT_MS = 10000;
 constexpr size_t FILE_LINE_MAX = 512;
 constexpr size_t RX_LINE_MAX = FILE_LINE_MAX + 1;
 constexpr size_t FILE_PATH_MAX = 96;
@@ -197,6 +198,7 @@ bool s_sd_pin_miso_ok = false;
 bool s_sd_pin_cs_ok = false;
 volatile uint8_t s_worker_request = SD_WORKER_NONE;
 volatile bool s_worker_busy = false;
+volatile bool s_file_command_active = false;
 volatile bool s_mount_worker_completed = false;
 volatile uint32_t s_worker_snapshot_revision = 0;
 volatile uint32_t s_worker_diag_revision = 0;
@@ -1388,6 +1390,17 @@ bool start_sd_worker(SdWorkerRequest request) {
         s_mount_worker_completed = false;
     }
     s_worker_request = request;
+    return true;
+}
+
+bool wait_for_sd_worker_idle(uint32_t timeout_ms) {
+    const uint32_t started = millis();
+    while (s_worker_busy) {
+        if ((millis() - started) >= timeout_ms) {
+            return false;
+        }
+        delay(2);
+    }
     return true;
 }
 
@@ -2641,14 +2654,23 @@ void handle_file_line(const char *line) {
         return;
     }
 
+    s_file_command_active = true;
+    if (!wait_for_sd_worker_idle(FILE_WORKER_IDLE_WAIT_MS)) {
+        s_file_command_active = false;
+        send_file_error(request_id, op, "busy");
+        return;
+    }
+
     refresh_worker_results();
     SdSnapshot status = current_status();
     if (!status.present) {
+        s_file_command_active = false;
         send_file_error(request_id, op, "no_card");
         return;
     }
     if (!status.mounted || !status.deskos || status.needs_fat32 ||
         !snapshot_fs_is_fat32(status)) {
+        s_file_command_active = false;
         send_file_error(request_id, op, "not_ready");
         return;
     }
@@ -2668,6 +2690,7 @@ void handle_file_line(const char *line) {
     } else {
         send_file_error(request_id, op, "unsupported_op");
     }
+    s_file_command_active = false;
 }
 
 void handle_line(char *line) {
@@ -2772,7 +2795,7 @@ void poll_stream(Stream &in, Stream &out, LineRx &rx) {
 
 void sd_worker_loop_once() {
     const uint8_t request = s_worker_request;
-    if (request == SD_WORKER_NONE || s_worker_busy) {
+    if (request == SD_WORKER_NONE || s_worker_busy || s_file_command_active) {
         delay(2);
         return;
     }
@@ -2803,7 +2826,6 @@ void setup() {
 void loop() {
     poll_stream(Serial1, Serial1, bridge_rx);
     poll_stream(Serial, Serial, usb_rx);
-    sd_worker_loop_once();
     delay(1);
 }
 
@@ -2812,5 +2834,5 @@ void setup1() {
 }
 
 void loop1() {
-    delay(10);
+    sd_worker_loop_once();
 }

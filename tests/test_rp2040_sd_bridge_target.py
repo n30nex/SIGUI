@@ -365,12 +365,15 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "void setup1()" in sketch
     assert "void loop1()" in sketch
     loop_body = sketch.split("void loop()", 1)[1].split("void setup1()", 1)[0]
-    assert "sd_worker_loop_once()" in loop_body
-    assert loop_body.index("poll_stream(Serial1, Serial1, bridge_rx)") < loop_body.index(
-        "sd_worker_loop_once()"
-    )
+    assert "sd_worker_loop_once()" not in loop_body
     loop1_body = sketch.split("void loop1()", 1)[1]
-    assert "sd_worker_loop_once()" not in loop1_body
+    assert "sd_worker_loop_once()" in loop1_body
+    assert "s_file_command_active" in sketch
+    assert "wait_for_sd_worker_idle(FILE_WORKER_IDLE_WAIT_MS)" in sketch
+    worker_body = sketch.split("void sd_worker_loop_once()", 1)[1].split(
+        "} // namespace", 1
+    )[0]
+    assert "s_file_command_active" in worker_body
     assert "SD_WORKER_MOUNT" in sketch
     assert "SD_WORKER_DIAG" in sketch
     assert "Stream *reply_stream = &Serial1;" in sketch
