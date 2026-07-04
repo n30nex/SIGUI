@@ -1018,7 +1018,7 @@ static void configure_compose_keyboard(lv_obj_t *keyboard)
     lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
                         d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
     lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_18, LV_PART_ITEMS);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, LV_PART_ITEMS);
     lv_obj_set_style_pad_all(keyboard, 4, 0);
     lv_obj_set_style_pad_row(keyboard, 6, 0);
     lv_obj_set_style_pad_column(keyboard, 4, 0);

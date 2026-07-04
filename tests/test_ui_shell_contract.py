@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from tools import ui_simulator
@@ -8,6 +9,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def test_ui_references_only_enabled_lvgl_fonts():
+    source = read("main/ui/ui_phase1.c")
+    sdkconfig = read("sdkconfig.defaults")
+    referenced = set(re.findall(r"lv_font_montserrat_(\d+)", source))
+    enabled = set(re.findall(r"CONFIG_LV_FONT_MONTSERRAT_(\d+)=y", sdkconfig))
+    assert referenced <= enabled
 
 
 def test_app_model_exposes_bounded_ui_snapshot():
