@@ -40,7 +40,7 @@ Coverage:
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - CI scope contract: `.github/workflows/d1l-ci.yml` must keep ESP32/UI work on the fast default path. The default Actions run builds ESP32 firmware and the release package without rebuilding RP2040 artifacts or running SD/RP2040 host dry-runs; `workflow_dispatch` with `include_sd_bridge=true` or changes under SD/RP2040 paths must opt into the bridge UF2, SD smoke UF2, and SD dry-run checks.
 - Release gate audit contract: `scripts/release_gate_audit_d1l.py` must fail closed when P0 production evidence is missing, must not require hardware or ports in CI, must reject obsolete SD preflight evidence that recommends any device-format action, must require SD evidence to report `formats_sd=false`, and must report `ready_for_public_release=false` until current-commit smoke, compose-keyboard capture, SD matrix, 12-hour soak, manual physical UI/photos, and full RF/DM evidence are present.
-- Autonomous hardware validation contract: `scripts/autonomous_hardware_validate_d1l.py` must provide a no-user-input orchestration path for the current D1L hardware route. It must default to COM12 for the ESP32 console, treat COM16 as the RP2040 USB/CDC/UF2 path only when an RP2040 refresh is explicitly requested, refuse COM8, COM11, and COM29, use only GitHub Actions-built artifacts, preserve `public_rf_tx=false` and `formats_sd=false`, reuse the already-validated production RP2040 bridge by default, run COM12 smoke/targeted UI corruption/scroll/pixel-capture/compose-keyboard/preflight evidence, and finish with the fail-closed release gate artifact. It may copy RP2040 UF2 files only when invoked with `--refresh-rp2040-smoke`; that refresh path must restore the production RP2040 bridge after any official SD smoke UF2.
+- Autonomous hardware validation contract: `scripts/autonomous_hardware_validate_d1l.py` must provide a no-user-input orchestration path for the current D1L hardware route. It must default to COM12 for the ESP32 console, treat COM16 as the RP2040 USB/CDC/UF2 path only when an RP2040 refresh is explicitly requested, refuse COM8, COM11, and COM29, use only GitHub Actions-built artifacts, preserve `public_rf_tx=false` and `formats_sd=false`, and reuse the already-validated production RP2040 bridge by default. The bundled COM12 smoke/UI/preflight path is a deliberate multi-surface sweep, not the default proof for every UI P0. Issue work should call the narrow script that matches the acceptance criteria, then reserve the bundled runner for multi-surface issues or final production sweep evidence. It may copy RP2040 UF2 files only when invoked with `--refresh-rp2040-smoke`; that refresh path must restore the production RP2040 bridge after any official SD smoke UF2.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces, the Settings setup dashboard, Public History/Search sheets, advert sheet, first-boot onboarding, lock overlay, Map, manual Map center, Map Tiles provider/download sheet, Storage/Radio/Contact/Packet/Mesh Roles sheets, fail on missing required labels or measured text overflow, emit a touch-target map with expanded 44x44 boxes, flag RF/destructive/format-capable actions, keep `formats_sd=false` for storage setup and map tile download actions, and include `large-mesh` and `storage-states` scenarios that prove oversized node/message stores and storage copy fit before rendering.
 - P0 UI hardware-script contract: `scripts/ui_corruption_probe_d1l.py --dry-run --rounds 20`, `scripts/ui_capture_d1l.py --dry-run`, `scripts/ui_compose_keyboard_capture_d1l.py --dry-run --targets public,public-long,dm,dm-long`, and `scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map` must stay host-only, require an explicit port for hardware mode, and must exercise `ui status`, `ui tab <home|messages|nodes|map|packets|settings>`, `ui compose-probe <public|public-long|dm|dm-long>`, serial-only UI data refresh via `ui data-canary <token>`, Packet search, Public search, telemetry fields from `health`, crashlog checks, and `ui capture status|begin|chunk|end` without hardcoded COM ports. The UI corruption artifact must prove at least 20 targeted rounds, monotonic uptime, zero failures, UI data refreshes, `public_rf_tx=false`, `formats_sd=false`, and heap/LVGL/UI-stack/reset telemetry; the pixel-capture artifact must reconstruct a 480x480 RGB565 PNG with matching CRC, no RF/format action, and a passing simulator/reference diff produced from the same logical view; the compose-keyboard artifact must reconstruct Public short/long and DM short/long keyboard states from COM12 RGB565 captures and prove sheet, textarea, dock, and keyboard geometry; the scroll artifact must identify each canonical surface and the tab used to reach it. SD-retained-history proof remains a separate `storage retained-canary` gate.
 - First-boot onboarding contract: settings schema v6 must persist `onboarding_complete`, optional manual map center, saved Wi-Fi profile metadata, and optional map tile provider/attribution/zoom metadata, migrate schema v2/v3/v4/v5 settings without dropping identity, expose `settings onboarding status|complete|reset`, and present a blocking touch setup sheet until onboarding is complete.
@@ -59,36 +59,46 @@ Coverage:
 
 ## Hardware Smoke
 
-Run only when the D1L port is known:
+Run only when the D1L port is known. For issue work, do not run this whole
+block. Pick the one proof that closes the selected P0, attach that artifact to
+the issue/PR, and move on to the next blocker.
 
 ```powershell
 $env:D1L_PORT = "COMx"
 python .\scripts\backup_flash_d1l.py --port $env:D1L_PORT --size 8MB
 .\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
-python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
-python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\current
-python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\current\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
-python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
-python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map --manual-touch --clear-crashlog-before-start
 ```
 
-For the current autonomous COM12/COM16 D1L route, prefer the single-command
-runner after the matching GitHub Actions artifacts are downloaded:
+Issue-specific COM12 proof:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --include-ui-probes
+# Split/stale redraw proof.
+python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
+
+# Hardware pixel / Home-screen proof.
+python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\current
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\current\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
+
+# Compose-keyboard proof.
+python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
+
+# One scroll/layout surface, or a tiny list named by the issue.
+python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start
 ```
 
-The default runner requires no manual touch confirmation, does not open COM8,
-COM11, or COM29, does not copy RP2040 UF2 files, reuses the already-validated
-production bridge, and writes the final release-gate audit under
-`artifacts\release-gate`. SD canaries remain available when SD acceptance is in
-scope; ESP32/UI-only fixes must keep the RP2040 side completely out of the run:
+For a deliberate COM12 UI sweep after the matching GitHub Actions artifacts are
+downloaded:
 
 ```powershell
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
 ```
+
+That sweep requires no manual touch confirmation, does not open COM8, COM11, or
+COM29, does not copy RP2040 UF2 files, reuses the already-validated production
+bridge, skips the SD suite, and writes the final release-gate audit under
+`artifacts\release-gate`. It can still take time because it cycles multiple UI
+surfaces; do not use it as the default proof for a one-surface P0.
 
 Only when RP2040 bridge firmware, SD smoke firmware, or SD electrical evidence
 actually needs refreshing, opt into the UF2 path:

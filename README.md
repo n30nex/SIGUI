@@ -78,15 +78,28 @@ Current D1L bench defaults:
 - Do not format SD from firmware, scripts, serial commands, or UI.
 - Do not send Public RF during SD validation.
 
-Autonomous validation:
+Issue-scoped hardware validation:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --include-ui-probes
+python .\scripts\smoke_d1l.py --port COM12 --out artifacts\hardware\com12\smoke-<sha>-COM12.json
 ```
 
-The default runner flashes/tests the ESP32 side on COM12, reuses the already
-validated RP2040 bridge, and does not copy RP2040 UF2 files. For ESP32/UI-only
-fixes, skip the SD suite too:
+For normal P0 work, run the one COM12 proof that matches the selected issue
+instead of cycling every UI surface. Use the full autonomous UI bundle only when
+the issue explicitly spans multiple UI gates, or as a final release sweep.
+
+Focused UI proof, choose the matching command only:
+
+```powershell
+$env:D1L_PORT = "COM12"
+python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
+python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
+python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets public,public-long,dm,dm-long --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
+python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start
+```
+
+Bundled COM12 UI sweep, not the default for every UI issue:
 
 ```powershell
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
@@ -104,16 +117,6 @@ fallback window, bridge restore, preflight, raw diag,
 file/export/map/retained/reboot canaries, smoke, and the final release-gate
 audit. For SD-only refreshes where the ESP32 app is already flashed from the
 matching Actions artifact, add `--skip-esp32-flash`.
-
-Focused UI proof:
-
-```powershell
-$env:D1L_PORT = "COM12"
-python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
-python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>
-python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
-python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
-```
 
 Guided SD install, only when autonomous RP2040 access is not available:
 
