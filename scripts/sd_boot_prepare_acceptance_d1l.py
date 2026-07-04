@@ -34,6 +34,12 @@ FALLBACK_SETUP_ACTIONS = {
 }
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+TRANSIENT_RESYNC_STATES = {
+    "bridge_unavailable",
+    "mount_pending",
+    "protocol_pending",
+    "rp2040_unavailable",
+}
 
 
 def command_plan(scenario: str) -> list[str]:
@@ -141,6 +147,15 @@ def filecanary_passed(result: dict | None) -> bool:
         and result.get("rename_replace") is True
         and result.get("read_final") is True
     )
+
+
+def storage_converged_for_scenario(scenario: str, storage_status: dict | None) -> bool:
+    state = sd_state(storage_status)
+    if scenario in FILE_GATE_SCENARIOS:
+        if storage_file_gate_ready(storage_status) and retained_store_gate_ready(storage_status):
+            return True
+        return state not in TRANSIENT_RESYNC_STATES and state != "ready"
+    return state not in TRANSIENT_RESYNC_STATES
 
 
 def any_flag(results: list[dict], flag: str) -> bool:
@@ -294,7 +309,7 @@ def run_acceptance(
             run_command(ser, "storage remount")
             storage_after = run_command(ser, "storage status")
             for _attempt in range(mount_poll_attempts):
-                if sd_state(storage_after) != "mount_pending":
+                if storage_converged_for_scenario(scenario, storage_after):
                     break
                 time.sleep(mount_poll_interval_sec)
                 storage_after = run_command(ser, "storage status")
