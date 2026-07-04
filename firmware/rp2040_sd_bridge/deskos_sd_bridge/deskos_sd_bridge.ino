@@ -1425,6 +1425,11 @@ bool snapshot_fs_is_fat32(const SdSnapshot &snapshot) {
     return snapshot.fs && strcmp(snapshot.fs, "fat32") == 0;
 }
 
+bool snapshot_ready_for_file_ops(const SdSnapshot &snapshot) {
+    return snapshot.present && snapshot.mounted && snapshot.deskos &&
+           !snapshot.needs_fat32 && snapshot_fs_is_fat32(snapshot);
+}
+
 void fill_capacity(SdSnapshot &snapshot) {
     FSInfo info;
     if (SDFS.info(info)) {
@@ -1802,6 +1807,22 @@ SdSnapshot request_mount_status() {
     return cache_status(mounted);
 }
 
+bool recover_file_ops_mount() {
+    SD.end(false);
+    SPI1.end();
+    s_sd_mounted = false;
+    s_cached_snapshot_valid = false;
+    s_sd_power_high = true;
+    s_sd_spi_options = DEDICATED_SPI;
+    if (!mount_sd_seeed_sample_path(true, true)) {
+        return snapshot_ready_for_file_ops(
+            cache_status(make_snapshot("error", "file_ops_remount_failed")));
+    }
+
+    SdSnapshot snapshot = mounted_snapshot_from_current_config();
+    return snapshot_ready_for_file_ops(cache_status(snapshot));
+}
+
 DiagSnapshot pending_diag_snapshot() {
     DiagSnapshot diag = {
         empty_probe("high", "dedicated", true, DEDICATED_SPI),
@@ -2141,8 +2162,7 @@ const char *rename_replace_preserving_old(const char *source_path, const char *t
 }
 
 void send_snapshot(Stream &out, const char *prefix, const SdSnapshot &snapshot) {
-    const bool file_ready = snapshot.present && snapshot.mounted && snapshot.deskos &&
-                            !snapshot.needs_fat32 && snapshot_fs_is_fat32(snapshot);
+    const bool file_ready = snapshot_ready_for_file_ops(snapshot);
     String line(prefix);
     line += " state=";
     line += snapshot.state;
@@ -2495,6 +2515,39 @@ void handle_file_read(uint32_t request_id, const char *line) {
     reply_stream->flush();
 }
 
+bool prepare_file_write_target(const char *full_path, bool append_mode, bool truncate,
+                               uint32_t *offset, const char **err) {
+    if (!ensure_parent_dirs(full_path)) {
+        *err = "open_failed";
+        return false;
+    }
+
+    uint32_t current_size = 0;
+    if (!truncate) {
+        File existing = SD.open(full_path, FILE_READ);
+        if (existing) {
+            if (existing.isDirectory()) {
+                existing.close();
+                *err = "is_dir";
+                return false;
+            }
+            current_size = static_cast<uint32_t>(existing.size());
+            existing.close();
+        }
+    }
+    if (append_mode) {
+        *offset = current_size;
+    } else if (*offset != current_size) {
+        *err = "range";
+        return false;
+    }
+
+    if (truncate) {
+        (void)SD.remove(full_path);
+    }
+    return true;
+}
+
 void handle_file_write(uint32_t request_id, const char *line, bool append_mode) {
     char op_name[8];
     snprintf(op_name, sizeof(op_name), "%s", append_mode ? "append" : "write");
@@ -2531,36 +2584,21 @@ void handle_file_write(uint32_t request_id, const char *line, bool append_mode) 
         }
     }
 
-    if (!ensure_parent_dirs(full_path)) {
-        send_file_error(request_id, op_name, "open_failed");
+    const char *write_err = nullptr;
+    if (!prepare_file_write_target(full_path, append_mode, truncate, &offset, &write_err)) {
+        send_file_error(request_id, op_name, write_err);
         return;
     }
 
-    uint32_t current_size = 0;
-    if (!truncate) {
-        File existing = SD.open(full_path, FILE_READ);
-        if (existing) {
-            if (existing.isDirectory()) {
-                existing.close();
-                send_file_error(request_id, op_name, "is_dir");
-                return;
-            }
-            current_size = static_cast<uint32_t>(existing.size());
-            existing.close();
-        }
-    }
-    if (append_mode) {
-        offset = current_size;
-    } else if (offset != current_size) {
-        send_file_error(request_id, op_name, "range");
-        return;
-    }
-
-    if (truncate) {
-        (void)SD.remove(full_path);
-    }
     const char *write_mode = truncate ? "w" : "a";
     File file = SD.open(full_path, write_mode);
+    if (!file && recover_file_ops_mount()) {
+        if (!prepare_file_write_target(full_path, append_mode, truncate, &offset, &write_err)) {
+            send_file_error(request_id, op_name, write_err);
+            return;
+        }
+        file = SD.open(full_path, write_mode);
+    }
     if (!file) {
         send_file_error(request_id, op_name, "open_failed");
         return;
@@ -2675,8 +2713,7 @@ void handle_file_line(const char *line) {
         send_file_error(request_id, op, "no_card");
         return;
     }
-    if (!status.mounted || !status.deskos || status.needs_fat32 ||
-        !snapshot_fs_is_fat32(status)) {
+    if (!snapshot_ready_for_file_ops(status)) {
         s_file_command_active = false;
         send_file_error(request_id, op, "not_ready");
         return;

@@ -300,7 +300,7 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     snapshot_body = sketch.split("void send_snapshot", 1)[1].split(
         "void append_probe_tokens", 1
     )[0]
-    assert "snapshot_fs_is_fat32(snapshot)" in snapshot_body
+    assert "snapshot_ready_for_file_ops(snapshot)" in snapshot_body
     directory_body = sketch.split("bool ensure_directory", 1)[1].split(
         "bool manifest_file_valid", 1
     )[0]
@@ -394,6 +394,12 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "crc32_bytes" in sketch
     assert "crc_mismatch" in sketch
     assert '"too_large"' in sketch
+    assert "bool snapshot_ready_for_file_ops" in sketch
+    assert "bool recover_file_ops_mount()" in sketch
+    assert 'make_snapshot("error", "file_ops_remount_failed")' in sketch
+    assert "s_cached_snapshot_valid = false;" in sketch
+    assert "mount_sd_seeed_sample_path(true, true)" in sketch
+    assert "bool prepare_file_write_target" in sketch
     assert "token_len >= key_len + 1U" in sketch
     assert "handle_file_stat" in sketch
     assert "handle_file_read" in sketch
@@ -416,6 +422,18 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "SD.open(full_path, FILE_READ)" in sketch
     assert 'const char *write_mode = truncate ? "w" : "a";' in sketch
     assert "SD.open(full_path, write_mode)" in sketch
+    write_body = sketch.split("void handle_file_write", 1)[1].split(
+        "void handle_file_delete", 1
+    )[0]
+    assert "recover_file_ops_mount()" in write_body
+    assert write_body.count("SD.open(full_path, write_mode)") == 2
+    assert write_body.index("SD.open(full_path, write_mode)") < write_body.index(
+        "recover_file_ops_mount()"
+    )
+    assert (
+        "prepare_file_write_target(full_path, append_mode, truncate, &offset, &write_err)"
+        in write_body
+    )
     assert "SD.open(full_path, FILE_WRITE)" not in sketch
     assert 'SD.open(full_path, "r")' not in sketch
     assert "file.seek(offset)" in sketch
