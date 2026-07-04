@@ -295,6 +295,38 @@ def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
     assert "copy_rect_to_capture_shadow" in source
     assert "d1l_ui_capture_begin" in source
 
+    direct_copy = source.split("static void lcd_direct_mode_copy_cb(void)", 1)[1].split(
+        "#endif\n\nstatic void flush_cb", 1
+    )[0]
+    assert "memcpy(to, from, bytes_per_line)" in direct_copy
+    assert "copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end" in direct_copy
+
+
+def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
+    source = read("main/ui/ui_phase1.c")
+
+    assert "static void request_full_screen_repaint(void)" in source
+    assert "lv_obj_invalidate(s_screen)" in source
+
+    render_body = source.split("static void render_active_tab(void)", 1)[1].split(
+        "esp_err_t d1l_ui_phase1_request_tab", 1
+    )[0]
+    assert "request_full_screen_repaint();" in render_body
+
+    compose_hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
+        "static void hide_public_history_sheet", 1
+    )[0]
+    assert "request_full_screen_repaint();" in compose_hide
+
+    public_compose = source.split("static void show_public_compose_sheet", 1)[1].split(
+        "static void public_test_event_cb", 1
+    )[0]
+    dm_compose = source.split("static void open_dm_compose_for_contact", 1)[1].split(
+        "static void open_dm_compose_event_cb", 1
+    )[0]
+    assert "request_full_screen_repaint();" in public_compose
+    assert "request_full_screen_repaint();" in dm_compose
+
 
 def test_serial_tab_state_stays_pending_until_render_finishes():
     source = read("main/ui/ui_phase1.c")
@@ -317,6 +349,7 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
     assert process_body.index("render_active_tab();") < process_body.index(
         "finish_pending_tab_switch(rendered_tab);"
     )
+    assert "s_content_refresh_pending = false;" not in process_body
 
     for name in [
         "d1l_ui_phase1_active_tab_name",
@@ -344,6 +377,11 @@ def test_content_refreshes_are_coalesced_on_ui_task():
     assert "d1l_ui_phase1_tab_switch_pending()" in process_body
     assert "request_content_refresh();" in process_body
     assert "render_active_tab();" in process_body
+
+    finish_body = source.split("static void finish_pending_tab_switch", 1)[1].split(
+        "static void request_content_refresh", 1
+    )[0]
+    assert "s_content_refresh_pending = false;" not in finish_body
 
     loop_body = source.split("static void ui_task(void *arg)", 1)[1].split(
         "static void touch_poll_task", 1
@@ -500,6 +538,16 @@ def test_first_boot_onboarding_sheet_is_touch_backed_and_persisted():
     assert 'create_button(s_onboarding_sheet, "Use Defaults"' in source
     assert "lv_textarea_set_max_length(s_onboarding_name_textarea, D1L_NODE_NAME_LEN - 1U)" in source
     assert "lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea)" in source
+    onboarding_body = source.split("static void create_onboarding_sheet", 1)[1].split(
+        "static void create_lock_overlay", 1
+    )[0]
+    assert "lv_obj_set_size(s_onboarding_sheet, 480, 480)" in onboarding_body
+    assert "lv_obj_set_pos(s_onboarding_sheet, 0, 0)" in onboarding_body
+    assert "lv_obj_set_style_border_width(s_onboarding_sheet, 0, 0)" in onboarding_body
+    update_body = source.split("static void update_onboarding_visibility", 1)[1].split(
+        "static void update_chrome", 1
+    )[0]
+    assert "request_full_screen_repaint();" in update_body
     assert "snapshot->onboarding_complete" in source
 
 

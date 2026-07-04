@@ -373,10 +373,6 @@ static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)
         s_tab_switch_pending = false;
     }
     portEXIT_CRITICAL(&s_tab_lock);
-
-    portENTER_CRITICAL(&s_content_refresh_lock);
-    s_content_refresh_pending = false;
-    portEXIT_CRITICAL(&s_content_refresh_lock);
 }
 
 static void request_content_refresh(void)
@@ -578,6 +574,13 @@ static void configure_content_scroll_root(lv_obj_t *root)
     lv_obj_set_style_pad_bottom(root, 12, 0);
 }
 
+static void request_full_screen_repaint(void)
+{
+    if (s_screen) {
+        lv_obj_invalidate(s_screen);
+    }
+}
+
 static void configure_sheet_scroll(lv_obj_t *sheet)
 {
     if (!sheet) {
@@ -728,25 +731,20 @@ static void lcd_direct_mode_copy_cb(void)
         if (disp_refr->inv_area_joined[i] != 0) {
             continue;
         }
-        const lv_coord_t x_start = disp_refr->inv_areas[i].x1;
-        const lv_coord_t x_end = disp_refr->inv_areas[i].x2 + 1;
         const lv_coord_t y_start = disp_refr->inv_areas[i].y1;
         const lv_coord_t y_end = disp_refr->inv_areas[i].y2 + 1;
-        const uint32_t copy_bytes_per_line =
-            (uint32_t)(x_end - x_start) * D1L_UI_CAPTURE_BYTES_PER_PIXEL;
-
-        uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+        uint8_t *from = fb_from + ((uint32_t)y_start * (uint32_t)h_res) *
                                   D1L_UI_CAPTURE_BYTES_PER_PIXEL;
-        uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res + (uint32_t)x_start) *
+        uint8_t *to = fb_to + ((uint32_t)y_start * (uint32_t)h_res) *
                               D1L_UI_CAPTURE_BYTES_PER_PIXEL;
         for (lv_coord_t y = y_start; y < y_end; ++y) {
-            memcpy(to, from, copy_bytes_per_line);
+            memcpy(to, from, bytes_per_line);
             from += bytes_per_line;
             to += bytes_per_line;
         }
 
-        copy_rect_to_capture_shadow(x_start, y_start, x_end, y_end,
-                                    fb_from, 0, 0, h_res);
+        copy_rect_to_capture_shadow(0, y_start, D1L_UI_CAPTURE_WIDTH, y_end,
+                                    fb_to, 0, 0, h_res);
         uint8_t *flush_ptr = fb_to + (uint32_t)y_start * bytes_per_line;
         const uint32_t bytes_to_flush = (uint32_t)(y_end - y_start) * bytes_per_line;
         Cache_WriteBack_Addr((uint32_t)flush_ptr, bytes_to_flush);
@@ -1147,6 +1145,7 @@ static void set_dock_hidden(bool hidden)
     } else {
         lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_HIDDEN);
     }
+    request_full_screen_repaint();
 }
 
 static void hide_sheet(void)
@@ -1164,6 +1163,7 @@ static void hide_compose_sheet(void)
     set_dock_hidden(false);
     s_compose_dm = false;
     memset(&s_compose_contact, 0, sizeof(s_compose_contact));
+    request_full_screen_repaint();
 }
 
 static void hide_public_history_sheet(void)
@@ -1340,6 +1340,7 @@ static void hide_onboarding_sheet(void)
         lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     }
     s_onboarding_visible = false;
+    request_full_screen_repaint();
 }
 
 static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
@@ -1354,6 +1355,7 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
     s_onboarding_visible = true;
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_onboarding_sheet);
+    request_full_screen_repaint();
 }
 
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
@@ -2217,6 +2219,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
         layout_compose_sheet_controls();
         update_compose_counter();
     }
+    request_full_screen_repaint();
 }
 
 static void public_test_event_cb(lv_event_t *event)
@@ -2283,6 +2286,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         layout_compose_sheet_controls();
         update_compose_counter();
     }
+    request_full_screen_repaint();
 }
 
 static void open_dm_compose_event_cb(lv_event_t *event)
@@ -6072,6 +6076,7 @@ static void render_active_tab(void)
     }
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
+    request_full_screen_repaint();
 }
 
 esp_err_t d1l_ui_phase1_request_tab(const char *name)
@@ -7360,12 +7365,11 @@ static void create_onboarding_sheet(lv_obj_t *screen)
     if (!s_onboarding_sheet) {
         return;
     }
-    lv_obj_set_size(s_onboarding_sheet, 456, 430);
-    lv_obj_set_pos(s_onboarding_sheet, 12, 25);
-    lv_obj_set_style_radius(s_onboarding_sheet, 8, 0);
+    lv_obj_set_size(s_onboarding_sheet, 480, 480);
+    lv_obj_set_pos(s_onboarding_sheet, 0, 0);
+    lv_obj_set_style_radius(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_onboarding_sheet, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_color(s_onboarding_sheet, lv_color_hex(0x5EEAD4), 0);
-    lv_obj_set_style_border_width(s_onboarding_sheet, 1, 0);
+    lv_obj_set_style_border_width(s_onboarding_sheet, 0, 0);
     lv_obj_set_style_pad_all(s_onboarding_sheet, 12, 0);
     lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_SCROLLABLE);
 

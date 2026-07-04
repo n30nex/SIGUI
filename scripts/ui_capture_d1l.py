@@ -147,6 +147,7 @@ def capture_frame(
     timeout: float,
     chunk_size: int,
     prep_commands: list[str] | None = None,
+    prep_ok_required: bool = True,
 ) -> dict[str, Any]:
     try:
         import serial
@@ -155,6 +156,7 @@ def capture_frame(
 
     chunk_size = max(1, min(chunk_size, MAX_CHUNK_BYTES))
     events: list[dict[str, Any]] = []
+    prep_failures: list[dict[str, Any]] = []
     raw = bytearray()
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
@@ -163,6 +165,9 @@ def capture_frame(
             prep = send_console_command(ser, prep_command, timeout)
             events.append(prep)
             if prep.get("ok") is not True:
+                prep_failures.append(prep)
+                if not prep_ok_required:
+                    continue
                 return {
                     "schema": 1,
                     "kind": "ui_pixel_capture",
@@ -173,6 +178,8 @@ def capture_frame(
                     "events": events,
                     "error": "ui_capture_prep_failed",
                     "prep_command": prep_command,
+                    "prep_ok": False,
+                    "prep_failures": prep_failures,
                     "public_rf_tx": False,
                     "formats_sd": False,
                 }
@@ -214,12 +221,17 @@ def capture_frame(
 
     capture_crc32 = crc32_hex(raw)
     expected_crc32 = str(begin.get("crc32") or "").upper()
-    ok = len(raw) == total and (not expected_crc32 or capture_crc32 == expected_crc32)
+    pixel_capture_ok = len(raw) == total and (not expected_crc32 or capture_crc32 == expected_crc32)
+    prep_ok = len(prep_failures) == 0
+    ok = pixel_capture_ok and prep_ok
     return {
         "schema": 1,
         "kind": "ui_pixel_capture",
         "mode": "hardware",
         "ok": ok,
+        "pixel_capture_ok": pixel_capture_ok,
+        "prep_ok": prep_ok,
+        "prep_failures": prep_failures,
         "port": port,
         "baud": baud,
         "width": width,

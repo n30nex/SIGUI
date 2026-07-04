@@ -104,12 +104,13 @@ def capture_target(
         timeout=timeout,
         chunk_size=chunk_size,
         prep_commands=[f"ui compose-probe {target}"],
+        prep_ok_required=False,
     )
     raw = bytes(frame.pop("raw_bytes", b""))
     target_slug = slug(target)
     raw_path = output_dir / f"{stem}-{target_slug}.rgb565"
     png_path = output_dir / f"{stem}-{target_slug}.png"
-    if frame.get("ok") is True:
+    if frame.get("ok") is True or frame.get("pixel_capture_ok") is True:
         raw_path.write_bytes(raw)
         write_png_from_rgb565_le(raw, png_path, int(frame["width"]), int(frame["height"]))
         frame["raw_path"] = str(raw_path)

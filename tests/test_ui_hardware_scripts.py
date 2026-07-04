@@ -168,6 +168,66 @@ def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     assert report["formats_sd"] is False
 
 
+def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(tmp_path, monkeypatch):
+    def fake_capture_frame(**kwargs):
+        assert kwargs["prep_commands"] == ["ui compose-probe public"]
+        assert kwargs["prep_ok_required"] is False
+        return {
+            "schema": 1,
+            "kind": "ui_pixel_capture",
+            "mode": "hardware",
+            "ok": False,
+            "pixel_capture_ok": True,
+            "prep_ok": False,
+            "prep_failures": [
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": "ui compose-probe",
+                    "target": "public",
+                    "keyboard": {"x": 16, "y": 322, "w": 448, "h": 258},
+                }
+            ],
+            "events": [
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": "ui compose-probe",
+                    "target": "public",
+                    "keyboard": {"x": 16, "y": 322, "w": 448, "h": 258},
+                }
+            ],
+            "width": 2,
+            "height": 1,
+            "bytes_per_pixel": 2,
+            "pixel_format": "rgb565-le",
+            "total_bytes": 4,
+            "raw_bytes": bytes([0x00, 0xF8, 0xE0, 0x07]),
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+
+    monkeypatch.setattr(ui_compose_keyboard_capture_d1l, "capture_frame", fake_capture_frame)
+
+    result = ui_compose_keyboard_capture_d1l.capture_target(
+        "public",
+        "COM12",
+        115200,
+        0.1,
+        1024,
+        tmp_path,
+        "compose-bad-geometry",
+    )
+
+    assert result["ok"] is False
+    assert result["capture"]["pixel_capture_ok"] is True
+    assert result["capture"]["prep_ok"] is False
+    assert result["png_path"].endswith("compose-bad-geometry-public.png")
+    assert result["raw_path"].endswith("compose-bad-geometry-public.rgb565")
+    assert Path(result["png_path"]).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert Path(result["raw_path"]).read_bytes() == bytes([0x00, 0xF8, 0xE0, 0x07])
+
+
 def test_smoke_command_reader_bounds_readline_timeout_and_restores_serial_timeout():
     ser = FakeSerial(
         [
