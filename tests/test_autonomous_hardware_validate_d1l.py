@@ -162,6 +162,53 @@ def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(t
     assert captured["timeout"] == 900
 
 
+def test_pixel_capture_generates_home_reference_and_diff_gate(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    captured = {}
+
+    def fake_command_report(name, command, cwd, timeout=None):
+        assert name == "ui_simulator_reference"
+        out_dir = Path(command[command.index("--out") + 1])
+        out_dir.mkdir(parents=True)
+        (out_dir / "home.png").write_bytes(b"png")
+        (out_dir / "ui-sim-report.json").write_text("{}", encoding="ascii")
+        return {"ok": True}
+
+    def fake_run_existing_script(ctx_arg, kind, args, out, timeout, dry_run):
+        captured.update({"kind": kind, "args": args, "out": out, "timeout": timeout, "dry_run": dry_run})
+        return {"schema": 1, "kind": kind, "ok": True}
+
+    monkeypatch.setattr(runner, "command_report", fake_command_report)
+    monkeypatch.setattr(runner, "run_existing_script", fake_run_existing_script)
+
+    report = runner.run_ui_pixel_capture(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert report["reference"]["kind"] == "ui_simulator_reference"
+    assert report["reference"]["view"] == "home"
+    assert captured["kind"] == "ui_pixel_capture"
+    assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
+    assert captured["args"][captured["args"].index("--prep-command") + 1] == "ui tab home"
+    assert captured["args"][captured["args"].index("--reference-view") + 1] == "home"
+    assert captured["args"][captured["args"].index("--reference-png") + 1].endswith("home.png")
+    assert captured["args"][captured["args"].index("--diff-out") + 1].endswith("_simdiff.json")
+    assert "COM8" not in json.dumps(captured["args"])
+    assert "COM11" not in json.dumps(captured["args"])
+    assert "COM29" not in json.dumps(captured["args"])
+
+
 def test_smoke_retries_once_after_post_flash_console_timeout(tmp_path, monkeypatch):
     ctx = runner.RunContext(
         root=tmp_path,

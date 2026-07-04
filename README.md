@@ -110,7 +110,8 @@ Focused UI proof:
 ```powershell
 $env:D1L_PORT = "COM12"
 python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
-python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
+python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
 python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
 ```
 

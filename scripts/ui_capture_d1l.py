@@ -18,9 +18,11 @@ from typing import Any
 try:
     from artifact_metadata import stamp_report
     from smoke_d1l import send_console_command
+    from ui_capture_diff_d1l import compare_pngs
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
     from scripts.smoke_d1l import send_console_command
+    from scripts.ui_capture_diff_d1l import compare_pngs
 
 
 WIDTH = 480
@@ -110,7 +112,13 @@ def resolve_output_paths(root: Path, out: str | None, png_out: str | None, raw_o
     return json_path, png_path, raw_path
 
 
-def dry_run_report(chunk_size: int) -> dict[str, Any]:
+def dry_run_report(
+    chunk_size: int,
+    prep_commands: list[str] | None = None,
+    reference_png: str | None = None,
+    reference_view: str | None = None,
+) -> dict[str, Any]:
+    commands = [*(prep_commands or []), *CAPTURE_COMMANDS]
     return {
         "schema": 1,
         "kind": "ui_pixel_capture",
@@ -118,13 +126,17 @@ def dry_run_report(chunk_size: int) -> dict[str, Any]:
         "ok": True,
         "hardware_required": False,
         "explicit_port_required": True,
-        "commands": CAPTURE_COMMANDS,
+        "commands": commands,
+        "prep_commands": prep_commands or [],
         "width": WIDTH,
         "height": HEIGHT,
         "bytes_per_pixel": BYTES_PER_PIXEL,
         "pixel_format": "rgb565-le",
         "total_bytes": TOTAL_BYTES,
         "chunk_size": min(chunk_size, MAX_CHUNK_BYTES),
+        "reference_png_path": reference_png,
+        "reference_view": reference_view,
+        "simulator_diff_required": bool(reference_png),
         "public_rf_tx": False,
         "formats_sd": False,
     }
@@ -342,16 +354,34 @@ def main() -> int:
     parser.add_argument("--out", default=None, help="JSON report path, or .png path to derive the JSON beside it")
     parser.add_argument("--png-out", default=None)
     parser.add_argument("--raw-out", default=None)
+    parser.add_argument("--prep-command", action="append", default=[])
+    parser.add_argument("--post-prep-settle-sec", type=float, default=0.0)
+    parser.add_argument("--reference-png", default=None)
+    parser.add_argument("--reference-view", default=None)
+    parser.add_argument("--diff-out", default=None)
+    parser.add_argument("--diff-pixel-tolerance", type=int, default=36)
+    parser.add_argument("--diff-max-different-ratio", type=float, default=0.60)
+    parser.add_argument("--diff-max-mean-abs-delta", type=float, default=50.0)
+    parser.add_argument("--diff-tile-size", type=int, default=24)
+    parser.add_argument("--diff-tile-delta-threshold", type=float, default=72.0)
+    parser.add_argument("--diff-max-tile-mismatch-ratio", type=float, default=0.38)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
     json_path, png_path, raw_path = resolve_output_paths(root, args.out, args.png_out, args.raw_out)
     if args.dry_run:
-        report = dry_run_report(args.chunk_size)
+        report = dry_run_report(args.chunk_size, args.prep_command, args.reference_png, args.reference_view)
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = capture_frame(args.port, args.baud, args.timeout, args.chunk_size)
+        report = capture_frame(
+            args.port,
+            args.baud,
+            args.timeout,
+            args.chunk_size,
+            prep_commands=args.prep_command,
+            post_prep_settle_sec=args.post_prep_settle_sec,
+        )
         raw = bytes(report.pop("raw_bytes", b""))
         if report.get("ok") is True:
             raw_path.parent.mkdir(parents=True, exist_ok=True)
@@ -359,6 +389,46 @@ def main() -> int:
             write_png_from_rgb565_le(raw, png_path, int(report["width"]), int(report["height"]))
             report["raw_path"] = str(raw_path)
             report["png_path"] = str(png_path)
+            if args.reference_png:
+                reference_png = Path(args.reference_png)
+                if not reference_png.is_absolute():
+                    reference_png = root / reference_png
+                diff_path = Path(args.diff_out) if args.diff_out else json_path.with_name(f"{json_path.stem}_simdiff.json")
+                if not diff_path.is_absolute():
+                    diff_path = root / diff_path
+                try:
+                    diff_report = compare_pngs(
+                        png_path,
+                        reference_png,
+                        reference_view=args.reference_view,
+                        pixel_tolerance=args.diff_pixel_tolerance,
+                        max_different_ratio=args.diff_max_different_ratio,
+                        max_mean_abs_delta=args.diff_max_mean_abs_delta,
+                        tile_size=args.diff_tile_size,
+                        tile_delta_threshold=args.diff_tile_delta_threshold,
+                        max_tile_mismatch_ratio=args.diff_max_tile_mismatch_ratio,
+                    )
+                except Exception as exc:
+                    diff_report = {
+                        "schema": 1,
+                        "kind": "ui_capture_simulator_diff",
+                        "ok": False,
+                        "error": str(exc),
+                        "capture_png_path": str(png_path),
+                        "reference_png_path": str(reference_png),
+                        "reference_view": args.reference_view,
+                        "public_rf_tx": False,
+                        "formats_sd": False,
+                    }
+                stamp_report(diff_report, root)
+                diff_path.parent.mkdir(parents=True, exist_ok=True)
+                diff_path.write_text(json.dumps(diff_report, indent=2, sort_keys=True) + "\n", encoding="ascii")
+                report["reference_png_path"] = str(reference_png)
+                report["reference_view"] = args.reference_view
+                report["simulator_diff_path"] = str(diff_path)
+                report["simulator_diff_ok"] = diff_report.get("ok") is True
+                report["simulator_diff"] = diff_report
+                report["ok"] = report.get("ok") is True and report["simulator_diff_ok"]
     stamp_report(report, root)
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(json.dumps(report, indent=2), encoding="ascii")

@@ -4,6 +4,7 @@ from scripts import (
     scroll_probe_d1l,
     smoke_d1l,
     ui_capture_d1l,
+    ui_capture_diff_d1l,
     ui_compose_keyboard_capture_d1l,
     ui_corruption_probe_d1l,
 )
@@ -151,7 +152,12 @@ def test_smoke_knows_ui_console_commands():
 
 
 def test_ui_capture_dry_run_and_png_writer(tmp_path):
-    report = ui_capture_d1l.dry_run_report(chunk_size=2048)
+    report = ui_capture_d1l.dry_run_report(
+        chunk_size=2048,
+        prep_commands=["ui tab home"],
+        reference_png="artifacts/ui-sim-reference/home.png",
+        reference_view="home",
+    )
 
     assert report["ok"] is True
     assert report["kind"] == "ui_pixel_capture"
@@ -160,6 +166,10 @@ def test_ui_capture_dry_run_and_png_writer(tmp_path):
     assert report["width"] == 480
     assert report["height"] == 480
     assert report["chunk_size"] == 1024
+    assert report["prep_commands"] == ["ui tab home"]
+    assert report["simulator_diff_required"] is True
+    assert report["reference_view"] == "home"
+    assert "ui tab home" in report["commands"]
     assert "ui capture begin" in report["commands"]
     assert "ui capture chunk 0 1024" in report["commands"]
     assert report["public_rf_tx"] is False
@@ -172,6 +182,45 @@ def test_ui_capture_dry_run_and_png_writer(tmp_path):
     ui_capture_d1l.write_png_from_rgb565_le(bytes(raw), png, 480, 480)
 
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_ui_capture_diff_accepts_matching_reference_and_rejects_material_difference(tmp_path):
+    raw = bytearray()
+    for _ in range(480 * 480):
+        raw.extend((0x00, 0xF8))
+    capture = tmp_path / "capture.png"
+    reference = tmp_path / "reference.png"
+    ui_capture_d1l.write_png_from_rgb565_le(bytes(raw), capture, 480, 480)
+    ui_capture_d1l.write_png_from_rgb565_le(bytes(raw), reference, 480, 480)
+
+    matching = ui_capture_diff_d1l.compare_pngs(capture, reference, reference_view="home")
+
+    assert matching["ok"] is True
+    assert matching["kind"] == "ui_capture_simulator_diff"
+    assert matching["reference_view"] == "home"
+    assert matching["different_pixel_ratio"] == 0
+    assert matching["public_rf_tx"] is False
+    assert matching["formats_sd"] is False
+
+    changed = bytearray(raw)
+    for pixel in range(0, 220 * 480):
+        offset = pixel * 2
+        changed[offset] = 0x1F
+        changed[offset + 1] = 0x00
+    bad_reference = tmp_path / "bad-reference.png"
+    ui_capture_d1l.write_png_from_rgb565_le(bytes(changed), bad_reference, 480, 480)
+
+    different = ui_capture_diff_d1l.compare_pngs(
+        capture,
+        bad_reference,
+        reference_view="home",
+        max_different_ratio=0.10,
+        max_tile_mismatch_ratio=0.10,
+    )
+
+    assert different["ok"] is False
+    assert different["error"] == "material_pixel_difference"
+    assert different["tile_mismatch_ratio"] > 0.10
 
 
 def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():

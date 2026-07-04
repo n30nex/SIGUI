@@ -457,6 +457,7 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
 
 
 def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
+    simulator_diff = data.get("simulator_diff") if isinstance(data.get("simulator_diff"), dict) else {}
     return (
         data.get("ok") is True
         and data.get("kind") == "ui_pixel_capture"
@@ -474,6 +475,16 @@ def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
         and bool(data.get("crc32"))
         and bool(data.get("png_path"))
         and bool(data.get("raw_path"))
+        and bool(data.get("reference_png_path"))
+        and bool(data.get("simulator_diff_path"))
+        and data.get("simulator_diff_ok") is True
+        and simulator_diff.get("ok") is True
+        and simulator_diff.get("kind") == "ui_capture_simulator_diff"
+        and simulator_diff.get("size_match") is True
+        and simulator_diff.get("width") == 480
+        and simulator_diff.get("height") == 480
+        and simulator_diff.get("public_rf_tx") is False
+        and simulator_diff.get("formats_sd") is False
     )
 
 
@@ -1907,7 +1918,7 @@ def build_audit(args: argparse.Namespace) -> dict:
             ),
             root,
             lambda data: ui_pixel_capture_ok(data, args.d1l_port),
-            "Current-commit D1L hardware pixel capture reconstructs a 480x480 RGB565 frame.",
+            "Current-commit D1L hardware pixel capture reconstructs a 480x480 RGB565 frame and passes the simulator/reference diff.",
             "No passing current-commit D1L hardware pixel capture artifact was found.",
         )
     )

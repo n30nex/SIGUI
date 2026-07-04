@@ -93,6 +93,28 @@ def ui_pixel_capture_payload(**overrides: object) -> dict:
         "firmware_crc32": "1234ABCD",
         "png_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.png",
         "raw_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.rgb565",
+        "reference_png_path": "artifacts/ui-sim-reference/68350bf-actions28549761003/home.png",
+        "reference_view": "home",
+        "simulator_diff_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf_simdiff.json",
+        "simulator_diff_ok": True,
+        "simulator_diff": {
+            "schema": 1,
+            "kind": "ui_capture_simulator_diff",
+            "ok": True,
+            "capture_png_path": "artifacts/hardware/com12/ui_pixel_capture_68350bf.png",
+            "reference_png_path": "artifacts/ui-sim-reference/68350bf-actions28549761003/home.png",
+            "reference_view": "home",
+            "width": 480,
+            "height": 480,
+            "reference_width": 480,
+            "reference_height": 480,
+            "size_match": True,
+            "different_pixel_ratio": 0.08,
+            "mean_abs_delta": 12.0,
+            "tile_mismatch_ratio": 0.04,
+            "public_rf_tx": False,
+            "formats_sd": False,
+        },
         "onboarding_visible": False,
         "public_rf_tx": False,
         "formats_sd": False,
@@ -1180,6 +1202,21 @@ def test_release_gate_audit_requires_hardware_ui_pixel_capture(tmp_path: Path):
         hardware / "ui_pixel_capture_68350bf.json",
         ui_pixel_capture_payload(captured_bytes=1024, crc32=""),
     )
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["ui_pixel_capture"]["ok"] is False
+    assert gates["ui_pixel_capture"]["details"]["path_found"] is True
+
+
+def test_release_gate_audit_requires_simulator_diff_for_pixel_capture(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = ui_pixel_capture_payload(simulator_diff_ok=False)
+    payload["simulator_diff"]["ok"] = False
+    payload["simulator_diff"]["error"] = "material_pixel_difference"
+    write_json(hardware / "ui_pixel_capture_68350bf.json", payload)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
