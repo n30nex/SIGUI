@@ -205,6 +205,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event);
 static void open_ble_sheet_event_cb(lv_event_t *event);
 static void open_display_sheet_event_cb(lv_event_t *event);
 static void open_diagnostics_sheet_event_cb(lv_event_t *event);
+static void open_sheet_event_cb(lv_event_t *event);
 
 typedef enum {
     D1L_UI_TAB_HOME = 0,
