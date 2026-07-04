@@ -949,6 +949,20 @@ def run_preflight(ctx: RunContext, dry_run: bool) -> dict:
     return run_existing_script(ctx, "rp2040_preflight", args, out, timeout=90, dry_run=dry_run)
 
 
+def run_sd_file_canary(ctx: RunContext, dry_run: bool) -> dict:
+    out = ctx.hardware_dir / f"sd_file_canary_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    args = [
+        str(ctx.root / "scripts" / "sd_file_canary_d1l.py"),
+        "--port",
+        ctx.d1l_port,
+        "--timeout",
+        "5",
+        "--mount-wait-sec",
+        "45",
+    ]
+    return run_existing_script(ctx, "sd_file_canary", args, out, timeout=120, dry_run=dry_run)
+
+
 def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
     out = ctx.hardware_dir / f"smoke_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
     args = [
@@ -1122,6 +1136,7 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
             *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if not args.skip_rp2040_official_smoke else []),
             "restore_rp2040_bridge",
             "rp2040_bridge_preflight",
+            "sd_file_canary",
             "d1l_smoke",
             *(["d1l_500_cycle_tab_abuse", "d1l_scroll_probe"] if args.include_ui_probes else []),
             "release_gate_audit",
@@ -1244,6 +1259,14 @@ def run_validation(args: argparse.Namespace) -> dict:
             return report
 
         runs.append(run_preflight(ctx, dry_run=args.dry_run))
+        sd_file_canary = run_sd_file_canary(ctx, dry_run=args.dry_run)
+        runs.append(sd_file_canary)
+        if sd_file_canary.get("ok") is not True and not args.dry_run:
+            runs.append(run_release_gate(ctx, dry_run=args.dry_run))
+            report["error"] = "sd_file_canary_failed"
+            report["ok"] = False
+            attach_release_gate_summary(report, runs)
+            return report
         runs.append(run_smoke(ctx, dry_run=args.dry_run))
         if args.include_ui_probes:
             runs.append(run_tab_abuse(ctx, cycles=args.tab_cycles, dry_run=args.dry_run))

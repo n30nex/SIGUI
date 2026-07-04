@@ -53,6 +53,8 @@ def test_sd_file_canary_dry_run_is_serial_only():
     assert report["formats_sd"] is False
     assert report["commands"] == [
         "storage status",
+        "storage mount",
+        "storage status",
         "storage filecanary",
         "storage status",
         "packets",
@@ -118,6 +120,49 @@ def test_sd_file_canary_success_requires_canary_ok(monkeypatch):
     assert report["storage_file_gate_ready_after"] is True
     assert report["retained_history_sd_ready_before"] is True
     assert report["retained_history_sd_ready_after"] is True
+
+
+def test_sd_file_canary_waits_for_mount_pending_to_become_ready(monkeypatch):
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"mount_pending"},"data_backend":"nvs","packet_log_backend":"nvs"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage mount","sd":{"state":"mount_pending"}}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"mount_pending"},"data_backend":"nvs","packet_log_backend":"nvs"}\n',
+            ready_storage_status(),
+            canary_success(),
+            ready_storage_status(),
+            '{"schema":1,"ok":true,"cmd":"packets","count":1,"persisted":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(sd_file_canary_d1l.time, "sleep", lambda _seconds: None)
+    report = sd_file_canary_d1l.run_canary(
+        "COM12",
+        115200,
+        1.0,
+        allow_unavailable=False,
+        mount_wait_sec=5.0,
+    )
+
+    assert report["ok"] is True
+    assert report["storage_ready_waited"] is True
+    assert report["storage_ready_poll_count"] == 3
+    assert report["storage_file_gate_ready_before"] is True
+    assert ser.writes == [
+        "storage status\n",
+        "storage mount\n",
+        "storage status\n",
+        "storage status\n",
+        "storage filecanary\n",
+        "storage status\n",
+        "packets\n",
+        "health\n",
+    ]
 
 
 def test_sd_file_canary_success_is_independent_of_retained_history_backends(monkeypatch):

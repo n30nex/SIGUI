@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 CANARY_COMMANDS = [
+    "storage status",
+    "storage mount",
     "storage status",
     "storage filecanary",
     "storage status",
@@ -95,7 +98,41 @@ def dry_run_report() -> dict:
     }
 
 
-def run_canary(port: str, baud: int, timeout: float, allow_unavailable: bool) -> dict:
+def wait_for_storage_ready(
+    ser,
+    timeout: float,
+    *,
+    mount_wait_sec: float,
+    poll_interval_sec: float = 1.0,
+    allow_unavailable: bool = False,
+) -> tuple[dict, list[dict], dict | None]:
+    initial = send_console_command(ser, "storage status", timeout)
+    results = [initial]
+    if storage_file_gate_ready(initial) or allow_unavailable:
+        return initial, results, None
+
+    mount = send_console_command(ser, "storage mount", max(timeout, 8.0))
+    results.append(mount)
+
+    deadline = time.monotonic() + mount_wait_sec
+    latest = initial
+    while time.monotonic() < deadline:
+        time.sleep(poll_interval_sec)
+        latest = send_console_command(ser, "storage status", timeout)
+        results.append(latest)
+        if storage_file_gate_ready(latest):
+            return latest, results, mount
+
+    return latest, results, mount
+
+
+def run_canary(
+    port: str,
+    baud: int,
+    timeout: float,
+    allow_unavailable: bool,
+    mount_wait_sec: float = 30.0,
+) -> dict:
     try:
         import serial
     except ImportError as exc:
@@ -104,14 +141,19 @@ def run_canary(port: str, baud: int, timeout: float, allow_unavailable: bool) ->
     results: list[dict] = []
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
-        for command in CANARY_COMMANDS:
-            results.append(send_console_command(ser, command, timeout))
+        before, ready_wait_results, mount_attempt = wait_for_storage_ready(
+            ser,
+            timeout,
+            mount_wait_sec=mount_wait_sec,
+            allow_unavailable=allow_unavailable,
+        )
+        results.extend(ready_wait_results)
+        canary = send_console_command(ser, "storage filecanary", timeout)
+        after = send_console_command(ser, "storage status", timeout)
+        packets = send_console_command(ser, "packets", timeout)
+        health = send_console_command(ser, "health", timeout)
+        results.extend([canary, after, packets, health])
 
-    before = results[0]
-    canary = results[1]
-    after = results[2]
-    packets = results[3]
-    health = results[4]
     retained_history_sd_before = retained_history_backends_ready(before)
     retained_history_sd_after = retained_history_backends_ready(after)
     canary_ok = filecanary_passed(canary)
@@ -130,6 +172,7 @@ def run_canary(port: str, baud: int, timeout: float, allow_unavailable: bool) ->
         "commands": CANARY_COMMANDS,
         "public_rf_tx": False,
         "formats_sd": False,
+        "mount_wait_sec": mount_wait_sec,
         "ok": (
             before.get("ok", False)
             and (canary_ok or unavailable_ok)
@@ -142,8 +185,14 @@ def run_canary(port: str, baud: int, timeout: float, allow_unavailable: bool) ->
         "canary_unavailable_ok": unavailable_ok,
         "storage_file_gate_ready_before": storage_file_gate_ready(before),
         "storage_file_gate_ready_after": storage_file_gate_ready(after),
+        "storage_ready_waited": len(ready_wait_results) > 1,
+        "storage_ready_poll_count": sum(
+            1 for result in ready_wait_results if result.get("cmd") == "storage status"
+        ),
         "retained_history_sd_ready_before": retained_history_sd_before,
         "retained_history_sd_ready_after": retained_history_sd_after,
+        "initial_storage_status": ready_wait_results[0] if ready_wait_results else None,
+        "mount_attempt": mount_attempt,
         "storage_before": before,
         "storage_after": after,
         "canary": canary,
@@ -158,6 +207,7 @@ def main() -> int:
     parser.add_argument("--port", default=os.environ.get("D1L_PORT"))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=5.0)
+    parser.add_argument("--mount-wait-sec", type=float, default=30.0)
     parser.add_argument("--allow-unavailable", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
@@ -174,7 +224,13 @@ def main() -> int:
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
-        report = run_canary(args.port, args.baud, args.timeout, args.allow_unavailable)
+        report = run_canary(
+            args.port,
+            args.baud,
+            args.timeout,
+            args.allow_unavailable,
+            mount_wait_sec=args.mount_wait_sec,
+        )
 
     root = Path(__file__).resolve().parents[1]
     if args.out:

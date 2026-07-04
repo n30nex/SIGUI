@@ -171,11 +171,13 @@ def expected_command_name(command: str) -> str:
 
 def send_console_command(ser, command: str, timeout: float) -> dict:
     ser.write((command + "\n").encode("utf-8"))
+    if hasattr(ser, "flush"):
+        ser.flush()
     return read_command_result(ser, expected_command_name(command), timeout)
 
 
 def wait_after_reboot(ser, settle_seconds: float) -> None:
-    time.sleep(settle_seconds)
+    time.sleep(max(settle_seconds, 7.0))
     ser.reset_input_buffer()
 
 

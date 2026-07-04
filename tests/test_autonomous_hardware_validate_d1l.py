@@ -406,6 +406,7 @@ def test_official_sd_smoke_exception_writes_gate_visible_artifact(tmp_path, monk
     monkeypatch.setattr(runner, "run_official_sd_smoke", lambda *args, **kwargs: (_ for _ in ()).throw(OSError(22, "Invalid argument")))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
     monkeypatch.setattr(runner, "run_tab_abuse", lambda ctx, cycles, dry_run: ok_step("tab_abuse"))
     monkeypatch.setattr(runner, "run_scroll_probe", lambda ctx, dry_run: ok_step("scroll_probe"))
@@ -533,6 +534,7 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "restore_bridge", lambda ctx, volume, uf2_timeout, dry_run: ok_step("rp2040_bridge_restore"))
     monkeypatch.setattr(runner, "run_preflight", lambda ctx, dry_run: ok_step("rp2040_bridge_preflight"))
+    monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     monkeypatch.setattr(runner, "run_smoke", lambda ctx, dry_run: ok_step("d1l_smoke"))
     monkeypatch.setattr(
         runner,
