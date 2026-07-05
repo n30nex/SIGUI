@@ -36,6 +36,7 @@ idf_component_register(
         "storage/map_tile_store.c"
         "storage/storage_status.c"
         "ui/ui_chrome.c"
+        "ui/ui_home.c"
         "ui/ui_keyboard.c"
         "ui/ui_modal.c"
         "ui/ui_navigation.c"

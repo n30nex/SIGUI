@@ -151,9 +151,21 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
 
 def test_home_screen_is_user_first_companion_dashboard():
     source = read("main/ui/ui_phase1.c")
+    cmake = read("main/CMakeLists.txt")
     header = read("main/app/app_model.h")
+    home_module = read("main/ui/ui_home.c")
+    home_header = read("main/ui/ui_home.h")
 
-    assert "home_sd_state" in source
+    assert '"ui/ui_home.c"' in cmake
+    assert '#include "ui_home.h"' in source
+    assert "d1l_ui_home_sd_state" in source
+    assert "d1l_ui_home_sd_state" in home_header
+    assert "d1l_ui_home_launcher_box" in home_header
+    assert "d1l_ui_home_status_box" in home_header
+    assert "static const d1l_ui_home_box_t k_launcher_boxes" in home_module
+    assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
+    assert "[D1L_UI_HOME_LAUNCHER_PACKETS] = {4, 280, 116, 132}" in home_module
+    assert "[D1L_UI_HOME_STATUS_TIME] = {4, 416, 116, 48}" in home_module
     assert "render_home_launcher_tile" in source
     assert "render_home_status_icon" in source
     assert "s_title_label" in source
@@ -194,12 +206,12 @@ def test_home_screen_is_user_first_companion_dashboard():
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
-    assert "render_home_launcher_tile(s_content, 4, 280" in home_body
-    assert "render_home_status_icon(s_content, 4, 416, 116" in home_body
+    assert "d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_PACKETS)" in home_body
+    assert "d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)" in home_body
     assert "LV_SYMBOL_WIFI" in home_body
     assert "LV_SYMBOL_BLUETOOTH" in home_body
     assert "LV_SYMBOL_SD_CARD" in home_body
-    home_status_body = home_body.split("render_home_status_icon(s_content, 4, 416, 116", 1)[1]
+    home_status_body = home_body.split("d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)", 1)[1]
     assert "0x00C2FF" in home_status_body
     assert "0xC4B5FD" in home_status_body
     assert "0xFBBF24" in home_status_body
