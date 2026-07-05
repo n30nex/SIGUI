@@ -271,9 +271,9 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
     assert actions_by_view["home"]["open_wifi_settings"]["kind"] == "status_icon"
-    assert actions_by_view["home"]["open_wifi_settings"]["visual_box"][1] >= 420
+    assert actions_by_view["home"]["open_wifi_settings"]["visual_box"][1] >= 416
     assert actions_by_view["home"]["open_storage_setup"]["kind"] == "status_icon"
-    assert actions_by_view["home"]["open_storage_setup"]["visual_box"][1] >= 420
+    assert actions_by_view["home"]["open_storage_setup"]["visual_box"][1] >= 416
     for docked_view in ("messages", "nodes", "map", "packets", "settings"):
         assert any(target["kind"] == "dock_tab" for target in views[docked_view]["touch_targets"]), docked_view
     assert actions_by_view["home"]["open_messages_public"]["destination"] == "messages"
