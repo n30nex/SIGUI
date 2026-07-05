@@ -17,8 +17,8 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 ## Recently Closed P0 Evidence
 
 - Split-page/stale-column redraw proof: COM12 `ui_corruption_probe_d1l.py` from `59610ab` / Actions `28723265336` completed 20 targeted rounds with zero failures, 20 serial data-refresh events, `final_pending=false`, `public_rf_tx=false`, and `formats_sd=false`.
-- Hardware Home pixel proof: COM12 `ui_capture_d1l.py` from `59610ab` / Actions `28723265336` reconstructed a 480x480 RGB565 PNG, matched firmware CRC `B7D2D890`, and passed simulator/reference diff.
-- Icon Home proof: Home renders the icon-first launcher and keeps the bottom dock off the Home screen while non-Home pages keep the dock.
+- Hardware Home pixel proof: COM12 `ui_capture_d1l.py` from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) reconstructed the current 480x480 RGB565 Home PNG, matched firmware CRC `ED8A8E31`, and passed simulator/reference diff.
+- Icon Home proof: Home renders the icon-first launcher with colored Time/Wi-Fi/BLE/SD status icons and keeps the bottom dock off the Home screen while non-Home pages keep the dock.
 - Compose proof: COM12 `ui_compose_keyboard_capture_d1l.py` from `59610ab` / Actions `28723265336` captured Public short/long and DM short/long keyboard states with no RF TX or SD formatting.
 
 ## Feature Direction

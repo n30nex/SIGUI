@@ -12,7 +12,7 @@ This folder contains only active release-facing documentation. Historical phase 
 - [Fast release workflow](FAST_RELEASE_WORKFLOW_D1L.md): short PR loop, fast Actions path, targeted hardware proof.
 - [Codex goal prompt](CODEX_GOAL_PROMPT_D1L.md): copy-paste prompt for the next iterative release cycle.
 
-Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the source of truth for release readiness. Latest UI evidence from `59610ab` / Actions `28723265336` proves targeted UI corruption, Home pixel capture plus simulator diff, scroll probing, and Public/DM compose capture. Latest core SD evidence from `1a29876` / Actions `28714355561` proves the installed FAT32 card path. Public release still fails closed until RF/DM, remaining physical SD matrix, manual photos/review, broader keyboard/sheet review, and 12-hour soak evidence are complete.
+Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the source of truth for release readiness. Latest Home evidence from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) proves the current icon launcher pixel capture plus simulator diff. Broader UI evidence from `59610ab` / Actions `28723265336` still proves targeted UI corruption, scroll probing, and Public/DM compose capture. Latest core SD evidence from `1a29876` / Actions `28714355561` proves the installed FAT32 card path. Public release still fails closed until RF/DM, remaining physical SD matrix, manual photos/review, broader keyboard/sheet review, and 12-hour soak evidence are complete.
 
 ## User And Developer Guides
 
