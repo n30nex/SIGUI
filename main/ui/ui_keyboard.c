@@ -4,6 +4,88 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "lvgl.h"
+
+static const char *d1l_compose_kb_map_lc[] = {
+    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+    "z", "x", "c", "v", "b", "n", "m", ".", "?", "\n",
+    "1#", "ABC", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_lc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_uc[] = {
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+    "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
+    "Z", "X", "C", "V", "B", "N", "M", ".", "?", "\n",
+    "1#", "abc", ",", "-", " ", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_uc[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    1,
+    6,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+static const char *d1l_compose_kb_map_spec[] = {
+    "abc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\n",
+    "0", "+", "-", "/", "*", "=", "%", "!", "?", "#", "\n",
+    "@", "&", "(", ")", ":", ";", "\"", "'", ".", ",", "\n",
+    "ABC", "_", " ", "/", LV_SYMBOL_BACKSPACE, LV_SYMBOL_OK, ""
+};
+
+static const lv_btnmatrix_ctrl_t d1l_compose_kb_ctrl_spec[] = {
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    1,
+    6,
+    1,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2,
+    LV_KEYBOARD_CTRL_BTN_FLAGS | 2
+};
+
+void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard)
+{
+    if (!keyboard) {
+        return;
+    }
+    lv_keyboard_set_popovers(keyboard, false);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER,
+                        d1l_compose_kb_map_lc, d1l_compose_kb_ctrl_lc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_UPPER,
+                        d1l_compose_kb_map_uc, d1l_compose_kb_ctrl_uc);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_1,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_SPECIAL_2,
+                        d1l_compose_kb_map_spec, d1l_compose_kb_ctrl_spec);
+    lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(keyboard, 4, 0);
+    lv_obj_set_style_pad_row(keyboard, 6, 0);
+    lv_obj_set_style_pad_column(keyboard, 4, 0);
+}
+
 bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
                                             size_t out_target_len)
 {
