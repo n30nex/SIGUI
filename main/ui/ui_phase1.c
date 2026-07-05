@@ -21,6 +21,7 @@
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "ui_navigation.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
@@ -47,7 +48,6 @@ static TaskHandle_t s_touch_task_handle;
 static portMUX_TYPE s_touch_lock = portMUX_INITIALIZER_UNLOCKED;
 static d1l_board_touch_state_t s_touch_state;
 static bool s_touch_state_ready = false;
-static portMUX_TYPE s_tab_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
@@ -209,14 +209,14 @@ static void open_display_sheet_event_cb(lv_event_t *event);
 static void open_diagnostics_sheet_event_cb(lv_event_t *event);
 static void open_sheet_event_cb(lv_event_t *event);
 
-typedef enum {
-    D1L_UI_TAB_HOME = 0,
-    D1L_UI_TAB_MESSAGES,
-    D1L_UI_TAB_NODES,
-    D1L_UI_TAB_MAP,
-    D1L_UI_TAB_PACKETS,
-    D1L_UI_TAB_SETTINGS,
-} d1l_ui_tab_t;
+typedef d1l_ui_screen_t d1l_ui_tab_t;
+
+#define D1L_UI_TAB_HOME D1L_UI_SCREEN_HOME
+#define D1L_UI_TAB_MESSAGES D1L_UI_SCREEN_MESSAGES
+#define D1L_UI_TAB_NODES D1L_UI_SCREEN_NODES
+#define D1L_UI_TAB_MAP D1L_UI_SCREEN_MAP
+#define D1L_UI_TAB_PACKETS D1L_UI_SCREEN_PACKETS
+#define D1L_UI_TAB_SETTINGS D1L_UI_SCREEN_SETTINGS
 
 typedef struct {
     uint32_t rx_packets;
@@ -260,9 +260,6 @@ typedef enum {
     D1L_RADIO_EDIT_RX_BOOST,
 } d1l_radio_edit_action_t;
 
-static d1l_ui_tab_t s_active_tab = D1L_UI_TAB_HOME;
-static bool s_tab_switch_pending = false;
-static d1l_ui_tab_t s_pending_tab = D1L_UI_TAB_HOME;
 static bool s_content_refresh_pending = false;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
@@ -342,41 +339,17 @@ static bool content_generation_changed_from_rendered(const d1l_app_snapshot_t *s
 
 static void request_tab_switch(d1l_ui_tab_t tab)
 {
-    portENTER_CRITICAL(&s_tab_lock);
-    s_pending_tab = tab;
-    s_tab_switch_pending = true;
-    portEXIT_CRITICAL(&s_tab_lock);
+    d1l_ui_navigation_request(tab);
 }
 
 static bool begin_pending_tab_switch(d1l_ui_tab_t *out_tab)
 {
-    bool pending;
-    d1l_ui_tab_t tab;
-
-    portENTER_CRITICAL(&s_tab_lock);
-    pending = s_tab_switch_pending;
-    tab = s_pending_tab;
-    if (pending) {
-        s_active_tab = tab;
-    }
-    portEXIT_CRITICAL(&s_tab_lock);
-
-    if (!pending) {
-        return false;
-    }
-    if (out_tab) {
-        *out_tab = tab;
-    }
-    return true;
+    return d1l_ui_navigation_begin_pending(out_tab);
 }
 
 static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)
 {
-    portENTER_CRITICAL(&s_tab_lock);
-    if (s_pending_tab == rendered_tab) {
-        s_tab_switch_pending = false;
-    }
-    portEXIT_CRITICAL(&s_tab_lock);
+    d1l_ui_navigation_finish(rendered_tab);
 }
 
 static void request_content_refresh(void)
@@ -457,103 +430,18 @@ static bool object_is_visible(lv_obj_t *obj);
 
 static const char *tab_name(d1l_ui_tab_t tab)
 {
-    switch (tab) {
-    case D1L_UI_TAB_HOME:
-        return "home";
-    case D1L_UI_TAB_MESSAGES:
-        return "messages";
-    case D1L_UI_TAB_NODES:
-        return "nodes";
-    case D1L_UI_TAB_MAP:
-        return "map";
-    case D1L_UI_TAB_PACKETS:
-        return "packets";
-    case D1L_UI_TAB_SETTINGS:
-        return "settings";
-    default:
-        return "unknown";
-    }
+    return d1l_ui_screen_name(tab);
 }
 
 static bool tab_from_name(const char *name, d1l_ui_tab_t *out_tab)
 {
-    if (!name || !out_tab) {
-        return false;
-    }
-    if (strcmp(name, "home") == 0) {
-        *out_tab = D1L_UI_TAB_HOME;
-    } else if (strcmp(name, "messages") == 0 || strcmp(name, "msg") == 0) {
-        *out_tab = D1L_UI_TAB_MESSAGES;
-    } else if (strcmp(name, "nodes") == 0) {
-        *out_tab = D1L_UI_TAB_NODES;
-    } else if (strcmp(name, "map") == 0) {
-        *out_tab = D1L_UI_TAB_MAP;
-    } else if (strcmp(name, "packets") == 0 || strcmp(name, "pkts") == 0) {
-        *out_tab = D1L_UI_TAB_PACKETS;
-    } else if (strcmp(name, "settings") == 0 || strcmp(name, "set") == 0) {
-        *out_tab = D1L_UI_TAB_SETTINGS;
-    } else {
-        return false;
-    }
-    return true;
+    return d1l_ui_screen_from_name(name, out_tab);
 }
 
 static bool scroll_surface_from_name(const char *name, char *out_surface,
                                      size_t out_surface_len, d1l_ui_tab_t *out_tab)
 {
-    char normalized[24] = {0};
-    if (!name || !out_surface || out_surface_len == 0 || !out_tab) {
-        return false;
-    }
-    size_t len = 0;
-    while (*name && len + 1U < sizeof(normalized)) {
-        char ch = (char)tolower((unsigned char)*name++);
-        normalized[len++] = (ch == '-' || ch == ' ') ? '_' : ch;
-    }
-    normalized[len] = '\0';
-    if (*name || len == 0) {
-        return false;
-    }
-
-    const char *surface = NULL;
-    d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
-    if (strcmp(normalized, "home") == 0) {
-        surface = "home";
-        tab = D1L_UI_TAB_HOME;
-    } else if (strcmp(normalized, "public") == 0 ||
-               strcmp(normalized, "messages") == 0 ||
-               strcmp(normalized, "public_messages") == 0) {
-        surface = "public_messages";
-        tab = D1L_UI_TAB_MESSAGES;
-    } else if (strcmp(normalized, "dm") == 0 ||
-               strcmp(normalized, "dm_thread") == 0) {
-        surface = "dm_thread";
-        tab = D1L_UI_TAB_MESSAGES;
-    } else if (strcmp(normalized, "nodes") == 0) {
-        surface = "nodes";
-        tab = D1L_UI_TAB_NODES;
-    } else if (strcmp(normalized, "packets") == 0 || strcmp(normalized, "pkts") == 0) {
-        surface = "packets";
-        tab = D1L_UI_TAB_PACKETS;
-    } else if (strcmp(normalized, "settings") == 0 || strcmp(normalized, "set") == 0) {
-        surface = "settings";
-        tab = D1L_UI_TAB_SETTINGS;
-    } else if (strcmp(normalized, "storage") == 0 || strcmp(normalized, "sd") == 0) {
-        surface = "storage";
-        tab = D1L_UI_TAB_SETTINGS;
-    } else if (strcmp(normalized, "wifi") == 0 || strcmp(normalized, "wi_fi") == 0) {
-        surface = "wifi";
-        tab = D1L_UI_TAB_SETTINGS;
-    } else if (strcmp(normalized, "map") == 0) {
-        surface = "map";
-        tab = D1L_UI_TAB_MAP;
-    } else {
-        return false;
-    }
-
-    snprintf(out_surface, out_surface_len, "%s", surface);
-    *out_tab = tab;
-    return true;
+    return d1l_ui_scroll_surface_from_name(name, out_surface, out_surface_len, out_tab);
 }
 
 static bool compose_probe_target_from_name(const char *name, char *out_target,
@@ -645,7 +533,7 @@ static void configure_home_content_root(lv_obj_t *root)
 
 static void configure_content_for_active_tab(void)
 {
-    if (s_active_tab == D1L_UI_TAB_HOME) {
+    if (d1l_ui_navigation_active() == D1L_UI_TAB_HOME) {
         configure_home_content_root(s_content);
     } else {
         configure_content_scroll_root(s_content);
@@ -1238,13 +1126,13 @@ static void set_dock_hidden(bool hidden)
 
 static void restore_dock_for_active_tab(void)
 {
-    set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME);
+    set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME);
 }
 
 static void layout_content_for_active_tab(void)
 {
     if (s_content) {
-        const bool home = s_active_tab == D1L_UI_TAB_HOME;
+        const bool home = d1l_ui_navigation_active() == D1L_UI_TAB_HOME;
         lv_obj_set_pos(s_content, 0, home ? 32 : 56);
         lv_obj_set_size(s_content, 480, home ? 448 : 362);
     }
@@ -1487,7 +1375,7 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     if (!snapshot || !s_title_label || !s_status_label || !s_identity_label) {
         return;
     }
-    const bool home = s_active_tab == D1L_UI_TAB_HOME;
+    const bool home = d1l_ui_navigation_active() == D1L_UI_TAB_HOME;
     lv_label_set_text(s_title_label, home ? "DeskOS" : "MeshCore DeskOS");
     set_object_hidden(s_status_label, home);
     set_object_hidden(s_identity_label, home);
@@ -4341,7 +4229,7 @@ static void open_dm_thread_event_cb(lv_event_t *event)
 static void set_messages_mode(bool show_dms)
 {
     s_messages_show_dms = show_dms;
-    if (s_active_tab == D1L_UI_TAB_MESSAGES) {
+    if (d1l_ui_navigation_active() == D1L_UI_TAB_MESSAGES) {
         request_content_refresh();
         return;
     }
@@ -6249,7 +6137,7 @@ static void render_active_tab(void)
     lv_obj_clean(s_content);
     configure_content_for_active_tab();
     lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);
-    switch (s_active_tab) {
+    switch (d1l_ui_navigation_active()) {
     case D1L_UI_TAB_HOME:
         render_home(&s_snapshot);
         break;
@@ -6366,32 +6254,17 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
 
 const char *d1l_ui_phase1_active_tab_name(void)
 {
-    d1l_ui_tab_t tab;
-
-    portENTER_CRITICAL(&s_tab_lock);
-    tab = s_active_tab;
-    portEXIT_CRITICAL(&s_tab_lock);
-    return tab_name(tab);
+    return tab_name(d1l_ui_navigation_active());
 }
 
 const char *d1l_ui_phase1_pending_tab_name(void)
 {
-    d1l_ui_tab_t tab;
-
-    portENTER_CRITICAL(&s_tab_lock);
-    tab = s_pending_tab;
-    portEXIT_CRITICAL(&s_tab_lock);
-    return tab_name(tab);
+    return tab_name(d1l_ui_navigation_pending());
 }
 
 bool d1l_ui_phase1_tab_switch_pending(void)
 {
-    bool pending;
-
-    portENTER_CRITICAL(&s_tab_lock);
-    pending = s_tab_switch_pending;
-    portEXIT_CRITICAL(&s_tab_lock);
-    return pending;
+    return d1l_ui_navigation_switch_pending();
 }
 
 static void fill_capture_status(d1l_ui_capture_status_t *status)
@@ -7078,7 +6951,7 @@ static void run_compose_probe_on_ui_task(const char *target,
     snprintf(result->target, sizeof(result->target), "%s", canonical);
 
     open_keyboard_probe_on_ui_task(canonical);
-    snprintf(result->active_tab, sizeof(result->active_tab), "%s", tab_name(s_active_tab));
+    snprintf(result->active_tab, sizeof(result->active_tab), "%s", tab_name(d1l_ui_navigation_active()));
 
     lv_obj_t *sheet = NULL;
     lv_obj_t *textarea = NULL;
