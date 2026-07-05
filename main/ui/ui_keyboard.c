@@ -86,6 +86,24 @@ void d1l_ui_keyboard_configure_compose(lv_obj_t *keyboard)
     lv_obj_set_style_pad_column(keyboard, 4, 0);
 }
 
+void d1l_ui_keyboard_configure_input(lv_obj_t *keyboard,
+                                     lv_obj_t *textarea,
+                                     int32_t x,
+                                     int32_t y,
+                                     int32_t width,
+                                     int32_t height)
+{
+    if (!keyboard) {
+        return;
+    }
+    lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height);
+    lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(keyboard, (lv_coord_t)x, (lv_coord_t)y);
+    if (textarea) {
+        lv_keyboard_set_textarea(keyboard, textarea);
+    }
+}
+
 bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
                                             size_t out_target_len)
 {

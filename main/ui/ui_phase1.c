@@ -4295,10 +4295,8 @@ static void render_map_location_sheet(void)
     if (!s_map_location_keyboard) {
         return;
     }
-    lv_obj_set_size(s_map_location_keyboard, 448, 164);
-    lv_obj_set_align(s_map_location_keyboard, LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(s_map_location_keyboard, 16, 248);
-    lv_keyboard_set_textarea(s_map_location_keyboard, s_map_lat_textarea);
+    d1l_ui_keyboard_configure_input(s_map_location_keyboard, s_map_lat_textarea,
+                                    16, 248, 448, 164);
     lv_obj_add_event_cb(s_map_location_keyboard, map_location_keyboard_event_cb,
                         LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_map_location_keyboard, map_location_keyboard_event_cb,
@@ -4571,12 +4569,8 @@ static void render_map_tiles_sheet(void)
 
     s_map_tiles_keyboard = create_keyboard(s_map_tiles_sheet, "map tile keyboard");
     if (s_map_tiles_keyboard) {
-        lv_obj_set_size(s_map_tiles_keyboard, 448, 82);
-        lv_obj_set_align(s_map_tiles_keyboard, LV_ALIGN_TOP_LEFT);
-        lv_obj_set_pos(s_map_tiles_keyboard, 16, 330);
-        if (s_map_tiles_url_textarea) {
-            lv_keyboard_set_textarea(s_map_tiles_keyboard, s_map_tiles_url_textarea);
-        }
+        d1l_ui_keyboard_configure_input(s_map_tiles_keyboard, s_map_tiles_url_textarea,
+                                        16, 330, 448, 82);
         lv_obj_add_event_cb(s_map_tiles_keyboard, map_tiles_keyboard_event_cb,
                             LV_EVENT_READY, NULL);
         lv_obj_add_event_cb(s_map_tiles_keyboard, map_tiles_keyboard_event_cb,
@@ -5389,12 +5383,8 @@ static void render_wifi_sheet(void)
 
     s_wifi_keyboard = create_keyboard(s_wifi_sheet, "wifi keyboard");
     if (s_wifi_keyboard) {
-        lv_obj_set_size(s_wifi_keyboard, 448, 82);
-        lv_obj_set_align(s_wifi_keyboard, LV_ALIGN_TOP_LEFT);
-        lv_obj_set_pos(s_wifi_keyboard, 16, 330);
-        if (s_wifi_ssid_textarea) {
-            lv_keyboard_set_textarea(s_wifi_keyboard, s_wifi_ssid_textarea);
-        }
+        d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea,
+                                        16, 330, 448, 82);
         lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_READY, NULL);
         lv_obj_add_event_cb(s_wifi_keyboard, wifi_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
     }
@@ -7000,10 +6990,8 @@ static void create_public_search_sheet(lv_obj_t *screen)
         d1l_ui_modal_hide(s_public_search_sheet);
         return;
     }
-    lv_obj_set_size(s_public_search_keyboard, 424, 194);
-    lv_obj_set_align(s_public_search_keyboard, LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(s_public_search_keyboard, 0, 114);
-    lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
+    d1l_ui_keyboard_configure_input(s_public_search_keyboard, s_public_search_textarea,
+                                    0, 114, 424, 194);
     lv_obj_add_event_cb(s_public_search_keyboard, public_search_keyboard_event_cb,
                         LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_public_search_keyboard, public_search_keyboard_event_cb,
@@ -7259,10 +7247,8 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     if (!s_contact_edit_keyboard) {
         goto fail;
     }
-    lv_obj_set_size(s_contact_edit_keyboard, 424, 178);
-    lv_obj_set_align(s_contact_edit_keyboard, LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(s_contact_edit_keyboard, 0, 138);
-    lv_keyboard_set_textarea(s_contact_edit_keyboard, s_contact_edit_textarea);
+    d1l_ui_keyboard_configure_input(s_contact_edit_keyboard, s_contact_edit_textarea,
+                                    0, 138, 424, 178);
     lv_obj_add_event_cb(s_contact_edit_keyboard, contact_edit_keyboard_event_cb,
                         LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_contact_edit_keyboard, contact_edit_keyboard_event_cb,
@@ -7393,10 +7379,8 @@ static void create_packet_search_sheet(lv_obj_t *screen)
         d1l_ui_modal_hide(s_packet_search_sheet);
         return;
     }
-    lv_obj_set_size(s_packet_search_keyboard, 424, 194);
-    lv_obj_set_align(s_packet_search_keyboard, LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(s_packet_search_keyboard, 0, 114);
-    lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
+    d1l_ui_keyboard_configure_input(s_packet_search_keyboard, s_packet_search_textarea,
+                                    0, 114, 424, 194);
     lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 
@@ -7482,10 +7466,8 @@ static void create_onboarding_sheet(lv_obj_t *screen)
         d1l_ui_modal_hide(s_onboarding_sheet);
         return;
     }
-    lv_obj_set_size(s_onboarding_keyboard, 424, 160);
-    lv_obj_set_align(s_onboarding_keyboard, LV_ALIGN_TOP_LEFT);
-    lv_obj_set_pos(s_onboarding_keyboard, 8, 258);
-    lv_keyboard_set_textarea(s_onboarding_keyboard, s_onboarding_name_textarea);
+    d1l_ui_keyboard_configure_input(s_onboarding_keyboard, s_onboarding_name_textarea,
+                                    8, 258, 424, 160);
     lv_obj_add_event_cb(s_onboarding_keyboard, onboarding_keyboard_event_cb, LV_EVENT_READY, NULL);
 
     if (d1l_settings_current()->onboarding_complete) {

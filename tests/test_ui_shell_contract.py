@@ -342,10 +342,15 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_probe_min_width" in keyboard_header
     assert "d1l_ui_keyboard_probe_min_height" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard_header
+    assert "d1l_ui_keyboard_configure_input" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard
+    assert "d1l_ui_keyboard_configure_input" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
     assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
+    assert "lv_obj_set_size(keyboard, (lv_coord_t)width, (lv_coord_t)height)" in keyboard
+    assert "lv_obj_set_align(keyboard, LV_ALIGN_TOP_LEFT)" in keyboard
+    assert "lv_keyboard_set_textarea(keyboard, textarea)" in keyboard
     assert "d1l_compose_kb_map_lc" not in source
     assert "static void configure_compose_keyboard" not in source
     assert 'strcmp(normalized, "public_search") == 0' in keyboard
@@ -363,16 +368,13 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "static bool compose_probe_target_requires_hidden_dock" not in source
     assert "static int32_t compose_probe_min_keyboard_width" not in source
     assert 'strcmp(normalized, "wifi_password") == 0' not in source
-    for keyboard in (
-        "s_public_search_keyboard",
-        "s_packet_search_keyboard",
-        "s_contact_edit_keyboard",
-        "s_onboarding_keyboard",
-        "s_map_location_keyboard",
-        "s_map_tiles_keyboard",
-        "s_wifi_keyboard",
-    ):
-        assert f"lv_obj_set_align({keyboard}, LV_ALIGN_TOP_LEFT)" in source
+    assert "d1l_ui_keyboard_configure_input(s_public_search_keyboard, s_public_search_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_packet_search_keyboard, s_packet_search_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_contact_edit_keyboard, s_contact_edit_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_onboarding_keyboard, s_onboarding_name_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_map_location_keyboard, s_map_lat_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_map_tiles_keyboard, s_map_tiles_url_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea" in source
     assert 'strcmp(target, "public_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source
