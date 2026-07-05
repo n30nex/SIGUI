@@ -298,7 +298,25 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
-    assert "ui compose-probe <public|public-long|dm|dm-long>" in console
+    assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
+    assert 'strcmp(normalized, "public_search") == 0' in source
+    assert 'strcmp(normalized, "packet_search") == 0' in source
+    assert 'strcmp(normalized, "contact_edit") == 0' in source
+    assert 'strcmp(normalized, "map_provider") == 0' in source
+    assert 'strcmp(normalized, "wifi_password") == 0' in source
+    for keyboard in (
+        "s_public_search_keyboard",
+        "s_packet_search_keyboard",
+        "s_contact_edit_keyboard",
+        "s_onboarding_keyboard",
+        "s_map_location_keyboard",
+        "s_map_tiles_keyboard",
+        "s_wifi_keyboard",
+    ):
+        assert f"lv_obj_set_align({keyboard}, LV_ALIGN_TOP_LEFT)" in source
+    assert 'strcmp(target, "public_search") == 0' in source
+    assert 'strcmp(target, "packet_search") == 0' in source
+    assert 'strcmp(target, "contact_edit") == 0' in source
     assert "ui data-canary <token>" in console
     assert "ui capture status" in console
     assert "ui capture begin" in console

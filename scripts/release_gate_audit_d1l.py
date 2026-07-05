@@ -42,7 +42,20 @@ REQUIRED_SCROLL_SURFACES = {
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
 SCROLL_MOVEMENT_OPTIONAL = {"home"}
-REQUIRED_COMPOSE_CAPTURE_TARGETS = {"public", "public-long", "dm", "dm-long"}
+REQUIRED_COMPOSE_CAPTURE_TARGETS = {
+    "public",
+    "public-long",
+    "dm",
+    "dm-long",
+    "public-search",
+    "packet-search",
+    "contact-edit",
+    "onboarding",
+    "map-location",
+    "map-provider",
+    "wifi-ssid",
+    "wifi-password",
+}
 REQUIRED_NOTICE_FILES = {
     "notices/LICENSE",
     "notices/THIRD_PARTY_NOTICES.md",
@@ -492,12 +505,46 @@ def ui_pixel_capture_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def compose_capture_expected_onboarding(expected_target: str) -> bool:
+    return expected_target == "onboarding"
+
+
+def compose_capture_requires_hidden_dock(expected_target: str) -> bool:
+    return expected_target in {
+        "public",
+        "public-long",
+        "dm",
+        "dm-long",
+        "public-search",
+        "packet-search",
+        "contact-edit",
+        "onboarding",
+        "map-location",
+        "map-provider",
+        "wifi-ssid",
+        "wifi-password",
+    }
+
+
+def compose_capture_min_keyboard_size(expected_target: str) -> tuple[int, int]:
+    if expected_target in {"public", "public-long", "dm", "dm-long"}:
+        return (440, 250)
+    if expected_target in {"public-search", "packet-search"}:
+        return (400, 180)
+    if expected_target == "contact-edit":
+        return (400, 170)
+    if expected_target in {"onboarding", "map-location"}:
+        return (400, 150)
+    return (440, 80)
+
+
 def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
     if not isinstance(probe, dict):
         return False
     keyboard = probe.get("keyboard") if isinstance(probe.get("keyboard"), dict) else {}
     textarea = probe.get("textarea") if isinstance(probe.get("textarea"), dict) else {}
     sheet = probe.get("sheet") if isinstance(probe.get("sheet"), dict) else {}
+    min_w, min_h = compose_capture_min_keyboard_size(expected_target)
     try:
         keyboard_inside_sheet = (
             int(keyboard.get("x")) >= 0
@@ -511,9 +558,15 @@ def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
             and int(textarea.get("x")) + int(textarea.get("w")) <= int(sheet.get("w"))
             and int(textarea.get("y")) + int(textarea.get("h")) <= int(keyboard.get("y"))
         )
-        keyboard_size_ok = int(keyboard.get("w")) >= 440 and int(keyboard.get("h")) >= 250
+        keyboard_size_ok = int(keyboard.get("w")) >= min_w and int(keyboard.get("h")) >= min_h
     except (TypeError, ValueError):
         return False
+    expected_onboarding = compose_capture_expected_onboarding(expected_target)
+    dock_ok = (
+        probe.get("dock_hidden") is True
+        if compose_capture_requires_hidden_dock(expected_target)
+        else isinstance(probe.get("dock_hidden"), bool)
+    )
     return (
         probe.get("ok") is True
         and probe.get("cmd") == "ui compose-probe"
@@ -522,8 +575,8 @@ def compose_capture_probe_ok(probe: dict, expected_target: str) -> bool:
         and probe.get("sheet_visible") is True
         and probe.get("textarea_visible") is True
         and probe.get("keyboard_visible") is True
-        and probe.get("onboarding_visible") is False
-        and probe.get("dock_hidden") is True
+        and probe.get("onboarding_visible") is expected_onboarding
+        and dock_ok
         and probe.get("dm_mode") is (expected_target.startswith("dm"))
         and probe.get("public_rf_tx") is False
         and probe.get("formats_sd") is False
@@ -561,7 +614,7 @@ def compose_keyboard_capture_ok(data: dict, expected_port: str) -> bool:
             and capture["capture"].get("port") == expected_port
             and capture["capture"].get("width") == 480
             and capture["capture"].get("height") == 480
-            and capture["capture"].get("onboarding_visible") is False
+            and capture["capture"].get("onboarding_visible") is compose_capture_expected_onboarding(target)
             and capture.get("target_visible") is True
             and compose_capture_probe_ok(capture.get("compose_probe"), target)
             for target, capture in captures_by_target.items()
@@ -1938,8 +1991,8 @@ def build_audit(args: argparse.Namespace) -> dict:
             ),
             root,
             lambda data: compose_keyboard_capture_ok(data, args.d1l_port),
-            "Current-commit D1L compose keyboard capture proves Public and DM keyboard states fit the 480x480 hardware frame.",
-            "No passing current-commit D1L compose keyboard hardware capture artifact was found.",
+            "Current-commit D1L compose/input keyboard capture proves all release-blocking keyboard callers fit the 480x480 hardware frame.",
+            "No passing current-commit D1L compose/input keyboard hardware capture artifact was found.",
         )
     )
     gates.append(

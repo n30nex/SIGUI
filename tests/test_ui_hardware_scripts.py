@@ -281,7 +281,7 @@ def test_ui_capture_ready_wait_requires_fresh_non_pending_frame():
 
 def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     report = ui_compose_keyboard_capture_d1l.dry_run_report(
-        targets=["public", "public-long", "dm", "dm-long"],
+        targets=ui_compose_keyboard_capture_d1l.parse_targets("all"),
         chunk_size=2048,
     )
 
@@ -289,13 +289,29 @@ def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     assert report["kind"] == "ui_compose_keyboard_capture"
     assert report["mode"] == "dry-run"
     assert report["explicit_port_required"] is True
-    assert report["targets"] == ["public", "public-long", "dm", "dm-long"]
+    assert report["targets"] == ui_compose_keyboard_capture_d1l.ALL_TARGETS
     assert "ui compose-probe public" in report["commands"]
     assert "ui compose-probe dm-long" in report["commands"]
+    assert "ui compose-probe public-search" in report["commands"]
+    assert "ui compose-probe packet-search" in report["commands"]
+    assert "ui compose-probe contact-edit" in report["commands"]
+    assert "ui compose-probe onboarding" in report["commands"]
+    assert "ui compose-probe map-location" in report["commands"]
+    assert "ui compose-probe map-provider" in report["commands"]
+    assert "ui compose-probe wifi-ssid" in report["commands"]
+    assert "ui compose-probe wifi-password" in report["commands"]
     assert "ui capture chunk 0 1024" in report["commands"]
     assert report["chunk_size"] == 1024
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
+
+
+def test_ui_compose_keyboard_capture_accepts_all_and_underscore_aliases():
+    assert ui_compose_keyboard_capture_d1l.parse_targets("all") == ui_compose_keyboard_capture_d1l.ALL_TARGETS
+    assert ui_compose_keyboard_capture_d1l.parse_targets("wifi_password,map_provider") == [
+        "wifi-password",
+        "map-provider",
+    ]
 
 
 def test_ui_compose_keyboard_capture_preserves_pixels_when_probe_geometry_fails(tmp_path, monkeypatch):

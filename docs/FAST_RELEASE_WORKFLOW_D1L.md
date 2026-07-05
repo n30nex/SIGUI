@@ -47,7 +47,7 @@ Then run one issue proof:
 |---|---|
 | Split-page or stale-column redraw corruption | `python .\scripts\ui_corruption_probe_d1l.py --port COM12 --rounds 20 --clear-crashlog-before-start --out artifacts\hardware\com12\ui_corruption_probe-<sha>-COM12.json` |
 | Hardware pixel capture or SiguredOS Home proof | `python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>` then `python .\scripts\ui_capture_d1l.py --port COM12 --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json` |
-| Compose keyboard geometry | `python .\scripts\ui_compose_keyboard_capture_d1l.py --port COM12 --targets public,public-long,dm,dm-long --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json` |
+| Compose/input keyboard geometry | `python .\scripts\ui_compose_keyboard_capture_d1l.py --port COM12 --targets all --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json` |
 | One scroll/layout surface | `python .\scripts\scroll_probe_d1l.py --port COM12 --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start --out artifacts\hardware\com12\scroll_probe-<sha>-COM12.json` |
 | Docs, tests, host simulator, or non-hardware plumbing | No COM12 cycle unless the GitHub issue explicitly names hardware acceptance. Use Actions plus host artifacts. |
 
