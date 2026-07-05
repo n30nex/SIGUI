@@ -650,12 +650,15 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
     return BLUE
 
 
-def draw_top_bar(s: Surface, snap: Snapshot):
+def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
-    s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
-    s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
-    s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
-    s.text(f"Wi-Fi off  BLE off  SD {snap.storage_state}", (202, 31, 464, 49), 11, MUTED, align="right")
+    if compact:
+        s.text("DeskOS", (16, 17, 150, 38), 14, TEXT, True)
+    else:
+        s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
+        s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
+        s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
+        s.text(f"Wi-Fi off  BLE off  SD {snap.storage_state}", (202, 31, 464, 49), 11, MUTED, align="right")
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -794,6 +797,26 @@ def draw_launcher_icon(s: Surface, box: tuple[int, int, int, int], icon: str, co
     elif icon == "signal":
         for i in range(4):
             s.rect((cx - 18 + i * 10, cy + 13 - i * 8, cx - 12 + i * 10, cy + 15), color)
+    elif icon == "time":
+        s.draw.ellipse((cx - 13, cy - 13, cx + 13, cy + 13), outline=color, width=3)
+        s.line(((cx, cy), (cx, cy - 8)), color)
+        s.line(((cx, cy), (cx + 7, cy + 4)), color)
+    elif icon == "wifi":
+        s.draw.arc((cx - 20, cy - 16, cx + 20, cy + 24), 220, 320, fill=color, width=3)
+        s.draw.arc((cx - 13, cy - 9, cx + 13, cy + 17), 220, 320, fill=color, width=3)
+        s.draw.ellipse((cx - 3, cy + 7, cx + 3, cy + 13), fill=color)
+    elif icon == "ble":
+        s.line(((cx, cy - 15), (cx, cy + 15)), color)
+        s.line(((cx, cy - 15), (cx + 11, cy - 6)), color)
+        s.line(((cx + 11, cy - 6), (cx, cy + 1)), color)
+        s.line(((cx, cy + 1), (cx + 11, cy + 9)), color)
+        s.line(((cx + 11, cy + 9), (cx, cy + 15)), color)
+        s.line(((cx - 11, cy - 8), (cx + 11, cy + 9)), color)
+        s.line(((cx - 11, cy + 9), (cx + 11, cy - 6)), color)
+    elif icon == "sd":
+        s.draw.polygon(((cx - 10, cy - 15), (cx + 10, cy - 15), (cx + 14, cy - 10), (cx + 14, cy + 15), (cx - 14, cy + 15), (cx - 14, cy - 11)), fill=color)
+        s.rect((cx - 6, cy - 9, cx - 2, cy - 3), (15, 28, 24))
+        s.rect((cx + 2, cy - 9, cx + 6, cy - 3), (15, 28, 24))
     else:
         s.text(icon[:3].upper(), (x0, y0, x1, y1), min(w, h) // 3, color, True, "center")
 
@@ -815,6 +838,24 @@ def draw_launcher_tile(
     s.text(label, (x0 + 5, y0 + 42, x1 - 5, y0 + 60), 11, TEXT, True, "center")
     s.text(detail, (x0 + 5, y0 + 60, x1 - 5, y1 - 4), 9, MUTED, False, "center")
     s.touch_target(label, box, kind="launcher_tile", action=action, destination=destination)
+
+
+def draw_status_icon(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    icon: str,
+    label: str,
+    color: tuple[int, int, int],
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+):
+    x0, y0, x1, y1 = box
+    s.round_rect(box, (13, 23, 18), (31, 55, 46), 4)
+    draw_launcher_icon(s, (x0 + 30, y0 + 4, x1 - 30, y0 + 34), icon, color)
+    s.text(label, (x0 + 5, y0 + 34, x1 - 5, y1 - 3), 10, color, True, "center")
+    if action or destination:
+        s.touch_target(label, box, kind="status_icon", action=action, destination=destination)
 
 
 def draw_settings_group(
@@ -896,38 +937,30 @@ def draw_row(
 
 def draw_home_body(s: Surface, snap: Snapshot):
     tiles = (
-        ((8, 64, 118, 144), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
-        ((126, 64, 236, 144), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
-        ((244, 64, 354, 144), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
-        ((362, 64, 472, 144), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
-        ((8, 152, 118, 232), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
-        ((126, 152, 236, 232), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
-        ((244, 152, 354, 232), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
-        ((362, 152, 472, 232), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
-        ((8, 240, 118, 320), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
-        ((126, 240, 236, 320), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
-        ((244, 240, 354, 320), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
-        ((362, 240, 472, 320), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
+        ((8, 60, 118, 168), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
+        ((126, 60, 236, 168), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
+        ((244, 60, 354, 168), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
+        ((362, 60, 472, 168), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
+        ((8, 176, 118, 284), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
+        ((126, 176, 236, 284), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
+        ((244, 176, 354, 284), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
+        ((362, 176, 472, 284), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
+        ((8, 292, 118, 400), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
+        ((126, 292, 236, 400), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
+        ((244, 292, 354, 400), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
+        ((362, 292, 472, 400), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
     )
     for box, icon, label, detail, color, action, destination in tiles:
         draw_launcher_tile(s, box, icon, label, detail, color, action=action, destination=destination)
 
-    s.text(
-        f"Mesh {snap.mesh_state}  RX {snap.rx_total}  TX {snap.tx_total}  Pub {snap.unread_public}  DM {snap.unread_dm}",
-        (16, 326, 464, 352),
-        12,
-        TEXT,
-        True,
-        "center",
-    )
-    draw_chip(s, (8, 366, 118, 410), "Time", "--:--", MUTED)
-    draw_chip(s, (126, 366, 236, 410), "Wi-Fi", "off", MUTED, action="open_wifi_settings", destination="wifi_setup_sheet")
-    draw_chip(s, (244, 366, 354, 410), "BLE", "off", MUTED, action="open_ble_settings", destination="ble_setup_sheet")
-    draw_chip(s, (362, 366, 472, 410), "SD", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else MUTED, action="open_storage_setup", destination="storage_setup_sheet")
+    draw_status_icon(s, (8, 420, 118, 472), "time", "Time", ACCENT)
+    draw_status_icon(s, (126, 420, 236, 472), "wifi", "Wi-Fi", ACCENT, action="open_wifi_settings", destination="wifi_setup_sheet")
+    draw_status_icon(s, (244, 420, 354, 472), "ble", "BLE", VIOLET, action="open_ble_settings", destination="ble_setup_sheet")
+    draw_status_icon(s, (362, 420, 472, 472), "sd", "SD", GREEN if snap.storage_backend != "NVS fallback" else AMBER, action="open_storage_setup", destination="storage_setup_sheet")
 
 
 def render_home(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
+    draw_top_bar(s, snap, compact=True)
     draw_home_body(s, snap)
 
 
@@ -1854,7 +1887,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
-        "MeshCore DeskOS",
+        "DeskOS",
         "Chats",
         "DMs",
         "Rooms",

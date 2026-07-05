@@ -120,6 +120,10 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_lock_overlay" in source
     assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
+    assert "static void restore_dock_for_active_tab(void)" in source
+    assert "set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME)" in source
+    assert "lv_obj_set_size(s_content, 480, s_active_tab == D1L_UI_TAB_HOME ? 424 : 362)" in source
+    assert "layout_content_for_active_tab();" in source
 
 
 def test_home_screen_is_user_first_companion_dashboard():
@@ -128,7 +132,11 @@ def test_home_screen_is_user_first_companion_dashboard():
 
     assert "home_sd_state" in source
     assert "render_home_launcher_tile" in source
-    assert "render_home_chip" in source
+    assert "render_home_status_icon" in source
+    assert "s_title_label" in source
+    assert "set_object_hidden(s_status_label, home)" in source
+    assert "set_object_hidden(s_identity_label, home)" in source
+    assert "set_object_hidden(s_lock_button, home)" in source
     assert '"Chats"' in source
     assert '"Rooms"' in source
     assert '"Contacts"' in source
@@ -163,6 +171,17 @@ def test_home_screen_is_user_first_companion_dashboard():
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
+    assert "render_home_launcher_tile(s_content, 8, 236" in home_body
+    assert "render_home_status_icon(s_content, 8, 364, 110" in home_body
+    assert "LV_SYMBOL_WIFI" in home_body
+    assert "LV_SYMBOL_BLUETOOTH" in home_body
+    assert "LV_SYMBOL_SD_CARD" in home_body
+    home_status_body = home_body.split("render_home_status_icon(s_content, 8, 364, 110", 1)[1]
+    assert "0x00C2FF" in home_status_body
+    assert "0xC4B5FD" in home_status_body
+    assert "0xFBBF24" in home_status_body
+    assert "0x8EA0AE" not in home_status_body
+    assert "Mesh %s  RX %lu  TX %lu" not in home_body
     assert "Last Messages" not in home_body
     assert "Local Repeaters" not in home_body
     assert "RF Packets" not in home_body
@@ -250,15 +269,19 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     console = read("main/comms/usb_console.c")
 
     assert "configure_content_scroll_root" in source
+    assert "configure_home_content_root" in source
+    assert "configure_content_for_active_tab" in source
     assert "lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in source
     assert "lv_obj_set_scroll_dir(root, LV_DIR_VER)" in source
     assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO)" in source
-    assert "configure_content_scroll_root(s_content)" in source
+    assert "lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in source
+    assert "lv_obj_set_scroll_dir(root, LV_DIR_NONE)" in source
+    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF)" in source
+    assert "configure_content_for_active_tab()" in source
     assert "layout_content_for_active_tab()" in source
     assert "lv_obj_set_size(s_content, 480, s_active_tab == D1L_UI_TAB_HOME ? 424 : 362)" in source
     assert "set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME)" in source
     assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
-    assert "lv_obj_clear_flag(s_content, LV_OBJ_FLAG_SCROLLABLE)" not in source
     assert "d1l_ui_phase1_request_tab" in header
     assert "d1l_ui_scroll_probe_result_t" in header
     assert "d1l_ui_phase1_scroll_probe" in header

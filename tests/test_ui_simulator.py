@@ -123,6 +123,8 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "BLE",
         "SD",
     } <= labels_by_view["home"]
+    assert "DeskOS" in labels_by_view["home"]
+    assert "Mesh ready, listening" not in labels_by_view["home"]
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
     for view_name in ("messages", "messages_dm", "nodes", "map", "packets", "settings"):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
@@ -267,6 +269,13 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
+    assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
+    assert actions_by_view["home"]["open_wifi_settings"]["kind"] == "status_icon"
+    assert actions_by_view["home"]["open_wifi_settings"]["visual_box"][1] >= 420
+    assert actions_by_view["home"]["open_storage_setup"]["kind"] == "status_icon"
+    assert actions_by_view["home"]["open_storage_setup"]["visual_box"][1] >= 420
+    for docked_view in ("messages", "nodes", "map", "packets", "settings"):
+        assert any(target["kind"] == "dock_tab" for target in views[docked_view]["touch_targets"]), docked_view
     assert actions_by_view["home"]["open_messages_public"]["destination"] == "messages"
     assert actions_by_view["home"]["open_messages_dm"]["destination"] == "messages_dm"
     assert actions_by_view["home"]["open_mesh_roles"]["destination"] == "mesh_roles_sheet"
