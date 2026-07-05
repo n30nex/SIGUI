@@ -134,8 +134,8 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "lv_obj_set_size(s_top_bar, 480, layout.content_y)" in source
     assert "layout.header_detail_visible ? 8 : 1" in source
     assert "lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 0)" in source
-    assert ".content_y = 18" in chrome
-    assert ".content_height = 462" in chrome
+    assert ".content_y = 16" in chrome
+    assert ".content_height = 464" in chrome
     assert ".content_scrollable = false" in chrome
     assert ".dock_visible = false" in chrome
     assert ".header_detail_visible = false" in chrome
@@ -194,12 +194,12 @@ def test_home_screen_is_user_first_companion_dashboard():
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
-    assert "render_home_launcher_tile(s_content, 6, 276" in home_body
-    assert "render_home_status_icon(s_content, 6, 416, 114" in home_body
+    assert "render_home_launcher_tile(s_content, 4, 280" in home_body
+    assert "render_home_status_icon(s_content, 4, 416, 116" in home_body
     assert "LV_SYMBOL_WIFI" in home_body
     assert "LV_SYMBOL_BLUETOOTH" in home_body
     assert "LV_SYMBOL_SD_CARD" in home_body
-    home_status_body = home_body.split("render_home_status_icon(s_content, 6, 416, 114", 1)[1]
+    home_status_body = home_body.split("render_home_status_icon(s_content, 4, 416, 116", 1)[1]
     assert "0x00C2FF" in home_status_body
     assert "0xC4B5FD" in home_status_body
     assert "0xFBBF24" in home_status_body

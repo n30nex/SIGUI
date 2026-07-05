@@ -1451,7 +1451,7 @@ static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
                                          lv_event_cb_t cb,
                                          void *user_data)
 {
-    lv_obj_t *chip = create_panel(parent, x, y, w, 44);
+    lv_obj_t *chip = create_panel(parent, x, y, w, 48);
     if (!chip) {
         return NULL;
     }
@@ -1467,12 +1467,12 @@ static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
     label_set_dot_width(icon_label, w - 8);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 4, 0);
+    obj_set_pos_if(icon_label, 4, 2);
 
     lv_obj_t *label = create_label(chip, title, accent);
     label_set_dot_width(label, w - 8);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(label, 4, 28);
+    obj_set_pos_if(label, 4, 31);
     return chip;
 }
 
@@ -1486,7 +1486,7 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
                                            lv_event_cb_t cb,
                                            void *user_data)
 {
-    lv_obj_t *tile = create_panel(parent, x, y, 114, 126);
+    lv_obj_t *tile = create_panel(parent, x, y, 116, 132);
     if (!tile) {
         return NULL;
     }
@@ -1501,19 +1501,19 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
 
     lv_obj_t *icon_label = create_label(tile, icon, accent);
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
-    label_set_dot_width(icon_label, 102);
+    label_set_dot_width(icon_label, 104);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 0, 14);
+    obj_set_pos_if(icon_label, 6, 16);
 
     lv_obj_t *title_label = create_label(tile, title, 0xF4F7FB);
-    label_set_dot_width(title_label, 102);
+    label_set_dot_width(title_label, 104);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(title_label, 0, 68);
+    obj_set_pos_if(title_label, 6, 72);
 
     lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
-    label_set_dot_width(detail_label, 102);
+    label_set_dot_width(detail_label, 104);
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(detail_label, 0, 96);
+    obj_set_pos_if(detail_label, 6, 102);
     return tile;
 }
 
@@ -1608,52 +1608,52 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->public_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 6, 4, LV_SYMBOL_ENVELOPE, "Chats", detail,
+    render_home_launcher_tile(s_content, 4, 0, LV_SYMBOL_ENVELOPE, "Chats", detail,
                               snapshot->public_unread_count ? 0xFBBF24 : 0x00C2FF,
                               open_messages_public_event_cb, NULL);
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 124, 4, LV_SYMBOL_FILE, "DMs", detail,
+    render_home_launcher_tile(s_content, 122, 0, LV_SYMBOL_FILE, "DMs", detail,
                               snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0,
                               open_messages_dm_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu seen", (unsigned long)snapshot->recent_room_count);
-    render_home_launcher_tile(s_content, 242, 4, LV_SYMBOL_DIRECTORY, "Rooms", detail,
+    render_home_launcher_tile(s_content, 240, 0, LV_SYMBOL_DIRECTORY, "Rooms", detail,
                               snapshot->recent_room_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu saved", (unsigned long)snapshot->contact_count);
-    render_home_launcher_tile(s_content, 360, 4, LV_SYMBOL_CALL, "Contacts", detail,
+    render_home_launcher_tile(s_content, 358, 0, LV_SYMBOL_CALL, "Contacts", detail,
                               snapshot->contact_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_NODES);
 
     snprintf(detail, sizeof(detail), "%lu heard", (unsigned long)snapshot->recent_repeater_count);
-    render_home_launcher_tile(s_content, 6, 140, LV_SYMBOL_REFRESH, "Repeaters", detail,
+    render_home_launcher_tile(s_content, 4, 140, LV_SYMBOL_REFRESH, "Repeaters", detail,
                               snapshot->recent_repeater_count ? 0xFBBF24 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 124, 140, LV_SYMBOL_BELL, "Advertise", "manual",
+    render_home_launcher_tile(s_content, 122, 140, LV_SYMBOL_BELL, "Advertise", "manual",
                               0x00C2FF, open_sheet_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 242, 140, LV_SYMBOL_GPS, "Map",
+    render_home_launcher_tile(s_content, 240, 140, LV_SYMBOL_GPS, "Map",
                               snapshot->map_tile_cache_ready ? "tiles ready" : "offline",
                               snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_MAP);
 
-    render_home_launcher_tile(s_content, 360, 140, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
+    render_home_launcher_tile(s_content, 358, 140, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
                               0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu rows", (unsigned long)snapshot->packet_count);
-    render_home_launcher_tile(s_content, 6, 276, LV_SYMBOL_LIST, "Packets", detail,
+    render_home_launcher_tile(s_content, 4, 280, LV_SYMBOL_LIST, "Packets", detail,
                               snapshot->packet_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_PACKETS);
 
-    render_home_launcher_tile(s_content, 124, 276, LV_SYMBOL_SETTINGS, "Settings", "setup",
+    render_home_launcher_tile(s_content, 122, 280, LV_SYMBOL_SETTINGS, "Settings", "setup",
                               0x00C2FF, request_tab_event_cb,
                               (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
 
-    render_home_launcher_tile(s_content, 242, 276, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
+    render_home_launcher_tile(s_content, 240, 280, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
                               snapshot->storage_data_enabled ? 0x5EEAD4 :
                               (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
                               open_storage_sheet_event_cb, NULL);
@@ -1663,19 +1663,19 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     } else {
         snprintf(detail, sizeof(detail), "waiting");
     }
-    render_home_launcher_tile(s_content, 360, 276, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
+    render_home_launcher_tile(s_content, 358, 280, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
                               snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_status_icon(s_content, 6, 416, 114, LV_SYMBOL_REFRESH, "Time",
+    render_home_status_icon(s_content, 4, 416, 116, LV_SYMBOL_REFRESH, "Time",
                             snapshot->time_available ? 0x5EEAD4 : 0x00C2FF, NULL, NULL);
-    render_home_status_icon(s_content, 124, 416, 114, LV_SYMBOL_WIFI, "Wi-Fi",
+    render_home_status_icon(s_content, 122, 416, 116, LV_SYMBOL_WIFI, "Wi-Fi",
                             snapshot->wifi_enabled ? 0x5EEAD4 : 0x00C2FF,
                             open_wifi_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 242, 416, 114, LV_SYMBOL_BLUETOOTH, "BLE",
+    render_home_status_icon(s_content, 240, 416, 116, LV_SYMBOL_BLUETOOTH, "BLE",
                             snapshot->ble_companion_enabled ? 0xA7F3D0 : 0xC4B5FD,
                             open_ble_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 360, 416, 114, LV_SYMBOL_SD_CARD, "SD",
+    render_home_status_icon(s_content, 358, 416, 116, LV_SYMBOL_SD_CARD, "SD",
                             snapshot->storage_data_enabled ? 0x5EEAD4 :
                             0xFBBF24,
                             open_storage_sheet_event_cb, NULL);
