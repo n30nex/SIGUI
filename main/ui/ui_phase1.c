@@ -52,8 +52,10 @@ static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
 static lv_obj_t *s_content;
+static lv_obj_t *s_title_label;
 static lv_obj_t *s_status_label;
 static lv_obj_t *s_identity_label;
+static lv_obj_t *s_lock_button;
 static lv_obj_t *s_toast;
 static lv_obj_t *s_sheet;
 static lv_obj_t *s_dock;
@@ -605,6 +607,29 @@ static void configure_content_scroll_root(lv_obj_t *root)
     lv_obj_set_style_border_width(root, 0, 0);
     lv_obj_set_style_pad_all(root, 0, 0);
     lv_obj_set_style_pad_bottom(root, 12, 0);
+}
+
+static void configure_home_content_root(lv_obj_t *root)
+{
+    if (!root) {
+        return;
+    }
+    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(root, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_style_bg_color(root, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_width(root, 0, 0);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_set_style_pad_bottom(root, 0, 0);
+}
+
+static void configure_content_for_active_tab(void)
+{
+    if (s_active_tab == D1L_UI_TAB_HOME) {
+        configure_home_content_root(s_content);
+    } else {
+        configure_content_scroll_root(s_content);
+    }
 }
 
 static void request_full_screen_repaint(void)
@@ -1420,9 +1445,29 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
     request_full_screen_repaint();
 }
 
+static void set_object_hidden(lv_obj_t *obj, bool hidden)
+{
+    if (!obj) {
+        return;
+    }
+    if (hidden) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_clear_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void update_chrome(const d1l_app_snapshot_t *snapshot)
 {
-    if (!snapshot || !s_status_label || !s_identity_label) {
+    if (!snapshot || !s_title_label || !s_status_label || !s_identity_label) {
+        return;
+    }
+    const bool home = s_active_tab == D1L_UI_TAB_HOME;
+    lv_label_set_text(s_title_label, home ? "DeskOS" : "MeshCore DeskOS");
+    set_object_hidden(s_status_label, home);
+    set_object_hidden(s_identity_label, home);
+    set_object_hidden(s_lock_button, home);
+    if (home) {
         return;
     }
     label_set_fmt(s_status_label, "%s  Mesh %s",
@@ -1689,30 +1734,35 @@ static const char *home_sd_state(const d1l_app_snapshot_t *snapshot)
     return "fallback";
 }
 
-static lv_obj_t *render_home_chip(lv_obj_t *parent,
-                                  int x,
-                                  int y,
-                                  int w,
-                                  const char *title,
-                                  const char *value,
-                                  uint32_t accent,
-                                  lv_event_cb_t cb,
-                                  void *user_data)
+static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
+                                         int x,
+                                         int y,
+                                         int w,
+                                         const char *icon,
+                                         const char *title,
+                                         uint32_t accent,
+                                         lv_event_cb_t cb,
+                                         void *user_data)
 {
-    lv_obj_t *chip = create_panel(parent, x, y, w, 44);
+    lv_obj_t *chip = create_panel(parent, x, y, w, 52);
     if (!chip) {
         return NULL;
     }
-    lv_obj_set_style_pad_all(chip, 7, 0);
+    lv_obj_set_style_pad_all(chip, 4, 0);
     if (cb) {
         lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(chip, cb, LV_EVENT_CLICKED, user_data);
     }
-    lv_obj_t *label = create_label(chip, title, 0x8EA0AE);
-    obj_align_if(label, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *state = create_label(chip, value, accent);
-    label_set_dot_width(state, w - 16);
-    obj_align_if(state, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *icon_label = create_label(chip, icon, accent);
+    obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
+    label_set_dot_width(icon_label, w - 8);
+    lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(icon_label, 4, 2);
+
+    lv_obj_t *label = create_label(chip, title, accent);
+    label_set_dot_width(label, w - 8);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    obj_set_pos_if(label, 4, 34);
     return chip;
 }
 
@@ -1726,7 +1776,7 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
                                            lv_event_cb_t cb,
                                            void *user_data)
 {
-    lv_obj_t *tile = create_panel(parent, x, y, 110, 76);
+    lv_obj_t *tile = create_panel(parent, x, y, 110, 108);
     if (!tile) {
         return NULL;
     }
@@ -1743,17 +1793,17 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
     label_set_dot_width(icon_label, 98);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 0, 2);
+    obj_set_pos_if(icon_label, 0, 12);
 
     lv_obj_t *title_label = create_label(tile, title, 0xF4F7FB);
     label_set_dot_width(title_label, 98);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(title_label, 0, 34);
+    obj_set_pos_if(title_label, 0, 52);
 
     lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
     label_set_dot_width(detail_label, 98);
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(detail_label, 0, 54);
+    obj_set_pos_if(detail_label, 0, 76);
     return tile;
 }
 
@@ -1869,31 +1919,31 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_NODES);
 
     snprintf(detail, sizeof(detail), "%lu heard", (unsigned long)snapshot->recent_repeater_count);
-    render_home_launcher_tile(s_content, 8, 92, LV_SYMBOL_REFRESH, "Repeaters", detail,
+    render_home_launcher_tile(s_content, 8, 120, LV_SYMBOL_REFRESH, "Repeaters", detail,
                               snapshot->recent_repeater_count ? 0xFBBF24 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 126, 92, LV_SYMBOL_BELL, "Advertise", "manual",
+    render_home_launcher_tile(s_content, 126, 120, LV_SYMBOL_BELL, "Advertise", "manual",
                               0x00C2FF, open_sheet_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 244, 92, LV_SYMBOL_GPS, "Map",
+    render_home_launcher_tile(s_content, 244, 120, LV_SYMBOL_GPS, "Map",
                               snapshot->map_tile_cache_ready ? "tiles ready" : "offline",
                               snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_MAP);
 
-    render_home_launcher_tile(s_content, 362, 92, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
+    render_home_launcher_tile(s_content, 362, 120, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
                               0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu rows", (unsigned long)snapshot->packet_count);
-    render_home_launcher_tile(s_content, 8, 176, LV_SYMBOL_LIST, "Packets", detail,
+    render_home_launcher_tile(s_content, 8, 236, LV_SYMBOL_LIST, "Packets", detail,
                               snapshot->packet_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_PACKETS);
 
-    render_home_launcher_tile(s_content, 126, 176, LV_SYMBOL_SETTINGS, "Settings", "setup",
+    render_home_launcher_tile(s_content, 126, 236, LV_SYMBOL_SETTINGS, "Settings", "setup",
                               0x00C2FF, request_tab_event_cb,
                               (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
 
-    render_home_launcher_tile(s_content, 244, 176, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
+    render_home_launcher_tile(s_content, 244, 236, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
                               snapshot->storage_data_enabled ? 0x5EEAD4 :
                               (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
                               open_storage_sheet_event_cb, NULL);
@@ -1903,36 +1953,22 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     } else {
         snprintf(detail, sizeof(detail), "waiting");
     }
-    render_home_launcher_tile(s_content, 362, 176, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
+    render_home_launcher_tile(s_content, 362, 236, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
                               snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    lv_obj_t *summary = create_label(s_content, "", 0xD7E1EA);
-    label_set_fmt(summary, "Mesh %s  RX %lu  TX %lu  Pub %lu  DM %lu",
-                  snapshot->mesh_state ? snapshot->mesh_state : "starting",
-                  (unsigned long)snapshot->rx_packets,
-                  (unsigned long)snapshot->tx_packets,
-                  (unsigned long)snapshot->public_unread_count,
-                  (unsigned long)snapshot->dm_unread_count);
-    label_set_dot_width(summary, 448);
-    lv_obj_set_style_text_align(summary, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(summary, 16, 262);
-
-    render_home_chip(s_content, 8, 296, 110, "Time",
-                     snapshot->time_label[0] ? snapshot->time_label : "--:--",
-                     snapshot->time_available ? 0x5EEAD4 : 0x8EA0AE, NULL, NULL);
-    render_home_chip(s_content, 126, 296, 110, "Wi-Fi",
-                     snapshot->wifi_state ? snapshot->wifi_state : "off",
-                     snapshot->wifi_enabled ? 0x5EEAD4 : 0x8EA0AE,
-                     open_wifi_sheet_event_cb, NULL);
-    render_home_chip(s_content, 244, 296, 110, "BLE",
-                     snapshot->ble_state ? snapshot->ble_state : "off",
-                     snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
-                     open_ble_sheet_event_cb, NULL);
-    render_home_chip(s_content, 362, 296, 110, "SD", home_sd_state(snapshot),
-                     snapshot->storage_data_enabled ? 0x5EEAD4 :
-                     (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
-                     open_storage_sheet_event_cb, NULL);
+    render_home_status_icon(s_content, 8, 364, 110, LV_SYMBOL_REFRESH, "Time",
+                            snapshot->time_available ? 0x5EEAD4 : 0x00C2FF, NULL, NULL);
+    render_home_status_icon(s_content, 126, 364, 110, LV_SYMBOL_WIFI, "Wi-Fi",
+                            snapshot->wifi_enabled ? 0x5EEAD4 : 0x00C2FF,
+                            open_wifi_sheet_event_cb, NULL);
+    render_home_status_icon(s_content, 244, 364, 110, LV_SYMBOL_BLUETOOTH, "BLE",
+                            snapshot->ble_companion_enabled ? 0xA7F3D0 : 0xC4B5FD,
+                            open_ble_sheet_event_cb, NULL);
+    render_home_status_icon(s_content, 362, 364, 110, LV_SYMBOL_SD_CARD, "SD",
+                            snapshot->storage_data_enabled ? 0x5EEAD4 :
+                            0xFBBF24,
+                            open_storage_sheet_event_cb, NULL);
 }
 
 static void render_storage_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -6180,7 +6216,7 @@ static void render_active_tab(void)
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
     lv_obj_clean(s_content);
-    configure_content_scroll_root(s_content);
+    configure_content_for_active_tab();
     lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);
     switch (s_active_tab) {
     case D1L_UI_TAB_HOME:
@@ -6869,9 +6905,8 @@ static void create_top_bar(lv_obj_t *screen)
     lv_obj_set_style_pad_all(bar, 8, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = create_label(bar, "MeshCore DeskOS", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 2, 0);
+    s_title_label = create_label(bar, "DeskOS", 0xF4F7FB);
+    lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 2, 0);
 
     s_status_label = create_label(bar, "starting", 0x5EEAD4);
     lv_label_set_long_mode(s_status_label, LV_LABEL_LONG_DOT);
@@ -6883,7 +6918,7 @@ static void create_top_bar(lv_obj_t *screen)
     lv_obj_set_width(s_identity_label, 190);
     lv_obj_align(s_identity_label, LV_ALIGN_BOTTOM_RIGHT, -48, -1);
 
-    create_button(bar, "Lock", 404, 6, 64, 40, lock_event_cb, NULL);
+    s_lock_button = create_button(bar, "Lock", 404, 6, 64, 40, lock_event_cb, NULL);
 }
 
 static void create_dock(lv_obj_t *screen)
@@ -7650,7 +7685,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     if (!s_content) {
         return ESP_ERR_NO_MEM;
     }
-    lv_obj_set_size(s_content, 480, 362);
+    lv_obj_set_size(s_content, 480, 424);
     lv_obj_set_pos(s_content, 0, 56);
     configure_content_scroll_root(s_content);
 
