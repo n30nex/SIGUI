@@ -295,16 +295,19 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     keyboard = read("main/ui/ui_keyboard.c")
     keyboard_header = read("main/ui/ui_keyboard.h")
 
-    assert "configure_content_scroll_root" in source
-    assert "configure_home_content_root" in source
-    assert "configure_content_for_active_tab" in source
-    assert "lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in source
-    assert "lv_obj_set_scroll_dir(root, LV_DIR_VER)" in source
-    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO)" in source
-    assert "lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in source
-    assert "lv_obj_set_scroll_dir(root, LV_DIR_NONE)" in source
-    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF)" in source
-    assert "configure_content_for_active_tab()" in source
+    assert "d1l_ui_screen_configure_content_root" in screen
+    assert "d1l_ui_screen_configure_content_root" in read("main/ui/ui_screen.h")
+    assert "static void configure_scrollable_content_root" in screen
+    assert "static void configure_home_content_root" in screen
+    assert "lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in screen
+    assert "lv_obj_set_scroll_dir(root, LV_DIR_VER)" in screen
+    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO)" in screen
+    assert "lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE)" in screen
+    assert "lv_obj_set_scroll_dir(root, LV_DIR_NONE)" in screen
+    assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF)" in screen
+    assert "configure_content_scroll_root" not in source
+    assert "configure_content_for_active_tab" not in source
+    assert "d1l_ui_screen_configure_content_root(s_content, layout.content_scrollable)" in source
     assert "layout_content_for_active_tab()" in source
     assert "lv_obj_set_pos(s_content, 0, layout.content_y)" in source
     assert "lv_obj_set_size(s_content, 480, layout.content_height)" in source
