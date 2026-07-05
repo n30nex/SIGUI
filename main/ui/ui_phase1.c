@@ -21,6 +21,7 @@
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "ui_modal.h"
 #include "ui_navigation.h"
 #include "sdkconfig.h"
 
@@ -559,12 +560,7 @@ static void force_ui_layout_repaint(void)
 
 static void configure_sheet_scroll(lv_obj_t *sheet)
 {
-    if (!sheet) {
-        return;
-    }
-    lv_obj_add_flag(sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(sheet, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(sheet, LV_SCROLLBAR_MODE_AUTO);
+    d1l_ui_modal_configure_scroll(sheet);
 }
 
 static void lv_tick_task(void *arg)
@@ -1141,16 +1137,12 @@ static void layout_content_for_active_tab(void)
 
 static void hide_sheet(void)
 {
-    if (s_sheet) {
-        lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_sheet);
 }
 
 static void hide_compose_sheet(void)
 {
-    if (s_compose_sheet) {
-        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_compose_sheet);
     s_onboarding_probe_suppressed = false;
     restore_dock_for_active_tab();
     s_compose_dm = false;
@@ -1160,34 +1152,26 @@ static void hide_compose_sheet(void)
 
 static void hide_public_history_sheet(void)
 {
-    if (s_public_history_sheet) {
-        lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_public_history_sheet);
     s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
 }
 
 static void hide_public_search_sheet(void)
 {
-    if (s_public_search_sheet) {
-        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_public_search_sheet);
     restore_dock_for_active_tab();
 }
 
 static void hide_message_detail_sheet(void)
 {
-    if (s_message_detail_sheet) {
-        lv_obj_add_flag(s_message_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_message_detail_sheet);
     s_message_detail_advanced = false;
     memset(&s_message_detail_message, 0, sizeof(s_message_detail_message));
 }
 
 static void hide_dm_thread_sheet(void)
 {
-    if (s_dm_thread_sheet) {
-        lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_dm_thread_sheet);
     s_dm_thread_fingerprint[0] = '\0';
     s_dm_thread_alias[0] = '\0';
     s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
@@ -1195,68 +1179,50 @@ static void hide_dm_thread_sheet(void)
 
 static void hide_radio_settings_sheet(void)
 {
-    if (s_radio_settings_sheet) {
-        lv_obj_add_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_radio_settings_sheet);
 }
 
 static void hide_storage_sheet(void)
 {
-    if (s_storage_sheet) {
-        lv_obj_add_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_storage_sheet);
 }
 
 static void hide_wifi_sheet(void)
 {
-    if (s_wifi_sheet) {
-        lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_wifi_sheet);
     restore_dock_for_active_tab();
 }
 
 static void hide_ble_sheet(void)
 {
-    if (s_ble_sheet) {
-        lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_ble_sheet);
 }
 
 static void hide_display_sheet(void)
 {
-    if (s_display_sheet) {
-        lv_obj_add_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_display_sheet);
 }
 
 static void hide_diagnostics_sheet(void)
 {
-    if (s_diagnostics_sheet) {
-        lv_obj_add_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_diagnostics_sheet);
 }
 
 static void hide_map_location_sheet(void)
 {
-    if (s_map_location_sheet) {
-        lv_obj_add_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_map_location_sheet);
     restore_dock_for_active_tab();
 }
 
 static void hide_map_tiles_sheet(void)
 {
-    if (s_map_tiles_sheet) {
-        lv_obj_add_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_map_tiles_sheet);
     restore_dock_for_active_tab();
 }
 
 static void hide_contact_edit_sheet(void)
 {
-    if (s_contact_edit_sheet) {
-        lv_obj_add_flag(s_contact_edit_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_contact_edit_sheet);
     if (s_contact_edit_textarea) {
         lv_textarea_set_text(s_contact_edit_textarea, "");
     }
@@ -1265,9 +1231,7 @@ static void hide_contact_edit_sheet(void)
 
 static void hide_contact_detail_sheet(void)
 {
-    if (s_contact_detail_sheet) {
-        lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_contact_detail_sheet);
     hide_contact_edit_sheet();
     hide_node_detail_sheet();
     memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
@@ -1275,65 +1239,49 @@ static void hide_contact_detail_sheet(void)
 
 static void hide_contact_export_sheet(void)
 {
-    if (s_contact_export_sheet) {
-        lv_obj_add_flag(s_contact_export_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_contact_export_sheet);
     memset(&s_contact_export_contact, 0, sizeof(s_contact_export_contact));
     s_contact_export_uri[0] = '\0';
 }
 
 static void hide_node_detail_sheet(void)
 {
-    if (s_node_detail_sheet) {
-        lv_obj_add_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_node_detail_sheet);
     memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
 }
 
 static void hide_route_detail_sheet(void)
 {
-    if (s_route_detail_sheet) {
-        lv_obj_add_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_route_detail_sheet);
     memset(&s_route_detail_route, 0, sizeof(s_route_detail_route));
 }
 
 static void hide_route_trace_sheet(void)
 {
-    if (s_route_trace_sheet) {
-        lv_obj_add_flag(s_route_trace_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_route_trace_sheet);
     memset(&s_route_trace_contact, 0, sizeof(s_route_trace_contact));
 }
 
 static void hide_packet_detail_sheet(void)
 {
-    if (s_packet_detail_sheet) {
-        lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_packet_detail_sheet);
     memset(&s_packet_detail_packet, 0, sizeof(s_packet_detail_packet));
 }
 
 static void hide_packet_search_sheet(void)
 {
-    if (s_packet_search_sheet) {
-        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_packet_search_sheet);
     restore_dock_for_active_tab();
 }
 
 static void hide_mesh_roles_sheet(void)
 {
-    if (s_mesh_roles_sheet) {
-        lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_mesh_roles_sheet);
 }
 
 static void hide_onboarding_sheet(void)
 {
-    if (s_onboarding_sheet) {
-        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
-    }
+    d1l_ui_modal_hide(s_onboarding_sheet);
     s_onboarding_visible = false;
     request_full_screen_repaint();
 }
@@ -1353,8 +1301,7 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         return;
     }
     s_onboarding_visible = true;
-    lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_onboarding_sheet);
+    d1l_ui_modal_show(s_onboarding_sheet);
     request_full_screen_repaint();
 }
 
@@ -2284,8 +2231,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
     }
     if (s_compose_sheet) {
         set_dock_hidden(true);
-        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_compose_sheet);
+        d1l_ui_modal_show(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
@@ -2352,8 +2298,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     }
     if (s_compose_sheet) {
         set_dock_hidden(true);
-        lv_obj_clear_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_compose_sheet);
+        d1l_ui_modal_show(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
@@ -2538,8 +2483,7 @@ static void contact_detail_export_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_contact_export_sheet();
     if (s_contact_export_sheet) {
-        lv_obj_clear_flag(s_contact_export_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_contact_export_sheet);
+        d1l_ui_modal_show(s_contact_export_sheet);
     }
 }
 
@@ -2548,8 +2492,7 @@ static void show_contact_detail_after_edit(void)
     request_content_refresh();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
-        lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_contact_detail_sheet);
+        d1l_ui_modal_show(s_contact_detail_sheet);
     }
 }
 
@@ -2592,7 +2535,7 @@ static void forget_contact_edit_event_cb(lv_event_t *event)
         hide_contact_edit_sheet();
         hide_contact_export_sheet();
         if (s_contact_detail_sheet) {
-            lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+            d1l_ui_modal_hide(s_contact_detail_sheet);
         }
         memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
         request_content_refresh();
@@ -2638,7 +2581,7 @@ static void open_contact_edit_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     if (s_contact_detail_sheet) {
-        lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_contact_detail_sheet);
     }
     if (s_contact_edit_title) {
         char title[48];
@@ -2653,8 +2596,7 @@ static void open_contact_edit_event_cb(lv_event_t *event)
                              s_contact_detail_contact.alias : s_contact_detail_contact.fingerprint);
         lv_keyboard_set_textarea(s_contact_edit_keyboard, s_contact_edit_textarea);
     }
-    lv_obj_clear_flag(s_contact_edit_sheet, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_contact_edit_sheet);
+    d1l_ui_modal_show(s_contact_edit_sheet);
     set_dock_hidden(true);
 }
 
@@ -2836,8 +2778,7 @@ static void open_route_trace_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_route_trace_sheet();
     if (s_route_trace_sheet) {
-        lv_obj_clear_flag(s_route_trace_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_route_trace_sheet);
+        d1l_ui_modal_show(s_route_trace_sheet);
     }
 }
 
@@ -2908,8 +2849,7 @@ static void update_contact_detail_flags(bool favorite, bool muted)
         request_content_refresh();
         render_contact_detail_sheet();
         if (s_contact_detail_sheet) {
-            lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_contact_detail_sheet);
+            d1l_ui_modal_show(s_contact_detail_sheet);
         }
     }
     show_toast("Contact", ret);
@@ -2948,8 +2888,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_node_detail_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
-        lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_contact_detail_sheet);
+        d1l_ui_modal_show(s_contact_detail_sheet);
     }
 }
 
@@ -3066,8 +3005,7 @@ static void open_node_detail_event_cb(lv_event_t *event)
     s_node_detail_node = *view;
     render_node_detail_sheet();
     if (s_node_detail_sheet) {
-        lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_node_detail_sheet);
+        d1l_ui_modal_show(s_node_detail_sheet);
     }
 }
 
@@ -3160,8 +3098,7 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_route_detail_sheet();
     if (s_route_detail_sheet) {
-        lv_obj_clear_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_route_detail_sheet);
+        d1l_ui_modal_show(s_route_detail_sheet);
     }
 }
 
@@ -3307,8 +3244,7 @@ static void open_message_detail_event_cb(lv_event_t *event)
     hide_node_detail_sheet();
     render_message_detail_sheet();
     if (s_message_detail_sheet) {
-        lv_obj_clear_flag(s_message_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_message_detail_sheet);
+        d1l_ui_modal_show(s_message_detail_sheet);
     }
 }
 
@@ -3440,8 +3376,7 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_packet_detail_sheet();
     if (s_packet_detail_sheet) {
-        lv_obj_clear_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_packet_detail_sheet);
+        d1l_ui_modal_show(s_packet_detail_sheet);
     }
 }
 
@@ -3569,8 +3504,7 @@ static void open_packet_search_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_packet_search_textarea, s_packet_search_text);
         lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
     }
-    lv_obj_clear_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_packet_search_sheet);
+    d1l_ui_modal_show(s_packet_search_sheet);
     set_dock_hidden(true);
 }
 
@@ -3692,8 +3626,7 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     render_mesh_roles_sheet();
     if (s_mesh_roles_sheet) {
-        lv_obj_clear_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_mesh_roles_sheet);
+        d1l_ui_modal_show(s_mesh_roles_sheet);
     }
 }
 
@@ -3930,8 +3863,7 @@ static void show_public_history_sheet(void)
 {
     render_public_history_sheet();
     if (s_public_history_sheet) {
-        lv_obj_clear_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_public_history_sheet);
+        d1l_ui_modal_show(s_public_history_sheet);
     }
 }
 
@@ -3986,8 +3918,7 @@ static void open_public_search_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_public_search_textarea, s_public_search_text);
         lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
     }
-    lv_obj_clear_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(s_public_search_sheet);
+    d1l_ui_modal_show(s_public_search_sheet);
     set_dock_hidden(true);
 }
 
@@ -4045,8 +3976,7 @@ static void dm_thread_load_older_event_cb(lv_event_t *event)
     }
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
-        lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_dm_thread_sheet);
+        d1l_ui_modal_show(s_dm_thread_sheet);
     }
 }
 
@@ -4071,8 +4001,7 @@ static void read_dm_thread_event_cb(lv_event_t *event)
         request_content_refresh();
         render_dm_thread_sheet();
         if (s_dm_thread_sheet) {
-            lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_dm_thread_sheet);
+            d1l_ui_modal_show(s_dm_thread_sheet);
         }
     }
 }
@@ -4199,8 +4128,7 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
     hide_mesh_roles_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
-        lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_dm_thread_sheet);
+        d1l_ui_modal_show(s_dm_thread_sheet);
     }
 }
 
@@ -4554,8 +4482,7 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     render_map_location_sheet();
     if (s_map_location_sheet) {
         set_dock_hidden(true);
-        lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_map_location_sheet);
+        d1l_ui_modal_show(s_map_location_sheet);
     }
 }
 
@@ -4835,8 +4762,7 @@ static void open_map_tiles_sheet_event_cb(lv_event_t *event)
     render_map_tiles_sheet();
     if (s_map_tiles_sheet) {
         set_dock_hidden(true);
-        lv_obj_clear_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_map_tiles_sheet);
+        d1l_ui_modal_show(s_map_tiles_sheet);
     }
 }
 
@@ -4930,8 +4856,7 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
         render_map_location_sheet();
         if (s_map_location_sheet) {
             set_dock_hidden(true);
-            lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_map_location_sheet);
+            d1l_ui_modal_show(s_map_location_sheet);
         }
     }
 }
@@ -5149,8 +5074,7 @@ static void radio_save_event_cb(lv_event_t *event)
         request_content_refresh();
         render_radio_settings_sheet();
         if (s_radio_settings_sheet) {
-            lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_radio_settings_sheet);
+            d1l_ui_modal_show(s_radio_settings_sheet);
         }
         show_toast_text("Radio saved; RF apply pending", true);
     } else {
@@ -5267,8 +5191,7 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_radio_settings_sheet();
     if (s_radio_settings_sheet) {
-        lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_radio_settings_sheet);
+        d1l_ui_modal_show(s_radio_settings_sheet);
     }
 }
 
@@ -5373,8 +5296,7 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_storage_sheet();
     if (s_storage_sheet) {
-        lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_storage_sheet);
+        d1l_ui_modal_show(s_storage_sheet);
     }
 }
 
@@ -5848,8 +5770,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
     render_wifi_sheet();
     if (s_wifi_sheet) {
         set_dock_hidden(true);
-        lv_obj_clear_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_wifi_sheet);
+        d1l_ui_modal_show(s_wifi_sheet);
     }
 }
 
@@ -5878,8 +5799,7 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_ble_sheet();
     if (s_ble_sheet) {
-        lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_ble_sheet);
+        d1l_ui_modal_show(s_ble_sheet);
     }
 }
 
@@ -5908,8 +5828,7 @@ static void open_display_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_display_sheet();
     if (s_display_sheet) {
-        lv_obj_clear_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_display_sheet);
+        d1l_ui_modal_show(s_display_sheet);
     }
 }
 
@@ -5938,8 +5857,7 @@ static void open_diagnostics_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_diagnostics_sheet();
     if (s_diagnostics_sheet) {
-        lv_obj_clear_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_diagnostics_sheet);
+        d1l_ui_modal_show(s_diagnostics_sheet);
     }
 }
 
@@ -5983,7 +5901,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_packet_detail_sheet();
         hide_packet_search_sheet();
         hide_mesh_roles_sheet();
-        lv_obj_clear_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_show(s_sheet);
     }
 }
 
@@ -6596,7 +6514,7 @@ static void process_pending_scroll_probe(void)
 
 static bool object_is_visible(lv_obj_t *obj)
 {
-    return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
+    return d1l_ui_modal_visible(obj);
 }
 
 static bool object_is_hidden_or_missing(lv_obj_t *obj)
@@ -6861,8 +6779,7 @@ static void open_keyboard_probe_on_ui_task(const char *target)
         s_onboarding_probe_suppressed = false;
         if (s_onboarding_sheet) {
             s_onboarding_visible = true;
-            lv_obj_clear_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(s_onboarding_sheet);
+            d1l_ui_modal_show(s_onboarding_sheet);
             set_dock_hidden(true);
         }
         if (s_onboarding_name_textarea) {
@@ -7164,7 +7081,7 @@ static void create_sheet(lv_obj_t *screen)
     create_button(s_sheet, "Zero Hop", 16, 52, 118, 52, advert_zero_event_cb, NULL);
     create_button(s_sheet, "Flood", 156, 52, 118, 52, advert_flood_event_cb, NULL);
     create_button(s_sheet, "Close", 296, 52, 96, 52, close_sheet_event_cb, NULL);
-    lv_obj_add_flag(s_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_sheet);
 }
 
 static void create_compose_sheet(lv_obj_t *screen)
@@ -7190,7 +7107,7 @@ static void create_compose_sheet(lv_obj_t *screen)
 
     s_compose_textarea = create_textarea(s_compose_sheet, "compose textarea");
     if (!s_compose_textarea) {
-        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_compose_sheet);
         return;
     }
     lv_textarea_set_placeholder_text(s_compose_textarea, "Public message");
@@ -7210,7 +7127,7 @@ static void create_compose_sheet(lv_obj_t *screen)
 
     s_compose_keyboard = create_keyboard(s_compose_sheet, "compose keyboard");
     if (!s_compose_keyboard) {
-        lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_compose_sheet);
         return;
     }
     configure_compose_keyboard(s_compose_keyboard);
@@ -7219,7 +7136,7 @@ static void create_compose_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_compose_keyboard, compose_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 
-    lv_obj_add_flag(s_compose_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_compose_sheet);
 }
 
 static void create_public_history_sheet(lv_obj_t *screen)
@@ -7236,7 +7153,7 @@ static void create_public_history_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_public_history_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_public_history_sheet, 12, 0);
     configure_sheet_scroll(s_public_history_sheet);
-    lv_obj_add_flag(s_public_history_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_public_history_sheet);
 }
 
 static void create_message_detail_sheet(lv_obj_t *screen)
@@ -7253,7 +7170,7 @@ static void create_message_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_message_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_message_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_message_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_message_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_message_detail_sheet);
 }
 
 static void create_public_search_sheet(lv_obj_t *screen)
@@ -7284,7 +7201,7 @@ static void create_public_search_sheet(lv_obj_t *screen)
 
     s_public_search_textarea = create_textarea(s_public_search_sheet, "public search textarea");
     if (!s_public_search_textarea) {
-        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_public_search_sheet);
         return;
     }
     lv_obj_set_size(s_public_search_textarea, 424, 48);
@@ -7301,7 +7218,7 @@ static void create_public_search_sheet(lv_obj_t *screen)
 
     s_public_search_keyboard = create_keyboard(s_public_search_sheet, "public search keyboard");
     if (!s_public_search_keyboard) {
-        lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_public_search_sheet);
         return;
     }
     lv_obj_set_size(s_public_search_keyboard, 424, 194);
@@ -7313,7 +7230,7 @@ static void create_public_search_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_public_search_keyboard, public_search_keyboard_event_cb,
                         LV_EVENT_CANCEL, NULL);
 
-    lv_obj_add_flag(s_public_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_public_search_sheet);
 }
 
 static void create_dm_thread_sheet(lv_obj_t *screen)
@@ -7330,7 +7247,7 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_dm_thread_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_dm_thread_sheet, 12, 0);
     configure_sheet_scroll(s_dm_thread_sheet);
-    lv_obj_add_flag(s_dm_thread_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_dm_thread_sheet);
 }
 
 static void create_radio_settings_sheet(lv_obj_t *screen)
@@ -7347,7 +7264,7 @@ static void create_radio_settings_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_radio_settings_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_radio_settings_sheet, 12, 0);
     lv_obj_clear_flag(s_radio_settings_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_radio_settings_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_radio_settings_sheet);
 }
 
 static void create_storage_sheet(lv_obj_t *screen)
@@ -7364,7 +7281,7 @@ static void create_storage_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_storage_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_storage_sheet, 12, 0);
     configure_sheet_scroll(s_storage_sheet);
-    lv_obj_add_flag(s_storage_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_storage_sheet);
 }
 
 static void create_wifi_sheet(lv_obj_t *screen)
@@ -7381,7 +7298,7 @@ static void create_wifi_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_wifi_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_wifi_sheet, 12, 0);
     configure_sheet_scroll(s_wifi_sheet);
-    lv_obj_add_flag(s_wifi_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_wifi_sheet);
 }
 
 static void create_ble_sheet(lv_obj_t *screen)
@@ -7398,7 +7315,7 @@ static void create_ble_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_ble_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_ble_sheet, 12, 0);
     lv_obj_clear_flag(s_ble_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_ble_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_ble_sheet);
 }
 
 static void create_display_sheet(lv_obj_t *screen)
@@ -7415,7 +7332,7 @@ static void create_display_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_display_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_display_sheet, 12, 0);
     lv_obj_clear_flag(s_display_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_display_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_display_sheet);
 }
 
 static void create_diagnostics_sheet(lv_obj_t *screen)
@@ -7432,7 +7349,7 @@ static void create_diagnostics_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_diagnostics_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_diagnostics_sheet, 12, 0);
     lv_obj_set_scrollbar_mode(s_diagnostics_sheet, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_add_flag(s_diagnostics_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_diagnostics_sheet);
 }
 
 static void create_map_location_sheet(lv_obj_t *screen)
@@ -7449,7 +7366,7 @@ static void create_map_location_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_map_location_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_map_location_sheet, 12, 0);
     lv_obj_clear_flag(s_map_location_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_map_location_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_map_location_sheet);
 }
 
 static void create_map_tiles_sheet(lv_obj_t *screen)
@@ -7466,7 +7383,7 @@ static void create_map_tiles_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_map_tiles_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_map_tiles_sheet, 12, 0);
     lv_obj_clear_flag(s_map_tiles_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_map_tiles_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_map_tiles_sheet);
 }
 
 static void create_contact_detail_sheet(lv_obj_t *screen)
@@ -7483,7 +7400,7 @@ static void create_contact_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_contact_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_contact_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_contact_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_contact_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_contact_detail_sheet);
 }
 
 static void create_node_detail_sheet(lv_obj_t *screen)
@@ -7500,7 +7417,7 @@ static void create_node_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_node_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_node_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_node_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_node_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_node_detail_sheet);
 }
 
 static void create_contact_edit_sheet(lv_obj_t *screen)
@@ -7572,7 +7489,7 @@ static void create_contact_edit_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_contact_edit_keyboard, contact_edit_keyboard_event_cb,
                         LV_EVENT_CANCEL, NULL);
 
-    lv_obj_add_flag(s_contact_edit_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_contact_edit_sheet);
     return;
 
 fail:
@@ -7599,7 +7516,7 @@ static void create_contact_export_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_contact_export_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_contact_export_sheet, 12, 0);
     lv_obj_clear_flag(s_contact_export_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_contact_export_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_contact_export_sheet);
 }
 
 static void create_route_detail_sheet(lv_obj_t *screen)
@@ -7616,7 +7533,7 @@ static void create_route_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_route_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_route_detail_sheet, 12, 0);
     lv_obj_clear_flag(s_route_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_route_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_route_detail_sheet);
 }
 
 static void create_route_trace_sheet(lv_obj_t *screen)
@@ -7633,7 +7550,7 @@ static void create_route_trace_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_route_trace_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_route_trace_sheet, 12, 0);
     lv_obj_clear_flag(s_route_trace_sheet, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(s_route_trace_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_route_trace_sheet);
 }
 
 static void create_packet_detail_sheet(lv_obj_t *screen)
@@ -7650,7 +7567,7 @@ static void create_packet_detail_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_packet_detail_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_packet_detail_sheet, 12, 0);
     lv_obj_set_scrollbar_mode(s_packet_detail_sheet, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_add_flag(s_packet_detail_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_packet_detail_sheet);
 }
 
 static void create_packet_search_sheet(lv_obj_t *screen)
@@ -7678,7 +7595,7 @@ static void create_packet_search_sheet(lv_obj_t *screen)
 
     s_packet_search_textarea = create_textarea(s_packet_search_sheet, "packet search textarea");
     if (!s_packet_search_textarea) {
-        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_packet_search_sheet);
         return;
     }
     lv_obj_set_size(s_packet_search_textarea, 424, 48);
@@ -7694,7 +7611,7 @@ static void create_packet_search_sheet(lv_obj_t *screen)
 
     s_packet_search_keyboard = create_keyboard(s_packet_search_sheet, "packet search keyboard");
     if (!s_packet_search_keyboard) {
-        lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_packet_search_sheet);
         return;
     }
     lv_obj_set_size(s_packet_search_keyboard, 424, 194);
@@ -7704,7 +7621,7 @@ static void create_packet_search_sheet(lv_obj_t *screen)
     lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_READY, NULL);
     lv_obj_add_event_cb(s_packet_search_keyboard, packet_search_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
 
-    lv_obj_add_flag(s_packet_search_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_packet_search_sheet);
 }
 
 static void create_mesh_roles_sheet(lv_obj_t *screen)
@@ -7721,7 +7638,7 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
     lv_obj_set_style_border_width(s_mesh_roles_sheet, 1, 0);
     lv_obj_set_style_pad_all(s_mesh_roles_sheet, 12, 0);
     lv_obj_set_scrollbar_mode(s_mesh_roles_sheet, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_add_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_HIDDEN);
+    d1l_ui_modal_hide(s_mesh_roles_sheet);
 }
 
 static void create_onboarding_sheet(lv_obj_t *screen)
@@ -7750,7 +7667,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
 
     s_onboarding_name_textarea = create_textarea(s_onboarding_sheet, "onboarding name textarea");
     if (!s_onboarding_name_textarea) {
-        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_onboarding_sheet);
         return;
     }
     lv_obj_set_size(s_onboarding_name_textarea, 424, 48);
@@ -7783,7 +7700,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
 
     s_onboarding_keyboard = create_keyboard(s_onboarding_sheet, "onboarding keyboard");
     if (!s_onboarding_keyboard) {
-        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_onboarding_sheet);
         return;
     }
     lv_obj_set_size(s_onboarding_keyboard, 424, 160);
@@ -7794,7 +7711,7 @@ static void create_onboarding_sheet(lv_obj_t *screen)
 
     if (d1l_settings_current()->onboarding_complete) {
         s_onboarding_visible = false;
-        lv_obj_add_flag(s_onboarding_sheet, LV_OBJ_FLAG_HIDDEN);
+        d1l_ui_modal_hide(s_onboarding_sheet);
     } else {
         s_onboarding_visible = true;
     }

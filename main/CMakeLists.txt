@@ -35,6 +35,7 @@ idf_component_register(
         "storage/export_store.c"
         "storage/map_tile_store.c"
         "storage/storage_status.c"
+        "ui/ui_modal.c"
         "ui/ui_navigation.c"
         "ui/ui_phase1.c"
     INCLUDE_DIRS
