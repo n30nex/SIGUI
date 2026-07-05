@@ -54,6 +54,7 @@ static bool s_touch_state_ready = false;
 static portMUX_TYPE s_content_refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_started = false;
 static lv_obj_t *s_screen;
+static lv_obj_t *s_top_bar;
 static lv_obj_t *s_content;
 static lv_obj_t *s_title_label;
 static lv_obj_t *s_status_label;
@@ -1279,6 +1280,15 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     const d1l_ui_chrome_layout_t layout =
         d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
     lv_label_set_text(s_title_label, layout.title);
+    if (s_top_bar) {
+        lv_obj_set_size(s_top_bar, 480, layout.content_y);
+        lv_obj_set_style_pad_all(s_top_bar, layout.header_detail_visible ? 8 : 2, 0);
+    }
+    if (layout.header_detail_visible) {
+        lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 2, 0);
+    } else {
+        lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 2);
+    }
     set_object_hidden(s_status_label, !layout.header_detail_visible);
     set_object_hidden(s_identity_label, !layout.header_detail_visible);
     set_object_hidden(s_lock_button, !layout.header_detail_visible);
@@ -1559,11 +1569,14 @@ static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
                                          lv_event_cb_t cb,
                                          void *user_data)
 {
-    lv_obj_t *chip = create_panel(parent, x, y, w, 56);
+    lv_obj_t *chip = create_panel(parent, x, y, w, 44);
     if (!chip) {
         return NULL;
     }
-    lv_obj_set_style_pad_all(chip, 4, 0);
+    lv_obj_set_style_radius(chip, 4, 0);
+    lv_obj_set_style_bg_color(chip, lv_color_hex(0x0F1712), 0);
+    lv_obj_set_style_border_color(chip, lv_color_hex(accent), 0);
+    lv_obj_set_style_pad_all(chip, 2, 0);
     if (cb) {
         lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(chip, cb, LV_EVENT_CLICKED, user_data);
@@ -1572,12 +1585,12 @@ static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
     label_set_dot_width(icon_label, w - 8);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 4, 4);
+    obj_set_pos_if(icon_label, 4, 0);
 
     lv_obj_t *label = create_label(chip, title, accent);
     label_set_dot_width(label, w - 8);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(label, 4, 38);
+    obj_set_pos_if(label, 4, 28);
     return chip;
 }
 
@@ -1591,7 +1604,7 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
                                            lv_event_cb_t cb,
                                            void *user_data)
 {
-    lv_obj_t *tile = create_panel(parent, x, y, 110, 118);
+    lv_obj_t *tile = create_panel(parent, x, y, 114, 126);
     if (!tile) {
         return NULL;
     }
@@ -1606,19 +1619,19 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
 
     lv_obj_t *icon_label = create_label(tile, icon, accent);
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
-    label_set_dot_width(icon_label, 98);
+    label_set_dot_width(icon_label, 102);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 0, 16);
+    obj_set_pos_if(icon_label, 0, 14);
 
     lv_obj_t *title_label = create_label(tile, title, 0xF4F7FB);
-    label_set_dot_width(title_label, 98);
+    label_set_dot_width(title_label, 102);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(title_label, 0, 62);
+    obj_set_pos_if(title_label, 0, 68);
 
     lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
-    label_set_dot_width(detail_label, 98);
+    label_set_dot_width(detail_label, 102);
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(detail_label, 0, 88);
+    obj_set_pos_if(detail_label, 0, 96);
     return tile;
 }
 
@@ -1713,52 +1726,52 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->public_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 8, 6, LV_SYMBOL_ENVELOPE, "Chats", detail,
+    render_home_launcher_tile(s_content, 6, 4, LV_SYMBOL_ENVELOPE, "Chats", detail,
                               snapshot->public_unread_count ? 0xFBBF24 : 0x00C2FF,
                               open_messages_public_event_cb, NULL);
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 126, 6, LV_SYMBOL_FILE, "DMs", detail,
+    render_home_launcher_tile(s_content, 124, 4, LV_SYMBOL_FILE, "DMs", detail,
                               snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0,
                               open_messages_dm_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu seen", (unsigned long)snapshot->recent_room_count);
-    render_home_launcher_tile(s_content, 244, 6, LV_SYMBOL_DIRECTORY, "Rooms", detail,
+    render_home_launcher_tile(s_content, 242, 4, LV_SYMBOL_DIRECTORY, "Rooms", detail,
                               snapshot->recent_room_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu saved", (unsigned long)snapshot->contact_count);
-    render_home_launcher_tile(s_content, 362, 6, LV_SYMBOL_CALL, "Contacts", detail,
+    render_home_launcher_tile(s_content, 360, 4, LV_SYMBOL_CALL, "Contacts", detail,
                               snapshot->contact_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_NODES);
 
     snprintf(detail, sizeof(detail), "%lu heard", (unsigned long)snapshot->recent_repeater_count);
-    render_home_launcher_tile(s_content, 8, 130, LV_SYMBOL_REFRESH, "Repeaters", detail,
+    render_home_launcher_tile(s_content, 6, 140, LV_SYMBOL_REFRESH, "Repeaters", detail,
                               snapshot->recent_repeater_count ? 0xFBBF24 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 126, 130, LV_SYMBOL_BELL, "Advertise", "manual",
+    render_home_launcher_tile(s_content, 124, 140, LV_SYMBOL_BELL, "Advertise", "manual",
                               0x00C2FF, open_sheet_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 244, 130, LV_SYMBOL_GPS, "Map",
+    render_home_launcher_tile(s_content, 242, 140, LV_SYMBOL_GPS, "Map",
                               snapshot->map_tile_cache_ready ? "tiles ready" : "offline",
                               snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_MAP);
 
-    render_home_launcher_tile(s_content, 362, 130, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
+    render_home_launcher_tile(s_content, 360, 140, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
                               0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu rows", (unsigned long)snapshot->packet_count);
-    render_home_launcher_tile(s_content, 8, 254, LV_SYMBOL_LIST, "Packets", detail,
+    render_home_launcher_tile(s_content, 6, 276, LV_SYMBOL_LIST, "Packets", detail,
                               snapshot->packet_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_PACKETS);
 
-    render_home_launcher_tile(s_content, 126, 254, LV_SYMBOL_SETTINGS, "Settings", "setup",
+    render_home_launcher_tile(s_content, 124, 276, LV_SYMBOL_SETTINGS, "Settings", "setup",
                               0x00C2FF, request_tab_event_cb,
                               (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
 
-    render_home_launcher_tile(s_content, 244, 254, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
+    render_home_launcher_tile(s_content, 242, 276, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
                               snapshot->storage_data_enabled ? 0x5EEAD4 :
                               (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
                               open_storage_sheet_event_cb, NULL);
@@ -1768,19 +1781,19 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     } else {
         snprintf(detail, sizeof(detail), "waiting");
     }
-    render_home_launcher_tile(s_content, 362, 254, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
+    render_home_launcher_tile(s_content, 360, 276, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
                               snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_status_icon(s_content, 8, 386, 110, LV_SYMBOL_REFRESH, "Time",
+    render_home_status_icon(s_content, 6, 410, 114, LV_SYMBOL_REFRESH, "Time",
                             snapshot->time_available ? 0x5EEAD4 : 0x00C2FF, NULL, NULL);
-    render_home_status_icon(s_content, 126, 386, 110, LV_SYMBOL_WIFI, "Wi-Fi",
+    render_home_status_icon(s_content, 124, 410, 114, LV_SYMBOL_WIFI, "Wi-Fi",
                             snapshot->wifi_enabled ? 0x5EEAD4 : 0x00C2FF,
                             open_wifi_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 244, 386, 110, LV_SYMBOL_BLUETOOTH, "BLE",
+    render_home_status_icon(s_content, 242, 410, 114, LV_SYMBOL_BLUETOOTH, "BLE",
                             snapshot->ble_companion_enabled ? 0xA7F3D0 : 0xC4B5FD,
                             open_ble_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 362, 386, 110, LV_SYMBOL_SD_CARD, "SD",
+    render_home_status_icon(s_content, 360, 410, 114, LV_SYMBOL_SD_CARD, "SD",
                             snapshot->storage_data_enabled ? 0x5EEAD4 :
                             0xFBBF24,
                             open_storage_sheet_event_cb, NULL);
@@ -6885,6 +6898,7 @@ static void create_top_bar(lv_obj_t *screen)
     if (!bar) {
         return;
     }
+    s_top_bar = bar;
     lv_obj_set_size(bar, 480, 56);
     lv_obj_set_pos(bar, 0, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(0x071018), 0);

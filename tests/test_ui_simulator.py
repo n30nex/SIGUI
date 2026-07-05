@@ -125,6 +125,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     } <= labels_by_view["home"]
     assert "DeskOS" in labels_by_view["home"]
     assert "Mesh ready, listening" not in labels_by_view["home"]
+    assert "D1L Desk" not in labels_by_view["home"]
+    assert not any(label.startswith("--:--  Mesh") for label in labels_by_view["home"])
+    assert "RX" not in labels_by_view["home"]
+    assert "TX" not in labels_by_view["home"]
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
     for view_name in ("messages", "messages_dm", "nodes", "map", "packets", "settings"):
         assert any(target["kind"] == "dock_tab" for target in views_by_name[view_name]["touch_targets"])
@@ -271,9 +275,14 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
     assert actions_by_view["home"]["open_wifi_settings"]["kind"] == "status_icon"
-    assert actions_by_view["home"]["open_wifi_settings"]["visual_box"][1] >= 416
+    assert actions_by_view["home"]["open_wifi_settings"]["visual_box"][1] >= 434
+    assert actions_by_view["home"]["open_wifi_settings"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert actions_by_view["home"]["open_ble_settings"]["kind"] == "status_icon"
+    assert actions_by_view["home"]["open_ble_settings"]["visual_box"][1] >= 434
     assert actions_by_view["home"]["open_storage_setup"]["kind"] == "status_icon"
-    assert actions_by_view["home"]["open_storage_setup"]["visual_box"][1] >= 416
+    assert actions_by_view["home"]["open_storage_setup"]["visual_box"][1] >= 434
+    assert actions_by_view["home"]["open_messages_public"]["visual_box"] == [6, 28, 120, 154]
+    assert actions_by_view["home"]["open_packets"]["visual_box"] == [6, 300, 120, 426]
     for docked_view in ("messages", "nodes", "map", "packets", "settings"):
         assert any(target["kind"] == "dock_tab" for target in views[docked_view]["touch_targets"]), docked_view
     assert actions_by_view["home"]["open_messages_public"]["destination"] == "messages"
