@@ -24,6 +24,7 @@
 #include "ui_keyboard.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
+#include "ui_screen.h"
 #include "sdkconfig.h"
 
 static const char *TAG = "d1l_ui";
@@ -6000,34 +6001,26 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
 
 static void render_active_tab(void)
 {
+    static const d1l_ui_screen_renderer_t renderers[] = {
+        {D1L_UI_TAB_HOME, render_home},
+        {D1L_UI_TAB_MESSAGES, render_messages},
+        {D1L_UI_TAB_NODES, render_nodes},
+        {D1L_UI_TAB_MAP, render_map},
+        {D1L_UI_TAB_PACKETS, render_packets},
+        {D1L_UI_TAB_SETTINGS, render_settings},
+    };
+
     if (!s_content) {
         return;
     }
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
-    lv_obj_clean(s_content);
     configure_content_for_active_tab();
-    lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF);
-    switch (d1l_ui_navigation_active()) {
-    case D1L_UI_TAB_HOME:
+    d1l_ui_screen_prepare_content_root(s_content);
+    if (!d1l_ui_screen_dispatch(d1l_ui_navigation_active(), &s_snapshot,
+                                renderers, sizeof(renderers) / sizeof(renderers[0]))) {
         render_home(&s_snapshot);
-        break;
-    case D1L_UI_TAB_MESSAGES:
-        render_messages(&s_snapshot);
-        break;
-    case D1L_UI_TAB_NODES:
-        render_nodes(&s_snapshot);
-        break;
-    case D1L_UI_TAB_MAP:
-        render_map(&s_snapshot);
-        break;
-    case D1L_UI_TAB_PACKETS:
-        render_packets(&s_snapshot);
-        break;
-    case D1L_UI_TAB_SETTINGS:
-        render_settings(&s_snapshot);
-        break;
     }
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
