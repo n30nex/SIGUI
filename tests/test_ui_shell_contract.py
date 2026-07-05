@@ -288,6 +288,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     header = read("main/ui/ui_phase1.h")
     console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
+    screen = read("main/ui/ui_screen.c")
     keyboard = read("main/ui/ui_keyboard.c")
     keyboard_header = read("main/ui/ui_keyboard.h")
 
@@ -305,7 +306,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_set_pos(s_content, 0, layout.content_y)" in source
     assert "lv_obj_set_size(s_content, 480, layout.content_height)" in source
     assert "set_dock_hidden(!layout.dock_visible)" in source
-    assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
+    assert "lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF)" in screen
+    assert "d1l_ui_screen_prepare_content_root(s_content)" in source
     assert "d1l_ui_phase1_request_tab" in header
     assert "d1l_ui_scroll_probe_result_t" in header
     assert "d1l_ui_phase1_scroll_probe" in header
@@ -411,13 +413,38 @@ def test_d1l_ui_display_path_uses_bsp_direct_framebuffers_and_capture_shadow():
 
 def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     source = read("main/ui/ui_phase1.c")
+    cmake = read("main/CMakeLists.txt")
+    screen_source = read("main/ui/ui_screen.c")
+    screen_header = read("main/ui/ui_screen.h")
 
     assert "static void request_full_screen_repaint(void)" in source
     assert "lv_obj_invalidate(s_screen)" in source
+    assert '"ui/ui_screen.c"' in cmake
+    assert '#include "ui_screen.h"' in source
+    assert "d1l_ui_screen_renderer_t" in screen_header
+    assert "d1l_ui_screen_prepare_content_root" in screen_header
+    assert "d1l_ui_screen_dispatch" in screen_header
+    assert "lv_obj_clean(content)" in screen_source
+    assert "lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF)" in screen_source
+    assert "renderers[i].render(snapshot);" in screen_source
 
     render_body = source.split("static void render_active_tab(void)", 1)[1].split(
         "esp_err_t d1l_ui_phase1_request_tab", 1
     )[0]
+    assert "static const d1l_ui_screen_renderer_t renderers[]" in render_body
+    for mapping in (
+        "{D1L_UI_TAB_HOME, render_home}",
+        "{D1L_UI_TAB_MESSAGES, render_messages}",
+        "{D1L_UI_TAB_NODES, render_nodes}",
+        "{D1L_UI_TAB_MAP, render_map}",
+        "{D1L_UI_TAB_PACKETS, render_packets}",
+        "{D1L_UI_TAB_SETTINGS, render_settings}",
+    ):
+        assert mapping in render_body
+    assert "d1l_ui_screen_prepare_content_root(s_content);" in render_body
+    assert "d1l_ui_screen_dispatch(d1l_ui_navigation_active(), &s_snapshot" in render_body
+    assert "switch (d1l_ui_navigation_active())" not in render_body
+    assert "lv_obj_clean(s_content)" not in render_body
     assert "request_full_screen_repaint();" in render_body
 
     compose_hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
