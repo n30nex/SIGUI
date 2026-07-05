@@ -171,6 +171,27 @@ def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     assert offenders == []
 
 
+def test_active_release_docs_mark_keyboard_p0_closed_and_keep_fast_path():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    roadmap = (ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+    checklist = (ROOT / "docs/RELEASE_CHECKLIST.md").read_text(encoding="utf-8")
+    limitations = (ROOT / "docs/KNOWN_LIMITATIONS.md").read_text(encoding="utf-8")
+    test_plan = (ROOT / "docs/TEST_PLAN_D1L.md").read_text(encoding="utf-8")
+    release_docs = "\n".join((readme, roadmap, checklist, limitations, test_plan))
+
+    assert "| On-screen keyboard and sheets |" not in roadmap
+    assert "Expanded issue #2 compose/input keyboard capture from PR #35" in checklist
+    assert "PR #35" in release_docs
+    assert "28727064923" in release_docs
+    assert "capture_count=12" in release_docs
+    assert "ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all" in test_plan
+    assert "broader keyboard/sheet physical review" not in release_docs
+    assert "expanded `--targets all` keyboard/sheet physical review" not in release_docs
+    assert "expanded `--targets all` keyboard/sheet review" not in release_docs
+    assert "PR #38 split navigation ownership" in roadmap
+    assert "PR #39 added a modal helper boundary" in roadmap
+
+
 def test_smoke_knows_ui_console_commands():
     assert "ui status" in smoke_d1l.SMOKE_COMMANDS
     assert smoke_d1l.expected_command_name("ui tab packets") == "ui tab"

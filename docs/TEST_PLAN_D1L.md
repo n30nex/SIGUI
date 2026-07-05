@@ -81,7 +81,7 @@ python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\curr
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\current\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
 
 # Compose-keyboard proof.
-python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
+python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
 
 # One scroll/layout surface, or a tiny list named by the issue.
 python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start
