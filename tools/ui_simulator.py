@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 480
 HEIGHT = 480
 TOP_BAR_H = 54
-HOME_TOP_BAR_H = 24
+HOME_TOP_BAR_H = 18
 DOCK_Y = 420
 DOCK_H = 60
 MIN_TOUCH_TARGET = 44
@@ -655,7 +655,7 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
 def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     if compact:
         s.rect((0, 0, WIDTH, HOME_TOP_BAR_H), (11, 18, 28))
-        s.text("DeskOS", (12, 3, 150, 22), 13, TEXT, True)
+        s.text("DeskOS", (12, 1, 150, 17), 11, TEXT, True)
         s.line(((0, HOME_TOP_BAR_H), (WIDTH, HOME_TOP_BAR_H)))
         return
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
@@ -945,18 +945,18 @@ def draw_row(
 
 def draw_home_body(s: Surface, snap: Snapshot):
     tiles = (
-        ((6, 28, 120, 154), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
-        ((124, 28, 238, 154), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
-        ((242, 28, 356, 154), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
-        ((360, 28, 474, 154), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
-        ((6, 164, 120, 290), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
-        ((124, 164, 238, 290), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
-        ((242, 164, 356, 290), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
-        ((360, 164, 474, 290), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
-        ((6, 300, 120, 426), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
-        ((124, 300, 238, 426), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
-        ((242, 300, 356, 426), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
-        ((360, 300, 474, 426), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
+        ((6, 22, 120, 148), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
+        ((124, 22, 238, 148), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
+        ((242, 22, 356, 148), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
+        ((360, 22, 474, 148), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
+        ((6, 158, 120, 284), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
+        ((124, 158, 238, 284), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
+        ((242, 158, 356, 284), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
+        ((360, 158, 474, 284), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
+        ((6, 294, 120, 420), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
+        ((124, 294, 238, 420), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
+        ((242, 294, 356, 420), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
+        ((360, 294, 474, 420), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
     )
     for box, icon, label, detail, color, action, destination in tiles:
         draw_launcher_tile(s, box, icon, label, detail, color, action=action, destination=destination)

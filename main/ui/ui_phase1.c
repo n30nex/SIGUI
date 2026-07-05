@@ -1282,12 +1282,12 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     lv_label_set_text(s_title_label, layout.title);
     if (s_top_bar) {
         lv_obj_set_size(s_top_bar, 480, layout.content_y);
-        lv_obj_set_style_pad_all(s_top_bar, layout.header_detail_visible ? 8 : 2, 0);
+        lv_obj_set_style_pad_all(s_top_bar, layout.header_detail_visible ? 8 : 1, 0);
     }
     if (layout.header_detail_visible) {
         lv_obj_align(s_title_label, LV_ALIGN_LEFT_MID, 2, 0);
     } else {
-        lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 2);
+        lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 0);
     }
     set_object_hidden(s_status_label, !layout.header_detail_visible);
     set_object_hidden(s_identity_label, !layout.header_detail_visible);
@@ -1785,15 +1785,15 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
                               snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_status_icon(s_content, 6, 410, 114, LV_SYMBOL_REFRESH, "Time",
+    render_home_status_icon(s_content, 6, 416, 114, LV_SYMBOL_REFRESH, "Time",
                             snapshot->time_available ? 0x5EEAD4 : 0x00C2FF, NULL, NULL);
-    render_home_status_icon(s_content, 124, 410, 114, LV_SYMBOL_WIFI, "Wi-Fi",
+    render_home_status_icon(s_content, 124, 416, 114, LV_SYMBOL_WIFI, "Wi-Fi",
                             snapshot->wifi_enabled ? 0x5EEAD4 : 0x00C2FF,
                             open_wifi_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 242, 410, 114, LV_SYMBOL_BLUETOOTH, "BLE",
+    render_home_status_icon(s_content, 242, 416, 114, LV_SYMBOL_BLUETOOTH, "BLE",
                             snapshot->ble_companion_enabled ? 0xA7F3D0 : 0xC4B5FD,
                             open_ble_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 360, 410, 114, LV_SYMBOL_SD_CARD, "SD",
+    render_home_status_icon(s_content, 360, 416, 114, LV_SYMBOL_SD_CARD, "SD",
                             snapshot->storage_data_enabled ? 0x5EEAD4 :
                             0xFBBF24,
                             open_storage_sheet_event_cb, NULL);
