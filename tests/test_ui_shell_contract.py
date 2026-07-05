@@ -277,7 +277,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "lv_obj_set_size(s_compose_keyboard, 448, 258)" in layout
     assert "lv_obj_set_align(s_compose_keyboard, LV_ALIGN_TOP_LEFT)" in layout
     assert "lv_obj_set_pos(s_compose_keyboard, 16, 158)" in layout
-    assert "configure_compose_keyboard(s_compose_keyboard)" in compose
+    assert "d1l_ui_keyboard_configure_compose(s_compose_keyboard)" in compose
     assert "layout_compose_sheet_controls()" in compose
     probe = source.split("static void open_compose_probe_on_ui_task", 1)[1].split(
         "static void fill_compose_probe_geometry", 1
@@ -338,6 +338,13 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_probe_requires_hidden_dock" in keyboard_header
     assert "d1l_ui_keyboard_probe_min_width" in keyboard_header
     assert "d1l_ui_keyboard_probe_min_height" in keyboard_header
+    assert "d1l_ui_keyboard_configure_compose" in keyboard_header
+    assert "d1l_ui_keyboard_configure_compose" in keyboard
+    assert "d1l_compose_kb_map_lc" in keyboard
+    assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
+    assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
+    assert "d1l_compose_kb_map_lc" not in source
+    assert "static void configure_compose_keyboard" not in source
     assert 'strcmp(normalized, "public_search") == 0' in keyboard
     assert 'strcmp(normalized, "packet_search") == 0' in keyboard
     assert 'strcmp(normalized, "contact_edit") == 0' in keyboard
@@ -768,8 +775,10 @@ def test_public_composer_uses_lvgl_textarea_keyboard():
     assert "lv_textarea_get_text" in source
     assert "lv_keyboard_create" in source
     assert "lv_keyboard_set_textarea" in source
-    assert "lv_keyboard_set_map" in source
-    assert "d1l_compose_kb_map_lc" in source
+    keyboard = read("main/ui/ui_keyboard.c")
+    assert "d1l_ui_keyboard_configure_compose(s_compose_keyboard)" in source
+    assert "lv_keyboard_set_map" in keyboard
+    assert "d1l_compose_kb_map_lc" in keyboard
     assert "LV_EVENT_READY" in source
     assert "LV_EVENT_CANCEL" in source
     assert "hide_compose_sheet()" in source
