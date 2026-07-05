@@ -78,6 +78,18 @@ gh workflow run d1l-ci.yml --ref <branch> -f include_sd_bridge=true
 Then run the SD-specific validator or guided SD workflow named by the issue.
 Keep `formats_sd=false`; users prepare FAT32 cards on a computer.
 
+For the guided public install workflow, use the single report path:
+
+```powershell
+python .\scripts\guided_sd_install_d1l.py --download-artifacts --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
+```
+
+Use `--skip-esp32-flash` only for a partial operator artifact when the matching
+ESP32 image is already flashed. The release gate's
+`guided_sd_install_validation` check requires the full guided report with
+COM12 ESP32 flash, COM16 official SD smoke and bridge restore, passing SD
+canaries, `public_rf_tx=false`, and `formats_sd=false`.
+
 ### RF/DM Issue
 
 Use a targeted RF/DM proof and keep ports explicit. Do not mix this with SD or

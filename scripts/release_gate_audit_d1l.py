@@ -1515,6 +1515,70 @@ def sd_data_export_gate(artifact_roots: list[Path], root: Path, commit: str | No
     )
 
 
+def guided_sd_install_ok(data: dict, expected_d1l_port: str, expected_rp2040_port: str) -> bool:
+    ports = data.get("ports") if isinstance(data.get("ports"), dict) else {}
+    canaries = data.get("canary_results") if isinstance(data.get("canary_results"), dict) else {}
+    no_format = data.get("no_format_proof") if isinstance(data.get("no_format_proof"), dict) else {}
+    return (
+        data.get("kind") == "d1l_guided_sd_install"
+        and data.get("mode") == "guided-hardware"
+        and data.get("ok") is True
+        and ports.get("d1l") == expected_d1l_port
+        and ports.get("rp2040") == expected_rp2040_port
+        and data.get("esp32_flash_requested") is True
+        and data.get("esp32_flash_ok") is True
+        and data.get("official_smoke_ok") is True
+        and data.get("bridge_ping_ok") is True
+        and data.get("ready_for_sd_acceptance") is True
+        and report_is_no_rf_no_format(data)
+        and no_format.get("formats_sd") is False
+        and no_format.get("public_rf_tx") is False
+        and len(canaries) >= 3
+        and all(value is True for value in canaries.values())
+        and not unsafe_sd_commands(data)
+    )
+
+
+def guided_sd_install_gate(
+    artifact_roots: list[Path],
+    root: Path,
+    commit: str | None,
+    expected_d1l_port: str,
+    expected_rp2040_port: str,
+) -> GateResult:
+    path = newest_commit_json_from_roots(
+        artifact_roots,
+        commit,
+        "d1l-guided-sd-install-*.json",
+        "guided_sd_install_*.json",
+    )
+    data = read_json(path)
+    ok = bool(path and data and guided_sd_install_ok(data, expected_d1l_port, expected_rp2040_port))
+    ports = data.get("ports") if isinstance(data.get("ports"), dict) else {}
+    canaries = data.get("canary_results") if isinstance(data.get("canary_results"), dict) else {}
+    return GateResult(
+        "guided_sd_install_validation",
+        "P0",
+        ok,
+        "Guided D1L SD install validation",
+        [rel(path, root)] if path else [],
+        "Guided SD install report proves Actions artifact install, ESP32 flash, RP2040 SD smoke/bridge restore, and SD canaries with no RF or formatting."
+        if ok else "No passing current-commit guided SD install validation report was found.",
+        {
+            "path_found": bool(path),
+            "artifact_ok": data.get("ok") if data else None,
+            "mode": data.get("mode") if data else None,
+            "ports": ports,
+            "esp32_flash_requested": data.get("esp32_flash_requested") if data else None,
+            "esp32_flash_ok": data.get("esp32_flash_ok") if data else None,
+            "official_smoke_ok": data.get("official_smoke_ok") if data else None,
+            "bridge_ping_ok": data.get("bridge_ping_ok") if data else None,
+            "ready_for_sd_acceptance": data.get("ready_for_sd_acceptance") if data else None,
+            "canary_results": canaries,
+        },
+    )
+
+
 def sd_raw_diag_gate(artifact_roots: list[Path], root: Path, commit: str | None, expected_port: str) -> GateResult:
     diag = newest_commit_json_from_roots(
         artifact_roots,
@@ -1919,6 +1983,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     export_canary_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-export-canary")
     diagnostic_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-diagnostic-export")
     data_export_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "sd-data-export")
+    guided_sd_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "guided-sd-install")
     raw_diag_roots = unique_dirs(
         sd_artifact_roots(root, github_run_dir, rp2040_hardware_dir, "rp2040-preflight")
         + sd_artifact_roots(root, github_run_dir, hardware_dir, "rp2040-preflight")
@@ -2034,6 +2099,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(sd_export_canary_gate(export_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_diagnostic_export_gate(diagnostic_export_roots, root, args.commit, args.d1l_port))
     gates.append(sd_data_export_gate(data_export_roots, root, args.commit, args.d1l_port))
+    gates.append(guided_sd_install_gate(guided_sd_roots, root, args.commit, args.d1l_port, args.rp2040_port))
     gates.append(sd_fat32_policy_gate(unformatted_boot_path, root, args.d1l_port))
     gates.append(sd_no_format_policy_gate(preflight_path, unformatted_boot_path, root))
     gates.append(sd_power_rail_gate(sd_power_roots, root, args.commit, args.d1l_port))

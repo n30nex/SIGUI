@@ -1,10 +1,11 @@
 # D1L SD Card Guided Install
 
-Prefer `scripts/autonomous_hardware_validate_d1l.py` for COM12/COM16 hardware
-validation. Use this guided flow only when COM12 is working but the RP2040 does
-not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
-only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
-the official SD smoke proof and once to restore the DeskOS SD bridge.
+Use this flow when an operator needs one public, repeatable SD install and
+validation command. It can download or accept GitHub Actions artifacts, flash
+the ESP32 app on COM12, guide the RP2040 UF2/BOOTSEL steps on COM16, run the SD
+checks, and write one validation report. The script first tries a safe RP2040
+USB CDC 1200-baud bootloader touch; the manual fallback is putting the RP2040
+into BOOTSEL/UF2 mode for the official SD smoke proof and bridge restore.
 
 ## Before Running
 
@@ -20,28 +21,37 @@ the official SD smoke proof and once to restore the DeskOS SD bridge.
 From the repository root:
 
 ```powershell
-python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
+python .\scripts\guided_sd_install_d1l.py --download-artifacts --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
 ```
 
-Autonomous SD refresh, when the ESP32 app is already flashed from the matching
-Actions artifact:
+By default, the guided command verifies `d1l-firmware-artifacts`, flashes the
+ESP32 app image from that Actions build on COM12, and then starts the RP2040 SD
+flow. If the matching ESP32 image is already flashed, add
+`--skip-esp32-flash` and keep the generated report as a partial/operator
+artifact; the final release gate requires a full guided report with the ESP32
+flash included.
+
+Autonomous SD refresh, when the bench should avoid manual BOOTSEL prompts:
 
 ```powershell
-python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-esp32-flash --refresh-rp2040-smoke
+python .\scripts\autonomous_hardware_validate_d1l.py --download-artifacts --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
 ```
 
 The script will:
 
-1. Verify `rp2040-seeed-official-sd-smoke-firmware` and
-   `rp2040-sd-bridge-firmware` checksums.
-2. Pause for the RP2040 UF2/BOOTSEL disk.
-3. Copy only `seeed_official_sd_smoke.ino.uf2`.
-4. Capture the official Seeed SD smoke JSON from the RP2040 USB serial port.
-5. Pause for the RP2040 UF2/BOOTSEL disk again.
-6. Copy only `deskos_sd_bridge.ino.uf2`.
-7. Verify `rp2040 ping` on COM12.
-8. Run the RP2040 SD bridge preflight.
-9. If preflight reports the SD file gate ready, run the short SD file/export
+1. Verify `d1l-firmware-artifacts`, `rp2040-seeed-official-sd-smoke-firmware`,
+   and `rp2040-sd-bridge-firmware` checksums.
+2. Flash the ESP32 app image from `d1l-firmware-artifacts\build` on COM12.
+3. Try the RP2040 bootloader touch, then pause for the UF2/BOOTSEL disk if
+   needed.
+4. Copy only `seeed_official_sd_smoke.ino.uf2`.
+5. Capture the official Seeed SD smoke JSON from the RP2040 USB serial port.
+6. Try the RP2040 bootloader touch again, then pause for the UF2/BOOTSEL disk if
+   needed.
+7. Copy only `deskos_sd_bridge.ino.uf2`.
+8. Verify `rp2040 ping` on COM12.
+9. Run the RP2040 SD bridge preflight.
+10. If preflight reports the SD file gate ready, run the short SD file/export
    canaries. The autonomous runner additionally captures raw diagnostics,
    map-tile, retained-history, reboot/remount, and RP2040-unavailable evidence.
 
@@ -61,6 +71,11 @@ The report is written to:
 ```text
 artifacts\hardware\com12\d1l-guided-sd-install-<sha7>-actions<run-id>.json
 ```
+
+The release gate looks for that report as `guided_sd_install_validation`. A
+passing final report must be `mode="guided-hardware"`, use COM12/COM16, include
+the ESP32 flash, report official smoke and bridge ping success, include SD
+canary results, and keep `public_rf_tx=false` plus `formats_sd=false`.
 
 ## At Each Prompt
 

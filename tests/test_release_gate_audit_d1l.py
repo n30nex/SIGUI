@@ -44,6 +44,7 @@ STRICT_SD_GATE_IDS = (
     "sd_export_canary_passed",
     "sd_diagnostic_export_passed",
     "sd_data_export_passed",
+    "guided_sd_install_validation",
     "sd_fat32_only_enforced",
     "sd_no_format_language",
     "sd_power_rail_measured",
@@ -839,6 +840,38 @@ def write_sd_matrix_evidence(root: Path, commit: str = COMMIT, metadata_commit: 
     )
 
 
+def write_guided_sd_install_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    write_json(
+        root / "artifacts" / "hardware" / "com12" / f"d1l-guided-sd-install-{commit[:7]}-actions{RUN_ID}.json",
+        {
+            "schema": 1,
+            "kind": "d1l_guided_sd_install",
+            "mode": "guided-hardware",
+            "ok": True,
+            "commit": metadata_commit or commit,
+            "github_actions_run": RUN_ID,
+            "ports": {"d1l": "COM12", "rp2040": "COM16", "forbidden": ["COM11", "COM29", "COM8"]},
+            "esp32_flash_requested": True,
+            "esp32_flash_ok": True,
+            "official_smoke_ok": True,
+            "bridge_ping_ok": True,
+            "ready_for_sd_acceptance": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "no_format_proof": {
+                "public_rf_tx": False,
+                "formats_sd": False,
+                "fat32_prepared_on_computer": True,
+            },
+            "canary_results": {
+                "sd_file_canary": True,
+                "sd_export_canary": True,
+                "sd_diagnostic_export": True,
+            },
+        },
+    )
+
+
 def write_strict_sd_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
     write_raw_diag_evidence(root, commit, metadata_commit)
     write_boot_prepare_evidence(root, commit, metadata_commit)
@@ -847,6 +880,7 @@ def write_strict_sd_evidence(root: Path, commit: str = COMMIT, metadata_commit: 
     write_reboot_remount_evidence(root, commit, metadata_commit)
     write_map_tile_canary_evidence(root, commit, metadata_commit)
     write_export_evidence(root, commit, metadata_commit)
+    write_guided_sd_install_evidence(root, commit, metadata_commit)
     write_power_rail_evidence(root, commit, metadata_commit)
     write_sd_matrix_evidence(root, commit, metadata_commit)
 
@@ -940,7 +974,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -973,7 +1007,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 17
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -1064,6 +1098,43 @@ def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
     assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
     assert report["ready_for_public_release"] is False
     assert report["p0_failed_count"] == 3
+
+
+def test_release_gate_audit_rejects_guided_sd_install_without_full_flash(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_json(
+        tmp_path / "artifacts" / "hardware" / "com12" / f"d1l-guided-sd-install-{COMMIT[:7]}-actions{RUN_ID}.json",
+        {
+            "schema": 1,
+            "kind": "d1l_guided_sd_install",
+            "mode": "guided-hardware",
+            "ok": True,
+            "commit": COMMIT,
+            "github_actions_run": RUN_ID,
+            "ports": {"d1l": "COM12", "rp2040": "COM16"},
+            "esp32_flash_requested": False,
+            "esp32_flash_skipped": True,
+            "esp32_flash_ok": None,
+            "official_smoke_ok": True,
+            "bridge_ping_ok": True,
+            "ready_for_sd_acceptance": True,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "no_format_proof": {"public_rf_tx": False, "formats_sd": False},
+            "canary_results": {
+                "sd_file_canary": True,
+                "sd_export_canary": True,
+                "sd_diagnostic_export": True,
+            },
+        },
+    )
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["guided_sd_install_validation"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["esp32_flash_requested"] is False
+    assert gate["details"]["esp32_flash_ok"] is None
 
 
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
@@ -1166,7 +1237,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):

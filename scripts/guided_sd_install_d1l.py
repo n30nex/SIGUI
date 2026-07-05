@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from autonomous_hardware_validate_d1l import (
+        POST_ESP32_FLASH_SETTLE_SEC,
+        command_report,
+        esptool_flash_command,
+    )
     from flash_rp2040_sd_bridge_uf2 import (
         FlashGuardError,
         candidate_volumes,
@@ -30,7 +35,13 @@ try:
         verify_artifact,
     )
     from smoke_d1l import send_console_command
+    from verify_checksums import verify_sha256_manifest
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.autonomous_hardware_validate_d1l import (
+        POST_ESP32_FLASH_SETTLE_SEC,
+        command_report,
+        esptool_flash_command,
+    )
     from scripts.flash_rp2040_sd_bridge_uf2 import (
         FlashGuardError,
         candidate_volumes,
@@ -40,6 +51,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         verify_artifact,
     )
     from scripts.smoke_d1l import send_console_command
+    from scripts.verify_checksums import verify_sha256_manifest
 
 
 DEFAULT_D1L_PORT = "COM" + "12"
@@ -59,6 +71,7 @@ class GuidedContext:
     d1l_port: str
     rp2040_port: str
     baud: int
+    esp32_flash_baud: int
     out: Path
 
 
@@ -139,6 +152,7 @@ def build_context(args: argparse.Namespace) -> GuidedContext:
         d1l_port=d1l_port,
         rp2040_port=rp2040_port,
         baud=args.baud,
+        esp32_flash_baud=args.esp32_flash_baud,
         out=Path("__placeholder__"),
     )
     out = Path(args.out) if args.out else default_out(ctx)
@@ -153,23 +167,96 @@ def build_context(args: argparse.Namespace) -> GuidedContext:
         d1l_port=ctx.d1l_port,
         rp2040_port=ctx.rp2040_port,
         baud=ctx.baud,
+        esp32_flash_baud=ctx.esp32_flash_baud,
         out=out,
     )
 
 
 def artifact_dirs(ctx: GuidedContext) -> dict[str, Path]:
     return {
+        "esp32": ctx.github_run_dir / "d1l-firmware-artifacts",
+        "esp32_build": ctx.github_run_dir / "d1l-firmware-artifacts" / "build",
         "official_smoke": ctx.github_run_dir / "rp2040-seeed-official-sd-smoke-firmware",
         "bridge": ctx.github_run_dir / "rp2040-sd-bridge-firmware",
     }
 
 
-def verify_inputs(ctx: GuidedContext) -> dict[str, Any]:
+def required_artifact_paths(ctx: GuidedContext, *, include_esp32: bool) -> dict[str, Path]:
     dirs = artifact_dirs(ctx)
+    required = {
+        "official_smoke_uf2": dirs["official_smoke"] / OFFICIAL_SMOKE_UF2,
+        "official_smoke_manifest": dirs["official_smoke"] / "SHA256SUMS.txt",
+        "bridge_uf2": dirs["bridge"] / BRIDGE_UF2,
+        "bridge_manifest": dirs["bridge"] / "SHA256SUMS.txt",
+    }
+    if include_esp32:
+        required.update(
+            {
+                "esp32_manifest": dirs["esp32"] / "SHA256SUMS.txt",
+                "esp32_flasher_args": dirs["esp32_build"] / "flasher_args.json",
+            }
+        )
+    return required
+
+
+def input_artifact_check(ctx: GuidedContext, *, include_esp32: bool) -> dict[str, Any]:
+    required = required_artifact_paths(ctx, include_esp32=include_esp32)
+    missing = {label: str(path) for label, path in required.items() if not path.exists()}
     return {
+        "schema": 1,
+        "kind": "input_artifact_check",
+        "github_run_dir": str(ctx.github_run_dir),
+        "required_artifacts": sorted(required),
+        "include_esp32": include_esp32,
+        "missing": missing,
+        "ok": not missing,
+    }
+
+
+def download_artifacts(ctx: GuidedContext, *, dry_run: bool) -> dict[str, Any]:
+    command = ["gh", "run", "download", ctx.github_run_id, "--dir", str(ctx.github_run_dir)]
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "github_artifact_download",
+        "mode": "dry-run" if dry_run else "download",
+        "command": command,
+        "path": str(ctx.github_run_dir),
+        "ok": True,
+    }
+    if not dry_run:
+        ctx.github_run_dir.mkdir(parents=True, exist_ok=True)
+        report["result"] = command_report("gh_run_download", command, ctx.root, timeout=300)
+        report["ok"] = report["result"].get("ok") is True
+    return report
+
+
+def verify_esp32_artifact(ctx: GuidedContext) -> dict[str, Any]:
+    dirs = artifact_dirs(ctx)
+    manifest = dirs["esp32"] / "SHA256SUMS.txt"
+    build = dirs["esp32_build"]
+    ok = manifest.is_file() and verify_sha256_manifest(manifest) and (build / "flasher_args.json").is_file()
+    return {
+        "path": str(dirs["esp32"]),
+        "build_dir": str(build),
+        "manifest": str(manifest),
+        "checksums_ok": manifest.is_file() and verify_sha256_manifest(manifest),
+        "flasher_args": str(build / "flasher_args.json"),
+        "ok": ok,
+    }
+
+
+def verify_inputs(ctx: GuidedContext, *, include_esp32: bool) -> dict[str, Any]:
+    dirs = artifact_dirs(ctx)
+    artifacts: dict[str, Any] = {
         "official_smoke": verify_artifact(dirs["official_smoke"], uf2_name=OFFICIAL_SMOKE_UF2),
         "bridge": verify_artifact(dirs["bridge"], uf2_name=BRIDGE_UF2),
     }
+    if include_esp32:
+        esp32 = verify_esp32_artifact(ctx)
+        if not esp32.get("ok"):
+            raise FlashGuardError(f"ESP32 firmware artifact verification failed: {esp32}")
+        artifacts["esp32"] = esp32
+    return artifacts
 
 
 def wait_for_uf2_volume(
@@ -213,6 +300,36 @@ def prompt_for_bootsel(stage: str, uf2_name: str, *, no_prompt: bool) -> None:
         input("Press Enter after the RP2040 UF2 disk is mounted...")
 
 
+def rp2040_bootloader_touch(port: str) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "rp2040_bootloader_touch",
+        "port": port,
+        "method": "usb_cdc_1200_baud_touch",
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "ok": False,
+    }
+    try:
+        import serial
+
+        with serial.Serial(port=port, baudrate=1200, timeout=0.1):
+            pass
+        time.sleep(2.0)
+        report["ok"] = True
+    except Exception as exc:  # pragma: no cover - serial dependent
+        report["error"] = str(exc)
+    return report
+
+
+def uf2_volume_available(volume: str | None, extra_roots: list[Path] | None = None) -> bool:
+    try:
+        choose_volume(Path(volume) if volume else None, extra_roots)
+        return True
+    except FlashGuardError:
+        return False
+
+
 def copy_stage(
     *,
     ctx: GuidedContext,
@@ -223,6 +340,8 @@ def copy_stage(
     timeout_sec: float,
     dry_run: bool,
     no_prompt: bool,
+    auto_bootloader: bool,
+    rp2040_port: str,
     extra_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {
@@ -244,7 +363,11 @@ def copy_stage(
         report["instructions"] = instruction_lines(stage, uf2_name)
         if dry_run:
             report["planned_copy"] = True
+            if auto_bootloader:
+                report["planned_bootloader_touch"] = True
             return report
+        if auto_bootloader and not uf2_volume_available(volume, extra_roots):
+            report["bootloader_touch"] = rp2040_bootloader_touch(rp2040_port)
         prompt_for_bootsel(stage, uf2_name, no_prompt=no_prompt)
         target, candidates = wait_for_uf2_volume(
             timeout_sec=timeout_sec,
@@ -336,15 +459,22 @@ def capture_official_smoke(port: str, baud: int, timeout_sec: float) -> dict[str
         "parsed": [],
         "ok": False,
     }
+    deadline = time.monotonic() + timeout_sec
     try:
         import serial
 
-        with serial.Serial(port=port, baudrate=baud, timeout=0.25) as ser:
-            deadline = time.monotonic() + timeout_sec
-            while time.monotonic() < deadline:
-                raw = ser.readline()
-                if not raw:
-                    continue
+        while time.monotonic() < deadline and report["ok"] is not True:
+            try:
+                ser = serial.Serial(port=port, baudrate=baud, timeout=0.25)
+            except Exception as exc:  # pragma: no cover - serial dependent
+                report["error"] = str(exc)
+                time.sleep(1.0)
+                continue
+            with ser:
+                while time.monotonic() < deadline:
+                    raw = ser.readline()
+                    if not raw:
+                        continue
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
@@ -355,11 +485,11 @@ def capture_official_smoke(port: str, baud: int, timeout_sec: float) -> dict[str
                     parsed = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                report["parsed"].append(parsed)
-                if parsed.get("test") == "seeed_official_sd_smoke":
-                    report["result"] = parsed
-                    report["ok"] = parsed.get("ok") is True
-                    break
+                    report["parsed"].append(parsed)
+                    if parsed.get("test") == "seeed_official_sd_smoke":
+                        report["result"] = parsed
+                        report["ok"] = parsed.get("ok") is True
+                        break
     except Exception as exc:  # pragma: no cover - serial dependent
         report["error"] = str(exc)
     report["ended_at"] = utc_now()
@@ -425,6 +555,39 @@ def run_json_script(
     return report
 
 
+def flash_esp32(ctx: GuidedContext, *, dry_run: bool) -> dict[str, Any]:
+    build_dir = artifact_dirs(ctx)["esp32_build"]
+    command = esptool_flash_command(build_dir, ctx.d1l_port, ctx.esp32_flash_baud)
+    out = (
+        ctx.root
+        / "artifacts"
+        / "hardware"
+        / ctx.d1l_port.lower()
+        / f"d1l-guided-esp32-flash-{ctx.short_commit}-actions{ctx.github_run_id}-{ctx.d1l_port}.json"
+    )
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": "esp32_flash",
+        "mode": "dry-run" if dry_run else "hardware",
+        "port": ctx.d1l_port,
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "command": command,
+        "post_flash_settle_sec": POST_ESP32_FLASH_SETTLE_SEC,
+        "ok": True,
+    }
+    if not dry_run:
+        report["result"] = command_report("esp32_flash", command, ctx.root, timeout=240)
+        report["ok"] = report["result"].get("ok") is True
+        if report["ok"]:
+            time.sleep(POST_ESP32_FLASH_SETTLE_SEC)
+    write_report(report, out)
+    report["path"] = str(out)
+    return report
+
+
 def run_canaries(ctx: GuidedContext, *, dry_run: bool) -> list[dict[str, Any]]:
     token = f"guided_{ctx.short_commit}"
     specs = [
@@ -470,8 +633,17 @@ def write_report(report: dict[str, Any], out: Path) -> None:
     out.write_text(json.dumps(report, indent=2) + "\n", encoding="ascii")
 
 
+def summarize_canaries(runs: list[dict[str, Any]]) -> dict[str, bool]:
+    return {
+        str(run.get("kind")): run.get("ok") is True
+        for run in runs
+        if str(run.get("kind", "")).startswith("sd_")
+    }
+
+
 def run_guided_install(ctx: GuidedContext, args: argparse.Namespace) -> dict[str, Any]:
     dirs = artifact_dirs(ctx)
+    include_esp32 = not args.skip_esp32_flash
     report: dict[str, Any] = {
         "schema": 1,
         "kind": "d1l_guided_sd_install",
@@ -485,19 +657,52 @@ def run_guided_install(ctx: GuidedContext, args: argparse.Namespace) -> dict[str
         "short_commit": ctx.short_commit,
         "github_actions_run": ctx.github_run_id,
         "github_run_dir": str(ctx.github_run_dir),
+        "download_artifacts_requested": args.download_artifacts,
+        "esp32_flash_requested": include_esp32,
+        "esp32_flash_baud": ctx.esp32_flash_baud,
         "ports": {"d1l": ctx.d1l_port, "rp2040": ctx.rp2040_port, "forbidden": sorted(FORBIDDEN_PORTS)},
         "public_rf_tx": False,
         "formats_sd": False,
+        "no_format_proof": {
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "forbidden_ports_refused": sorted(FORBIDDEN_PORTS),
+            "fat32_prepared_on_computer": True,
+        },
         "created_at": utc_now(),
         "ok": True,
         "runs": [],
     }
+
+    input_check = input_artifact_check(ctx, include_esp32=include_esp32)
+    report["runs"].append(input_check)
+    if input_check.get("ok") is not True and args.download_artifacts:
+        report["runs"].append(download_artifacts(ctx, dry_run=args.dry_run))
+        input_check = input_artifact_check(ctx, include_esp32=include_esp32)
+        report["runs"].append(input_check)
+    if input_check.get("ok") is not True:
+        report["ok"] = False
+        report["error"] = "input_artifact_check_failed"
+        return report
+
     try:
-        report["artifacts"] = verify_inputs(ctx)
+        report["artifacts"] = verify_inputs(ctx, include_esp32=include_esp32)
     except Exception as exc:
         report["ok"] = False
         report["error"] = str(exc)
         return report
+
+    if include_esp32:
+        esp32_flash = flash_esp32(ctx, dry_run=args.dry_run)
+        report["runs"].append(esp32_flash)
+        report["esp32_flash_ok"] = esp32_flash.get("ok") is True
+        if esp32_flash.get("ok") is not True:
+            report["ok"] = False
+            report["error"] = "esp32_flash_failed"
+            return report
+    else:
+        report["esp32_flash_ok"] = None
+        report["esp32_flash_skipped"] = True
 
     official_copy = copy_stage(
         ctx=ctx,
@@ -508,6 +713,8 @@ def run_guided_install(ctx: GuidedContext, args: argparse.Namespace) -> dict[str
         timeout_sec=args.uf2_timeout,
         dry_run=args.dry_run,
         no_prompt=args.no_prompt,
+        auto_bootloader=args.auto_bootloader,
+        rp2040_port=ctx.rp2040_port,
     )
     report["runs"].append(official_copy)
     if official_copy.get("ok") is not True:
@@ -543,6 +750,8 @@ def run_guided_install(ctx: GuidedContext, args: argparse.Namespace) -> dict[str
         timeout_sec=args.uf2_timeout,
         dry_run=args.dry_run,
         no_prompt=args.no_prompt,
+        auto_bootloader=args.auto_bootloader,
+        rp2040_port=ctx.rp2040_port,
     )
     report["runs"].append(bridge_copy)
     if bridge_copy.get("ok") is not True:
@@ -584,18 +793,33 @@ def run_guided_install(ctx: GuidedContext, args: argparse.Namespace) -> dict[str
     preflight_artifact = preflight.get("artifact") if isinstance(preflight.get("artifact"), dict) else {}
     ready_for_canaries = preflight_artifact.get("ready_for_sd_acceptance") is True
     report["ready_for_sd_acceptance"] = ready_for_canaries
+    report["sd_status"] = preflight_artifact.get("classification") if isinstance(preflight_artifact.get("classification"), dict) else {}
     if not args.skip_canaries and (args.dry_run or ready_for_canaries):
         report["runs"].extend(run_canaries(ctx, dry_run=args.dry_run))
     elif not args.skip_canaries:
         report["canaries_skipped"] = "preflight_not_ready_for_sd_acceptance"
 
+    report["canary_results"] = summarize_canaries(report["runs"])
+    report["canary_artifacts"] = [
+        str(run.get("path"))
+        for run in report["runs"]
+        if str(run.get("kind", "")).startswith("sd_") and run.get("path")
+    ]
     report["official_smoke_ok"] = capture.get("ok") is True
-    report["bridge_ping_ok"] = bridge_ping.get("ok") is True
+    report["bridge_ping_ok"] = (
+        bridge_ping.get("ok") is True
+        or preflight_artifact.get("rp2040_ping_ok") is True
+        or preflight_artifact.get("rp2040_ping", {}).get("ok") is True
+    )
+    if bridge_ping.get("ok") is not True and report["bridge_ping_ok"]:
+        report["bridge_ping_recovered_by_preflight"] = True
     report["ok"] = (
-        report["official_smoke_ok"]
+        (not include_esp32 or report["esp32_flash_ok"] is True)
+        and report["official_smoke_ok"]
         and report["bridge_ping_ok"]
         and preflight.get("ok") is True
-        and (args.skip_canaries or args.dry_run or all(run.get("ok") is True for run in report["runs"] if str(run.get("kind", "")).startswith("sd_")))
+        and (args.skip_canaries or args.dry_run or bool(report["canary_results"]))
+        and (args.skip_canaries or args.dry_run or all(report["canary_results"].values()))
     )
     if not report["ok"]:
         report["error"] = "guided_sd_install_not_fully_verified"
@@ -611,6 +835,9 @@ def main() -> int:
     parser.add_argument("--d1l-port", default=os.environ.get("D1L_PORT", DEFAULT_D1L_PORT))
     parser.add_argument("--rp2040-port", default=os.environ.get("D1L_RP2040_PORT", DEFAULT_RP2040_PORT))
     parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--esp32-flash-baud", type=int, default=460800)
+    parser.add_argument("--download-artifacts", action="store_true")
+    parser.add_argument("--skip-esp32-flash", action="store_true")
     parser.add_argument("--uf2-volume", help="Explicit RP2040 UF2 volume, e.g. E:")
     parser.add_argument("--uf2-timeout", type=float, default=180.0)
     parser.add_argument("--rp2040-port-timeout", type=float, default=45.0)
@@ -618,6 +845,7 @@ def main() -> int:
     parser.add_argument("--post-copy-delay", type=float, default=2.0)
     parser.add_argument("--skip-canaries", action="store_true")
     parser.add_argument("--no-prompt", action="store_true", help="Do not pause for Enter; just wait for UF2 volumes")
+    parser.add_argument("--auto-bootloader", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out")
     args = parser.parse_args()

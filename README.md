@@ -2,7 +2,7 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. The fast release path is issue-sized: start from current `main`, change one P0, run focused host tests, run the full host suite, use GitHub Actions with `include_sd_bridge=false` unless SD/RP2040 evidence changed, and run only the hardware proof named by the selected issue. The latest issue-sized COM12 Home proof from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) passes Home pixel capture plus simulator diff with `public_rf_tx=false` and `formats_sd=false`. The broader COM12 UI stability set from Actions-built commit `59610ab` / run `28723265336` still covers targeted UI corruption, scroll probing, and Public/DM compose-keyboard capture. Core SD card support remains proven on the FAT32 bench artifact set from `1a29876` / run `28714355561`. Release remains blocked by full RF/DM acceptance, the remaining physical SD matrix, manual physical photos/review, 12-hour soak, and broader keyboard/sheet physical review. The latest local autonomous audit for the UI proof still fails closed with `ready_for_public_release=false`, `failed_count=20`, and `p0_failed_count=19`; no release tag should be cut until the release-commit gate is green.
+Current public-release status: **not ready to tag**. The fast release path is issue-sized: start from current `main`, change one P0, run focused host tests, run the full host suite, use GitHub Actions with `include_sd_bridge=false` unless SD/RP2040 evidence changed, and run only the hardware proof named by the selected issue. The latest issue-sized COM12 Home proof from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) passes Home pixel capture plus simulator diff with `public_rf_tx=false` and `formats_sd=false`. The COM12 compose/input proof from PR #35 (`fce5d82` / Actions `28727064923`, merged as `77c423c`) covers all release-blocking keyboard callers with `public_rf_tx=false` and `formats_sd=false`. Core SD card support remains proven on the FAT32 bench artifact set from `1a29876` / run `28714355561`. Release remains blocked by full RF/DM acceptance, the remaining physical SD matrix, guided SD install validation, manual physical photos/review, and 12-hour soak. No release tag should be cut until the release-commit gate is green.
 
 ## Feature Matrix
 
@@ -12,7 +12,7 @@ Status values: Working, Hardware-proven, Partial, Experimental, Not started.
 |---|---|---|
 | GitHub Actions firmware package | Working | Default ESP32/UI CI builds the ESP32 firmware and release package without rebuilding RP2040 artifacts. `include_sd_bridge=true` or SD/RP2040 path changes opt into the RP2040 SD bridge UF2 and official Seeed SD smoke UF2 checksums. |
 | Touch Home and shell navigation | Hardware-proven | Home uses an icon launcher with colored Time/Wi-Fi/BLE/SD status icons and no bottom dock; Messages, Nodes, Map, Packets, and Settings keep the bottom dock. COM12 Home proof from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) covers the current Home pixel capture and simulator diff with no RF TX or formatting. |
-| Compose/input keyboard capture | Partially hardware-proven | `ui_compose_keyboard_capture_d1l.py` captured Public short/long and DM short/long keyboard states on COM12 from `59610ab` / Actions `28723265336`. The current issue-sized keyboard gate now uses `--targets all` for Public/DM compose, Public search, Packet search, contact edit, onboarding, map location/provider, and Wi-Fi SSID/password without broad UI cycling. |
+| Compose/input keyboard capture | Hardware-proven | `ui_compose_keyboard_capture_d1l.py --targets all` passed on COM12 from PR #35 (`fce5d82` / Actions `28727064923`, merged as `77c423c`) for Public/DM compose, Public search, Packet search, contact edit, onboarding, map location/provider, and Wi-Fi SSID/password without broad UI cycling. |
 | Public messages | Hardware-proven | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
@@ -121,11 +121,18 @@ file/export/map/retained/reboot canaries, smoke, and the final release-gate
 audit. For SD-only refreshes where the ESP32 app is already flashed from the
 matching Actions artifact, add `--skip-esp32-flash`.
 
-Guided SD install, only when autonomous RP2040 access is not available:
+Guided SD install and validation for SD/RP2040 release work:
 
 ```powershell
-python .\scripts\guided_sd_install_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
+python .\scripts\guided_sd_install_d1l.py --download-artifacts --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --d1l-port COM12 --rp2040-port COM16
 ```
+
+This guided path verifies downloaded Actions checksums, flashes the ESP32 app on
+COM12, guides the two RP2040 UF2/BOOTSEL steps on COM16 for official SD smoke
+and bridge restore, runs the post-restore SD checks, and writes one
+`d1l-guided-sd-install-<sha7>-actions<run-id>.json` report. Add
+`--skip-esp32-flash` only when the matching ESP32 Actions artifact is already
+flashed.
 
 ## Documentation
 
