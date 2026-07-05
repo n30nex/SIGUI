@@ -287,6 +287,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     source = read("main/ui/ui_phase1.c")
     header = read("main/ui/ui_phase1.h")
     console = read("main/comms/usb_console.c")
+    cmake = read("main/CMakeLists.txt")
+    keyboard = read("main/ui/ui_keyboard.c")
+    keyboard_header = read("main/ui/ui_keyboard.h")
 
     assert "configure_content_scroll_root" in source
     assert "configure_home_content_root" in source
@@ -320,11 +323,16 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
     assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
     assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
-    assert 'strcmp(normalized, "public_search") == 0' in source
-    assert 'strcmp(normalized, "packet_search") == 0' in source
-    assert 'strcmp(normalized, "contact_edit") == 0' in source
-    assert 'strcmp(normalized, "map_provider") == 0' in source
-    assert 'strcmp(normalized, "wifi_password") == 0' in source
+    assert '"ui/ui_keyboard.c"' in cmake
+    assert '#include "ui_keyboard.h"' in source
+    assert "d1l_ui_keyboard_normalize_probe_target" in source
+    assert "d1l_ui_keyboard_normalize_probe_target" in keyboard_header
+    assert 'strcmp(normalized, "public_search") == 0' in keyboard
+    assert 'strcmp(normalized, "packet_search") == 0' in keyboard
+    assert 'strcmp(normalized, "contact_edit") == 0' in keyboard
+    assert 'strcmp(normalized, "map_provider") == 0' in keyboard
+    assert 'strcmp(normalized, "wifi_password") == 0' in keyboard
+    assert 'strcmp(normalized, "wifi_password") == 0' not in source
     for keyboard in (
         "s_public_search_keyboard",
         "s_packet_search_keyboard",
