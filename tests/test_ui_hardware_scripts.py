@@ -188,8 +188,9 @@ def test_active_release_docs_mark_keyboard_p0_closed_and_keep_fast_path():
     assert "broader keyboard/sheet physical review" not in release_docs
     assert "expanded `--targets all` keyboard/sheet physical review" not in release_docs
     assert "expanded `--targets all` keyboard/sheet review" not in release_docs
-    assert "PR #38 split navigation ownership" in roadmap
-    assert "PR #39 added a modal helper boundary" in roadmap
+    assert "ui_navigation.c" in roadmap
+    assert "ui_modal.c" in roadmap
+    assert "ui_chrome.c" in roadmap
 
 
 def test_smoke_knows_ui_console_commands():
