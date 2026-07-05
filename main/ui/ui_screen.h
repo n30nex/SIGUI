@@ -14,6 +14,7 @@ typedef struct {
     d1l_ui_screen_render_fn_t render;
 } d1l_ui_screen_renderer_t;
 
+void d1l_ui_screen_configure_content_root(lv_obj_t *root, bool scrollable);
 bool d1l_ui_screen_render(d1l_ui_screen_t screen,
                           const d1l_app_snapshot_t *snapshot,
                           lv_obj_t *content,

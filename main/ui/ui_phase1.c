@@ -454,45 +454,6 @@ static bool compose_probe_target_from_name(const char *name, char *out_target,
     return d1l_ui_keyboard_normalize_probe_target(name, out_target, out_target_len);
 }
 
-static void configure_content_scroll_root(lv_obj_t *root)
-{
-    if (!root) {
-        return;
-    }
-    lv_obj_add_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(root, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_AUTO);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_width(root, 0, 0);
-    lv_obj_set_style_pad_all(root, 0, 0);
-    lv_obj_set_style_pad_bottom(root, 12, 0);
-}
-
-static void configure_home_content_root(lv_obj_t *root)
-{
-    if (!root) {
-        return;
-    }
-    lv_obj_clear_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(root, LV_DIR_NONE);
-    lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x071018), 0);
-    lv_obj_set_style_border_width(root, 0, 0);
-    lv_obj_set_style_pad_all(root, 0, 0);
-    lv_obj_set_style_pad_bottom(root, 0, 0);
-}
-
-static void configure_content_for_active_tab(void)
-{
-    const d1l_ui_chrome_layout_t layout =
-        d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
-    if (!layout.content_scrollable) {
-        configure_home_content_root(s_content);
-    } else {
-        configure_content_scroll_root(s_content);
-    }
-}
-
 static void request_full_screen_repaint(void)
 {
     if (s_screen) {
@@ -1006,6 +967,7 @@ static void layout_content_for_active_tab(void)
             d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
         lv_obj_set_pos(s_content, 0, layout.content_y);
         lv_obj_set_size(s_content, 480, layout.content_height);
+        d1l_ui_screen_configure_content_root(s_content, layout.content_scrollable);
     }
     restore_dock_for_active_tab();
 }
@@ -5949,7 +5911,6 @@ static void render_active_tab(void)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
-    configure_content_for_active_tab();
     if (!d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
                               renderers, sizeof(renderers) / sizeof(renderers[0]))) {
         render_home(&s_snapshot);
@@ -7611,7 +7572,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     }
     lv_obj_set_size(s_content, 480, 424);
     lv_obj_set_pos(s_content, 0, 56);
-    configure_content_scroll_root(s_content);
+    d1l_ui_screen_configure_content_root(s_content, true);
 
     create_dock(s_screen);
     create_sheet(s_screen);
