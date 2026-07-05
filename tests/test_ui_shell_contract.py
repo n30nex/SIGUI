@@ -121,7 +121,7 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
     assert "static void restore_dock_for_active_tab(void)" in source
-    assert "set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME)" in source
+    assert "set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME)" in source
     assert "lv_obj_set_pos(s_content, 0, home ? 32 : 56)" in source
     assert "lv_obj_set_size(s_content, 480, home ? 448 : 362)" in source
     assert "layout_content_for_active_tab();" in source
@@ -282,7 +282,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "layout_content_for_active_tab()" in source
     assert "lv_obj_set_pos(s_content, 0, home ? 32 : 56)" in source
     assert "lv_obj_set_size(s_content, 480, home ? 448 : 362)" in source
-    assert "set_dock_hidden(s_active_tab == D1L_UI_TAB_HOME)" in source
+    assert "set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME)" in source
     assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
     assert "d1l_ui_phase1_request_tab" in header
     assert "d1l_ui_scroll_probe_result_t" in header
@@ -397,11 +397,17 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
 
 def test_serial_tab_state_stays_pending_until_render_finishes():
     source = read("main/ui/ui_phase1.c")
+    nav_source = read("main/ui/ui_navigation.c")
 
-    assert "static portMUX_TYPE s_tab_lock = portMUX_INITIALIZER_UNLOCKED" in source
+    assert "static portMUX_TYPE s_navigation_lock = portMUX_INITIALIZER_UNLOCKED" in nav_source
+    assert "static d1l_ui_screen_t s_active_screen = D1L_UI_SCREEN_HOME" in nav_source
+    assert "static d1l_ui_screen_t s_pending_screen = D1L_UI_SCREEN_HOME" in nav_source
     assert "static void request_tab_switch(d1l_ui_tab_t tab)" in source
     assert "static bool begin_pending_tab_switch(d1l_ui_tab_t *out_tab)" in source
     assert "static void finish_pending_tab_switch(d1l_ui_tab_t rendered_tab)" in source
+    assert "d1l_ui_navigation_request(tab);" in source
+    assert "return d1l_ui_navigation_begin_pending(out_tab);" in source
+    assert "d1l_ui_navigation_finish(rendered_tab);" in source
     assert "request_tab_switch(tab)" in source
     assert "request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event))" in source
     assert "request_tab_switch(D1L_UI_TAB_MESSAGES)" in source
@@ -410,7 +416,7 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
         "static void lock_event_cb", 1
     )[0]
     assert "begin_pending_tab_switch(&rendered_tab)" in process_body
-    assert "s_tab_switch_pending = false;" not in process_body.split("render_active_tab();", 1)[0]
+    assert "d1l_ui_navigation_finish" not in process_body.split("render_active_tab();", 1)[0]
     assert "render_active_tab();" in process_body
     assert "finish_pending_tab_switch(rendered_tab);" in process_body
     assert process_body.index("render_active_tab();") < process_body.index(
@@ -418,14 +424,9 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
     )
     assert "s_content_refresh_pending = false;" not in process_body
 
-    for name in [
-        "d1l_ui_phase1_active_tab_name",
-        "d1l_ui_phase1_pending_tab_name",
-        "d1l_ui_phase1_tab_switch_pending",
-    ]:
-        body = source.split(f"{name}(", 1)[1].split("\n}", 1)[0]
-        assert "portENTER_CRITICAL(&s_tab_lock)" in body
-        assert "portEXIT_CRITICAL(&s_tab_lock)" in body
+    assert "return tab_name(d1l_ui_navigation_active());" in source
+    assert "return tab_name(d1l_ui_navigation_pending());" in source
+    assert "return d1l_ui_navigation_switch_pending();" in source
 
 
 def test_content_refreshes_are_coalesced_on_ui_task():
