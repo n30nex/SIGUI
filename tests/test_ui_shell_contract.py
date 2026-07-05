@@ -327,11 +327,24 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert '#include "ui_keyboard.h"' in source
     assert "d1l_ui_keyboard_normalize_probe_target" in source
     assert "d1l_ui_keyboard_normalize_probe_target" in keyboard_header
+    assert "d1l_ui_keyboard_probe_target_is_compose" in keyboard_header
+    assert "d1l_ui_keyboard_probe_requires_hidden_dock" in keyboard_header
+    assert "d1l_ui_keyboard_probe_min_width" in keyboard_header
+    assert "d1l_ui_keyboard_probe_min_height" in keyboard_header
     assert 'strcmp(normalized, "public_search") == 0' in keyboard
     assert 'strcmp(normalized, "packet_search") == 0' in keyboard
     assert 'strcmp(normalized, "contact_edit") == 0' in keyboard
     assert 'strcmp(normalized, "map_provider") == 0' in keyboard
     assert 'strcmp(normalized, "wifi_password") == 0' in keyboard
+    assert "d1l_ui_keyboard_probe_target_is_compose(target)" in keyboard
+    assert "d1l_ui_keyboard_probe_requires_hidden_dock" in keyboard
+    assert "return 400;" in keyboard
+    assert "return 250;" in keyboard
+    assert "d1l_ui_keyboard_probe_min_width(canonical)" in source
+    assert "d1l_ui_keyboard_probe_min_height(canonical)" in source
+    assert "static bool compose_probe_target_is_dm" not in source
+    assert "static bool compose_probe_target_requires_hidden_dock" not in source
+    assert "static int32_t compose_probe_min_keyboard_width" not in source
     assert 'strcmp(normalized, "wifi_password") == 0' not in source
     for keyboard in (
         "s_public_search_keyboard",

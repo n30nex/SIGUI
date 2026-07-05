@@ -6484,31 +6484,12 @@ static const char *compose_probe_sample_text(const char *target)
     return "test from DeskOS D1L";
 }
 
-static bool compose_probe_target_is_dm(const char *target)
-{
-    return target && strncmp(target, "dm", 2) == 0;
-}
-
-static bool compose_probe_target_is_compose(const char *target)
-{
-    return target &&
-        (strcmp(target, "public") == 0 ||
-         strcmp(target, "public_long") == 0 ||
-         strcmp(target, "dm") == 0 ||
-         strcmp(target, "dm_long") == 0);
-}
-
-static bool compose_probe_target_is_onboarding(const char *target)
-{
-    return target && strcmp(target, "onboarding") == 0;
-}
-
 static d1l_ui_tab_t compose_probe_tab_for_target(const char *target)
 {
     if (!target) {
         return D1L_UI_TAB_HOME;
     }
-    if (compose_probe_target_is_compose(target) ||
+    if (d1l_ui_keyboard_probe_target_is_compose(target) ||
         strcmp(target, "public_search") == 0) {
         return D1L_UI_TAB_MESSAGES;
     }
@@ -6527,49 +6508,6 @@ static d1l_ui_tab_t compose_probe_tab_for_target(const char *target)
         return D1L_UI_TAB_SETTINGS;
     }
     return D1L_UI_TAB_HOME;
-}
-
-static bool compose_probe_target_requires_hidden_dock(const char *target)
-{
-    return compose_probe_target_is_compose(target) ||
-        compose_probe_target_is_onboarding(target) ||
-        strcmp(target, "public_search") == 0 ||
-        strcmp(target, "packet_search") == 0 ||
-        strcmp(target, "contact_edit") == 0 ||
-        strcmp(target, "map_location") == 0 ||
-        strcmp(target, "map_provider") == 0 ||
-        strcmp(target, "wifi_ssid") == 0 ||
-        strcmp(target, "wifi_password") == 0;
-}
-
-static int32_t compose_probe_min_keyboard_width(const char *target)
-{
-    if (strcmp(target, "public_search") == 0 ||
-        strcmp(target, "packet_search") == 0 ||
-        strcmp(target, "contact_edit") == 0 ||
-        compose_probe_target_is_onboarding(target)) {
-        return 400;
-    }
-    return 440;
-}
-
-static int32_t compose_probe_min_keyboard_height(const char *target)
-{
-    if (compose_probe_target_is_compose(target)) {
-        return 250;
-    }
-    if (strcmp(target, "public_search") == 0 ||
-        strcmp(target, "packet_search") == 0) {
-        return 180;
-    }
-    if (strcmp(target, "contact_edit") == 0) {
-        return 170;
-    }
-    if (compose_probe_target_is_onboarding(target) ||
-        strcmp(target, "map_location") == 0) {
-        return 150;
-    }
-    return 80;
 }
 
 static void hide_keyboard_probe_sheets(bool include_onboarding)
@@ -6609,7 +6547,7 @@ static void fill_compose_probe_objects(const char *target, lv_obj_t **sheet,
     *sheet = NULL;
     *textarea = NULL;
     *keyboard = NULL;
-    if (compose_probe_target_is_compose(target)) {
+    if (d1l_ui_keyboard_probe_target_is_compose(target)) {
         *sheet = s_compose_sheet;
         *textarea = s_compose_textarea;
         *keyboard = s_compose_keyboard;
@@ -6625,7 +6563,7 @@ static void fill_compose_probe_objects(const char *target, lv_obj_t **sheet,
         *sheet = s_contact_edit_sheet;
         *textarea = s_contact_edit_textarea;
         *keyboard = s_contact_edit_keyboard;
-    } else if (compose_probe_target_is_onboarding(target)) {
+    } else if (d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         *sheet = s_onboarding_sheet;
         *textarea = s_onboarding_name_textarea;
         *keyboard = s_onboarding_keyboard;
@@ -6654,11 +6592,11 @@ static void open_compose_probe_on_ui_task(const char *target)
     s_onboarding_probe_suppressed = true;
     request_tab_switch(D1L_UI_TAB_MESSAGES);
     process_pending_tab_switch();
-    s_messages_show_dms = compose_probe_target_is_dm(target);
+    s_messages_show_dms = d1l_ui_keyboard_probe_target_is_dm(target);
     render_active_tab();
     hide_onboarding_sheet();
 
-    if (compose_probe_target_is_dm(target)) {
+    if (d1l_ui_keyboard_probe_target_is_dm(target)) {
         d1l_contact_entry_t contact = {0};
         snprintf(contact.fingerprint, sizeof(contact.fingerprint), "%s", "0000000000000000");
         snprintf(contact.public_key_hex, sizeof(contact.public_key_hex), "%s", "00");
@@ -6686,16 +6624,16 @@ static void open_compose_probe_on_ui_task(const char *target)
 
 static void open_keyboard_probe_on_ui_task(const char *target)
 {
-    if (compose_probe_target_is_compose(target)) {
+    if (d1l_ui_keyboard_probe_target_is_compose(target)) {
         open_compose_probe_on_ui_task(target);
         return;
     }
 
     hide_keyboard_probe_sheets(true);
-    s_onboarding_probe_suppressed = !compose_probe_target_is_onboarding(target);
+    s_onboarding_probe_suppressed = !d1l_ui_keyboard_probe_target_is_onboarding(target);
     request_tab_switch(compose_probe_tab_for_target(target));
     process_pending_tab_switch();
-    if (!compose_probe_target_is_onboarding(target)) {
+    if (!d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         hide_onboarding_sheet();
     }
 
@@ -6729,7 +6667,7 @@ static void open_keyboard_probe_on_ui_task(const char *target)
                  sizeof(s_contact_detail_contact.alias),
                  "%s", "Probe Contact");
         open_contact_edit_event_cb(NULL);
-    } else if (compose_probe_target_is_onboarding(target)) {
+    } else if (d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         s_onboarding_probe_suppressed = false;
         if (s_onboarding_sheet) {
             s_onboarding_visible = true;
@@ -6857,12 +6795,12 @@ static void run_compose_probe_on_ui_task(const char *target,
         result->textarea_x + result->textarea_w <= result->sheet_w &&
         result->textarea_y + result->textarea_h <= result->keyboard_y;
     const bool onboarding_state_ok =
-        result->onboarding_visible == compose_probe_target_is_onboarding(canonical);
+        result->onboarding_visible == d1l_ui_keyboard_probe_target_is_onboarding(canonical);
     const bool dock_state_ok =
-        !compose_probe_target_requires_hidden_dock(canonical) || result->dock_hidden;
+        !d1l_ui_keyboard_probe_requires_hidden_dock(canonical) || result->dock_hidden;
     const bool dm_state_ok =
-        !compose_probe_target_is_compose(canonical) ||
-        result->dm_mode == compose_probe_target_is_dm(canonical);
+        !d1l_ui_keyboard_probe_target_is_compose(canonical) ||
+        result->dm_mode == d1l_ui_keyboard_probe_target_is_dm(canonical);
 
     result->ok = result->target_supported &&
         result->sheet_visible &&
@@ -6871,8 +6809,8 @@ static void run_compose_probe_on_ui_task(const char *target,
         onboarding_state_ok &&
         dock_state_ok &&
         dm_state_ok &&
-        result->keyboard_w >= compose_probe_min_keyboard_width(canonical) &&
-        result->keyboard_h >= compose_probe_min_keyboard_height(canonical) &&
+        result->keyboard_w >= d1l_ui_keyboard_probe_min_width(canonical) &&
+        result->keyboard_h >= d1l_ui_keyboard_probe_min_height(canonical) &&
         sheet_inside_screen &&
         keyboard_inside_sheet &&
         keyboard_inside_screen &&
