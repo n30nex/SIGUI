@@ -6030,9 +6030,8 @@ static void render_active_tab(void)
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
     configure_content_for_active_tab();
-    d1l_ui_screen_prepare_content_root(s_content);
-    if (!d1l_ui_screen_dispatch(d1l_ui_navigation_active(), &s_snapshot,
-                                renderers, sizeof(renderers) / sizeof(renderers[0]))) {
+    if (!d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
+                              renderers, sizeof(renderers) / sizeof(renderers[0]))) {
         render_home(&s_snapshot);
     }
     update_onboarding_visibility(&s_snapshot);

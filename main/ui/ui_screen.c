@@ -1,6 +1,6 @@
 #include "ui_screen.h"
 
-void d1l_ui_screen_prepare_content_root(lv_obj_t *content)
+static void prepare_content_root(lv_obj_t *content)
 {
     if (!content) {
         return;
@@ -9,7 +9,7 @@ void d1l_ui_screen_prepare_content_root(lv_obj_t *content)
     lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF);
 }
 
-bool d1l_ui_screen_dispatch(d1l_ui_screen_t screen,
+static bool dispatch_screen(d1l_ui_screen_t screen,
                             const d1l_app_snapshot_t *snapshot,
                             const d1l_ui_screen_renderer_t *renderers,
                             size_t renderer_count)
@@ -24,4 +24,17 @@ bool d1l_ui_screen_dispatch(d1l_ui_screen_t screen,
         }
     }
     return false;
+}
+
+bool d1l_ui_screen_render(d1l_ui_screen_t screen,
+                          const d1l_app_snapshot_t *snapshot,
+                          lv_obj_t *content,
+                          const d1l_ui_screen_renderer_t *renderers,
+                          size_t renderer_count)
+{
+    if (!content) {
+        return false;
+    }
+    prepare_content_root(content);
+    return dispatch_screen(screen, snapshot, renderers, renderer_count);
 }
