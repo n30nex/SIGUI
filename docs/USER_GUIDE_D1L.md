@@ -120,7 +120,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Current Limits
 
 - Manual physical review of the touch UI is still pending.
-- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures. `scripts/ui_compose_keyboard_capture_d1l.py` opens `ui compose-probe public|public-long|dm|dm-long` and writes four compose-keyboard PNG/RGB565 captures for the `ui_compose_keyboard_capture` release gate. The `59610ab` / Actions `28723265336` evidence already proves the Home simulator/reference diff and Public/DM compose captures; rerun those probes only when the selected issue requires fresh UI proof.
+- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures. `scripts/ui_compose_keyboard_capture_d1l.py` opens `ui compose-probe public|public-long|dm|dm-long` and writes four compose-keyboard PNG/RGB565 captures for the `ui_compose_keyboard_capture` release gate. PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) proves the current Home simulator/reference diff, and `59610ab` / Actions `28723265336` proves Public/DM compose captures; rerun those probes only when the selected issue requires fresh UI proof.
 - Manual touch review of the Settings dashboard and Radio Settings sheet is still pending.
 - Manual touch review of the Contact Edit rename/Forget sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.
