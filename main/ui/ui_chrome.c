@@ -4,8 +4,8 @@ d1l_ui_chrome_layout_t d1l_ui_chrome_layout_for_screen(d1l_ui_screen_t screen)
 {
     if (screen == D1L_UI_SCREEN_HOME) {
         return (d1l_ui_chrome_layout_t){
-            .content_y = 32,
-            .content_height = 448,
+            .content_y = 18,
+            .content_height = 462,
             .content_scrollable = false,
             .dock_visible = false,
             .header_detail_visible = false,
