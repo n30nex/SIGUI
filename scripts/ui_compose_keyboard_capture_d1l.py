@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Capture D1L compose keyboard states from the hardware framebuffer."""
+"""Capture D1L compose and input-keyboard states from the hardware framebuffer."""
 
 from __future__ import annotations
 
@@ -19,7 +19,21 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.ui_capture_d1l import MAX_CHUNK_BYTES, capture_frame, write_png_from_rgb565_le
 
 
-DEFAULT_TARGETS = ["public", "public-long", "dm", "dm-long"]
+ALL_TARGETS = [
+    "public",
+    "public-long",
+    "dm",
+    "dm-long",
+    "public-search",
+    "packet-search",
+    "contact-edit",
+    "onboarding",
+    "map-location",
+    "map-provider",
+    "wifi-ssid",
+    "wifi-password",
+]
+DEFAULT_TARGETS = list(ALL_TARGETS)
 
 
 def default_json_path(root: Path) -> Path:
@@ -40,11 +54,17 @@ def slug(value: str) -> str:
     return re.sub(r"[^a-z0-9_]+", "_", value.lower().replace("-", "_")).strip("_")
 
 
+def normalize_target(value: str) -> str:
+    return value.strip().lower().replace("_", "-")
+
+
 def parse_targets(text: str | None) -> list[str]:
     if not text:
         return list(DEFAULT_TARGETS)
-    targets = [item.strip().lower() for item in text.split(",") if item.strip()]
-    allowed = set(DEFAULT_TARGETS)
+    if normalize_target(text) == "all":
+        return list(ALL_TARGETS)
+    targets = [normalize_target(item) for item in text.split(",") if item.strip()]
+    allowed = set(ALL_TARGETS)
     unknown = sorted(set(targets) - allowed)
     if unknown:
         raise ValueError(f"unknown compose capture target(s): {', '.join(unknown)}")
@@ -117,9 +137,10 @@ def capture_target(
         frame["raw_path"] = str(raw_path)
         frame["png_path"] = str(png_path)
     probe = compose_probe_event(frame)
+    expected_onboarding_visible = target == "onboarding"
     target_visible = (
-        frame.get("onboarding_visible") is False
-        and bool(probe and probe.get("onboarding_visible") is False)
+        frame.get("onboarding_visible") is expected_onboarding_visible
+        and bool(probe and probe.get("onboarding_visible") is expected_onboarding_visible)
     )
     return {
         "target": target,

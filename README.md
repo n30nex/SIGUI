@@ -12,7 +12,7 @@ Status values: Working, Hardware-proven, Partial, Experimental, Not started.
 |---|---|---|
 | GitHub Actions firmware package | Working | Default ESP32/UI CI builds the ESP32 firmware and release package without rebuilding RP2040 artifacts. `include_sd_bridge=true` or SD/RP2040 path changes opt into the RP2040 SD bridge UF2 and official Seeed SD smoke UF2 checksums. |
 | Touch Home and shell navigation | Hardware-proven | Home uses an icon launcher with colored Time/Wi-Fi/BLE/SD status icons and no bottom dock; Messages, Nodes, Map, Packets, and Settings keep the bottom dock. COM12 Home proof from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) covers the current Home pixel capture and simulator diff with no RF TX or formatting. |
-| Compose keyboard capture | Hardware-proven | `ui_compose_keyboard_capture_d1l.py` captured Public short/long and DM short/long keyboard states on COM12 from `59610ab` / Actions `28723265336`. Broader keyboard/sheet physical review still gates release. |
+| Compose/input keyboard capture | Partially hardware-proven | `ui_compose_keyboard_capture_d1l.py` captured Public short/long and DM short/long keyboard states on COM12 from `59610ab` / Actions `28723265336`. The current issue-sized keyboard gate now uses `--targets all` for Public/DM compose, Public search, Packet search, contact edit, onboarding, map location/provider, and Wi-Fi SSID/password without broad UI cycling. |
 | Public messages | Hardware-proven | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
@@ -53,7 +53,7 @@ python -m pytest tests
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\ui_capture_d1l.py --dry-run
-python .\scripts\ui_compose_keyboard_capture_d1l.py --dry-run --targets public,public-long,dm,dm-long
+python .\scripts\ui_compose_keyboard_capture_d1l.py --dry-run --targets all
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
 python .\scripts\sd_file_canary_d1l.py --dry-run
 python .\scripts\sd_retained_history_acceptance_d1l.py --dry-run --token dryrun
@@ -98,7 +98,7 @@ $env:D1L_PORT = "COM12"
 python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --clear-crashlog-before-start
 python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\<sha>
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\<sha>\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-<sha>-COM12.json
-python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets public,public-long,dm,dm-long --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
+python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all --out artifacts\hardware\com12\ui_compose_keyboard_capture-<sha>-COM12.json
 python .\scripts\scroll_probe_d1l.py --port $env:D1L_PORT --screens <screen-or-small-list> --manual-touch --clear-crashlog-before-start
 ```
 

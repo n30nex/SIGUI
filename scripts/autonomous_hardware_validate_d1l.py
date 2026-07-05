@@ -1428,7 +1428,7 @@ def run_ui_compose_keyboard_capture(ctx: RunContext, dry_run: bool) -> dict:
         "--chunk-size",
         "1024",
         "--targets",
-        "public,public-long,dm,dm-long",
+        "all",
         "--out",
         str(out),
     ]

@@ -9,6 +9,20 @@ from scripts.release_gate_audit_d1l import build_audit, parse_args
 COMMIT = "68350bf9f3fabfd2db4110ec6ffc36068056a060"
 STALE_COMMIT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 RUN_ID = "28549761003"
+COMPOSE_CAPTURE_TARGETS = [
+    "public",
+    "public-long",
+    "dm",
+    "dm-long",
+    "public-search",
+    "packet-search",
+    "contact-edit",
+    "onboarding",
+    "map-location",
+    "map-provider",
+    "wifi-ssid",
+    "wifi-password",
+]
 SCROLL_SURFACES = {
     "home": "home",
     "public_messages": "messages",
@@ -130,6 +144,16 @@ def ui_pixel_capture_payload(**overrides: object) -> dict:
 def compose_keyboard_capture_payload(**overrides: object) -> dict:
     def capture(target: str) -> dict:
         probe_target = target.replace("-", "_")
+        onboarding_visible = target == "onboarding"
+        active_tab = {
+            "packet-search": "packets",
+            "contact-edit": "nodes",
+            "onboarding": "home",
+            "map-location": "map",
+            "map-provider": "map",
+            "wifi-ssid": "settings",
+            "wifi-password": "settings",
+        }.get(target, "messages")
         return {
             "target": target,
             "ok": True,
@@ -141,17 +165,17 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
                 "sheet_visible": True,
                 "textarea_visible": True,
                 "keyboard_visible": True,
-                "onboarding_visible": False,
+                "onboarding_visible": onboarding_visible,
                 "dock_hidden": True,
                 "dm_mode": target.startswith("dm"),
-                "active_tab": "messages",
+                "active_tab": active_tab,
                 "sheet": {"x": 0, "y": 56, "w": 480, "h": 424},
                 "textarea": {"x": 16, "y": 58, "w": 448, "h": 78},
                 "keyboard": {"x": 16, "y": 158, "w": 448, "h": 258},
                 "public_rf_tx": False,
                 "formats_sd": False,
             },
-            "capture": ui_pixel_capture_payload(),
+            "capture": ui_pixel_capture_payload(onboarding_visible=onboarding_visible),
             "png_path": f"artifacts/hardware/com12/ui_compose_{target}.png",
             "raw_path": f"artifacts/hardware/com12/ui_compose_{target}.rgb565",
             "target_visible": True,
@@ -164,9 +188,9 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
         "kind": "ui_compose_keyboard_capture",
         "mode": "hardware",
         "port": "COM12",
-        "targets": ["public", "public-long", "dm", "dm-long"],
-        "captures": [capture(target) for target in ("public", "public-long", "dm", "dm-long")],
-        "capture_count": 4,
+        "targets": COMPOSE_CAPTURE_TARGETS,
+        "captures": [capture(target) for target in COMPOSE_CAPTURE_TARGETS],
+        "capture_count": len(COMPOSE_CAPTURE_TARGETS),
         "public_rf_tx": False,
         "formats_sd": False,
     }

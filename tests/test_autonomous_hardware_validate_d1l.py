@@ -154,7 +154,7 @@ def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(t
     assert report["ok"] is True
     assert captured["kind"] == "ui_compose_keyboard_capture"
     assert captured["args"][captured["args"].index("--port") + 1] == "COM12"
-    assert captured["args"][captured["args"].index("--targets") + 1] == "public,public-long,dm,dm-long"
+    assert captured["args"][captured["args"].index("--targets") + 1] == "all"
     assert "COM8" not in json.dumps(captured["args"])
     assert "COM11" not in json.dumps(captured["args"])
     assert "COM29" not in json.dumps(captured["args"])
