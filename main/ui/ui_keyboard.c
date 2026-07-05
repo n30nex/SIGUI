@@ -104,6 +104,36 @@ void d1l_ui_keyboard_configure_input(lv_obj_t *keyboard,
     }
 }
 
+bool d1l_ui_keyboard_focus_textarea_from_event(lv_obj_t *keyboard,
+                                               lv_event_t *event,
+                                               lv_obj_t *primary_textarea,
+                                               lv_obj_t *secondary_textarea)
+{
+    if (!keyboard || !event) {
+        return false;
+    }
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_FOCUSED && code != LV_EVENT_CLICKED) {
+        return false;
+    }
+    lv_obj_t *target = lv_event_get_target(event);
+    if (!target) {
+        return false;
+    }
+    if (target != primary_textarea && target != secondary_textarea) {
+        return false;
+    }
+    lv_keyboard_set_textarea(keyboard, target);
+    return true;
+}
+
+void d1l_ui_keyboard_clear_textarea(lv_obj_t *keyboard)
+{
+    if (keyboard) {
+        lv_keyboard_set_textarea(keyboard, NULL);
+    }
+}
+
 bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
                                             size_t out_target_len)
 {

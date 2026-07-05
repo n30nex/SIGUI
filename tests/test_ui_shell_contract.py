@@ -355,8 +355,17 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_probe_min_height" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard_header
     assert "d1l_ui_keyboard_configure_input" in keyboard_header
+    assert "d1l_ui_keyboard_focus_textarea_from_event" in keyboard_header
+    assert "d1l_ui_keyboard_clear_textarea" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard
     assert "d1l_ui_keyboard_configure_input" in keyboard
+    assert "d1l_ui_keyboard_focus_textarea_from_event" in keyboard
+    assert "lv_event_get_code(event)" in keyboard
+    assert "LV_EVENT_FOCUSED" in keyboard
+    assert "LV_EVENT_CLICKED" in keyboard
+    assert "lv_event_get_target(event)" in keyboard
+    assert "d1l_ui_keyboard_clear_textarea" in keyboard
+    assert "lv_keyboard_set_textarea(keyboard, NULL)" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
     assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
@@ -387,6 +396,10 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_configure_input(s_map_location_keyboard, s_map_lat_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_map_tiles_keyboard, s_map_tiles_url_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_tiles_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event" in source
+    assert "d1l_ui_keyboard_clear_textarea(s_map_tiles_keyboard)" in source
     assert 'strcmp(target, "public_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source

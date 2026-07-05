@@ -4147,16 +4147,9 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
 
 static void map_location_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_map_location_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *textarea = lv_event_get_target(event);
-        if (textarea == s_map_lat_textarea || textarea == s_map_lon_textarea) {
-            lv_keyboard_set_textarea(s_map_location_keyboard, textarea);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event,
+                                              s_map_lat_textarea,
+                                              s_map_lon_textarea);
 }
 
 static void map_location_save_event_cb(lv_event_t *event)
@@ -4353,26 +4346,16 @@ static void update_map_tiles_zoom_label(void)
 
 static void map_tiles_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_map_tiles_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *target = lv_event_get_target(event);
-        if (target == s_map_tiles_url_textarea ||
-            target == s_map_tiles_attribution_textarea) {
-            lv_keyboard_set_textarea(s_map_tiles_keyboard, target);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_map_tiles_keyboard, event,
+                                              s_map_tiles_url_textarea,
+                                              s_map_tiles_attribution_textarea);
 }
 
 static void map_tiles_keyboard_event_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        if (s_map_tiles_keyboard) {
-            lv_keyboard_set_textarea(s_map_tiles_keyboard, NULL);
-        }
+        d1l_ui_keyboard_clear_textarea(s_map_tiles_keyboard);
     }
 }
 
@@ -5172,16 +5155,9 @@ static void wifi_refresh_sheet(void)
 
 static void wifi_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_wifi_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *textarea = lv_event_get_target(event);
-        if (textarea == s_wifi_ssid_textarea || textarea == s_wifi_password_textarea) {
-            lv_keyboard_set_textarea(s_wifi_keyboard, textarea);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event,
+                                              s_wifi_ssid_textarea,
+                                              s_wifi_password_textarea);
 }
 
 static void wifi_save_event_cb(lv_event_t *event)
