@@ -8,7 +8,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 
 | Blocker | Current State | Next Proof |
 |---|---|---|
-| On-screen keyboard and sheets | Public/DM compose keyboard geometry is hardware-proven on COM12 from Actions-built `59610ab` / run `28723265336`. The current issue-sized capture path now uses `ui_compose_keyboard_capture_d1l.py --targets all` to cover the remaining compose/input callers without a broad UI sweep. | Run the all-keyboard COM12 capture only when working the keyboard P0, then keep the final broad UI/manual pass for release readiness. |
+| UI modular ownership and newest Home proof | PR #38 split navigation ownership and PR #39 added a modal helper boundary on `main`. The remaining #16/#6 work is to finish owned screen/render modules, keyboard/shared chrome ownership, single-active-root invariants, and current Home pixel/manual evidence without broad UI cycling. | For code-only module slices, use host tests plus default Actions. For Home/pixel acceptance, run only the matching COM12 `ui_capture_d1l.py` proof once COM12 is available. |
 | Full RF/DM acceptance | Public and outbound DM foundations exist; full inbound DM, ACK/PATH, direct-route proof remains open. | Produce `rf_full_acceptance_*.json` with health and no-Public-command proof. |
 | SD release matrix | Core SD file/history/remount/map/export canaries, raw diagnostics, RP2040-unavailable fallback, and the official Seeed FAT32 smoke pass on the current FAT32 card from `1a29876` / Actions `28714355561`. | Add physical no-card and unformatted/non-FAT32 proof, <=32GB FAT32 matrix, no-format language proof for unusable media, and power/electrical evidence. |
 | Physical screenshots/review | Host simulator screenshots are committed under `docs/screenshots`; PR #37 refreshes the Home simulator screenshot for the newest title-only/full-height icon layout. | Add physical device photos, manual UI review artifact, and fresh COM12 Home pixel capture for the newest Home layout once COM12 is available. |
@@ -19,7 +19,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 - Split-page/stale-column redraw proof: COM12 `ui_corruption_probe_d1l.py` from `59610ab` / Actions `28723265336` completed 20 targeted rounds with zero failures, 20 serial data-refresh events, `final_pending=false`, `public_rf_tx=false`, and `formats_sd=false`.
 - Previous Home pixel proof: COM12 `ui_capture_d1l.py` from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) reconstructed the then-current 480x480 RGB565 Home PNG, matched firmware CRC `ED8A8E31`, and passed simulator/reference diff.
 - Icon Home proof: PR #37 host/simulator and Actions evidence show Home renders a title-only full-height icon launcher with colored Time/Wi-Fi/BLE/SD status icons and keeps the bottom dock off the Home screen while non-Home pages keep the dock. Fresh COM12 pixel proof is still pending for this newest Home layout.
-- Compose proof: COM12 `ui_compose_keyboard_capture_d1l.py` from `59610ab` / Actions `28723265336` captured Public short/long and DM short/long keyboard states with no RF TX or SD formatting. The expanded issue #2 proof command is `--targets all` for the remaining keyboard callers.
+- Compose/input keyboard proof: PR #35 / issue #2 captured all 12 release-blocking keyboard callers on COM12 from `fce5d82` / Actions `28727064923` using `ui_compose_keyboard_capture_d1l.py --targets all`. The artifact reports `ok=true`, `capture_count=12`, `public_rf_tx=false`, and `formats_sd=false` for Public/DM compose, Public search, Packet search, contact edit, onboarding, map location/provider, and Wi-Fi SSID/password.
 
 ## Feature Direction
 
@@ -31,7 +31,7 @@ Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_re
 
 ## Active Work Queue
 
-1. Finish the remaining keyboard/sheet physical review with issue-scoped capture evidence.
+1. Continue #16/#6 UI modular ownership slices, then capture the current Home COM12 pixel/manual proof once COM12 is available.
 2. Finish RF/DM acceptance without reserved local ports.
 3. Complete the remaining physical SD release matrix now that core SD works.
 4. Capture physical device photos and manual UI review.
