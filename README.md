@@ -2,34 +2,37 @@
 
 MeshCore DeskOS D1L is firmware for the Seeed SenseCAP Indicator D1L: ESP32-S3, RP2040, 480x480 touch display, and SX1262 LoRa radio. The goal is a touch-first MeshCore desk console for Public messages, direct messages, node visibility, packet diagnostics, and optional FAT32 SD-card backed history.
 
-Current public-release status: **not ready to tag**. Core SD card support is working on the current bench artifact set from commit `1a29876` / GitHub Actions run `28714355561`, but release remains blocked by targeted UI corruption proof, compose-keyboard hardware capture, full RF/DM acceptance, the remaining physical SD matrix, manual physical photos/review, and long soak evidence. The latest local autonomous audit reports `ready_for_public_release=false`, `failed_count=13`, and `p0_failed_count=12`. No release tag should be cut until that gate is green on the release commit.
+Current public-release status: **not ready to tag**. The fast release path is issue-sized: start from current `main`, change one P0, run focused host tests, run the full host suite, use GitHub Actions with `include_sd_bridge=false` unless SD/RP2040 evidence changed, and run only the hardware proof named by the selected issue. The latest COM12 UI proof from Actions-built commit `59610ab` / run `28723265336` passes targeted UI corruption, Home pixel capture plus simulator diff, scroll probing, and Public/DM compose-keyboard capture with `public_rf_tx=false` and `formats_sd=false`. Core SD card support remains proven on the FAT32 bench artifact set from `1a29876` / run `28714355561`. Release remains blocked by full RF/DM acceptance, the remaining physical SD matrix, manual physical photos/review, 12-hour soak, and broader keyboard/sheet physical review. The latest local autonomous audit for the UI proof still fails closed with `ready_for_public_release=false`, `failed_count=20`, and `p0_failed_count=19`; no release tag should be cut until the release-commit gate is green.
 
 ## Feature Matrix
+
+Status values: Working, Hardware-proven, Partial, Experimental, Not started.
 
 | Area | Status | Notes |
 |---|---|---|
 | GitHub Actions firmware package | Working | Default ESP32/UI CI builds the ESP32 firmware and release package without rebuilding RP2040 artifacts. `include_sd_bridge=true` or SD/RP2040 path changes opt into the RP2040 SD bridge UF2 and official Seeed SD smoke UF2 checksums. |
-| Touch shell | Partial | Home now uses a SiguredOS-style icon launcher with quick Mesh/Wi-Fi/BLE/SD status, plus Messages, Nodes, Map, Packets, Settings, sheets, keyboard, and simulator coverage. Compose uses a compact D1L keyboard map and has a COM12 compose-keyboard capture gate; remaining work targets current-commit hardware pixel proof, split-page redraw review, and broader keyboard/sheet layout polish. |
-| Public messages | Hardware-proven core | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
+| Touch Home and shell navigation | Hardware-proven | Home uses an icon launcher with quick Mesh/Wi-Fi/BLE/SD status and no bottom dock; Messages, Nodes, Map, Packets, and Settings keep the bottom dock. COM12 proof from `59610ab` / Actions `28723265336` covers targeted UI corruption, Home pixel capture, simulator diff, and scroll probing with no RF TX or formatting. |
+| Compose keyboard capture | Hardware-proven | `ui_compose_keyboard_capture_d1l.py` captured Public short/long and DM short/long keyboard states on COM12 from `59610ab` / Actions `28723265336`. Broader keyboard/sheet physical review still gates release. |
+| Public messages | Hardware-proven | Public TX/RX plumbing, retained Public history, search, unread/read state, and Packet-tab evidence exist. |
 | Direct messages | Partial | DM TX/store/thread UI exists. Full inbound DM, ACK/PATH, and direct-route acceptance remain release blockers. |
 | Nodes, contacts, routes | Partial | Heard nodes, contacts, route trace/detail, role browser, and diagnostics exist. Physical review and final RF route proof remain open. |
-| Packet diagnostics | Working core | Packet list, filter/search, raw preview, detail sheet, and retained packet storage paths exist. |
-| SD core file operations | Hardware-proven core | Current COM12/COM16 evidence from `1a29876` / Actions `28714355561` proves official Seeed FAT32 smoke, FAT32 `READY_SD`, raw diagnostics, filecanary, safe boot scenarios for correct/missing/existing data plus RP2040-unavailable fallback, retained history after reboot, reboot/remount, map-tile canary, export canary, diagnostic export, and sampled data export without Public RF or formatting. |
+| Packet diagnostics | Working | Packet list, filter/search, raw preview, detail sheet, and retained packet storage paths exist. |
+| SD core file operations | Hardware-proven | Current COM12/COM16 evidence from `1a29876` / Actions `28714355561` proves official Seeed FAT32 smoke, FAT32 `READY_SD`, raw diagnostics, filecanary, safe boot scenarios for correct/missing/existing data plus RP2040-unavailable fallback, retained history after reboot, reboot/remount, map-tile canary, export canary, diagnostic export, and sampled data export without Public RF or formatting. |
 | SD release matrix | Partial | Still needs physical no-card and unformatted/non-FAT32 scenario proof, <=32GB FAT32 multi-card matrix, no-format language proof tied to unusable-media behavior, and power/electrical evidence. Users prepare FAT32 SD cards on a computer; there is no device-side SD formatting path. |
 | Map and offline tiles | Partial | Manual center, provider setup, SD map-tile canary, and policy UI exist. GPS, tile rendering proof, and live touch tile browsing remain pending. |
 | Wi-Fi | Experimental | Setup UI and bounded serial controls exist; disabled by default and not release-proven for map downloads. |
-| BLE, OTA, GPS | Not release-ready | BLE companion transport, OTA, GPS/location-source integration, and nearby GPS node pins remain pending. |
+| BLE, OTA, GPS | Not started | Release-grade BLE companion transport, OTA, GPS/location-source integration, and nearby GPS node pins remain pending. |
 | Soak and physical review | Partial | Short evidence exists. Full 12-hour idle/listening soak and physical photos/manual UI review are still open. |
 
 Retained Public/DM message history, route history, packet history, diagnostic exports, sampled user-data exports, and map-tile cache can use SD only when the RP2040 bridge reports a ready FAT32 card with file operations and atomic rename. These retained stores keep NVS fallback available.
 
 ## Screenshots
 
-These committed host simulator screenshots are representative of the current UI surfaces, but they are not a substitute for physical device photos or COM12 pixel-capture PNGs from the release commit. Physical device photos are still required before release.
+These committed host simulator screenshots are representative of the current UI surfaces. They are not a substitute for physical device photos or issue-matched COM12 pixel-capture PNGs when a selected issue requires pixel evidence. Physical device photos are still required before release.
 
-| Home | Messages | Packets |
-|---|---|---|
-| ![Home](docs/screenshots/home.png) | ![Messages](docs/screenshots/messages.png) | ![Packets](docs/screenshots/packets.png) |
+| Home | Messages | Nodes | Packets |
+|---|---|---|---|
+| ![Home](docs/screenshots/home.png) | ![Messages](docs/screenshots/messages.png) | ![Nodes](docs/screenshots/nodes.png) | ![Packets](docs/screenshots/packets.png) |
 
 | Settings | Storage | Map |
 |---|---|---|
