@@ -62,3 +62,65 @@ bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
     snprintf(out_target, out_target_len, "%s", target);
     return true;
 }
+
+bool d1l_ui_keyboard_probe_target_is_dm(const char *target)
+{
+    return target && strncmp(target, "dm", 2) == 0;
+}
+
+bool d1l_ui_keyboard_probe_target_is_compose(const char *target)
+{
+    return target &&
+        (strcmp(target, "public") == 0 ||
+         strcmp(target, "public_long") == 0 ||
+         strcmp(target, "dm") == 0 ||
+         strcmp(target, "dm_long") == 0);
+}
+
+bool d1l_ui_keyboard_probe_target_is_onboarding(const char *target)
+{
+    return target && strcmp(target, "onboarding") == 0;
+}
+
+bool d1l_ui_keyboard_probe_requires_hidden_dock(const char *target)
+{
+    return d1l_ui_keyboard_probe_target_is_compose(target) ||
+        d1l_ui_keyboard_probe_target_is_onboarding(target) ||
+        strcmp(target, "public_search") == 0 ||
+        strcmp(target, "packet_search") == 0 ||
+        strcmp(target, "contact_edit") == 0 ||
+        strcmp(target, "map_location") == 0 ||
+        strcmp(target, "map_provider") == 0 ||
+        strcmp(target, "wifi_ssid") == 0 ||
+        strcmp(target, "wifi_password") == 0;
+}
+
+int32_t d1l_ui_keyboard_probe_min_width(const char *target)
+{
+    if (strcmp(target, "public_search") == 0 ||
+        strcmp(target, "packet_search") == 0 ||
+        strcmp(target, "contact_edit") == 0 ||
+        d1l_ui_keyboard_probe_target_is_onboarding(target)) {
+        return 400;
+    }
+    return 440;
+}
+
+int32_t d1l_ui_keyboard_probe_min_height(const char *target)
+{
+    if (d1l_ui_keyboard_probe_target_is_compose(target)) {
+        return 250;
+    }
+    if (strcmp(target, "public_search") == 0 ||
+        strcmp(target, "packet_search") == 0) {
+        return 180;
+    }
+    if (strcmp(target, "contact_edit") == 0) {
+        return 170;
+    }
+    if (d1l_ui_keyboard_probe_target_is_onboarding(target) ||
+        strcmp(target, "map_location") == 0) {
+        return 150;
+    }
+    return 80;
+}
