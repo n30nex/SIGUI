@@ -106,6 +106,9 @@ def test_app_model_exposes_bounded_ui_snapshot():
 
 def test_phase3_shell_replaces_diagnostic_tile_home():
     source = read("main/ui/ui_phase1.c")
+    chrome = read("main/ui/ui_chrome.c")
+    chrome_header = read("main/ui/ui_chrome.h")
+    cmake = read("main/CMakeLists.txt")
     assert "D1L_UI_TAB_HOME" in source
     assert "D1L_UI_TAB_MESSAGES" in source
     assert "D1L_UI_TAB_NODES" in source
@@ -120,10 +123,26 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_lock_overlay" in source
     assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
+    assert '"ui/ui_chrome.c"' in cmake
+    assert "#include \"ui_chrome.h\"" in source
+    assert "d1l_ui_chrome_layout_t" in chrome_header
+    assert "d1l_ui_chrome_layout_for_screen" in source
     assert "static void restore_dock_for_active_tab(void)" in source
-    assert "set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME)" in source
-    assert "lv_obj_set_pos(s_content, 0, home ? 32 : 56)" in source
-    assert "lv_obj_set_size(s_content, 480, home ? 448 : 362)" in source
+    assert "set_dock_hidden(!layout.dock_visible)" in source
+    assert "lv_obj_set_pos(s_content, 0, layout.content_y)" in source
+    assert "lv_obj_set_size(s_content, 480, layout.content_height)" in source
+    assert ".content_y = 32" in chrome
+    assert ".content_height = 448" in chrome
+    assert ".content_scrollable = false" in chrome
+    assert ".dock_visible = false" in chrome
+    assert ".header_detail_visible = false" in chrome
+    assert ".title = \"DeskOS\"" in chrome
+    assert ".content_y = 56" in chrome
+    assert ".content_height = 362" in chrome
+    assert ".content_scrollable = true" in chrome
+    assert ".dock_visible = true" in chrome
+    assert ".header_detail_visible = true" in chrome
+    assert ".title = \"MeshCore DeskOS\"" in chrome
     assert "layout_content_for_active_tab();" in source
 
 
@@ -135,9 +154,9 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "render_home_launcher_tile" in source
     assert "render_home_status_icon" in source
     assert "s_title_label" in source
-    assert "set_object_hidden(s_status_label, home)" in source
-    assert "set_object_hidden(s_identity_label, home)" in source
-    assert "set_object_hidden(s_lock_button, home)" in source
+    assert "set_object_hidden(s_status_label, !layout.header_detail_visible)" in source
+    assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
+    assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
     assert '"Chats"' in source
     assert '"Rooms"' in source
     assert '"Contacts"' in source
@@ -280,9 +299,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF)" in source
     assert "configure_content_for_active_tab()" in source
     assert "layout_content_for_active_tab()" in source
-    assert "lv_obj_set_pos(s_content, 0, home ? 32 : 56)" in source
-    assert "lv_obj_set_size(s_content, 480, home ? 448 : 362)" in source
-    assert "set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME)" in source
+    assert "lv_obj_set_pos(s_content, 0, layout.content_y)" in source
+    assert "lv_obj_set_size(s_content, 480, layout.content_height)" in source
+    assert "set_dock_hidden(!layout.dock_visible)" in source
     assert "lv_obj_scroll_to_y(s_content, 0, LV_ANIM_OFF)" in source
     assert "d1l_ui_phase1_request_tab" in header
     assert "d1l_ui_scroll_probe_result_t" in header

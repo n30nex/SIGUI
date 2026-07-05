@@ -21,6 +21,7 @@
 #include "d1l_config.h"
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
+#include "ui_chrome.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
 #include "sdkconfig.h"
@@ -534,7 +535,9 @@ static void configure_home_content_root(lv_obj_t *root)
 
 static void configure_content_for_active_tab(void)
 {
-    if (d1l_ui_navigation_active() == D1L_UI_TAB_HOME) {
+    const d1l_ui_chrome_layout_t layout =
+        d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
+    if (!layout.content_scrollable) {
         configure_home_content_root(s_content);
     } else {
         configure_content_scroll_root(s_content);
@@ -1122,15 +1125,18 @@ static void set_dock_hidden(bool hidden)
 
 static void restore_dock_for_active_tab(void)
 {
-    set_dock_hidden(d1l_ui_navigation_active() == D1L_UI_TAB_HOME);
+    const d1l_ui_chrome_layout_t layout =
+        d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
+    set_dock_hidden(!layout.dock_visible);
 }
 
 static void layout_content_for_active_tab(void)
 {
     if (s_content) {
-        const bool home = d1l_ui_navigation_active() == D1L_UI_TAB_HOME;
-        lv_obj_set_pos(s_content, 0, home ? 32 : 56);
-        lv_obj_set_size(s_content, 480, home ? 448 : 362);
+        const d1l_ui_chrome_layout_t layout =
+            d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
+        lv_obj_set_pos(s_content, 0, layout.content_y);
+        lv_obj_set_size(s_content, 480, layout.content_height);
     }
     restore_dock_for_active_tab();
 }
@@ -1322,12 +1328,13 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     if (!snapshot || !s_title_label || !s_status_label || !s_identity_label) {
         return;
     }
-    const bool home = d1l_ui_navigation_active() == D1L_UI_TAB_HOME;
-    lv_label_set_text(s_title_label, home ? "DeskOS" : "MeshCore DeskOS");
-    set_object_hidden(s_status_label, home);
-    set_object_hidden(s_identity_label, home);
-    set_object_hidden(s_lock_button, home);
-    if (home) {
+    const d1l_ui_chrome_layout_t layout =
+        d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
+    lv_label_set_text(s_title_label, layout.title);
+    set_object_hidden(s_status_label, !layout.header_detail_visible);
+    set_object_hidden(s_identity_label, !layout.header_detail_visible);
+    set_object_hidden(s_lock_button, !layout.header_detail_visible);
+    if (!layout.header_detail_visible) {
         return;
     }
     label_set_fmt(s_status_label, "%s  Mesh %s",
