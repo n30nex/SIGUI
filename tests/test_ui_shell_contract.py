@@ -158,7 +158,9 @@ def test_home_screen_is_user_first_companion_dashboard():
 
     assert '"ui/ui_home.c"' in cmake
     assert '#include "ui_home.h"' in source
-    assert "d1l_ui_home_sd_state" in source
+    assert "d1l_ui_home_render(s_content, snapshot, handle_home_action);" in source
+    assert "d1l_ui_home_render" in home_module
+    assert "d1l_ui_home_render" in home_header
     assert "d1l_ui_home_sd_state" in home_header
     assert 'strcmp(state, "mount_pending") == 0' in home_module
     assert 'return "mounting";' in home_module
@@ -170,52 +172,60 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
     assert "[D1L_UI_HOME_LAUNCHER_PACKETS] = {4, 280, 116, 132}" in home_module
     assert "[D1L_UI_HOME_STATUS_TIME] = {4, 416, 116, 48}" in home_module
-    assert "render_home_launcher_tile" in source
-    assert "render_home_status_icon" in source
+    assert "render_launcher_tile" in home_module
+    assert "render_status_icon" in home_module
+    assert "lv_obj_set_style_border_width(panel, 1, 0)" in home_module
+    assert "home_action_event_cb" in home_module
+    assert "lv_event_get_user_data(event)" in home_module
+    assert "static const d1l_ui_home_action_t k_action_values" in home_module
+    assert "(void *)&k_action_values[action]" in home_module
+    assert "(void *)(uintptr_t)action" not in home_module
+    assert "D1L_UI_HOME_ACTION_MESSAGES_PUBLIC" in home_header
+    assert "render_home_launcher_tile" not in source
+    assert "render_home_status_icon" not in source
+    assert "render_home_message_preview" not in source
+    assert "render_home_repeater_preview" not in source
     assert "s_title_label" in source
     assert "set_object_hidden(s_status_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
-    assert '"Chats"' in source
-    assert '"Rooms"' in source
-    assert '"Contacts"' in source
-    assert '"Repeaters"' in source
-    assert '"Advertise"' in source
-    assert '"Map"' in source
-    assert '"Terminal"' in source
-    assert '"Packets"' in source
-    assert '"Settings"' in source
-    assert '"Setup"' in source
-    assert '"Signal"' in source
-    assert '"Time"' in source
-    assert '"Wi-Fi"' in source
-    assert '"BLE"' in source
-    assert '"SD"' in source
-    assert '"DMs"' in source
-    assert "render_home_message_preview" in source
-    assert "render_home_repeater_preview" in source
-    assert "snapshot->public_unread_count" in source
-    assert "snapshot->dm_unread_count" in source
-    assert "snapshot->recent_room_count" in source
-    assert "snapshot->recent_repeater_count" in source
-    assert "snapshot->packet_count" in source
-    assert "snapshot->signal_summary.sample_count" in source
+    assert '"Chats"' in home_module
+    assert '"Rooms"' in home_module
+    assert '"Contacts"' in home_module
+    assert '"Repeaters"' in home_module
+    assert '"Advertise"' in home_module
+    assert '"Map"' in home_module
+    assert '"Terminal"' in home_module
+    assert '"Packets"' in home_module
+    assert '"Settings"' in home_module
+    assert '"Setup"' in home_module
+    assert '"Signal"' in home_module
+    assert '"Time"' in home_module
+    assert '"Wi-Fi"' in home_module
+    assert '"BLE"' in home_module
+    assert '"SD"' in home_module
+    assert '"DMs"' in home_module
+    assert "snapshot->public_unread_count" in home_module
+    assert "snapshot->dm_unread_count" in home_module
+    assert "snapshot->recent_room_count" in home_module
+    assert "snapshot->recent_repeater_count" in home_module
+    assert "snapshot->packet_count" in home_module
+    assert "snapshot->signal_summary.sample_count" in home_module
+    assert "handle_home_action" in source
     assert "open_messages_public_event_cb" in source
     assert "open_messages_dm_event_cb" in source
-    assert "request_tab_event_cb" in source
+    assert "request_tab_switch(D1L_UI_TAB_NODES)" in source
     assert "open_mesh_roles_event_cb" in source
     assert "open_sheet_event_cb" in source
     assert "open_diagnostics_sheet_event_cb" in source
     assert "open_storage_sheet_event_cb" in source
-    home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
-        "static void render_storage_line", 1
-    )[0]
-    assert "d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_PACKETS)" in home_body
-    assert "d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)" in home_body
+    home_body = home_module.split("void d1l_ui_home_render", 1)[1]
+    assert "D1L_UI_HOME_LAUNCHER_PACKETS" in home_body
+    assert "D1L_UI_HOME_STATUS_TIME" in home_body
     assert "LV_SYMBOL_WIFI" in home_body
     assert "LV_SYMBOL_BLUETOOTH" in home_body
     assert "LV_SYMBOL_SD_CARD" in home_body
-    home_status_body = home_body.split("d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)", 1)[1]
+    home_status_body = home_body.split("D1L_UI_HOME_STATUS_TIME", 1)[1]
     assert "0x00C2FF" in home_status_body
     assert "0xC4B5FD" in home_status_body
     assert "0xFBBF24" in home_status_body
@@ -232,16 +242,6 @@ def test_home_screen_is_user_first_companion_dashboard():
 
 def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     source = read("main/ui/ui_phase1.c")
-
-    home_preview = source.split("static void render_home_message_preview", 1)[1].split(
-        "static void render_home_repeater_preview", 1
-    )[0]
-    assert "create_panel(parent, 18, y, 424, 76)" in home_preview
-    assert 'entry->text[0] ? entry->text : "No text"' in home_preview
-    assert "lv_obj_set_pos(sender, 8, 4)" in home_preview
-    assert "lv_obj_set_pos(text, 8, 28)" in home_preview
-    assert "lv_obj_set_pos(details, 8, 52)" in home_preview
-    assert "%s ago  rssi %d  snr %s  hops %u" in home_preview
 
     message_row = source.split("static void render_message_row", 1)[1].split(
         "static void render_dm_row", 1
@@ -481,7 +481,7 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     )[0]
     assert "static const d1l_ui_screen_renderer_t renderers[]" in render_body
     for mapping in (
-        "{D1L_UI_TAB_HOME, render_home}",
+        "{D1L_UI_TAB_HOME, render_home_screen}",
         "{D1L_UI_TAB_MESSAGES, render_messages}",
         "{D1L_UI_TAB_NODES, render_nodes}",
         "{D1L_UI_TAB_MAP, render_map}",
