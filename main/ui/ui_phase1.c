@@ -182,6 +182,7 @@ static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
 static void render_active_tab(void);
 static void render_contact_detail_sheet(void);
+static void show_contact_detail_sheet(void);
 static void render_node_detail_sheet(void);
 static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_public_history_event_cb(lv_event_t *event);
@@ -1134,7 +1135,7 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         hide_onboarding_sheet();
         return;
     }
-    if (s_onboarding_probe_suppressed && object_is_visible(s_compose_sheet)) {
+    if (s_onboarding_probe_suppressed) {
         hide_onboarding_sheet();
         return;
     }
@@ -2065,6 +2066,7 @@ static void close_contact_export_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_contact_export_sheet();
+    show_contact_detail_sheet();
 }
 
 static void render_contact_export_sheet(void)
@@ -2170,7 +2172,7 @@ static void contact_detail_export_event_cb(lv_event_t *event)
     }
 }
 
-static void show_contact_detail_after_edit(void)
+static void show_contact_detail_sheet(void)
 {
     request_content_refresh();
     render_contact_detail_sheet();
@@ -2183,7 +2185,7 @@ static void close_contact_edit_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_contact_edit_sheet();
-    show_contact_detail_after_edit();
+    show_contact_detail_sheet();
 }
 
 static void save_contact_edit_event_cb(lv_event_t *event)
@@ -2200,7 +2202,7 @@ static void save_contact_edit_event_cb(lv_event_t *event)
     if (ret == ESP_OK) {
         s_contact_detail_contact = updated;
         hide_contact_edit_sheet();
-        show_contact_detail_after_edit();
+        show_contact_detail_sheet();
     }
     show_toast("Rename", ret);
 }
@@ -3430,6 +3432,7 @@ static void close_public_search_event_cb(lv_event_t *event)
 {
     (void)event;
     hide_public_search_sheet();
+    show_public_history_sheet();
 }
 
 static void public_history_load_older_event_cb(lv_event_t *event)
@@ -3583,7 +3586,7 @@ static void public_search_keyboard_event_cb(lv_event_t *event)
     if (code == LV_EVENT_READY) {
         apply_public_search_event_cb(event);
     } else if (code == LV_EVENT_CANCEL) {
-        hide_public_search_sheet();
+        close_public_search_event_cb(event);
     }
 }
 
@@ -6142,6 +6145,7 @@ static void open_compose_probe_on_ui_task(const char *target)
     s_onboarding_probe_suppressed = true;
     request_tab_switch(D1L_UI_TAB_MESSAGES);
     process_pending_tab_switch();
+    s_onboarding_probe_suppressed = true;
     s_messages_show_dms = d1l_ui_keyboard_probe_target_is_dm(target);
     render_active_tab();
     hide_onboarding_sheet();
@@ -6183,6 +6187,7 @@ static void open_keyboard_probe_on_ui_task(const char *target)
     s_onboarding_probe_suppressed = !d1l_ui_keyboard_probe_target_is_onboarding(target);
     request_tab_switch(compose_probe_tab_for_target(target));
     process_pending_tab_switch();
+    s_onboarding_probe_suppressed = !d1l_ui_keyboard_probe_target_is_onboarding(target);
     if (!d1l_ui_keyboard_probe_target_is_onboarding(target)) {
         hide_onboarding_sheet();
     }
@@ -7212,6 +7217,7 @@ static void touch_poll_task(void *arg)
 
 esp_err_t d1l_ui_phase1_show_home(void)
 {
+    d1l_ui_modal_reset();
     s_screen = create_screen_object("root screen");
     if (!s_screen) {
         return ESP_ERR_NO_MEM;
