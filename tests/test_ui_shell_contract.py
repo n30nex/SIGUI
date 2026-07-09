@@ -134,8 +134,8 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "lv_obj_set_size(s_top_bar, 480, layout.content_y)" in source
     assert "layout.header_detail_visible ? 8 : 1" in source
     assert "lv_obj_align(s_title_label, LV_ALIGN_TOP_LEFT, 10, 0)" in source
-    assert ".content_y = 18" in chrome
-    assert ".content_height = 462" in chrome
+    assert ".content_y = 16" in chrome
+    assert ".content_height = 464" in chrome
     assert ".content_scrollable = false" in chrome
     assert ".dock_visible = false" in chrome
     assert ".header_detail_visible = false" in chrome
@@ -151,9 +151,25 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
 
 def test_home_screen_is_user_first_companion_dashboard():
     source = read("main/ui/ui_phase1.c")
+    cmake = read("main/CMakeLists.txt")
     header = read("main/app/app_model.h")
+    home_module = read("main/ui/ui_home.c")
+    home_header = read("main/ui/ui_home.h")
 
-    assert "home_sd_state" in source
+    assert '"ui/ui_home.c"' in cmake
+    assert '#include "ui_home.h"' in source
+    assert "d1l_ui_home_sd_state" in source
+    assert "d1l_ui_home_sd_state" in home_header
+    assert 'strcmp(state, "mount_pending") == 0' in home_module
+    assert 'return "mounting";' in home_module
+    assert 'return "needs FAT32";' in home_module
+    assert "return snapshot->storage_sd_state;" not in home_module
+    assert "d1l_ui_home_launcher_box" in home_header
+    assert "d1l_ui_home_status_box" in home_header
+    assert "static const d1l_ui_home_box_t k_launcher_boxes" in home_module
+    assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
+    assert "[D1L_UI_HOME_LAUNCHER_PACKETS] = {4, 280, 116, 132}" in home_module
+    assert "[D1L_UI_HOME_STATUS_TIME] = {4, 416, 116, 48}" in home_module
     assert "render_home_launcher_tile" in source
     assert "render_home_status_icon" in source
     assert "s_title_label" in source
@@ -194,12 +210,12 @@ def test_home_screen_is_user_first_companion_dashboard():
     home_body = source.split("static void render_home(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_storage_line", 1
     )[0]
-    assert "render_home_launcher_tile(s_content, 6, 276" in home_body
-    assert "render_home_status_icon(s_content, 6, 416, 114" in home_body
+    assert "d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_PACKETS)" in home_body
+    assert "d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)" in home_body
     assert "LV_SYMBOL_WIFI" in home_body
     assert "LV_SYMBOL_BLUETOOTH" in home_body
     assert "LV_SYMBOL_SD_CARD" in home_body
-    home_status_body = home_body.split("render_home_status_icon(s_content, 6, 416, 114", 1)[1]
+    home_status_body = home_body.split("d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME)", 1)[1]
     assert "0x00C2FF" in home_status_body
     assert "0xC4B5FD" in home_status_body
     assert "0xFBBF24" in home_status_body
@@ -343,8 +359,17 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_probe_min_height" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard_header
     assert "d1l_ui_keyboard_configure_input" in keyboard_header
+    assert "d1l_ui_keyboard_focus_textarea_from_event" in keyboard_header
+    assert "d1l_ui_keyboard_clear_textarea" in keyboard_header
     assert "d1l_ui_keyboard_configure_compose" in keyboard
     assert "d1l_ui_keyboard_configure_input" in keyboard
+    assert "d1l_ui_keyboard_focus_textarea_from_event" in keyboard
+    assert "lv_event_get_code(event)" in keyboard
+    assert "LV_EVENT_FOCUSED" in keyboard
+    assert "LV_EVENT_CLICKED" in keyboard
+    assert "lv_event_get_target(event)" in keyboard
+    assert "d1l_ui_keyboard_clear_textarea" in keyboard
+    assert "lv_keyboard_set_textarea(keyboard, NULL)" in keyboard
     assert "d1l_compose_kb_map_lc" in keyboard
     assert "lv_keyboard_set_map(keyboard, LV_KEYBOARD_MODE_TEXT_LOWER" in keyboard
     assert "lv_obj_set_style_text_font(keyboard, &lv_font_montserrat_14" in keyboard
@@ -375,6 +400,10 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_configure_input(s_map_location_keyboard, s_map_lat_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_map_tiles_keyboard, s_map_tiles_url_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_tiles_keyboard, event" in source
+    assert "d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event" in source
+    assert "d1l_ui_keyboard_clear_textarea(s_map_tiles_keyboard)" in source
     assert 'strcmp(target, "public_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source

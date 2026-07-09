@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw, ImageFont
 WIDTH = 480
 HEIGHT = 480
 TOP_BAR_H = 54
-HOME_TOP_BAR_H = 18
+HOME_TOP_BAR_H = 16
 DOCK_Y = 420
 DOCK_H = 60
 MIN_TOUCH_TARGET = 44
@@ -655,7 +655,7 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
 def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     if compact:
         s.rect((0, 0, WIDTH, HOME_TOP_BAR_H), (11, 18, 28))
-        s.text("DeskOS", (12, 1, 150, 17), 11, TEXT, True)
+        s.text("DeskOS", (10, 0, 132, 15), 10, TEXT, True)
         s.line(((0, HOME_TOP_BAR_H), (WIDTH, HOME_TOP_BAR_H)))
         return
     s.rect((0, 0, WIDTH, TOP_BAR_H), (11, 18, 28))
@@ -842,9 +842,9 @@ def draw_launcher_tile(
 ):
     x0, y0, x1, y1 = box
     s.round_rect(box, (13, 23, 18), (31, 55, 46), 4)
-    draw_launcher_icon(s, (x0 + 22, y0 + 12, x1 - 22, y0 + 62), icon, color)
-    s.text(label, (x0 + 5, y0 + 70, x1 - 5, y0 + 92), 13, TEXT, True, "center")
-    s.text(detail, (x0 + 5, y0 + 96, x1 - 5, y1 - 7), 10, MUTED, False, "center")
+    draw_launcher_icon(s, (x0 + 23, y0 + 16, x1 - 23, y0 + 66), icon, color)
+    s.text(label, (x0 + 6, y0 + 72, x1 - 6, y0 + 96), 13, TEXT, True, "center")
+    s.text(detail, (x0 + 6, y0 + 102, x1 - 6, y1 - 7), 10, MUTED, False, "center")
     s.touch_target(label, box, kind="launcher_tile", action=action, destination=destination)
 
 
@@ -860,8 +860,8 @@ def draw_status_icon(
 ):
     x0, y0, x1, y1 = box
     s.round_rect(box, (13, 23, 18), color, 4)
-    draw_launcher_icon(s, (x0 + 34, y0 + 3, x1 - 34, y0 + 29), icon, color)
-    s.text(label, (x0 + 5, y0 + 28, x1 - 5, y1 - 3), 10, color, True, "center")
+    draw_launcher_icon(s, (x0 + 35, y0 + 4, x1 - 35, y0 + 30), icon, color)
+    s.text(label, (x0 + 5, y0 + 31, x1 - 5, y1 - 3), 10, color, True, "center")
     if action or destination:
         s.touch_target(label, box, kind="status_icon", action=action, destination=destination)
 
@@ -945,26 +945,26 @@ def draw_row(
 
 def draw_home_body(s: Surface, snap: Snapshot):
     tiles = (
-        ((6, 22, 120, 148), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
-        ((124, 22, 238, 148), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
-        ((242, 22, 356, 148), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
-        ((360, 22, 474, 148), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
-        ((6, 158, 120, 284), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
-        ((124, 158, 238, 284), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
-        ((242, 158, 356, 284), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
-        ((360, 158, 474, 284), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
-        ((6, 294, 120, 420), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
-        ((124, 294, 238, 420), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
-        ((242, 294, 356, 420), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
-        ((360, 294, 474, 420), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
+        ((4, 16, 120, 148), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
+        ((122, 16, 238, 148), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
+        ((240, 16, 356, 148), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
+        ((358, 16, 474, 148), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
+        ((4, 156, 120, 288), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
+        ((122, 156, 238, 288), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
+        ((240, 156, 356, 288), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
+        ((358, 156, 474, 288), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
+        ((4, 296, 120, 428), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
+        ((122, 296, 238, 428), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
+        ((240, 296, 356, 428), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
+        ((358, 296, 474, 428), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
     )
     for box, icon, label, detail, color, action, destination in tiles:
         draw_launcher_tile(s, box, icon, label, detail, color, action=action, destination=destination)
 
-    draw_status_icon(s, (6, 434, 120, 478), "time", "Time", ACCENT)
-    draw_status_icon(s, (124, 434, 238, 478), "wifi", "Wi-Fi", ACCENT, action="open_wifi_settings", destination="wifi_setup_sheet")
-    draw_status_icon(s, (242, 434, 356, 478), "ble", "BLE", VIOLET, action="open_ble_settings", destination="ble_setup_sheet")
-    draw_status_icon(s, (360, 434, 474, 478), "sd", "SD", GREEN if snap.storage_backend != "NVS fallback" else AMBER, action="open_storage_setup", destination="storage_setup_sheet")
+    draw_status_icon(s, (4, 432, 120, 480), "time", "Time", ACCENT)
+    draw_status_icon(s, (122, 432, 238, 480), "wifi", "Wi-Fi", ACCENT, action="open_wifi_settings", destination="wifi_setup_sheet")
+    draw_status_icon(s, (240, 432, 356, 480), "ble", "BLE", VIOLET, action="open_ble_settings", destination="ble_setup_sheet")
+    draw_status_icon(s, (358, 432, 474, 480), "sd", "SD", GREEN if snap.storage_backend != "NVS fallback" else AMBER, action="open_storage_setup", destination="storage_setup_sheet")
 
 
 def render_home(s: Surface, snap: Snapshot):

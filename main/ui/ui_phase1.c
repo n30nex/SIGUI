@@ -21,6 +21,7 @@
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
 #include "ui_chrome.h"
+#include "ui_home.h"
 #include "ui_keyboard.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
@@ -421,7 +422,6 @@ static void hide_node_detail_sheet(void);
 static void request_tab_event_cb(lv_event_t *event);
 static void open_map_location_sheet_event_cb(lv_event_t *event);
 static void open_map_tiles_sheet_event_cb(lv_event_t *event);
-static const char *home_sd_state(const d1l_app_snapshot_t *snapshot);
 static const char *packet_filter_direction(void);
 static const char *packet_filter_kind(void);
 static void message_detail_mode_event_cb(lv_event_t *event);
@@ -1183,7 +1183,7 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
     label_set_fmt(s_identity_label, "Wi-Fi %s  BLE %s  SD %s",
                   snapshot->wifi_state ? snapshot->wifi_state : "off",
                   snapshot->ble_state ? snapshot->ble_state : "off",
-                  home_sd_state(snapshot));
+                  d1l_ui_home_sd_state(snapshot));
 }
 
 static lv_obj_t *render_metric_card(lv_obj_t *parent, int x, int y, const char *title,
@@ -1424,34 +1424,15 @@ static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
     s_radio_edit.rx_boost = snapshot->radio_rx_boost;
 }
 
-static const char *home_sd_state(const d1l_app_snapshot_t *snapshot)
-{
-    if (!snapshot) {
-        return "unknown";
-    }
-    if (snapshot->storage_data_enabled || snapshot->storage_sd_data_root_ready) {
-        return "ready";
-    }
-    if (snapshot->storage_setup_required) {
-        return "setup";
-    }
-    if (snapshot->storage_sd_state && snapshot->storage_sd_state[0]) {
-        return snapshot->storage_sd_state;
-    }
-    return "fallback";
-}
-
 static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
-                                         int x,
-                                         int y,
-                                         int w,
+                                         d1l_ui_home_box_t box,
                                          const char *icon,
                                          const char *title,
                                          uint32_t accent,
                                          lv_event_cb_t cb,
                                          void *user_data)
 {
-    lv_obj_t *chip = create_panel(parent, x, y, w, 44);
+    lv_obj_t *chip = create_panel(parent, box.x, box.y, box.width, box.height);
     if (!chip) {
         return NULL;
     }
@@ -1465,20 +1446,19 @@ static lv_obj_t *render_home_status_icon(lv_obj_t *parent,
     }
     lv_obj_t *icon_label = create_label(chip, icon, accent);
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
-    label_set_dot_width(icon_label, w - 8);
+    label_set_dot_width(icon_label, box.width - 8);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 4, 0);
+    obj_set_pos_if(icon_label, 4, 2);
 
     lv_obj_t *label = create_label(chip, title, accent);
-    label_set_dot_width(label, w - 8);
+    label_set_dot_width(label, box.width - 8);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(label, 4, 28);
+    obj_set_pos_if(label, 4, 31);
     return chip;
 }
 
 static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
-                                           int x,
-                                           int y,
+                                           d1l_ui_home_box_t box,
                                            const char *icon,
                                            const char *title,
                                            const char *detail,
@@ -1486,7 +1466,7 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
                                            lv_event_cb_t cb,
                                            void *user_data)
 {
-    lv_obj_t *tile = create_panel(parent, x, y, 114, 126);
+    lv_obj_t *tile = create_panel(parent, box.x, box.y, box.width, box.height);
     if (!tile) {
         return NULL;
     }
@@ -1501,19 +1481,19 @@ static lv_obj_t *render_home_launcher_tile(lv_obj_t *parent,
 
     lv_obj_t *icon_label = create_label(tile, icon, accent);
     obj_set_style_text_font_if(icon_label, &lv_font_montserrat_24);
-    label_set_dot_width(icon_label, 102);
+    label_set_dot_width(icon_label, 104);
     lv_obj_set_style_text_align(icon_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(icon_label, 0, 14);
+    obj_set_pos_if(icon_label, 6, 16);
 
     lv_obj_t *title_label = create_label(tile, title, 0xF4F7FB);
-    label_set_dot_width(title_label, 102);
+    label_set_dot_width(title_label, 104);
     lv_obj_set_style_text_align(title_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(title_label, 0, 68);
+    obj_set_pos_if(title_label, 6, 72);
 
     lv_obj_t *detail_label = create_label(tile, detail, 0x8EA0AE);
-    label_set_dot_width(detail_label, 102);
+    label_set_dot_width(detail_label, 104);
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
-    obj_set_pos_if(detail_label, 0, 96);
+    obj_set_pos_if(detail_label, 6, 102);
     return tile;
 }
 
@@ -1608,52 +1588,63 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->public_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 6, 4, LV_SYMBOL_ENVELOPE, "Chats", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_CHATS),
+                              LV_SYMBOL_ENVELOPE, "Chats", detail,
                               snapshot->public_unread_count ? 0xFBBF24 : 0x00C2FF,
                               open_messages_public_event_cb, NULL);
 
     snprintf(value, sizeof(value), "%lu", (unsigned long)snapshot->dm_unread_count);
     snprintf(detail, sizeof(detail), "%s new", value);
-    render_home_launcher_tile(s_content, 124, 4, LV_SYMBOL_FILE, "DMs", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_DMS),
+                              LV_SYMBOL_FILE, "DMs", detail,
                               snapshot->dm_unread_count ? 0xFBBF24 : 0xA7F3D0,
                               open_messages_dm_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu seen", (unsigned long)snapshot->recent_room_count);
-    render_home_launcher_tile(s_content, 242, 4, LV_SYMBOL_DIRECTORY, "Rooms", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_ROOMS),
+                              LV_SYMBOL_DIRECTORY, "Rooms", detail,
                               snapshot->recent_room_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu saved", (unsigned long)snapshot->contact_count);
-    render_home_launcher_tile(s_content, 360, 4, LV_SYMBOL_CALL, "Contacts", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_CONTACTS),
+                              LV_SYMBOL_CALL, "Contacts", detail,
                               snapshot->contact_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_NODES);
 
     snprintf(detail, sizeof(detail), "%lu heard", (unsigned long)snapshot->recent_repeater_count);
-    render_home_launcher_tile(s_content, 6, 140, LV_SYMBOL_REFRESH, "Repeaters", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_REPEATERS),
+                              LV_SYMBOL_REFRESH, "Repeaters", detail,
                               snapshot->recent_repeater_count ? 0xFBBF24 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 124, 140, LV_SYMBOL_BELL, "Advertise", "manual",
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_ADVERTISE),
+                              LV_SYMBOL_BELL, "Advertise", "manual",
                               0x00C2FF, open_sheet_event_cb, NULL);
 
-    render_home_launcher_tile(s_content, 242, 140, LV_SYMBOL_GPS, "Map",
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_MAP),
+                              LV_SYMBOL_GPS, "Map",
                               snapshot->map_tile_cache_ready ? "tiles ready" : "offline",
                               snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_MAP);
 
-    render_home_launcher_tile(s_content, 360, 140, LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_TERMINAL),
+                              LV_SYMBOL_KEYBOARD, "Terminal", "diagnose",
                               0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
 
     snprintf(detail, sizeof(detail), "%lu rows", (unsigned long)snapshot->packet_count);
-    render_home_launcher_tile(s_content, 6, 276, LV_SYMBOL_LIST, "Packets", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_PACKETS),
+                              LV_SYMBOL_LIST, "Packets", detail,
                               snapshot->packet_count ? 0x5EEAD4 : 0x8EA0AE,
                               request_tab_event_cb, (void *)(uintptr_t)D1L_UI_TAB_PACKETS);
 
-    render_home_launcher_tile(s_content, 124, 276, LV_SYMBOL_SETTINGS, "Settings", "setup",
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_SETTINGS),
+                              LV_SYMBOL_SETTINGS, "Settings", "setup",
                               0x00C2FF, request_tab_event_cb,
                               (void *)(uintptr_t)D1L_UI_TAB_SETTINGS);
 
-    render_home_launcher_tile(s_content, 242, 276, LV_SYMBOL_HOME, "Setup", home_sd_state(snapshot),
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_SETUP),
+                              LV_SYMBOL_HOME, "Setup", d1l_ui_home_sd_state(snapshot),
                               snapshot->storage_data_enabled ? 0x5EEAD4 :
                               (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
                               open_storage_sheet_event_cb, NULL);
@@ -1663,19 +1654,24 @@ static void render_home(const d1l_app_snapshot_t *snapshot)
     } else {
         snprintf(detail, sizeof(detail), "waiting");
     }
-    render_home_launcher_tile(s_content, 360, 276, LV_SYMBOL_VOLUME_MAX, "Signal", detail,
+    render_home_launcher_tile(s_content, d1l_ui_home_launcher_box(D1L_UI_HOME_LAUNCHER_SIGNAL),
+                              LV_SYMBOL_VOLUME_MAX, "Signal", detail,
                               snapshot->signal_summary.sample_count ? 0x5EEAD4 : 0x8EA0AE,
                               open_mesh_roles_event_cb, NULL);
 
-    render_home_status_icon(s_content, 6, 416, 114, LV_SYMBOL_REFRESH, "Time",
+    render_home_status_icon(s_content, d1l_ui_home_status_box(D1L_UI_HOME_STATUS_TIME),
+                            LV_SYMBOL_REFRESH, "Time",
                             snapshot->time_available ? 0x5EEAD4 : 0x00C2FF, NULL, NULL);
-    render_home_status_icon(s_content, 124, 416, 114, LV_SYMBOL_WIFI, "Wi-Fi",
+    render_home_status_icon(s_content, d1l_ui_home_status_box(D1L_UI_HOME_STATUS_WIFI),
+                            LV_SYMBOL_WIFI, "Wi-Fi",
                             snapshot->wifi_enabled ? 0x5EEAD4 : 0x00C2FF,
                             open_wifi_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 242, 416, 114, LV_SYMBOL_BLUETOOTH, "BLE",
+    render_home_status_icon(s_content, d1l_ui_home_status_box(D1L_UI_HOME_STATUS_BLE),
+                            LV_SYMBOL_BLUETOOTH, "BLE",
                             snapshot->ble_companion_enabled ? 0xA7F3D0 : 0xC4B5FD,
                             open_ble_sheet_event_cb, NULL);
-    render_home_status_icon(s_content, 360, 416, 114, LV_SYMBOL_SD_CARD, "SD",
+    render_home_status_icon(s_content, d1l_ui_home_status_box(D1L_UI_HOME_STATUS_SD),
+                            LV_SYMBOL_SD_CARD, "SD",
                             snapshot->storage_data_enabled ? 0x5EEAD4 :
                             0xFBBF24,
                             open_storage_sheet_event_cb, NULL);
@@ -4151,16 +4147,9 @@ static void close_map_location_sheet_event_cb(lv_event_t *event)
 
 static void map_location_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_map_location_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *textarea = lv_event_get_target(event);
-        if (textarea == s_map_lat_textarea || textarea == s_map_lon_textarea) {
-            lv_keyboard_set_textarea(s_map_location_keyboard, textarea);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event,
+                                              s_map_lat_textarea,
+                                              s_map_lon_textarea);
 }
 
 static void map_location_save_event_cb(lv_event_t *event)
@@ -4357,26 +4346,16 @@ static void update_map_tiles_zoom_label(void)
 
 static void map_tiles_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_map_tiles_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *target = lv_event_get_target(event);
-        if (target == s_map_tiles_url_textarea ||
-            target == s_map_tiles_attribution_textarea) {
-            lv_keyboard_set_textarea(s_map_tiles_keyboard, target);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_map_tiles_keyboard, event,
+                                              s_map_tiles_url_textarea,
+                                              s_map_tiles_attribution_textarea);
 }
 
 static void map_tiles_keyboard_event_cb(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        if (s_map_tiles_keyboard) {
-            lv_keyboard_set_textarea(s_map_tiles_keyboard, NULL);
-        }
+        d1l_ui_keyboard_clear_textarea(s_map_tiles_keyboard);
     }
 }
 
@@ -5176,16 +5155,9 @@ static void wifi_refresh_sheet(void)
 
 static void wifi_textarea_event_cb(lv_event_t *event)
 {
-    if (!s_wifi_keyboard) {
-        return;
-    }
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED) {
-        lv_obj_t *textarea = lv_event_get_target(event);
-        if (textarea == s_wifi_ssid_textarea || textarea == s_wifi_password_textarea) {
-            lv_keyboard_set_textarea(s_wifi_keyboard, textarea);
-        }
-    }
+    d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event,
+                                              s_wifi_ssid_textarea,
+                                              s_wifi_password_textarea);
 }
 
 static void wifi_save_event_cb(lv_event_t *event)
@@ -5815,7 +5787,7 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
              snapshot->storage_data_enabled ? "Ready" :
              (snapshot->storage_setup_required ? "Needs FAT32" : "NVS fallback"));
     snprintf(storage_detail, sizeof(storage_detail), "SD %s; FAT32 only, no format",
-             home_sd_state(snapshot));
+             d1l_ui_home_sd_state(snapshot));
     render_settings_tile(s_content, 18, 70, "SD Card", storage_value, storage_detail,
                          snapshot->storage_data_enabled ? 0x5EEAD4 : 0xFBBF24,
                          open_storage_sheet_event_cb, NULL);
