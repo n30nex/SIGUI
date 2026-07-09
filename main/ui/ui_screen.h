@@ -7,7 +7,8 @@
 #include "lvgl.h"
 #include "ui_navigation.h"
 
-typedef void (*d1l_ui_screen_render_fn_t)(const d1l_app_snapshot_t *snapshot);
+typedef void (*d1l_ui_screen_render_fn_t)(lv_obj_t *content,
+                                          const d1l_app_snapshot_t *snapshot);
 
 typedef struct {
     d1l_ui_screen_t screen;

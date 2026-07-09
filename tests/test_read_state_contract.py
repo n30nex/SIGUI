@@ -84,7 +84,7 @@ def test_console_and_ui_expose_thread_read_controls():
     assert "read_dm_thread_event_cb" in ui
     assert "d1l_app_model_mark_dm_thread_read(s_dm_thread_fingerprint)" in ui
     assert 'create_button(s_dm_thread_sheet, "Read"' in ui
-    assert "render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i])" in ui
+    assert "render_dm_row(content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i])" in ui
     assert "dm_row_state(entry, unread)" in ui
 
     assert 'action="mark_dm_thread_read"' in simulator

@@ -47,16 +47,17 @@ static void prepare_content_root(lv_obj_t *content)
 }
 
 static bool dispatch_screen(d1l_ui_screen_t screen,
+                            lv_obj_t *content,
                             const d1l_app_snapshot_t *snapshot,
                             const d1l_ui_screen_renderer_t *renderers,
                             size_t renderer_count)
 {
-    if (!snapshot || !renderers) {
+    if (!content || !snapshot || !renderers) {
         return false;
     }
     for (size_t i = 0; i < renderer_count; ++i) {
         if (renderers[i].screen == screen && renderers[i].render) {
-            renderers[i].render(snapshot);
+            renderers[i].render(content, snapshot);
             return true;
         }
     }
@@ -73,5 +74,9 @@ bool d1l_ui_screen_render(d1l_ui_screen_t screen,
         return false;
     }
     prepare_content_root(content);
-    return dispatch_screen(screen, snapshot, renderers, renderer_count);
+    if (dispatch_screen(screen, content, snapshot, renderers, renderer_count)) {
+        return true;
+    }
+    return screen != D1L_UI_SCREEN_HOME &&
+           dispatch_screen(D1L_UI_SCREEN_HOME, content, snapshot, renderers, renderer_count);
 }

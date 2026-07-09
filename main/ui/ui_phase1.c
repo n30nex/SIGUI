@@ -1469,9 +1469,9 @@ static void handle_home_action(d1l_ui_home_action_t action)
     }
 }
 
-static void render_home_screen(const d1l_app_snapshot_t *snapshot)
+static void render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
-    d1l_ui_home_render(s_content, snapshot, handle_home_action);
+    d1l_ui_home_render(content, snapshot, handle_home_action);
 }
 
 static void render_storage_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -3819,9 +3819,9 @@ static void open_messages_dm_event_cb(lv_event_t *event)
     set_messages_mode(true);
 }
 
-static void render_messages(const d1l_app_snapshot_t *snapshot)
+static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
-    lv_obj_t *header = create_panel(s_content, 18, 16, 424, 108);
+    lv_obj_t *header = create_panel(content, 18, 16, 424, 108);
     lv_obj_t *title = create_label(header, "Messages", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
@@ -3842,10 +3842,10 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     create_button(header, "History", 166, 62, 80, 40, open_public_history_event_cb, NULL);
     create_button(header, "Test", 254, 62, 64, 40, public_test_event_cb, NULL);
 
-    create_button(s_content, "Public", 18, 136, 96, 40, open_messages_public_event_cb, NULL);
-    create_button(s_content, "DMs", 122, 136, 80, 40, open_messages_dm_event_cb, NULL);
+    create_button(content, "Public", 18, 136, 96, 40, open_messages_public_event_cb, NULL);
+    create_button(content, "DMs", 122, 136, 80, 40, open_messages_dm_event_cb, NULL);
 
-    lv_obj_t *mode_label = create_label(s_content,
+    lv_obj_t *mode_label = create_label(content,
                                         s_messages_show_dms ? "DM Conversations" : "Public Channel",
                                         s_messages_show_dms ? 0xA7F3D0 : 0x5EEAD4);
     lv_obj_set_pos(mode_label, 26, 190);
@@ -3853,26 +3853,26 @@ static void render_messages(const d1l_app_snapshot_t *snapshot)
     int y = 218;
     if (s_messages_show_dms) {
         for (size_t i = 0; i < snapshot->recent_dm_count; ++i) {
-            render_dm_row(s_content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
+            render_dm_row(content, y, &snapshot->recent_dms[i], snapshot->recent_dm_unread[i]);
             y += 80;
         }
         if (snapshot->recent_dm_count == 0) {
-            lv_obj_t *empty = create_label(s_content, "No direct messages", 0x8EA0AE);
+            lv_obj_t *empty = create_label(content, "No direct messages", 0x8EA0AE);
             lv_obj_set_pos(empty, 26, y);
         }
     } else {
         for (size_t i = 0; i < snapshot->recent_message_count; ++i) {
-            render_message_row(s_content, y, &snapshot->recent_messages[i]);
+            render_message_row(content, y, &snapshot->recent_messages[i]);
             y += 80;
         }
         if (snapshot->recent_message_count == 0) {
-            lv_obj_t *empty = create_label(s_content, "No Public messages", 0x8EA0AE);
+            lv_obj_t *empty = create_label(content, "No Public messages", 0x8EA0AE);
             lv_obj_set_pos(empty, 26, y);
         }
     }
 }
 
-static void render_nodes(const d1l_app_snapshot_t *snapshot)
+static void render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[64];
@@ -3890,31 +3890,31 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
              (unsigned long)snapshot->signal_summary.room_server_count,
              (unsigned long)snapshot->signal_summary.repeater_candidate_count,
              (unsigned long)snapshot->node_total_written);
-    render_metric_card(s_content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
+    render_metric_card(content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
     snprintf(value, sizeof(value), "%u", (unsigned)snapshot->contact_count);
     snprintf(detail, sizeof(detail), "contacts  writes %lu",
              (unsigned long)snapshot->contact_total_written);
-    render_metric_card(s_content, 238, 16, "Contacts", value, detail, 0xA7F3D0);
+    render_metric_card(content, 238, 16, "Contacts", value, detail, 0xA7F3D0);
 
     int y = 136;
     if (snapshot->recent_contact_count > 0) {
         for (size_t i = 0; i < snapshot->recent_contact_count && y <= 190; ++i) {
-            render_contact_row(s_content, y, &snapshot->recent_contacts[i]);
+            render_contact_row(content, y, &snapshot->recent_contacts[i]);
             y += 54;
         }
-        lv_obj_t *heard = create_label(s_content, "Heard", 0x8EA0AE);
+        lv_obj_t *heard = create_label(content, "Heard", 0x8EA0AE);
         lv_obj_set_pos(heard, 26, y + 4);
         y += 28;
     }
-    lv_obj_t *all_heard = create_label(s_content, "All Heard", 0x8EA0AE);
+    lv_obj_t *all_heard = create_label(content, "All Heard", 0x8EA0AE);
     lv_obj_set_pos(all_heard, 26, y + 4);
     y += 28;
     for (size_t i = 0; i < node_rows; ++i) {
-        render_node_row(s_content, y, &s_node_rows[i]);
+        render_node_row(content, y, &s_node_rows[i]);
         y += 62;
     }
     if (node_rows == 0) {
-        lv_obj_t *empty = create_label(s_content, "No heard nodes yet", 0x8EA0AE);
+        lv_obj_t *empty = create_label(content, "No heard nodes yet", 0x8EA0AE);
         lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
         const char *notes[] = {
             "Listening for signed adverts from nearby MeshCore nodes.",
@@ -3924,7 +3924,7 @@ static void render_nodes(const d1l_app_snapshot_t *snapshot)
         };
         int note_y = 206;
         for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
-            lv_obj_t *note = create_panel(s_content, 18, note_y, 424, 52);
+            lv_obj_t *note = create_panel(content, 18, note_y, 424, 52);
             lv_obj_set_style_pad_all(note, 8, 0);
             lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
             lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
@@ -4386,24 +4386,24 @@ static void open_map_tiles_sheet_event_cb(lv_event_t *event)
     }
 }
 
-static void render_map(const d1l_app_snapshot_t *snapshot)
+static void render_map(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
     char value[32];
     char detail[96];
     char lat[20];
     char lon[20];
-    lv_obj_t *title = create_label(s_content, "Map", 0xF4F7FB);
+    lv_obj_t *title = create_label(content, "Map", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 18, 8);
-    create_button(s_content, "Tiles", 238, 8, 72, 40,
+    create_button(content, "Tiles", 238, 8, 72, 40,
                   open_map_tiles_sheet_event_cb, NULL);
-    create_button(s_content, snapshot->map_location_set ? "Move Pin" : "Set Pin",
+    create_button(content, snapshot->map_location_set ? "Move Pin" : "Set Pin",
                   318, 8, 124, 40, open_map_location_sheet_event_cb, NULL);
 
     snprintf(value, sizeof(value), "%s", snapshot->map_tile_cache_ready ? "SD Ready" : "Offline");
     snprintf(detail, sizeof(detail), "%s",
              snapshot->map_tile_backend ? snapshot->map_tile_backend : "unavailable");
-    render_metric_card(s_content, 18, 48, "Tile Cache", value, detail,
+    render_metric_card(content, 18, 48, "Tile Cache", value, detail,
                        snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24);
 
     snprintf(value, sizeof(value), "%s",
@@ -4412,9 +4412,9 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
     snprintf(detail, sizeof(detail), "%s",
              snapshot->map_tile_download_state ? snapshot->map_tile_download_state :
              "provider_required");
-    render_metric_card(s_content, 238, 48, "Downloads", value, detail, 0x93C5FD);
+    render_metric_card(content, 238, 48, "Downloads", value, detail, 0x93C5FD);
 
-    lv_obj_t *cache = create_panel(s_content, 18, 168, 424, 82);
+    lv_obj_t *cache = create_panel(content, 18, 168, 424, 82);
     create_label(cache, snapshot->map_tile_cache_ready ? "Offline Cache" : "No Offline Tiles", 0xF4F7FB);
     lv_obj_t *policy = create_label(cache, "", 0x8EA0AE);
     if (snapshot->map_tile_cache_ready) {
@@ -4439,7 +4439,7 @@ static void render_map(const d1l_app_snapshot_t *snapshot)
     lv_obj_set_width(path, 390);
     lv_obj_set_pos(path, 0, 50);
 
-    lv_obj_t *center = create_panel(s_content, 18, 266, 424, 94);
+    lv_obj_t *center = create_panel(content, 18, 266, 424, 94);
     create_label(center, "Center", 0xF4F7FB);
     lv_obj_t *routes_label = create_label(center, "Routes", 0x8EA0AE);
     lv_obj_set_pos(routes_label, 320, 0);
@@ -4511,15 +4511,15 @@ static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label
     return button;
 }
 
-static void render_packets(const d1l_app_snapshot_t *snapshot)
+static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
     char snr[16];
     format_snr_tenths(snr, sizeof(snr), snapshot->signal_summary.latest_snr_tenths);
-    lv_obj_t *title = create_label(s_content, "Packets", 0xF4F7FB);
+    lv_obj_t *title = create_label(content, "Packets", 0xF4F7FB);
     obj_set_style_text_font_if(title, &lv_font_montserrat_24);
     obj_set_pos_if(title, 18, 16);
 
-    lv_obj_t *terminal = create_panel(s_content, 18, 52, 424, 50);
+    lv_obj_t *terminal = create_panel(content, 18, 52, 424, 50);
     if (terminal) {
         lv_obj_set_style_pad_all(terminal, 8, 0);
         lv_obj_set_style_bg_color(terminal, lv_color_hex(0x071018), 0);
@@ -4541,27 +4541,27 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
         obj_align_if(line2, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     }
 
-    render_packet_filter_button(s_content, "All", 18, D1L_PACKET_FILTER_ALL);
-    render_packet_filter_button(s_content, "RX", 82, D1L_PACKET_FILTER_RX);
-    render_packet_filter_button(s_content, "TX", 146, D1L_PACKET_FILTER_TX);
-    render_packet_filter_button(s_content, "Text", 210, D1L_PACKET_FILTER_TEXT);
-    create_button(s_content, "Search", 278, 112, 74, 34, open_packet_search_event_cb, NULL);
-    create_button(s_content, s_packets_paused ? "Resume" : "Pause", 362, 112, 80, 34,
+    render_packet_filter_button(content, "All", 18, D1L_PACKET_FILTER_ALL);
+    render_packet_filter_button(content, "RX", 82, D1L_PACKET_FILTER_RX);
+    render_packet_filter_button(content, "TX", 146, D1L_PACKET_FILTER_TX);
+    render_packet_filter_button(content, "Text", 210, D1L_PACKET_FILTER_TEXT);
+    create_button(content, "Search", 278, 112, 74, 34, open_packet_search_event_cb, NULL);
+    create_button(content, s_packets_paused ? "Resume" : "Pause", 362, 112, 80, 34,
                   packet_pause_event_cb, NULL);
     if (s_packet_search_text[0]) {
-        lv_obj_t *search = create_label(s_content, "", 0xFBBF24);
+        lv_obj_t *search = create_label(content, "", 0xFBBF24);
         label_set_fmt(search, "find %.18s", s_packet_search_text);
         lv_label_set_long_mode(search, LV_LABEL_LONG_DOT);
         lv_obj_set_width(search, 408);
         lv_obj_set_pos(search, 26, 152);
     }
 
-    lv_obj_t *feed_title = create_label(s_content, "Packet Feed", 0x8EA0AE);
+    lv_obj_t *feed_title = create_label(content, "Packet Feed", 0x8EA0AE);
     obj_set_pos_if(feed_title, 26, s_packet_search_text[0] ? 176 : 156);
 
     size_t packet_rows = refresh_packet_terminal_rows();
     int y = s_packet_search_text[0] ? 204 : 184;
-    lv_obj_t *feed_count = create_label(s_content, "", 0x8EA0AE);
+    lv_obj_t *feed_count = create_label(content, "", 0x8EA0AE);
     const size_t page_first = packet_rows > 0 ? s_packet_skip_newest + 1U : 0;
     const size_t page_last = s_packet_skip_newest + packet_rows;
     label_set_fmt(feed_count, "page %u-%u/%u%s",
@@ -4572,46 +4572,46 @@ static void render_packets(const d1l_app_snapshot_t *snapshot)
     lv_obj_set_width(feed_count, 210);
     lv_obj_set_pos(feed_count, 218, s_packet_search_text[0] ? 176 : 156);
     for (size_t i = 0; i < packet_rows; ++i) {
-        render_packet_row(s_content, y, &s_packet_filtered_packets[i]);
+        render_packet_row(content, y, &s_packet_filtered_packets[i]);
         y += 52;
     }
     if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
-        lv_obj_t *empty = create_label(s_content, "No packets match filter", 0x8EA0AE);
+        lv_obj_t *empty = create_label(content, "No packets match filter", 0x8EA0AE);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
     } else if (packet_rows == 0) {
-        lv_obj_t *empty = create_label(s_content, "Packet log is empty", 0x8EA0AE);
+        lv_obj_t *empty = create_label(content, "Packet log is empty", 0x8EA0AE);
         lv_obj_set_pos(empty, 26, y + 8);
         y += 34;
     }
 
     if (packet_feed_can_load_older(packet_rows)) {
-        create_button(s_content, "Load Older", 18, y + 4, 128, 40,
+        create_button(content, "Load Older", 18, y + 4, 128, 40,
                       packet_load_older_event_cb, NULL);
         if (packet_feed_can_load_newer()) {
-            create_button(s_content, "Newer", 154, y + 4, 92, 40,
+            create_button(content, "Newer", 154, y + 4, 92, 40,
                           packet_load_newer_event_cb, NULL);
         }
         y += 54;
     } else if (packet_feed_can_load_newer()) {
-        create_button(s_content, "Newer", 18, y + 4, 92, 40,
+        create_button(content, "Newer", 18, y + 4, 92, 40,
                       packet_load_newer_event_cb, NULL);
         y += 54;
     }
 
     y += 10;
-    lv_obj_t *roles = create_button(s_content, "Mesh Roles", 18, y, 130, 36,
+    lv_obj_t *roles = create_button(content, "Mesh Roles", 18, y, 130, 36,
                                     open_mesh_roles_event_cb, NULL);
     if (roles) {
         lv_obj_set_style_bg_color(roles, lv_color_hex(0x12362F), 0);
     }
     y += 48;
     if (snapshot->recent_route_count > 0) {
-        lv_obj_t *routes = create_label(s_content, "Routes", 0x8EA0AE);
+        lv_obj_t *routes = create_label(content, "Routes", 0x8EA0AE);
         lv_obj_set_pos(routes, 26, y);
         y += 24;
         for (size_t i = 0; i < snapshot->recent_route_count; ++i) {
-            render_route_row(s_content, y, &snapshot->recent_routes[i]);
+            render_route_row(content, y, &snapshot->recent_routes[i]);
             y += 54;
         }
     }
@@ -5548,7 +5548,7 @@ static lv_obj_t *render_settings_tile(lv_obj_t *parent, int x, int y, const char
     return tile;
 }
 
-static void render_settings(const d1l_app_snapshot_t *snapshot)
+static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
     d1l_app_radio_profile_edit_t profile = {
         .frequency_hz = snapshot->radio_frequency_hz,
@@ -5561,10 +5561,10 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     char profile_line[80];
     format_radio_profile_line(profile_line, sizeof(profile_line), &profile);
 
-    lv_obj_t *title = create_label(s_content, "Settings", 0xF4F7FB);
+    lv_obj_t *title = create_label(content, "Settings", 0xF4F7FB);
     obj_set_style_text_font_if(title, &lv_font_montserrat_24);
     obj_set_pos_if(title, 18, 16);
-    lv_obj_t *subtitle = create_label(s_content, "Setup Dashboard", 0x8EA0AE);
+    lv_obj_t *subtitle = create_label(content, "Setup Dashboard", 0x8EA0AE);
     label_set_dot_width(subtitle, 260);
     obj_set_pos_if(subtitle, 18, 44);
 
@@ -5585,7 +5585,7 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
              (snapshot->storage_setup_required ? "Needs FAT32" : "NVS fallback"));
     snprintf(storage_detail, sizeof(storage_detail), "SD %s; FAT32 only, no format",
              d1l_ui_home_sd_state(snapshot));
-    render_settings_tile(s_content, 18, 70, "SD Card", storage_value, storage_detail,
+    render_settings_tile(content, 18, 70, "SD Card", storage_value, storage_detail,
                          snapshot->storage_data_enabled ? 0x5EEAD4 : 0xFBBF24,
                          open_storage_sheet_event_cb, NULL);
 
@@ -5597,7 +5597,7 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     }
     snprintf(wifi_detail, sizeof(wifi_detail), "%s; mesh stays offline",
              snapshot->wifi_build_enabled ? "Scan/connect for tiles" : "Not in this firmware");
-    render_settings_tile(s_content, 238, 70, "Wi-Fi", wifi_value, wifi_detail,
+    render_settings_tile(content, 238, 70, "Wi-Fi", wifi_value, wifi_detail,
                          snapshot->wifi_connected ? 0x5EEAD4 :
                          (snapshot->wifi_enabled ? 0xFBBF24 : 0x8EA0AE),
                          open_wifi_sheet_event_cb, NULL);
@@ -5605,7 +5605,7 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     snprintf(ble_value, sizeof(ble_value), "%s",
              snapshot->ble_state ? snapshot->ble_state :
              (snapshot->ble_build_enabled ? "off" : "unavailable"));
-    render_settings_tile(s_content, 18, 128, "BLE", ble_value,
+    render_settings_tile(content, 18, 128, "BLE", ble_value,
                          "Companion pairing gated",
                          snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
                          open_ble_sheet_event_cb, NULL);
@@ -5614,7 +5614,7 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
              profile_line,
              snapshot->radio_tx_power_dbm,
              snapshot->radio_rx_boost ? "on" : "off");
-    render_settings_tile(s_content, 238, 128, "Radio", "Mesh profile", radio_detail,
+    render_settings_tile(content, 238, 128, "Radio", "Mesh profile", radio_detail,
                          0x93C5FD, open_radio_settings_event_cb, NULL);
 
     snprintf(map_value, sizeof(map_value), "%s",
@@ -5622,11 +5622,11 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     snprintf(map_detail, sizeof(map_detail), "%s",
              snapshot->map_tile_cache_ready ? "Offline cache ready" :
              "Wi-Fi and allowed provider");
-    render_settings_tile(s_content, 18, 186, "Map Tiles", map_value, map_detail,
+    render_settings_tile(content, 18, 186, "Map Tiles", map_value, map_detail,
                          snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xFBBF24,
                          open_map_tiles_sheet_event_cb, NULL);
 
-    render_settings_tile(s_content, 238, 186, "Display", "Backlight",
+    render_settings_tile(content, 238, 186, "Display", "Backlight",
                          "Brightness, night, contrast",
                          0xA7F3D0, open_display_sheet_event_cb, NULL);
 
@@ -5635,20 +5635,20 @@ static void render_settings(const d1l_app_snapshot_t *snapshot)
     snprintf(identity_detail, sizeof(identity_detail), "Name %s; fingerprint %.16s",
              snapshot->node_name[0] ? snapshot->node_name : "D1L Desk",
              snapshot->identity_fingerprint[0] ? snapshot->identity_fingerprint : "not generated");
-    render_settings_tile(s_content, 18, 244, "Identity", identity_value, identity_detail,
+    render_settings_tile(content, 18, 244, "Identity", identity_value, identity_detail,
                          snapshot->identity_ready ? 0x5EEAD4 : 0x8EA0AE, NULL, NULL);
 
-    render_settings_tile(s_content, 238, 244, "Diagnostics", "Health",
+    render_settings_tile(content, 238, 244, "Diagnostics", "Health",
                          "Crashlog, exports, soak",
                          0xC4B5FD, open_diagnostics_sheet_event_cb, NULL);
 
     snprintf(about_detail, sizeof(about_detail), "%s %s",
              D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION);
-    render_settings_tile(s_content, 18, 302, "About",
+    render_settings_tile(content, 18, 302, "About",
                          snapshot->node_name[0] ? snapshot->node_name : "DeskOS D1L",
                          about_detail, 0x8EA0AE, NULL, NULL);
 
-    render_settings_tile(s_content, 238, 302, "Advanced", "Hidden tools",
+    render_settings_tile(content, 238, 302, "Advanced", "Hidden tools",
                          "Raw data and adverts",
                          0xFCA5A5, open_sheet_event_cb, NULL);
 }
@@ -5670,10 +5670,8 @@ static void render_active_tab(void)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     layout_content_for_active_tab();
-    if (!d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
-                              renderers, sizeof(renderers) / sizeof(renderers[0]))) {
-        render_home_screen(&s_snapshot);
-    }
+    (void)d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
+                               renderers, sizeof(renderers) / sizeof(renderers[0]));
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
     request_full_screen_repaint();
