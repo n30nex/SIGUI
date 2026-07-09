@@ -160,6 +160,10 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert '#include "ui_home.h"' in source
     assert "d1l_ui_home_sd_state" in source
     assert "d1l_ui_home_sd_state" in home_header
+    assert 'strcmp(state, "mount_pending") == 0' in home_module
+    assert 'return "mounting";' in home_module
+    assert 'return "needs FAT32";' in home_module
+    assert "return snapshot->storage_sd_state;" not in home_module
     assert "d1l_ui_home_launcher_box" in home_header
     assert "d1l_ui_home_status_box" in home_header
     assert "static const d1l_ui_home_box_t k_launcher_boxes" in home_module
