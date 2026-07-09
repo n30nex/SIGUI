@@ -158,7 +158,7 @@ def test_home_screen_is_user_first_companion_dashboard():
 
     assert '"ui/ui_home.c"' in cmake
     assert '#include "ui_home.h"' in source
-    assert "d1l_ui_home_render(s_content, snapshot, handle_home_action);" in source
+    assert "d1l_ui_home_render(content, snapshot, handle_home_action);" in source
     assert "d1l_ui_home_render" in home_module
     assert "d1l_ui_home_render" in home_header
     assert "d1l_ui_home_sd_state" in home_header
@@ -256,10 +256,11 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "lv_obj_set_pos(text, 8, 28)" in dm_row
     assert "lv_obj_set_pos(details, 8, 50)" in dm_row
 
-    messages = source.split("static void render_messages(const d1l_app_snapshot_t *snapshot)", 1)[1].split(
+    messages = source.split("static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)", 1)[1].split(
         "static void render_nodes", 1
     )[0]
-    assert "create_panel(s_content, 18, 16, 424, 108)" in messages
+    assert "create_panel(content, 18, 16, 424, 108)" in messages
+    assert "s_content" not in messages
     assert 'create_button(header, "Compose", 70, 62, 88, 40' in messages
     assert "for (size_t i = 0; i < snapshot->recent_message_count; ++i)" in messages
     assert "for (size_t i = 0; i < snapshot->recent_dm_count; ++i)" in messages
@@ -330,7 +331,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "set_dock_hidden(!layout.dock_visible)" in source
     assert "lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF)" in screen
     assert "prepare_content_root(content)" in screen
-    assert "dispatch_screen(screen, snapshot, renderers, renderer_count)" in screen
+    assert "dispatch_screen(screen, content, snapshot, renderers, renderer_count)" in screen
     assert "d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content" in source
     assert "d1l_ui_phase1_request_tab" in header
     assert "d1l_ui_scroll_probe_result_t" in header
@@ -471,10 +472,12 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     assert "d1l_ui_screen_render" in screen_header
     assert "lv_obj_clean(content)" in screen_source
     assert "lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF)" in screen_source
-    assert "renderers[i].render(snapshot);" in screen_source
+    assert "renderers[i].render(content, snapshot);" in screen_source
+    assert "d1l_ui_screen_render_fn_t)(lv_obj_t *content" in screen_header
     assert "static void prepare_content_root" in screen_source
     assert "lv_obj_scroll_to_y(content, 0, LV_ANIM_OFF);\n}\n\nstatic bool dispatch_screen" in screen_source
     assert "static bool dispatch_screen" in screen_source
+    assert "dispatch_screen(D1L_UI_SCREEN_HOME, content, snapshot" in screen_source
 
     render_body = source.split("static void render_active_tab(void)", 1)[1].split(
         "esp_err_t d1l_ui_phase1_request_tab", 1
@@ -494,7 +497,20 @@ def test_ui_transitions_force_full_screen_repaint_for_hardware_capture():
     assert "d1l_ui_screen_dispatch" not in render_body
     assert "switch (d1l_ui_navigation_active())" not in render_body
     assert "lv_obj_clean(s_content)" not in render_body
+    assert "render_home_screen(&s_snapshot)" not in render_body
     assert "request_full_screen_repaint();" in render_body
+
+    renderer_signatures = (
+        "render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+        "render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+        "render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+        "render_map(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+        "render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+        "render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)",
+    )
+    for signature in renderer_signatures:
+        body = source.split(f"static void {signature}", 1)[1].split("\nstatic ", 1)[0]
+        assert "s_content" not in body, signature
 
     compose_hide = source.split("static void hide_compose_sheet(void)", 1)[1].split(
         "static void hide_public_history_sheet", 1
@@ -997,8 +1013,8 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert "parse_coord_text_e7" in source
     assert "map_location_save_event_cb" in source
     assert "format_coord_e7" in source
-    assert "render_metric_card(s_content, 18, 48" in source
-    assert "render_metric_card(s_content, 238, 48" in source
+    assert "render_metric_card(content, 18, 48" in source
+    assert "render_metric_card(content, 238, 48" in source
     assert 'const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"}' in source
     assert "for (int i = 0; i < 6; ++i)" in source
     assert "map_tile_download_supported" in header
@@ -1255,7 +1271,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_defaults_event_cb" in source
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" in source
-    assert 'render_settings_tile(s_content, 238, 128, "Radio"' in source
+    assert 'render_settings_tile(content, 238, 128, "Radio"' in source
     assert '"Radio Settings"' in source
     assert '"Live RF matches saved profile"' in source
     assert '"Saved profile pending next radio start/apply"' in source

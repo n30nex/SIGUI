@@ -33,7 +33,7 @@ Do not build firmware on the Windows host. Use GitHub Actions for ESP32
 binaries. RP2040 SD bridge binaries are opt-in for bridge/SD work only:
 
 ```powershell
-gh workflow run d1l-ci.yml --ref feature/meshcore-deskos-d1l -f include_sd_bridge=false
+gh workflow run d1l-ci.yml --ref <branch-or-main> -f include_sd_bridge=false
 gh run watch
 gh run download <run-id> -D artifacts\github\<run-id>
 ```
