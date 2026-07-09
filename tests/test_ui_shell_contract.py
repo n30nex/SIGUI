@@ -12,7 +12,7 @@ def read(rel: str) -> str:
 
 
 def test_ui_references_only_enabled_lvgl_fonts():
-    source = read("main/ui/ui_phase1.c")
+    source = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "main/ui").glob("*.c"))
     sdkconfig = read("sdkconfig.defaults")
     referenced = set(re.findall(r"lv_font_montserrat_(\d+)", source))
     enabled = set(re.findall(r"CONFIG_LV_FONT_MONTSERRAT_(\d+)=y", sdkconfig))
@@ -1182,8 +1182,66 @@ def test_packet_detail_sheet_opens_from_packet_rows():
     assert "hide_packet_search_sheet()" in source
 
 
+def test_settings_screen_renderer_has_an_owned_action_boundary():
+    source = read("main/ui/ui_phase1.c")
+    cmake = read("main/CMakeLists.txt")
+    settings_module = read("main/ui/ui_settings.c")
+    settings_header = read("main/ui/ui_settings.h")
+
+    assert '"ui/ui_settings.c"' in cmake
+    assert '#include "ui_settings.h"' in source
+    assert "d1l_ui_settings_render" in settings_module
+    assert "d1l_ui_settings_render" in settings_header
+    assert "static const d1l_ui_settings_action_t k_action_values" in settings_module
+    assert "lv_event_get_user_data(event)" in settings_module
+    assert "(void *)&k_action_values[action]" in settings_module
+    assert "(void *)(uintptr_t)action" not in settings_module
+    assert "d1l_app_model_" not in settings_module
+    assert "lv_obj_clean" not in settings_module
+    assert "s_content" not in settings_module
+    assert "static lv_obj_t *render_settings_tile" not in source
+
+    wrapper = source.split(
+        "static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)", 1
+    )[1].split("\n}", 1)[0]
+    assert "d1l_ui_settings_render(content, snapshot, handle_settings_action);" in wrapper
+    assert "lv_" not in wrapper
+
+    action_routes = (
+        ("D1L_UI_SETTINGS_ACTION_STORAGE", "open_storage_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_WIFI", "open_wifi_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_BLE", "open_ble_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_RADIO", "open_radio_settings_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_MAP_TILES", "open_map_tiles_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_DISPLAY", "open_display_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_DIAGNOSTICS", "open_diagnostics_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_ADVANCED", "open_sheet_event_cb(NULL);"),
+    )
+    for action, route in action_routes:
+        assert action in settings_header
+        assert f"[{action}] = {action}" in settings_module
+        route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
+        assert route in route_body
+
+    for style in (
+        "lv_obj_set_style_radius(panel, 8, 0)",
+        "lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0)",
+        "lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0)",
+        "lv_obj_set_style_border_width(panel, 1, 0)",
+        "lv_obj_set_style_pad_all(panel, 12, 0)",
+        "lv_obj_set_style_pad_all(tile, 8, 0)",
+    ):
+        assert style in settings_module
+    assert "settings_create_panel(parent, x, y, 204, 54)" in settings_module
+    assert "settings_set_dot_width(title_label, 92)" in settings_module
+    assert "settings_set_dot_width(value_label, 96)" in settings_module
+    assert "settings_set_dot_width(detail_label, 188)" in settings_module
+    assert "lv_obj_set_pos(detail_label, 0, 28)" in settings_module
+
+
 def test_settings_screen_reports_companion_wireless_state():
     source = read("main/ui/ui_phase1.c")
+    settings_module = read("main/ui/ui_settings.c")
     header = read("main/app/app_model.h")
     assert "wifi_state" in header
     assert "ble_state" in header
@@ -1198,15 +1256,15 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_last_error" in header
     assert "ble_transport_supported" in header
     assert "coexistence_policy" in header
-    assert '"Setup Dashboard"' in source
-    assert '"SD Card"' in source
-    assert '"Map Tiles"' in source
-    assert '"Identity"' in source
-    assert '"Advanced"' in source
-    assert '"About"' in source
-    assert '"Raw data and adverts"' in source
-    assert "mesh stays offline" in source
-    assert "FAT32 only, no format" in source
+    assert '"Setup Dashboard"' in settings_module
+    assert '"SD Card"' in settings_module
+    assert '"Map Tiles"' in settings_module
+    assert '"Identity"' in settings_module
+    assert '"Advanced"' in settings_module
+    assert '"About"' in settings_module
+    assert '"Raw data and adverts"' in settings_module
+    assert "mesh stays offline" in settings_module
+    assert "FAT32 only, no format" in settings_module
     assert "static lv_obj_t *s_wifi_sheet" in source
     assert "static lv_obj_t *s_ble_sheet" in source
     assert "static lv_obj_t *s_display_sheet" in source
@@ -1259,6 +1317,7 @@ def test_settings_screen_reports_companion_wireless_state():
 
 def test_settings_screen_has_safe_touch_radio_editor():
     source = read("main/ui/ui_phase1.c")
+    settings_module = read("main/ui/ui_settings.c")
     model = read("main/app/app_model.c")
 
     assert "static lv_obj_t *s_radio_settings_sheet" in source
@@ -1271,7 +1330,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_defaults_event_cb" in source
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" in source
-    assert 'render_settings_tile(content, 238, 128, "Radio"' in source
+    assert 'render_settings_tile(parent, 238, 128, "Radio"' in settings_module
     assert '"Radio Settings"' in source
     assert '"Live RF matches saved profile"' in source
     assert '"Saved profile pending next radio start/apply"' in source

@@ -42,6 +42,7 @@ idf_component_register(
         "ui/ui_navigation.c"
         "ui/ui_phase1.c"
         "ui/ui_screen.c"
+        "ui/ui_settings.c"
     INCLUDE_DIRS
         "."
         "app"
