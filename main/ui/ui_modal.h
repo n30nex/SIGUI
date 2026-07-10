@@ -4,6 +4,8 @@
 
 #include "lvgl.h"
 
+/* All modal lifecycle calls are UI-task-only. */
+void d1l_ui_modal_reset(void);
 void d1l_ui_modal_hide(lv_obj_t *obj);
 void d1l_ui_modal_show(lv_obj_t *obj);
 bool d1l_ui_modal_visible(const lv_obj_t *obj);
