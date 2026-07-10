@@ -248,6 +248,9 @@ jobs:
         run: |
           mkdir -p artifacts/firmware
           find build -type f \( -name "*.bin" -o -name "*.elf" -o -name "*.map" -o -name "flasher_args.json" \) -print -exec cp --parents {} artifacts/firmware/ \;
+          test -f sdkconfig
+          test -f build/config/sdkconfig.json
+          cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/
           (cd artifacts/firmware && find . -type f ! -name "SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
 
       - name: Download RP2040 release artifacts

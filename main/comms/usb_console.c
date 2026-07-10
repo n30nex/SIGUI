@@ -2392,6 +2392,9 @@ static bool build_diagnostic_export_payload(const char *token,
     if (!append_export_json(dest, dest_size, &used,
                             "\"health\":{\"uptime_ms\":%lu,\"heap_free\":%lu,"
                             "\"heap_min_free\":%lu,\"heap_largest_free\":%lu,"
+                            "\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,"
+                            "\"internal_heap_largest_free\":%lu,"
+                            "\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,"
                             "\"psram_free\":%lu,\"psram_min_free\":%lu,"
                             "\"psram_largest_free\":%lu,"
                             "\"current_task_stack_free_words\":%lu,"
@@ -2402,6 +2405,11 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.heap_free,
                             (unsigned long)h.heap_min_free,
                             (unsigned long)h.heap_largest_free,
+                            (unsigned long)h.internal_heap_free,
+                            (unsigned long)h.internal_heap_min_free,
+                            (unsigned long)h.internal_heap_largest_free,
+                            (unsigned long)h.dma_heap_free,
+                            (unsigned long)h.dma_heap_largest_free,
                             (unsigned long)h.psram_free,
                             (unsigned long)h.psram_min_free,
                             (unsigned long)h.psram_largest_free,
@@ -4296,10 +4304,15 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
            (unsigned long)h.heap_largest_free,
+           (unsigned long)h.internal_heap_free,
+           (unsigned long)h.internal_heap_min_free,
+           (unsigned long)h.internal_heap_largest_free,
+           (unsigned long)h.dma_heap_free,
+           (unsigned long)h.dma_heap_largest_free,
            (unsigned long)h.psram_free, (unsigned long)h.psram_min_free,
            (unsigned long)h.psram_largest_free,
            (unsigned long)h.current_task_stack_free_words,

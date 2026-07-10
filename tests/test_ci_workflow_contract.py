@@ -120,5 +120,8 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
     assert "python scripts/verify_checksums.py artifacts/release" in job
+    assert "test -f sdkconfig" in job
+    assert "test -f build/config/sdkconfig.json" in job
+    assert "cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/" in job
     assert "--port" not in job
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
