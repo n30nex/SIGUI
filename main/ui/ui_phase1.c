@@ -152,7 +152,10 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
-static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 1500U;
+/* A full retained Packet view can legitimately take longer than 1.5 s to rebuild
+ * before a nested page opens. Keep the serial proof bounded without turning a
+ * populated device into a false timeout. */
+static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
 static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
@@ -6478,14 +6481,20 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     process_pending_tab_switch();
 
     lv_obj_t *target = scroll_probe_open_surface(canonical);
-    force_ui_layout_repaint();
-    measure_scroll_probe_target(target, result);
-    if (strncmp(canonical, "contact_", strlen("contact_")) == 0 ||
+    const bool static_page =
+        strncmp(canonical, "contact_", strlen("contact_")) == 0 ||
         strcmp(canonical, "mesh_roles") == 0 ||
         strcmp(canonical, "mesh_rooms") == 0 ||
-        strcmp(canonical, "mesh_repeaters") == 0) {
+        strcmp(canonical, "mesh_repeaters") == 0;
+    if (static_page) {
+        result->target_found = target != NULL;
+        result->scrollable = target && lv_obj_has_flag(target, LV_OBJ_FLAG_SCROLLABLE);
         result->ok = result->surface_supported && result->target_found;
+        request_full_screen_repaint();
+        return;
     }
+    force_ui_layout_repaint();
+    measure_scroll_probe_target(target, result);
 }
 
 static bool begin_pending_scroll_probe(char *surface, size_t surface_len)
