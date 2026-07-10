@@ -29,7 +29,10 @@ SCROLL_SURFACES = {
     "storage_card": {"tab": "settings", "label": "SD card status"},
     "storage_data": {"tab": "settings", "label": "Data locations"},
     "wifi": {"tab": "settings", "label": "Wi-Fi settings"},
-    "map": {"tab": "map", "label": "Map"},
+    "map": {"tab": "map", "label": "Actual Map view"},
+    "map_options": {"tab": "map", "label": "Map options"},
+    "map_location": {"tab": "map", "label": "Map location"},
+    "map_cache": {"tab": "map", "label": "Cache status"},
 }
 SCREEN_ALIASES = {
     "messages": "public_messages",
@@ -46,10 +49,51 @@ SCREEN_ALIASES = {
     "storage-data": "storage_data",
     "wi_fi": "wifi",
     "wi-fi": "wifi",
+    "map-options": "map_options",
+    "map_options_page": "map_options",
+    "map-options-page": "map_options",
+    "map-location": "map_location",
+    "map_location_page": "map_location",
+    "map-location-page": "map_location",
+    "map-cache": "map_cache",
 }
 DEFAULT_SCREENS = tuple(SCROLL_SURFACES)
 VALID_SCREENS = tuple(SCROLL_SURFACES)
-SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card"}
+MAP_READ_ONLY_SURFACES = frozenset({
+    "map",
+    "map_options",
+    "map_location",
+    "map_cache",
+})
+SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card", *MAP_READ_ONLY_SURFACES}
+
+
+def probe_safety(*, clear_crashlog_before_start: bool) -> dict[str, bool | int]:
+    return {
+        "read_only": not clear_crashlog_before_start,
+        "save_actions": False,
+        "clear_actions": clear_crashlog_before_start,
+        "map_download": False,
+        "network_tx": False,
+        "map_network_requests": False,
+        "background_download": False,
+        "area_download": False,
+        "visible_tile_limit": 9,
+        "zoom_batch_limit": 1,
+        "wifi_mutation": False,
+        "rf_tx": False,
+        "public_rf_tx": False,
+        "dm_rf_tx": False,
+        "storage_mutation": False,
+        "formats_sd": False,
+    }
+
+
+def validate_setup_actions(screens: list[str], clear_crashlog_before_start: bool) -> None:
+    if clear_crashlog_before_start and MAP_READ_ONLY_SURFACES.intersection(screens):
+        raise ValueError(
+            "--clear-crashlog-before-start is not allowed with network-suppressed Map probes"
+        )
 
 
 def utc_stamp() -> str:
@@ -72,11 +116,54 @@ def surface_plan(screens: list[str]) -> list[dict]:
     ]
 
 
+def map_network_request_count(row: dict | None) -> int | None:
+    if not isinstance(row, dict) or row.get("ok") is not True:
+        return None
+    value = row.get("network_requests")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return None
+
+
+def summarize_map_network_evidence(
+    before: dict | None,
+    after: dict | None,
+    *,
+    measured: bool,
+) -> dict:
+    before_count = map_network_request_count(before)
+    after_count = map_network_request_count(after)
+    samples_valid = measured and before_count is not None and after_count is not None
+    return {
+        "command": "map tiles status",
+        "measured": measured,
+        "before": before,
+        "after": after,
+        "before_count": before_count,
+        "after_count": after_count,
+        "delta": after_count - before_count if samples_valid else None,
+        "samples_valid": samples_valid,
+        "unchanged": samples_valid and before_count == after_count,
+    }
+
+
 def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> dict:
     plan = surface_plan(screens)
     commands: list[str] = []
+    map_probe_requested = bool(MAP_READ_ONLY_SURFACES.intersection(screens))
+    if map_probe_requested:
+        commands.append("map tiles status")
     for item in plan:
-        commands.extend([f"ui tab {item['tab']}", f"ui scroll-probe {item['screen']}"])
+        if item["screen"] in MAP_READ_ONLY_SURFACES:
+            commands.append(f"ui scroll-probe {item['screen']}")
+        else:
+            commands.extend([f"ui tab {item['tab']}", f"ui scroll-probe {item['screen']}"])
+    if map_probe_requested:
+        commands.append("map tiles status")
     commands.extend(["ui status", "health", "crashlog"])
     return {
         "schema": 1,
@@ -89,6 +176,14 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
         "screens": screens,
         "surface_plan": plan,
         "commands": commands,
+        "map_network_evidence": {
+            "command": "map tiles status",
+            "measured": False,
+            "declared_no_network": True,
+            "before": None,
+            "after": None,
+        },
+        **probe_safety(clear_crashlog_before_start=False),
     }
 
 
@@ -144,6 +239,7 @@ def run_scroll_probe(
     clear_crashlog_before_start: bool,
     poll_sec: float,
 ) -> dict:
+    validate_setup_actions(screens, clear_crashlog_before_start)
     try:
         import serial
     except ImportError as exc:
@@ -151,7 +247,15 @@ def run_scroll_probe(
 
     setup_events: list[dict] = []
     events: list[dict] = []
+    map_tiles_before: dict | None = None
+    map_tiles_after: dict | None = None
     started_at = datetime.now(timezone.utc)
+    map_indices = [
+        index for index, surface in enumerate(surface_plan(screens))
+        if surface["screen"] in MAP_READ_ONLY_SURFACES
+    ]
+    first_map_index = map_indices[0] if map_indices else None
+    last_map_index = map_indices[-1] if map_indices else None
 
     with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
@@ -162,14 +266,25 @@ def run_scroll_probe(
                 {"cmd": "crashlog clear", "result": send_console_command(ser, "crashlog clear", timeout)}
             )
 
-        for surface in surface_plan(screens):
+        for surface_index, surface in enumerate(surface_plan(screens)):
             screen = surface["screen"]
             tab = surface["tab"]
             label = surface["label"]
-            request = send_console_command(ser, f"ui tab {tab}", timeout)
-            time.sleep(dwell_sec)
-            tab_active, statuses = wait_for_tab(ser, tab, max(timeout, 15.0), poll_sec)
-            probe = send_console_command(ser, f"ui scroll-probe {screen}", max(timeout, 15.0))
+            if surface_index == first_map_index:
+                map_tiles_before = send_console_command(ser, "map tiles status", timeout)
+            if screen in MAP_READ_ONLY_SURFACES:
+                # The probe command arms firmware-side network suppression before
+                # navigating to Map. Never open the live Map with `ui tab map`
+                # from an evidence probe.
+                probe = send_console_command(ser, f"ui scroll-probe {screen}", max(timeout, 15.0))
+                request = probe
+                time.sleep(dwell_sec)
+                tab_active, statuses = wait_for_tab(ser, tab, max(timeout, 15.0), poll_sec)
+            else:
+                request = send_console_command(ser, f"ui tab {tab}", timeout)
+                time.sleep(dwell_sec)
+                tab_active, statuses = wait_for_tab(ser, tab, max(timeout, 15.0), poll_sec)
+                probe = send_console_command(ser, f"ui scroll-probe {screen}", max(timeout, 15.0))
             if manual_touch:
                 print(f"Manual check: scroll the {label} surface, then press Enter.")
                 input()
@@ -191,6 +306,8 @@ def run_scroll_probe(
                     "manual_touch_confirmed": manual_touch,
                 }
             )
+            if surface_index == last_map_index:
+                map_tiles_after = send_console_command(ser, "map tiles status", timeout)
 
     ended_at = datetime.now(timezone.utc)
     failures = [
@@ -213,9 +330,34 @@ def run_scroll_probe(
         for event in events
         if event_failed(event)
     ]
+    map_network_evidence = summarize_map_network_evidence(
+        map_tiles_before,
+        map_tiles_after,
+        measured=bool(map_indices),
+    )
+    map_network_failures = []
+    if map_indices and map_network_evidence.get("unchanged") is not True:
+        map_network_failures.append(
+            {
+                "kind": "map_network_counter",
+                "samples_valid": map_network_evidence.get("samples_valid"),
+                "before_count": map_network_evidence.get("before_count"),
+                "after_count": map_network_evidence.get("after_count"),
+                "delta": map_network_evidence.get("delta"),
+            }
+        )
+    failures.extend(map_network_failures)
     setup_failures = [
         event for event in setup_events if not event.get("result", {}).get("ok")
     ]
+    network_assertion = (
+        False if not map_indices or map_network_evidence.get("unchanged") is True
+        else True if map_network_evidence.get("samples_valid") is True
+        else None
+    )
+    safety = probe_safety(clear_crashlog_before_start=clear_crashlog_before_start)
+    safety["network_tx"] = network_assertion
+    safety["map_network_requests"] = network_assertion
     return {
         "schema": 1,
         "mode": "hardware",
@@ -235,6 +377,8 @@ def run_scroll_probe(
         "setup_events": setup_events,
         "probe_results": {event["screen"]: event["probe"] for event in events},
         "events": events,
+        "map_network_evidence": map_network_evidence,
+        **safety,
     }
 
 
@@ -272,6 +416,10 @@ def main() -> int:
         parser.error(str(exc))
     if not screens:
         parser.error("--screens must include at least one screen")
+    try:
+        validate_setup_actions(screens, args.clear_crashlog_before_start)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.dry_run:
         report = dry_run_report(screens, args.dwell_sec, args.manual_touch)

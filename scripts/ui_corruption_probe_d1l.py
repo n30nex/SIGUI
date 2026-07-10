@@ -12,9 +12,11 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
+    from scroll_probe_d1l import summarize_map_network_evidence
     from smoke_d1l import send_console_command
 except ModuleNotFoundError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
+    from scripts.scroll_probe_d1l import summarize_map_network_evidence
     from scripts.smoke_d1l import send_console_command
 
 
@@ -30,6 +32,12 @@ TELEMETRY_FIELDS = (
     "ui_task_stack_free_words",
     "reset_reason",
 )
+
+
+def tab_probe_command(tab: str) -> str:
+    # Map must be entered through the scroll probe so firmware suppresses tile
+    # networking before the view becomes active.
+    return "ui scroll-probe map" if tab == "map" else f"ui tab {tab}"
 
 
 def utc_stamp() -> str:
@@ -52,12 +60,14 @@ def dry_run_report(
 ) -> dict:
     commands = [
         "ui status",
-        *[f"ui tab {tab}" for tab in TAB_SEQUENCE],
+        "map tiles status",
+        *[tab_probe_command(tab) for tab in TAB_SEQUENCE],
         f"ui data-canary {token_for_round(1)}",
         f"packets search {token_for_round(1)}",
         f"messages public search {token_for_round(1)}",
         "health",
         "crashlog",
+        "map tiles status",
     ]
     return {
         "schema": 1,
@@ -73,15 +83,25 @@ def dry_run_report(
         "skip_data_canary": skip_data_canary,
         "tabs": list(TAB_SEQUENCE),
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
         "formats_sd": False,
         "telemetry_fields": list(TELEMETRY_FIELDS),
         "commands": commands,
+        "map_network_evidence": {
+            "command": "map tiles status",
+            "measured": False,
+            "declared_no_network": True,
+            "before": None,
+            "after": None,
+        },
         "checks": {
             "tab_switches_settle": True,
             "button_refreshes_deferred": True,
             "data_refresh_exercised": not skip_data_canary,
             "data_refreshes_pass": not skip_data_canary,
             "no_public_rf": True,
+            "no_map_network_requests": True,
             "no_formatting": True,
             "no_stuck_pending": True,
             "final_active_tab_known": True,
@@ -177,7 +197,7 @@ def summarize_telemetry(events: list[dict]) -> dict:
 
 
 def tab_step(ser, tab: str, timeout: float, settle_sec: float, poll_sec: float, round_number: int) -> dict:
-    request = send_console_command(ser, f"ui tab {tab}", timeout)
+    request = send_console_command(ser, tab_probe_command(tab), timeout)
     time.sleep(settle_sec)
     active, statuses = wait_for_tab(ser, tab, timeout, poll_sec)
     health = send_console_command(ser, "health", timeout)
@@ -293,6 +313,8 @@ def run_probe(
 
     events: list[dict] = []
     setup_events: list[dict] = []
+    map_tiles_before: dict | None = None
+    map_tiles_after: dict | None = None
     started_at = datetime.now(timezone.utc)
     run_prefix = token_prefix_for_run(started_at)
 
@@ -300,6 +322,7 @@ def run_probe(
         time.sleep(1.0)
         ser.reset_input_buffer()
         setup_events.append({"cmd": "ui status", "result": send_console_command(ser, "ui status", timeout)})
+        map_tiles_before = send_console_command(ser, "map tiles status", timeout)
         if clear_crashlog_before_start:
             setup_events.append(
                 {"cmd": "crashlog clear", "result": send_console_command(ser, "crashlog clear", timeout)}
@@ -318,10 +341,26 @@ def run_probe(
                         round_number,
                     )
                 )
+        map_tiles_after = send_console_command(ser, "map tiles status", timeout)
 
     ended_at = datetime.now(timezone.utc)
     setup_failures = [event for event in setup_events if not event.get("result", {}).get("ok")]
     failures = event_failures(events, skip_data_canary=skip_data_canary)
+    map_network_evidence = summarize_map_network_evidence(
+        map_tiles_before,
+        map_tiles_after,
+        measured=True,
+    )
+    if map_network_evidence.get("unchanged") is not True:
+        failures.append(
+            {
+                "kind": "map_network_counter",
+                "samples_valid": map_network_evidence.get("samples_valid"),
+                "before_count": map_network_evidence.get("before_count"),
+                "after_count": map_network_evidence.get("after_count"),
+                "delta": map_network_evidence.get("delta"),
+            }
+        )
     telemetry = summarize_telemetry(events)
     telemetry_failures = []
     if not telemetry.get("uptime_monotonic"):
@@ -330,6 +369,11 @@ def run_probe(
         telemetry_failures.append({"check": "no_stuck_pending", "ok": False})
     if telemetry.get("final_active_tab") not in TAB_SEQUENCE:
         telemetry_failures.append({"check": "final_active_tab_known", "ok": False})
+    network_assertion = (
+        False if map_network_evidence.get("unchanged") is True
+        else True if map_network_evidence.get("samples_valid") is True
+        else None
+    )
     report = {
         "schema": 1,
         "kind": "ui_corruption_probe",
@@ -347,7 +391,10 @@ def run_probe(
         "skip_data_canary": skip_data_canary,
         "tabs": list(TAB_SEQUENCE),
         "public_rf_tx": False,
+        "network_tx": network_assertion,
+        "map_network_requests": network_assertion,
         "formats_sd": False,
+        "map_network_evidence": map_network_evidence,
         "data_refresh_events": sum(1 for event in events if event.get("kind") == "data_refresh"),
         "ok": not failures and not setup_failures and not telemetry_failures,
         "failure_count": len(failures) + len(setup_failures) + len(telemetry_failures),
@@ -362,6 +409,7 @@ def run_probe(
                 failure.get("kind") == "data_refresh" for failure in failures
             ),
             "no_public_rf": True,
+            "no_map_network_requests": map_network_evidence.get("unchanged") is True,
             "no_formatting": True,
             "uptime_monotonic": telemetry.get("uptime_monotonic") is True,
             "no_stuck_pending": telemetry.get("final_pending") is False,

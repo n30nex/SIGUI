@@ -13,7 +13,7 @@ def read(rel: str) -> str:
 def test_settings_model_defaults_and_nvs_contract():
     header = read("main/app/settings_model.h")
     source = read("main/app/settings_model.c")
-    assert "D1L_SETTINGS_SCHEMA_VERSION 6U" in header
+    assert "D1L_SETTINGS_SCHEMA_VERSION 7U" in header
     assert "D1L_WIFI_SSID_LEN 33U" in header
     assert "D1L_WIFI_PASSWORD_LEN 65U" in header
     assert "wifi_profile_saved" in header
@@ -23,9 +23,9 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "identity_private_key" in header
     assert "onboarding_complete" in header
     assert "map_location_set" in header
-    assert "map_tile_provider_saved" in header
-    assert "map_tile_url_template" in header
-    assert "map_tile_attribution" in header
+    assert "map_tile_provider_saved" not in header
+    assert "map_tile_url_template" not in header
+    assert "map_tile_attribution" not in header
     assert "map_tile_zoom" in header
     assert "map_lat_e7" in header
     assert "map_lon_e7" in header
@@ -38,14 +38,16 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "d1l_settings_v3_t" in source
     assert "d1l_settings_v4_t" in source
     assert "d1l_settings_v5_t" in source
+    assert "d1l_settings_v6_t" in source
     assert "migrate_v2_settings" in source
     assert "migrate_v3_settings" in source
     assert "migrate_v4_settings" in source
     assert "migrate_v5_settings" in source
-    assert "if (loaded_schema == 5U)" in source
-    assert "if (loaded_schema == 4U)" in source
-    assert "if (loaded_schema == 3U)" in source
-    assert "if (loaded_schema == 2U)" in source
+    assert "migrate_v6_settings" in source
+    assert "switch (loaded.schema_version)" in source
+    assert "case D1L_SETTINGS_SCHEMA_VERSION:" in source
+    assert "case 5U:" in source
+    assert "Unknown same-size blobs are never sanitized as v7" in source
     assert "d1l_settings_save_wifi_profile" in header
     assert "d1l_settings_clear_wifi_profile" in header
     assert "strlen(ssid) >= D1L_WIFI_SSID_LEN" in source
@@ -73,10 +75,8 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "settings->map_location_set = false" in source
     assert "settings->map_lat_e7 = 0" in source
     assert "settings->map_lon_e7 = 0" in source
-    assert "settings->map_tile_provider_saved = false" in source
     assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in source
-    assert "d1l_map_tile_provider_template_allowed(settings->map_tile_url_template)" in source
-    assert "d1l_map_tile_attribution_valid(settings->map_tile_attribution)" in source
+    assert "settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;" in source
     assert "settings->path_hash_bytes = 1" in source
     assert "settings->frequency_hz = D1L_RADIO_FREQ_HZ" in source
     assert "settings->tcxo_mode = D1L_TCXO_NONE" in source
@@ -149,12 +149,52 @@ def test_console_exposes_phase2_foundation_commands():
     assert "strtod(text, &end)" in console
     assert '\\"map_location\\"' in console
     assert '\\"map_tiles\\"' in console
-    assert '\\"provider_saved\\"' in console
-    assert "settings->map_tile_provider_saved" in console
+    assert '\\"source\\":' in console
+    assert "D1L_MAP_TILE_SOURCE_ID" in console
+    assert "D1L_MAP_TILE_SOURCE_URL_TEMPLATE" in console
+    assert "settings->map_tile_provider_saved" not in console
+    assert "provider_saved" not in console
     assert "D1L_MAP_TILE_PROVIDER_POLICY" in console
     assert "print_map_location_result" in console
     assert "d1l_app_model_set_map_location(lat_e7, lon_e7)" in console
     assert "d1l_app_model_clear_map_location()" in console
+
+
+def test_v5_and_v6_migrations_preserve_wifi_location_and_identity():
+    source = read("main/app/settings_model.c")
+
+    v5 = source.split("static void migrate_v5_settings", 1)[1].split(
+        "static void migrate_v6_settings", 1
+    )[0]
+    v6 = source.split("static void migrate_v6_settings", 1)[1].split(
+        "static void migrate_v4_settings", 1
+    )[0]
+    for migration in (v5, v6):
+        assert "dest->wifi_enabled = src->wifi_enabled" in migration
+        assert "dest->wifi_profile_saved = src->wifi_profile_saved" in migration
+        assert "memcpy(dest->wifi_ssid, src->wifi_ssid" in migration
+        assert "memcpy(dest->wifi_password, src->wifi_password" in migration
+        assert "dest->map_location_set = src->map_location_set" in migration
+        assert "dest->map_lat_e7 = src->map_lat_e7" in migration
+        assert "dest->map_lon_e7 = src->map_lon_e7" in migration
+        assert "dest->identity_ready = src->identity_ready" in migration
+        assert "memcpy(dest->identity_public_key, src->identity_public_key" in migration
+        assert "memcpy(dest->identity_private_key, src->identity_private_key" in migration
+        assert "dest->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM" in migration
+
+    load = source.split("esp_err_t d1l_settings_load(void)", 1)[1].split(
+        "esp_err_t d1l_settings_save", 1
+    )[0]
+    same_size = load.split("len == sizeof(s_current)", 1)[1].split(
+        "len == sizeof(d1l_settings_v6_t)", 1
+    )[0]
+    assert "switch (loaded.schema_version)" in same_size
+    assert "case 5U:" in same_size
+    assert "migrate_v5_settings(&s_current, &old_v5)" in same_size
+    v6_blob = load.split("len == sizeof(d1l_settings_v6_t)", 1)[1].split(
+        "len == sizeof(d1l_settings_v5_t)", 1
+    )[0]
+    assert "migrate_v6_settings(&s_current, &old_settings)" in v6_blob
 
 
 def test_smoke_includes_settings_identity_and_mesh_status():

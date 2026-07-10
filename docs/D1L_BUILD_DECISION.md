@@ -4,6 +4,8 @@ Date: 2026-06-29
 
 Decision: use ESP-IDF v5.1.x as the primary D1L firmware framework.
 
+Status review (2026-07-10): this remains the vendor-compatible bring-up baseline, not the final production baseline. [Espressif's final v5.1.7 notice](https://github.com/espressif/esp-idf/releases/tag/v5.1.7) states that the v5.1 branch reached end of life in December 2025 and no longer receives bug or security fixes. Public release therefore requires qualification on a supported ESP-IDF branch (target v5.5.x unless the Seeed BSP dictates another supported branch), followed by the full Actions and hardware gate matrix. If vendor compatibility prevents migration, a maintained security-patch plan must be documented and approved explicitly.
+
 ## Rationale
 
 The Seeed SenseCAP Indicator ESP32 SDK is ESP-IDF based and explicitly says to use ESP-IDF `v5.1.x`. Its examples already select `CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L=y` and include D1L paths for RGB LCD, touch, IO expander, RP2040 reset, and SX1262 LoRa bring-up.

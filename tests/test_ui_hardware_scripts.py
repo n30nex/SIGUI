@@ -41,13 +41,20 @@ def test_ui_corruption_probe_dry_run_is_explicit_port_safe():
     assert report["rounds"] == 20
     assert report["release_min_rounds"] == 20
     assert report["public_rf_tx"] is False
+    assert report["network_tx"] is False
+    assert report["map_network_requests"] is False
     assert report["formats_sd"] is False
     assert "heap_free" in report["telemetry_fields"]
     assert "ui_task_stack_free_words" in report["telemetry_fields"]
     assert report["tabs"] == ["home", "messages", "nodes", "map", "packets", "settings"]
     assert "ui status" in report["commands"]
     assert "ui tab packets" in report["commands"]
+    assert "ui scroll-probe map" in report["commands"]
+    assert "ui tab map" not in report["commands"]
     assert "ui data-canary uiRx0001" in report["commands"]
+    assert report["commands"].count("map tiles status") == 2
+    assert report["map_network_evidence"]["measured"] is False
+    assert report["map_network_evidence"]["declared_no_network"] is True
     assert report["checks"]["data_refresh_exercised"] is True
     assert report["checks"]["no_stuck_pending"] is True
     assert report["checks"]["final_active_tab_known"] is True
@@ -93,7 +100,7 @@ def test_ui_corruption_probe_requires_token_in_result_entries():
 
 def test_scroll_probe_dry_run_and_screen_parser():
     screens = scroll_probe_d1l.parse_screens(
-        "home,public,dm-thread,nodes,packets,settings,storage,storage-card,storage-data,wi-fi,map"
+        "home,public,dm-thread,nodes,packets,settings,storage,storage-card,storage-data,wi-fi,map,map-options,map-location,map-cache"
     )
     report = scroll_probe_d1l.dry_run_report(screens, dwell_sec=0.5, manual_touch=True)
 
@@ -109,6 +116,9 @@ def test_scroll_probe_dry_run_and_screen_parser():
         "storage_data",
         "wifi",
         "map",
+        "map_options",
+        "map_location",
+        "map_cache",
     ]
     assert report["ok"] is True
     assert report["mode"] == "dry-run"
@@ -123,7 +133,47 @@ def test_scroll_probe_dry_run_and_screen_parser():
     assert "ui scroll-probe storage_card" in report["commands"]
     assert "ui scroll-probe storage_data" in report["commands"]
     assert "ui scroll-probe dm_thread" in report["commands"]
+    assert "ui scroll-probe map_options" in report["commands"]
+    assert "ui scroll-probe map_location" in report["commands"]
+    assert "ui scroll-probe map_cache" in report["commands"]
+    assert "ui tab map" not in report["commands"]
+    assert report["network_tx"] is False
+    assert report["map_network_requests"] is False
+    assert report["visible_tile_limit"] == 9
+    assert report["zoom_batch_limit"] == 1
+    assert report["commands"].count("map tiles status") == 2
+    assert report["map_network_evidence"]["measured"] is False
+    assert report["map_network_evidence"]["declared_no_network"] is True
     assert "crashlog" in report["commands"]
+
+
+def test_map_network_counter_evidence_requires_two_equal_valid_samples():
+    before = {"ok": True, "network_requests": 4}
+    same = {"ok": True, "network_requests": 4}
+    grew = {"ok": True, "network_requests": 5}
+
+    evidence = scroll_probe_d1l.summarize_map_network_evidence(
+        before, same, measured=True
+    )
+    assert evidence["samples_valid"] is True
+    assert evidence["unchanged"] is True
+    assert evidence["delta"] == 0
+    assert evidence["before"] is before
+    assert evidence["after"] is same
+
+    evidence = scroll_probe_d1l.summarize_map_network_evidence(
+        before, grew, measured=True
+    )
+    assert evidence["samples_valid"] is True
+    assert evidence["unchanged"] is False
+    assert evidence["delta"] == 1
+
+    evidence = scroll_probe_d1l.summarize_map_network_evidence(
+        before, {"ok": False}, measured=True
+    )
+    assert evidence["samples_valid"] is False
+    assert evidence["unchanged"] is False
+    assert evidence["delta"] is None
 
 
 def test_scroll_probe_rejects_unknown_screen():
@@ -197,7 +247,7 @@ def test_active_release_docs_mark_keyboard_p0_closed_and_keep_fast_path():
     assert "Expanded issue #2 compose/input keyboard capture from PR #35" in checklist
     assert "PR #35" in release_docs
     assert "28727064923" in release_docs
-    assert "capture_count=12" in release_docs
+    assert "capture_count=11" in release_docs
     assert "ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all" in test_plan
     assert "broader keyboard/sheet physical review" not in release_docs
     assert "expanded `--targets all` keyboard/sheet physical review" not in release_docs
@@ -333,20 +383,22 @@ def test_ui_compose_keyboard_capture_dry_run_is_targeted_and_safe():
     assert "ui compose-probe contact-edit" in report["commands"]
     assert "ui compose-probe onboarding" in report["commands"]
     assert "ui compose-probe map-location" in report["commands"]
-    assert "ui compose-probe map-provider" in report["commands"]
+    assert "map-provider" not in report["commands"]
     assert "ui compose-probe wifi-ssid" in report["commands"]
     assert "ui compose-probe wifi-password" in report["commands"]
     assert "ui capture chunk 0 1024" in report["commands"]
     assert report["chunk_size"] == 1024
     assert report["public_rf_tx"] is False
+    assert report["network_tx"] is False
+    assert report["map_network_requests"] is False
     assert report["formats_sd"] is False
 
 
 def test_ui_compose_keyboard_capture_accepts_all_and_underscore_aliases():
     assert ui_compose_keyboard_capture_d1l.parse_targets("all") == ui_compose_keyboard_capture_d1l.ALL_TARGETS
-    assert ui_compose_keyboard_capture_d1l.parse_targets("wifi_password,map_provider") == [
+    assert ui_compose_keyboard_capture_d1l.parse_targets("wifi_password,map_location") == [
         "wifi-password",
-        "map-provider",
+        "map-location",
     ]
 
 

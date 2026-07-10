@@ -51,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 45
+    assert len(views) == 46
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -69,6 +69,9 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
         if name in ui_simulator.MESH_ROLE_VIEWS:
             assert view["truncated_labels"] == [], name
         if name in ui_simulator.STORAGE_HIERARCHY_VIEWS:
+            assert view["truncated_labels"] == [], name
+            assert view["sibling_text_overlaps"] == [], name
+        if name in ui_simulator.MAP_HIERARCHY_VIEWS:
             assert view["truncated_labels"] == [], name
             assert view["sibling_text_overlaps"] == [], name
 
@@ -218,33 +221,34 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "Public Channel"} <= labels_by_view["messages"]
     assert {"Messages", "Public", "DMs", "DM Conversations"} <= labels_by_view["messages_dm"]
     assert {"Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"} <= labels_by_view["nodes"]
-    assert {"Map", "Tiles", "Set Pin", "Tile Cache", "Downloads", "No Offline Tiles", "Center", "Unset", "Routes"} <= labels_by_view["map"]
-    assert "Connect Wi-Fi and download allowed tiles for your area." in labels_by_view["map"]
-    assert "Allowed provider and visible attribution required." in labels_by_view["map"]
+    assert {"Map", "Options", "(c) OpenStreetMap contributors"} <= labels_by_view["map"]
     assert {
-        "Map Tiles",
-        "Allowed provider template",
-        "Attribution",
-        "Zoom 12",
-        "Save",
-        "Clear",
-        "Live download unavailable",
-        "Tile render pending; use serial canaries for SD cache proof.",
-        "No public OSM bulk tile servers. Visible attribution is required.",
-        "Keyboard",
-        "Close",
-    } <= labels_by_view["map_tiles_sheet"]
+        "Map options",
+        "Back to Map",
+        "Set location",
+        "Cache status",
+        "Tiles download only while Map is open. Reopening the same area uses the saved copy.",
+    } <= labels_by_view["map_options"]
     assert {
-        "Set D1L Location",
-        "Map needs your D1L location",
-        "Enter decimal degrees",
+        "Set location",
+        "Back",
+        "Map center in decimal degrees",
+        "Set the center used for the local map area.",
         "Latitude",
         "Longitude",
-        "Keyboard",
-        "Save",
-        "Clear",
-        "Skip",
-    } <= labels_by_view["map_location_sheet"]
+        "Save location",
+    } <= labels_by_view["map_location"]
+    assert {
+        "Cache status",
+        "Back",
+            "Read-only readiness",
+        "SD card",
+        "Wi-Fi",
+        "Location",
+        "Map view",
+        "OpenStreetMap is built in.",
+        "(c) OpenStreetMap contributors",
+    } <= labels_by_view["map_cache"]
     assert {"Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Routes", "Packet Feed"} <= labels_by_view["packets"]
     assert {
         "More",
@@ -259,7 +263,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     } <= labels_by_view["settings"]
     assert {"More", "Tools", "Packets and diagnostics", "Packets", "Diagnostics"} <= labels_by_view["settings_tools_expanded"]
     assert {"More", "Connections", "Wi-Fi", "Bluetooth", "Radio"} <= labels_by_view["settings_connections_expanded"]
-    assert {"More", "Storage & maps", "SD Card", "Offline Maps"} <= labels_by_view["settings_storage_maps_expanded"]
+    assert {"More", "Storage & maps", "SD Card", "Map options"} <= labels_by_view["settings_storage_maps_expanded"]
     assert {"More", "Device", "Display", "Identity"} <= labels_by_view["settings_device_expanded"]
     assert {"More", "Support", "About", "Version 1.0.0-rc1"} <= labels_by_view["settings_support_expanded"]
     assert {"More", "Advanced", "Mesh advertise", "Broadcast presence"} <= labels_by_view["settings_advanced_expanded"]
@@ -491,19 +495,22 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["wifi_setup_sheet"]["edit_wifi_password"]["kind"] == "text_field"
     assert not any(target["kind"] == "dock_tab" for target in views["wifi_setup_sheet"]["touch_targets"])
     assert actions_by_view["ble_setup_sheet"]["close_ble_setup"]["destination"] == "settings"
-    assert actions_by_view["map"]["open_map_tiles"]["destination"] == "map_tiles_sheet"
-    assert actions_by_view["map_tiles_sheet"]["edit_map_tile_provider"]["kind"] == "text_field"
-    assert actions_by_view["map_tiles_sheet"]["edit_map_tile_attribution"]["kind"] == "text_field"
-    assert actions_by_view["map_tiles_sheet"]["save_map_tile_provider"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
-    assert "download_center_tile" not in actions_by_view["map_tiles_sheet"]
-    assert actions_by_view["map_tiles_sheet"]["close_map_tiles"]["destination"] == "map"
-    assert not any(target["kind"] == "dock_tab" for target in views["map_tiles_sheet"]["touch_targets"])
-    assert actions_by_view["map"]["open_map_location_picker"]["destination"] == "map_location_sheet"
-    assert actions_by_view["map_location_sheet"]["save_map_location"]["destination"] == "map"
-    assert actions_by_view["map_location_sheet"]["edit_map_latitude"]["kind"] == "text_field"
-    assert actions_by_view["map_location_sheet"]["edit_map_longitude"]["kind"] == "text_field"
-    assert actions_by_view["map_location_sheet"]["skip_map_location"]["destination"] == "map"
-    assert actions_by_view["map_location_sheet"]["clear_d1l_pin"]["destination"] == "map"
+    assert actions_by_view["map"]["open_map_options"]["destination"] == "map_options"
+    assert set(actions_by_view["map_options"]) == {
+        "close_map_options",
+        "open_map_location",
+        "open_map_cache",
+    }
+    assert actions_by_view["map_options"]["close_map_options"]["destination"] == "map"
+    assert actions_by_view["map_options"]["open_map_location"]["destination"] == "map_location"
+    assert actions_by_view["map_options"]["open_map_cache"]["destination"] == "map_cache"
+    assert not any(target["kind"] == "dock_tab" for target in views["map_options"]["touch_targets"])
+    assert set(actions_by_view["map_cache"]) == {"close_map_cache"}
+    assert actions_by_view["map_cache"]["close_map_cache"]["destination"] == "map_options"
+    assert actions_by_view["map_location"]["save_map_location"]["destination"] == "map"
+    assert actions_by_view["map_location"]["edit_map_latitude"]["kind"] == "text_field"
+    assert actions_by_view["map_location"]["edit_map_longitude"]["kind"] == "text_field"
+    assert actions_by_view["map_location"]["close_map_location"]["destination"] == "map_options"
     assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
     assert actions_by_view["node_detail_sheet"]["close_node_detail"]["destination"] == "nodes"
     assert set(actions_by_view["contact_detail_sheet"]) == {
@@ -611,7 +618,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["settings_connections_expanded"]["open_ble_settings"]["destination"] == "ble_setup_sheet"
     assert actions_by_view["settings_connections_expanded"]["open_radio_settings"]["destination"] == "radio_settings_sheet"
     assert actions_by_view["settings_storage_maps_expanded"]["open_storage_setup"]["destination"] == "storage_setup_sheet"
-    assert actions_by_view["settings_storage_maps_expanded"]["open_map_tiles"]["destination"] == "map_tiles_sheet"
+    assert actions_by_view["settings_storage_maps_expanded"]["open_map_options"]["destination"] == "map_options"
     assert actions_by_view["settings_device_expanded"]["open_display_settings"]["destination"] == "display_settings_sheet"
     assert actions_by_view["settings_advanced_expanded"]["open_advert_sheet"]["destination"] == "advert_sheet"
     assert not any(target["label"] == "Identity" for target in views["settings_device_expanded"]["touch_targets"])
@@ -931,7 +938,9 @@ def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
             assert map_view["metrics"]["map_tile_cache_ready"] is True
             assert map_view["metrics"]["map_tile_download_supported"] is False
             assert map_view["metrics"]["map_tile_render_supported"] is False
-            assert "sd_map_tiles_ready" in set(map_view["labels"])
+            assert "Set a location" in set(map_view["labels"])
+            assert "(c) OpenStreetMap contributors" in set(map_view["labels"])
+            assert "sd_map_tiles_ready" not in set(map_view["labels"])
 
 
 def test_storage_card_media_state_filesystem_and_readiness_mappings():
@@ -1085,11 +1094,172 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
     assert report["required_labels_missing"] == []
-    assert {"Map", "Center", "Manual", "43.6532000, -79.3832000"} <= labels
+    assert {"SD card needed", "Options", "(c) OpenStreetMap contributors"} <= labels
     assert view["metrics"]["map_location_set"] is True
     assert view["metrics"]["map_center_source"] == "manual"
     assert view["metrics"]["map_center_lat_e7"] == 436532000
     assert view["metrics"]["map_center_lon_e7"] == -793832000
+
+
+def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
+    expected = {
+        "default": "Set a location",
+        "manual-location": "Needs SD",
+        "map-location-wifi-off": "Needs Wi-Fi",
+        "map-ready": "Ready to open",
+    }
+    for scenario, status in expected.items():
+        report = ui_simulator.generate(
+            tmp_path / f"home-{scenario}", views=("home",), scenario=scenario
+        )
+        labels = set(report["views"][0]["labels"])
+        assert report["ok"] is True, scenario
+        assert status in labels, scenario
+        assert "Map cache ready" not in labels, scenario
+        assert "Set up Map" not in labels, scenario
+
+
+def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
+    hierarchy_views = ("map", "map_options", "map_location", "map_cache")
+    report = ui_simulator.generate(
+        tmp_path / "ready-map", views=hierarchy_views, scenario="map-ready"
+    )
+    views = {view["name"]: view for view in report["views"]}
+    labels = {name: set(view["labels"]) for name, view in views.items()}
+    actions = {
+        name: {target["action"]: target for target in view["touch_targets"]}
+        for name, view in views.items()
+    }
+
+    assert report["ok"] is True
+    assert report["overflow_count"] == 0
+    assert report["touch_target_issue_count"] == 0
+    assert report["required_labels_missing"] == []
+    assert views["map"]["metrics"]["map_hierarchy_level"] == "actual_view"
+    assert views["map"]["metrics"]["map_actual_view"] is True
+    assert views["map"]["metrics"]["map_landing_action_count"] == 1
+    assert views["map"]["metrics"]["map_visible_tile_limit"] == 9
+    assert views["map"]["metrics"]["map_zoom_batch_count"] == 1
+    assert views["map"]["metrics"]["map_cached_tile_count"] == 9
+    assert views["map"]["metrics"]["map_interactive_request_eligible"] is True
+    assert views["map"]["metrics"]["map_attribution_visible"] is True
+    assert views["map_options"]["metrics"]["map_hierarchy_level"] == "options"
+    assert views["map_options"]["metrics"]["map_options_action_count"] == 2
+    assert "SD ready" in labels["map_options"]
+    assert "Local area saved" not in labels["map_options"]
+    assert views["map_cache"]["metrics"]["map_cache_read_only"] is True
+
+    assert_pairwise_disjoint(views["map_options"]["metrics"]["map_options_regions"])
+    assert_pairwise_disjoint(views["map_cache"]["metrics"]["map_cache_row_boxes"])
+    for row_box in views["map_cache"]["metrics"]["map_cache_row_boxes"]:
+        assert_box_inside(row_box, views["map_cache"]["metrics"]["map_cache_panel"])
+
+    all_labels = set().union(*(labels[name] for name in hierarchy_views))
+    for raw_token in (
+        "provider",
+        "sd_map_tiles_ready",
+        "offline",
+        "Tile source",
+        "Remove source",
+        "tile_render_pending",
+        "map/tiles/z{z}/x{x}/y{y}.tile",
+        "serial canaries",
+    ):
+        assert all(raw_token not in label for label in all_labels), raw_token
+    assert not any("download" in action for view_actions in actions.values() for action in view_actions)
+    assert not any(target["formats_sd"] for view in views.values() for target in view["touch_targets"])
+    assert not any(target["rf_tx"] for view in views.values() for target in view["touch_targets"])
+
+    for page_name in ui_simulator.MAP_HIERARCHY_VIEWS:
+        page = views[page_name]
+        assert page["dock_rendered"] is False
+        assert page["truncated_labels"] == []
+        assert page["sibling_text_overlaps"] == []
+        for target in page["touch_targets"]:
+            x0, y0, x1, y1 = target["visual_box"]
+            assert x1 - x0 >= ui_simulator.MIN_TOUCH_TARGET, (page_name, target["label"])
+            assert y1 - y0 >= ui_simulator.MIN_TOUCH_TARGET, (page_name, target["label"])
+
+    assert actions["map"]["open_map_options"]["destination"] == "map_options"
+    assert actions["map_options"]["open_map_location"]["destination"] == "map_location"
+    assert actions["map_location"]["close_map_location"]["destination"] == "map_options"
+    assert actions["map_options"]["open_map_cache"]["destination"] == "map_cache"
+    assert actions["map_cache"]["close_map_cache"]["destination"] == "map_options"
+
+
+def test_ui_simulator_built_in_map_states_are_deterministic_and_policy_bounded(tmp_path):
+    hierarchy_views = ("map", "map_options", "map_location", "map_cache")
+    first = ui_simulator.generate(
+        tmp_path / "map-ready-first",
+        views=hierarchy_views,
+        scenario="map-ready",
+    )
+    second = ui_simulator.generate(
+        tmp_path / "map-ready-second",
+        views=hierarchy_views,
+        scenario="map-ready",
+    )
+    first_views = {view["name"]: view for view in first["views"]}
+    second_views = {view["name"]: view for view in second["views"]}
+
+    assert first["ok"] is True
+    assert second["ok"] is True
+    for name in hierarchy_views:
+        assert Path(first_views[name]["screenshot"]).read_bytes() == Path(second_views[name]["screenshot"]).read_bytes(), name
+
+    cache_rows = {row["title"]: row["value"] for row in first_views["map_cache"]["metrics"]["map_cache_rows"]}
+    assert cache_rows == {
+        "Wi-Fi": "Connected",
+        "SD card": "Ready",
+        "Location": "Saved",
+        "Map view": "Local area saved",
+    }
+    for view in first_views.values():
+        assert view["metrics"].get("map_probe_network_allowed") is False
+        assert view["metrics"].get("map_background_download") is False
+        assert view["metrics"].get("map_area_download") is False
+
+
+def test_ui_simulator_map_setup_connection_live_and_cached_states(tmp_path):
+    expected = {
+        "default": ("Set a location", False, 0, False),
+        "map-location-wifi-off": ("Wi-Fi needed", False, 0, False),
+        "map-wifi-connecting": ("Connecting to Wi-Fi", False, 0, False),
+        "map-ready": (None, True, 9, True),
+        "map-cached-revisit": (None, False, 9, True),
+    }
+    for scenario, (status, eligible, cached, frame_ready) in expected.items():
+        report = ui_simulator.generate(
+            tmp_path / scenario, views=("map",), scenario=scenario
+        )
+        view = report["views"][0]
+        assert report["ok"] is True, scenario
+        if status is not None:
+            assert status in set(view["labels"]), scenario
+        assert ("Live view" in set(view["labels"])) is False, scenario
+        assert ("Cached view" in set(view["labels"])) is False, scenario
+        assert ("Z12" in set(view["labels"])) is False, scenario
+        assert ("9/9 cached" in set(view["labels"])) is False, scenario
+        assert view["metrics"]["map_frame_ready"] is frame_ready
+        assert view["metrics"]["map_interactive_request_eligible"] is eligible
+        assert view["metrics"]["map_cached_tile_count"] == cached
+        assert view["metrics"]["map_visible_tile_limit"] == 9
+        assert view["metrics"]["map_zoom_batch_count"] == 1
+        assert view["metrics"]["map_attribution"] == "(c) OpenStreetMap contributors"
+
+
+def test_ui_simulator_unsaved_map_location_fields_start_blank(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path / "unsaved-location", views=("map_location",), scenario="default"
+    )
+    view = report["views"][0]
+
+    assert report["ok"] is True
+    assert view["metrics"]["map_location_latitude_value"] == ""
+    assert view["metrics"]["map_location_longitude_value"] == ""
+    assert view["metrics"]["map_location_examples_are_placeholders_only"] is True
+    assert "43.6532000" not in view["labels"]
+    assert "-79.3832000" not in view["labels"]
 
 
 def test_ui_simulator_is_documented_and_run_in_ci():
@@ -1102,8 +1272,10 @@ def test_ui_simulator_is_documented_and_run_in_ci():
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in workflow
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
     assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in workflow
+    assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in workflow
     assert "python .\\tools\\ui_simulator.py --out artifacts\\ui-sim" in test_plan
     assert "python .\\tools\\ui_simulator.py --scenario large-mesh --out artifacts\\ui-sim-large" in test_plan
+    assert "python .\\tools\\ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts\\ui-sim-map-ready" in test_plan
     assert "tools/ui_simulator.py" in roadmap
     assert "large-mesh" in roadmap
     assert "Simulator screenshots captured" in checklist

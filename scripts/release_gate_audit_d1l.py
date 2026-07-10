@@ -39,9 +39,12 @@ REQUIRED_SCROLL_SURFACES = {
     "storage": "settings",
     "wifi": "settings",
     "map": "map",
+    "map_options": "map",
+    "map_location": "map",
+    "map_cache": "map",
 }
 REQUIRED_SCROLL_SCREENS = set(REQUIRED_SCROLL_SURFACES)
-SCROLL_MOVEMENT_OPTIONAL = {"home"}
+SCROLL_MOVEMENT_OPTIONAL = {"home", "map", "map_options", "map_location", "map_cache"}
 REQUIRED_COMPOSE_CAPTURE_TARGETS = {
     "public",
     "public-long",
@@ -52,7 +55,6 @@ REQUIRED_COMPOSE_CAPTURE_TARGETS = {
     "contact-edit",
     "onboarding",
     "map-location",
-    "map-provider",
     "wifi-ssid",
     "wifi-password",
 }
@@ -445,6 +447,39 @@ def all_checks_true(data: dict) -> bool:
     return isinstance(checks, dict) and bool(checks) and all(value is True for value in checks.values())
 
 
+def map_network_counter_evidence_ok(data: dict) -> bool:
+    evidence = data.get("map_network_evidence")
+    if not isinstance(evidence, dict):
+        return False
+    before = evidence.get("before")
+    after = evidence.get("after")
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    before_count = before.get("network_requests")
+    after_count = after.get("network_requests")
+    if (
+        isinstance(before_count, bool)
+        or isinstance(after_count, bool)
+        or not isinstance(before_count, int)
+        or not isinstance(after_count, int)
+        or before_count < 0
+        or after_count < 0
+    ):
+        return False
+    return (
+        evidence.get("command") == "map tiles status"
+        and evidence.get("measured") is True
+        and evidence.get("samples_valid") is True
+        and evidence.get("unchanged") is True
+        and evidence.get("before_count") == before_count
+        and evidence.get("after_count") == after_count
+        and evidence.get("delta") == 0
+        and before.get("ok") is True
+        and after.get("ok") is True
+        and before_count == after_count
+    )
+
+
 def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
     telemetry = data.get("telemetry") if isinstance(data.get("telemetry"), dict) else {}
     telemetry_fields = set(telemetry.get("telemetry_fields") or data.get("telemetry_fields") or [])
@@ -453,6 +488,9 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
         data.get("ok") is True
         and data.get("port") == expected_port
         and data.get("public_rf_tx") is False
+        and data.get("network_tx") is False
+        and data.get("map_network_requests") is False
+        and map_network_counter_evidence_ok(data)
         and data.get("formats_sd") is False
         and data.get("skip_data_canary") is not True
         and int(data.get("rounds") or 0) >= RELEASE_UI_CORRUPTION_MIN_ROUNDS
@@ -467,6 +505,7 @@ def ui_corruption_probe_ok(data: dict, expected_port: str) -> bool:
         and checks.get("data_refresh_exercised") is True
         and checks.get("data_refreshes_pass") is True
         and checks.get("no_public_rf") is True
+        and checks.get("no_map_network_requests") is True
         and checks.get("no_formatting") is True
         and checks.get("no_stuck_pending") is True
         and checks.get("final_active_tab_known") is True
@@ -520,7 +559,6 @@ def compose_capture_requires_hidden_dock(expected_target: str) -> bool:
         "contact-edit",
         "onboarding",
         "map-location",
-        "map-provider",
         "wifi-ssid",
         "wifi-password",
     }
@@ -605,6 +643,8 @@ def compose_keyboard_capture_ok(data: dict, expected_port: str) -> bool:
         and all(
             capture.get("ok") is True
             and capture.get("public_rf_tx") is False
+            and capture.get("network_tx") is False
+            and capture.get("map_network_requests") is False
             and capture.get("formats_sd") is False
             and bool(capture.get("png_path"))
             and bool(capture.get("raw_path"))
@@ -643,9 +683,8 @@ def scroll_probe_results_by_screen(data: dict) -> dict:
 
 
 def scroll_probe_screen_ok(screen: str, tab: str, probe: dict) -> bool:
-    movement_ok = (
-        probe.get("scrollable") is True
-        and (probe.get("moved") is True or screen in SCROLL_MOVEMENT_OPTIONAL)
+    movement_ok = screen in SCROLL_MOVEMENT_OPTIONAL or (
+        probe.get("scrollable") is True and probe.get("moved") is True
     )
     probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
     return (
@@ -677,6 +716,15 @@ def scroll_probe_ok(data: dict, expected_port: str) -> bool:
             and scroll_probe_screen_ok(screen, tab, probes[screen])
             for screen, tab in REQUIRED_SCROLL_SURFACES.items()
         )
+        and data.get("network_tx") is False
+        and data.get("map_network_requests") is False
+        and map_network_counter_evidence_ok(data)
+        and data.get("background_download") is False
+        and data.get("area_download") is False
+        and int(data.get("visible_tile_limit") or 0) == 9
+        and int(data.get("zoom_batch_limit") or 0) == 1
+        and data.get("wifi_mutation") is False
+        and data.get("storage_mutation") is False
     )
 
 
