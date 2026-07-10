@@ -80,6 +80,12 @@ python .\scripts\ui_corruption_probe_d1l.py --port $env:D1L_PORT --rounds 20 --c
 python .\tools\ui_simulator.py --view home --out artifacts\ui-sim-reference\current
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui tab home" --reference-png artifacts\ui-sim-reference\current\home.png --reference-view home --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
 
+# Safe nested contact-page proofs. These targets only open pages. In particular,
+# contact_forget displays the warning without invoking its red confirmation callback.
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe contact_detail" --reference-png docs\screenshots\contact_detail_sheet.png --reference-view contact_detail_sheet --out artifacts\hardware\com12\ui_pixel_capture_contact_detail-COM12.json
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe contact_options" --reference-png docs\screenshots\contact_options_page.png --reference-view contact_options_page --out artifacts\hardware\com12\ui_pixel_capture_contact_options-COM12.json
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe contact_forget" --reference-png docs\screenshots\forget_contact_confirm_page.png --reference-view forget_contact_confirm_page --out artifacts\hardware\com12\ui_pixel_capture_contact_forget-COM12.json
+
 # Compose-keyboard proof.
 python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
 

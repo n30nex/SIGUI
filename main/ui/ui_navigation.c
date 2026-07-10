@@ -90,6 +90,20 @@ bool d1l_ui_scroll_surface_from_name(const char *name,
     } else if (strcmp(normalized, "nodes") == 0) {
         surface = "nodes";
         screen = D1L_UI_SCREEN_NODES;
+    } else if (strcmp(normalized, "contact") == 0 ||
+               strcmp(normalized, "contact_detail") == 0) {
+        surface = "contact_detail";
+        screen = D1L_UI_SCREEN_NODES;
+    } else if (strcmp(normalized, "contact_options") == 0) {
+        surface = "contact_options";
+        screen = D1L_UI_SCREEN_NODES;
+    } else if (strcmp(normalized, "contact_forget") == 0 ||
+               strcmp(normalized, "forget_contact") == 0) {
+        surface = "contact_forget";
+        screen = D1L_UI_SCREEN_NODES;
+    } else if (strcmp(normalized, "contact_route") == 0) {
+        surface = "contact_route";
+        screen = D1L_UI_SCREEN_NODES;
     } else if (strcmp(normalized, "packets") == 0 ||
                strcmp(normalized, "pkts") == 0) {
         surface = "packets";

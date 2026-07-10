@@ -367,7 +367,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
-    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|packets|settings|storage|wifi|map>" in console
+    assert "contact_probe_surfaces" in console
     assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
     assert '#include "ui_keyboard.h"' in source
@@ -1274,6 +1275,26 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     ):
         assert delete_call not in static_void_body(source, symbol), symbol
     assert "forget_contact_edit_event_cb" not in source
+
+    probe = source.split("static lv_obj_t *scroll_probe_open_contact_surface", 1)[1].split(
+        "static void measure_scroll_probe_target", 1
+    )[0]
+    for surface, sheet in (
+        ("contact_detail", "s_contact_detail_sheet"),
+        ("contact_options", "s_contact_options_sheet"),
+        ("contact_forget", "s_contact_forget_sheet"),
+        ("contact_route", "s_route_trace_sheet"),
+    ):
+        assert f'"{surface}"' in probe
+        assert f"return {sheet};" in probe
+    assert delete_call not in probe
+    assert "confirm_forget_contact_event_cb" not in probe
+
+    run_probe = source.split("static void run_scroll_probe_on_ui_task", 1)[1].split(
+        "static bool begin_pending_scroll_probe", 1
+    )[0]
+    assert 'strncmp(canonical, "contact_", strlen("contact_")) == 0' in run_probe
+    assert "result->ok = result->surface_supported && result->target_found;" in run_probe
 
 
 def test_route_detail_sheet_opens_from_route_rows():

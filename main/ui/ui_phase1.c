@@ -6132,6 +6132,62 @@ static lv_obj_t *scroll_probe_find_target(lv_obj_t *root)
     return target ? target : fallback;
 }
 
+static void scroll_probe_contact_entry(d1l_contact_entry_t *entry)
+{
+    if (!entry) {
+        return;
+    }
+    memset(entry, 0, sizeof(*entry));
+    d1l_app_model_snapshot(&s_snapshot);
+    if (s_snapshot.recent_contact_count > 0 &&
+        s_snapshot.recent_contacts[0].fingerprint[0] != '\0') {
+        *entry = s_snapshot.recent_contacts[0];
+        return;
+    }
+    snprintf(entry->fingerprint, sizeof(entry->fingerprint), "%s", "C0DEC0DEC0DEC0DE");
+    snprintf(entry->public_key_hex, sizeof(entry->public_key_hex), "%s",
+             "C0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DEC0DE");
+    snprintf(entry->alias, sizeof(entry->alias), "%s", "Contact Probe");
+    snprintf(entry->heard_name, sizeof(entry->heard_name), "%s", "Contact Probe");
+    snprintf(entry->type, sizeof(entry->type), "%s", "chat");
+    entry->last_rssi_dbm = -42;
+    entry->last_snr_tenths = 30;
+    entry->out_path_valid = true;
+}
+
+static lv_obj_t *scroll_probe_open_contact_surface(const char *surface)
+{
+    d1l_contact_entry_t contact = {0};
+    scroll_probe_contact_entry(&contact);
+    hide_contact_detail_sheet();
+    s_contact_detail_contact = contact;
+
+    if (strcmp(surface, "contact_detail") == 0) {
+        show_contact_detail_sheet();
+        return s_contact_detail_sheet;
+    }
+    if (strcmp(surface, "contact_options") == 0) {
+        show_contact_options_sheet();
+        return s_contact_options_sheet;
+    }
+    if (strcmp(surface, "contact_forget") == 0) {
+        render_contact_forget_sheet();
+        if (s_contact_forget_sheet) {
+            show_modal(s_contact_forget_sheet);
+        }
+        return s_contact_forget_sheet;
+    }
+    if (strcmp(surface, "contact_route") == 0) {
+        s_route_trace_contact = contact;
+        render_route_trace_sheet();
+        if (s_route_trace_sheet) {
+            show_modal(s_route_trace_sheet);
+        }
+        return s_route_trace_sheet;
+    }
+    return NULL;
+}
+
 static void measure_scroll_probe_target(lv_obj_t *target,
                                         d1l_ui_scroll_probe_result_t *result)
 {
@@ -6191,6 +6247,9 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
         open_wifi_sheet_event_cb(NULL);
         return scroll_probe_find_target(s_wifi_sheet);
     }
+    if (strncmp(surface, "contact_", strlen("contact_")) == 0) {
+        return scroll_probe_open_contact_surface(surface);
+    }
     return scroll_probe_find_target(s_content);
 }
 
@@ -6212,6 +6271,9 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     lv_obj_t *target = scroll_probe_open_surface(canonical);
     force_ui_layout_repaint();
     measure_scroll_probe_target(target, result);
+    if (strncmp(canonical, "contact_", strlen("contact_")) == 0) {
+        result->ok = result->surface_supported && result->target_found;
+    }
 }
 
 static bool begin_pending_scroll_probe(char *surface, size_t surface_len)

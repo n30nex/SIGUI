@@ -37,7 +37,18 @@ def test_navigation_module_owns_screen_names_and_surface_aliases():
     for canonical in ["home", "messages", "nodes", "map", "packets", "settings"]:
         assert f'return "{canonical}"' in nav_source
 
-    for alias in ['"msg"', '"pkts"', '"set"', '"public_messages"', '"dm_thread"', '"wi_fi"']:
+    for alias in [
+        '"msg"',
+        '"pkts"',
+        '"set"',
+        '"public_messages"',
+        '"dm_thread"',
+        '"wi_fi"',
+        '"contact_detail"',
+        '"contact_options"',
+        '"contact_forget"',
+        '"contact_route"',
+    ]:
         assert alias in nav_source
 
     assert "d1l_ui_screen_from_name(name, out_tab)" in ui_source
