@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_timer.h"
 
 #include "hal/rp2040_bridge.h"
@@ -53,7 +54,7 @@ typedef struct {
 _Static_assert(sizeof(d1l_packet_log_history_record_t) <= D1L_RP2040_FILE_CHUNK_MAX,
                "packet SD history record must fit in one RP2040 file chunk");
 
-static d1l_packet_log_entry_t s_entries[D1L_PACKET_LOG_CAPACITY];
+static d1l_packet_log_entry_t s_entries[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_head;
 static size_t s_count;
 static uint32_t s_next_seq = 1;
@@ -64,7 +65,7 @@ static uint32_t s_last_sd_flush_ms;
 static uint32_t s_sd_history_records;
 static uint32_t s_sd_history_failed_writes;
 static bool s_loaded;
-static d1l_packet_log_primary_blob_t s_primary_blob_scratch;
+static d1l_packet_log_primary_blob_t s_primary_blob_scratch EXT_RAM_BSS_ATTR;
 static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch;
 static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
