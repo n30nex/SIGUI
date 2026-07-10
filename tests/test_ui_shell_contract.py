@@ -367,8 +367,9 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
-    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|wifi|map>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>" in console
     assert "contact_probe_surfaces" in console
+    assert '\\"storage_probe_surfaces\\":[\\"storage\\",\\"storage_card\\",\\"storage_data\\"]' in console
     assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
     assert '#include "ui_keyboard.h"' in source
@@ -1556,9 +1557,17 @@ def test_settings_screen_has_non_destructive_storage_setup_sheet():
     assert "render_storage_sheet" in source
     assert "open_storage_sheet_event_cb" in source
     assert "hide_storage_sheet" in source
-    assert '"SD Card"' in source
-    assert '"next step: %s%s"' in source
-    assert "DeskOS creates its folders automatically and never formats cards on-device." in source
+    assert 'render_storage_header("Storage"' in source
+    assert 'render_storage_header("Card status"' in source
+    assert 'render_storage_header("Data locations"' in source
+    assert "D1L_STORAGE_PAGE_CARD_STATUS" in source
+    assert "D1L_STORAGE_PAGE_DATA_LOCATIONS" in source
+    assert '"next step: %s%s"' not in source
+    assert "storage_card_state_friendly" in source
+    assert "FAT32 only - This device never formats cards." in source
+    assert "storage_retained_backend_friendly" in source
+    assert "storage_map_backend_friendly" in source
+    assert "storage_export_backend_friendly" in source
     assert "storage_setup_action" in header
     assert "storage_sd_needs_fat32" in header
     assert "storage_rp2040_sd_protocol_supported" in header

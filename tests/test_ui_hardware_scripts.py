@@ -92,7 +92,9 @@ def test_ui_corruption_probe_requires_token_in_result_entries():
 
 
 def test_scroll_probe_dry_run_and_screen_parser():
-    screens = scroll_probe_d1l.parse_screens("home,public,dm-thread,nodes,packets,settings,storage,wi-fi,map")
+    screens = scroll_probe_d1l.parse_screens(
+        "home,public,dm-thread,nodes,packets,settings,storage,storage-card,storage-data,wi-fi,map"
+    )
     report = scroll_probe_d1l.dry_run_report(screens, dwell_sec=0.5, manual_touch=True)
 
     assert screens == [
@@ -103,6 +105,8 @@ def test_scroll_probe_dry_run_and_screen_parser():
         "packets",
         "settings",
         "storage",
+        "storage_card",
+        "storage_data",
         "wifi",
         "map",
     ]
@@ -110,10 +114,14 @@ def test_scroll_probe_dry_run_and_screen_parser():
     assert report["mode"] == "dry-run"
     assert report["explicit_port_required"] is True
     assert report["manual_touch"] is True
-    assert {"screen": "storage", "tab": "settings", "label": "Storage settings"} in report["surface_plan"]
+    assert {"screen": "storage", "tab": "settings", "label": "Storage overview"} in report["surface_plan"]
+    assert {"screen": "storage_card", "tab": "settings", "label": "SD card status"} in report["surface_plan"]
+    assert {"screen": "storage_data", "tab": "settings", "label": "Data locations"} in report["surface_plan"]
     assert {"screen": "dm_thread", "tab": "messages", "label": "DM thread"} in report["surface_plan"]
     assert "ui tab messages" in report["commands"]
     assert "ui scroll-probe storage" in report["commands"]
+    assert "ui scroll-probe storage_card" in report["commands"]
+    assert "ui scroll-probe storage_data" in report["commands"]
     assert "ui scroll-probe dm_thread" in report["commands"]
     assert "crashlog" in report["commands"]
 
@@ -127,7 +135,7 @@ def test_scroll_probe_rejects_unknown_screen():
         raise AssertionError("parse_screens accepted an unknown screen")
 
 
-def test_scroll_probe_allows_static_home_but_requires_other_surfaces_to_move():
+def test_scroll_probe_allows_static_home_and_storage_summary_but_requires_data_to_move():
     def event(screen: str) -> dict:
         tab = "home" if screen == "home" else "settings"
         return {
@@ -140,7 +148,7 @@ def test_scroll_probe_allows_static_home_but_requires_other_surfaces_to_move():
                 "surface": screen,
                 "tab": tab,
                 "target_found": True,
-                "scrollable": True,
+                "scrollable": screen == "storage_data",
                 "moved": False,
             },
             "status": {"active_tab": tab},
@@ -149,7 +157,13 @@ def test_scroll_probe_allows_static_home_but_requires_other_surfaces_to_move():
         }
 
     assert scroll_probe_d1l.event_failed(event("home")) is False
-    assert scroll_probe_d1l.event_failed(event("storage")) is True
+    assert scroll_probe_d1l.event_failed(event("storage")) is False
+    assert scroll_probe_d1l.event_failed(event("storage_card")) is False
+    assert scroll_probe_d1l.event_failed(event("storage_data")) is True
+
+    moving_data = event("storage_data")
+    moving_data["probe"]["moved"] = True
+    assert scroll_probe_d1l.event_failed(moving_data) is False
 
 
 def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():

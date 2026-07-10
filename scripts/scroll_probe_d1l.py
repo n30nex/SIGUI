@@ -25,7 +25,9 @@ SCROLL_SURFACES = {
     "nodes": {"tab": "nodes", "label": "Nodes"},
     "packets": {"tab": "packets", "label": "Packets"},
     "settings": {"tab": "settings", "label": "Settings"},
-    "storage": {"tab": "settings", "label": "Storage settings"},
+    "storage": {"tab": "settings", "label": "Storage overview"},
+    "storage_card": {"tab": "settings", "label": "SD card status"},
+    "storage_data": {"tab": "settings", "label": "Data locations"},
     "wifi": {"tab": "settings", "label": "Wi-Fi settings"},
     "map": {"tab": "map", "label": "Map"},
 }
@@ -37,12 +39,17 @@ SCREEN_ALIASES = {
     "dm": "dm_thread",
     "dm_thread": "dm_thread",
     "dm-thread": "dm_thread",
+    "sd": "storage",
+    "sd_card": "storage_card",
+    "sd-card": "storage_card",
+    "storage-card": "storage_card",
+    "storage-data": "storage_data",
     "wi_fi": "wifi",
     "wi-fi": "wifi",
 }
 DEFAULT_SCREENS = tuple(SCROLL_SURFACES)
 VALID_SCREENS = tuple(SCROLL_SURFACES)
-SCROLL_MOVEMENT_OPTIONAL = {"home"}
+SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card"}
 
 
 def utc_stamp() -> str:
@@ -93,9 +100,8 @@ def crashlog_has_entries(row: dict) -> bool:
 def event_failed(event: dict) -> bool:
     probe = event.get("probe") if isinstance(event.get("probe"), dict) else {}
     screen = str(event.get("screen") or "")
-    movement_ok = (
-        probe.get("scrollable") is True
-        and (probe.get("moved") is True or screen in SCROLL_MOVEMENT_OPTIONAL)
+    movement_ok = screen in SCROLL_MOVEMENT_OPTIONAL or (
+        probe.get("scrollable") is True and probe.get("moved") is True
     )
     probe_ok = probe.get("ok") is True or (screen in SCROLL_MOVEMENT_OPTIONAL and movement_ok)
     return (

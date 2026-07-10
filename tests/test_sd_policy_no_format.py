@@ -33,7 +33,7 @@ def test_sd_user_policy_copy_is_fat32_only():
     storage = read("main/storage/storage_status.c")
     bridge = read("firmware/rp2040_sd_bridge/deskos_sd_bridge/deskos_sd_bridge.ino")
 
-    assert "DeskOS creates its folders automatically and never formats cards on-device." in ui
+    assert "FAT32 only - This device never formats cards." in ui
     assert '\\"policy\\":\\"no_device_format\\"' in console
     assert "prepare_fat32_on_computer" in storage
     assert "not_fat32_or_unmountable" in bridge

@@ -125,6 +125,13 @@ bool d1l_ui_scroll_surface_from_name(const char *name,
                strcmp(normalized, "sd") == 0) {
         surface = "storage";
         screen = D1L_UI_SCREEN_SETTINGS;
+    } else if (strcmp(normalized, "storage_card") == 0 ||
+               strcmp(normalized, "sd_card") == 0) {
+        surface = "storage_card";
+        screen = D1L_UI_SCREEN_SETTINGS;
+    } else if (strcmp(normalized, "storage_data") == 0) {
+        surface = "storage_data";
+        screen = D1L_UI_SCREEN_SETTINGS;
     } else if (strcmp(normalized, "wifi") == 0 ||
                strcmp(normalized, "wi_fi") == 0) {
         surface = "wifi";

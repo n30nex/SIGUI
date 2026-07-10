@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image
@@ -11,6 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
+
+
+def boxes_overlap(left: list[int], right: list[int]) -> bool:
+    return min(left[2], right[2]) > max(left[0], right[0]) and min(left[3], right[3]) > max(left[1], right[1])
+
+
+def assert_pairwise_disjoint(boxes: list[list[int]]) -> None:
+    for index, left in enumerate(boxes):
+        for right in boxes[index + 1 :]:
+            assert not boxes_overlap(left, right), (left, right)
+
+
+def assert_box_inside(inner: list[int], outer: list[int]) -> None:
+    assert outer[0] <= inner[0] < inner[2] <= outer[2], (inner, outer)
+    assert outer[1] <= inner[1] < inner[3] <= outer[3], (inner, outer)
 
 
 def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
@@ -35,7 +51,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 43
+    assert len(views) == 45
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -52,6 +68,9 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
             assert view["truncated_labels"] == [], name
         if name in ui_simulator.MESH_ROLE_VIEWS:
             assert view["truncated_labels"] == [], name
+        if name in ui_simulator.STORAGE_HIERARCHY_VIEWS:
+            assert view["truncated_labels"] == [], name
+            assert view["sibling_text_overlaps"] == [], name
 
 
 def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
@@ -273,12 +292,43 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"} <= labels_by_view["compose_sheet"]
     assert {"Radio Settings", "Freq 910.525 MHz", "-25k", "+25k", "Cycle BW", "Save"} <= labels_by_view["radio_settings_sheet"]
     assert {
-        "SD Card",
-        "FAT32 only, no format",
-        "SD Card",
-        "Backends",
-        "No device format; onboard NVS remains fallback.",
+        "Storage",
+        "Back",
+        "Current storage",
+        "Using internal storage",
+        "Card status",
+        "Data locations",
+        ui_simulator.STORAGE_SAFETY_COPY,
     } <= labels_by_view["storage_setup_sheet"]
+    assert {
+        "Card status",
+        "Read-only card details",
+        "Back",
+        "State",
+        "Filesystem",
+        "Capacity",
+        "Free space",
+        "Readiness",
+        ui_simulator.STORAGE_SAFETY_COPY,
+    } <= labels_by_view["storage_card_page"]
+    assert {
+        "Data locations",
+        "Back",
+        "Messages",
+        "Direct messages",
+        "Packets",
+        "Routes",
+        "Map tiles",
+        ui_simulator.STORAGE_SAFETY_COPY,
+    } <= labels_by_view["storage_data_page"]
+    assert {row["title"] for row in views_by_name["storage_data_page"]["metrics"]["storage_data_rows"]} == {
+        "Messages",
+        "Direct messages",
+        "Packets",
+        "Routes",
+        "Map tiles",
+        "Exports",
+    }
     assert {"Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"} <= labels_by_view["mesh_roles_sheet"]
     assert {"Rooms", "Back", "Room servers", "All shown"} <= labels_by_view["mesh_rooms_page"]
     assert {"Repeaters", "Back", "Repeater candidates", "All shown"} <= labels_by_view["mesh_repeaters_page"]
@@ -618,7 +668,23 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         assert back_bottom < panel_top
     assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
     assert actions_by_view["advert_sheet"]["send_advert_flood"]["rf_tx"] is True
-    assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["formats_sd"] is False
+    assert set(actions_by_view["storage_setup_sheet"]) == {
+        "close_storage_setup",
+        "open_storage_card",
+        "open_storage_data",
+    }
+    assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["destination"] == "settings"
+    assert actions_by_view["storage_setup_sheet"]["open_storage_card"]["destination"] == "storage_card_page"
+    assert actions_by_view["storage_setup_sheet"]["open_storage_data"]["destination"] == "storage_data_page"
+    assert set(actions_by_view["storage_card_page"]) == {"close_storage_card"}
+    assert actions_by_view["storage_card_page"]["close_storage_card"]["destination"] == "storage_setup_sheet"
+    assert set(actions_by_view["storage_data_page"]) == {"close_storage_data"}
+    assert actions_by_view["storage_data_page"]["close_storage_data"]["destination"] == "storage_setup_sheet"
+    for page_name in ui_simulator.STORAGE_HIERARCHY_VIEWS:
+        assert views[page_name]["dock_rendered"] is False
+        assert views[page_name]["sibling_text_overlaps"] == []
+        assert all(target["formats_sd"] is False for target in views[page_name]["touch_targets"])
+        assert all(target["destructive"] is False for target in views[page_name]["touch_targets"])
     assert actions_by_view["lock_overlay"]["unlock"]["destination"] == "home"
 
     for view in report["views"]:
@@ -632,98 +698,382 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
 
 
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):
+    internal = {
+        "Messages": "Internal",
+        "Direct messages": "Internal",
+        "Packets": "Internal",
+        "Routes": "Internal",
+        "Map tiles": "Unavailable",
+        "Exports": "USB only",
+    }
+    retained_sd = {
+        "Messages": "SD + internal backup",
+        "Direct messages": "SD + internal backup",
+        "Packets": "SD + internal backup",
+        "Routes": "SD + internal backup",
+        "Map tiles": "Pending",
+        "Exports": "USB only",
+    }
     scenarios = {
+        "default": (
+            "Using internal storage",
+            "Your data stays available internally.",
+            "Card reader starting",
+            "Not available",
+            internal,
+        ),
         "storage-no-card": (
-            "insert_card",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "No SD card",
+            "Insert a FAT32 card when you want more space.",
+            "No card inserted",
+            "No card",
+            internal,
         ),
         "storage-needs-fat32": (
-            "prepare_fat32_on_computer",
+            "Card needs FAT32",
+            "Prepare the card as FAT32 on a computer, then reinsert it.",
             "FAT32 card required",
-            "Prepare FAT32 on a computer; DeskOS only creates folders.",
+            "Needs FAT32",
+            internal,
         ),
         "storage-mount-error": (
-            "inspect_rp2040_sd_mount_error_firmware_path",
-            "Firmware mount issue",
-            "Inspect RP2040 mount diagnostics; do not format on-device.",
+            "Card needs attention",
+            "Technical details are available over USB.",
+            "Card needs attention",
+            "Needs attention",
+            internal,
         ),
         "storage-probe-error": (
-            "inspect_rp2040_sd_cmd0_firmware_path",
-            "Firmware probe issue",
-            "Inspect RP2040 CMD0/CMD8 diagnostics; do not format on-device.",
+            "Card needs attention",
+            "Technical details are available over USB.",
+            "Card needs attention",
+            "Needs attention",
+            internal,
         ),
         "storage-root-missing": (
-            "retry_storage_mount",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "Card setup incomplete",
+            "Reinsert the card to finish creating DeskOS folders.",
+            "Preparing DeskOS folders",
+            "Setup incomplete",
+            internal,
         ),
         "storage-ready-pending-migration": (
-            "store_migration_pending",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "SD card ready",
+            "The card is ready while saved data stays internal.",
+            "Ready",
+            "Ready",
+            {**internal, "Map tiles": "Pending"},
         ),
         "storage-ready-packet-log-sd": (
-            "packet_log_canary_enabled",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "SD card ready",
+            "Saved data stays mirrored internally.",
+            "Ready",
+            "Ready",
+            {**internal, "Packets": "SD + internal backup", "Map tiles": "Pending"},
         ),
         "storage-ready-retained-history-sd": (
-            "retained_history_sd_enabled",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "SD card ready",
+            "Saved data stays mirrored internally.",
+            "Ready",
+            "Ready",
+            retained_sd,
         ),
         "storage-ready-map-tiles-sd": (
-            "retained_history_sd_enabled",
-            "FAT32 only, no format",
-            "No device format; onboard NVS remains fallback.",
+            "SD card ready",
+            "Saved data stays mirrored internally.",
+            "Ready",
+            "Ready",
+            {**retained_sd, "Map tiles": "SD card", "Exports": "SD card"},
+        ),
+        "storage-ready-map-only-sd": (
+            "SD card ready",
+            "The card is ready while saved data stays internal.",
+            "Ready",
+            "Ready",
+            {**internal, "Map tiles": "SD card"},
+        ),
+        "storage-ready-export-only-sd": (
+            "SD card ready",
+            "The card is ready while saved data stays internal.",
+            "Ready",
+            "Ready",
+            {**internal, "Map tiles": "Pending", "Exports": "SD card"},
+        ),
+        "storage-degraded": (
+            "SD needs attention",
+            "Saved data remains available.",
+            "Card needs attention",
+            "Needs attention",
+            retained_sd,
+        ),
+        "storage-media-error": (
+            "Card needs attention",
+            "Technical details are available over USB.",
+            "Card needs attention",
+            "Needs attention",
+            internal,
+        ),
+        "storage-bridge-reported": (
+            "Card needs attention",
+            "Technical details are available over USB.",
+            "Card needs attention",
+            "Needs attention",
+            internal,
         ),
     }
+    raw_tokens = {
+        "bridge_protocol_pending",
+        "insert_card",
+        "prepare_fat32_on_computer",
+        "inspect_rp2040_sd_mount_error_firmware_path",
+        "inspect_rp2040_sd_cmd0_firmware_path",
+        "retry_storage_mount",
+        "store_migration_pending",
+        "packet_log_canary_enabled",
+        "retained_history_sd_enabled",
+        "NVS fallback",
+        "Backends",
+        "RP2040",
+        "CMD0",
+        "SdFat",
+        "bridge_reported",
+        "not_available",
+    }
 
-    for scenario, (setup_action, subtitle, guidance) in scenarios.items():
-        report = ui_simulator.generate(tmp_path / scenario, views=("settings", "storage_setup_sheet"), scenario=scenario)
-        labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
-        storage_view = next(view for view in report["views"] if view["name"] == "storage_setup_sheet")
+    for scenario, (state, guidance, card_state, readiness, expected_data) in scenarios.items():
+        report = ui_simulator.generate(
+            tmp_path / scenario,
+            views=("storage_setup_sheet", "storage_card_page", "storage_data_page"),
+            scenario=scenario,
+        )
+        views = {view["name"]: view for view in report["views"]}
+        labels = {name: set(view["labels"]) for name, view in views.items()}
 
         assert report["ok"] is True, scenario
         assert report["overflow_count"] == 0, scenario
         assert report["touch_target_issue_count"] == 0, scenario
         assert report["flow_report"]["format_actions"] == [], scenario
+        assert report["flow_report"]["destructive_actions"] == [], scenario
         assert report["required_labels_missing"] == [], scenario
-        assert {
-            "More",
-            "Settings and tools",
-            "Tools",
-            "Packets and diagnostics",
-            "Connections",
-            "Storage & maps",
-            "Device",
-            "Support",
-            "Advanced",
-        } <= labels_by_view["settings"]
-        assert {
-            "SD Card",
-            subtitle,
-            "Backends",
-            f"setup {setup_action}",
-            guidance,
-        } <= labels_by_view["storage_setup_sheet"]
-        if scenario == "storage-ready-packet-log-sd":
-            assert "messages NVS / packets SD / routes NVS" in labels_by_view["storage_setup_sheet"]
-        elif scenario == "storage-ready-retained-history-sd":
-            assert "messages SD / packets SD / routes SD" in labels_by_view["storage_setup_sheet"]
-        elif scenario == "storage-ready-map-tiles-sd":
-            assert "msg/pkt/route/map SD" in labels_by_view["storage_setup_sheet"]
+        assert {state, guidance, "Card status", "Data locations", ui_simulator.STORAGE_SAFETY_COPY} <= labels[
+            "storage_setup_sheet"
+        ]
+        card_rows = {row["title"]: row["value"] for row in views["storage_card_page"]["metrics"]["storage_card_rows"]}
+        assert card_rows["State"] == card_state
+        assert card_rows["Readiness"] == readiness
+        assert set(card_rows) == {"State", "Filesystem", "Capacity", "Free space", "Readiness"}
+
+        all_storage_labels = set().union(*(labels[name] for name in ui_simulator.STORAGE_HIERARCHY_VIEWS))
+        for raw in raw_tokens:
+            assert all(raw not in label for label in all_storage_labels), (scenario, raw)
+
+        root = views["storage_setup_sheet"]
+        card = views["storage_card_page"]
+        data = views["storage_data_page"]
+        assert root["metrics"]["storage_hierarchy_level"] == "root"
+        assert card["metrics"]["storage_hierarchy_level"] == "card"
+        assert data["metrics"]["storage_hierarchy_level"] == "data"
+        assert root["metrics"]["storage_setup_action_hidden"] is True
+        assert root["metrics"]["storage_root_action_count"] == 2
+        expected_root_summary = (
+            "SD + internal"
+            if any(value in ("SD + internal backup", "SD card") for value in expected_data.values())
+            else "Internal"
+        )
+        assert root["metrics"]["storage_root_location_summary"] == expected_root_summary
+        assert expected_root_summary in labels["storage_setup_sheet"]
+        assert card["metrics"]["storage_card_field_count"] == 5
+        assert data["metrics"]["storage_data_row_count"] == 6
+        assert data["metrics"]["storage_data_visible_row_count"] == 5
+        assert data["metrics"]["storage_data_scroll_enabled"] is True
+        assert data["metrics"]["storage_data_content_fits"] is False
+        assert data["metrics"]["storage_data_content_height"] > data["metrics"]["storage_data_viewport_height"]
+        assert data["metrics"]["storage_data_scroll_range_px"] > 0
+        assert {row["title"]: row["value"] for row in data["metrics"]["storage_data_rows"]} == expected_data
+
+        assert_pairwise_disjoint(root["metrics"]["storage_root_regions"])
+        assert_pairwise_disjoint(card["metrics"]["storage_card_row_boxes"])
+        for row_box in card["metrics"]["storage_card_row_boxes"]:
+            assert_box_inside(row_box, card["metrics"]["storage_card_panel"])
+        assert_pairwise_disjoint(data["metrics"]["storage_data_virtual_row_boxes"])
+        for row_box in data["metrics"]["storage_data_visible_row_boxes"]:
+            assert_box_inside(row_box, data["metrics"]["storage_data_viewport"])
+        safety_boxes = {tuple(views[name]["metrics"]["storage_safety_box"]) for name in ui_simulator.STORAGE_HIERARCHY_VIEWS}
+        assert safety_boxes == {(16, 424, 464, 468)}
+        for name in ui_simulator.STORAGE_HIERARCHY_VIEWS:
+            view = views[name]
+            assert view["overflow"] == [], (scenario, name)
+            assert view["truncated_labels"] == [], (scenario, name)
+            assert view["sibling_text_overlaps"] == [], (scenario, name)
+            assert all(target["width"] >= ui_simulator.MIN_TOUCH_TARGET for target in view["touch_targets"])
+            assert all(target["height"] >= ui_simulator.MIN_TOUCH_TARGET for target in view["touch_targets"])
+            assert all(target["formats_sd"] is False for target in view["touch_targets"])
+
+        if scenario in ("storage-probe-error", "storage-media-error", "storage-bridge-reported"):
+            assert any(label.endswith("SD Needs attention") for label in labels["storage_setup_sheet"])
+            parity_report = ui_simulator.generate(
+                tmp_path / f"{scenario}-menu-parity",
+                views=("home", "settings_storage_maps_expanded"),
+                scenario=scenario,
+            )
+            parity_labels = {view["name"]: set(view["labels"]) for view in parity_report["views"]}
+            assert "Needs attention" in parity_labels["home"]
+            assert "Needs attention" in parity_labels["settings_storage_maps_expanded"]
+            assert any(
+                label.endswith("SD Needs attention")
+                for label in parity_labels["settings_storage_maps_expanded"]
+            )
+
+        if scenario == "storage-ready-map-tiles-sd":
             map_report = ui_simulator.generate(tmp_path / f"{scenario}-map", views=("map",), scenario=scenario)
             map_view = map_report["views"][0]
-            assert map_report["ok"] is True, scenario
+            assert map_report["ok"] is True
             assert map_view["metrics"]["map_tile_cache_ready"] is True
             assert map_view["metrics"]["map_tile_download_supported"] is False
             assert map_view["metrics"]["map_tile_render_supported"] is False
             assert "sd_map_tiles_ready" in set(map_view["labels"])
-        else:
-            assert "messages NVS / packets NVS / routes NVS" in labels_by_view["storage_setup_sheet"]
-        assert storage_view["overflow"] == []
+
+
+def test_storage_card_media_state_filesystem_and_readiness_mappings():
+    base = ui_simulator.sample_snapshot()
+    assert ui_simulator.storage_card_state(base) == "Card reader starting"
+    assert ui_simulator.storage_card_readiness(base) == "Not available"
+    assert ui_simulator.storage_filesystem_label(base) == "Not available"
+
+    unavailable = replace(base, storage_setup_action="bridge_unavailable")
+    assert ui_simulator.storage_card_state(unavailable) == "Card reader unavailable"
+    assert ui_simulator.storage_card_readiness(unavailable) == "Not available"
+
+    no_card = ui_simulator.storage_no_card_snapshot()
+    assert ui_simulator.storage_card_state(no_card) == "No card inserted"
+    assert ui_simulator.storage_card_readiness(no_card) == "No card"
+
+    fat32_required = ui_simulator.storage_needs_fat32_snapshot()
+    assert ui_simulator.storage_card_state(fat32_required) == "FAT32 card required"
+    assert ui_simulator.storage_filesystem_label(fat32_required) == "FAT32 required"
+    assert ui_simulator.storage_card_readiness(fat32_required) == "Needs FAT32"
+    backup_reformat = replace(fat32_required, storage_setup_action="backup_reformat_fat32_on_computer")
+    assert ui_simulator.storage_friendly_state(backup_reformat)[2] == "Prepare as FAT32, then reinsert the card."
+
+    checking = replace(
+        fat32_required,
+        storage_setup_action="wait_for_storage_mount",
+    )
+    assert ui_simulator.storage_card_state(checking) == "Checking card"
+    assert ui_simulator.storage_card_readiness(checking) == "Checking"
+
+    preparing = ui_simulator.storage_root_missing_snapshot()
+    assert ui_simulator.storage_card_state(preparing) == "Preparing DeskOS folders"
+    assert ui_simulator.storage_card_readiness(preparing) == "Setup incomplete"
+
+    ready = ui_simulator.storage_ready_pending_migration_snapshot()
+    assert ui_simulator.storage_card_state(ready) == "Ready"
+    assert ui_simulator.storage_card_readiness(ready) == "Ready"
+    assert ui_simulator.storage_filesystem_label(ready) == "FAT32"
+    assert ui_simulator.storage_filesystem_label(replace(ready, storage_sd_filesystem="fatfs")) == "FAT32"
+    assert ui_simulator.storage_filesystem_label(
+        replace(ready, storage_sd_mounted=False, storage_sd_data_root_ready=False, storage_sd_filesystem="exfat")
+    ) == "exFAT (not supported)"
+    assert ui_simulator.storage_filesystem_label(
+        replace(ready, storage_sd_data_root_ready=False, storage_sd_filesystem="unknown")
+    ) == "Detected"
+
+    detected_not_ready = replace(
+        base,
+        storage_sd_present=True,
+        storage_setup_action="not_available",
+    )
+    assert ui_simulator.storage_card_state(detected_not_ready) == "Detected - not ready"
+    assert ui_simulator.storage_card_readiness(detected_not_ready) == "Not ready"
+    assert ui_simulator.storage_filesystem_label(detected_not_ready) == "Not available"
+    assert ui_simulator.storage_card_readiness(replace(base, storage_setup_action="not_available")) == "Not ready"
+
+    mount_error = ui_simulator.storage_mount_error_snapshot()
+    probe_error = ui_simulator.storage_probe_error_snapshot()
+    assert ui_simulator.storage_menu_status(mount_error) == "Needs attention"
+    assert ui_simulator.storage_menu_status(probe_error) == "Needs attention"
+    assert ui_simulator.storage_menu_status(
+        replace(
+            ui_simulator.storage_ready_pending_migration_snapshot(),
+            storage_sd_state="error",
+        )
+    ) == "Needs attention"
+    assert ui_simulator.storage_menu_status(
+        replace(base, storage_setup_action="not_available", storage_sd_state="bridge_reported")
+    ) == "Needs attention"
+
+    map_only = ui_simulator.storage_ready_map_only_sd_snapshot()
+    export_only = ui_simulator.storage_ready_export_only_sd_snapshot()
+    assert map_only.storage_data_enabled is False
+    assert export_only.storage_data_enabled is False
+    assert map_only.storage_sd_data_root_ready is True
+    assert export_only.storage_sd_data_root_ready is True
+    assert ui_simulator.storage_menu_status(map_only) == "Ready"
+    assert ui_simulator.storage_menu_status(export_only) == "Ready"
+    assert ui_simulator.storage_menu_status(
+        replace(map_only, storage_retained_sd_degraded=True)
+    ) == "Needs attention"
+
+    for media_error in (
+        ui_simulator.storage_media_error_snapshot(),
+        ui_simulator.storage_bridge_reported_snapshot(),
+    ):
+        assert media_error.storage_setup_action == "not_available"
+        assert ui_simulator.storage_needs_attention(media_error) is True
+        assert ui_simulator.storage_menu_status(media_error) == "Needs attention"
+        assert ui_simulator.storage_friendly_state(media_error)[0] == "Card needs attention"
+        assert ui_simulator.storage_card_menu_status(media_error) == "Needs attention"
+        assert ui_simulator.storage_card_readiness(media_error) == "Needs attention"
+        assert ui_simulator.storage_card_state(media_error) == "Card needs attention"
+    assert ui_simulator.storage_needs_attention(ui_simulator.storage_ready_pending_migration_snapshot()) is False
+
+
+def test_storage_root_summary_uses_all_six_child_backends():
+    pending = ui_simulator.storage_ready_pending_migration_snapshot()
+    assert ui_simulator.storage_root_location_summary(pending) == "Internal"
+    assert ui_simulator.map_storage_label(pending.map_tile_backend) == "Pending"
+    assert ui_simulator.storage_root_location_summary(replace(pending, storage_backend="mixed")) == "Internal"
+
+    retained_only = replace(pending, message_store_backend="sd")
+    assert ui_simulator.storage_root_location_summary(retained_only) == "SD + internal"
+    assert ui_simulator.retained_storage_label(retained_only.message_store_backend) == "SD + internal backup"
+
+    map_only = ui_simulator.storage_ready_map_only_sd_snapshot()
+    assert ui_simulator.storage_root_location_summary(map_only) == "SD + internal"
+    assert ui_simulator.map_storage_label(map_only.map_tile_backend) == "SD card"
+    assert ui_simulator.export_storage_label(map_only.export_backend) == "USB only"
+
+    export_only = ui_simulator.storage_ready_export_only_sd_snapshot()
+    assert ui_simulator.storage_root_location_summary(export_only) == "SD + internal"
+    assert ui_simulator.map_storage_label(export_only.map_tile_backend) == "Pending"
+    assert ui_simulator.export_storage_label(export_only.export_backend) == "SD card"
+
+
+def test_storage_warning_propagates_to_collapsed_and_expanded_more_rows(tmp_path):
+    snapshot = ui_simulator.storage_degraded_snapshot()
+    storage = next(
+        category
+        for category in ui_simulator.more_category_specs(snapshot)
+        if category["key"] == "storage_maps"
+    )
+    sd_leaf = storage["leaves"][0]
+
+    assert storage["summary"] == "SD needs attention"
+    assert storage["warning"] is True
+    assert storage["color"] == ui_simulator.WARNING_TEXT
+    assert sd_leaf[1] == "Needs attention"
+    assert sd_leaf[2] == ui_simulator.RED
+    assert sd_leaf[5] is True
+
+    report = ui_simulator.generate(
+        tmp_path,
+        views=("settings", "settings_storage_maps_expanded"),
+        scenario="storage-degraded",
+    )
+    labels = {view["name"]: set(view["labels"]) for view in report["views"]}
+    assert report["ok"] is True
+    assert "SD needs attention" in labels["settings"]
+    assert "SD needs attention" in labels["settings_storage_maps_expanded"]
 
 
 def test_ui_simulator_manual_location_scenario_fits(tmp_path):
