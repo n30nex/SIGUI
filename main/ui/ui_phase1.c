@@ -947,6 +947,9 @@ static void set_dock_hidden(bool hidden)
     if (!s_dock) {
         return;
     }
+    if (lv_obj_has_flag(s_dock, LV_OBJ_FLAG_HIDDEN) == hidden) {
+        return;
+    }
     if (hidden) {
         lv_obj_add_flag(s_dock, LV_OBJ_FLAG_HIDDEN);
     } else {
@@ -957,9 +960,22 @@ static void set_dock_hidden(bool hidden)
 
 static void restore_dock_for_active_tab(void)
 {
+    if (d1l_ui_modal_has_active()) {
+        set_dock_hidden(true);
+        return;
+    }
     const d1l_ui_chrome_layout_t layout =
         d1l_ui_chrome_layout_for_screen(d1l_ui_navigation_active());
     set_dock_hidden(!layout.dock_visible);
+}
+
+static void show_modal(lv_obj_t *obj)
+{
+    if (!obj) {
+        return;
+    }
+    set_dock_hidden(true);
+    d1l_ui_modal_show(obj);
 }
 
 static void layout_content_for_active_tab(void)
@@ -977,6 +993,7 @@ static void layout_content_for_active_tab(void)
 static void hide_sheet(void)
 {
     d1l_ui_modal_hide(s_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_compose_sheet(void)
@@ -993,6 +1010,7 @@ static void hide_public_history_sheet(void)
 {
     d1l_ui_modal_hide(s_public_history_sheet);
     s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
+    restore_dock_for_active_tab();
 }
 
 static void hide_public_search_sheet(void)
@@ -1006,6 +1024,7 @@ static void hide_message_detail_sheet(void)
     d1l_ui_modal_hide(s_message_detail_sheet);
     s_message_detail_advanced = false;
     memset(&s_message_detail_message, 0, sizeof(s_message_detail_message));
+    restore_dock_for_active_tab();
 }
 
 static void hide_dm_thread_sheet(void)
@@ -1014,16 +1033,19 @@ static void hide_dm_thread_sheet(void)
     s_dm_thread_fingerprint[0] = '\0';
     s_dm_thread_alias[0] = '\0';
     s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+    restore_dock_for_active_tab();
 }
 
 static void hide_radio_settings_sheet(void)
 {
     d1l_ui_modal_hide(s_radio_settings_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_storage_sheet(void)
 {
     d1l_ui_modal_hide(s_storage_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_wifi_sheet(void)
@@ -1035,16 +1057,19 @@ static void hide_wifi_sheet(void)
 static void hide_ble_sheet(void)
 {
     d1l_ui_modal_hide(s_ble_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_display_sheet(void)
 {
     d1l_ui_modal_hide(s_display_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_diagnostics_sheet(void)
 {
     d1l_ui_modal_hide(s_diagnostics_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_map_location_sheet(void)
@@ -1074,6 +1099,7 @@ static void hide_contact_detail_sheet(void)
     hide_contact_edit_sheet();
     hide_node_detail_sheet();
     memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));
+    restore_dock_for_active_tab();
 }
 
 static void hide_contact_export_sheet(void)
@@ -1081,30 +1107,35 @@ static void hide_contact_export_sheet(void)
     d1l_ui_modal_hide(s_contact_export_sheet);
     memset(&s_contact_export_contact, 0, sizeof(s_contact_export_contact));
     s_contact_export_uri[0] = '\0';
+    restore_dock_for_active_tab();
 }
 
 static void hide_node_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_node_detail_sheet);
     memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
+    restore_dock_for_active_tab();
 }
 
 static void hide_route_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_route_detail_sheet);
     memset(&s_route_detail_route, 0, sizeof(s_route_detail_route));
+    restore_dock_for_active_tab();
 }
 
 static void hide_route_trace_sheet(void)
 {
     d1l_ui_modal_hide(s_route_trace_sheet);
     memset(&s_route_trace_contact, 0, sizeof(s_route_trace_contact));
+    restore_dock_for_active_tab();
 }
 
 static void hide_packet_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_packet_detail_sheet);
     memset(&s_packet_detail_packet, 0, sizeof(s_packet_detail_packet));
+    restore_dock_for_active_tab();
 }
 
 static void hide_packet_search_sheet(void)
@@ -1116,12 +1147,14 @@ static void hide_packet_search_sheet(void)
 static void hide_mesh_roles_sheet(void)
 {
     d1l_ui_modal_hide(s_mesh_roles_sheet);
+    restore_dock_for_active_tab();
 }
 
 static void hide_onboarding_sheet(void)
 {
     d1l_ui_modal_hide(s_onboarding_sheet);
     s_onboarding_visible = false;
+    restore_dock_for_active_tab();
     request_full_screen_repaint();
 }
 
@@ -1140,7 +1173,7 @@ static void update_onboarding_visibility(const d1l_app_snapshot_t *snapshot)
         return;
     }
     s_onboarding_visible = true;
-    d1l_ui_modal_show(s_onboarding_sheet);
+    show_modal(s_onboarding_sheet);
     request_full_screen_repaint();
 }
 
@@ -1893,8 +1926,7 @@ static void show_public_compose_sheet(const char *title, const char *placeholder
         lv_label_set_text(s_compose_title, title && title[0] ? title : "Compose Public");
     }
     if (s_compose_sheet) {
-        set_dock_hidden(true);
-        d1l_ui_modal_show(s_compose_sheet);
+        show_modal(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
@@ -1960,8 +1992,7 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
         lv_label_set_text(s_compose_title, title);
     }
     if (s_compose_sheet) {
-        set_dock_hidden(true);
-        d1l_ui_modal_show(s_compose_sheet);
+        show_modal(s_compose_sheet);
     }
     if (s_compose_textarea && s_compose_keyboard) {
         lv_textarea_set_text(s_compose_textarea, "");
@@ -2147,7 +2178,7 @@ static void contact_detail_export_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_contact_export_sheet();
     if (s_contact_export_sheet) {
-        d1l_ui_modal_show(s_contact_export_sheet);
+        show_modal(s_contact_export_sheet);
     }
 }
 
@@ -2156,7 +2187,7 @@ static void show_contact_detail_sheet(void)
     request_content_refresh();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
-        d1l_ui_modal_show(s_contact_detail_sheet);
+        show_modal(s_contact_detail_sheet);
     }
 }
 
@@ -2260,8 +2291,7 @@ static void open_contact_edit_event_cb(lv_event_t *event)
                              s_contact_detail_contact.alias : s_contact_detail_contact.fingerprint);
         lv_keyboard_set_textarea(s_contact_edit_keyboard, s_contact_edit_textarea);
     }
-    d1l_ui_modal_show(s_contact_edit_sheet);
-    set_dock_hidden(true);
+    show_modal(s_contact_edit_sheet);
 }
 
 static bool ui_route_trace_is_direct(const d1l_route_entry_t *entry)
@@ -2442,7 +2472,7 @@ static void open_route_trace_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_route_trace_sheet();
     if (s_route_trace_sheet) {
-        d1l_ui_modal_show(s_route_trace_sheet);
+        show_modal(s_route_trace_sheet);
     }
 }
 
@@ -2513,7 +2543,7 @@ static void update_contact_detail_flags(bool favorite, bool muted)
         request_content_refresh();
         render_contact_detail_sheet();
         if (s_contact_detail_sheet) {
-            d1l_ui_modal_show(s_contact_detail_sheet);
+            show_modal(s_contact_detail_sheet);
         }
     }
     show_toast("Contact", ret);
@@ -2552,7 +2582,7 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     hide_node_detail_sheet();
     render_contact_detail_sheet();
     if (s_contact_detail_sheet) {
-        d1l_ui_modal_show(s_contact_detail_sheet);
+        show_modal(s_contact_detail_sheet);
     }
 }
 
@@ -2669,7 +2699,7 @@ static void open_node_detail_event_cb(lv_event_t *event)
     s_node_detail_node = *view;
     render_node_detail_sheet();
     if (s_node_detail_sheet) {
-        d1l_ui_modal_show(s_node_detail_sheet);
+        show_modal(s_node_detail_sheet);
     }
 }
 
@@ -2762,7 +2792,7 @@ static void open_route_detail_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_route_detail_sheet();
     if (s_route_detail_sheet) {
-        d1l_ui_modal_show(s_route_detail_sheet);
+        show_modal(s_route_detail_sheet);
     }
 }
 
@@ -2908,7 +2938,7 @@ static void open_message_detail_event_cb(lv_event_t *event)
     hide_node_detail_sheet();
     render_message_detail_sheet();
     if (s_message_detail_sheet) {
-        d1l_ui_modal_show(s_message_detail_sheet);
+        show_modal(s_message_detail_sheet);
     }
 }
 
@@ -3040,7 +3070,7 @@ static void open_packet_detail_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_packet_detail_sheet();
     if (s_packet_detail_sheet) {
-        d1l_ui_modal_show(s_packet_detail_sheet);
+        show_modal(s_packet_detail_sheet);
     }
 }
 
@@ -3168,8 +3198,7 @@ static void open_packet_search_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_packet_search_textarea, s_packet_search_text);
         lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
     }
-    d1l_ui_modal_show(s_packet_search_sheet);
-    set_dock_hidden(true);
+    show_modal(s_packet_search_sheet);
 }
 
 static void close_mesh_roles_event_cb(lv_event_t *event)
@@ -3290,7 +3319,7 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     render_mesh_roles_sheet();
     if (s_mesh_roles_sheet) {
-        d1l_ui_modal_show(s_mesh_roles_sheet);
+        show_modal(s_mesh_roles_sheet);
     }
 }
 
@@ -3528,7 +3557,7 @@ static void show_public_history_sheet(void)
 {
     render_public_history_sheet();
     if (s_public_history_sheet) {
-        d1l_ui_modal_show(s_public_history_sheet);
+        show_modal(s_public_history_sheet);
     }
 }
 
@@ -3583,8 +3612,7 @@ static void open_public_search_event_cb(lv_event_t *event)
         lv_textarea_set_text(s_public_search_textarea, s_public_search_text);
         lv_keyboard_set_textarea(s_public_search_keyboard, s_public_search_textarea);
     }
-    d1l_ui_modal_show(s_public_search_sheet);
-    set_dock_hidden(true);
+    show_modal(s_public_search_sheet);
 }
 
 static void open_public_history_event_cb(lv_event_t *event)
@@ -3641,7 +3669,7 @@ static void dm_thread_load_older_event_cb(lv_event_t *event)
     }
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
-        d1l_ui_modal_show(s_dm_thread_sheet);
+        show_modal(s_dm_thread_sheet);
     }
 }
 
@@ -3666,7 +3694,7 @@ static void read_dm_thread_event_cb(lv_event_t *event)
         request_content_refresh();
         render_dm_thread_sheet();
         if (s_dm_thread_sheet) {
-            d1l_ui_modal_show(s_dm_thread_sheet);
+            show_modal(s_dm_thread_sheet);
         }
     }
 }
@@ -3793,7 +3821,7 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
     hide_mesh_roles_sheet();
     render_dm_thread_sheet();
     if (s_dm_thread_sheet) {
-        d1l_ui_modal_show(s_dm_thread_sheet);
+        show_modal(s_dm_thread_sheet);
     }
 }
 
@@ -4137,8 +4165,7 @@ static void open_map_location_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_map_location_sheet();
     if (s_map_location_sheet) {
-        set_dock_hidden(true);
-        d1l_ui_modal_show(s_map_location_sheet);
+        show_modal(s_map_location_sheet);
     }
 }
 
@@ -4403,8 +4430,7 @@ static void open_map_tiles_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_map_tiles_sheet();
     if (s_map_tiles_sheet) {
-        set_dock_hidden(true);
-        d1l_ui_modal_show(s_map_tiles_sheet);
+        show_modal(s_map_tiles_sheet);
     }
 }
 
@@ -4497,8 +4523,7 @@ static void render_map(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
         map_location_from_snapshot(snapshot);
         render_map_location_sheet();
         if (s_map_location_sheet) {
-            set_dock_hidden(true);
-            d1l_ui_modal_show(s_map_location_sheet);
+            show_modal(s_map_location_sheet);
         }
     }
 }
@@ -4716,7 +4741,7 @@ static void radio_save_event_cb(lv_event_t *event)
         request_content_refresh();
         render_radio_settings_sheet();
         if (s_radio_settings_sheet) {
-            d1l_ui_modal_show(s_radio_settings_sheet);
+            show_modal(s_radio_settings_sheet);
         }
         show_toast_text("Radio saved; RF apply pending", true);
     } else {
@@ -4833,7 +4858,7 @@ static void open_radio_settings_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_radio_settings_sheet();
     if (s_radio_settings_sheet) {
-        d1l_ui_modal_show(s_radio_settings_sheet);
+        show_modal(s_radio_settings_sheet);
     }
 }
 
@@ -4938,7 +4963,7 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_storage_sheet();
     if (s_storage_sheet) {
-        d1l_ui_modal_show(s_storage_sheet);
+        show_modal(s_storage_sheet);
     }
 }
 
@@ -5400,8 +5425,7 @@ static void open_wifi_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_wifi_sheet();
     if (s_wifi_sheet) {
-        set_dock_hidden(true);
-        d1l_ui_modal_show(s_wifi_sheet);
+        show_modal(s_wifi_sheet);
     }
 }
 
@@ -5430,7 +5454,7 @@ static void open_ble_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_ble_sheet();
     if (s_ble_sheet) {
-        d1l_ui_modal_show(s_ble_sheet);
+        show_modal(s_ble_sheet);
     }
 }
 
@@ -5459,7 +5483,7 @@ static void open_display_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_display_sheet();
     if (s_display_sheet) {
-        d1l_ui_modal_show(s_display_sheet);
+        show_modal(s_display_sheet);
     }
 }
 
@@ -5488,7 +5512,7 @@ static void open_diagnostics_sheet_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
     render_diagnostics_sheet();
     if (s_diagnostics_sheet) {
-        d1l_ui_modal_show(s_diagnostics_sheet);
+        show_modal(s_diagnostics_sheet);
     }
 }
 
@@ -5532,7 +5556,7 @@ static void open_sheet_event_cb(lv_event_t *event)
         hide_packet_detail_sheet();
         hide_packet_search_sheet();
         hide_mesh_roles_sheet();
-        d1l_ui_modal_show(s_sheet);
+        show_modal(s_sheet);
     }
 }
 
@@ -6211,8 +6235,7 @@ static void open_keyboard_probe_on_ui_task(const char *target)
         s_onboarding_probe_suppressed = false;
         if (s_onboarding_sheet) {
             s_onboarding_visible = true;
-            d1l_ui_modal_show(s_onboarding_sheet);
-            set_dock_hidden(true);
+            show_modal(s_onboarding_sheet);
         }
         if (s_onboarding_name_textarea) {
             lv_textarea_set_text(s_onboarding_name_textarea, "DeskOS Probe");

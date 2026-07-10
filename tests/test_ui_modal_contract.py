@@ -21,6 +21,7 @@ def test_modal_module_is_registered_and_owns_visibility_helpers():
         "d1l_ui_modal_hide",
         "d1l_ui_modal_show",
         "d1l_ui_modal_visible",
+        "d1l_ui_modal_has_active",
         "d1l_ui_modal_configure_scroll",
     ]:
         assert symbol in modal_header
@@ -54,6 +55,19 @@ def test_modal_module_is_registered_and_owns_visibility_helpers():
         "void d1l_ui_modal_hide", 1
     )[0]
     assert "s_active_modal = NULL" in reset_body
+    active_body = modal_source.split("bool d1l_ui_modal_has_active", 1)[1].split(
+        "void d1l_ui_modal_configure_scroll", 1
+    )[0]
+    assert "s_active_modal &&" in active_body
+    assert "lv_obj_is_valid(s_active_modal)" in active_body
+    assert "d1l_ui_modal_visible(s_active_modal)" in active_body
+    assert active_body.index("s_active_modal &&") < active_body.index(
+        "lv_obj_is_valid(s_active_modal)"
+    )
+    assert active_body.index("lv_obj_is_valid(s_active_modal)") < active_body.index(
+        "d1l_ui_modal_visible(s_active_modal)"
+    )
+    assert "All modal lifecycle and query calls are UI-task-only." in modal_header
     assert "Semaphore" not in modal_source
     assert "Mutex" not in modal_source
 
@@ -82,9 +96,28 @@ def test_phase1_routes_sheet_visibility_through_modal_boundary():
     )
 
     hide_calls = re.findall(r"d1l_ui_modal_hide\(s_[a-z0-9_]+_sheet\)", ui_source)
-    show_calls = re.findall(r"d1l_ui_modal_show\(s_[a-z0-9_]+_sheet\)", ui_source)
+    show_calls = re.findall(r"show_modal\(s_[a-z0-9_]+_sheet\)", ui_source)
     assert len(hide_calls) >= 20
     assert len(show_calls) >= 20
+    assert ui_source.count("d1l_ui_modal_show(") == 1
+
+    show_wrapper = ui_source.split("static void show_modal", 1)[1].split(
+        "static void layout_content_for_active_tab", 1
+    )[0]
+    assert "set_dock_hidden(true);" in show_wrapper
+    assert "d1l_ui_modal_show(obj);" in show_wrapper
+    assert show_wrapper.index("set_dock_hidden(true);") < show_wrapper.index(
+        "d1l_ui_modal_show(obj);"
+    )
+
+    restore = ui_source.split("static void restore_dock_for_active_tab", 1)[1].split(
+        "static void show_modal", 1
+    )[0]
+    assert "d1l_ui_modal_has_active()" in restore
+    assert "set_dock_hidden(true);" in restore
+    assert restore.index("d1l_ui_modal_has_active()") < restore.index(
+        "d1l_ui_chrome_layout_for_screen"
+    )
 
 
 def test_exclusive_modal_parent_returns_and_onboarding_suppression_are_explicit():

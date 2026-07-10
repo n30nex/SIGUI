@@ -19,6 +19,22 @@ HOME_TOP_BAR_H = 16
 DOCK_Y = 420
 DOCK_H = 60
 MIN_TOUCH_TARGET = 44
+DOCKED_VIEWS = frozenset(
+    {
+        "messages",
+        "messages_dm",
+        "nodes",
+        "map",
+        "packets",
+        "settings",
+        "settings_tools_expanded",
+        "settings_connections_expanded",
+        "settings_storage_maps_expanded",
+        "settings_device_expanded",
+        "settings_support_expanded",
+        "settings_advanced_expanded",
+    }
+)
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -418,6 +434,7 @@ class Surface:
         self.touch_targets: list[dict[str, object]] = []
         self.labels: list[str] = []
         self.metrics: dict[str, int | str | bool] = {}
+        self.dock_rendered = False
 
     def font(self, size: int, bold: bool = False) -> ImageFont.ImageFont:
         key = (size, bold)
@@ -489,11 +506,8 @@ class Surface:
         offscreen = x0 < 0 or y0 < 0 or x1 > WIDTH or y1 > HEIGHT
         top_bar_limit = HOME_TOP_BAR_H if self.view == "home" else TOP_BAR_H
         top_bar_overlap = kind not in ("screen", "top_bar") and self.view != "lock_overlay" and y0 < top_bar_limit
-        dock_overlap = (
-            kind != "dock_tab"
-            and self.view not in ("home", "lock_overlay", "onboarding_sheet")
-            and y1 > DOCK_Y
-        )
+        dock_overlap = kind != "dock_tab" and self.view in DOCKED_VIEWS and y1 > DOCK_Y
+        unexpected_dock = kind == "dock_tab" and self.view not in DOCKED_VIEWS
         self.touch_targets.append(
             {
                 "label": label,
@@ -509,6 +523,7 @@ class Surface:
                 "offscreen": offscreen,
                 "top_bar_overlap": top_bar_overlap,
                 "dock_overlap": dock_overlap,
+                "unexpected_dock": unexpected_dock,
                 "rf_tx": rf_tx or public_rf_tx or dm_tx,
                 "public_rf_tx": public_rf_tx,
                 "dm_tx": dm_tx,
@@ -599,8 +614,15 @@ class Surface:
         touch_issues = [
             target
             for target in self.touch_targets
-            if target["too_small"] or target["offscreen"] or target["top_bar_overlap"] or target["dock_overlap"]
+            if target["too_small"]
+            or target["offscreen"]
+            or target["top_bar_overlap"]
+            or target["dock_overlap"]
+            or target["unexpected_dock"]
         ]
+        dock_target_count = sum(1 for target in self.touch_targets if target["kind"] == "dock_tab")
+        dock_expected = self.view in DOCKED_VIEWS
+        dock_invariant_ok = self.dock_rendered == dock_expected and dock_target_count == (5 if dock_expected else 0)
         return {
             "name": self.view,
             "screenshot": screenshot.as_posix(),
@@ -608,6 +630,10 @@ class Surface:
             "touch_targets": self.touch_targets,
             "touch_target_count": len(self.touch_targets),
             "touch_target_issues": touch_issues,
+            "dock_expected": dock_expected,
+            "dock_rendered": self.dock_rendered,
+            "dock_target_count": dock_target_count,
+            "dock_invariant_ok": dock_invariant_ok,
             "missing_required_labels": missing,
             "truncated_labels": [r for r in self.text_records if r["truncated"]],
             "overflow": [r for r in self.text_records if r["overflow"]],
@@ -667,6 +693,9 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
 
 
 def draw_dock(s: Surface, active: str):
+    if s.view not in DOCKED_VIEWS:
+        raise ValueError(f"dock is not allowed on modal view: {s.view}")
+    s.dock_rendered = True
     s.rect((0, DOCK_Y, WIDTH, HEIGHT), (10, 16, 25))
     tabs = (
         ("Home", "Home", "home"),
@@ -1669,9 +1698,7 @@ def render_settings_advanced_expanded(s: Surface, snap: Snapshot):
 
 def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
     draw_top_bar(s, sample_snapshot())
-    draw_home_body(s, sample_snapshot())
-    s.touch_targets.clear()
-    s.rect((0, TOP_BAR_H, WIDTH, DOCK_Y), DIM)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), DIM)
     s.round_rect((24, 78, 456, 392), (18, 27, 39), (72, 92, 112), 8)
     s.text(title, (44, 94, 330, 122), 22, TEXT, True)
     if subtitle:
@@ -1739,7 +1766,6 @@ def render_public_history_sheet(s: Surface, snap: Snapshot):
         y += 40
     if load_older_available:
         draw_button(s, (44, 332, 178, 376), "Load Older", BLUE, action="load_older_public_history")
-    draw_dock(s, "Messages")
     s.metrics.update(
         {
             "public_history_source_count": len(snap.public_messages),
@@ -1761,7 +1787,6 @@ def render_public_search_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_public_search", destination="public_history_sheet")
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard opens for Public history search", (56, 318, 424, 350), 13, MUTED, False, "center")
-    draw_dock(s, "Messages")
 
 
 def render_message_detail_sheet(s: Surface, snap: Snapshot):
@@ -1778,7 +1803,6 @@ def render_message_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Path", (44, 330, 160, 350), 13, MUTED, True)
     s.text("1 hop", (44, 352, 436, 372), 14, BLUE)
     draw_button(s, (44, 382, 200, 412), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
-    draw_dock(s, "Messages")
 
 
 def render_contact_detail_sheet(s: Surface, snap: Snapshot):
@@ -1809,7 +1833,6 @@ def render_contact_detail_sheet(s: Surface, snap: Snapshot):
             destructive=destructive,
         )
     draw_button(s, (44, 346, 200, 378), "Close", MUTED, action="close_contact_detail", destination="nodes")
-    draw_dock(s, "Nodes")
 
 
 def render_node_detail_sheet(s: Surface, snap: Snapshot):
@@ -1830,7 +1853,6 @@ def render_node_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Last heard", (44, 318, 150, 338), 13, MUTED, True)
     s.text("12s ago  heard 24", (152, 318, 436, 338), 14, TEXT)
     draw_button(s, (44, 358, 200, 392), "Close", MUTED, action="close_node_detail", destination="nodes")
-    draw_dock(s, "Nodes")
 
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
@@ -1846,7 +1868,6 @@ def render_contact_edit_sheet(s: Surface, snap: Snapshot):
     s.text(contact.name, (56, 214, 424, 232), 16, TEXT)
     s.round_rect((44, 258, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard saves alias; Forget removes only the promoted contact", (56, 280, 424, 340), 13, MUTED, False, "center")
-    draw_dock(s, "Nodes")
 
 
 def render_radio_settings_sheet(s: Surface, snap: Snapshot):
@@ -1869,7 +1890,6 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (44, 356, 136, 386), "US/CAN", BLUE, action="radio_defaults")
     draw_button(s, (146, 356, 238, 386), "Save", GREEN, action="save_radio_profile", destination="settings")
     draw_button(s, (248, 356, 340, 386), "Close", MUTED, action="close_radio_settings", destination="settings")
-    draw_dock(s, "Settings")
 
 
 def render_storage_setup_sheet(s: Surface, snap: Snapshot):
@@ -1892,7 +1912,6 @@ def render_storage_setup_sheet(s: Surface, snap: Snapshot):
     draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
     s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
     s.text(guidance, (44, 328, 436, 360), 12, AMBER, True)
-    draw_dock(s, "Settings")
 
 
 def render_display_settings_sheet(s: Surface, snap: Snapshot):
@@ -1905,7 +1924,6 @@ def render_display_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (172, 318, 260, 360), "Night", BLUE, action="display_night")
     draw_button(s, (272, 318, 386, 360), "Contrast", BLUE, action="display_contrast")
     s.text("Timeout", (44, 374, 160, 402), 12, MUTED, True)
-    draw_dock(s, "Settings")
 
 
 def render_diagnostics_sheet(s: Surface, snap: Snapshot):
@@ -1921,7 +1939,6 @@ def render_diagnostics_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (44, 358, 156, 390), "Crashlog", AMBER, action="diagnostics_crashlog")
     draw_button(s, (168, 358, 264, 390), "Export", BLUE, action="diagnostics_export")
     draw_button(s, (276, 358, 362, 390), "Soak", GREEN, action="diagnostics_soak")
-    draw_dock(s, "Settings")
 
 
 def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
@@ -1969,7 +1986,6 @@ def render_ble_setup_sheet(s: Surface, snap: Snapshot):
         s.text("Pair unavailable", (44, 346, 210, 366), 12, MUTED)
         s.text("Forget unavailable", (224, 346, 436, 366), 12, MUTED)
     s.text("USB remains the reliable companion path for production validation.", (44, 386, 436, 416), 12, MUTED)
-    draw_dock(s, "Settings")
 
 
 def render_advert_sheet(s: Surface, snap: Snapshot):
@@ -1981,7 +1997,6 @@ def render_advert_sheet(s: Surface, snap: Snapshot):
     s.text("Intentional wider RF advert for controlled tests only.", (44, 316, 436, 338), 12, AMBER)
     draw_button(s, (44, 352, 184, 386), "Flood", AMBER, action="send_advert_flood", rf_tx=True)
     draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_advert_sheet", destination="settings")
-    draw_dock(s, "Settings")
 
 
 def render_contact_export_sheet(s: Surface, snap: Snapshot):
@@ -1996,7 +2011,6 @@ def render_contact_export_sheet(s: Surface, snap: Snapshot):
     s.text("name=YKF+Corebot  type=1", (234, 288, 436, 304), 10, MUTED)
     s.text(f"key {SAMPLE_PUBLIC_KEY[:12]}...{SAMPLE_PUBLIC_KEY[-8:]}", (234, 304, 436, 320), 10, BLUE)
     draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_contact_export", destination="contact_detail_sheet")
-    draw_dock(s, "Nodes")
 
 
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
@@ -2016,7 +2030,6 @@ def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (44, button_y, 160, button_y + 52), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
     draw_button(s, (174, button_y, 290, button_y + 52), "Read", ACCENT, action="mark_dm_thread_read")
     draw_button(s, (304, button_y, 420, button_y + 52), "Close", MUTED, action="close_dm_thread", destination="messages")
-    draw_dock(s, "Messages")
     s.metrics.update(
         {
             "dm_thread_source_count": len(snap.dm_messages),
@@ -2037,7 +2050,6 @@ def render_route_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Confidence", (44, 270, 180, 290), 13, MUTED, True)
     s.text("recent live packet evidence", (44, 292, 436, 316), 16, GREEN)
     draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_route_detail", destination="packets")
-    draw_dock(s, "Settings")
 
 
 def render_route_trace_sheet(s: Surface, snap: Snapshot):
@@ -2059,7 +2071,6 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (236, 94, 306, 134), "Ping", BLUE, action="send_trace_probe", dm_tx=True)
     draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_route_trace", destination="contact_detail_sheet")
     s.text("DM-only trace probe", (44, 390, 300, 408), 11, MUTED)
-    draw_dock(s, "Nodes")
     s.metrics.update(
         {
             "route_trace_source_count": len(contact_routes),
@@ -2083,7 +2094,6 @@ def render_packet_detail_sheet(s: Surface, snap: Snapshot):
     s.text("hash 2 byte  hops 1  uptime 12044ms", (108, 326, 436, 346), 13, TEXT)
     s.text("Raw Hex", (44, 358, 180, 378), 13, MUTED, True)
     s.text(packet.raw_hex, (116, 358, 436, 378), 14, BLUE)
-    draw_dock(s, "Settings")
 
 
 def render_packet_search_sheet(s: Surface, snap: Snapshot):
@@ -2097,7 +2107,6 @@ def render_packet_search_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_packet_search", destination="packets")
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard opens for packet search", (56, 318, 424, 350), 13, MUTED, False, "center")
-    draw_dock(s, "Settings")
 
 
 def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
@@ -2113,7 +2122,6 @@ def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
         draw_row(s, (44, y, 436, y + 36), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}")
         y += 44
     draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_mesh_roles", destination="packets")
-    draw_dock(s, "Settings")
 
 
 def render_lock_overlay(s: Surface, snap: Snapshot):
@@ -2751,6 +2759,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
     truncated_count = 0
     required_missing: list[dict[str, str]] = []
     touch_target_issue_count = 0
+    dock_invariant_issues: list[dict[str, object]] = []
     for view in selected:
         if view not in RENDERERS:
             raise ValueError(f"unknown view: {view}")
@@ -2762,6 +2771,15 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         overflow_count += len(summary["overflow"])
         truncated_count += len(summary["truncated_labels"])
         touch_target_issue_count += len(summary["touch_target_issues"])
+        if not summary["dock_invariant_ok"]:
+            dock_invariant_issues.append(
+                {
+                    "view": view,
+                    "expected": summary["dock_expected"],
+                    "rendered": summary["dock_rendered"],
+                    "target_count": summary["dock_target_count"],
+                }
+            )
         for label in summary["missing_required_labels"]:
             required_missing.append({"view": view, "label": label})
         report_views.append(summary)
@@ -2769,13 +2787,14 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
     flow_report = build_flow_report(report_views)
     report = {
         "schema": 2,
-        "ok": overflow_count == 0 and not required_missing and flow_report["ok"],
+        "ok": overflow_count == 0 and not required_missing and not dock_invariant_issues and flow_report["ok"],
         "display": {"width": WIDTH, "height": HEIGHT},
         "source": "tools/ui_simulator.py",
         "scenario": scenario,
         "snapshot_counts": snapshot_counts(snap),
         "views": report_views,
         "touch_target_issue_count": touch_target_issue_count,
+        "dock_invariant_issues": dock_invariant_issues,
         "flow_report": flow_report,
         "overflow_count": overflow_count,
         "truncated_count": truncated_count,
