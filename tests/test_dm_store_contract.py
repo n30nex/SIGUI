@@ -120,6 +120,12 @@ def test_app_model_and_ui_preview_recent_dms():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    thread_render = ui.split("static void render_dm_thread_sheet(void)", 1)[1].split(
+        "static void show_dm_thread_for", 1
+    )[0]
+    thread_open = ui.split("static void show_dm_thread_for", 1)[1].split(
+        "static void open_home_dm_preview_event_cb", 1
+    )[0]
     assert "D1L_APP_SNAPSHOT_DM_PREVIEW 5U" in header
     assert "recent_dms" in header
     assert "dm_total_written" in header
@@ -133,6 +139,13 @@ def test_app_model_and_ui_preview_recent_dms():
     assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in ui
     assert "s_dm_thread_entries[D1L_DM_STORE_CAPACITY]" in ui
     assert "dm_thread_load_older_event_cb" in ui
-    assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in ui
+    assert 'create_button(body, "Load Older", 0, 0, 424, 48' in thread_render
+    assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in thread_render
+    assert "d1l_app_model_mark_dm_thread_read(fingerprint)" in thread_open
+    assert thread_open.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < thread_open.index(
+        "render_dm_thread_sheet();"
+    )
+    assert 'create_button(s_dm_thread_sheet, "Read"' not in thread_render
+    assert "read_dm_thread_event_cb" not in ui
     assert '"DM"' in ui
     assert "No direct messages" in ui

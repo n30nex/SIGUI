@@ -51,6 +51,7 @@
 - [x] `messages public` serial diagnostic added to smoke coverage.
 - [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
 - [x] Public History and DM Thread retained-history paging implemented with Load Older buttons plus serial `offset <n>` diagnostics and page metadata.
+- [x] Message Detail and DM Thread use full-height dockless pages with one Back control, scrollable content, and a sticky full-width Reply; Public text wraps before Technical details and opening a DM thread marks it read without a competing Read button.
 - [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
 - [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions; `artifacts/hardware/com12/dm_probe_b841621c.json` passed COM12-to-COM11 outbound DM proof with retained DM, packet, route, meshbot receive-counter, health, and no-Public-command checks all true.
 - [x] Messages tab reads persisted Public rows from the app snapshot.

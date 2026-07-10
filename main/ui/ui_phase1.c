@@ -2828,6 +2828,42 @@ static void reply_message_detail_event_cb(lv_event_t *event)
     show_public_compose_sheet(title, placeholder);
 }
 
+static lv_obj_t *create_nested_page_body(lv_obj_t *page, const char *name)
+{
+    lv_obj_t *body = create_object(page, name);
+    if (!body) {
+        return NULL;
+    }
+    lv_obj_set_size(body, 448, 292);
+    lv_obj_set_pos(body, 16, 60);
+    lv_obj_set_style_radius(body, 8, 0);
+    lv_obj_set_style_bg_color(body, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_color(body, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_border_width(body, 1, 0);
+    lv_obj_set_style_pad_all(body, 12, 0);
+    lv_obj_set_style_pad_row(body, 10, 0);
+    lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    return body;
+}
+
+static lv_obj_t *create_nested_page_label(lv_obj_t *parent, const char *text,
+                                           uint32_t color, bool wrap)
+{
+    lv_obj_t *label = create_label(parent, text, color);
+    if (!label) {
+        return NULL;
+    }
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_height(label, LV_SIZE_CONTENT);
+    lv_label_set_long_mode(label, wrap ? LV_LABEL_LONG_WRAP : LV_LABEL_LONG_DOT);
+    return label;
+}
+
 static void render_message_detail_sheet(void)
 {
     if (!s_message_detail_sheet) {
@@ -2836,79 +2872,69 @@ static void render_message_detail_sheet(void)
     lv_obj_clean(s_message_detail_sheet);
 
     const d1l_message_entry_t *entry = &s_message_detail_message;
+    create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44,
+                  close_message_detail_event_cb, NULL);
     lv_obj_t *title = create_label(s_message_detail_sheet, "Message Detail", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 158);
-    lv_obj_set_pos(title, 8, 4);
+    lv_obj_set_width(title, 364);
+    lv_obj_set_pos(title, 100, 10);
 
-    create_button(s_message_detail_sheet,
-                  s_message_detail_advanced ? "Normal" : "Advanced",
-                  174, 0, 90, 40, message_detail_mode_event_cb, NULL);
-    if (entry->direction[0] != 't') {
-        create_button(s_message_detail_sheet, "Reply", 274, 0, 62, 40, reply_message_detail_event_cb, NULL);
-    }
-    create_button(s_message_detail_sheet, "Close", 344, 0, 66, 40, close_message_detail_event_cb, NULL);
-
-    lv_obj_t *sender_title = create_label(s_message_detail_sheet, "Sender", 0x5EEAD4);
-    lv_obj_set_pos(sender_title, 8, 50);
-    lv_obj_t *sender = create_label(s_message_detail_sheet, "", 0xE5EDF5);
-    label_set_fmt(sender, "%s  %s",
-                  entry->author[0] ? entry->author : "unknown",
-                  message_delivery_label(entry));
-    lv_label_set_long_mode(sender, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(sender, 392);
-    lv_obj_set_pos(sender, 8, 72);
-
-    lv_obj_t *message_title = create_label(s_message_detail_sheet, "Message", 0x5EEAD4);
-    lv_obj_set_pos(message_title, 8, 106);
-    lv_obj_t *message = create_label(s_message_detail_sheet, entry->text[0] ? entry->text : "-", 0xF4F7FB);
-    lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(message, 392);
-    lv_obj_set_pos(message, 8, 128);
-
-    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    lv_obj_t *signal = create_label(s_message_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(signal, "Signal rssi %d  snr %s%d.%d",
-                  entry->rssi_dbm,
-                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
-    lv_label_set_long_mode(signal, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(signal, 392);
-    lv_obj_set_pos(signal, 8, 190);
-
-    lv_obj_t *path = create_label(s_message_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(path, "Path %u hop%s",
-                  entry->path_hops, entry->path_hops == 1 ? "" : "s");
-    lv_label_set_long_mode(path, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(path, 392);
-    lv_obj_set_pos(path, 8, 224);
-
-    if (!s_message_detail_advanced) {
-        lv_obj_t *hint = create_label(s_message_detail_sheet,
-                                      "Advanced shows route details",
-                                      0x8EA0AE);
-        lv_label_set_long_mode(hint, LV_LABEL_LONG_DOT);
-        lv_obj_set_width(hint, 392);
-        lv_obj_set_pos(hint, 8, 258);
+    lv_obj_t *body = create_nested_page_body(s_message_detail_sheet, "message detail body");
+    if (!body) {
         return;
     }
 
-    lv_obj_t *advanced = create_label(s_message_detail_sheet, "Advanced", 0xFBBF24);
-    lv_obj_set_pos(advanced, 8, 258);
-    lv_obj_t *seq = create_label(s_message_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(seq, "seq %lu  uptime %lums  direction %s",
-                  (unsigned long)entry->seq,
-                  (unsigned long)entry->uptime_ms,
-                  entry->direction[0] ? entry->direction : "?");
-    lv_label_set_long_mode(seq, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(seq, 392);
-    lv_obj_set_pos(seq, 8, 282);
-    lv_obj_t *hash = create_label(s_message_detail_sheet, "", 0x8EA0AE);
-    label_set_fmt(hash, "path hash %u byte  delivered %s",
-                  entry->path_hash_bytes, entry->delivered ? "yes" : "no");
-    lv_label_set_long_mode(hash, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(hash, 392);
-    lv_obj_set_pos(hash, 8, 304);
+    create_nested_page_label(body, "Sender", 0x5EEAD4, false);
+    lv_obj_t *sender = create_nested_page_label(body, "", 0xE5EDF5, false);
+    if (sender) {
+        label_set_fmt(sender, "%s  %s",
+                      entry->author[0] ? entry->author : "unknown",
+                      message_delivery_label(entry));
+    }
+
+    create_nested_page_label(body, "Message", 0x5EEAD4, false);
+    create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true);
+
+    lv_obj_t *technical = create_button(body,
+                                        s_message_detail_advanced ?
+                                        "Hide technical details" : "Technical details",
+                                        0, 0, 424, 48, message_detail_mode_event_cb, NULL);
+    if (technical) {
+        lv_obj_set_width(technical, LV_PCT(100));
+    }
+
+    if (s_message_detail_advanced) {
+        const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
+        lv_obj_t *signal = create_nested_page_label(body, "", 0x8EA0AE, true);
+        if (signal) {
+            label_set_fmt(signal, "Signal  rssi %d  snr %s%d.%d",
+                          entry->rssi_dbm,
+                          entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
+        }
+        lv_obj_t *path = create_nested_page_label(body, "", 0x8EA0AE, true);
+        if (path) {
+            label_set_fmt(path, "Path  %u hop%s",
+                          entry->path_hops, entry->path_hops == 1 ? "" : "s");
+        }
+        lv_obj_t *seq = create_nested_page_label(body, "", 0x8EA0AE, true);
+        if (seq) {
+            label_set_fmt(seq, "Sequence  %lu  uptime %lums  direction %s",
+                          (unsigned long)entry->seq,
+                          (unsigned long)entry->uptime_ms,
+                          entry->direction[0] ? entry->direction : "?");
+        }
+        lv_obj_t *hash = create_nested_page_label(body, "", 0x8EA0AE, true);
+        if (hash) {
+            label_set_fmt(hash, "Path hash  %u byte  delivered %s",
+                          entry->path_hash_bytes, entry->delivered ? "yes" : "no");
+        }
+    }
+
+    if (entry->direction[0] != 't') {
+        create_button(s_message_detail_sheet, "Reply", 16, 360, 448, 52,
+                      reply_message_detail_event_cb, NULL);
+    }
 }
 
 static void open_message_detail_event_cb(lv_event_t *event)
@@ -3685,20 +3711,6 @@ static void reply_dm_thread_event_cb(lv_event_t *event)
     open_dm_compose_for_contact(&contact);
 }
 
-static void read_dm_thread_event_cb(lv_event_t *event)
-{
-    (void)event;
-    esp_err_t ret = d1l_app_model_mark_dm_thread_read(s_dm_thread_fingerprint);
-    show_toast("Thread read", ret);
-    if (ret == ESP_OK) {
-        request_content_refresh();
-        render_dm_thread_sheet();
-        if (s_dm_thread_sheet) {
-            show_modal(s_dm_thread_sheet);
-        }
-    }
-}
-
 static void render_dm_thread_sheet(void)
 {
     if (!s_dm_thread_sheet) {
@@ -3709,15 +3721,13 @@ static void render_dm_thread_sheet(void)
     lv_obj_clean(s_dm_thread_sheet);
 
     const char *alias = s_dm_thread_alias[0] ? s_dm_thread_alias : s_dm_thread_fingerprint;
+    create_button(s_dm_thread_sheet, "Back", 12, 6, 72, 44,
+                  close_dm_thread_event_cb, NULL);
     lv_obj_t *title = create_label(s_dm_thread_sheet, alias, 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 178);
-    lv_obj_set_pos(title, 8, 4);
-
-    create_button(s_dm_thread_sheet, "Reply", 198, 0, 64, 40, reply_dm_thread_event_cb, NULL);
-    create_button(s_dm_thread_sheet, "Read", 270, 0, 56, 40, read_dm_thread_event_cb, NULL);
-    create_button(s_dm_thread_sheet, "Close", 334, 0, 76, 40, close_dm_thread_event_cb, NULL);
+    lv_obj_set_width(title, 364);
+    lv_obj_set_pos(title, 100, 10);
 
     if (s_dm_thread_limit < D1L_DM_THREAD_UI_INITIAL_ROWS) {
         s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
@@ -3731,30 +3741,31 @@ static void render_dm_thread_sheet(void)
                                           s_dm_thread_unread, s_dm_thread_limit,
                                           0, &total_matches);
 
-    lv_obj_t *meta = create_label(s_dm_thread_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.16s  showing %u/%u", s_dm_thread_fingerprint,
-                  (unsigned)thread_count, (unsigned)total_matches);
-    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
-    lv_obj_set_pos(meta, 8, 42);
-
-    lv_obj_t *list = create_object(s_dm_thread_sheet, "dm thread list");
-    if (!list) {
+    lv_obj_t *body = create_nested_page_body(s_dm_thread_sheet, "dm thread body");
+    if (!body) {
         return;
     }
-    lv_obj_set_size(list, 424, 176);
-    lv_obj_set_pos(list, 0, 68);
-    lv_obj_set_style_radius(list, 6, 0);
-    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(list, 0, 0);
-    lv_obj_set_style_pad_all(list, 0, 0);
-    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_t *meta = create_nested_page_label(body, "", 0x8EA0AE, false);
+    if (meta) {
+        label_set_fmt(meta, "%.16s  showing %u/%u", s_dm_thread_fingerprint,
+                      (unsigned)thread_count, (unsigned)total_matches);
+    }
+    if (thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
+        lv_obj_t *older = create_button(body, "Load Older", 0, 0, 424, 48,
+                                        dm_thread_load_older_event_cb, NULL);
+        if (older) {
+            lv_obj_set_width(older, LV_PCT(100));
+        }
+    }
 
-    int y = 0;
     for (size_t i = 0; i < thread_count; ++i) {
         const d1l_dm_entry_t *entry = &s_dm_thread_entries[i];
         const bool unread = s_dm_thread_unread[i];
-        lv_obj_t *row = create_panel(list, 0, y, 404, 48);
+        lv_obj_t *row = create_panel(body, 0, 0, 424, 56);
+        if (!row) {
+            continue;
+        }
+        lv_obj_set_width(row, LV_PCT(100));
         lv_obj_set_style_pad_all(row, 8, 0);
         const char *who = entry->direction[0] == 't' ? "You" : alias;
         lv_obj_t *sender = create_label(row, who,
@@ -3770,7 +3781,6 @@ static void render_dm_thread_sheet(void)
         lv_label_set_long_mode(text, LV_LABEL_LONG_DOT);
         lv_obj_set_width(text, 372);
         lv_obj_align(text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-        y += 54;
     }
     if (thread_count < 3) {
         const char *notes[] = {
@@ -3779,22 +3789,24 @@ static void render_dm_thread_sheet(void)
             "Use Reply for a direct MeshCore DM when contact keys exist.",
         };
         for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
-            lv_obj_t *note = create_panel(list, 0, y, 404, 48);
+            lv_obj_t *note = create_panel(body, 0, 0, 424, 56);
+            if (!note) {
+                continue;
+            }
+            lv_obj_set_width(note, LV_PCT(100));
             lv_obj_set_style_pad_all(note, 8, 0);
             lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
             lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
             lv_obj_set_width(text, 372);
             lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
-            y += 54;
         }
     }
     if (thread_count > 0) {
-        lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
+        lv_obj_update_layout(body);
+        lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF);
     }
-    if (thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY) {
-        create_button(s_dm_thread_sheet, "Load Older", 8, 260, 126, 36,
-                      dm_thread_load_older_event_cb, NULL);
-    }
+    create_button(s_dm_thread_sheet, "Reply", 16, 360, 448, 52,
+                  reply_dm_thread_event_cb, NULL);
 }
 
 static void show_dm_thread_for(const char *fingerprint, const char *alias)
@@ -3807,6 +3819,9 @@ static void show_dm_thread_for(const char *fingerprint, const char *alias)
     snprintf(s_dm_thread_alias, sizeof(s_dm_thread_alias), "%s",
              alias && alias[0] ? alias : fingerprint);
     s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
+    if (d1l_app_model_mark_dm_thread_read(fingerprint) == ESP_OK) {
+        request_content_refresh();
+    }
     hide_sheet();
     hide_public_history_sheet();
     hide_public_search_sheet();
@@ -6625,13 +6640,12 @@ static void create_message_detail_sheet(lv_obj_t *screen)
     if (!s_message_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_message_detail_sheet, 448, 328);
-    lv_obj_set_pos(s_message_detail_sheet, 16, 82);
-    lv_obj_set_style_radius(s_message_detail_sheet, 8, 0);
+    lv_obj_set_size(s_message_detail_sheet, 480, 424);
+    lv_obj_set_pos(s_message_detail_sheet, 0, 56);
+    lv_obj_set_style_radius(s_message_detail_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_message_detail_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_message_detail_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_message_detail_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_message_detail_sheet, 12, 0);
+    lv_obj_set_style_border_width(s_message_detail_sheet, 0, 0);
+    lv_obj_set_style_pad_all(s_message_detail_sheet, 0, 0);
     lv_obj_clear_flag(s_message_detail_sheet, LV_OBJ_FLAG_SCROLLABLE);
     d1l_ui_modal_hide(s_message_detail_sheet);
 }
@@ -6700,14 +6714,13 @@ static void create_dm_thread_sheet(lv_obj_t *screen)
     if (!s_dm_thread_sheet) {
         return;
     }
-    lv_obj_set_size(s_dm_thread_sheet, 448, 328);
-    lv_obj_set_pos(s_dm_thread_sheet, 16, 82);
-    lv_obj_set_style_radius(s_dm_thread_sheet, 8, 0);
+    lv_obj_set_size(s_dm_thread_sheet, 480, 424);
+    lv_obj_set_pos(s_dm_thread_sheet, 0, 56);
+    lv_obj_set_style_radius(s_dm_thread_sheet, 0, 0);
     lv_obj_set_style_bg_color(s_dm_thread_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_dm_thread_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_dm_thread_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_dm_thread_sheet, 12, 0);
-    configure_sheet_scroll(s_dm_thread_sheet);
+    lv_obj_set_style_border_width(s_dm_thread_sheet, 0, 0);
+    lv_obj_set_style_pad_all(s_dm_thread_sheet, 0, 0);
+    lv_obj_clear_flag(s_dm_thread_sheet, LV_OBJ_FLAG_SCROLLABLE);
     d1l_ui_modal_hide(s_dm_thread_sheet);
 }
 

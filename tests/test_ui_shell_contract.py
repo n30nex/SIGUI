@@ -259,17 +259,24 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
     assert "for (size_t i = 0; i < snapshot->recent_message_count; ++i)" in messages
     assert "for (size_t i = 0; i < snapshot->recent_dm_count; ++i)" in messages
 
+    nested_body = source.split("static lv_obj_t *create_nested_page_body", 1)[1].split(
+        "static lv_obj_t *create_nested_page_label", 1
+    )[0]
+    assert "lv_obj_set_size(body, 448, 292)" in nested_body
+    assert "lv_obj_set_pos(body, 16, 60)" in nested_body
+    assert "lv_obj_set_scroll_dir(body, LV_DIR_VER)" in nested_body
+    assert "lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN)" in nested_body
+
     detail = source.split("static void render_message_detail_sheet(void)", 1)[1].split(
         "static void open_message_detail_event_cb", 1
     )[0]
-    normal_detail = detail.split("if (!s_message_detail_advanced)", 1)[0]
-    assert 's_message_detail_advanced ? "Normal" : "Advanced"' in detail
-    assert '"%s  %s"' in normal_detail
-    assert '"Path %u hop%s"' in normal_detail
-    assert "#%lu" not in normal_detail
-    assert "uptime" not in normal_detail
-    assert '"seq %lu  uptime %lums  direction %s"' in detail
-    assert '"path hash %u byte  delivered %s"' in detail
+    assert 'create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44' in detail
+    assert 'create_nested_page_body(s_message_detail_sheet, "message detail body")' in detail
+    assert 'create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true)' in detail
+    assert detail.index('entry->text[0] ? entry->text : "-"') < detail.index('"Technical details"')
+    assert '"Hide technical details" : "Technical details"' in detail
+    assert '"Sequence  %lu  uptime %lums  direction %s"' in detail
+    assert '"Path hash  %u byte  delivered %s"' in detail
 
     compose = source.split("static void create_compose_sheet", 1)[1].split(
         "static void create_public_history_sheet", 1
@@ -683,7 +690,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "home_launcher_navigation",
         "public_compose_and_send",
         "public_history_search",
-        "dm_thread_read_and_reply",
+        "dm_thread_open_and_reply",
         "node_detail_inspection",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
@@ -711,7 +718,6 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "apply_public_search": "apply_public_search_event_cb",
         "open_dm_thread": "open_dm_thread_event_cb",
         "open_dm_reply": "reply_dm_thread_event_cb",
-        "mark_dm_thread_read": "read_dm_thread_event_cb",
         "open_contact_detail": "open_contact_detail_event_cb",
         "open_node_detail": "open_node_detail_event_cb",
         "close_node_detail": "close_node_detail_event_cb",
@@ -844,6 +850,16 @@ def test_dm_composer_opens_from_contact_rows():
 
 def test_dm_thread_sheet_opens_from_recent_dm_rows():
     source = read("main/ui/ui_phase1.c")
+    create = source.split("static void create_dm_thread_sheet", 1)[1].split(
+        "static void create_radio_settings_sheet", 1
+    )[0]
+    render = source.split("static void render_dm_thread_sheet(void)", 1)[1].split(
+        "static void show_dm_thread_for", 1
+    )[0]
+    show = source.split("static void show_dm_thread_for", 1)[1].split(
+        "static void open_home_dm_preview_event_cb", 1
+    )[0]
+
     assert "static lv_obj_t *s_dm_thread_sheet" in source
     assert "static char s_dm_thread_fingerprint" in source
     assert "create_dm_thread_sheet" in source
@@ -854,20 +870,45 @@ def test_dm_thread_sheet_opens_from_recent_dm_rows():
     assert "static bool s_dm_thread_unread[D1L_DM_STORE_CAPACITY]" in source
     assert "static size_t s_dm_thread_limit" in source
     assert "dm_thread_load_older_event_cb" in source
-    assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in source
-    assert "lv_obj_set_scroll_dir(list, LV_DIR_VER)" in source
-    assert "lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF)" in source
+    assert "lv_obj_set_size(s_dm_thread_sheet, 480, 424)" in create
+    assert "lv_obj_set_pos(s_dm_thread_sheet, 0, 56)" in create
+    assert 'create_button(s_dm_thread_sheet, "Back", 12, 6, 72, 44' in render
+    assert 'create_nested_page_body(s_dm_thread_sheet, "dm thread body")' in render
+    assert "d1l_app_model_copy_dm_thread_page(s_dm_thread_fingerprint" in render
+    assert "thread_count < total_matches && s_dm_thread_limit < D1L_DM_STORE_CAPACITY" in render
+    assert 'create_button(body, "Load Older", 0, 0, 424, 48' in render
+    assert "lv_obj_scroll_to_y(body, LV_COORD_MAX, LV_ANIM_OFF)" in render
     assert "lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE)" in source
     assert "lv_obj_add_event_cb(row, open_dm_thread_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_app_model_find_contact(s_dm_thread_fingerprint, &contact)" in source
     assert "open_dm_compose_for_contact(&contact)" in source
-    assert 'create_button(s_dm_thread_sheet, "Reply"' in source
-    assert 'create_button(s_dm_thread_sheet, "Load Older"' in source
+    reply = re.search(
+        r'create_button\(s_dm_thread_sheet,\s*"Reply",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
+        render,
+    )
+    assert reply is not None
+    reply_x, _, reply_width, reply_height = (int(value) for value in reply.groups())
+    assert reply_x == 16
+    assert reply_width == 448
+    assert reply_height >= 48
+    assert 'create_button(s_dm_thread_sheet, "Read"' not in render
+    assert "read_dm_thread_event_cb" not in source
+    assert "d1l_app_model_mark_dm_thread_read(fingerprint)" in show
+    assert show.index("d1l_app_model_mark_dm_thread_read(fingerprint)") < show.index(
+        "render_dm_thread_sheet();"
+    )
     assert "hide_dm_thread_sheet()" in source
 
 
 def test_public_message_detail_sheet_opens_from_public_rows():
     source = read("main/ui/ui_phase1.c")
+    create = source.split("static void create_message_detail_sheet", 1)[1].split(
+        "static void create_public_search_sheet", 1
+    )[0]
+    render = source.split("static void render_message_detail_sheet(void)", 1)[1].split(
+        "static void open_message_detail_event_cb", 1
+    )[0]
+
     assert "static lv_obj_t *s_message_detail_sheet" in source
     assert "static d1l_message_entry_t s_message_detail_message" in source
     assert "render_message_detail_sheet" in source
@@ -876,16 +917,30 @@ def test_public_message_detail_sheet_opens_from_public_rows():
     assert "reply_message_detail_event_cb" in source
     assert "create_message_detail_sheet" in source
     assert "lv_obj_add_event_cb(row, open_message_detail_event_cb, LV_EVENT_CLICKED" in source
-    assert '"Message Detail"' in source
-    assert '"Sender"' in source
-    assert 'create_button(s_message_detail_sheet, "Reply"' in source
+    assert "lv_obj_set_size(s_message_detail_sheet, 480, 424)" in create
+    assert "lv_obj_set_pos(s_message_detail_sheet, 0, 56)" in create
+    assert 'create_button(s_message_detail_sheet, "Back", 12, 6, 72, 44' in render
+    assert 'create_nested_page_body(s_message_detail_sheet, "message detail body")' in render
+    assert 'create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true)' in render
+    assert render.index('entry->text[0] ? entry->text : "-"') < render.index(
+        '"Technical details"'
+    )
+    reply = re.search(
+        r'create_button\(s_message_detail_sheet,\s*"Reply",\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)',
+        render,
+    )
+    assert reply is not None
+    reply_x, _, reply_width, reply_height = (int(value) for value in reply.groups())
+    assert reply_x == 16
+    assert reply_width == 448
+    assert reply_height >= 48
     assert 'snprintf(title, sizeof(title), "Reply %.32s"' in source
     assert 'snprintf(placeholder, sizeof(placeholder), "Reply to %.48s"' in source
     assert "show_public_compose_sheet(title, placeholder)" in source
-    assert '"Signal rssi %d  snr %s%d.%d"' in source
-    assert '"Path %u hop%s"' in source
-    assert 's_message_detail_advanced ? "Normal" : "Advanced"' in source
-    assert '"seq %lu  uptime %lums  direction %s"' in source
+    assert '"Signal  rssi %d  snr %s%d.%d"' in render
+    assert '"Path  %u hop%s"' in render
+    assert '"Hide technical details" : "Technical details"' in render
+    assert '"Sequence  %lu  uptime %lums  direction %s"' in source
     assert "message_delivery_label" in source
     assert "hide_message_detail_sheet()" in source
 

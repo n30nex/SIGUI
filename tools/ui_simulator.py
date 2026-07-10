@@ -50,6 +50,10 @@ BLUE = (147, 197, 253)
 VIOLET = (196, 181, 253)
 DIM = (5, 8, 13)
 SAMPLE_PUBLIC_KEY = "0BF0A701D5AE2DB660B6ABA17831F883937D290883817CBD1122334455667788"
+SAMPLE_LONG_PUBLIC_MESSAGE = (
+    "Public test reply received after the desk moved between rooms. The complete message stays readable here, "
+    "including the sender's note that the direct route recovered without losing the original message text."
+)
 
 
 @dataclass(frozen=True)
@@ -496,6 +500,7 @@ class Surface:
         rf_tx: bool = False,
         public_rf_tx: bool = False,
         dm_tx: bool = False,
+        marks_read: bool = False,
         destructive: bool = False,
         formats_sd: bool = False,
     ):
@@ -527,6 +532,7 @@ class Surface:
                 "rf_tx": rf_tx or public_rf_tx or dm_tx,
                 "public_rf_tx": public_rf_tx,
                 "dm_tx": dm_tx,
+                "marks_read": marks_read,
                 "destructive": destructive,
                 "formats_sd": formats_sd,
             }
@@ -596,6 +602,54 @@ class Surface:
                 "overflow": overflow,
             }
         )
+
+    def wrapped_text(
+        self,
+        label: str,
+        box: tuple[int, int, int, int],
+        size: int = 14,
+        color: tuple[int, int, int] = TEXT,
+        bold: bool = False,
+        line_height: int | None = None,
+    ) -> tuple[int, int]:
+        """Draw every word in a bounded multiline box and report lines/end y."""
+
+        font = self.font(size, bold)
+        x0, y0, x1, y1 = box
+        max_w = max(1, x1 - x0)
+        step = line_height or size + 7
+        lines: list[str] = []
+        current = ""
+        for word in label.split():
+            candidate = word if not current else f"{current} {word}"
+            if self.draw.textlength(candidate, font=font) <= max_w:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            current = word
+        if current or not lines:
+            lines.append(current)
+
+        available_lines = max(0, (y1 - y0) // step)
+        drawn_lines = lines[:available_lines]
+        for index, line in enumerate(drawn_lines):
+            line_y = y0 + index * step
+            self.text(line, (x0, line_y, x1, line_y + step), size, color, bold)
+        if label not in self.labels:
+            self.labels.append(label)
+        if len(lines) > available_lines:
+            self.text_records.append(
+                {
+                    "label": label,
+                    "drawn": "\n".join(drawn_lines),
+                    "box": list(box),
+                    "actual": list(box),
+                    "truncated": False,
+                    "overflow": True,
+                }
+            )
+        return len(lines), y0 + len(lines) * step
 
     def _fit(self, label: str, font: ImageFont.ImageFont, max_w: int) -> tuple[str, bool]:
         if self.draw.textlength(label, font=font) <= max_w:
@@ -1211,6 +1265,7 @@ def render_messages_dm_list(s: Surface, snap: Snapshot):
             kind="row",
             action="open_dm_thread",
             destination="dm_thread_sheet",
+            marks_read=True,
         )
         y += 66
         dm_rendered += 1
@@ -1789,20 +1844,66 @@ def render_public_search_sheet(s: Surface, snap: Snapshot):
     s.text("Keyboard opens for Public history search", (56, 318, 424, 350), 13, MUTED, False, "center")
 
 
-def render_message_detail_sheet(s: Surface, snap: Snapshot):
+def render_message_detail_page(s: Surface, snap: Snapshot, *, technical_details: bool):
     msg = snap.public_messages[1] if len(snap.public_messages) > 1 else snap.public_messages[0]
-    draw_sheet_frame(s, "Message Detail", msg.source)
-    draw_button(s, (214, 94, 316, 134), "Advanced", BLUE, action="toggle_message_detail_advanced")
-    draw_button(s, (326, 94, 436, 134), "Close", MUTED, action="close_message_detail", destination="messages")
-    s.text("Sender", (44, 154, 160, 174), 13, MUTED, True)
-    s.text(f"{msg.source}  received", (44, 176, 436, 200), 17, TEXT)
-    s.text("Message", (44, 212, 160, 232), 13, MUTED, True)
-    s.text(msg.text, (44, 234, 436, 260), 16, TEXT)
-    s.text("Signal", (44, 276, 160, 296), 13, MUTED, True)
-    s.text("RSSI -41  SNR 30", (44, 298, 436, 318), 15, GREEN)
-    s.text("Path", (44, 330, 160, 350), 13, MUTED, True)
-    s.text("1 hop", (44, 352, 436, 372), 14, BLUE)
-    draw_button(s, (44, 382, 200, 412), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
+    message_text = SAMPLE_LONG_PUBLIC_MESSAGE if technical_details else msg.text
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_message_detail", destination="messages")
+    s.text("Message Detail", (112, 62, 464, 90), 22, TEXT, True)
+    s.text(msg.source, (112, 90, 464, 112), 12, MUTED)
+
+    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
+    s.text("Sender", (28, 128, 160, 148), 13, MUTED, True)
+    s.text(f"{msg.source}  received", (28, 148, 452, 174), 16, TEXT)
+    s.text("Message", (28, 178, 160, 198), 13, MUTED, True)
+    wrapped_lines, message_end_y = s.wrapped_text(
+        message_text,
+        (28, 200, 452, 312),
+        15,
+        TEXT,
+        line_height=22,
+    )
+
+    disclosure_y = max(244, message_end_y + 8)
+    s.round_rect((28, disclosure_y, 452, disclosure_y + 48), SURFACE_2, BORDER, 8)
+    s.text("Technical details", (42, disclosure_y + 8, 330, disclosure_y + 40), 14, BLUE, True)
+    s.text("v" if technical_details else ">", (420, disclosure_y + 8, 440, disclosure_y + 40), 16, MUTED, True, "center")
+    s.touch_target(
+        "Technical details",
+        (28, disclosure_y, 452, disclosure_y + 48),
+        kind="disclosure",
+        action="toggle_message_detail_advanced",
+        destination="message_detail_sheet" if technical_details else "message_detail_technical_page",
+    )
+    content_end_y = disclosure_y + 48
+    if technical_details:
+        s.text("Signal", (36, content_end_y + 6, 106, content_end_y + 28), 12, MUTED, True)
+        s.text("RSSI -41  SNR 30", (108, content_end_y + 6, 280, content_end_y + 28), 13, GREEN)
+        s.text("Path", (290, content_end_y + 6, 336, content_end_y + 28), 12, MUTED, True)
+        s.text("1 hop", (340, content_end_y + 6, 444, content_end_y + 28), 13, BLUE)
+        content_end_y += 34
+
+    draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_public_reply", destination="compose_sheet")
+    s.metrics.update(
+        {
+            "message_body_scrollable": True,
+            "message_body_viewport": [16, 120, 464, 408],
+            "message_content_height": content_end_y - 120,
+            "message_wrapped_lines": wrapped_lines,
+            "message_text_complete": message_end_y <= 312,
+            "message_technical_details_expanded": technical_details,
+            "message_sticky_reply": True,
+        }
+    )
+
+
+def render_message_detail_sheet(s: Surface, snap: Snapshot):
+    render_message_detail_page(s, snap, technical_details=False)
+
+
+def render_message_detail_technical_page(s: Surface, snap: Snapshot):
+    render_message_detail_page(s, snap, technical_details=True)
 
 
 def render_contact_detail_sheet(s: Surface, snap: Snapshot):
@@ -2016,26 +2117,34 @@ def render_contact_export_sheet(s: Surface, snap: Snapshot):
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
     dm_thread_page_limit = 5
     load_older_available = len(snap.dm_messages) > dm_thread_page_limit
-    draw_sheet_frame(s, "DM Thread", "YKF Corebot")
-    s.text(f"Thread {min(len(snap.dm_messages), dm_thread_page_limit)}/{len(snap.dm_messages)} rows", (44, 132, 436, 150), 12, MUTED)
-    visible_messages = snap.dm_messages[-(2 if load_older_available else 3):]
-    y = 154
+    visible_messages = snap.dm_messages[-(3 if load_older_available else min(3, len(snap.dm_messages))):]
+    alias = snap.contacts[0].name if snap.contacts else "Direct message"
+    count_line = f"{min(len(snap.dm_messages), dm_thread_page_limit)} of {len(snap.dm_messages)} messages"
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_dm_thread", destination="messages_dm")
+    s.text(alias, (112, 62, 464, 90), 22, TEXT, True)
+    s.text(count_line, (112, 90, 464, 112), 12, MUTED)
+    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
+    y = 132
     for msg in visible_messages:
-        draw_row(s, (44, y, 436, y + 42), f"{msg.source}: {msg.text}", msg.meta, "new" if msg.unread else None)
-        y += 50
-    button_y = 304
+        draw_row(s, (28, y, 452, y + 54), f"{msg.source}: {msg.text}", msg.meta)
+        y += 62
     if load_older_available:
-        draw_button(s, (44, 260, 178, 304), "Load Older", BLUE, action="load_older_dm_thread")
-        button_y = 318
-    draw_button(s, (44, button_y, 160, button_y + 52), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
-    draw_button(s, (174, button_y, 290, button_y + 52), "Read", ACCENT, action="mark_dm_thread_read")
-    draw_button(s, (304, button_y, 420, button_y + 52), "Close", MUTED, action="close_dm_thread", destination="messages")
+        draw_button(s, (28, 344, 166, 392), "Load Older", BLUE, action="load_older_dm_thread")
+    draw_button(s, (16, 420, 464, 472), "Reply", GREEN, action="open_dm_reply", destination="compose_sheet")
     s.metrics.update(
         {
             "dm_thread_source_count": len(snap.dm_messages),
             "dm_thread_page_limit": dm_thread_page_limit,
             "dm_thread_rendered_count": len(visible_messages),
             "dm_thread_load_older_available": load_older_available,
+            "dm_thread_body_scrollable": True,
+            "dm_thread_body_viewport": [16, 120, 464, 408],
+            "dm_thread_marks_read_on_open": True,
+            "dm_thread_sticky_reply": True,
+            "dm_thread_alias": alias,
+            "dm_thread_count_line": count_line,
         }
     )
 
@@ -2184,6 +2293,7 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
     "message_detail_sheet": render_message_detail_sheet,
+    "message_detail_technical_page": render_message_detail_technical_page,
     "dm_thread_sheet": render_dm_thread_sheet,
     "route_detail_sheet": render_route_detail_sheet,
     "route_trace_sheet": render_route_trace_sheet,
@@ -2382,8 +2492,19 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
     "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
     "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
-    "message_detail_sheet": ("Message Detail", "Sender", "Message", "Signal", "Path", "Advanced", "Reply", "Close"),
-    "dm_thread_sheet": ("DM Thread", "Reply", "Read", "Close"),
+    "message_detail_sheet": ("Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"),
+    "message_detail_technical_page": (
+        "Message Detail",
+        "Back",
+        "Sender",
+        "Message",
+        "Technical details",
+        "Signal",
+        "Path",
+        "Reply",
+        SAMPLE_LONG_PUBLIC_MESSAGE,
+    ),
+    "dm_thread_sheet": ("Back", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
     "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Ping", "Close"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
@@ -2514,6 +2635,16 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "public_message_detail",
         "steps": (
             {"view": "messages", "action": "open_message_detail", "destination": "message_detail_sheet"},
+            {
+                "view": "message_detail_sheet",
+                "action": "toggle_message_detail_advanced",
+                "destination": "message_detail_technical_page",
+            },
+            {
+                "view": "message_detail_technical_page",
+                "action": "toggle_message_detail_advanced",
+                "destination": "message_detail_sheet",
+            },
             {"view": "message_detail_sheet", "action": "close_message_detail", "destination": "messages"},
         ),
     },
@@ -2525,13 +2656,17 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "name": "dm_thread_read_and_reply",
+        "name": "dm_thread_open_and_reply",
         "steps": (
             {"view": "messages", "action": "open_messages_dm", "destination": "messages_dm"},
-            {"view": "messages_dm", "action": "open_dm_thread", "destination": "dm_thread_sheet"},
+            {
+                "view": "messages_dm",
+                "action": "open_dm_thread",
+                "destination": "dm_thread_sheet",
+                "marks_read": True,
+            },
             {"view": "dm_thread_sheet", "action": "open_dm_reply", "destination": "compose_sheet"},
-            {"view": "dm_thread_sheet", "action": "mark_dm_thread_read"},
-            {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages"},
+            {"view": "dm_thread_sheet", "action": "close_dm_thread", "destination": "messages_dm"},
         ),
     },
     {
@@ -2649,7 +2784,7 @@ def find_target(views_by_name: dict[str, dict[str, object]], step: dict[str, obj
     for target in view["touch_targets"]:
         if target["action"] != step["action"]:
             continue
-        for key in ("destination", "rf_tx", "public_rf_tx", "dm_tx", "destructive", "formats_sd"):
+        for key in ("destination", "rf_tx", "public_rf_tx", "dm_tx", "marks_read", "destructive", "formats_sd"):
             if key in step and target.get(key) != step[key]:
                 break
         else:
