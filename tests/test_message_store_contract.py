@@ -57,6 +57,9 @@ def test_ui_and_console_expose_persistent_public_messages():
     app_source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
     console = read("main/comms/usb_console.c")
+    detail = ui.split("static void render_message_detail_sheet(void)", 1)[1].split(
+        "static void open_message_detail_event_cb", 1
+    )[0]
     assert "D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U" in app_header
     assert "recent_messages" in app_header
     assert "d1l_app_model_query_public_messages_page" in app_header
@@ -67,6 +70,11 @@ def test_ui_and_console_expose_persistent_public_messages():
     assert "render_message_detail_sheet" in ui
     assert "open_message_detail_event_cb" in ui
     assert "s_message_detail_message = *entry" in ui
+    assert 'create_nested_page_body(s_message_detail_sheet, "message detail body")' in detail
+    assert 'create_nested_page_label(body, entry->text[0] ? entry->text : "-", 0xF4F7FB, true)' in detail
+    assert detail.index('entry->text[0] ? entry->text : "-"') < detail.index(
+        '"Technical details"'
+    )
     assert "lv_textarea_set_max_length(s_compose_textarea, D1L_MESSAGE_MAX_CHARS)" in ui
     assert "static lv_obj_t *s_compose_counter" in ui
     assert "update_compose_counter()" in ui

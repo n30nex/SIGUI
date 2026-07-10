@@ -14,6 +14,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Home is a quiet dashboard with four task destinations: Messages, Network, Map, and More. A single Device card summarizes Time, Wi-Fi, Bluetooth, and SD state without turning each status into another competing button.
 - The bottom dock uses the same five-destination information architecture on non-Home screens: Home, Messages, Network, Map, and More. Packets and diagnostics remain available under More instead of competing with primary tasks.
 - Public message screen with persisted recent Public rows, a touch `test` send action, and a free-text composer sheet routed through the app model.
+- Message Detail and DM Thread use full-height nested pages with one Back control, a scrollable content body, and a sticky full-width Reply action. Long Public text determines its own height before Technical details; opening a DM thread marks it read.
 - Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows.
 - Map screen that reports offline SD tile-cache policy/readiness, retained route/node counts, disabled live-download state, and an optional serial-configured manual center.
 - Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.

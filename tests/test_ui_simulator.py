@@ -35,7 +35,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 38
+    assert len(views) == 39
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -94,6 +94,9 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert dm_thread["dm_thread_rendered_count"] <= 3
     assert dm_thread["dm_thread_page_limit"] == 5
     assert dm_thread["dm_thread_load_older_available"] is True
+    assert dm_thread["dm_thread_count_line"] == "5 of 32 messages"
+    assert dm_thread["dm_thread_marks_read_on_open"] is True
+    assert dm_thread["dm_thread_sticky_reply"] is True
     assert "Load Older" in set(views["dm_thread_sheet"]["labels"])
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
@@ -251,12 +254,26 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
     assert {"Public Search", "Search author or message", "Apply", "Clear", "Close"} <= labels_by_view["public_search_sheet"]
-    assert {"Message Detail", "Sender", "Message", "Signal", "Path", "Advanced", "Reply", "Close"} <= labels_by_view["message_detail_sheet"]
+    assert {"Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"} <= labels_by_view["message_detail_sheet"]
+    assert {
+        "Message Detail",
+        "Back",
+        "Sender",
+        "Message",
+        "Technical details",
+        "Signal",
+        "Path",
+        "Reply",
+        ui_simulator.SAMPLE_LONG_PUBLIC_MESSAGE,
+    } <= labels_by_view["message_detail_technical_page"]
     assert {"Contact Detail", "Trace", "Edit", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
     assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Edit Contact", "Contact alias", "Save", "Forget", "Close"} <= labels_by_view["contact_edit_sheet"]
     assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
-    assert {"DM Thread", "Thread 2/2 rows", "Reply", "Read"} <= labels_by_view["dm_thread_sheet"]
+    assert {"YKF Corebot", "2 of 2 messages", "Back", "Reply"} <= labels_by_view["dm_thread_sheet"]
+    assert "Read" not in labels_by_view["dm_thread_sheet"]
+    assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
+    assert "new" not in labels_by_view["dm_thread_sheet"]
     assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
@@ -286,7 +303,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "public_history_search",
         "public_message_detail",
         "public_message_reply",
-        "dm_thread_read_and_reply",
+        "dm_thread_open_and_reply",
         "node_detail_inspection",
         "contact_detail_management",
         "contact_edit_alias_and_forget",
@@ -310,9 +327,24 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["messages"]["open_public_history"]["destination"] == "public_history_sheet"
     assert actions_by_view["messages"]["open_message_detail"]["destination"] == "message_detail_sheet"
     assert actions_by_view["messages_dm"]["open_dm_thread"]["destination"] == "dm_thread_sheet"
+    assert actions_by_view["messages_dm"]["open_dm_thread"]["marks_read"] is True
     assert actions_by_view["message_detail_sheet"]["close_message_detail"]["destination"] == "messages"
     assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert actions_by_view["message_detail_sheet"]["toggle_message_detail_advanced"]["destination"] == "message_detail_technical_page"
+    assert actions_by_view["message_detail_technical_page"]["toggle_message_detail_advanced"]["destination"] == "message_detail_sheet"
     assert actions_by_view["message_detail_sheet"]["open_public_reply"]["destination"] == "compose_sheet"
+    assert actions_by_view["message_detail_sheet"]["open_public_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert actions_by_view["message_detail_sheet"]["open_public_reply"]["height"] >= 48
+    assert actions_by_view["message_detail_technical_page"]["open_public_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert views["message_detail_technical_page"]["metrics"]["message_text_complete"] is True
+    assert views["message_detail_technical_page"]["metrics"]["message_wrapped_lines"] >= 3
+    assert views["message_detail_technical_page"]["metrics"]["message_technical_details_expanded"] is True
+    assert views["message_detail_technical_page"]["metrics"]["message_body_scrollable"] is True
+    assert views["message_detail_technical_page"]["metrics"]["message_sticky_reply"] is True
+    assert actions_by_view["dm_thread_sheet"]["close_dm_thread"]["destination"] == "messages_dm"
+    assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["visual_box"] == [16, 420, 464, 472]
+    assert actions_by_view["dm_thread_sheet"]["open_dm_reply"]["height"] >= 48
+    assert "mark_dm_thread_read" not in actions_by_view["dm_thread_sheet"]
     assert not any(target["kind"] == "dock_tab" for target in views["compose_sheet"]["touch_targets"])
     assert not any(target["kind"] == "dock_tab" for target in views["home"]["touch_targets"])
     assert actions_by_view["home"]["open_messages_public"]["visual_box"] == [12, 16, 234, 156]
