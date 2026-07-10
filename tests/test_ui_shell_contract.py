@@ -1296,7 +1296,7 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "confirm_forget_contact_event_cb" not in probe
 
     run_probe = source.split("static void run_scroll_probe_on_ui_task", 1)[1].split(
-        "static bool begin_pending_scroll_probe", 1
+        "static uint32_t begin_pending_scroll_probe", 1
     )[0]
     assert 'strncmp(canonical, "contact_", strlen("contact_")) == 0' in run_probe
     assert "result->ok = result->surface_supported && result->target_found;" in run_probe

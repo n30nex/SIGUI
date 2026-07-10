@@ -207,13 +207,13 @@ def test_mesh_roles_back_paths_and_page_probes_are_non_destructive():
         assert forbidden not in probe
 
     page_classifier_start = ui.index("static void run_scroll_probe_on_ui_task")
-    page_classifier_end = ui.index("\nstatic bool begin_pending_scroll_probe", page_classifier_start)
+    page_classifier_end = ui.index("\nstatic uint32_t begin_pending_scroll_probe", page_classifier_start)
     page_classifier = ui[page_classifier_start:page_classifier_end]
     for surface in ("mesh_roles", "mesh_rooms", "mesh_repeaters"):
         assert f'strcmp(canonical, "{surface}") == 0' in page_classifier
     assert "const bool static_page" in page_classifier
     assert "result->target_found = target != NULL;" in page_classifier
-    assert "request_full_screen_repaint();" in page_classifier
+    assert page_classifier.index("force_ui_layout_repaint();") < page_classifier.index("if (static_page)")
     assert "return;" in page_classifier
     assert "result->ok = result->surface_supported && result->target_found;" in page_classifier
 

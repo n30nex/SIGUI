@@ -165,14 +165,24 @@ static size_t s_packet_row_limit = 100U;
 static size_t s_packet_skip_newest;
 static size_t s_packet_total_matches;
 static bool s_packet_sd_history_page;
+typedef struct {
+    uint32_t next_id;
+    uint32_t pending_id;
+    uint32_t inflight_id;
+    uint32_t completed_id;
+    uint32_t abandoned_id;
+    uint32_t signaled_id;
+    bool admission_reserved;
+} d1l_ui_probe_gate_t;
+
 static SemaphoreHandle_t s_scroll_probe_done_sem;
 static portMUX_TYPE s_scroll_probe_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_scroll_probe_pending;
+static d1l_ui_probe_gate_t s_scroll_probe_gate;
 static char s_scroll_probe_surface[24];
 static d1l_ui_scroll_probe_result_t s_scroll_probe_result;
 static SemaphoreHandle_t s_compose_probe_done_sem;
 static portMUX_TYPE s_compose_probe_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_compose_probe_pending;
+static d1l_ui_probe_gate_t s_compose_probe_gate;
 static char s_compose_probe_target[16];
 static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
@@ -405,12 +415,117 @@ static bool content_refresh_pending(void)
     return pending;
 }
 
+/* Probe-gate helpers are called only while the matching probe lock is held. */
+static bool probe_gate_busy(const d1l_ui_probe_gate_t *gate)
+{
+    return gate && (gate->admission_reserved || gate->pending_id != 0U ||
+                    gate->inflight_id != 0U);
+}
+
+static bool probe_gate_reserve_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || probe_gate_busy(gate)) {
+        return false;
+    }
+    gate->admission_reserved = true;
+    return true;
+}
+
+static uint32_t probe_gate_commit_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || !gate->admission_reserved || gate->pending_id != 0U ||
+        gate->inflight_id != 0U) {
+        return 0U;
+    }
+    gate->next_id++;
+    if (gate->next_id == 0U) {
+        gate->next_id++;
+    }
+    gate->pending_id = gate->next_id;
+    gate->completed_id = 0U;
+    gate->abandoned_id = 0U;
+    gate->signaled_id = 0U;
+    gate->admission_reserved = false;
+    return gate->pending_id;
+}
+
+static void probe_gate_abort_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (gate) {
+        gate->admission_reserved = false;
+    }
+}
+
+static uint32_t probe_gate_begin(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || gate->pending_id == 0U || gate->inflight_id != 0U) {
+        return 0U;
+    }
+    const uint32_t request_id = gate->pending_id;
+    gate->pending_id = 0U;
+    gate->inflight_id = request_id;
+    return request_id;
+}
+
+static void probe_gate_timeout(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || request_id == 0U) {
+        return;
+    }
+    if (gate->pending_id == request_id) {
+        gate->pending_id = 0U;
+    } else if (gate->inflight_id == request_id) {
+        if (gate->signaled_id == request_id) {
+            gate->inflight_id = 0U;
+            gate->completed_id = 0U;
+            gate->abandoned_id = 0U;
+            gate->signaled_id = 0U;
+        } else {
+            gate->abandoned_id = request_id;
+        }
+    }
+}
+
+static bool probe_gate_publish(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || request_id == 0U || gate->inflight_id != request_id) {
+        return false;
+    }
+    gate->completed_id = request_id;
+    return true;
+}
+
+static void probe_gate_finish_signal(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (gate && gate->inflight_id == request_id) {
+        gate->signaled_id = request_id;
+        if (gate->abandoned_id == request_id) {
+            gate->inflight_id = 0U;
+            gate->completed_id = 0U;
+            gate->abandoned_id = 0U;
+            gate->signaled_id = 0U;
+        }
+    }
+}
+
+static bool probe_gate_acknowledge(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || gate->inflight_id != request_id || gate->completed_id != request_id) {
+        return false;
+    }
+    gate->inflight_id = 0U;
+    gate->completed_id = 0U;
+    gate->abandoned_id = 0U;
+    gate->signaled_id = 0U;
+    return true;
+}
+
 static bool scroll_probe_pending(void)
 {
     bool pending;
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    pending = s_scroll_probe_pending;
+    pending = probe_gate_busy(&s_scroll_probe_gate);
     portEXIT_CRITICAL(&s_scroll_probe_lock);
     return pending;
 }
@@ -420,7 +535,7 @@ static bool compose_probe_pending(void)
     bool pending;
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    pending = s_compose_probe_pending;
+    pending = probe_gate_busy(&s_compose_probe_gate);
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return pending;
 }
@@ -6024,6 +6139,7 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
 {
     char canonical[24] = {0};
     d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
+    uint32_t request_id = 0U;
     if (!result || !scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -6031,29 +6147,49 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
         return ESP_ERR_INVALID_STATE;
     }
 
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    if (!probe_gate_reserve_admission(&s_scroll_probe_gate)) {
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+
+    /* The idle gate is reserved before stale-token drain, so a late producer
+     * cannot publish between drain and admission. */
     while (xSemaphoreTake(s_scroll_probe_done_sem, 0) == pdTRUE) {
     }
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    if (s_scroll_probe_pending) {
+    request_id = probe_gate_commit_admission(&s_scroll_probe_gate);
+    if (request_id == 0U) {
+        probe_gate_abort_admission(&s_scroll_probe_gate);
         portEXIT_CRITICAL(&s_scroll_probe_lock);
         return ESP_ERR_INVALID_STATE;
     }
     memset(&s_scroll_probe_result, 0, sizeof(s_scroll_probe_result));
     snprintf(s_scroll_probe_surface, sizeof(s_scroll_probe_surface), "%s", canonical);
-    s_scroll_probe_pending = true;
     portEXIT_CRITICAL(&s_scroll_probe_lock);
 
     if (xSemaphoreTake(s_scroll_probe_done_sem,
                        pdMS_TO_TICKS(D1L_UI_SCROLL_PROBE_TIMEOUT_MS)) != pdTRUE) {
         portENTER_CRITICAL(&s_scroll_probe_lock);
-        s_scroll_probe_pending = false;
+        probe_gate_timeout(&s_scroll_probe_gate, request_id);
         portEXIT_CRITICAL(&s_scroll_probe_lock);
         return ESP_ERR_TIMEOUT;
     }
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
+    if (s_scroll_probe_gate.completed_id != request_id ||
+        s_scroll_probe_gate.inflight_id != request_id) {
+        probe_gate_timeout(&s_scroll_probe_gate, request_id);
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     *result = s_scroll_probe_result;
+    if (!probe_gate_acknowledge(&s_scroll_probe_gate, request_id)) {
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
     return ESP_OK;
 }
@@ -6062,6 +6198,7 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
                                        d1l_ui_compose_probe_result_t *result)
 {
     char canonical[16] = {0};
+    uint32_t request_id = 0U;
     if (!result || !compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -6069,29 +6206,47 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
         return ESP_ERR_INVALID_STATE;
     }
 
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    if (!probe_gate_reserve_admission(&s_compose_probe_gate)) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+
     while (xSemaphoreTake(s_compose_probe_done_sem, 0) == pdTRUE) {
     }
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    if (s_compose_probe_pending) {
+    request_id = probe_gate_commit_admission(&s_compose_probe_gate);
+    if (request_id == 0U) {
+        probe_gate_abort_admission(&s_compose_probe_gate);
         portEXIT_CRITICAL(&s_compose_probe_lock);
         return ESP_ERR_INVALID_STATE;
     }
     memset(&s_compose_probe_result, 0, sizeof(s_compose_probe_result));
     snprintf(s_compose_probe_target, sizeof(s_compose_probe_target), "%s", canonical);
-    s_compose_probe_pending = true;
     portEXIT_CRITICAL(&s_compose_probe_lock);
 
     if (xSemaphoreTake(s_compose_probe_done_sem,
                        pdMS_TO_TICKS(D1L_UI_COMPOSE_PROBE_TIMEOUT_MS)) != pdTRUE) {
         portENTER_CRITICAL(&s_compose_probe_lock);
-        s_compose_probe_pending = false;
+        probe_gate_timeout(&s_compose_probe_gate, request_id);
         portEXIT_CRITICAL(&s_compose_probe_lock);
         return ESP_ERR_TIMEOUT;
     }
 
     portENTER_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_gate.completed_id != request_id ||
+        s_compose_probe_gate.inflight_id != request_id) {
+        probe_gate_timeout(&s_compose_probe_gate, request_id);
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     *result = s_compose_probe_result;
+    if (!probe_gate_acknowledge(&s_compose_probe_gate, request_id)) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return ESP_OK;
 }
@@ -6486,51 +6641,62 @@ static void run_scroll_probe_on_ui_task(const char *surface,
         strcmp(canonical, "mesh_roles") == 0 ||
         strcmp(canonical, "mesh_rooms") == 0 ||
         strcmp(canonical, "mesh_repeaters") == 0;
+    force_ui_layout_repaint();
     if (static_page) {
         result->target_found = target != NULL;
         result->scrollable = target && lv_obj_has_flag(target, LV_OBJ_FLAG_SCROLLABLE);
         result->ok = result->surface_supported && result->target_found;
-        request_full_screen_repaint();
         return;
     }
-    force_ui_layout_repaint();
     measure_scroll_probe_target(target, result);
 }
 
-static bool begin_pending_scroll_probe(char *surface, size_t surface_len)
+static uint32_t begin_pending_scroll_probe(char *surface, size_t surface_len)
 {
-    bool pending;
+    uint32_t request_id;
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    pending = s_scroll_probe_pending;
-    if (pending && surface && surface_len > 0) {
+    request_id = probe_gate_begin(&s_scroll_probe_gate);
+    if (request_id != 0U && surface && surface_len > 0) {
         snprintf(surface, surface_len, "%s", s_scroll_probe_surface);
-        s_scroll_probe_pending = false;
     }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
-    return pending;
+    return request_id;
 }
 
-static void finish_pending_scroll_probe(const d1l_ui_scroll_probe_result_t *result)
+static void finish_pending_scroll_probe(const d1l_ui_scroll_probe_result_t *result,
+                                        uint32_t request_id)
 {
+    bool signal_completion;
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    s_scroll_probe_result = *result;
+    signal_completion = probe_gate_publish(&s_scroll_probe_gate, request_id);
+    if (signal_completion) {
+        s_scroll_probe_result = *result;
+    }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
-    if (s_scroll_probe_done_sem) {
+
+    /* Publish before releasing the in-flight owner. A timed-out request can
+     * leave a semaphore token, but no later request can be admitted until the
+     * token has been published and can be drained safely. */
+    if (signal_completion && s_scroll_probe_done_sem) {
         (void)xSemaphoreGive(s_scroll_probe_done_sem);
     }
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    probe_gate_finish_signal(&s_scroll_probe_gate, request_id);
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
 }
 
 static void process_pending_scroll_probe(void)
 {
     char surface[24] = {0};
-    if (!begin_pending_scroll_probe(surface, sizeof(surface))) {
+    const uint32_t request_id = begin_pending_scroll_probe(surface, sizeof(surface));
+    if (request_id == 0U) {
         return;
     }
 
     d1l_ui_scroll_probe_result_t result = {0};
     run_scroll_probe_on_ui_task(surface, &result);
-    finish_pending_scroll_probe(&result);
+    finish_pending_scroll_probe(&result, request_id);
 }
 
 static bool object_is_visible(lv_obj_t *obj)
@@ -6885,40 +7051,48 @@ static void run_compose_probe_on_ui_task(const char *target,
         textarea_inside_sheet;
 }
 
-static bool begin_pending_compose_probe(char *target, size_t target_len)
+static uint32_t begin_pending_compose_probe(char *target, size_t target_len)
 {
-    bool pending;
+    uint32_t request_id;
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    pending = s_compose_probe_pending;
-    if (pending && target && target_len > 0) {
+    request_id = probe_gate_begin(&s_compose_probe_gate);
+    if (request_id != 0U && target && target_len > 0) {
         snprintf(target, target_len, "%s", s_compose_probe_target);
-        s_compose_probe_pending = false;
     }
     portEXIT_CRITICAL(&s_compose_probe_lock);
-    return pending;
+    return request_id;
 }
 
-static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result)
+static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result,
+                                         uint32_t request_id)
 {
+    bool signal_completion;
     portENTER_CRITICAL(&s_compose_probe_lock);
-    s_compose_probe_result = *result;
+    signal_completion = probe_gate_publish(&s_compose_probe_gate, request_id);
+    if (signal_completion) {
+        s_compose_probe_result = *result;
+    }
     portEXIT_CRITICAL(&s_compose_probe_lock);
-    if (s_compose_probe_done_sem) {
+    if (signal_completion && s_compose_probe_done_sem) {
         (void)xSemaphoreGive(s_compose_probe_done_sem);
     }
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    probe_gate_finish_signal(&s_compose_probe_gate, request_id);
+    portEXIT_CRITICAL(&s_compose_probe_lock);
 }
 
 static void process_pending_compose_probe(void)
 {
     char target[16] = {0};
-    if (!begin_pending_compose_probe(target, sizeof(target))) {
+    const uint32_t request_id = begin_pending_compose_probe(target, sizeof(target));
+    if (request_id == 0U) {
         return;
     }
 
     d1l_ui_compose_probe_result_t result = {0};
     run_compose_probe_on_ui_task(target, &result);
-    finish_pending_compose_probe(&result);
+    finish_pending_compose_probe(&result, request_id);
 }
 
 static void lock_event_cb(lv_event_t *event)
