@@ -46,6 +46,8 @@ CONTACT_HIERARCHY_VIEWS = frozenset(
     }
 )
 MESH_ROLE_VIEWS = frozenset({"mesh_roles_sheet", "mesh_rooms_page", "mesh_repeaters_page"})
+STORAGE_HIERARCHY_VIEWS = frozenset({"storage_setup_sheet", "storage_card_page", "storage_data_page"})
+STORAGE_SAFETY_COPY = "FAT32 only - This device never formats cards."
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -57,6 +59,10 @@ ACCENT = (77, 219, 204)
 GREEN = (167, 243, 208)
 AMBER = (251, 191, 36)
 RED = (248, 113, 113)
+WARNING_TEXT = (252, 165, 165)
+WARNING_SUMMARY = (217, 137, 147)
+WARNING_BG = (35, 19, 23)
+WARNING_BORDER = (127, 29, 29)
 BLUE = (147, 197, 253)
 VIOLET = (196, 181, 253)
 DIM = (5, 8, 13)
@@ -113,12 +119,25 @@ class Snapshot:
     dm_messages: tuple[Message, ...]
     packets: tuple[Packet, ...]
     routes: tuple[Packet, ...]
-    storage_state: str
+    storage_sd_present: bool
+    storage_sd_mounted: bool
+    storage_sd_data_root_ready: bool
+    storage_sd_needs_fat32: bool
+    storage_setup_required: bool
+    storage_data_enabled: bool
+    storage_retained_sd_degraded: bool
+    storage_sd_state: str
+    storage_sd_filesystem: str
+    storage_capacity_kb: int
+    storage_free_kb: int
     storage_backend: str
-    storage_detail: str
-    storage_stores: str
+    message_store_backend: str
+    dm_store_backend: str
+    packet_log_backend: str
+    route_store_backend: str
     storage_setup_action: str
     map_tile_backend: str
+    export_backend: str
     map_tile_cache_ready: bool
     map_tile_cache_policy: str
     map_tile_cache_path_template: str
@@ -177,12 +196,25 @@ def sample_snapshot() -> Snapshot:
             Packet("Public route", "RX", "target Public hop 1", "via Krabs Lagoon", ""),
             Packet("DM route", "TX", "target 0BF0A direct", "direct path retained", ""),
         ),
-        storage_state="pending bridge",
-        storage_backend="NVS fallback",
-        storage_detail="RP2040 SD bridge pending",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=False,
+        storage_sd_mounted=False,
+        storage_sd_data_root_ready=False,
+        storage_sd_needs_fat32=False,
+        storage_setup_required=False,
+        storage_data_enabled=False,
+        storage_retained_sd_degraded=False,
+        storage_sd_state="protocol_pending",
+        storage_sd_filesystem="unknown",
+        storage_capacity_kb=0,
+        storage_free_kb=0,
+        storage_backend="nvs",
+        message_store_backend="nvs",
+        dm_store_backend="nvs",
+        packet_log_backend="nvs",
+        route_store_backend="nvs",
         storage_setup_action="bridge_protocol_pending",
         map_tile_backend="unavailable",
+        export_backend="serial",
         map_tile_cache_ready=False,
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
@@ -283,12 +315,25 @@ def large_mesh_snapshot() -> Snapshot:
         dm_messages=dm_messages,
         packets=packets,
         routes=routes,
-        storage_state="pending bridge",
-        storage_backend="NVS fallback",
-        storage_detail="RP2040 SD bridge pending",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=False,
+        storage_sd_mounted=False,
+        storage_sd_data_root_ready=False,
+        storage_sd_needs_fat32=False,
+        storage_setup_required=False,
+        storage_data_enabled=False,
+        storage_retained_sd_degraded=False,
+        storage_sd_state="protocol_pending",
+        storage_sd_filesystem="unknown",
+        storage_capacity_kb=0,
+        storage_free_kb=0,
+        storage_backend="nvs",
+        message_store_backend="nvs",
+        dm_store_backend="nvs",
+        packet_log_backend="nvs",
+        route_store_backend="nvs",
         storage_setup_action="bridge_protocol_pending",
         map_tile_backend="unavailable",
+        export_backend="serial",
         map_tile_cache_ready=False,
         map_tile_cache_policy="sd_offline_cache_when_ready",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
@@ -311,10 +356,7 @@ def large_mesh_snapshot() -> Snapshot:
 def storage_no_card_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="no card",
-        storage_backend="NVS fallback",
-        storage_detail="No SD card reported",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_state="no_card",
         storage_setup_action="insert_card",
     )
 
@@ -322,10 +364,11 @@ def storage_no_card_snapshot() -> Snapshot:
 def storage_needs_fat32_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="needs FAT32",
-        storage_backend="NVS fallback",
-        storage_detail="Prepare FAT32 on a computer",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=True,
+        storage_sd_needs_fat32=True,
+        storage_setup_required=True,
+        storage_sd_state="needs_fat32",
+        storage_capacity_kb=31_457_280,
         storage_setup_action="prepare_fat32_on_computer",
     )
 
@@ -333,10 +376,11 @@ def storage_needs_fat32_snapshot() -> Snapshot:
 def storage_mount_error_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="mount error",
-        storage_backend="NVS fallback",
-        storage_detail="RP2040 SdFat mount diagnostics",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=True,
+        storage_sd_needs_fat32=True,
+        storage_setup_required=True,
+        storage_sd_state="error",
+        storage_capacity_kb=31_457_280,
         storage_setup_action="inspect_rp2040_sd_mount_error_firmware_path",
     )
 
@@ -344,10 +388,7 @@ def storage_mount_error_snapshot() -> Snapshot:
 def storage_probe_error_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="probe error",
-        storage_backend="NVS fallback",
-        storage_detail="RP2040 CMD0/CMD8 diagnostics",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_state="bridge_reported",
         storage_setup_action="inspect_rp2040_sd_cmd0_firmware_path",
     )
 
@@ -355,10 +396,13 @@ def storage_probe_error_snapshot() -> Snapshot:
 def storage_root_missing_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="root missing",
-        storage_backend="NVS fallback",
-        storage_detail="DeskOS root missing",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=True,
+        storage_sd_mounted=True,
+        storage_setup_required=True,
+        storage_sd_state="deskos_root_missing",
+        storage_sd_filesystem="fat32",
+        storage_capacity_kb=31_457_280,
+        storage_free_kb=29_360_128,
         storage_setup_action="retry_storage_mount",
     )
 
@@ -366,49 +410,90 @@ def storage_root_missing_snapshot() -> Snapshot:
 def storage_ready_pending_migration_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
-        storage_state="ready",
-        storage_backend="NVS fallback",
-        storage_detail="SD valid, stores pending",
-        storage_stores="messages NVS / packets NVS / routes NVS",
+        storage_sd_present=True,
+        storage_sd_mounted=True,
+        storage_sd_data_root_ready=True,
+        storage_sd_state="ready",
+        storage_sd_filesystem="fat32",
+        storage_capacity_kb=31_457_280,
+        storage_free_kb=29_360_128,
         storage_setup_action="store_migration_pending",
+        map_tile_backend="sd_pending_store_migration",
     )
 
 
 def storage_ready_packet_log_sd_snapshot() -> Snapshot:
     return replace(
-        sample_snapshot(),
-        storage_state="ready",
-        storage_backend="Mixed storage",
-        storage_detail="SD packet-log canary",
-        storage_stores="messages NVS / packets SD / routes NVS",
+        storage_ready_pending_migration_snapshot(),
+        storage_data_enabled=True,
+        storage_backend="mixed",
+        packet_log_backend="sd",
         storage_setup_action="packet_log_canary_enabled",
     )
 
 
 def storage_ready_retained_history_sd_snapshot() -> Snapshot:
     return replace(
-        sample_snapshot(),
-        storage_state="ready",
-        storage_backend="Mixed storage",
-        storage_detail="SD retained-history stores",
-        storage_stores="messages SD / packets SD / routes SD",
+        storage_ready_pending_migration_snapshot(),
+        storage_data_enabled=True,
+        storage_backend="mixed",
+        message_store_backend="sd",
+        dm_store_backend="sd",
+        packet_log_backend="sd",
+        route_store_backend="sd",
         storage_setup_action="retained_history_sd_enabled",
     )
 
 
 def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
     return replace(
-        sample_snapshot(),
-        storage_state="ready",
-        storage_backend="Mixed storage",
-        storage_detail="SD retained stores + map cache",
-        storage_stores="msg/pkt/route/map SD",
-        storage_setup_action="retained_history_sd_enabled",
+        storage_ready_retained_history_sd_snapshot(),
         map_tile_backend="sd_map_tiles_ready",
+        export_backend="sd_diagnostic_exports_ready",
         map_tile_cache_ready=True,
         map_tile_download_supported=False,
         map_tile_render_supported=False,
         map_tile_download_state="tile_render_pending",
+    )
+
+
+def storage_ready_map_only_sd_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_pending_migration_snapshot(),
+        map_tile_backend="sd_map_tiles_ready",
+        map_tile_cache_ready=True,
+    )
+
+
+def storage_ready_export_only_sd_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_pending_migration_snapshot(),
+        export_backend="sd_diagnostic_exports_ready",
+    )
+
+
+def storage_degraded_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_retained_history_sd_snapshot(),
+        storage_retained_sd_degraded=True,
+    )
+
+
+def storage_media_error_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_sd_present=True,
+        storage_setup_required=True,
+        storage_sd_state="error",
+        storage_setup_action="not_available",
+    )
+
+
+def storage_bridge_reported_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_sd_state="bridge_reported",
+        storage_setup_action="not_available",
     )
 
 
@@ -435,6 +520,11 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-ready-packet-log-sd": storage_ready_packet_log_sd_snapshot,
     "storage-ready-retained-history-sd": storage_ready_retained_history_sd_snapshot,
     "storage-ready-map-tiles-sd": storage_ready_map_tiles_sd_snapshot,
+    "storage-ready-map-only-sd": storage_ready_map_only_sd_snapshot,
+    "storage-ready-export-only-sd": storage_ready_export_only_sd_snapshot,
+    "storage-degraded": storage_degraded_snapshot,
+    "storage-media-error": storage_media_error_snapshot,
+    "storage-bridge-reported": storage_bridge_reported_snapshot,
     "manual-location": manual_location_snapshot,
 }
 
@@ -702,6 +792,7 @@ class Surface:
             "missing_required_labels": missing,
             "truncated_labels": [r for r in self.text_records if r["truncated"]],
             "overflow": [r for r in self.text_records if r["overflow"]],
+            "sibling_text_overlaps": text_record_overlaps(self.text_records),
             "text_count": len(self.text_records),
             "metrics": self.metrics,
         }
@@ -743,6 +834,166 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
     return BLUE
 
 
+def storage_needs_attention(snap: Snapshot) -> bool:
+    return (
+        snap.storage_retained_sd_degraded
+        or snap.storage_setup_action in (
+            "inspect_rp2040_sd_cmd0_firmware_path",
+            "inspect_rp2040_sd_mount_error_firmware_path",
+        )
+        or snap.storage_sd_state in ("error", "bridge_reported")
+    )
+
+
+def storage_menu_status(snap: Snapshot) -> str:
+    if storage_needs_attention(snap):
+        return "Needs attention"
+    if snap.storage_data_enabled or snap.storage_sd_data_root_ready:
+        return "Ready"
+    if snap.storage_setup_required:
+        return "Needs setup"
+    if snap.storage_sd_present:
+        return "Detected"
+    return "Internal storage"
+
+
+def storage_friendly_state(snap: Snapshot) -> tuple[str, str, str, tuple[int, int, int]]:
+    action = snap.storage_setup_action
+    if storage_needs_attention(snap):
+        if not snap.storage_retained_sd_degraded:
+            return (
+                "Card needs attention",
+                "Internal storage is active.",
+                "Technical details are available over USB.",
+                WARNING_TEXT,
+            )
+        return (
+            "SD needs attention",
+            "Internal storage is active.",
+            "Saved data remains available.",
+            WARNING_TEXT,
+        )
+    if action == "bridge_unavailable":
+        return (
+            "Using internal storage",
+            "SD support is unavailable.",
+            "Internal storage remains active.",
+            AMBER,
+        )
+    if action == "bridge_protocol_pending":
+        return (
+            "Using internal storage",
+            "SD support is starting.",
+            "Your data stays available internally.",
+            AMBER,
+        )
+    if action in ("run_storage_mount", "wait_for_storage_mount"):
+        return (
+            "Checking SD card",
+            "Using internal storage for now.",
+            "The card check finishes automatically.",
+            AMBER,
+        )
+    if action == "insert_card":
+        return (
+            "No SD card",
+            "Internal storage is active.",
+            "Insert a FAT32 card when you want more space.",
+            AMBER,
+        )
+    if action == "prepare_fat32_on_computer":
+        return (
+            "Card needs FAT32",
+            "Prepare it on a computer.",
+            "Prepare the card as FAT32 on a computer, then reinsert it.",
+            AMBER,
+        )
+    if action == "backup_reformat_fat32_on_computer":
+        return (
+            "Card needs FAT32",
+            "Prepare it on a computer.",
+            "Prepare as FAT32, then reinsert the card.",
+            AMBER,
+        )
+    if action in ("retry_storage_mount", "use_nvs_fallback"):
+        return (
+            "Card setup incomplete",
+            "Internal storage is active.",
+            "Reinsert the card to finish creating DeskOS folders.",
+            AMBER,
+        )
+    if action == "forced_nvs":
+        return (
+            "Internal storage only",
+            "SD storage is paused.",
+            "Internal storage remains active.",
+            AMBER,
+        )
+    if snap.storage_data_enabled:
+        return (
+            "SD card ready",
+            "SD is used with internal backup.",
+            "Saved data stays mirrored internally.",
+            GREEN,
+        )
+    if snap.storage_sd_data_root_ready:
+        return (
+            "SD card ready",
+            "Using internal storage.",
+            "The card is ready while saved data stays internal.",
+            GREEN,
+        )
+    return (
+        "Using internal storage",
+        "SD is not ready yet.",
+        "Your data stays available internally.",
+        AMBER,
+    )
+
+
+def retained_storage_label(backend: str) -> str:
+    if backend in ("sd", "mixed"):
+        return "SD + internal backup"
+    return "Internal"
+
+
+def map_storage_label(backend: str) -> str:
+    if backend == "sd_map_tiles_ready":
+        return "SD card"
+    if backend == "sd_pending_store_migration":
+        return "Pending"
+    return "Unavailable"
+
+
+def export_storage_label(backend: str) -> str:
+    if backend == "sd_diagnostic_exports_ready":
+        return "SD card"
+    return "USB only"
+
+
+def storage_root_location_summary(snap: Snapshot) -> str:
+    retained_backends = (
+        snap.message_store_backend,
+        snap.dm_store_backend,
+        snap.packet_log_backend,
+        snap.route_store_backend,
+    )
+    uses_sd = (
+        any(backend in ("sd", "mixed") for backend in retained_backends)
+        or snap.map_tile_backend == "sd_map_tiles_ready"
+        or snap.export_backend == "sd_diagnostic_exports_ready"
+    )
+    return "SD + internal" if uses_sd else "Internal"
+
+
+def storage_size_label(size_kb: int) -> str:
+    if size_kb >= 1024 * 1024:
+        return f"{size_kb / (1024 * 1024):.1f} GB"
+    if size_kb >= 1024:
+        return f"{size_kb / 1024:.1f} MB"
+    return f"{size_kb} KB"
+
+
 def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     if compact:
         s.rect((0, 0, WIDTH, HOME_TOP_BAR_H), (11, 18, 28))
@@ -753,7 +1004,7 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
     s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
-    s.text(f"Wi-Fi off  BLE off  SD {snap.storage_state}", (202, 31, 464, 49), 11, MUTED, align="right")
+    s.text(f"Wi-Fi off  BLE off  SD {storage_menu_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -1001,14 +1252,38 @@ def draw_more_category(
     *,
     action: str,
     expanded: bool = False,
+    warning: bool = False,
 ):
     """Draw one calm, full-width disclosure row on the More accordion."""
 
     x0, y0, x1, y1 = box
-    s.round_rect(box, SURFACE, BORDER, 8)
-    s.text(title, (x0 + 12, y0 + 4, x1 - 34, y0 + 24), 13, color, True)
-    s.text(summary, (x0 + 12, y0 + 24, x1 - 34, y1 - 4), 10, MUTED)
-    s.text("v" if expanded else ">", (x1 - 24, y0 + 5, x1 - 10, y1 - 5), 16, MUTED, True, "center")
+    s.round_rect(
+        box,
+        WARNING_BG if warning else SURFACE,
+        WARNING_BORDER if warning else BORDER,
+        8,
+    )
+    s.text(
+        title,
+        (x0 + 12, y0 + 4, x1 - 34, y0 + 24),
+        13,
+        WARNING_TEXT if warning else color,
+        True,
+    )
+    s.text(
+        summary,
+        (x0 + 12, y0 + 24, x1 - 34, y1 - 4),
+        10,
+        WARNING_SUMMARY if warning else MUTED,
+    )
+    s.text(
+        "v" if expanded else ">",
+        (x1 - 24, y0 + 5, x1 - 10, y1 - 5),
+        16,
+        WARNING_TEXT if warning else MUTED,
+        True,
+        "center",
+    )
     s.touch_target(title, box, kind="menu_category", action=action)
 
 
@@ -1026,12 +1301,12 @@ def draw_more_leaf(
     """Draw one leaf row from the expanded More accordion."""
 
     x0, y0, x1, y1 = box
-    s.round_rect(box, (35, 19, 23) if warning else SURFACE, (127, 29, 29) if warning else BORDER, 8)
+    s.round_rect(box, WARNING_BG if warning else SURFACE, WARNING_BORDER if warning else BORDER, 8)
     s.text(title, (x0 + 28, y0 + 12, x0 + 220, y1 - 12), 14, color, True)
     status_right = x1 - 34 if action else x1 - 16
-    s.text(status, (x0 + 220, y0 + 12, status_right, y1 - 12), 12, RED if warning else MUTED, False, "right")
+    s.text(status, (x0 + 220, y0 + 12, status_right, y1 - 12), 12, WARNING_TEXT if warning else MUTED, False, "right")
     if action:
-        s.text(">", (x1 - 26, y0 + 10, x1 - 10, y1 - 10), 16, RED if warning else MUTED, True, "center")
+        s.text(">", (x1 - 26, y0 + 10, x1 - 10, y1 - 10), 16, WARNING_TEXT if warning else MUTED, True, "center")
         s.touch_target(title, box, kind="menu_leaf", action=action, destination=destination)
 
 
@@ -1173,7 +1448,8 @@ def draw_home_body(s: Surface, snap: Snapshot):
         )
 
     device_box = (12, 312, 468, 428)
-    storage_color = GREEN if snap.storage_backend != "NVS fallback" else AMBER
+    storage_status = storage_menu_status(snap)
+    storage_color = GREEN if storage_status == "Ready" else (RED if snap.storage_retained_sd_degraded else AMBER)
     s.round_rect(device_box, (13, 23, 18), (31, 55, 46), 8)
     s.text("Device status", (26, 320, 230, 346), 16, TEXT, True)
     s.text("Settings and support", (26, 342, 260, 362), 10, MUTED)
@@ -1182,7 +1458,7 @@ def draw_home_body(s: Surface, snap: Snapshot):
         ("Time", "Syncing", MUTED),
         ("Wi-Fi", "Off", MUTED),
         ("BLE", "Off", MUTED),
-        ("SD", snap.storage_state, storage_color),
+        ("SD", storage_status, storage_color),
     )
     for index, (label, value, color) in enumerate(device_columns):
         x0 = 26 + index * 110
@@ -1591,7 +1867,8 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
     """Return the stable More hierarchy represented by the firmware accordion."""
 
     packet_status = f"{len(snap.packets)} saved"
-    storage_status = "Ready" if snap.storage_state == "ready" else "Needs setup"
+    storage_status = storage_menu_status(snap)
+    storage_warning = storage_needs_attention(snap)
     map_status = "Ready" if snap.map_tile_cache_ready else ("Not set up" if snap.map_tile_sideload_supported else "Unavailable")
     return (
         {
@@ -1599,6 +1876,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "title": "Tools",
             "summary": "Packets and diagnostics",
             "color": ACCENT,
+            "warning": False,
             "action": "toggle_more_tools",
             "leaves": (
                 ("Packets", packet_status, BLUE, "open_packets", "packets", False),
@@ -1610,6 +1888,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "title": "Connections",
             "summary": "Wi-Fi, Bluetooth, and radio",
             "color": GREEN,
+            "warning": False,
             "action": "toggle_more_connections",
             "leaves": (
                 ("Wi-Fi", "Off", TEXT, "open_wifi_settings", "wifi_setup_sheet", False),
@@ -1620,11 +1899,19 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
         {
             "key": "storage_maps",
             "title": "Storage & maps",
-            "summary": "SD card and offline maps",
-            "color": AMBER,
+            "summary": "SD needs attention" if storage_warning else "SD card and offline maps",
+            "color": WARNING_TEXT if storage_warning else AMBER,
+            "warning": storage_warning,
             "action": "toggle_more_storage_maps",
             "leaves": (
-                ("SD Card", storage_status, GREEN if storage_status == "Ready" else TEXT, "open_storage_setup", "storage_setup_sheet", False),
+                (
+                    "SD Card",
+                    storage_status,
+                    RED if storage_warning else (GREEN if storage_status == "Ready" else TEXT),
+                    "open_storage_setup",
+                    "storage_setup_sheet",
+                    storage_warning,
+                ),
                 ("Offline Maps", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_tiles", "map_tiles_sheet", False),
             ),
         },
@@ -1633,6 +1920,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "title": "Device",
             "summary": "Display and identity",
             "color": BLUE,
+            "warning": False,
             "action": "toggle_more_device",
             "leaves": (
                 ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
@@ -1644,6 +1932,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "title": "Support",
             "summary": "About this device",
             "color": VIOLET,
+            "warning": False,
             "action": "toggle_more_support",
             "leaves": (("About", "Version 1.0.0-rc1", TEXT, None, None, False),),
         },
@@ -1652,6 +1941,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "title": "Advanced",
             "summary": "Developer options",
             "color": RED,
+            "warning": True,
             "action": "toggle_more_advanced",
             "leaves": (("Mesh advertise", "Broadcast presence", RED, "open_advert_sheet", "advert_sheet", True),),
         },
@@ -1676,6 +1966,7 @@ def render_settings(s: Surface, snap: Snapshot):
             str(category["summary"]),
             category["color"],
             action=str(category["action"]),
+            warning=bool(category["warning"]),
         )
     draw_dock(s, "Settings")
 
@@ -1695,6 +1986,7 @@ def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
         selected["color"],
         action=str(selected["action"]),
         expanded=True,
+        warning=bool(selected["warning"]),
     )
 
     y0 = 162
@@ -1724,6 +2016,7 @@ def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
             str(category["summary"]),
             category["color"],
             action=str(category["action"]),
+            warning=bool(category["warning"]),
         )
         y0 += 52
 
@@ -2090,26 +2383,289 @@ def render_radio_settings_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (248, 356, 340, 386), "Close", MUTED, action="close_radio_settings", destination="settings")
 
 
-def render_storage_setup_sheet(s: Surface, snap: Snapshot):
-    if snap.storage_setup_action == "inspect_rp2040_sd_mount_error_firmware_path":
-        subtitle = "Firmware mount issue"
-        guidance = "Inspect RP2040 mount diagnostics; do not format on-device."
-    elif snap.storage_setup_action == "inspect_rp2040_sd_cmd0_firmware_path":
-        subtitle = "Firmware probe issue"
-        guidance = "Inspect RP2040 CMD0/CMD8 diagnostics; do not format on-device."
-    elif snap.storage_setup_action == "prepare_fat32_on_computer":
-        subtitle = "FAT32 card required"
-        guidance = "Prepare FAT32 on a computer; DeskOS only creates folders."
-    else:
-        subtitle = "FAT32 only, no format"
-        guidance = "No device format; onboard NVS remains fallback."
+def draw_storage_page_header(
+    s: Surface,
+    snap: Snapshot,
+    title: str,
+    subtitle: str,
+    *,
+    back_action: str,
+    back_destination: str,
+):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action=back_action, destination=back_destination)
+    s.text(title, (112, 62, 464, 90), 22, TEXT, True)
+    s.text(subtitle, (112, 90, 464, 112), 12, MUTED)
 
-    draw_sheet_frame(s, "SD Card", subtitle)
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_storage_setup", destination="settings")
-    draw_metric(s, (44, 154, 436, 214), "SD Card", snap.storage_state, snap.storage_detail, AMBER)
-    draw_metric(s, (44, 226, 436, 286), "Backends", snap.storage_backend, snap.storage_stores, BLUE)
-    s.text(f"setup {snap.storage_setup_action}", (44, 302, 436, 324), 14, TEXT, True)
-    s.text(guidance, (44, 328, 436, 360), 12, AMBER, True)
+
+def draw_storage_safety(s: Surface):
+    safety_box = (16, 424, 464, 468)
+    s.round_rect(safety_box, (36, 29, 12), (124, 91, 18), 8)
+    s.text(STORAGE_SAFETY_COPY, (28, 434, 452, 458), 12, AMBER, True, "center")
+    s.metrics["storage_safety_box"] = list(safety_box)
+
+
+def draw_storage_value_row(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    value: str,
+    color: tuple[int, int, int] = TEXT,
+):
+    x0, y0, x1, y1 = box
+    s.round_rect(box, SURFACE_2, BORDER, 8)
+    s.text(title, (x0 + 12, y0 + 9, x0 + 220, y1 - 9), 13, TEXT, True)
+    s.text(value, (x0 + 220, y0 + 9, x1 - 12, y1 - 9), 12, color, True, "right")
+
+
+def draw_storage_text_pair(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    value: str,
+    color: tuple[int, int, int] = TEXT,
+):
+    x0, y0, x1, y1 = box
+    s.text(title, (x0, y0 + 8, x0 + 192, y1 - 8), 13, MUTED, True)
+    s.text(value, (x0 + 192, y0 + 8, x1, y1 - 8), 12, color, True, "right")
+
+
+def storage_card_menu_status(snap: Snapshot) -> str:
+    if storage_needs_attention(snap):
+        return "Needs attention"
+    if snap.storage_setup_action == "bridge_protocol_pending":
+        return "Starting"
+    if snap.storage_setup_action == "bridge_unavailable":
+        return "Unavailable"
+    if snap.storage_setup_action in ("run_storage_mount", "wait_for_storage_mount"):
+        return "Checking"
+    if snap.storage_sd_present and snap.storage_sd_mounted and snap.storage_sd_data_root_ready:
+        return "Ready"
+    if snap.storage_sd_present:
+        return "Needs setup"
+    return "No card" if snap.storage_setup_action == "insert_card" else "Not confirmed"
+
+
+def storage_card_readiness(snap: Snapshot) -> str:
+    if storage_needs_attention(snap):
+        return "Needs attention"
+    if snap.storage_setup_action in ("bridge_unavailable", "bridge_protocol_pending"):
+        return "Not available"
+    if snap.storage_setup_action == "insert_card":
+        return "No card"
+    if snap.storage_setup_action in ("run_storage_mount", "wait_for_storage_mount"):
+        return "Checking"
+    if snap.storage_sd_needs_fat32:
+        return "Needs FAT32"
+    if snap.storage_sd_present and snap.storage_sd_mounted and snap.storage_sd_data_root_ready:
+        return "Ready"
+    if snap.storage_sd_present and snap.storage_sd_mounted:
+        return "Setup incomplete"
+    return "Not ready"
+
+
+def storage_card_state(snap: Snapshot) -> str:
+    action = snap.storage_setup_action
+    if storage_needs_attention(snap):
+        return "Card needs attention"
+    if action == "bridge_unavailable":
+        return "Card reader unavailable"
+    if action == "bridge_protocol_pending":
+        return "Card reader starting"
+    if action == "insert_card":
+        return "No card inserted"
+    if action in ("run_storage_mount", "wait_for_storage_mount"):
+        return "Checking card"
+    if action in ("prepare_fat32_on_computer", "backup_reformat_fat32_on_computer") or snap.storage_sd_needs_fat32:
+        return "FAT32 card required"
+    if action in ("retry_storage_mount", "use_nvs_fallback") and snap.storage_sd_present:
+        return "Preparing DeskOS folders"
+    if snap.storage_sd_present and snap.storage_sd_mounted and snap.storage_sd_data_root_ready:
+        return "Ready"
+    if snap.storage_sd_present:
+        return "Detected - not ready"
+    return "Not detected"
+
+
+def storage_filesystem_label(snap: Snapshot) -> str:
+    if not snap.storage_sd_present:
+        return "Not available"
+    if snap.storage_sd_needs_fat32:
+        return "FAT32 required"
+    filesystem = snap.storage_sd_filesystem.strip().lower()
+    if filesystem in ("fat32", "fatfs"):
+        return "FAT32"
+    if filesystem == "exfat":
+        return "exFAT (not supported)"
+    if snap.storage_sd_mounted:
+        return "Detected"
+    return "Not available"
+
+
+def render_storage_setup_sheet(s: Surface, snap: Snapshot):
+    state, detail, guidance, accent = storage_friendly_state(snap)
+    location_summary = storage_root_location_summary(snap)
+    draw_storage_page_header(
+        s,
+        snap,
+        "Storage",
+        "Card and saved-data overview",
+        back_action="close_storage_setup",
+        back_destination="settings",
+    )
+
+    hero_box = (16, 120, 464, 212)
+    s.round_rect(hero_box, (13, 22, 31), BORDER, 8)
+    s.text("Current storage", (28, 130, 452, 150), 12, MUTED, True)
+    s.text(state, (28, 156, 452, 180), 19, accent, True)
+    s.text(detail, (28, 186, 452, 204), 11, MUTED)
+
+    card_box = (16, 224, 464, 292)
+    draw_more_leaf(
+        s,
+        card_box,
+        "Card status",
+        storage_card_menu_status(snap),
+        accent,
+        action="open_storage_card",
+        destination="storage_card_page",
+    )
+    data_box = (16, 304, 464, 372)
+    draw_more_leaf(
+        s,
+        data_box,
+        "Data locations",
+        location_summary,
+        BLUE,
+        action="open_storage_data",
+        destination="storage_data_page",
+    )
+
+    guidance_box = (16, 380, 464, 420)
+    s.round_rect(guidance_box, (13, 22, 31), BORDER, 8)
+    s.text(guidance, (28, 388, 452, 412), 11, accent)
+    draw_storage_safety(s)
+    s.metrics.update(
+        {
+            "storage_hierarchy_level": "root",
+            "storage_root_regions": [list(hero_box), list(card_box), list(data_box), list(guidance_box)],
+            "storage_root_action_count": 2,
+            "storage_root_location_summary": location_summary,
+            "storage_setup_action_hidden": True,
+        }
+    )
+
+
+def render_storage_card_page(s: Surface, snap: Snapshot):
+    _, _, _, accent = storage_friendly_state(snap)
+    draw_storage_page_header(
+        s,
+        snap,
+        "Card status",
+        "Read-only card details",
+        back_action="close_storage_card",
+        back_destination="storage_setup_sheet",
+    )
+
+    card_state = storage_card_state(snap)
+    filesystem = storage_filesystem_label(snap)
+    capacity_value = storage_size_label(snap.storage_capacity_kb) if snap.storage_capacity_kb > 0 else "Not available"
+    free_value = storage_size_label(snap.storage_free_kb) if snap.storage_capacity_kb > 0 else "Not available"
+    readiness = storage_card_readiness(snap)
+    rows = (
+        ("State", card_state, accent),
+        ("Filesystem", filesystem, AMBER if snap.storage_sd_needs_fat32 else TEXT),
+        ("Capacity", capacity_value, TEXT),
+        ("Free space", free_value, TEXT),
+        ("Readiness", readiness, GREEN if readiness == "Ready" else (RED if readiness == "Needs attention" else AMBER)),
+    )
+    panel_box = (16, 124, 464, 412)
+    s.round_rect(panel_box, (13, 22, 31), BORDER, 8)
+    row_boxes: list[list[int]] = []
+    y = 132
+    for index, (title, value, color) in enumerate(rows):
+        row_box = (28, y, 452, y + 44)
+        row_boxes.append(list(row_box))
+        draw_storage_text_pair(s, row_box, title, value, color)
+        if index + 1 < len(rows):
+            s.line(((28, y + 48), (452, y + 48)), BORDER)
+        y += 52
+
+    draw_storage_safety(s)
+    s.metrics.update(
+        {
+            "storage_hierarchy_level": "card",
+            "storage_card_field_count": len(rows),
+            "storage_card_rows": [{"title": title, "value": value} for title, value, _ in rows],
+            "storage_card_panel": list(panel_box),
+            "storage_card_row_boxes": row_boxes,
+        }
+    )
+
+
+def render_storage_data_page(s: Surface, snap: Snapshot):
+    draw_storage_page_header(
+        s,
+        snap,
+        "Data locations",
+        "Where saved data is kept",
+        back_action="close_storage_data",
+        back_destination="storage_setup_sheet",
+    )
+    list_panel = (16, 120, 464, 412)
+    s.round_rect(list_panel, (13, 22, 31), BORDER, 8)
+    rows = (
+        ("Messages", retained_storage_label(snap.message_store_backend)),
+        ("Direct messages", retained_storage_label(snap.dm_store_backend)),
+        ("Packets", retained_storage_label(snap.packet_log_backend)),
+        ("Routes", retained_storage_label(snap.route_store_backend)),
+        ("Map tiles", map_storage_label(snap.map_tile_backend)),
+        ("Exports", export_storage_label(snap.export_backend)),
+    )
+    row_height = 48
+    row_gap = 8
+    viewport = (28, 128, 452, 404)
+    content_height = len(rows) * row_height + (len(rows) - 1) * row_gap
+    virtual_row_boxes = [
+        [viewport[0], viewport[1] + index * (row_height + row_gap), viewport[2], viewport[1] + index * (row_height + row_gap) + row_height]
+        for index in range(len(rows))
+    ]
+    visible_row_boxes: list[list[int]] = []
+    for (title, value), row_box_list in zip(rows, virtual_row_boxes):
+        if row_box_list[3] > viewport[3]:
+            break
+        row_box = tuple(row_box_list)
+        visible_row_boxes.append(row_box_list)
+        draw_storage_value_row(s, row_box, title, value, GREEN if "SD" in value else TEXT)
+    scrollbar_track = (456, viewport[1], 460, viewport[3])
+    scrollbar_thumb_height = max(44, (viewport[3] - viewport[1]) ** 2 // content_height)
+    s.round_rect(scrollbar_track, (27, 38, 52), (54, 68, 86), 2)
+    s.round_rect(
+        (scrollbar_track[0], scrollbar_track[1], scrollbar_track[2], scrollbar_track[1] + scrollbar_thumb_height),
+        (77, 219, 204),
+        (77, 219, 204),
+        2,
+    )
+
+    draw_storage_safety(s)
+    s.metrics.update(
+        {
+            "storage_hierarchy_level": "data",
+            "storage_data_row_count": len(rows),
+            "storage_data_list_panel": list(list_panel),
+            "storage_data_viewport": list(viewport),
+            "storage_data_rows": [{"title": title, "value": value} for title, value in rows],
+            "storage_data_virtual_row_boxes": virtual_row_boxes,
+            "storage_data_visible_row_boxes": visible_row_boxes,
+            "storage_data_visible_row_count": len(visible_row_boxes),
+            "storage_data_content_height": content_height,
+            "storage_data_viewport_height": viewport[3] - viewport[1],
+            "storage_data_scroll_range_px": content_height - (viewport[3] - viewport[1]),
+            "storage_data_scroll_enabled": True,
+            "storage_data_content_fits": content_height <= viewport[3] - viewport[1],
+        }
+    )
 
 
 def render_display_settings_sheet(s: Surface, snap: Snapshot):
@@ -2538,6 +3094,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "public_search_sheet": render_public_search_sheet,
     "radio_settings_sheet": render_radio_settings_sheet,
     "storage_setup_sheet": render_storage_setup_sheet,
+    "storage_card_page": render_storage_card_page,
+    "storage_data_page": render_storage_data_page,
     "display_settings_sheet": render_display_settings_sheet,
     "diagnostics_sheet": render_diagnostics_sheet,
     "wifi_setup_sheet": render_wifi_setup_sheet,
@@ -2646,7 +3204,6 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "More",
         "Settings and tools",
         "Storage & maps",
-        "SD card and offline maps",
         "SD Card",
         "Offline Maps",
     ),
@@ -2694,10 +3251,33 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "storage_setup_sheet": (
-        "SD Card",
-        "SD Card",
-        "Backends",
-        "Close",
+        "Storage",
+        "Back",
+        "Current storage",
+        "Card status",
+        "Data locations",
+        STORAGE_SAFETY_COPY,
+    ),
+    "storage_card_page": (
+        "Card status",
+        "Read-only card details",
+        "Back",
+        "State",
+        "Filesystem",
+        "Capacity",
+        "Free space",
+        "Readiness",
+        STORAGE_SAFETY_COPY,
+    ),
+    "storage_data_page": (
+        "Data locations",
+        "Back",
+        "Messages",
+        "Direct messages",
+        "Packets",
+        "Routes",
+        "Map tiles",
+        STORAGE_SAFETY_COPY,
     ),
     "display_settings_sheet": (
         "Display",
@@ -3086,6 +3666,16 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
+        "name": "storage_hierarchy_navigation",
+        "steps": (
+            {"view": "storage_setup_sheet", "action": "open_storage_card", "destination": "storage_card_page"},
+            {"view": "storage_card_page", "action": "close_storage_card", "destination": "storage_setup_sheet"},
+            {"view": "storage_setup_sheet", "action": "open_storage_data", "destination": "storage_data_page"},
+            {"view": "storage_data_page", "action": "close_storage_data", "destination": "storage_setup_sheet"},
+            {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "settings"},
+        ),
+    },
+    {
         "name": "settings_display_and_diagnostics",
         "steps": (
             {"view": "display_settings_sheet", "action": "close_display_settings", "destination": "settings"},
@@ -3133,6 +3723,25 @@ def touch_target_overlaps(targets: list[dict[str, object]]) -> list[dict[str, ob
             if right["kind"] == "screen":
                 continue
             rx0, ry0, rx1, ry1 = right["visual_box"]
+            width = min(lx1, rx1) - max(lx0, rx0)
+            height = min(ly1, ry1) - max(ly0, ry0)
+            if width > 0 and height > 0:
+                overlaps.append(
+                    {
+                        "left": left["label"],
+                        "right": right["label"],
+                        "box": [max(lx0, rx0), max(ly0, ry0), min(lx1, rx1), min(ly1, ry1)],
+                    }
+                )
+    return overlaps
+
+
+def text_record_overlaps(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    overlaps: list[dict[str, object]] = []
+    for i, left in enumerate(records):
+        lx0, ly0, lx1, ly1 = left["actual"]
+        for right in records[i + 1 :]:
+            rx0, ry0, rx1, ry1 = right["actual"]
             width = min(lx1, rx1) - max(lx0, rx0)
             height = min(ly1, ry1) - max(ly0, ry0)
             if width > 0 and height > 0:
@@ -3223,6 +3832,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
     report_views = []
     overflow_count = 0
     truncated_count = 0
+    sibling_text_overlap_count = 0
     required_missing: list[dict[str, str]] = []
     touch_target_issue_count = 0
     dock_invariant_issues: list[dict[str, object]] = []
@@ -3236,6 +3846,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         summary = surface.summary(screenshot, REQUIRED_LABELS.get(view, ()))
         overflow_count += len(summary["overflow"])
         truncated_count += len(summary["truncated_labels"])
+        sibling_text_overlap_count += len(summary["sibling_text_overlaps"])
         touch_target_issue_count += len(summary["touch_target_issues"])
         if not summary["dock_invariant_ok"]:
             dock_invariant_issues.append(
@@ -3264,6 +3875,7 @@ def generate(out_dir: Path, views: tuple[str, ...] | None = None, scenario: str 
         "flow_report": flow_report,
         "overflow_count": overflow_count,
         "truncated_count": truncated_count,
+        "sibling_text_overlap_count": sibling_text_overlap_count,
         "required_labels_missing": required_missing,
     }
     report_path = out_dir / "ui-sim-report.json"

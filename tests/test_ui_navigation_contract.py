@@ -51,6 +51,8 @@ def test_navigation_module_owns_screen_names_and_surface_aliases():
         '"mesh_roles"',
         '"mesh_rooms"',
         '"mesh_repeaters"',
+        '"storage_card"',
+        '"storage_data"',
     ]:
         assert alias in nav_source
 
@@ -63,6 +65,13 @@ def test_navigation_module_owns_screen_names_and_surface_aliases():
         )[0]
         assert f'surface = "{surface}";' in mapping
         assert "screen = D1L_UI_SCREEN_PACKETS;" in mapping
+
+    for surface in ["storage", "storage_card", "storage_data"]:
+        mapping = surface_mapping.split(f'strcmp(normalized, "{surface}")', 1)[1].split(
+            "} else", 1
+        )[0]
+        assert f'surface = "{surface}";' in mapping
+        assert "screen = D1L_UI_SCREEN_SETTINGS;" in mapping
 
     assert "d1l_ui_screen_from_name(name, out_tab)" in ui_source
     assert "d1l_ui_scroll_surface_from_name(name, out_surface, out_surface_len, out_tab)" in ui_source

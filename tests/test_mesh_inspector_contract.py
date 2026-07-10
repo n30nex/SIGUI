@@ -67,7 +67,7 @@ def test_console_exposes_signal_rooms_and_repeaters():
     assert "signal" in SMOKE_COMMANDS
     assert "roomservers" in SMOKE_COMMANDS
     assert "repeaters" in SMOKE_COMMANDS
-    usage = "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|wifi|map>"
+    usage = "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>"
     assert console.count(usage) == 3
 
 

@@ -24,16 +24,61 @@ static const d1l_ui_home_box_t k_destination_boxes[D1L_UI_HOME_DESTINATION_COUNT
 
 static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 116};
 
+static bool home_storage_text_equals(const char *value, const char *expected)
+{
+    return value && expected && strcmp(value, expected) == 0;
+}
+
+static bool home_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return false;
+    }
+    return snapshot->storage_retained_sd_degraded ||
+           home_storage_text_equals(snapshot->storage_sd_state, "error") ||
+           home_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
+           home_storage_text_equals(snapshot->storage_setup_action,
+                                    "inspect_rp2040_sd_cmd0_firmware_path") ||
+           home_storage_text_equals(snapshot->storage_setup_action,
+                                    "inspect_rp2040_sd_mount_error_firmware_path");
+}
+
 const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot) {
         return "unknown";
+    }
+    if (home_storage_needs_attention(snapshot)) {
+        return "Needs attention";
     }
     if (snapshot->storage_data_enabled || snapshot->storage_sd_data_root_ready) {
         return "ready";
     }
     if (snapshot->storage_setup_required) {
         return "setup";
+    }
+    const char *action = snapshot->storage_setup_action;
+    if (home_storage_text_equals(action, "bridge_unavailable") ||
+        home_storage_text_equals(action, "bridge_protocol_pending")) {
+        return "offline";
+    }
+    if (home_storage_text_equals(action, "insert_card")) {
+        return "no card";
+    }
+    if (home_storage_text_equals(action, "prepare_fat32_on_computer") ||
+        home_storage_text_equals(action, "backup_reformat_fat32_on_computer")) {
+        return "needs FAT32";
+    }
+    if (home_storage_text_equals(action, "run_storage_mount") ||
+        home_storage_text_equals(action, "wait_for_storage_mount")) {
+        return "mounting";
+    }
+    if (home_storage_text_equals(action, "retry_storage_mount") ||
+        home_storage_text_equals(action, "use_nvs_fallback")) {
+        return "setup";
+    }
+    if (home_storage_text_equals(action, "forced_nvs")) {
+        return "internal";
     }
     const char *state = snapshot->storage_sd_state;
     if (!state || state[0] == '\0') {
@@ -57,20 +102,17 @@ const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot)
     if (strcmp(state, "deskos_manifest_invalid") == 0) {
         return "repair";
     }
-    if (strcmp(state, "protocol_pending") == 0 ||
-        strcmp(state, "bridge_unavailable") == 0) {
+    if (strcmp(state, "pending_bridge") == 0 ||
+        strcmp(state, "protocol_pending") == 0 ||
+        strcmp(state, "rp2040_unavailable") == 0 ||
+        strcmp(state, "bridge_unavailable") == 0 ||
+        strcmp(state, "unsupported") == 0) {
         return "offline";
-    }
-    if (strcmp(state, "error") == 0) {
-        return "SD error";
     }
     if (strcmp(state, "fat32_ready") == 0) {
         return "FAT32 ready";
     }
-    if (strcmp(state, "bridge_reported") == 0) {
-        return "detected";
-    }
-    return state;
+    return "internal";
 }
 
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot)
@@ -243,8 +285,9 @@ static void render_device_status(lv_obj_t *parent, const d1l_app_snapshot_t *sna
         snapshot->time_available ? 0x5EEAD4 : 0x8EA0AE,
         snapshot->wifi_enabled ? 0x5EEAD4 : 0x8EA0AE,
         snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
-        snapshot->storage_data_enabled ? 0x5EEAD4 :
-        (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE),
+        home_storage_needs_attention(snapshot) ? 0xF87171 :
+        (snapshot->storage_data_enabled ? 0x5EEAD4 :
+            (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE)),
     };
 
     for (int index = 0; index < 4; ++index) {

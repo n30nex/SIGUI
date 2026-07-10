@@ -1,6 +1,7 @@
 #include "ui_settings.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "d1l_config.h"
 #include "lvgl.h"
@@ -52,6 +53,25 @@ static settings_category_t s_expanded_category = SETTINGS_CATEGORY_NONE;
 static lv_obj_t *s_category_children[SETTINGS_CATEGORY_COUNT];
 static lv_obj_t *s_category_chevrons[SETTINGS_CATEGORY_COUNT];
 static lv_obj_t *s_menu;
+
+static bool settings_storage_text_equals(const char *value, const char *expected)
+{
+    return value && expected && strcmp(value, expected) == 0;
+}
+
+static bool settings_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return false;
+    }
+    return snapshot->storage_retained_sd_degraded ||
+           settings_storage_text_equals(snapshot->storage_sd_state, "error") ||
+           settings_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
+           settings_storage_text_equals(snapshot->storage_setup_action,
+                                        "inspect_rp2040_sd_cmd0_firmware_path") ||
+           settings_storage_text_equals(snapshot->storage_setup_action,
+                                        "inspect_rp2040_sd_mount_error_firmware_path");
+}
 
 static lv_obj_t *settings_create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
@@ -328,16 +348,24 @@ void d1l_ui_settings_render(lv_obj_t *parent,
     const char *radio_status = snapshot->radio_apply_pending
         ? "Applying"
         : ((snapshot->radio_ready || snapshot->radio_applied) ? "Ready" : "Needs setup");
-    const char *storage_status = snapshot->storage_data_enabled
-        ? "Ready"
-        : (snapshot->storage_setup_required
-            ? "Needs setup"
-            : (snapshot->storage_sd_present ? "Detected" : "Internal storage"));
+    const bool storage_needs_attention = settings_storage_needs_attention(snapshot);
+    const bool storage_ready = snapshot->storage_data_enabled ||
+                               snapshot->storage_sd_data_root_ready;
+    const char *storage_status = storage_needs_attention
+        ? "Needs attention"
+        : (storage_ready
+            ? "Ready"
+            : (snapshot->storage_setup_required
+                ? "Needs setup"
+                : (snapshot->storage_sd_present ? "Detected" : "Internal storage")));
     const char *map_status = snapshot->map_tile_cache_ready
         ? "Ready"
         : ((snapshot->map_tile_download_supported || snapshot->map_tile_sideload_supported)
             ? "Not set up"
             : "Unavailable");
+    const char *storage_category_summary = storage_needs_attention
+        ? "SD needs attention"
+        : "SD card and offline maps";
 
     const settings_menu_item_t tools[] = {
         {"Packets", packet_status, 0x93C5FD, D1L_UI_SETTINGS_ACTION_PACKETS, false},
@@ -357,8 +385,9 @@ void d1l_ui_settings_render(lv_obj_t *parent,
     };
     const settings_menu_item_t storage_maps[] = {
         {"SD Card", storage_status,
-         snapshot->storage_data_enabled ? 0x5EEAD4 : 0xF4F7FB,
-         D1L_UI_SETTINGS_ACTION_STORAGE, false},
+         storage_needs_attention ? 0xF87171 :
+            (storage_ready ? 0x5EEAD4 : 0xF4F7FB),
+         D1L_UI_SETTINGS_ACTION_STORAGE, storage_needs_attention},
         {"Offline Maps", map_status,
          snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xF4F7FB,
          D1L_UI_SETTINGS_ACTION_MAP_TILES, false},
@@ -392,7 +421,8 @@ void d1l_ui_settings_render(lv_obj_t *parent,
     render_category(s_menu, SETTINGS_CATEGORY_CONNECTIONS, "Connections",
                     "Wi-Fi, Bluetooth, and radio", connections, 3, false);
     render_category(s_menu, SETTINGS_CATEGORY_STORAGE_MAPS, "Storage & maps",
-                    "SD card and offline maps", storage_maps, 2, false);
+                    storage_category_summary, storage_maps, 2,
+                    storage_needs_attention);
     render_category(s_menu, SETTINGS_CATEGORY_DEVICE, "Device",
                     "Display and identity", device, 2, false);
     render_category(s_menu, SETTINGS_CATEGORY_SUPPORT, "Support",

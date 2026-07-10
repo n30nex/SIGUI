@@ -372,23 +372,29 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage setup" in SMOKE_COMMANDS
     assert not any(command.startswith("storage map-tile-canary") for command in SMOKE_COMMANDS)
     assert not any(command.startswith("storage export-canary") for command in SMOKE_COMMANDS)
-    assert '"Storage %s  SD %s"' in ui
+    assert "storage_card_state_friendly" in ui
+    assert "storage_retained_backend_friendly" in ui
+    assert "storage_map_backend_friendly" in ui
+    assert "storage_export_backend_friendly" in ui
     assert "static lv_obj_t *s_storage_sheet" in ui
     assert "render_storage_sheet" in ui
     assert "open_storage_sheet_event_cb" in ui
-    assert '"SD Card"' in ui
-    assert "DeskOS creates its folders automatically and never formats cards on-device." in ui
-    assert "const char *storage_status = snapshot->storage_data_enabled" in settings_ui
+    assert 'render_storage_header("Storage"' in ui
+    assert '"Card status"' in ui
+    assert '"Data locations"' in ui
+    assert "This device never formats cards." in ui
+    assert "const bool storage_needs_attention = settings_storage_needs_attention(snapshot)" in settings_ui
+    assert 'storage_needs_attention\n        ? "Needs attention"' in settings_ui
     assert '? "Ready"' in settings_ui
     assert '"Needs setup"' in settings_ui
     assert '"Internal storage"' in settings_ui
     assert "FAT32 only, no format" not in settings_ui
     assert '"SD Card"' in simulator
-    assert "FAT32 only, no format" in simulator
-    assert "NVS fallback" in simulator
+    assert "FAT32 only - This device never formats cards." in simulator
+    assert "Internal storage" in simulator
     assert "storage_setup_sheet" in simulator
-    assert "Prepare FAT32 on a computer" in simulator
-    assert "Inspect RP2040 mount diagnostics" in simulator
+    assert "Prepare the card as FAT32 on a computer" in simulator
+    assert "Technical details are available over USB" in simulator
     assert "d1l_rp2040_sd_status_t" in rp2040_header
     assert "char state[32]" in rp2040_header
     assert "d1l_rp2040_ping_t" in rp2040_header
@@ -752,5 +758,5 @@ def test_docs_keep_sd_backed_store_claims_pending_until_hardware_proof():
 
     assert "SD-backed message/packet/route/export/map-tile stores" in checklist
     assert "- [ ] Optional SD-card data storage implemented" in checklist
-    assert "retained Public/DM message history" in user_guide
+    assert "retained public/dm message history" in user_guide.lower()
     assert "Retained Public/DM message history" in readme

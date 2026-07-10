@@ -294,6 +294,12 @@ typedef enum {
     D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES,
 } d1l_mesh_roles_page_t;
 
+typedef enum {
+    D1L_STORAGE_PAGE_ROOT = 0,
+    D1L_STORAGE_PAGE_CARD_STATUS,
+    D1L_STORAGE_PAGE_DATA_LOCATIONS,
+} d1l_storage_page_t;
+
 static bool s_content_refresh_pending = false;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
@@ -302,6 +308,7 @@ static bool s_packets_paused;
 static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
 static d1l_mesh_roles_page_t s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
+static d1l_storage_page_t s_storage_page = D1L_STORAGE_PAGE_ROOT;
 
 static d1l_ui_content_generation_t content_generation_from_snapshot(
     const d1l_app_snapshot_t *snapshot)
@@ -1213,6 +1220,7 @@ static void hide_radio_settings_sheet(void)
 static void hide_storage_sheet(void)
 {
     d1l_ui_modal_hide(s_storage_sheet);
+    s_storage_page = D1L_STORAGE_PAGE_ROOT;
     restore_dock_for_active_tab();
 }
 
@@ -1716,16 +1724,6 @@ static void handle_settings_action(d1l_ui_settings_action_t action)
 static void render_settings(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
 {
     d1l_ui_settings_render(content, snapshot, handle_settings_action);
-}
-
-static void render_storage_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
-{
-    lv_obj_t *line = create_label(parent, "", 0x8EA0AE);
-    label_set_fmt(line, "Storage %s  SD %s",
-                  snapshot->storage_backend ? snapshot->storage_backend : "nvs",
-                  snapshot->storage_sd_state ? snapshot->storage_sd_state : "unknown");
-    label_set_dot_width(line, 126);
-    obj_set_pos_if(line, 0, y);
 }
 
 static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t *snapshot)
@@ -5399,6 +5397,504 @@ static void close_storage_sheet_event_cb(lv_event_t *event)
     hide_storage_sheet();
 }
 
+static void storage_subpage_back_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_storage_page = D1L_STORAGE_PAGE_ROOT;
+    render_storage_sheet();
+    show_modal(s_storage_sheet);
+}
+
+static void open_storage_card_status_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_storage_page = D1L_STORAGE_PAGE_CARD_STATUS;
+    render_storage_sheet();
+    show_modal(s_storage_sheet);
+}
+
+static void open_storage_data_locations_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_storage_page = D1L_STORAGE_PAGE_DATA_LOCATIONS;
+    render_storage_sheet();
+    show_modal(s_storage_sheet);
+}
+
+static bool storage_text_equals(const char *value, const char *expected)
+{
+    return value && expected && strcmp(value, expected) == 0;
+}
+
+static bool storage_snapshot_needs_attention(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return false;
+    }
+    return snapshot->storage_retained_sd_degraded ||
+           storage_text_equals(snapshot->storage_sd_state, "error") ||
+           storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
+           storage_text_equals(snapshot->storage_setup_action,
+                               "inspect_rp2040_sd_cmd0_firmware_path") ||
+           storage_text_equals(snapshot->storage_setup_action,
+                               "inspect_rp2040_sd_mount_error_firmware_path");
+}
+
+static const char *storage_card_state_friendly(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return "Status unavailable";
+    }
+    if (storage_snapshot_needs_attention(snapshot)) {
+        return "Card needs attention";
+    }
+    if (storage_text_equals(snapshot->storage_setup_action, "run_storage_mount") ||
+        storage_text_equals(snapshot->storage_setup_action, "wait_for_storage_mount")) {
+        return "Checking card";
+    }
+    if (snapshot->storage_rp2040_bridge_required &&
+        !snapshot->storage_rp2040_bridge_ready) {
+        return "Card reader unavailable";
+    }
+    if (snapshot->storage_rp2040_bridge_required &&
+        !snapshot->storage_rp2040_sd_protocol_supported) {
+        return "Card reader starting";
+    }
+    if (!snapshot->storage_sd_present) {
+        return "No card inserted";
+    }
+    if (snapshot->storage_sd_needs_fat32 ||
+        storage_text_equals(snapshot->storage_sd_state, "not_fat32_or_unmountable")) {
+        return "FAT32 card required";
+    }
+    if (storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
+        return "DeskOS files need attention";
+    }
+    if (storage_text_equals(snapshot->storage_sd_state, "checking") ||
+        storage_text_equals(snapshot->storage_sd_state, "mount_pending")) {
+        return "Checking card";
+    }
+    if (storage_text_equals(snapshot->storage_sd_state, "creating_deskos_files") ||
+        (snapshot->storage_sd_mounted && !snapshot->storage_sd_data_root_ready)) {
+        return "Preparing DeskOS folders";
+    }
+    if (snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready) {
+        return "Ready";
+    }
+    return "Card detected, not ready";
+}
+
+static const char *storage_filesystem_friendly(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot || !snapshot->storage_sd_present) {
+        return "Not available";
+    }
+    if (snapshot->storage_sd_needs_fat32) {
+        return "FAT32 required";
+    }
+    if (storage_text_equals(snapshot->storage_sd_filesystem, "fat32") ||
+        storage_text_equals(snapshot->storage_sd_filesystem, "fatfs")) {
+        return "FAT32";
+    }
+    if (storage_text_equals(snapshot->storage_sd_filesystem, "exfat")) {
+        return "exFAT (not supported)";
+    }
+    return snapshot->storage_sd_mounted ? "Detected" : "Not available";
+}
+
+static const char *storage_readiness_friendly(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return "Not available";
+    }
+    const char *action = snapshot->storage_setup_action;
+    if (storage_snapshot_needs_attention(snapshot) ||
+        storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
+        return "Needs attention";
+    }
+    if (storage_text_equals(action, "run_storage_mount") ||
+        storage_text_equals(action, "wait_for_storage_mount")) {
+        return "Checking";
+    }
+    if (storage_text_equals(action, "bridge_unavailable") ||
+        storage_text_equals(action, "bridge_protocol_pending")) {
+        return "Not available";
+    }
+    if (storage_text_equals(action, "insert_card") || !snapshot->storage_sd_present) {
+        return "No card";
+    }
+    if (snapshot->storage_sd_needs_fat32) {
+        return "Needs FAT32";
+    }
+    if (storage_text_equals(snapshot->storage_sd_state, "checking") ||
+        storage_text_equals(snapshot->storage_sd_state, "mount_pending")) {
+        return "Checking";
+    }
+    if (snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready) {
+        return "Ready";
+    }
+    if (snapshot->storage_sd_present || snapshot->storage_sd_mounted) {
+        return "Setup incomplete";
+    }
+    return "Not ready";
+}
+
+static uint32_t storage_card_value_accent(const char *value)
+{
+    if (storage_text_equals(value, "Ready")) {
+        return 0xA7F3D0;
+    }
+    if (storage_text_equals(value, "Needs attention") ||
+        storage_text_equals(value, "Card needs attention") ||
+        storage_text_equals(value, "DeskOS files need attention")) {
+        return 0xFCA5A5;
+    }
+    if (storage_text_equals(value, "Not available") ||
+        storage_text_equals(value, "No card") ||
+        storage_text_equals(value, "No card inserted") ||
+        storage_text_equals(value, "Status unavailable") ||
+        storage_text_equals(value, "Card reader unavailable")) {
+        return 0x93C5FD;
+    }
+    return 0xFBBF24;
+}
+
+static void format_storage_kb(char *dest, size_t dest_size, uint32_t kb, bool known)
+{
+    if (!dest || dest_size == 0U) {
+        return;
+    }
+    if (!known) {
+        snprintf(dest, dest_size, "%s", "Not reported");
+    } else if (kb >= 1024U * 1024U) {
+        const uint32_t whole = kb / (1024U * 1024U);
+        const uint32_t tenth = ((kb % (1024U * 1024U)) * 10U) / (1024U * 1024U);
+        snprintf(dest, dest_size, "%lu.%lu GB",
+                 (unsigned long)whole, (unsigned long)tenth);
+    } else if (kb >= 1024U) {
+        snprintf(dest, dest_size, "%lu MB", (unsigned long)(kb / 1024U));
+    } else {
+        snprintf(dest, dest_size, "%lu KB", (unsigned long)kb);
+    }
+}
+
+static bool storage_backend_uses_sd(const char *backend)
+{
+    return storage_text_equals(backend, "sd") ||
+           storage_text_equals(backend, "mixed") ||
+           storage_text_equals(backend, "sd_map_tiles_ready") ||
+           storage_text_equals(backend, "sd_diagnostic_exports_ready");
+}
+
+static const char *storage_retained_backend_friendly(const char *backend)
+{
+    if (storage_text_equals(backend, "sd") || storage_text_equals(backend, "mixed")) {
+        return "SD + internal backup";
+    }
+    return "Internal";
+}
+
+static const char *storage_map_backend_friendly(const char *backend)
+{
+    if (storage_text_equals(backend, "sd_map_tiles_ready")) {
+        return "SD card";
+    }
+    if (storage_text_equals(backend, "sd_pending_store_migration")) {
+        return "Pending";
+    }
+    return "Unavailable";
+}
+
+static const char *storage_export_backend_friendly(const char *backend)
+{
+    if (storage_text_equals(backend, "sd_diagnostic_exports_ready")) {
+        return "SD card";
+    }
+    return "USB only";
+}
+
+static const char *storage_data_summary(const d1l_app_snapshot_t *snapshot)
+{
+    if (snapshot &&
+        (storage_backend_uses_sd(snapshot->message_store_backend) ||
+         storage_backend_uses_sd(snapshot->dm_store_backend) ||
+         storage_backend_uses_sd(snapshot->packet_log_backend) ||
+         storage_backend_uses_sd(snapshot->route_store_backend) ||
+         storage_backend_uses_sd(snapshot->map_tile_backend) ||
+         storage_backend_uses_sd(snapshot->export_backend))) {
+        return "SD + internal";
+    }
+    return "Internal";
+}
+
+static uint32_t storage_backend_accent(const char *backend)
+{
+    if (storage_backend_uses_sd(backend)) {
+        return 0xA7F3D0;
+    }
+    if (storage_text_equals(backend, "sd_pending_store_migration")) {
+        return 0xFBBF24;
+    }
+    return 0x93C5FD;
+}
+
+typedef struct {
+    const char *state;
+    const char *detail;
+    const char *guidance;
+    uint32_t accent;
+} storage_hero_copy_t;
+
+static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
+{
+    storage_hero_copy_t copy = {
+        .state = "Using internal storage",
+        .detail = "SD is not ready yet.",
+        .guidance = "Your data stays available internally.",
+        .accent = 0xFBBF24,
+    };
+    if (!snapshot) {
+        return copy;
+    }
+
+    if (snapshot->storage_retained_sd_degraded) {
+        copy.state = "SD needs attention";
+        copy.detail = "Internal storage is active.";
+        copy.guidance = "Saved data remains available.";
+        copy.accent = 0xFCA5A5;
+        return copy;
+    }
+
+    const char *action = snapshot->storage_setup_action;
+    if (storage_snapshot_needs_attention(snapshot)) {
+        copy.state = "Card needs attention";
+        copy.detail = "Internal storage is active.";
+        copy.guidance = "Technical details are available over USB.";
+        copy.accent = 0xFCA5A5;
+        return copy;
+    }
+    if (storage_text_equals(action, "bridge_unavailable")) {
+        copy.detail = "SD support is unavailable.";
+        copy.guidance = "Internal storage remains active.";
+    } else if (storage_text_equals(action, "bridge_protocol_pending")) {
+        copy.detail = "SD support is starting.";
+    } else if (storage_text_equals(action, "run_storage_mount") ||
+               storage_text_equals(action, "wait_for_storage_mount")) {
+        copy.state = "Checking SD card";
+        copy.detail = "Using internal storage for now.";
+        copy.guidance = "The card check finishes automatically.";
+    } else if (storage_text_equals(action, "insert_card")) {
+        copy.state = "No SD card";
+        copy.detail = "Internal storage is active.";
+        copy.guidance = "Insert a FAT32 card for more space.";
+    } else if (storage_text_equals(action, "prepare_fat32_on_computer")) {
+        copy.state = "Card needs FAT32";
+        copy.detail = "Prepare it on a computer.";
+        copy.guidance = "Prepare as FAT32, then reinsert the card.";
+    } else if (storage_text_equals(action, "backup_reformat_fat32_on_computer")) {
+        copy.state = "Card needs FAT32";
+        copy.detail = "Prepare it on a computer.";
+        copy.guidance = "Prepare as FAT32, then reinsert the card.";
+    } else if (storage_text_equals(action, "retry_storage_mount") ||
+               storage_text_equals(action, "use_nvs_fallback")) {
+        copy.state = "Card setup incomplete";
+        copy.detail = "Internal storage is active.";
+        copy.guidance = "Reinsert the card to finish DeskOS folders.";
+    } else if (storage_text_equals(action, "forced_nvs")) {
+        copy.state = "Internal storage only";
+        copy.detail = "SD storage is paused.";
+        copy.guidance = "Internal storage remains active.";
+    } else if (snapshot->storage_data_enabled) {
+        copy.state = "SD card ready";
+        copy.detail = "SD is used with internal backup.";
+        copy.guidance = "Saved data stays mirrored internally.";
+        copy.accent = 0xA7F3D0;
+    } else if (snapshot->storage_sd_data_root_ready) {
+        copy.state = "SD card ready";
+        copy.detail = "Using internal storage.";
+        copy.guidance = "SD is ready; saved data stays internal.";
+        copy.accent = 0xA7F3D0;
+    }
+    return copy;
+}
+
+static void render_storage_header(const char *title, lv_event_cb_t back_cb)
+{
+    create_button(s_storage_sheet, "Back", 12, 8, 76, 44, back_cb, NULL);
+    lv_obj_t *heading = create_label(s_storage_sheet, title, 0xF4F7FB);
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(heading, 360);
+    lv_obj_set_pos(heading, 104, 13);
+}
+
+static void render_storage_safety_copy(void)
+{
+    lv_obj_t *panel = create_panel(s_storage_sheet, 16, 368, 448, 44);
+    if (!panel) {
+        return;
+    }
+    lv_obj_set_style_pad_all(panel, 8, 0);
+    lv_obj_t *label = create_label(
+        panel, "FAT32 only - This device never formats cards.", 0xFBBF24);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+}
+
+static void render_storage_detail_row(lv_obj_t *parent, int y,
+                                      const char *name, const char *value,
+                                      uint32_t accent)
+{
+    lv_obj_t *name_label = create_label(parent, name, accent);
+    lv_obj_set_width(name_label, 150);
+    lv_obj_set_pos(name_label, 12, y);
+    lv_obj_t *value_label = create_label(parent, value, 0xE5EDF5);
+    lv_label_set_long_mode(value_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(value_label, 254);
+    lv_obj_set_style_text_align(value_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(value_label, 170, y);
+}
+
+static void render_storage_root(void)
+{
+    const storage_hero_copy_t hero = storage_hero_copy(&s_snapshot);
+    render_storage_header("Storage", close_storage_sheet_event_cb);
+    lv_obj_t *subtitle = create_label(s_storage_sheet,
+                                      "Card and saved-data overview", 0x8EA0AE);
+    lv_label_set_long_mode(subtitle, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(subtitle, 360);
+    lv_obj_set_pos(subtitle, 104, 40);
+
+    lv_obj_t *hero_panel = create_panel(s_storage_sheet, 16, 64, 448, 92);
+    if (hero_panel) {
+        lv_obj_set_style_pad_all(hero_panel, 0, 0);
+        lv_obj_t *eyebrow = create_label(hero_panel, "Current storage", 0x8EA0AE);
+        lv_obj_set_pos(eyebrow, 12, 8);
+        lv_obj_t *state = create_label(hero_panel, hero.state, hero.accent);
+        lv_obj_set_style_text_font(state, &lv_font_montserrat_24, 0);
+        lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(state, 424);
+        lv_obj_set_pos(state, 12, 28);
+        lv_obj_t *detail = create_label(hero_panel, hero.detail, 0x8EA0AE);
+        lv_label_set_long_mode(detail, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(detail, 424);
+        lv_obj_set_pos(detail, 12, 64);
+    }
+
+    lv_obj_t *card = create_button(s_storage_sheet, "Card status",
+                                    16, 168, 448, 68,
+                                    open_storage_card_status_event_cb, NULL);
+    style_contact_option_button(card, hero.accent,
+                                storage_card_state_friendly(&s_snapshot));
+
+    lv_obj_t *data = create_button(s_storage_sheet, "Data locations",
+                                    16, 248, 448, 68,
+                                    open_storage_data_locations_event_cb, NULL);
+    style_contact_option_button(data, 0x93C5FD, storage_data_summary(&s_snapshot));
+
+    lv_obj_t *guidance = create_panel(s_storage_sheet, 16, 324, 448, 40);
+    if (guidance) {
+        lv_obj_set_style_pad_all(guidance, 0, 0);
+        lv_obj_t *copy = create_label(guidance, hero.guidance, hero.accent);
+        lv_label_set_long_mode(copy, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(copy, 424);
+        lv_obj_set_pos(copy, 12, 10);
+    }
+}
+
+static void render_storage_card_status(void)
+{
+    char capacity[24];
+    char free_space[24];
+    const char *state = storage_card_state_friendly(&s_snapshot);
+    const char *readiness = storage_readiness_friendly(&s_snapshot);
+    const bool capacity_known = s_snapshot.storage_sd_present &&
+                                s_snapshot.storage_capacity_kb > 0U;
+    format_storage_kb(capacity, sizeof(capacity), s_snapshot.storage_capacity_kb,
+                      capacity_known);
+    format_storage_kb(free_space, sizeof(free_space), s_snapshot.storage_free_kb,
+                      capacity_known);
+
+    render_storage_header("Card status", storage_subpage_back_event_cb);
+    lv_obj_t *subtitle = create_label(s_storage_sheet,
+                                      "Read-only card details", 0x8EA0AE);
+    lv_obj_set_pos(subtitle, 104, 40);
+
+    lv_obj_t *panel = create_panel(s_storage_sheet, 16, 68, 448, 288);
+    if (!panel) {
+        return;
+    }
+    lv_obj_set_style_pad_all(panel, 0, 0);
+    render_storage_detail_row(panel, 18, "State", state,
+                              storage_card_value_accent(state));
+    render_storage_detail_row(panel, 70, "Filesystem",
+                              storage_filesystem_friendly(&s_snapshot), 0x93C5FD);
+    render_storage_detail_row(panel, 122, "Capacity", capacity, 0xC4B5FD);
+    render_storage_detail_row(panel, 174, "Free space", free_space, 0xC4B5FD);
+    render_storage_detail_row(panel, 226, "Readiness", readiness,
+                              storage_card_value_accent(readiness));
+}
+
+static void render_storage_location_row(lv_obj_t *parent, int y,
+                                        const char *name, const char *location_text,
+                                        uint32_t accent)
+{
+    lv_obj_t *row = create_panel(parent, 0, y, 424, 48);
+    if (!row) {
+        return;
+    }
+    lv_obj_set_style_pad_all(row, 8, 0);
+    lv_obj_t *name_label = create_label(row, name, 0xF4F7FB);
+    lv_obj_set_width(name_label, 180);
+    lv_obj_align(name_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_t *location = create_label(row, location_text, accent);
+    lv_label_set_long_mode(location, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(location, 220);
+    lv_obj_set_style_text_align(location, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(location, LV_ALIGN_RIGHT_MID, 0, 0);
+}
+
+static void render_storage_data_locations(void)
+{
+    render_storage_header("Data locations", storage_subpage_back_event_cb);
+    lv_obj_t *subtitle = create_label(s_storage_sheet,
+                                      "Where saved data is kept", 0x8EA0AE);
+    lv_obj_set_pos(subtitle, 104, 40);
+
+    lv_obj_t *list = create_object(s_storage_sheet, "storage locations list");
+    if (!list) {
+        return;
+    }
+    lv_obj_set_size(list, 448, 288);
+    lv_obj_set_pos(list, 16, 68);
+    lv_obj_set_style_radius(list, 8, 0);
+    lv_obj_set_style_bg_color(list, lv_color_hex(0x0B121A), 0);
+    lv_obj_set_style_border_color(list, lv_color_hex(0x263241), 0);
+    lv_obj_set_style_border_width(list, 1, 0);
+    lv_obj_set_style_pad_all(list, 8, 0);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+
+    render_storage_location_row(list, 0, "Messages",
+                                storage_retained_backend_friendly(s_snapshot.message_store_backend),
+                                storage_backend_accent(s_snapshot.message_store_backend));
+    render_storage_location_row(list, 56, "Direct messages",
+                                storage_retained_backend_friendly(s_snapshot.dm_store_backend),
+                                storage_backend_accent(s_snapshot.dm_store_backend));
+    render_storage_location_row(list, 112, "Packets",
+                                storage_retained_backend_friendly(s_snapshot.packet_log_backend),
+                                storage_backend_accent(s_snapshot.packet_log_backend));
+    render_storage_location_row(list, 168, "Routes",
+                                storage_retained_backend_friendly(s_snapshot.route_store_backend),
+                                storage_backend_accent(s_snapshot.route_store_backend));
+    render_storage_location_row(list, 224, "Map tiles",
+                                storage_map_backend_friendly(s_snapshot.map_tile_backend),
+                                storage_backend_accent(s_snapshot.map_tile_backend));
+    render_storage_location_row(list, 280, "Exports",
+                                storage_export_backend_friendly(s_snapshot.export_backend),
+                                storage_backend_accent(s_snapshot.export_backend));
+}
+
 static void render_storage_sheet(void)
 {
     if (!s_storage_sheet) {
@@ -5407,67 +5903,20 @@ static void render_storage_sheet(void)
     d1l_app_model_snapshot(&s_snapshot);
     lv_obj_clean(s_storage_sheet);
 
-    lv_obj_t *title = create_label(s_storage_sheet, "SD Card", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_obj_set_pos(title, 8, 4);
-    create_button(s_storage_sheet, "Close", 340, 0, 76, 40, close_storage_sheet_event_cb, NULL);
-
-    lv_obj_t *state = create_label(s_storage_sheet, "", 0x5EEAD4);
-    label_set_fmt(state, "SD %s via %s",
-                  s_snapshot.storage_sd_state ? s_snapshot.storage_sd_state : "unknown",
-                  s_snapshot.storage_sd_interface ? s_snapshot.storage_sd_interface : "unknown");
-    lv_label_set_long_mode(state, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(state, 408);
-    lv_obj_set_pos(state, 8, 48);
-    render_storage_line(s_storage_sheet, 70, &s_snapshot);
-
-    lv_obj_t *card = create_label(s_storage_sheet, "", 0xE5EDF5);
-    label_set_fmt(card, "card %s  mounted %s  root %s",
-                  s_snapshot.storage_sd_present ? "present" : "absent",
-                  s_snapshot.storage_sd_mounted ? "yes" : "no",
-                  s_snapshot.storage_sd_data_root_ready ? "ready" : "pending");
-    lv_obj_set_pos(card, 8, 96);
-
-    lv_obj_t *space = create_label(s_storage_sheet, "", 0x8EA0AE);
-    label_set_fmt(space, "fs %s  free %luK / %luK",
-                  s_snapshot.storage_sd_filesystem ? s_snapshot.storage_sd_filesystem : "unknown",
-                  (unsigned long)s_snapshot.storage_free_kb,
-                  (unsigned long)s_snapshot.storage_capacity_kb);
-    lv_obj_set_pos(space, 8, 124);
-
-    lv_obj_t *backend = create_label(s_storage_sheet, "", 0x8EA0AE);
-    label_set_fmt(backend, "messages %s  packets %s  routes %s",
-                  s_snapshot.message_store_backend ? s_snapshot.message_store_backend : "nvs",
-                  s_snapshot.packet_log_backend ? s_snapshot.packet_log_backend : "nvs",
-                  s_snapshot.route_store_backend ? s_snapshot.route_store_backend : "nvs");
-    lv_label_set_long_mode(backend, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(backend, 408);
-    lv_obj_set_pos(backend, 8, 152);
-
-    lv_obj_t *action = create_label(s_storage_sheet, "", 0xFBBF24);
-    const bool prepare_fat32_action = s_snapshot.storage_setup_action &&
-        strcmp(s_snapshot.storage_setup_action, "prepare_fat32_on_computer") == 0;
-    label_set_fmt(action, "next step: %s%s",
-                  s_snapshot.storage_setup_action ? s_snapshot.storage_setup_action : "not_available",
-                  prepare_fat32_action ? " (prepare FAT32 on computer)" : "");
-    lv_label_set_long_mode(action, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(action, 408);
-    lv_obj_set_pos(action, 8, 184);
-
-    lv_obj_t *note = create_label(s_storage_sheet,
-                                  s_snapshot.storage_note ? s_snapshot.storage_note :
-                                  "Onboard NVS remains the fallback data store.",
-                                  0x8EA0AE);
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(note, 408);
-    lv_obj_set_pos(note, 8, 216);
-
-    lv_obj_t *safety = create_label(s_storage_sheet,
-                                    "Use a FAT32 card prepared on your computer. DeskOS creates its folders automatically and never formats cards on-device.",
-                                    0xFBBF24);
-    lv_label_set_long_mode(safety, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(safety, 408);
-    lv_obj_set_pos(safety, 8, 268);
+    switch (s_storage_page) {
+    case D1L_STORAGE_PAGE_CARD_STATUS:
+        render_storage_card_status();
+        break;
+    case D1L_STORAGE_PAGE_DATA_LOCATIONS:
+        render_storage_data_locations();
+        break;
+    case D1L_STORAGE_PAGE_ROOT:
+    default:
+        s_storage_page = D1L_STORAGE_PAGE_ROOT;
+        render_storage_root();
+        break;
+    }
+    render_storage_safety_copy();
 }
 
 static void open_storage_sheet_event_cb(lv_event_t *event)
@@ -5492,6 +5941,7 @@ static void open_storage_sheet_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
+    s_storage_page = D1L_STORAGE_PAGE_ROOT;
     render_storage_sheet();
     if (s_storage_sheet) {
         show_modal(s_storage_sheet);
@@ -6550,6 +7000,20 @@ static lv_obj_t *scroll_probe_open_mesh_surface(const char *surface)
     return s_mesh_roles_sheet;
 }
 
+static lv_obj_t *scroll_probe_open_storage_surface(const char *surface)
+{
+    open_storage_sheet_event_cb(NULL);
+    if (strcmp(surface, "storage_card") == 0) {
+        open_storage_card_status_event_cb(NULL);
+    } else if (strcmp(surface, "storage_data") == 0) {
+        open_storage_data_locations_event_cb(NULL);
+        return scroll_probe_find_target(s_storage_sheet);
+    } else if (strcmp(surface, "storage") != 0) {
+        return NULL;
+    }
+    return s_storage_sheet;
+}
+
 static void measure_scroll_probe_target(lv_obj_t *target,
                                         d1l_ui_scroll_probe_result_t *result)
 {
@@ -6601,9 +7065,10 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
                            s_snapshot.recent_dms[0].contact_fingerprint);
         return scroll_probe_find_target(s_dm_thread_sheet);
     }
-    if (strcmp(surface, "storage") == 0) {
-        open_storage_sheet_event_cb(NULL);
-        return scroll_probe_find_target(s_storage_sheet);
+    if (strcmp(surface, "storage") == 0 ||
+        strcmp(surface, "storage_card") == 0 ||
+        strcmp(surface, "storage_data") == 0) {
+        return scroll_probe_open_storage_surface(surface);
     }
     if (strcmp(surface, "wifi") == 0) {
         open_wifi_sheet_event_cb(NULL);
@@ -6638,6 +7103,8 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     lv_obj_t *target = scroll_probe_open_surface(canonical);
     const bool static_page =
         strncmp(canonical, "contact_", strlen("contact_")) == 0 ||
+        strcmp(canonical, "storage") == 0 ||
+        strcmp(canonical, "storage_card") == 0 ||
         strcmp(canonical, "mesh_roles") == 0 ||
         strcmp(canonical, "mesh_rooms") == 0 ||
         strcmp(canonical, "mesh_repeaters") == 0;
@@ -6649,6 +7116,11 @@ static void run_scroll_probe_on_ui_task(const char *surface,
         return;
     }
     measure_scroll_probe_target(target, result);
+    if (strcmp(canonical, "storage_data") == 0 && target) {
+        lv_obj_scroll_to_y(target, 0, LV_ANIM_OFF);
+        lv_obj_update_layout(target);
+        force_ui_layout_repaint();
+    }
 }
 
 static uint32_t begin_pending_scroll_probe(char *surface, size_t surface_len)
@@ -7411,14 +7883,13 @@ static void create_storage_sheet(lv_obj_t *screen)
     if (!s_storage_sheet) {
         return;
     }
-    lv_obj_set_size(s_storage_sheet, 448, 320);
-    lv_obj_set_pos(s_storage_sheet, 16, 82);
-    lv_obj_set_style_radius(s_storage_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_storage_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_storage_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_storage_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_storage_sheet, 12, 0);
-    configure_sheet_scroll(s_storage_sheet);
+    lv_obj_set_size(s_storage_sheet, 480, 424);
+    lv_obj_set_pos(s_storage_sheet, 0, 56);
+    lv_obj_set_style_radius(s_storage_sheet, 0, 0);
+    lv_obj_set_style_bg_color(s_storage_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_width(s_storage_sheet, 0, 0);
+    lv_obj_set_style_pad_all(s_storage_sheet, 0, 0);
+    lv_obj_clear_flag(s_storage_sheet, LV_OBJ_FLAG_SCROLLABLE);
     d1l_ui_modal_hide(s_storage_sheet);
 }
 
