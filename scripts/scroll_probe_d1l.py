@@ -187,9 +187,12 @@ def dry_run_report(screens: list[str], dwell_sec: float, manual_touch: bool) -> 
     }
 
 
-def crashlog_has_entries(row: dict) -> bool:
+def crashlog_has_crash_like_entries(row: dict) -> bool:
     entries = row.get("entries")
-    return isinstance(entries, list) and len(entries) > 0
+    return isinstance(entries, list) and any(
+        isinstance(entry, dict) and entry.get("crash_like") is True
+        for entry in entries
+    )
 
 
 def event_failed(event: dict) -> bool:
@@ -209,7 +212,7 @@ def event_failed(event: dict) -> bool:
         or not movement_ok
         or event["status"].get("active_tab") != event["tab"]
         or not event["health"].get("ok")
-        or crashlog_has_entries(event["crashlog"])
+        or crashlog_has_crash_like_entries(event["crashlog"])
     )
 
 
@@ -324,7 +327,7 @@ def run_scroll_probe(
             "active_tab": event["status"].get("active_tab"),
             "expected_active_tab": event["tab"],
             "health_ok": event["health"].get("ok"),
-            "crashlog_entries": crashlog_has_entries(event["crashlog"]),
+            "crashlog_crash_like_entries": crashlog_has_crash_like_entries(event["crashlog"]),
             "movement_required": event["screen"] not in SCROLL_MOVEMENT_OPTIONAL,
         }
         for event in events

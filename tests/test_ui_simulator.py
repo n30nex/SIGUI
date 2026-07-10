@@ -1258,8 +1258,8 @@ def test_ui_simulator_unsaved_map_location_fields_start_blank(tmp_path):
     assert view["metrics"]["map_location_latitude_value"] == ""
     assert view["metrics"]["map_location_longitude_value"] == ""
     assert view["metrics"]["map_location_examples_are_placeholders_only"] is True
-    assert "43.6532000" not in view["labels"]
-    assert "-79.3832000" not in view["labels"]
+    assert "e.g. 43.6532000" in view["labels"]
+    assert "e.g. -79.3832000" in view["labels"]
 
 
 def test_ui_simulator_is_documented_and_run_in_ci():

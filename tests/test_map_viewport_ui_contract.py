@@ -203,8 +203,8 @@ def test_unsaved_map_location_uses_empty_fields_and_example_placeholders():
     assert 'char latitude[20] = "";' in editor
     assert 'char longitude[20] = "";' in editor
     assert "if (snapshot->map_location_set)" in editor
-    assert 'map_configure_textarea(controls->latitude_textarea, "43.6532000", latitude' in editor
-    assert 'map_configure_textarea(controls->longitude_textarea, "-79.3832000", longitude' in editor
+    assert 'map_configure_textarea(controls->latitude_textarea, "e.g. 43.6532000", latitude' in editor
+    assert 'map_configure_textarea(controls->longitude_textarea, "e.g. -79.3832000", longitude' in editor
     assert "s_map_location_lat_e7 = 0;" in snapshot_copy
     assert "s_map_location_lon_e7 = 0;" in snapshot_copy
     assert "436532000L" not in phase_source

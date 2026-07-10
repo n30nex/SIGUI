@@ -762,7 +762,7 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
     if (controls->latitude_textarea) {
         lv_obj_set_size(controls->latitude_textarea, 448, 48);
         lv_obj_set_pos(controls->latitude_textarea, 16, 146);
-        map_configure_textarea(controls->latitude_textarea, "43.6532000", latitude, 14);
+        map_configure_textarea(controls->latitude_textarea, "e.g. 43.6532000", latitude, 14);
         if (callbacks->location_textarea) {
             lv_obj_add_event_cb(controls->latitude_textarea, callbacks->location_textarea,
                                 LV_EVENT_FOCUSED, NULL);
@@ -778,7 +778,7 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
     if (controls->longitude_textarea) {
         lv_obj_set_size(controls->longitude_textarea, 448, 48);
         lv_obj_set_pos(controls->longitude_textarea, 16, 228);
-        map_configure_textarea(controls->longitude_textarea, "-79.3832000", longitude, 15);
+        map_configure_textarea(controls->longitude_textarea, "e.g. -79.3832000", longitude, 15);
         if (callbacks->location_textarea) {
             lv_obj_add_event_cb(controls->longitude_textarea, callbacks->location_textarea,
                                 LV_EVENT_FOCUSED, NULL);

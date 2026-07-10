@@ -1891,12 +1891,16 @@ def render_map_location(s: Surface, snap: Snapshot):
     s.touch_target("Latitude", (16, 202, 464, 250), kind="text_field", action="edit_map_latitude")
     if latitude_value:
         s.text(latitude_value, (28, 212, 452, 240), 17, TEXT)
+    else:
+        s.text("e.g. 43.6532000", (28, 212, 452, 240), 15, MUTED)
 
     s.text("Longitude", (28, 262, 220, 282), 13, GREEN, True)
     s.round_rect((16, 284, 464, 332), SURFACE_2, BORDER, 8)
     s.touch_target("Longitude", (16, 284, 464, 332), kind="text_field", action="edit_map_longitude")
     if longitude_value:
         s.text(longitude_value, (28, 294, 452, 322), 17, TEXT)
+    else:
+        s.text("e.g. -79.3832000", (28, 294, 452, 322), 15, MUTED)
 
     s.round_rect((16, 344, 464, 398), (13, 22, 31), BORDER, 8)
     s.text("The keyboard opens only while editing a coordinate.", (28, 358, 452, 384), 12, MUTED)

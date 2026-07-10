@@ -216,6 +216,38 @@ def test_scroll_probe_allows_static_home_and_storage_summary_but_requires_data_t
     assert scroll_probe_d1l.event_failed(moving_data) is False
 
 
+def test_scroll_probe_ignores_normal_power_on_history_but_rejects_crash_like_resets():
+    event = {
+        "screen": "map",
+        "tab": "map",
+        "request": {"ok": True},
+        "tab_active": True,
+        "probe": {
+            "ok": True,
+            "surface": "map",
+            "tab": "map",
+            "target_found": True,
+            "scrollable": True,
+            "moved": False,
+        },
+        "status": {"active_tab": "map"},
+        "health": {"ok": True},
+        "crashlog": {
+            "entries": [
+                {"reset_reason": "POWERON", "crash_like": False},
+                {"reset_reason": "SW", "crash_like": False},
+            ]
+        },
+    }
+
+    assert scroll_probe_d1l.event_failed(event) is False
+
+    event["crashlog"]["entries"].append(
+        {"reset_reason": "PANIC", "crash_like": True}
+    )
+    assert scroll_probe_d1l.event_failed(event) is True
+
+
 def test_active_release_docs_do_not_treat_short_tab_abuse_as_final_proof():
     release_docs = [
         "README.md",
