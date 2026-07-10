@@ -35,7 +35,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 39
+    assert len(views) == 41
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -48,6 +48,8 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
         assert view["dock_rendered"] is (name in ui_simulator.DOCKED_VIEWS)
         assert view["dock_target_count"] == (5 if name in ui_simulator.DOCKED_VIEWS else 0)
         assert view["dock_invariant_ok"] is True
+        if name in ui_simulator.CONTACT_HIERARCHY_VIEWS:
+            assert view["truncated_labels"] == [], name
 
 
 def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
@@ -64,6 +66,8 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert report["snapshot_counts"]["dm_messages"] == 32
 
     views = {view["name"]: view for view in report["views"]}
+    for name in ui_simulator.CONTACT_HIERARCHY_VIEWS:
+        assert views[name]["truncated_labels"] == [], name
     messages = views["messages"]["metrics"]
     assert messages["public_source_count"] == 48
     assert messages["public_rendered_count"] <= 5
@@ -266,15 +270,37 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Reply",
         ui_simulator.SAMPLE_LONG_PUBLIC_MESSAGE,
     } <= labels_by_view["message_detail_technical_page"]
-    assert {"Contact Detail", "Trace", "Edit", "Export", "Fav", "Mute"} <= labels_by_view["contact_detail_sheet"]
+    assert {"YKF Corebot", "Contact detail", "Back", "Fingerprint", "Signal", "Status", "Message", "Contact options"} <= labels_by_view["contact_detail_sheet"]
+    assert {
+        "Contact Options",
+        "YKF Corebot",
+        "Back",
+        "Route",
+        "Rename",
+        "Favorite",
+        "Mute",
+        "Export",
+        "Forget contact",
+        "Requires confirmation",
+    } <= labels_by_view["contact_options_page"]
     assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
-    assert {"Edit Contact", "Contact alias", "Save", "Forget", "Close"} <= labels_by_view["contact_edit_sheet"]
-    assert {"Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"} <= labels_by_view["contact_export_sheet"]
+    assert {"Rename Contact", "YKF Corebot", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"} <= labels_by_view["contact_edit_sheet"]
+    assert "Forget" not in labels_by_view["contact_edit_sheet"]
+    assert {"Export Contact", "YKF Corebot", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"} <= labels_by_view["contact_export_sheet"]
+    assert {
+        "Forget Contact",
+        "YKF Corebot",
+        "Back",
+        "Remove this contact?",
+        "This cannot be undone.",
+        "Cancel",
+        "Forget contact",
+    } <= labels_by_view["forget_contact_confirm_page"]
     assert {"YKF Corebot", "2 of 2 messages", "Back", "Reply"} <= labels_by_view["dm_thread_sheet"]
     assert "Read" not in labels_by_view["dm_thread_sheet"]
     assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
     assert "new" not in labels_by_view["dm_thread_sheet"]
-    assert {"Route Trace", "Trace", "Contact Path", "Best Evidence", "Close"} <= labels_by_view["route_trace_sheet"]
+    assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Ping"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
@@ -305,8 +331,8 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
         "public_message_reply",
         "dm_thread_open_and_reply",
         "node_detail_inspection",
-        "contact_detail_management",
-        "contact_edit_alias_and_forget",
+        "contact_detail_options_hierarchy",
+        "contact_rename_and_forget_confirmation",
         "map_page_policy",
         "packet_filters_search_and_details",
         "mesh_roles_browser",
@@ -402,6 +428,78 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["map_location_sheet"]["clear_d1l_pin"]["destination"] == "map"
     assert actions_by_view["nodes"]["open_node_detail"]["destination"] == "node_detail_sheet"
     assert actions_by_view["node_detail_sheet"]["close_node_detail"]["destination"] == "nodes"
+    assert set(actions_by_view["contact_detail_sheet"]) == {
+        "close_contact_detail",
+        "open_dm_compose",
+        "open_contact_options",
+    }
+    assert actions_by_view["contact_detail_sheet"]["close_contact_detail"]["destination"] == "nodes"
+    assert actions_by_view["contact_detail_sheet"]["open_dm_compose"]["destination"] == "compose_sheet"
+    assert actions_by_view["contact_detail_sheet"]["open_contact_options"]["destination"] == "contact_options_page"
+    assert set(actions_by_view["contact_options_page"]) == {
+        "close_contact_options",
+        "open_route_trace",
+        "open_contact_edit",
+        "toggle_favorite",
+        "toggle_mute",
+        "open_contact_export",
+        "open_forget_contact_confirm",
+    }
+    assert actions_by_view["contact_options_page"]["close_contact_options"]["destination"] == "contact_detail_sheet"
+    assert actions_by_view["contact_options_page"]["open_route_trace"]["destination"] == "route_trace_sheet"
+    assert actions_by_view["contact_options_page"]["open_contact_edit"]["destination"] == "contact_edit_sheet"
+    assert actions_by_view["contact_options_page"]["toggle_favorite"]["destination"] is None
+    assert actions_by_view["contact_options_page"]["toggle_mute"]["destination"] is None
+    assert actions_by_view["contact_options_page"]["open_contact_export"]["destination"] == "contact_export_sheet"
+    assert actions_by_view["contact_options_page"]["open_forget_contact_confirm"]["destination"] == "forget_contact_confirm_page"
+    assert actions_by_view["contact_options_page"]["open_forget_contact_confirm"]["destructive"] is False
+    assert set(actions_by_view["contact_edit_sheet"]) == {
+        "close_contact_edit",
+        "edit_contact_alias",
+        "cancel_contact_edit",
+        "save_contact_alias",
+    }
+    assert actions_by_view["contact_edit_sheet"]["close_contact_edit"]["destination"] == "contact_options_page"
+    assert actions_by_view["contact_edit_sheet"]["cancel_contact_edit"]["destination"] == "contact_options_page"
+    assert actions_by_view["contact_edit_sheet"]["save_contact_alias"]["destination"] == "contact_options_page"
+    assert set(actions_by_view["contact_export_sheet"]) == {"close_contact_export"}
+    assert actions_by_view["contact_export_sheet"]["close_contact_export"]["destination"] == "contact_options_page"
+    assert set(actions_by_view["route_trace_sheet"]) == {"close_route_trace", "send_trace_probe"}
+    assert actions_by_view["route_trace_sheet"]["close_route_trace"]["destination"] == "contact_options_page"
+    assert actions_by_view["route_trace_sheet"]["send_trace_probe"]["dm_tx"] is True
+    assert set(actions_by_view["forget_contact_confirm_page"]) == {
+        "close_forget_contact_confirm",
+        "cancel_forget_contact",
+        "confirm_forget_contact",
+    }
+    assert actions_by_view["forget_contact_confirm_page"]["close_forget_contact_confirm"]["destination"] == "contact_options_page"
+    assert actions_by_view["forget_contact_confirm_page"]["cancel_forget_contact"]["destination"] == "contact_options_page"
+    assert actions_by_view["forget_contact_confirm_page"]["confirm_forget_contact"]["destination"] == "nodes"
+    assert actions_by_view["forget_contact_confirm_page"]["confirm_forget_contact"]["destructive"] is True
+    assert report["flow_report"]["destructive_actions"] == [
+        {
+            "view": "forget_contact_confirm_page",
+            "action": "confirm_forget_contact",
+            "label": "Forget contact",
+            "destination": "nodes",
+        }
+    ]
+    assert {
+        name: views[name]["metrics"]["contact_hierarchy_level"]
+        for name in ui_simulator.CONTACT_HIERARCHY_VIEWS
+    } == {
+        "contact_detail_sheet": "detail",
+        "contact_options_page": "options",
+        "contact_edit_sheet": "rename",
+        "contact_export_sheet": "export",
+        "forget_contact_confirm_page": "forget_confirm",
+        "route_trace_sheet": "route_trace",
+    }
+    assert views["contact_detail_sheet"]["metrics"]["contact_primary_action_count"] == 2
+    assert views["contact_options_page"]["metrics"]["contact_option_count"] == 6
+    assert views["forget_contact_confirm_page"]["metrics"]["contact_forget_confirmation"] is True
+    assert views["forget_contact_confirm_page"]["metrics"]["contact_warning_complete"] is True
+    assert all(views[name]["dock_rendered"] is False for name in ui_simulator.CONTACT_HIERARCHY_VIEWS)
     assert actions_by_view["messages"]["send_public_test"]["public_rf_tx"] is True
     assert actions_by_view["compose_sheet"]["send_public_text"]["public_rf_tx"] is True
     assert {
@@ -459,7 +557,6 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["packet_detail_sheet"]["toggle_packet_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
     assert actions_by_view["advert_sheet"]["send_advert_flood"]["rf_tx"] is True
-    assert actions_by_view["contact_edit_sheet"]["forget_contact"]["destructive"] is True
     assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["formats_sd"] is False
     assert actions_by_view["lock_overlay"]["unlock"]["destination"] == "home"
 

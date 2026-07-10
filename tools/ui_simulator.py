@@ -35,6 +35,16 @@ DOCKED_VIEWS = frozenset(
         "settings_advanced_expanded",
     }
 )
+CONTACT_HIERARCHY_VIEWS = frozenset(
+    {
+        "contact_detail_sheet",
+        "contact_options_page",
+        "contact_edit_sheet",
+        "contact_export_sheet",
+        "forget_contact_confirm_page",
+        "route_trace_sheet",
+    }
+)
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -1906,34 +1916,96 @@ def render_message_detail_technical_page(s: Surface, snap: Snapshot):
     render_message_detail_page(s, snap, technical_details=True)
 
 
+def draw_contact_page_header(
+    s: Surface,
+    snap: Snapshot,
+    title: str,
+    subtitle: str,
+    *,
+    back_action: str,
+    back_destination: str,
+):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action=back_action, destination=back_destination)
+    s.text(title, (112, 62, 464, 90), 22, TEXT, True)
+    s.text(subtitle, (112, 90, 464, 112), 12, MUTED)
+
+
 def render_contact_detail_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
-    draw_sheet_frame(s, "Contact Detail", contact.name)
-    s.text("Fingerprint", (44, 154, 180, 174), 13, MUTED, True)
-    s.text(contact.fingerprint, (44, 176, 436, 200), 17, TEXT)
-    s.text("Signal", (44, 210, 180, 230), 13, MUTED, True)
-    s.text(f"{contact.signal}  {contact.meta}", (44, 232, 436, 254), 14, GREEN)
-    buttons = (("DM", GREEN), ("Trace", BLUE), ("Edit", ACCENT), ("Export", ACCENT), ("Fav", ACCENT), ("Mute", ACCENT))
-    actions = {
-        "DM": ("open_dm_compose", "compose_sheet", False),
-        "Trace": ("open_route_trace", "route_trace_sheet", False),
-        "Edit": ("open_contact_edit", "contact_edit_sheet", False),
-        "Export": ("open_contact_export", "contact_export_sheet", False),
-        "Fav": ("toggle_favorite", None, False),
-        "Mute": ("toggle_mute", None, False),
-    }
-    for i, (label, color) in enumerate(buttons):
-        action, destination, destructive = actions[label]
-        draw_button(
+    draw_contact_page_header(
+        s,
+        snap,
+        contact.name,
+        "Contact detail",
+        back_action="close_contact_detail",
+        back_destination="nodes",
+    )
+    s.round_rect((16, 120, 464, 326), (13, 22, 31), BORDER, 8)
+    s.text("Fingerprint", (28, 132, 180, 152), 13, MUTED, True)
+    s.text(contact.fingerprint, (28, 154, 452, 180), 16, TEXT)
+    s.text("Signal", (28, 194, 100, 214), 13, MUTED, True)
+    s.text(contact.signal, (104, 194, 452, 216), 14, GREEN, True)
+    s.text("Status", (28, 230, 100, 250), 13, MUTED, True)
+    status_lines, status_end_y = s.wrapped_text(contact.meta, (104, 228, 452, 300), 13, TEXT, line_height=20)
+    draw_button(s, (16, 340, 464, 392), "Message", GREEN, action="open_dm_compose", destination="compose_sheet")
+    draw_button(
+        s,
+        (16, 408, 464, 472),
+        "Contact options",
+        BLUE,
+        action="open_contact_options",
+        destination="contact_options_page",
+    )
+    s.metrics.update(
+        {
+            "contact_hierarchy_level": "detail",
+            "contact_primary_action_count": 2,
+            "contact_status_wrapped_lines": status_lines,
+            "contact_status_complete": status_end_y <= 300,
+        }
+    )
+
+
+def render_contact_options_page(s: Surface, snap: Snapshot):
+    contact = snap.contacts[0]
+    draw_contact_page_header(
+        s,
+        snap,
+        "Contact Options",
+        contact.name,
+        back_action="close_contact_options",
+        back_destination="contact_detail_sheet",
+    )
+    rows = (
+        ((16, 120, 464, 168), "Route", "Trace path", BLUE, "open_route_trace", "route_trace_sheet", False),
+        ((16, 172, 464, 220), "Rename", "Change alias", ACCENT, "open_contact_edit", "contact_edit_sheet", False),
+        ((16, 224, 464, 272), "Favorite", "Off", AMBER, "toggle_favorite", None, False),
+        ((16, 276, 464, 324), "Mute", "Off", VIOLET, "toggle_mute", None, False),
+        ((16, 328, 464, 376), "Export", "Share QR", GREEN, "open_contact_export", "contact_export_sheet", False),
+        (
+            (16, 380, 464, 428),
+            "Forget contact",
+            "Requires confirmation",
+            RED,
+            "open_forget_contact_confirm",
+            "forget_contact_confirm_page",
+            True,
+        ),
+    )
+    for box, title, status, color, action, destination, warning in rows:
+        draw_more_leaf(
             s,
-            (44 + i * 64, 278, 100 + i * 64, 330),
-            label,
+            box,
+            title,
+            status,
             color,
             action=action,
             destination=destination,
-            destructive=destructive,
+            warning=warning,
         )
-    draw_button(s, (44, 346, 200, 378), "Close", MUTED, action="close_contact_detail", destination="nodes")
+    s.metrics.update({"contact_hierarchy_level": "options", "contact_option_count": 6})
 
 
 def render_node_detail_sheet(s: Surface, snap: Snapshot):
@@ -1958,17 +2030,41 @@ def render_node_detail_sheet(s: Surface, snap: Snapshot):
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
-    draw_sheet_frame(s, "Edit Contact", contact.name)
-    draw_button(s, (210, 94, 274, 134), "Save", GREEN, action="save_contact_alias", destination="contact_detail_sheet")
-    draw_button(s, (284, 94, 356, 134), "Forget", RED, action="forget_contact", destination="nodes", destructive=True)
-    draw_button(s, (366, 94, 436, 134), "Close", MUTED, action="close_contact_edit", destination="contact_detail_sheet")
-    s.text("Alias only; retained history remains", (44, 150, 436, 172), 13, MUTED, True)
-    s.round_rect((44, 184, 436, 236), SURFACE_2, BORDER, 8)
-    s.touch_target("Contact alias", (44, 184, 436, 236), kind="text_field", action="edit_contact_alias")
-    s.text("Contact alias", (56, 192, 220, 214), 13, MUTED, True)
-    s.text(contact.name, (56, 214, 424, 232), 16, TEXT)
-    s.round_rect((44, 258, 436, 370), SURFACE, BORDER, 8)
-    s.text("Keyboard saves alias; Forget removes only the promoted contact", (56, 280, 424, 340), 13, MUTED, False, "center")
+    draw_contact_page_header(
+        s,
+        snap,
+        "Rename Contact",
+        contact.name,
+        back_action="close_contact_edit",
+        back_destination="contact_options_page",
+    )
+    s.text("Contact alias", (28, 126, 220, 148), 13, GREEN, True)
+    s.round_rect((16, 152, 464, 204), SURFACE_2, BORDER, 8)
+    s.touch_target("Contact alias", (16, 152, 464, 204), kind="text_field", action="edit_contact_alias")
+    s.text(contact.name, (28, 162, 452, 194), 17, TEXT)
+    s.text("Only the display alias changes. History and keys remain.", (28, 212, 452, 236), 12, MUTED)
+    s.round_rect((16, 246, 464, 404), (8, 14, 22), BORDER, 8)
+    s.text("Keyboard", (28, 254, 452, 276), 13, MUTED, True)
+    s.text("q w e r t y u i o p", (32, 286, 448, 316), 16, TEXT, False, "center")
+    s.text("a s d f g h j k l", (32, 324, 448, 354), 16, TEXT, False, "center")
+    s.text("ready     cancel", (32, 364, 448, 394), 15, TEXT, False, "center")
+    draw_button(
+        s,
+        (16, 420, 228, 472),
+        "Cancel",
+        MUTED,
+        action="cancel_contact_edit",
+        destination="contact_options_page",
+    )
+    draw_button(
+        s,
+        (240, 420, 464, 472),
+        "Save name",
+        GREEN,
+        action="save_contact_alias",
+        destination="contact_options_page",
+    )
+    s.metrics.update({"contact_hierarchy_level": "rename", "contact_destructive_actions": 0})
 
 
 def render_radio_settings_sheet(s: Surface, snap: Snapshot):
@@ -2102,16 +2198,64 @@ def render_advert_sheet(s: Surface, snap: Snapshot):
 
 def render_contact_export_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
-    draw_sheet_frame(s, "Contact Export", "MeshCore QR for YKF Corebot")
-    draw_fake_qr(s, (52, 154, 214, 316))
-    s.text("MeshCore QR", (234, 154, 436, 178), 15, GREEN, True)
-    s.text("Fingerprint", (234, 190, 436, 210), 13, MUTED, True)
-    s.text(contact.fingerprint, (234, 212, 436, 236), 15, TEXT)
-    s.text("URI", (234, 250, 436, 270), 13, MUTED, True)
-    s.text("meshcore://contact/add", (234, 272, 436, 288), 10, BLUE)
-    s.text("name=YKF+Corebot  type=1", (234, 288, 436, 304), 10, MUTED)
-    s.text(f"key {SAMPLE_PUBLIC_KEY[:12]}...{SAMPLE_PUBLIC_KEY[-8:]}", (234, 304, 436, 320), 10, BLUE)
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_contact_export", destination="contact_detail_sheet")
+    draw_contact_page_header(
+        s,
+        snap,
+        "Export Contact",
+        contact.name,
+        back_action="close_contact_export",
+        back_destination="contact_options_page",
+    )
+    draw_fake_qr(s, (152, 124, 328, 300))
+    s.text("MeshCore QR", (28, 306, 452, 330), 15, GREEN, True, "center")
+    s.text("Fingerprint", (28, 340, 160, 360), 13, MUTED, True)
+    s.text(contact.fingerprint, (162, 338, 452, 362), 15, TEXT)
+    s.text("URI", (28, 374, 76, 394), 13, MUTED, True)
+    s.text("meshcore://contact/add", (80, 372, 452, 396), 13, BLUE)
+    s.text("Ready to scan", (28, 420, 452, 450), 14, TEXT, True, "center")
+    s.metrics.update({"contact_hierarchy_level": "export", "contact_export_complete": True})
+
+
+def render_forget_contact_confirm_page(s: Surface, snap: Snapshot):
+    contact = snap.contacts[0]
+    draw_contact_page_header(
+        s,
+        snap,
+        "Forget Contact",
+        contact.name,
+        back_action="close_forget_contact_confirm",
+        back_destination="contact_options_page",
+    )
+    s.round_rect((16, 132, 464, 326), (35, 19, 23), (127, 29, 29), 10)
+    s.text("Remove this contact?", (32, 150, 448, 180), 20, RED, True)
+    warning = "The saved alias and contact key will be removed from this device. Retained message history is not deleted."
+    warning_lines, warning_end_y = s.wrapped_text(warning, (32, 192, 448, 274), 14, TEXT, line_height=23)
+    s.text("This cannot be undone.", (32, 286, 448, 312), 13, RED, True)
+    draw_button(
+        s,
+        (16, 420, 228, 472),
+        "Cancel",
+        MUTED,
+        action="cancel_forget_contact",
+        destination="contact_options_page",
+    )
+    draw_button(
+        s,
+        (240, 420, 464, 472),
+        "Forget contact",
+        RED,
+        action="confirm_forget_contact",
+        destination="nodes",
+        destructive=True,
+    )
+    s.metrics.update(
+        {
+            "contact_hierarchy_level": "forget_confirm",
+            "contact_forget_confirmation": True,
+            "contact_warning_wrapped_lines": warning_lines,
+            "contact_warning_complete": warning_end_y <= 274,
+        }
+    )
 
 
 def render_dm_thread_sheet(s: Surface, snap: Snapshot):
@@ -2164,26 +2308,38 @@ def render_route_detail_sheet(s: Surface, snap: Snapshot):
 def render_route_trace_sheet(s: Surface, snap: Snapshot):
     contact = snap.contacts[0]
     contact_routes = tuple(route for route in snap.routes if contact.fingerprint[:4] in route.meta or "direct" in route.note)
-    draw_sheet_frame(s, "Route Trace", contact.name)
-    s.text("Trace", (44, 154, 160, 174), 13, MUTED, True)
-    s.text(contact.fingerprint, (44, 176, 436, 198), 16, TEXT)
-    s.text("Contact Path", (44, 210, 180, 230), 13, MUTED, True)
-    s.text("key retained  path known  hops 0", (44, 232, 436, 254), 15, GREEN)
-    s.text("Best Evidence", (44, 266, 180, 286), 13, MUTED, True)
-    s.text("direct seq 42 confidence 100", (44, 288, 436, 310), 15, ACCENT)
+    draw_contact_page_header(
+        s,
+        snap,
+        "Route Trace",
+        contact.name,
+        back_action="close_route_trace",
+        back_destination="contact_options_page",
+    )
+    s.round_rect((16, 120, 464, 408), (13, 22, 31), BORDER, 8)
+    s.text("Fingerprint", (28, 132, 160, 152), 13, MUTED, True)
+    s.text(contact.fingerprint, (28, 154, 452, 178), 16, TEXT)
+    s.text("Contact Path", (28, 194, 180, 214), 13, MUTED, True)
+    s.text("Key retained  /  path known  /  0 hops", (28, 216, 452, 240), 14, GREEN)
+    s.text("Best Evidence", (28, 256, 180, 276), 13, MUTED, True)
+    s.text("Direct packet  /  confidence 100", (28, 278, 452, 302), 14, ACCENT)
     y = 320
     rendered = 0
     for route in contact_routes[:2]:
-        draw_row(s, (44, y, 436, y + 30), f"{route.kind} {route.direction}", f"{route.meta}  {route.note}")
-        y += 34
+        route_text = f"{route.kind} {route.direction}: {route.meta}"
+        lines, route_end_y = s.wrapped_text(route_text, (28, y, 452, y + 40), 12, TEXT, line_height=20)
+        if lines > 0:
+            y = route_end_y + 4
         rendered += 1
-    draw_button(s, (236, 94, 306, 134), "Ping", BLUE, action="send_trace_probe", dm_tx=True)
-    draw_button(s, (316, 94, 436, 134), "Close", MUTED, action="close_route_trace", destination="contact_detail_sheet")
-    s.text("DM-only trace probe", (44, 390, 300, 408), 11, MUTED)
+    if not contact_routes:
+        s.text("No recent trace evidence", (28, 322, 452, 348), 13, MUTED)
+    s.text("DM-only trace probe", (28, 378, 452, 400), 11, MUTED, False, "center")
+    draw_button(s, (16, 420, 464, 472), "Ping", BLUE, action="send_trace_probe", dm_tx=True)
     s.metrics.update(
         {
             "route_trace_source_count": len(contact_routes),
             "route_trace_rendered_count": rendered,
+            "contact_hierarchy_level": "route_trace",
         }
     )
 
@@ -2289,9 +2445,11 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "ble_setup_sheet": render_ble_setup_sheet,
     "advert_sheet": render_advert_sheet,
     "contact_detail_sheet": render_contact_detail_sheet,
+    "contact_options_page": render_contact_options_page,
     "node_detail_sheet": render_node_detail_sheet,
     "contact_edit_sheet": render_contact_edit_sheet,
     "contact_export_sheet": render_contact_export_sheet,
+    "forget_contact_confirm_page": render_forget_contact_confirm_page,
     "message_detail_sheet": render_message_detail_sheet,
     "message_detail_technical_page": render_message_detail_technical_page,
     "dm_thread_sheet": render_dm_thread_sheet,
@@ -2488,10 +2646,29 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Close",
     ),
     "advert_sheet": ("Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"),
-    "contact_detail_sheet": ("Contact Detail", "Fingerprint", "Signal", "DM", "Trace", "Edit", "Export", "Fav", "Mute", "Close"),
+    "contact_detail_sheet": ("Back", "Contact detail", "Fingerprint", "Signal", "Status", "Message", "Contact options"),
+    "contact_options_page": (
+        "Contact Options",
+        "Back",
+        "Route",
+        "Rename",
+        "Favorite",
+        "Mute",
+        "Export",
+        "Forget contact",
+        "Requires confirmation",
+    ),
     "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
-    "contact_edit_sheet": ("Edit Contact", "Contact alias", "Save", "Forget", "Close"),
-    "contact_export_sheet": ("Contact Export", "MeshCore QR", "Fingerprint", "URI", "Close"),
+    "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
+    "contact_export_sheet": ("Export Contact", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"),
+    "forget_contact_confirm_page": (
+        "Forget Contact",
+        "Back",
+        "Remove this contact?",
+        "This cannot be undone.",
+        "Cancel",
+        "Forget contact",
+    ),
     "message_detail_sheet": ("Message Detail", "Back", "Sender", "Message", "Technical details", "Reply"),
     "message_detail_technical_page": (
         "Message Detail",
@@ -2506,7 +2683,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "dm_thread_sheet": ("Back", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
-    "route_trace_sheet": ("Route Trace", "Trace", "Contact Path", "Best Evidence", "Ping", "Close"),
+    "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Ping"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
@@ -2677,25 +2854,64 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         ),
     },
     {
-        "name": "contact_detail_management",
+        "name": "contact_detail_options_hierarchy",
         "steps": (
             {"view": "nodes", "action": "open_contact_detail", "destination": "contact_detail_sheet"},
             {"view": "contact_detail_sheet", "action": "open_dm_compose", "destination": "compose_sheet"},
-            {"view": "contact_detail_sheet", "action": "open_route_trace", "destination": "route_trace_sheet"},
+            {
+                "view": "contact_detail_sheet",
+                "action": "open_contact_options",
+                "destination": "contact_options_page",
+            },
+            {"view": "contact_options_page", "action": "open_route_trace", "destination": "route_trace_sheet"},
             {"view": "route_trace_sheet", "action": "send_trace_probe", "dm_tx": True},
-            {"view": "contact_detail_sheet", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
-            {"view": "contact_detail_sheet", "action": "open_contact_export", "destination": "contact_export_sheet"},
-            {"view": "contact_detail_sheet", "action": "toggle_favorite"},
-            {"view": "contact_detail_sheet", "action": "toggle_mute"},
+            {"view": "route_trace_sheet", "action": "close_route_trace", "destination": "contact_options_page"},
+            {"view": "contact_options_page", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
+            {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_options_page"},
+            {"view": "contact_edit_sheet", "action": "cancel_contact_edit", "destination": "contact_options_page"},
+            {"view": "contact_options_page", "action": "toggle_favorite"},
+            {"view": "contact_options_page", "action": "toggle_mute"},
+            {"view": "contact_options_page", "action": "open_contact_export", "destination": "contact_export_sheet"},
+            {"view": "contact_export_sheet", "action": "close_contact_export", "destination": "contact_options_page"},
+            {
+                "view": "contact_options_page",
+                "action": "open_forget_contact_confirm",
+                "destination": "forget_contact_confirm_page",
+            },
+            {
+                "view": "forget_contact_confirm_page",
+                "action": "close_forget_contact_confirm",
+                "destination": "contact_options_page",
+            },
+            {
+                "view": "forget_contact_confirm_page",
+                "action": "cancel_forget_contact",
+                "destination": "contact_options_page",
+            },
+            {
+                "view": "contact_options_page",
+                "action": "close_contact_options",
+                "destination": "contact_detail_sheet",
+            },
+            {"view": "contact_detail_sheet", "action": "close_contact_detail", "destination": "nodes"},
         ),
     },
     {
-        "name": "contact_edit_alias_and_forget",
+        "name": "contact_rename_and_forget_confirmation",
         "steps": (
             {"view": "contact_edit_sheet", "action": "edit_contact_alias"},
-            {"view": "contact_edit_sheet", "action": "save_contact_alias", "destination": "contact_detail_sheet"},
-            {"view": "contact_edit_sheet", "action": "forget_contact", "destination": "nodes", "destructive": True},
-            {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_detail_sheet"},
+            {"view": "contact_edit_sheet", "action": "save_contact_alias", "destination": "contact_options_page"},
+            {
+                "view": "contact_options_page",
+                "action": "open_forget_contact_confirm",
+                "destination": "forget_contact_confirm_page",
+            },
+            {
+                "view": "forget_contact_confirm_page",
+                "action": "confirm_forget_contact",
+                "destination": "nodes",
+                "destructive": True,
+            },
         ),
     },
     {

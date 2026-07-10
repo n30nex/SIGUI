@@ -11,6 +11,24 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def static_void_body(source: str, symbol: str) -> str:
+    marker = f"static void {symbol}("
+    start = source.rfind(marker)
+    assert start >= 0, symbol
+    end = source.find("\nstatic ", start + len(marker))
+    return source[start : end if end >= 0 else len(source)]
+
+
+def concrete_button_dimensions(body: str, sheet: str) -> list[tuple[int, int]]:
+    return [
+        (int(width), int(height))
+        for width, height in re.findall(
+            rf"create_button\(\s*{re.escape(sheet)}\s*,\s*[^,]+,\s*-?\d+\s*,\s*-?\d+\s*,\s*(\d+)\s*,\s*(\d+)\s*,",
+            body,
+        )
+    ]
+
+
 def test_ui_references_only_enabled_lvgl_fonts():
     source = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "main/ui").glob("*.c"))
     sdkconfig = read("sdkconfig.defaults")
@@ -349,7 +367,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
-    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|packets|settings|storage|wifi|map>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|packets|settings|storage|wifi|map>" in console
+    assert "contact_probe_surfaces" in console
     assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
     assert '#include "ui_keyboard.h"' in source
@@ -634,13 +653,16 @@ def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
     expected_deferred_paths = [
         "s_packet_search_text[0] = '\\0';\n    if (s_packet_search_textarea)",
         "hide_packet_search_sheet();\n    request_content_refresh();",
-        "hide_contact_edit_sheet();\n        hide_contact_export_sheet();",
-        "memset(&s_contact_detail_contact, 0, sizeof(s_contact_detail_contact));\n        request_content_refresh();",
-        "s_contact_detail_contact = updated;\n        request_content_refresh();\n        render_contact_detail_sheet();",
         "s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;\n    s_packet_skip_newest = 0;\n    hide_packet_search_sheet();\n    request_content_refresh();",
     ]
     for snippet in expected_deferred_paths:
         assert snippet in source
+
+    rename = static_void_body(source, "save_contact_edit_event_cb")
+    assert "s_contact_detail_contact = updated;" in rename
+    assert "hide_contact_edit_sheet();" in rename
+    assert "show_contact_options_sheet();" in rename
+    assert "render_contact_detail_sheet();" not in rename
 
 
 def test_touch_ui_actions_route_through_app_model():
@@ -692,8 +714,8 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "public_history_search",
         "dm_thread_open_and_reply",
         "node_detail_inspection",
-        "contact_detail_management",
-        "contact_edit_alias_and_forget",
+        "contact_detail_options_hierarchy",
+        "contact_rename_and_forget_confirmation",
         "map_page_policy",
         "packet_filters_search_and_details",
         "mesh_roles_browser",
@@ -719,12 +741,21 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_dm_thread": "open_dm_thread_event_cb",
         "open_dm_reply": "reply_dm_thread_event_cb",
         "open_contact_detail": "open_contact_detail_event_cb",
+        "close_contact_detail": "close_contact_detail_event_cb",
+        "open_dm_compose": "contact_detail_dm_event_cb",
+        "open_contact_options": "open_contact_options_event_cb",
+        "close_contact_options": "close_contact_options_event_cb",
         "open_node_detail": "open_node_detail_event_cb",
         "close_node_detail": "close_node_detail_event_cb",
         "open_contact_edit": "open_contact_edit_event_cb",
+        "close_contact_edit": "close_contact_edit_event_cb",
+        "cancel_contact_edit": "close_contact_edit_event_cb",
         "edit_contact_alias": "s_contact_edit_textarea",
         "save_contact_alias": "save_contact_edit_event_cb",
-        "forget_contact": "forget_contact_edit_event_cb",
+        "open_forget_contact_confirm": "open_contact_forget_event_cb",
+        "close_forget_contact_confirm": "cancel_contact_forget_event_cb",
+        "cancel_forget_contact": "cancel_contact_forget_event_cb",
+        "confirm_forget_contact": "confirm_forget_contact_event_cb",
         "open_map": "dock_event_cb",
         "open_nodes": "dock_event_cb",
         "open_packets": "D1L_UI_SETTINGS_ACTION_PACKETS",
@@ -735,7 +766,10 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "save_map_location": "map_location_save_event_cb",
         "skip_map_location": "close_map_location_sheet_event_cb",
         "open_contact_export": "contact_detail_export_event_cb",
+        "close_contact_export": "close_contact_export_event_cb",
         "open_route_trace": "open_route_trace_event_cb",
+        "close_route_trace": "close_route_trace_event_cb",
+        "send_trace_probe": "route_trace_probe_event_cb",
         "open_packet_search": "open_packet_search_event_cb",
         "edit_packet_search": "s_packet_search_textarea",
         "apply_packet_search": "apply_packet_search_event_cb",
@@ -1118,9 +1152,11 @@ def test_messages_screen_renders_bounded_preview_rows():
     assert '"Search author or message"' in source
 
 
-def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
+def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     source = read("main/ui/ui_phase1.c")
     assert "static lv_obj_t *s_contact_detail_sheet" in source
+    assert "static lv_obj_t *s_contact_options_sheet" in source
+    assert "static lv_obj_t *s_contact_forget_sheet" in source
     assert "static lv_obj_t *s_contact_edit_sheet" in source
     assert "static lv_obj_t *s_contact_export_sheet" in source
     assert "static lv_obj_t *s_route_trace_sheet" in source
@@ -1129,8 +1165,12 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "static d1l_contact_entry_t s_route_trace_contact" in source
     assert "static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY]" in source
     assert "open_contact_detail_event_cb" in source
+    assert "open_contact_options_event_cb" in source
+    assert "open_contact_forget_event_cb" in source
     assert "open_route_trace_event_cb" in source
     assert "create_contact_detail_sheet" in source
+    assert "create_contact_options_sheet" in source
+    assert "create_contact_forget_sheet" in source
     assert "create_contact_edit_sheet" in source
     assert "create_contact_export_sheet" in source
     assert "create_route_trace_sheet" in source
@@ -1147,7 +1187,6 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED" in source
     assert "d1l_app_model_set_contact_flags(s_contact_detail_contact.fingerprint" in source
     assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in source
-    assert "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint" in source
     assert "d1l_app_model_export_contact_uri(s_contact_detail_contact.fingerprint" in source
     assert "s_contact_action_favorite" in source
     assert "s_contact_action_mute" in source
@@ -1156,14 +1195,106 @@ def test_contact_detail_sheet_exposes_dm_favorite_and_mute_actions():
     assert "route_trace_probe_event_cb" in source
     assert "d1l_app_model_request_trace_probe(s_route_trace_contact.fingerprint" in source
     assert 'create_button(s_route_trace_sheet, "Ping"' in source
-    assert 'create_button(s_contact_detail_sheet, "Trace"' in source
-    assert 'create_button(s_contact_detail_sheet, "Edit"' in source
     assert '"Alias only; retained history remains"' in source
     assert '"DM-only trace probe; no Public RF"' in source
     assert '"Contact Export"' in source
     assert '"MeshCore QR  %.16s  type %u"' in source
     assert "lv_qrcode_create" in source
     assert "lv_qrcode_update" in source
+
+    detail = static_void_body(source, "render_contact_detail_sheet")
+    assert '"Back"' in detail
+    assert '"Message"' in detail
+    assert '"Contact options"' in detail
+    for hidden_action in ('"Trace"', '"Edit"', '"Export"', '"Fav"', '"Mute"', '"Forget'):
+        assert hidden_action not in detail
+    detail_buttons = concrete_button_dimensions(detail, "s_contact_detail_sheet")
+    assert len(detail_buttons) == 3
+
+    options = static_void_body(source, "render_contact_options_sheet")
+    for option in (
+        '"Route trace"',
+        '"Rename"',
+        '"Remove from favorites"',
+        '"Add to favorites"',
+        '"Unmute notifications"',
+        '"Mute notifications"',
+        '"Export QR"',
+        '"Forget contact"',
+    ):
+        assert option in options
+    options_buttons = concrete_button_dimensions(options, "s_contact_options_sheet")
+    assert len(options_buttons) == 7
+
+    forget = static_void_body(source, "render_contact_forget_sheet")
+    assert '"Back"' in forget
+    assert '"Cancel"' in forget
+    assert '"Forget Contact"' in forget
+    assert "cancel_contact_forget_event_cb" in forget
+    assert "confirm_forget_contact_event_cb" in forget
+    forget_buttons = concrete_button_dimensions(forget, "s_contact_forget_sheet")
+    assert len(forget_buttons) == 3
+
+    for symbol, sheet, expected_count in (
+        ("render_contact_export_sheet", "s_contact_export_sheet", 1),
+        ("render_route_trace_sheet", "s_route_trace_sheet", 2),
+        ("create_contact_edit_sheet", "s_contact_edit_sheet", 2),
+    ):
+        dimensions = concrete_button_dimensions(static_void_body(source, symbol), sheet)
+        assert len(dimensions) == expected_count, symbol
+        assert all(width >= 44 and height >= 44 for width, height in dimensions), symbol
+    for name, dimensions in (
+        ("detail", detail_buttons),
+        ("options", options_buttons),
+        ("forget", forget_buttons),
+    ):
+        assert all(width >= 44 and height >= 44 for width, height in dimensions), name
+
+    for symbol, sheet in (
+        ("create_contact_detail_sheet", "s_contact_detail_sheet"),
+        ("create_contact_options_sheet", "s_contact_options_sheet"),
+        ("create_contact_forget_sheet", "s_contact_forget_sheet"),
+        ("create_contact_edit_sheet", "s_contact_edit_sheet"),
+        ("create_contact_export_sheet", "s_contact_export_sheet"),
+        ("create_route_trace_sheet", "s_route_trace_sheet"),
+    ):
+        create_body = static_void_body(source, symbol)
+        assert f"lv_obj_set_size({sheet}, 480, 424);" in create_body
+        assert f"lv_obj_set_pos({sheet}, 0, 56);" in create_body
+
+    delete_call = "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint"
+    confirm = static_void_body(source, "confirm_forget_contact_event_cb")
+    assert source.count(delete_call) == 1
+    assert delete_call in confirm
+    for symbol in (
+        "cancel_contact_forget_event_cb",
+        "close_contact_options_event_cb",
+        "close_contact_edit_event_cb",
+        "close_contact_export_event_cb",
+        "close_route_trace_event_cb",
+    ):
+        assert delete_call not in static_void_body(source, symbol), symbol
+    assert "forget_contact_edit_event_cb" not in source
+
+    probe = source.split("static lv_obj_t *scroll_probe_open_contact_surface", 1)[1].split(
+        "static void measure_scroll_probe_target", 1
+    )[0]
+    for surface, sheet in (
+        ("contact_detail", "s_contact_detail_sheet"),
+        ("contact_options", "s_contact_options_sheet"),
+        ("contact_forget", "s_contact_forget_sheet"),
+        ("contact_route", "s_route_trace_sheet"),
+    ):
+        assert f'"{surface}"' in probe
+        assert f"return {sheet};" in probe
+    assert delete_call not in probe
+    assert "confirm_forget_contact_event_cb" not in probe
+
+    run_probe = source.split("static void run_scroll_probe_on_ui_task", 1)[1].split(
+        "static bool begin_pending_scroll_probe", 1
+    )[0]
+    assert 'strncmp(canonical, "contact_", strlen("contact_")) == 0' in run_probe
+    assert "result->ok = result->surface_supported && result->target_found;" in run_probe
 
 
 def test_route_detail_sheet_opens_from_route_rows():
