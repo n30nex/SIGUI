@@ -157,6 +157,17 @@ def test_mesh_roles_is_full_height_hierarchical_bounded_and_read_only():
         assert "d1l_app_model_request" not in row
         assert "d1l_meshcore" not in row
 
+    friendly_route = ui.split(
+        "static const char *friendly_repeater_route", 1
+    )[1].split("\nstatic ", 1)[0]
+    assert 'strcmp(route, "heard_path") == 0' in friendly_route
+    assert 'return "heard path";' in friendly_route
+    assert 'strcmp(route, "flood") == 0' in friendly_route
+    assert 'return "flood path";' in friendly_route
+    assert "strchr(route, '_')" in friendly_route
+    assert 'return "route evidence";' in friendly_route
+    assert "friendly_repeater_route(entry)" in repeater_row
+
     dimensions = (
         concrete_button_dimensions(header, "s_mesh_roles_sheet")
         + concrete_button_dimensions(root, "s_mesh_roles_sheet")

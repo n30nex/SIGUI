@@ -3501,6 +3501,24 @@ static void render_room_server_role_row(lv_obj_t *parent, int y, const d1l_mesh_
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
+static const char *friendly_repeater_route(const d1l_mesh_repeater_candidate_t *entry)
+{
+    const char *route = entry && entry->route[0] ? entry->route : "";
+    if (strcmp(route, "heard_path") == 0) {
+        return "heard path";
+    }
+    if (strcmp(route, "flood") == 0) {
+        return "flood path";
+    }
+    if (strcmp(route, "direct") == 0) {
+        return "direct path";
+    }
+    if (!route[0] || strcmp(route, "unknown") == 0 || strchr(route, '_')) {
+        return "route evidence";
+    }
+    return route;
+}
+
 static void render_repeater_role_row(lv_obj_t *parent, int y,
                                      const d1l_mesh_repeater_candidate_t *entry)
 {
@@ -3516,7 +3534,7 @@ static void render_repeater_role_row(lv_obj_t *parent, int y,
     label_set_fmt(meta, "%d dBm / %s dB  %u hop%s via %.16s",
                   entry->rssi_dbm, snr, entry->path_hops,
                   entry->path_hops == 1U ? "" : "s",
-                  entry->route[0] ? entry->route : "mesh");
+                  friendly_repeater_route(entry));
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
     lv_obj_set_width(meta, 406);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
