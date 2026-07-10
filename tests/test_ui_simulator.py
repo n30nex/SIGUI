@@ -22,6 +22,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
     assert report["snapshot_counts"]["heard"] == 3
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
+    assert report["dock_invariant_issues"] == []
     assert report["required_labels_missing"] == []
     assert report["flow_report"]["ok"] is True
     assert report["flow_report"]["target_overlaps"] == []
@@ -43,6 +44,10 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
         assert view["text_count"] > 0
         assert view["overflow"] == []
         assert view["touch_target_issues"] == []
+        assert view["dock_expected"] is (name in ui_simulator.DOCKED_VIEWS)
+        assert view["dock_rendered"] is (name in ui_simulator.DOCKED_VIEWS)
+        assert view["dock_target_count"] == (5 if name in ui_simulator.DOCKED_VIEWS else 0)
+        assert view["dock_invariant_ok"] is True
 
 
 def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
@@ -105,6 +110,23 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     report = ui_simulator.generate(tmp_path)
     views_by_name = {view["name"]: view for view in report["views"]}
     labels_by_view = {view["name"]: set(view["labels"]) for view in report["views"]}
+    expected_docked_views = frozenset(
+        {
+            "messages",
+            "messages_dm",
+            "nodes",
+            "map",
+            "packets",
+            "settings",
+            "settings_tools_expanded",
+            "settings_connections_expanded",
+            "settings_storage_maps_expanded",
+            "settings_device_expanded",
+            "settings_support_expanded",
+            "settings_advanced_expanded",
+        }
+    )
+    assert ui_simulator.DOCKED_VIEWS == expected_docked_views
 
     assert {
         "Messages",
@@ -416,6 +438,7 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
             assert target["offscreen"] is False, (view["name"], target["label"])
             assert target["top_bar_overlap"] is False, (view["name"], target["label"])
             assert target["dock_overlap"] is False, (view["name"], target["label"])
+            assert target["unexpected_dock"] is False, (view["name"], target["label"])
 
 
 def test_ui_simulator_storage_state_scenarios_fit(tmp_path):

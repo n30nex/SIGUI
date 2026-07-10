@@ -39,6 +39,13 @@ bool d1l_ui_modal_visible(const lv_obj_t *obj)
     return obj && !lv_obj_has_flag(obj, LV_OBJ_FLAG_HIDDEN);
 }
 
+bool d1l_ui_modal_has_active(void)
+{
+    return s_active_modal &&
+           lv_obj_is_valid(s_active_modal) &&
+           d1l_ui_modal_visible(s_active_modal);
+}
+
 void d1l_ui_modal_configure_scroll(lv_obj_t *obj)
 {
     if (!obj) {
