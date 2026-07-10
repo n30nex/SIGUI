@@ -9,6 +9,14 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def static_void_body(source: str, symbol: str) -> str:
+    marker = f"static void {symbol}("
+    start = source.rfind(marker)
+    assert start >= 0, symbol
+    end = source.find("\nstatic ", start + len(marker))
+    return source[start : end if end >= 0 else len(source)]
+
+
 def test_modal_module_is_registered_and_owns_visibility_helpers():
     cmake = read("main/CMakeLists.txt")
     modal_source = read("main/ui/ui_modal.c")
@@ -134,11 +142,41 @@ def test_exclusive_modal_parent_returns_and_onboarding_suppression_are_explicit(
     )[0]
     assert "close_public_search_event_cb(event);" in public_keyboard
 
-    contact_close = ui_source.split("static void close_contact_export_event_cb", 1)[1].split(
-        "static void render_contact_export_sheet", 1
-    )[0]
-    assert "hide_contact_export_sheet();" in contact_close
-    assert "show_contact_detail_sheet();" in contact_close
+    contact_options_close = static_void_body(ui_source, "close_contact_options_event_cb")
+    assert "hide_contact_options_sheet();" in contact_options_close
+    assert "show_contact_detail_sheet();" in contact_options_close
+
+    contact_returns = {
+        "close_contact_edit_event_cb": "hide_contact_edit_sheet();",
+        "close_contact_export_event_cb": "hide_contact_export_sheet();",
+        "close_route_trace_event_cb": "hide_route_trace_sheet();",
+        "cancel_contact_forget_event_cb": "hide_contact_forget_sheet();",
+    }
+    delete_call = "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint"
+    for symbol, hide_call in contact_returns.items():
+        callback = static_void_body(ui_source, symbol)
+        assert hide_call in callback, symbol
+        assert "show_contact_options_sheet();" in callback, symbol
+        assert delete_call not in callback, symbol
+
+    save_contact = static_void_body(ui_source, "save_contact_edit_event_cb")
+    assert "hide_contact_edit_sheet();" in save_contact
+    assert "show_contact_options_sheet();" in save_contact
+    assert "show_contact_detail_sheet();" not in save_contact
+    assert delete_call not in save_contact
+
+    rename_keyboard = static_void_body(ui_source, "contact_edit_keyboard_event_cb")
+    assert "code == LV_EVENT_CANCEL" in rename_keyboard
+    assert "close_contact_edit_event_cb(event);" in rename_keyboard
+    assert delete_call not in rename_keyboard
+
+    forget_page = static_void_body(ui_source, "render_contact_forget_sheet")
+    assert forget_page.count("cancel_contact_forget_event_cb") == 2
+    assert forget_page.count("confirm_forget_contact_event_cb") == 1
+
+    confirm_forget = static_void_body(ui_source, "confirm_forget_contact_event_cb")
+    assert ui_source.count(delete_call) == 1
+    assert delete_call in confirm_forget
 
     onboarding = ui_source.split("static void update_onboarding_visibility", 1)[1].split(
         "static void set_object_hidden", 1

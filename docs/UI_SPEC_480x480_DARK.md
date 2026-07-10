@@ -17,7 +17,8 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Message Detail and DM Thread use full-height nested pages with one Back control, a scrollable content body, and a sticky full-width Reply action. Long Public text determines its own height before Technical details; opening a DM thread marks it read.
 - Nodes screen that reports heard-node and contact counts, renders newest persisted contact rows when present, and falls back to newest persisted heard-node rows.
 - Map screen that reports offline SD tile-cache policy/readiness, retained route/node counts, disabled live-download state, and an optional serial-configured manual center.
-- Contact detail sheet with DM, favorite, mute, and MeshCore QR-compatible export actions.
+- Contact Detail uses the full-height nested-page pattern and exposes only two primary destinations: `Message` and `Contact options`. Contact Options owns Route, Export, Rename, favorite/mute state, and the destructive contact-removal path. Route, Export, and Rename return to Contact Options rather than flattening those functions back into Contact Detail.
+- Removing a contact requires a dedicated confirmation page. `Cancel` and every `Back` path are non-destructive and restore Contact Options; only the explicit confirmation callback may delete the retained contact.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
 - More uses disclosure categories and nested rows: Tools, Connections, Storage & maps, Device, Support, and Advanced. Leaf actions include Packets, Diagnostics, Wi-Fi, Bluetooth, Radio, SD Card, Offline Maps, Display, Identity, and About.
 - Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and live RF apply status.
@@ -39,3 +40,4 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 - A row tap opens its detail or action page; inline buttons are reserved for the single most common safe action.
 - Modal and nested pages hide the dock, provide one clear Back or Close action, and cannot leave background navigation looking active.
 - User-facing summaries use plain language. Protocol identifiers, fingerprints, raw packet bytes, and hardware diagnostics live under Technical details or Advanced.
+- Contact actions follow `Network -> Contact Detail -> Contact options -> sub-function`. Destructive removal is never colocated with Message and never occurs from a Back, Cancel, keyboard-cancel, or child-page close callback.

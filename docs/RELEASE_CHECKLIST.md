@@ -42,7 +42,7 @@
 - [x] Large simulated mesh UI stress passes with bounded message/node previews.
 - [x] Bottom dock tab taps validated on D1L `COM12` after the deferred tab-switch fix; monitored touch samples and crashlog stayed clean.
 - [ ] Manual visual review of the physical shell.
-- [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contacts/routes, and touch radio editing.
+- [ ] Manual visual/touch review of the Public composer, DMs, persistent nodes/contact hierarchy/routes, and touch radio editing.
 
 ## Phase 4 Messaging And Stores
 
@@ -52,6 +52,8 @@
 - [x] `messages public search <text>` and bounded Public History/Search UI added to smoke and simulator coverage.
 - [x] Public History and DM Thread retained-history paging implemented with Load Older buttons plus serial `offset <n>` diagnostics and page metadata.
 - [x] Message Detail and DM Thread use full-height dockless pages with one Back control, scrollable content, and a sticky full-width Reply; Public text wraps before Technical details and opening a DM thread marks it read without a competing Read button.
+- [x] Contact Detail host UI exposes only Message and Contact Options; Route, Export, and Rename return to Contact Options, and contact deletion exists only behind a dedicated confirmation callback whose Cancel/Back paths are non-destructive.
+- [ ] Flash the exact Actions-built contact-hierarchy commit on COM12 and capture Detail -> Contact Options plus Route/Export/Rename return paths. Exercise Cancel/Back on removal confirmation; do not confirm deletion during the pixel/navigation proof.
 - [x] Public History/Search build flashed, standard-smoked on `COM7`, and targeted with COM11 hardware DM receive proof without Public-channel RF.
 - [x] Repeatable DM-only COM11 hardware probe added and passed so Public-channel RF can stay quiet during targeted regressions; `artifacts/hardware/com12/dm_probe_b841621c.json` passed COM12-to-COM11 outbound DM proof with retained DM, packet, route, meshbot receive-counter, health, and no-Public-command checks all true.
 - [x] Messages tab reads persisted Public rows from the app snapshot.
@@ -62,7 +64,7 @@
 - [x] Route store survives reboot on `COM7`.
 - [x] `routes trace <fingerprint>` diagnostic and contact-detail Route Trace sheet implemented with retained route/contact evidence plus an explicit DM-only `routes probe <fingerprint>` / touch `Ping` action; no Public RF is used by the active probe.
 - [x] Heard-node and contact public-key retention survives reboot on `COM7`.
-- [x] Contact favorite/mute flags persist across reboot and are exposed through serial diagnostics plus the contact detail UI.
+- [x] Contact favorite/mute flags persist across reboot and are exposed through serial diagnostics plus Contact Options.
 - [x] Public unread/read state persists across reboot and is exposed through serial diagnostics plus the Messages UI.
 - [x] Route detail diagnostics and first Packet-tab route detail sheet are implemented, built, flashed, and Public-RF probed on `COM7`.
 - [x] Packet log persists newest 8 rows across reboot and exposes serial/touch packet detail.
@@ -142,7 +144,7 @@
 - [x] Evidence-based release gate audit script added and uploaded by CI; hardware evidence is metadata-strict for commit-matched UI/scroll/DM/SD/RF/manual/soak artifacts so stale evidence cannot pass a final release audit. The SD gate rejects obsolete format-capable preflight guidance and requires no-device-format evidence (`formats_sd=false`). The keyboard gate is closed by PR #35 / issue #2, and PR #56 closes current hierarchy Home pixel/navigation proof. The overall audit still intentionally fails closed while RF/DM, SD matrix, manual review, soak, and remaining UI modular ownership evidence stay open.
 - [x] Older COM12 smoke, shorter historical tab stress, scroll probe, outbound DM proof, supplemental route-probe proof, RP2040 preflight, UF2 scan, full RF partial proof, Actions checksums, and packaged notices captured for `a1afd4b` after flashing the verified Actions package from run `28569851955`.
 - [x] Current `1a29876` / Actions run `28714355561` COM12/COM16 core SD evidence captured: autonomous validation, official Seeed smoke, COM12 smoke, preflight, raw diagnostic, file canary, safe boot scenarios, RP2040-unavailable fallback, retained-history canary, reboot/remount, map-tile canary, export canary, diagnostic export, and sampled data export all pass without Public RF or formatting.
-- [ ] Fresh issue-sized evidence still required for the remaining P0s: #16/#6 full-height Messages, Network/routes, Map, Packets, and settings page domains (the Home/More hierarchy, canonical renderer root, single-active modal owner, and dockless-modal invariant are implemented), UI-task ownership, remaining sheet-specific keyboard submit/cancel ownership, and deeper single-root/callback invariants; full RF/DM acceptance; remaining physical SD release matrix; physical photos/manual UI review; and 12-hour soak. PR #56 / Actions `29060900359` proves the current hierarchy pixels and quick all-tab health, targeted longer corruption/scroll proof is proven on `59610ab` / Actions `28723265336`, and all-target keyboard proof is proven by PR #35 / Actions `28727064923`. Do not rerun them for unrelated pixel-neutral PRs. Collect one artifact set per issue; save the commit-matched full sweep for final release readiness.
+- [ ] Fresh issue-sized evidence still required for the remaining P0s: exact Actions/COM12 contact-hierarchy pixels and non-destructive return paths; #16/#6 owned full-height Messages, Network/routes, Map, Packets, contact, and settings page domains (the Home/More hierarchy, canonical renderer root, single-active modal owner, dockless-modal invariant, and host contact hierarchy are implemented); UI-task ownership; remaining sheet-specific keyboard submit/cancel ownership; and deeper single-root/callback invariants; full RF/DM acceptance; remaining physical SD release matrix; physical photos/manual UI review; and 12-hour soak. PR #56 / Actions `29060900359` proves the current hierarchy pixels and quick all-tab health, targeted longer corruption/scroll proof is proven on `59610ab` / Actions `28723265336`, and all-target keyboard proof is proven by PR #35 / Actions `28727064923`. Do not rerun them for unrelated pixel-neutral PRs. Collect one artifact set per issue; save the commit-matched full sweep for final release readiness.
 - [ ] Physical screen photos captured.
 - [x] Manual physical UI review artifact helper added: `scripts/manual_ui_review_d1l.py` requires current photos plus explicit display/touch/navigation/workflow confirmations before producing an `ok=true` review JSON.
 - [ ] Final full-duration soak evidence added.

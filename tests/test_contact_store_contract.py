@@ -10,6 +10,14 @@ def read(rel: str) -> str:
     return (ROOT / rel).read_text(encoding="utf-8")
 
 
+def static_void_body(source: str, symbol: str) -> str:
+    marker = f"static void {symbol}("
+    start = source.rfind(marker)
+    assert start >= 0, symbol
+    end = source.find("\nstatic ", start + len(marker))
+    return source[start : end if end >= 0 else len(source)]
+
+
 def test_contact_store_is_bounded_and_nvs_backed():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")
@@ -100,11 +108,14 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "render_contact_row" in ui
     assert 'entry->public_key_hex[0] ? "key" : "no key"' in ui
     assert "create_contact_detail_sheet" in ui
+    assert "create_contact_options_sheet" in ui
+    assert "create_contact_forget_sheet" in ui
     assert "create_contact_edit_sheet" in ui
     assert "render_contact_detail_sheet" in ui
+    assert "render_contact_options_sheet" in ui
+    assert "render_contact_forget_sheet" in ui
     assert "open_contact_edit_event_cb" in ui
     assert "d1l_app_model_rename_contact(s_contact_detail_contact.fingerprint" in ui
-    assert "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint" in ui
     assert "create_contact_export_sheet" in ui
     assert "render_contact_export_sheet" in ui
     assert "lv_qrcode_create" in ui
@@ -112,6 +123,31 @@ def test_ui_console_and_smoke_expose_contacts():
     assert "update_contact_detail_flags" in ui
     assert "s_contact_action_favorite" in ui
     assert "s_contact_action_mute" in ui
+
+    delete_call = "d1l_app_model_delete_contact(s_contact_detail_contact.fingerprint"
+    confirm = static_void_body(ui, "confirm_forget_contact_event_cb")
+    assert ui.count(delete_call) == 1
+    assert delete_call in confirm
+    assert "forget_contact_edit_event_cb" not in ui
+    for symbol in (
+        "cancel_contact_forget_event_cb",
+        "close_contact_options_event_cb",
+        "close_contact_edit_event_cb",
+        "save_contact_edit_event_cb",
+        "close_contact_export_event_cb",
+        "close_route_trace_event_cb",
+    ):
+        callback = static_void_body(ui, symbol)
+        assert delete_call not in callback, symbol
+    for symbol in (
+        "cancel_contact_forget_event_cb",
+        "close_contact_edit_event_cb",
+        "save_contact_edit_event_cb",
+        "close_contact_export_event_cb",
+        "close_route_trace_event_cb",
+    ):
+        assert "show_contact_options_sheet();" in static_void_body(ui, symbol), symbol
+
     assert '"Contacts"' in ui
     assert 'ok_begin("contacts")' in console
     assert '\\"out_path_known\\"' in console
