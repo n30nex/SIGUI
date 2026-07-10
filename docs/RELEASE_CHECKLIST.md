@@ -26,6 +26,7 @@
 
 - [x] 480x480 dark shell replaces the bring-up tile home.
 - [x] Top status, home dashboard, bottom dock, packet view, Settings setup dashboard, advert sheet, toast, and lock overlay implemented.
+- [x] Screenshot-wide navigation audit consolidated the shell into Home, Messages, Network, Map, and More; Home exposes four task destinations plus one Device status card, and More uses disclosure categories instead of a flat button grid.
 - [x] First persisted onboarding sheet implemented with node name, Canada/USA preset, Desk Companion role, offline radio defaults, and identity generation.
 - [x] Touch Public `test` action routes through the app model.
 - [x] Phase 3 shell host contract tests pass.

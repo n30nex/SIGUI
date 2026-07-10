@@ -1429,41 +1429,17 @@ static void radio_edit_from_snapshot(const d1l_app_snapshot_t *snapshot)
 static void handle_home_action(d1l_ui_home_action_t action)
 {
     switch (action) {
-    case D1L_UI_HOME_ACTION_MESSAGES_PUBLIC:
-        open_messages_public_event_cb(NULL);
+    case D1L_UI_HOME_ACTION_MESSAGES:
+        request_tab_switch(D1L_UI_TAB_MESSAGES);
         break;
-    case D1L_UI_HOME_ACTION_MESSAGES_DM:
-        open_messages_dm_event_cb(NULL);
-        break;
-    case D1L_UI_HOME_ACTION_MESH_ROLES:
-        open_mesh_roles_event_cb(NULL);
-        break;
-    case D1L_UI_HOME_ACTION_NODES:
+    case D1L_UI_HOME_ACTION_NETWORK:
         request_tab_switch(D1L_UI_TAB_NODES);
-        break;
-    case D1L_UI_HOME_ACTION_ADVERTISE:
-        open_sheet_event_cb(NULL);
         break;
     case D1L_UI_HOME_ACTION_MAP:
         request_tab_switch(D1L_UI_TAB_MAP);
         break;
-    case D1L_UI_HOME_ACTION_DIAGNOSTICS:
-        open_diagnostics_sheet_event_cb(NULL);
-        break;
-    case D1L_UI_HOME_ACTION_PACKETS:
-        request_tab_switch(D1L_UI_TAB_PACKETS);
-        break;
-    case D1L_UI_HOME_ACTION_SETTINGS:
+    case D1L_UI_HOME_ACTION_MORE:
         request_tab_switch(D1L_UI_TAB_SETTINGS);
-        break;
-    case D1L_UI_HOME_ACTION_STORAGE:
-        open_storage_sheet_event_cb(NULL);
-        break;
-    case D1L_UI_HOME_ACTION_WIFI:
-        open_wifi_sheet_event_cb(NULL);
-        break;
-    case D1L_UI_HOME_ACTION_BLE:
-        open_ble_sheet_event_cb(NULL);
         break;
     case D1L_UI_HOME_ACTION_NONE:
     default:
@@ -1479,6 +1455,9 @@ static void render_home_screen(lv_obj_t *content, const d1l_app_snapshot_t *snap
 static void handle_settings_action(d1l_ui_settings_action_t action)
 {
     switch (action) {
+    case D1L_UI_SETTINGS_ACTION_PACKETS:
+        request_tab_switch(D1L_UI_TAB_PACKETS);
+        break;
     case D1L_UI_SETTINGS_ACTION_STORAGE:
         open_storage_sheet_event_cb(NULL);
         break;
@@ -5815,7 +5794,13 @@ esp_err_t d1l_ui_capture_end(d1l_ui_capture_status_t *out_status)
 
 static void request_tab_event_cb(lv_event_t *event)
 {
-    request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event));
+    if (!event) {
+        return;
+    }
+    const d1l_ui_tab_t *tab = (const d1l_ui_tab_t *)lv_event_get_user_data(event);
+    if (tab) {
+        request_tab_switch(*tab);
+    }
 }
 
 static void dock_event_cb(lv_event_t *event)
@@ -6484,10 +6469,17 @@ static void create_dock(lv_obj_t *screen)
     lv_obj_set_style_pad_all(s_dock, 5, 0);
     lv_obj_clear_flag(s_dock, LV_OBJ_FLAG_SCROLLABLE);
 
-    const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"};
-    for (int i = 0; i < 6; ++i) {
-        create_button(s_dock, labels[i], 4 + i * 80, 5, 72, 50, dock_event_cb,
-                      (void *)(uintptr_t)i);
+    static const d1l_ui_tab_t tabs[] = {
+        D1L_UI_TAB_HOME,
+        D1L_UI_TAB_MESSAGES,
+        D1L_UI_TAB_NODES,
+        D1L_UI_TAB_MAP,
+        D1L_UI_TAB_SETTINGS,
+    };
+    static const char *const labels[] = {"Home", "Msg", "Network", "Map", "More"};
+    for (size_t i = 0; i < sizeof(tabs) / sizeof(tabs[0]); ++i) {
+        create_button(s_dock, labels[i], 4 + (int)i * 96, 5, 88, 50, dock_event_cb,
+                      (void *)&tabs[i]);
     }
 }
 

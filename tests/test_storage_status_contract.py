@@ -378,8 +378,11 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "open_storage_sheet_event_cb" in ui
     assert '"SD Card"' in ui
     assert "DeskOS creates its folders automatically and never formats cards on-device." in ui
-    assert 'snapshot->storage_data_enabled ? "Ready"' in settings_ui
-    assert "FAT32 only, no format" in settings_ui
+    assert "const char *storage_status = snapshot->storage_data_enabled" in settings_ui
+    assert '? "Ready"' in settings_ui
+    assert '"Needs setup"' in settings_ui
+    assert '"Internal storage"' in settings_ui
+    assert "FAT32 only, no format" not in settings_ui
     assert '"SD Card"' in simulator
     assert "FAT32 only, no format" in simulator
     assert "NVS fallback" in simulator

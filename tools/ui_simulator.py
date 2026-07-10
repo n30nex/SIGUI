@@ -668,16 +668,28 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
 
 def draw_dock(s: Surface, active: str):
     s.rect((0, DOCK_Y, WIDTH, HEIGHT), (10, 16, 25))
-    tabs = [("Home", "Home"), ("Messages", "Msg"), ("Nodes", "Nodes"), ("Map", "Map"), ("Packets", "Pkts"), ("Settings", "Set")]
+    tabs = (
+        ("Home", "Home", "home"),
+        ("Messages", "Msg", "messages"),
+        ("Nodes", "Network", "nodes"),
+        ("Map", "Map", "map"),
+        ("Settings", "More", "settings"),
+    )
     w = WIDTH // len(tabs)
-    for i, (name, label) in enumerate(tabs):
+    for i, (name, label, destination) in enumerate(tabs):
         x0 = i * w
         x1 = WIDTH if i == len(tabs) - 1 else (i + 1) * w
         active_tab = name == active
         if active_tab:
             s.round_rect((x0 + 8, DOCK_Y + 8, x1 - 8, HEIGHT - 8), (29, 48, 62), (58, 88, 104), 8)
         s.text(label, (x0 + 6, DOCK_Y + 17, x1 - 6, HEIGHT - 15), 13, TEXT if active_tab else MUTED, active_tab, "center")
-        s.touch_target(f"{name} tab", (x0, DOCK_Y, x1, HEIGHT), kind="dock_tab", action=f"open_{name.lower()}", destination=name.lower())
+        s.touch_target(
+            f"{label} tab",
+            (x0, DOCK_Y, x1, HEIGHT),
+            kind="dock_tab",
+            action=f"open_{destination}",
+            destination=destination,
+        )
 
 
 def draw_metric(
@@ -886,6 +898,73 @@ def draw_settings_group(
         s.touch_target(title, box, kind="settings_group", action=action, destination=destination)
 
 
+def draw_more_category(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    summary: str,
+    color: tuple[int, int, int] = ACCENT,
+    *,
+    action: str,
+    expanded: bool = False,
+):
+    """Draw one calm, full-width disclosure row on the More accordion."""
+
+    x0, y0, x1, y1 = box
+    s.round_rect(box, SURFACE, BORDER, 8)
+    s.text(title, (x0 + 12, y0 + 4, x1 - 34, y0 + 24), 13, color, True)
+    s.text(summary, (x0 + 12, y0 + 24, x1 - 34, y1 - 4), 10, MUTED)
+    s.text("v" if expanded else ">", (x1 - 24, y0 + 5, x1 - 10, y1 - 5), 16, MUTED, True, "center")
+    s.touch_target(title, box, kind="menu_category", action=action)
+
+
+def draw_more_leaf(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    title: str,
+    status: str,
+    color: tuple[int, int, int] = TEXT,
+    *,
+    action: str | None = None,
+    destination: str | None = None,
+    warning: bool = False,
+):
+    """Draw one leaf row from the expanded More accordion."""
+
+    x0, y0, x1, y1 = box
+    s.round_rect(box, (35, 19, 23) if warning else SURFACE, (127, 29, 29) if warning else BORDER, 8)
+    s.text(title, (x0 + 28, y0 + 12, x0 + 220, y1 - 12), 14, color, True)
+    status_right = x1 - 34 if action else x1 - 16
+    s.text(status, (x0 + 220, y0 + 12, status_right, y1 - 12), 12, RED if warning else MUTED, False, "right")
+    if action:
+        s.text(">", (x1 - 26, y0 + 10, x1 - 10, y1 - 10), 16, RED if warning else MUTED, True, "center")
+        s.touch_target(title, box, kind="menu_leaf", action=action, destination=destination)
+
+
+def draw_destination_card(
+    s: Surface,
+    box: tuple[int, int, int, int],
+    icon: str,
+    title: str,
+    detail: str,
+    status: str,
+    color: tuple[int, int, int],
+    *,
+    action: str,
+    destination: str,
+):
+    """Draw a Home destination using the same title/detail/status hierarchy as firmware."""
+
+    x0, y0, x1, y1 = box
+    s.round_rect(box, (13, 23, 18), (31, 55, 46), 12)
+    draw_launcher_icon(s, (x0 + 12, y0 + 11, x0 + 48, y0 + 49), icon, color)
+    s.text(title, (x0 + 52, y0 + 12, x1 - 30, y0 + 44), 18, TEXT, True)
+    s.text(">", (x1 - 28, y0 + 12, x1 - 12, y0 + 44), 16, MUTED, True, "center")
+    s.text(detail, (x0 + 14, y0 + 54, x1 - 14, y0 + 98), 11, MUTED)
+    s.text(status, (x0 + 14, y0 + 106, x1 - 14, y1 - 8), 11, color, True)
+    s.touch_target(title, box, kind="destination_card", action=action, destination=destination)
+
+
 def draw_fake_qr(s: Surface, box: tuple[int, int, int, int]):
     x0, y0, x1, y1 = box
     s.rect(box, (248, 250, 252), (248, 250, 252))
@@ -945,26 +1024,83 @@ def draw_row(
 
 def draw_home_body(s: Surface, snap: Snapshot):
     tiles = (
-        ((4, 16, 120, 148), "chat", "Chats", f"{snap.unread_public} new", AMBER if snap.unread_public else ACCENT, "open_messages_public", "messages"),
-        ((122, 16, 238, 148), "dm", "DMs", f"{snap.unread_dm} new", AMBER if snap.unread_dm else GREEN, "open_messages_dm", "messages_dm"),
-        ((240, 16, 356, 148), "folder", "Rooms", f"{len(snap.rooms)} seen", GREEN if snap.rooms else MUTED, "open_mesh_roles", "mesh_roles_sheet"),
-        ((358, 16, 474, 148), "phone", "Contacts", f"{len(snap.contacts)} saved", GREEN if snap.contacts else MUTED, "open_nodes", "nodes"),
-        ((4, 156, 120, 288), "repeat", "Repeaters", f"{len(snap.repeaters)} heard", AMBER if snap.repeaters else MUTED, "open_repeaters", "mesh_roles_sheet"),
-        ((122, 156, 238, 288), "bell", "Advertise", "manual", ACCENT, "open_advert_sheet", "advert_sheet"),
-        ((240, 156, 356, 288), "map", "Map", "tiles" if snap.map_tile_cache_ready else "offline", GREEN if snap.map_tile_cache_ready else ACCENT, "open_map", "map"),
-        ((358, 156, 474, 288), "terminal", "Terminal", "diagnose", VIOLET, "open_diagnostics", "diagnostics_sheet"),
-        ((4, 296, 120, 428), "packets", "Packets", f"{len(snap.packets)} rows", GREEN if snap.packets else MUTED, "open_packets", "packets"),
-        ((122, 296, 238, 428), "settings", "Settings", "setup", ACCENT, "open_settings", "settings"),
-        ((240, 296, 356, 428), "setup", "Setup", snap.storage_state, GREEN if snap.storage_backend != "NVS fallback" else AMBER, "open_storage_setup", "storage_setup_sheet"),
-        ((358, 296, 474, 428), "signal", "Signal", snap.latest_signal.split()[0] if snap.latest_signal else "waiting", GREEN if snap.latest_signal else MUTED, "open_signal", "mesh_roles_sheet"),
+        (
+            (12, 16, 234, 156),
+            "chat",
+            "Messages",
+            "Public, direct, and room conversations",
+            f"{snap.unread_public + snap.unread_dm} unread" if snap.unread_public + snap.unread_dm else "All caught up",
+            AMBER if snap.unread_public + snap.unread_dm else ACCENT,
+            "open_messages_public",
+            "messages",
+        ),
+        (
+            (246, 16, 468, 156),
+            "signal",
+            "Network",
+            "Contacts, nearby nodes, and routing",
+            f"{len(snap.contacts)} contacts | {len(snap.heard)} nearby",
+            GREEN if snap.contacts else MUTED,
+            "open_nodes",
+            "nodes",
+        ),
+        (
+            (12, 164, 234, 304),
+            "map",
+            "Map",
+            "Location, routes, and offline maps",
+            "Offline maps ready" if snap.map_tile_cache_ready else "Set up offline maps",
+            GREEN if snap.map_tile_cache_ready else ACCENT,
+            "open_map",
+            "map",
+        ),
+        (
+            (246, 164, 468, 304),
+            "settings",
+            "More",
+            "Tools, device settings, and support",
+            f"{len(snap.packets)} packet{'s' if len(snap.packets) != 1 else ''} captured",
+            VIOLET if snap.packets else MUTED,
+            "open_settings",
+            "settings",
+        ),
     )
-    for box, icon, label, detail, color, action, destination in tiles:
-        draw_launcher_tile(s, box, icon, label, detail, color, action=action, destination=destination)
+    for box, icon, label, detail, status, color, action, destination in tiles:
+        draw_destination_card(
+            s,
+            box,
+            icon,
+            label,
+            detail,
+            status,
+            color,
+            action=action,
+            destination=destination,
+        )
 
-    draw_status_icon(s, (4, 432, 120, 480), "time", "Time", ACCENT)
-    draw_status_icon(s, (122, 432, 238, 480), "wifi", "Wi-Fi", ACCENT, action="open_wifi_settings", destination="wifi_setup_sheet")
-    draw_status_icon(s, (240, 432, 356, 480), "ble", "BLE", VIOLET, action="open_ble_settings", destination="ble_setup_sheet")
-    draw_status_icon(s, (358, 432, 474, 480), "sd", "SD", GREEN if snap.storage_backend != "NVS fallback" else AMBER, action="open_storage_setup", destination="storage_setup_sheet")
+    device_box = (12, 312, 468, 428)
+    storage_color = GREEN if snap.storage_backend != "NVS fallback" else AMBER
+    s.round_rect(device_box, (13, 23, 18), (31, 55, 46), 8)
+    s.text("Device status", (26, 320, 230, 346), 16, TEXT, True)
+    s.text("Settings and support", (26, 342, 260, 362), 10, MUTED)
+    s.text(">", (438, 320, 454, 346), 16, MUTED, True, "center")
+    device_columns = (
+        ("Time", "Syncing", MUTED),
+        ("Wi-Fi", "Off", MUTED),
+        ("BLE", "Off", MUTED),
+        ("SD", snap.storage_state, storage_color),
+    )
+    for index, (label, value, color) in enumerate(device_columns):
+        x0 = 26 + index * 110
+        s.text(label, (x0, 374, x0 + 100, 392), 10, MUTED, True)
+        s.text(value, (x0, 396, x0 + 100, 418), 11, color, True)
+    s.touch_target(
+        "Device status",
+        device_box,
+        kind="device_status_card",
+        action="open_device_status",
+        destination="settings",
+    )
 
 
 def render_home(s: Surface, snap: Snapshot):
@@ -1343,7 +1479,7 @@ def render_packets(s: Surface, snap: Snapshot):
             action="open_route_detail",
             destination="route_detail_sheet",
         )
-    draw_dock(s, "Packets")
+    draw_dock(s, "Settings")
     s.metrics.update(
         {
             "packet_source_count": len(snap.packets),
@@ -1356,28 +1492,179 @@ def render_packets(s: Surface, snap: Snapshot):
     )
 
 
-def render_settings(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.text("Settings", (16, 64, 150, 92), 22, TEXT, True)
-    s.text("Setup Dashboard", (18, 92, 260, 110), 12, MUTED)
+def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
+    """Return the stable More hierarchy represented by the firmware accordion."""
 
-    storage_value = "Ready" if snap.storage_state == "ready" else ("Needs FAT32" if "fat32" in snap.storage_setup_action else "NVS fallback")
-    map_value = "Tiles ready" if snap.map_tile_cache_ready else "Setup"
-    rows = (
-        ((16, 116, 236, 170), "SD Card", storage_value, "FAT32 only, no format", AMBER, "open_storage_setup", "storage_setup_sheet"),
-        ((244, 116, 464, 170), "Wi-Fi", "off", "Scan/connect, mesh offline", GREEN, "open_wifi_settings", "wifi_setup_sheet"),
-        ((16, 178, 236, 232), "BLE", "off", "Companion pairing gated", MUTED, "open_ble_settings", "ble_setup_sheet"),
-        ((244, 178, 464, 232), "Radio", "Mesh profile", "US/CAN profile", BLUE, "open_radio_settings", "radio_settings_sheet"),
-        ((16, 240, 236, 294), "Map Tiles", map_value, "Wi-Fi and allowed provider", AMBER, "open_map_tiles", "map_tiles_sheet"),
-        ((244, 240, 464, 294), "Display", "Backlight", "Brightness, night, contrast", GREEN, "open_display_settings", "display_settings_sheet"),
-        ((16, 302, 236, 356), "Identity", "Ready", snap.fingerprint, GREEN, None, None),
-        ((244, 302, 464, 356), "Diagnostics", "Health", "Crashlog, exports, soak", VIOLET, "open_diagnostics", "diagnostics_sheet"),
-        ((16, 364, 236, 418), "About", snap.node_name, "DeskOS D1L 0.1.0-phase1", MUTED, None, None),
-        ((244, 364, 464, 418), "Advanced", "Hidden tools", "Raw data and adverts", RED, "open_advert_sheet", "advert_sheet"),
+    packet_status = f"{len(snap.packets)} saved"
+    storage_status = "Ready" if snap.storage_state == "ready" else "Needs setup"
+    map_status = "Ready" if snap.map_tile_cache_ready else ("Not set up" if snap.map_tile_sideload_supported else "Unavailable")
+    return (
+        {
+            "key": "tools",
+            "title": "Tools",
+            "summary": "Packets and diagnostics",
+            "color": ACCENT,
+            "action": "toggle_more_tools",
+            "leaves": (
+                ("Packets", packet_status, BLUE, "open_packets", "packets", False),
+                ("Diagnostics", "Health & reports", VIOLET, "open_diagnostics", "diagnostics_sheet", False),
+            ),
+        },
+        {
+            "key": "connections",
+            "title": "Connections",
+            "summary": "Wi-Fi, Bluetooth, and radio",
+            "color": GREEN,
+            "action": "toggle_more_connections",
+            "leaves": (
+                ("Wi-Fi", "Off", TEXT, "open_wifi_settings", "wifi_setup_sheet", False),
+                ("Bluetooth", "Unavailable", TEXT, "open_ble_settings", "ble_setup_sheet", False),
+                ("Radio", "Ready", GREEN, "open_radio_settings", "radio_settings_sheet", False),
+            ),
+        },
+        {
+            "key": "storage_maps",
+            "title": "Storage & maps",
+            "summary": "SD card and offline maps",
+            "color": AMBER,
+            "action": "toggle_more_storage_maps",
+            "leaves": (
+                ("SD Card", storage_status, GREEN if storage_status == "Ready" else TEXT, "open_storage_setup", "storage_setup_sheet", False),
+                ("Offline Maps", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_tiles", "map_tiles_sheet", False),
+            ),
+        },
+        {
+            "key": "device",
+            "title": "Device",
+            "summary": "Display and identity",
+            "color": BLUE,
+            "action": "toggle_more_device",
+            "leaves": (
+                ("Display", "Brightness & theme", GREEN, "open_display_settings", "display_settings_sheet", False),
+                ("Identity", "Ready", TEXT, None, None, False),
+            ),
+        },
+        {
+            "key": "support",
+            "title": "Support",
+            "summary": "About this device",
+            "color": VIOLET,
+            "action": "toggle_more_support",
+            "leaves": (("About", "Version 1.0.0-rc1", TEXT, None, None, False),),
+        },
+        {
+            "key": "advanced",
+            "title": "Advanced",
+            "summary": "Developer options",
+            "color": RED,
+            "action": "toggle_more_advanced",
+            "leaves": (("Mesh advertise", "Broadcast presence", RED, "open_advert_sheet", "advert_sheet", True),),
+        },
     )
-    for box, title, value, detail, color, action, destination in rows:
-        draw_settings_group(s, box, title, value, detail, color, action=action, destination=destination)
+
+
+def draw_more_header(s: Surface, snap: Snapshot):
+    draw_top_bar(s, snap)
+    s.text("More", (18, 64, 150, 92), 22, TEXT, True)
+    s.text("Settings and tools", (18, 92, 278, 108), 12, MUTED)
+
+
+def render_settings(s: Surface, snap: Snapshot):
+    draw_more_header(s, snap)
+
+    for index, category in enumerate(more_category_specs(snap)):
+        y0 = 110 + index * 52
+        draw_more_category(
+            s,
+            (18, y0, 462, y0 + 48),
+            str(category["title"]),
+            str(category["summary"]),
+            category["color"],
+            action=str(category["action"]),
+        )
     draw_dock(s, "Settings")
+
+
+def render_settings_expanded(s: Surface, snap: Snapshot, selected_key: str):
+    """Render a deterministic scroll anchor for one expanded More category."""
+
+    draw_more_header(s, snap)
+    categories = more_category_specs(snap)
+    selected_index = next(index for index, category in enumerate(categories) if category["key"] == selected_key)
+    selected = categories[selected_index]
+    draw_more_category(
+        s,
+        (18, 110, 462, 158),
+        str(selected["title"]),
+        str(selected["summary"]),
+        selected["color"],
+        action=str(selected["action"]),
+        expanded=True,
+    )
+
+    y0 = 162
+    leaves = selected["leaves"]
+    for title, status, color, action, destination, warning in leaves:
+        draw_more_leaf(
+            s,
+            (18, y0, 462, y0 + 54),
+            title,
+            status,
+            color,
+            action=action,
+            destination=destination,
+            warning=warning,
+        )
+        y0 += 58
+
+    # The real menu scrolls. Keep the selected category anchored at the top and
+    # show as many following collapsed categories as the 480 px viewport allows.
+    for category in categories[selected_index + 1 :]:
+        if y0 + 48 > 418:
+            break
+        draw_more_category(
+            s,
+            (18, y0, 462, y0 + 48),
+            str(category["title"]),
+            str(category["summary"]),
+            category["color"],
+            action=str(category["action"]),
+        )
+        y0 += 52
+
+    s.metrics.update(
+        {
+            "more_expanded_category": selected_key,
+            "more_leaf_count": len(leaves),
+            "more_actionable_leaf_count": sum(1 for leaf in leaves if leaf[3]),
+            "more_scroll_anchor_y": 110,
+        }
+    )
+    draw_dock(s, "Settings")
+
+
+def render_settings_tools_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "tools")
+
+
+def render_settings_connections_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "connections")
+
+
+def render_settings_storage_maps_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "storage_maps")
+
+
+def render_settings_device_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "device")
+
+
+def render_settings_support_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "support")
+
+
+def render_settings_advanced_expanded(s: Surface, snap: Snapshot):
+    render_settings_expanded(s, snap, "advanced")
 
 
 def draw_sheet_frame(s: Surface, title: str, subtitle: str | None = None):
@@ -1642,7 +1929,7 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
     s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
     s.text("Wi-Fi Setup", (28, 70, 230, 100), 22, TEXT, True)
     s.text("Profile and state", (28, 96, 230, 116), 12, MUTED)
-    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="home")
+    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_wifi_setup", destination="settings")
     s.text("State off  build enabled", (28, 112, 452, 134), 14, AMBER, True)
     s.text("Last none", (28, 134, 452, 156), 13, MUTED)
     s.text("Profile not saved  password open/empty", (28, 156, 452, 178), 13, TEXT)
@@ -1667,7 +1954,7 @@ def render_wifi_setup_sheet(s: Surface, snap: Snapshot):
 
 def render_ble_setup_sheet(s: Surface, snap: Snapshot):
     draw_sheet_frame(s, "BLE Setup", "Companion state")
-    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="home")
+    draw_button(s, (356, 94, 436, 134), "Close", MUTED, action="close_ble_setup", destination="settings")
     s.text("State off  build disabled", (44, 154, 436, 178), 15, AMBER, True)
     if snap.ble_transport_supported:
         s.text("Companion BLE is available for measured local setup.", (44, 194, 436, 236), 13, TEXT)
@@ -1682,7 +1969,7 @@ def render_ble_setup_sheet(s: Surface, snap: Snapshot):
         s.text("Pair unavailable", (44, 346, 210, 366), 12, MUTED)
         s.text("Forget unavailable", (224, 346, 436, 366), 12, MUTED)
     s.text("USB remains the reliable companion path for production validation.", (44, 386, 436, 416), 12, MUTED)
-    draw_dock(s, "Home")
+    draw_dock(s, "Settings")
 
 
 def render_advert_sheet(s: Surface, snap: Snapshot):
@@ -1750,7 +2037,7 @@ def render_route_detail_sheet(s: Surface, snap: Snapshot):
     s.text("Confidence", (44, 270, 180, 290), 13, MUTED, True)
     s.text("recent live packet evidence", (44, 292, 436, 316), 16, GREEN)
     draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_route_detail", destination="packets")
-    draw_dock(s, "Packets")
+    draw_dock(s, "Settings")
 
 
 def render_route_trace_sheet(s: Surface, snap: Snapshot):
@@ -1796,7 +2083,7 @@ def render_packet_detail_sheet(s: Surface, snap: Snapshot):
     s.text("hash 2 byte  hops 1  uptime 12044ms", (108, 326, 436, 346), 13, TEXT)
     s.text("Raw Hex", (44, 358, 180, 378), 13, MUTED, True)
     s.text(packet.raw_hex, (116, 358, 436, 378), 14, BLUE)
-    draw_dock(s, "Packets")
+    draw_dock(s, "Settings")
 
 
 def render_packet_search_sheet(s: Surface, snap: Snapshot):
@@ -1810,7 +2097,7 @@ def render_packet_search_sheet(s: Surface, snap: Snapshot):
     draw_button(s, (288, 228, 400, 278), "Close", MUTED, action="close_packet_search", destination="packets")
     s.round_rect((44, 300, 436, 370), SURFACE, BORDER, 8)
     s.text("Keyboard opens for packet search", (56, 318, 424, 350), 13, MUTED, False, "center")
-    draw_dock(s, "Packets")
+    draw_dock(s, "Settings")
 
 
 def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
@@ -1826,7 +2113,7 @@ def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
         draw_row(s, (44, y, 436, y + 36), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}")
         y += 44
     draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_mesh_roles", destination="packets")
-    draw_dock(s, "Packets")
+    draw_dock(s, "Settings")
 
 
 def render_lock_overlay(s: Surface, snap: Snapshot):
@@ -1868,6 +2155,12 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "map_tiles_sheet": render_map_tiles_sheet,
     "packets": render_packets,
     "settings": render_settings,
+    "settings_tools_expanded": render_settings_tools_expanded,
+    "settings_connections_expanded": render_settings_connections_expanded,
+    "settings_storage_maps_expanded": render_settings_storage_maps_expanded,
+    "settings_device_expanded": render_settings_device_expanded,
+    "settings_support_expanded": render_settings_support_expanded,
+    "settings_advanced_expanded": render_settings_advanced_expanded,
     "compose_sheet": render_compose_sheet,
     "public_history_sheet": render_public_history_sheet,
     "public_search_sheet": render_public_search_sheet,
@@ -1896,18 +2189,12 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
 REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "home": (
         "DeskOS",
-        "Chats",
-        "DMs",
-        "Rooms",
-        "Contacts",
-        "Repeaters",
-        "Advertise",
+        "Messages",
+        "Network",
         "Map",
-        "Terminal",
-        "Packets",
-        "Settings",
-        "Setup",
-        "Signal",
+        "More",
+        "Device status",
+        "Settings and support",
         "Time",
         "Wi-Fi",
         "BLE",
@@ -1951,18 +2238,64 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
     "settings": (
-        "Settings",
-        "Setup Dashboard",
-        "SD Card",
+        "More",
+        "Settings and tools",
+        "Tools",
+        "Packets and diagnostics",
+        "Connections",
+        "Storage & maps",
+        "Device",
+        "Support",
+        "Advanced",
+    ),
+    "settings_tools_expanded": (
+        "More",
+        "Settings and tools",
+        "Tools",
+        "Packets and diagnostics",
+        "Packets",
+        "Diagnostics",
+    ),
+    "settings_connections_expanded": (
+        "More",
+        "Settings and tools",
+        "Connections",
+        "Wi-Fi, Bluetooth, and radio",
         "Wi-Fi",
-        "BLE",
+        "Bluetooth",
         "Radio",
-        "Map Tiles",
+    ),
+    "settings_storage_maps_expanded": (
+        "More",
+        "Settings and tools",
+        "Storage & maps",
+        "SD card and offline maps",
+        "SD Card",
+        "Offline Maps",
+    ),
+    "settings_device_expanded": (
+        "More",
+        "Settings and tools",
+        "Device",
+        "Display and identity",
         "Display",
         "Identity",
-        "Diagnostics",
+    ),
+    "settings_support_expanded": (
+        "More",
+        "Settings and tools",
+        "Support",
+        "About this device",
         "About",
+        "Version 1.0.0-rc1",
+    ),
+    "settings_advanced_expanded": (
+        "More",
+        "Settings and tools",
         "Advanced",
+        "Developer options",
+        "Mesh advertise",
+        "Broadcast presence",
     ),
     "compose_sheet": ("Compose Public", "Public message", "20/138", "Keyboard", "Send", "Clear", "Close"),
     "public_history_sheet": ("Public History", "Search", "Clear", "Close", "Public scrollback"),
@@ -2078,23 +2411,75 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "home_launcher_navigation",
         "steps": (
             {"view": "home", "action": "open_messages_public", "destination": "messages"},
-            {"view": "home", "action": "open_messages_dm", "destination": "messages_dm"},
             {"view": "home", "action": "open_nodes", "destination": "nodes"},
-            {"view": "home", "action": "open_repeaters", "destination": "mesh_roles_sheet"},
             {"view": "home", "action": "open_map", "destination": "map"},
-            {"view": "home", "action": "open_packets", "destination": "packets"},
             {"view": "home", "action": "open_settings", "destination": "settings"},
-            {"view": "home", "action": "open_advert_sheet", "destination": "advert_sheet"},
-            {"view": "home", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
-            {"view": "home", "action": "open_mesh_roles", "destination": "mesh_roles_sheet"},
-            {"view": "home", "action": "open_signal", "destination": "mesh_roles_sheet"},
-            {"view": "home", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
+            {"view": "home", "action": "open_device_status", "destination": "settings"},
+        ),
+    },
+    {
+        "name": "more_category_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_tools"},
+            {"view": "settings", "action": "toggle_more_connections"},
+            {"view": "settings", "action": "toggle_more_storage_maps"},
+            {"view": "settings", "action": "toggle_more_device"},
+            {"view": "settings", "action": "toggle_more_support"},
+            {"view": "settings", "action": "toggle_more_advanced"},
+        ),
+    },
+    {
+        "name": "more_tools_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_tools"},
+            {"view": "settings_tools_expanded", "action": "open_packets", "destination": "packets"},
+            {"view": "settings_tools_expanded", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
+            {"view": "settings_tools_expanded", "action": "toggle_more_tools"},
+        ),
+    },
+    {
+        "name": "more_connections_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_connections"},
+            {"view": "settings_connections_expanded", "action": "open_wifi_settings", "destination": "wifi_setup_sheet"},
             {"view": "wifi_setup_sheet", "action": "wifi_scan"},
             {"view": "wifi_setup_sheet", "action": "wifi_connect"},
-            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "home"},
-            {"view": "home", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
-            {"view": "ble_setup_sheet", "action": "close_ble_setup", "destination": "home"},
-            {"view": "home", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "wifi_setup_sheet", "action": "close_wifi_setup", "destination": "settings"},
+            {"view": "settings_connections_expanded", "action": "open_ble_settings", "destination": "ble_setup_sheet"},
+            {"view": "settings_connections_expanded", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
+            {"view": "settings_connections_expanded", "action": "toggle_more_connections"},
+        ),
+    },
+    {
+        "name": "more_storage_maps_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_storage_maps"},
+            {"view": "settings_storage_maps_expanded", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
+            {"view": "settings_storage_maps_expanded", "action": "open_map_tiles", "destination": "map_tiles_sheet"},
+            {"view": "settings_storage_maps_expanded", "action": "toggle_more_storage_maps"},
+        ),
+    },
+    {
+        "name": "more_device_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_device"},
+            {"view": "settings_device_expanded", "action": "open_display_settings", "destination": "display_settings_sheet"},
+            {"view": "settings_device_expanded", "action": "toggle_more_device"},
+        ),
+    },
+    {
+        "name": "more_support_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_support"},
+            {"view": "settings_support_expanded", "action": "toggle_more_support"},
+        ),
+    },
+    {
+        "name": "more_advanced_expanded_navigation",
+        "steps": (
+            {"view": "settings", "action": "toggle_more_advanced"},
+            {"view": "settings_advanced_expanded", "action": "open_advert_sheet", "destination": "advert_sheet"},
+            {"view": "settings_advanced_expanded", "action": "toggle_more_advanced"},
         ),
     },
     {
@@ -2214,16 +2599,13 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "settings_radio_storage_and_advert",
         "steps": (
-            {"view": "settings", "action": "open_radio_settings", "destination": "radio_settings_sheet"},
             {"view": "radio_settings_sheet", "action": "radio_freq_down"},
             {"view": "radio_settings_sheet", "action": "radio_freq_up"},
             {"view": "radio_settings_sheet", "action": "radio_cycle_bandwidth"},
             {"view": "radio_settings_sheet", "action": "radio_sf_down"},
             {"view": "radio_settings_sheet", "action": "radio_sf_up"},
             {"view": "radio_settings_sheet", "action": "save_radio_profile", "destination": "settings"},
-            {"view": "settings", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
             {"view": "storage_setup_sheet", "action": "close_storage_setup", "destination": "settings"},
-            {"view": "settings", "action": "open_advert_sheet", "destination": "advert_sheet"},
             {"view": "advert_sheet", "action": "send_advert_zero", "rf_tx": True},
             {"view": "advert_sheet", "action": "send_advert_flood", "rf_tx": True},
             {"view": "advert_sheet", "action": "close_advert_sheet", "destination": "settings"},
@@ -2232,9 +2614,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
     {
         "name": "settings_display_and_diagnostics",
         "steps": (
-            {"view": "settings", "action": "open_display_settings", "destination": "display_settings_sheet"},
             {"view": "display_settings_sheet", "action": "close_display_settings", "destination": "settings"},
-            {"view": "settings", "action": "open_diagnostics", "destination": "diagnostics_sheet"},
             {"view": "diagnostics_sheet", "action": "close_diagnostics", "destination": "settings"},
         ),
     },
