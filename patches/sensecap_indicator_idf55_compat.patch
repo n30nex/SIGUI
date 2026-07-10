@@ -54,6 +54,12 @@ diff --git a/components/bsp/src/peripherals/bsp_lcd.c b/components/bsp/src/perip
 @@ -83 +83 @@ IRAM_ATTR static bool on_vsync_event(
 -    esp_lcd_rgb_panel_event_data_t *edata,
 +    const esp_lcd_rgb_panel_event_data_t *edata,
+diff --git a/components/bsp/src/codec/es8388.c b/components/bsp/src/codec/es8388.c
+--- a/components/bsp/src/codec/es8388.c
++++ b/components/bsp/src/codec/es8388.c
+@@ -473 +473 @@
+-esp_err_t es8388_config_dac_output(int output)
++esp_err_t es8388_config_dac_output(es_dac_output_t output)
 diff --git a/components/bsp/src/calibration/touch_calibration.c b/components/bsp/src/calibration/touch_calibration.c
 --- a/components/bsp/src/calibration/touch_calibration.c
 +++ b/components/bsp/src/calibration/touch_calibration.c

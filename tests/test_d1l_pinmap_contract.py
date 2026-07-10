@@ -160,6 +160,7 @@ def test_cmake_applies_parent_owned_seeed_patch_set():
     assert "g_dioIrq = dioIrq;" in compat_patch
     assert "static void (*lvgl_direct_mode_buf_copy)(void)" in compat_patch
     assert "const esp_lcd_rgb_panel_event_data_t *edata" in compat_patch
+    assert "es8388_config_dac_output(es_dac_output_t output)" in compat_patch
     assert "static esp_err_t lcd_draw_bitmap" in compat_patch
     assert "const void *data" in compat_patch
     assert "-fpermissive" not in compat_patch
