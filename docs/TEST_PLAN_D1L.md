@@ -86,6 +86,11 @@ python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scrol
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe contact_options" --reference-png docs\screenshots\contact_options_page.png --reference-view contact_options_page --out artifacts\hardware\com12\ui_pixel_capture_contact_options-COM12.json
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe contact_forget" --reference-png docs\screenshots\forget_contact_confirm_page.png --reference-view forget_contact_confirm_page --out artifacts\hardware\com12\ui_pixel_capture_contact_forget-COM12.json
 
+# Safe Mesh Roles page-open proofs. These aliases only navigate to read-only pages.
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe mesh_roles" --reference-png docs\screenshots\mesh_roles_sheet.png --reference-view mesh_roles_sheet --out artifacts\hardware\com12\ui_pixel_capture_mesh_roles-COM12.json
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe mesh_rooms" --reference-png docs\screenshots\mesh_rooms_page.png --reference-view mesh_rooms_page --out artifacts\hardware\com12\ui_pixel_capture_mesh_rooms-COM12.json
+python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --prep-command "ui scroll-probe mesh_repeaters" --reference-png docs\screenshots\mesh_repeaters_page.png --reference-view mesh_repeaters_page --out artifacts\hardware\com12\ui_pixel_capture_mesh_repeaters-COM12.json
+
 # Compose-keyboard proof.
 python .\scripts\ui_compose_keyboard_capture_d1l.py --port $env:D1L_PORT --targets all --out artifacts\hardware\com12\ui_compose_keyboard_capture-COM12.json
 
@@ -297,8 +302,8 @@ complete newest `rf_full_acceptance_*.json` hardware artifact with
 For Phase 4 touch direct-message compose validation:
 
 1. Verify `contacts` contains at least one contact with a full 64-hex `public_key`.
-2. Open the Nodes tab and verify the keyed contact row exposes a `DM` action.
-3. Tap `DM`, type a short message on the compose keyboard, and tap `Send`.
+2. Open Network, tap the keyed contact row, and verify Contact Detail exposes `Message`.
+3. Tap `Message`, type a short message on the compose keyboard, and tap `Send`.
 4. Verify the toast reports the DM queued.
 5. Verify `messages dm` contains a TX row for the same contact and message text with a nonzero `ack_hash`.
 6. If physical touch cannot be observed in the current test session, run the backend precondition probe by sending the same target through `mesh send dm <fingerprint> <text>` and recording `contacts`, `messages dm`, and `health`.
@@ -307,7 +312,7 @@ For Phase 4 touch direct-message thread validation:
 
 1. Verify `messages dm` contains at least one row for a contact with a full public key.
 2. Open the Messages tab and tap the DM preview row.
-3. Verify the DM thread sheet opens with the contact alias, fingerprint metadata, retained rows for the same fingerprint, and `Reply`/`Read`/`Close` actions.
+3. Verify the full-height DM Thread opens with Back, the contact alias, fingerprint metadata, retained rows for the same fingerprint, and one sticky `Reply` action. Opening the thread marks it read automatically.
 4. Tap `Reply`, type a short message, and tap `Send`.
 5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
 6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.
@@ -350,7 +355,7 @@ For Phase 4 contact detail and favorite/mute validation:
 5. Reboot and verify both flags are still true.
 6. Run `contacts set <fingerprint> favorite 0` and `contacts set <fingerprint> mute 0`.
 7. Verify `contacts` shows both flags false.
-8. For physical touch review, open the Nodes tab, tap the contact row, verify the detail sheet shows signal/key/path metadata, and verify `Fav`, `Mute`, `DM`, `Edit`, and `Close` actions respond. In `Edit`, verify alias save updates only the contact alias and `Forget` removes only the promoted contact.
+8. For physical touch review, open Network, tap a contact row, and verify Contact Detail exposes only `Back`, `Message`, and `Contact options`. Open Contact Options and verify Route trace, Rename, favorite/mute, Export QR, and Forget are reachable there. Verify every child Back returns to Contact Options. Enter Forget, then use Back/Cancel and confirm the contact still exists; perform the explicit destructive confirmation only when deletion is intentionally in scope.
 
 For Phase 6 contact export validation:
 
@@ -358,7 +363,7 @@ For Phase 6 contact export validation:
 2. Run `contacts export` and verify it returns `ok=true`, `format="meshcore://contact/add"`, and a list of entries whose `shareable` field reflects public-key availability.
 3. Run `contacts export <fingerprint>` for the keyed contact.
 4. Verify `meshcore_uri` starts with `meshcore://contact/add?`, includes URL-encoded `name`, the 64-hex `public_key`, and the correct numeric MeshCore `type`.
-5. Open the contact detail sheet, tap `Export`, and verify the Contact Export sheet shows a MeshCore QR plus URI metadata without crashing or hiding the UI.
+5. Open Contact Detail, tap `Contact options`, then `Export QR`; verify the Contact Export page shows a MeshCore QR plus URI metadata without crashing or exposing the background dock. Back must return to Contact Options.
 6. If a MeshCore phone/client is available, scan the QR and verify it imports the same contact name/public key/type.
 
 ## Radio Settings
@@ -394,7 +399,7 @@ For Phase 6 retained route trace validation:
 3. Verify the response returns `cmd="routes trace"`, the requested `fingerprint`, `known_contact`, `contact_route`, `route_count`, `best_route`, `best_confidence`, and an `entries` array filtered to that target.
 4. Verify `active_probe_supported=true` and `active_probe_command="routes probe <fingerprint>"`; plain `routes trace` still summarizes retained evidence and does not transmit RF.
 5. Run `routes probe <fingerprint>` only when an opt-in DM RF trace is allowed. Verify the response has `cmd="routes probe"`, `queued=true`, a generated `trace_` token, `dm_rf_tx=true`, and `public_rf_tx=false`.
-6. For physical touch review, open the contact detail sheet, tap `Trace`, verify the Route Trace sheet opens with contact path, best evidence, retained route rows, and a `Ping` action. Tap `Ping` only during RF-allowed validation and verify it queues the same DM-only active trace behavior without sending Public RF.
+6. For physical touch review, open Contact Detail, tap `Contact options`, then `Route trace`; verify the page shows contact path, best evidence, retained route rows, and a `Ping` action. Back must return to Contact Options. Tap `Ping` only during RF-allowed validation and verify it queues the same DM-only active trace behavior without sending Public RF.
 
 ## Packet Log
 
@@ -447,4 +452,8 @@ For Phase 6 signal/room-server/repeater validation:
 3. Run `repeaters` and verify entries are inferred only from nonzero path-hop route or heard-node evidence; Public route rows should not by themselves become repeater candidates.
 4. Run `mesh send public test`, wait for local MeshCore bot replies, and verify D1L packet count increases while the COM11 bot status counters show fresh Public movement.
 5. Verify `health` remains `board_ready=true`, `ui_ready=true`, and reports nonzero task stack watermarks after the probe.
-6. For physical touch review, open the Packet tab, tap the `Mesh Roles` card, verify the role browser sheet lists room servers and repeater candidates, scroll if the list exceeds the sheet, then close it.
+6. For host proof, verify the simulator emits `mesh_roles_sheet`, `mesh_rooms_page`, and `mesh_repeaters_page`; each button target is at least 44x44, source rows stay contained in the list panel, and no Mesh Roles action is RF-capable or destructive.
+7. On exact Actions-built COM12 firmware, capture the three read-only aliases `ui scroll-probe mesh_roles`, `ui scroll-probe mesh_rooms`, and `ui scroll-probe mesh_repeaters`. Verify capture metadata reports matching firmware/host CRCs, `public_rf_tx=false`, and `formats_sd=false`.
+8. For physical touch review, open Packets and tap `Mesh Roles`. Verify the root shows only the Rooms and Repeaters categories; each opens its own bounded vertical list. Child Back must return to Mesh Roles, root Back must return to Packets, rows must stay inside the list while scrolling, and tapping a row must perform no action.
+
+Merged PR #59 / source `d24552e` / Actions `29064260772` is the closed contact-page baseline: COM12 Contact Detail, Contact Options, and confirmation-only Forget captures matched firmware/host CRCs and passed simulator diffs, and the companion three-round all-tab probe passed with no Public RF or formatting. Do not treat that artifact as Mesh Roles hardware proof; the hierarchy above requires a new exact-build capture set.

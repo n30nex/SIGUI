@@ -48,8 +48,21 @@ def test_navigation_module_owns_screen_names_and_surface_aliases():
         '"contact_options"',
         '"contact_forget"',
         '"contact_route"',
+        '"mesh_roles"',
+        '"mesh_rooms"',
+        '"mesh_repeaters"',
     ]:
         assert alias in nav_source
+
+    surface_mapping = nav_source.split("bool d1l_ui_scroll_surface_from_name", 1)[1].split(
+        "void d1l_ui_navigation_request", 1
+    )[0]
+    for surface in ["mesh_roles", "mesh_rooms", "mesh_repeaters"]:
+        mapping = surface_mapping.split(f'strcmp(normalized, "{surface}")', 1)[1].split(
+            "} else", 1
+        )[0]
+        assert f'surface = "{surface}";' in mapping
+        assert "screen = D1L_UI_SCREEN_PACKETS;" in mapping
 
     assert "d1l_ui_screen_from_name(name, out_tab)" in ui_source
     assert "d1l_ui_scroll_surface_from_name(name, out_surface, out_surface_len, out_tab)" in ui_source

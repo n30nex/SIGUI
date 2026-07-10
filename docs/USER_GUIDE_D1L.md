@@ -12,15 +12,15 @@ This firmware turns a Seeed SenseCAP Indicator D1L into a touch-first desk conso
 - Messages opens to the Public channel by default, with an explicit DMs mode for retained direct-message conversations and thread review.
 - Touch Public/DM compose enforces the 138-character MeshCore limit and shows the current character count.
 - Tapping a Public message opens a detail sheet with sender, message text, signal, retained path evidence, and a Reply action that opens Public compose without transmitting until Send.
-- Home uses full-screen launcher tiles for Chats, DMs, Rooms, Contacts, Repeaters, Advertise, Map, Terminal, Packets, Settings, Setup, and Signal with only a small DeskOS title strip. The Home footer keeps colored Time, Wi-Fi, BLE, and SD status icons reachable; Wi-Fi scan/connect controls are available only when the Wi-Fi runtime is enabled, and BLE pairing/transport controls are unavailable until a measured BLE transport artifact exists.
+- Home is a quiet five-destination dashboard: Messages, Network, Map, and More are the task entries, while one Device card summarizes Time, Wi-Fi, Bluetooth, and SD state. Secondary tools such as Packets and diagnostics are grouped under More instead of competing on the Home screen.
 - Targeted outbound DM to a local MeshCore bot has been verified through hardware counters and D1L packet/message logs.
 - First-boot setup for node name, Canada/USA preset confirmation, Desk Companion role, offline radio defaults, and local identity generation.
-- 480x480 dark touch shell with Home, Messages, Nodes, Packets, Settings, modal sheets, toast feedback, onboarding, and lock overlay.
-- Settings opens as an end-user setup dashboard for SD Card, Wi-Fi, BLE, Radio, Map Tiles, Display, Identity, Diagnostics, About, and Advanced.
+- 480x480 dark touch shell with Home, Messages, Network, Map, More, full-height nested pages, toast feedback, onboarding, and lock overlay.
+- More groups Tools, Connections, Storage & maps, Device, Support, and Advanced into simple menus. SD Card, Wi-Fi, BLE, Radio, Map Tiles, Display, Identity, Diagnostics, About, and Packets are leaf destinations rather than one busy grid.
 - Staged touch radio settings editor for frequency, bandwidth, SF, CR, TX power, RX boost, and US/CAN defaults. Saved profile changes are persisted and flagged as reboot/apply pending.
-- Mesh visibility summaries for signal, room servers, and repeater candidates.
+- Mesh visibility summaries for signal, room servers, and repeater candidates. `Packets -> Mesh Roles` opens a two-choice root; Rooms and Repeaters then open separate bounded read-only lists, with Back returning one level at a time.
 - Packets is now a terminal-style diagnostic feed with RX/TX/fail/error color treatment, filter/search controls, pause/resume, route evidence, and normal/advanced packet detail.
-- Nodes tab role badges for companions, repeaters, room servers, sensors, and unknown nodes, plus a read-only heard-node detail sheet for role, fingerprint, public-key state, signal, path, and heard-count evidence.
+- Network shows role badges for companions, repeaters, room servers, sensors, and unknown nodes, plus a read-only heard-node detail page for role, fingerprint, public-key state, signal, path, and heard-count evidence.
 - Read-only route trace helper for promoted contacts or known fingerprints, backed by retained route/contact evidence.
 - Contact export for promoted contacts with retained public keys, using MeshCore-compatible `meshcore://contact/add?...` serial output and a touch QR sheet.
 - USB serial diagnostics, smoke test, and soak test tooling.
@@ -79,6 +79,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `ui capture chunk <offset> <len>`
 - `ui capture end`
 - `ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>`
+- `ui scroll-probe <...|mesh_roles|mesh_rooms|mesh_repeaters|...>` (safe read-only page-open aliases for capture)
 - `messages public`
 - `messages public offset 8`
 - `messages public search test`
@@ -120,7 +121,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 ## Current Limits
 
 - Manual physical review of the touch UI is still pending.
-- Hardware pixel capture over the COM12 console is now the primary way to prove what the D1L display actually drew. It reconstructs a 480x480 RGB565 PNG on the PC for debugging split-page or stale-column UI failures. `scripts/ui_compose_keyboard_capture_d1l.py --targets all` opens every release-blocking compose/input keyboard caller and writes PNG/RGB565 captures for the `ui_compose_keyboard_capture` release gate. PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) proves the current Home simulator/reference diff, and `59610ab` / Actions `28723265336` proves the older Public/DM compose subset; rerun only the probe named by the selected issue.
+- Hardware pixel capture over the COM12 console is the primary way to prove what the D1L display drew. Merged PR #59 / source `d24552e` / Actions `29064260772` proves the simplified Contact Detail, Contact Options, and confirmation-only Forget pages with exact CRC matches and passing simulator diffs, plus a clean three-round all-tab probe with no Public RF or formatting. The newer Mesh Roles hierarchy remains pending its own exact Actions/COM12 capture and physical Back/scroll review; rerun only the probe named by the selected issue.
 - Manual touch review of the Settings dashboard and Radio Settings sheet is still pending.
 - Manual touch review of the Contact Edit rename/Forget sheet is still pending.
 - Full DM ACK/PATH, direct-route, and inbound-DM RF proof is still pending.

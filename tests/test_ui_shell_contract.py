@@ -367,7 +367,7 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
-    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|packets|settings|storage|wifi|map>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|wifi|map>" in console
     assert "contact_probe_surfaces" in console
     assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
@@ -776,6 +776,11 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_packet_detail": "open_packet_detail_event_cb",
         "open_route_detail": "open_route_detail_event_cb",
         "open_mesh_roles": "open_mesh_roles_event_cb",
+        "close_mesh_roles": "close_mesh_roles_event_cb",
+        "open_mesh_rooms": "open_mesh_room_servers_event_cb",
+        "close_mesh_rooms": "mesh_roles_subpage_back_event_cb",
+        "open_mesh_repeaters": "open_mesh_repeater_candidates_event_cb",
+        "close_mesh_repeaters": "mesh_roles_subpage_back_event_cb",
         "open_radio_settings": "open_radio_settings_event_cb",
         "radio_freq_down": "radio_edit_adjust_event_cb",
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",

@@ -104,6 +104,15 @@ bool d1l_ui_scroll_surface_from_name(const char *name,
     } else if (strcmp(normalized, "contact_route") == 0) {
         surface = "contact_route";
         screen = D1L_UI_SCREEN_NODES;
+    } else if (strcmp(normalized, "mesh_roles") == 0) {
+        surface = "mesh_roles";
+        screen = D1L_UI_SCREEN_PACKETS;
+    } else if (strcmp(normalized, "mesh_rooms") == 0) {
+        surface = "mesh_rooms";
+        screen = D1L_UI_SCREEN_PACKETS;
+    } else if (strcmp(normalized, "mesh_repeaters") == 0) {
+        surface = "mesh_repeaters";
+        screen = D1L_UI_SCREEN_PACKETS;
     } else if (strcmp(normalized, "packets") == 0 ||
                strcmp(normalized, "pkts") == 0) {
         surface = "packets";
