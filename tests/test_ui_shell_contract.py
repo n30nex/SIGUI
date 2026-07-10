@@ -166,21 +166,29 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert 'return "mounting";' in home_module
     assert 'return "needs FAT32";' in home_module
     assert "return snapshot->storage_sd_state;" not in home_module
-    assert "d1l_ui_home_launcher_box" in home_header
-    assert "d1l_ui_home_status_box" in home_header
-    assert "static const d1l_ui_home_box_t k_launcher_boxes" in home_module
-    assert "static const d1l_ui_home_box_t k_status_boxes" in home_module
-    assert "[D1L_UI_HOME_LAUNCHER_PACKETS] = {4, 280, 116, 132}" in home_module
-    assert "[D1L_UI_HOME_STATUS_TIME] = {4, 416, 116, 48}" in home_module
-    assert "render_launcher_tile" in home_module
-    assert "render_status_icon" in home_module
+    assert "d1l_ui_home_destination_box" in home_header
+    assert "d1l_ui_home_device_box" in home_header
+    assert "static const d1l_ui_home_box_t k_destination_boxes" in home_module
+    assert "static const d1l_ui_home_box_t k_device_box" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MESSAGES] = {12, 0, 222, 140}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_NETWORK] = {246, 0, 222, 140}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MAP] = {12, 148, 222, 140}" in home_module
+    assert "[D1L_UI_HOME_DESTINATION_MORE] = {246, 148, 222, 140}" in home_module
+    assert "static const d1l_ui_home_box_t k_device_box = {12, 296, 456, 116}" in home_module
+    assert "render_destination_card" in home_module
+    assert "render_device_status" in home_module
     assert "lv_obj_set_style_border_width(panel, 1, 0)" in home_module
     assert "home_action_event_cb" in home_module
     assert "lv_event_get_user_data(event)" in home_module
     assert "static const d1l_ui_home_action_t k_action_values" in home_module
     assert "(void *)&k_action_values[action]" in home_module
     assert "(void *)(uintptr_t)action" not in home_module
-    assert "D1L_UI_HOME_ACTION_MESSAGES_PUBLIC" in home_header
+    assert "D1L_UI_HOME_ACTION_MESSAGES" in home_header
+    assert "D1L_UI_HOME_ACTION_NETWORK" in home_header
+    assert "D1L_UI_HOME_ACTION_MAP" in home_header
+    assert "D1L_UI_HOME_ACTION_MORE" in home_header
+    assert "D1L_UI_HOME_LAUNCHER_" not in home_header
+    assert "D1L_UI_HOME_STATUS_" not in home_header
     assert "render_home_launcher_tile" not in source
     assert "render_home_status_icon" not in source
     assert "render_home_message_preview" not in source
@@ -189,47 +197,33 @@ def test_home_screen_is_user_first_companion_dashboard():
     assert "set_object_hidden(s_status_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_identity_label, !layout.header_detail_visible)" in source
     assert "set_object_hidden(s_lock_button, !layout.header_detail_visible)" in source
-    assert '"Chats"' in home_module
-    assert '"Rooms"' in home_module
-    assert '"Contacts"' in home_module
-    assert '"Repeaters"' in home_module
-    assert '"Advertise"' in home_module
+    assert '"Messages"' in home_module
+    assert '"Network"' in home_module
     assert '"Map"' in home_module
-    assert '"Terminal"' in home_module
-    assert '"Packets"' in home_module
-    assert '"Settings"' in home_module
-    assert '"Setup"' in home_module
-    assert '"Signal"' in home_module
+    assert '"More"' in home_module
+    assert '"Device status"' in home_module
     assert '"Time"' in home_module
     assert '"Wi-Fi"' in home_module
     assert '"BLE"' in home_module
     assert '"SD"' in home_module
-    assert '"DMs"' in home_module
     assert "snapshot->public_unread_count" in home_module
     assert "snapshot->dm_unread_count" in home_module
-    assert "snapshot->recent_room_count" in home_module
-    assert "snapshot->recent_repeater_count" in home_module
+    assert "snapshot->contact_count" in home_module
+    assert "snapshot->node_count" in home_module
     assert "snapshot->packet_count" in home_module
-    assert "snapshot->signal_summary.sample_count" in home_module
     assert "handle_home_action" in source
-    assert "open_messages_public_event_cb" in source
-    assert "open_messages_dm_event_cb" in source
-    assert "request_tab_switch(D1L_UI_TAB_NODES)" in source
-    assert "open_mesh_roles_event_cb" in source
-    assert "open_sheet_event_cb" in source
-    assert "open_diagnostics_sheet_event_cb" in source
-    assert "open_storage_sheet_event_cb" in source
+    for action, tab in (
+        ("D1L_UI_HOME_ACTION_MESSAGES", "D1L_UI_TAB_MESSAGES"),
+        ("D1L_UI_HOME_ACTION_NETWORK", "D1L_UI_TAB_NODES"),
+        ("D1L_UI_HOME_ACTION_MAP", "D1L_UI_TAB_MAP"),
+        ("D1L_UI_HOME_ACTION_MORE", "D1L_UI_TAB_SETTINGS"),
+    ):
+        route_body = source.split(f"case {action}:", 1)[1].split("break;", 1)[0]
+        assert f"request_tab_switch({tab});" in route_body
     home_body = home_module.split("void d1l_ui_home_render", 1)[1]
-    assert "D1L_UI_HOME_LAUNCHER_PACKETS" in home_body
-    assert "D1L_UI_HOME_STATUS_TIME" in home_body
-    assert "LV_SYMBOL_WIFI" in home_body
-    assert "LV_SYMBOL_BLUETOOTH" in home_body
-    assert "LV_SYMBOL_SD_CARD" in home_body
-    home_status_body = home_body.split("D1L_UI_HOME_STATUS_TIME", 1)[1]
-    assert "0x00C2FF" in home_status_body
-    assert "0xC4B5FD" in home_status_body
-    assert "0xFBBF24" in home_status_body
-    assert "0x8EA0AE" not in home_status_body
+    assert home_body.count("render_destination_card(parent") == 4
+    assert "render_device_status(parent, snapshot);" in home_body
+    assert "render_status_icon" not in home_body
     assert "Mesh %s  RX %lu  TX %lu" not in home_body
     assert "Last Messages" not in home_body
     assert "Local Repeaters" not in home_body
@@ -541,7 +535,9 @@ def test_serial_tab_state_stays_pending_until_render_finishes():
     assert "return d1l_ui_navigation_begin_pending(out_tab);" in source
     assert "d1l_ui_navigation_finish(rendered_tab);" in source
     assert "request_tab_switch(tab)" in source
-    assert "request_tab_switch((d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event))" in source
+    assert "const d1l_ui_tab_t *tab = (const d1l_ui_tab_t *)lv_event_get_user_data(event);" in source
+    assert "request_tab_switch(*tab);" in source
+    assert "(d1l_ui_tab_t)(uintptr_t)lv_event_get_user_data(event)" not in source
     assert "request_tab_switch(D1L_UI_TAB_MESSAGES)" in source
 
     process_body = source.split("static void process_pending_tab_switch(void)", 1)[1].split(
@@ -725,7 +721,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "forget_contact": "forget_contact_edit_event_cb",
         "open_map": "dock_event_cb",
         "open_nodes": "dock_event_cb",
-        "open_packets": "dock_event_cb",
+        "open_packets": "D1L_UI_SETTINGS_ACTION_PACKETS",
         "open_settings": "dock_event_cb",
         "open_map_location_picker": "open_map_location_sheet_event_cb",
         "edit_map_latitude": "s_map_lat_textarea",
@@ -740,8 +736,6 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_packet_detail": "open_packet_detail_event_cb",
         "open_route_detail": "open_route_detail_event_cb",
         "open_mesh_roles": "open_mesh_roles_event_cb",
-        "open_repeaters": "open_mesh_roles_event_cb",
-        "open_signal": "open_mesh_roles_event_cb",
         "open_radio_settings": "open_radio_settings_event_cb",
         "radio_freq_down": "radio_edit_adjust_event_cb",
         "radio_cycle_bandwidth": "radio_edit_adjust_event_cb",
@@ -1015,8 +1009,14 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert "format_coord_e7" in source
     assert "render_metric_card(content, 18, 48" in source
     assert "render_metric_card(content, 238, 48" in source
-    assert 'const char *labels[] = {"Home", "Msg", "Nodes", "Map", "Pkts", "Set"}' in source
-    assert "for (int i = 0; i < 6; ++i)" in source
+    assert 'static const char *const labels[] = {"Home", "Msg", "Network", "Map", "More"}' in source
+    assert "static const d1l_ui_tab_t tabs[]" in source
+    assert "D1L_UI_TAB_PACKETS" not in source.split("static void create_dock", 1)[1].split(
+        "static void create_toast", 1
+    )[0]
+    assert "4 + (int)i * 96" in source
+    assert "(void *)&tabs[i]" in source
+    assert "(void *)(uintptr_t)i" not in source
     assert "map_tile_download_supported" in header
     assert "map_tile_render_supported" in header
     assert "map_tile_sideload_supported" in header
@@ -1208,6 +1208,7 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
     assert "lv_" not in wrapper
 
     action_routes = (
+        ("D1L_UI_SETTINGS_ACTION_PACKETS", "request_tab_switch(D1L_UI_TAB_PACKETS);"),
         ("D1L_UI_SETTINGS_ACTION_STORAGE", "open_storage_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_WIFI", "open_wifi_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_BLE", "open_ble_sheet_event_cb(NULL);"),
@@ -1224,19 +1225,22 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
         assert route in route_body
 
     for style in (
-        "lv_obj_set_style_radius(panel, 8, 0)",
-        "lv_obj_set_style_bg_color(panel, lv_color_hex(0x111923), 0)",
-        "lv_obj_set_style_border_color(panel, lv_color_hex(0x263241), 0)",
-        "lv_obj_set_style_border_width(panel, 1, 0)",
-        "lv_obj_set_style_pad_all(panel, 12, 0)",
-        "lv_obj_set_style_pad_all(tile, 8, 0)",
+        "lv_obj_set_style_radius(row, 10, 0)",
+        "lv_obj_set_style_bg_color(row, lv_color_hex(warning ? 0x231317 : 0x111923), 0)",
+        "lv_obj_set_style_border_color(row, lv_color_hex(warning ? 0x7F1D1D : 0x263241), 0)",
+        "lv_obj_set_style_border_width(row, 1, 0)",
+        "lv_obj_set_style_pad_all(row, 0, 0)",
     ):
         assert style in settings_module
-    assert "settings_create_panel(parent, x, y, 204, 54)" in settings_module
-    assert "settings_set_dot_width(title_label, 92)" in settings_module
-    assert "settings_set_dot_width(value_label, 96)" in settings_module
-    assert "settings_set_dot_width(detail_label, 188)" in settings_module
-    assert "lv_obj_set_pos(detail_label, 0, 28)" in settings_module
+    assert "settings_create_row(parent, 444, 54, item->warning)" in settings_module
+    assert "settings_create_row(group, 444, 48, warning)" in settings_module
+    assert "settings_category_event_cb" in settings_module
+    assert "settings_apply_category_state" in settings_module
+    assert "s_expanded_category == *category_value" in settings_module
+    assert "lv_obj_add_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
+    assert "lv_obj_clear_flag(s_category_children[index], LV_OBJ_FLAG_HIDDEN)" in settings_module
+    for category in ("Tools", "Connections", "Storage & maps", "Device", "Support", "Advanced"):
+        assert f'"{category}"' in settings_module
 
 
 def test_settings_screen_reports_companion_wireless_state():
@@ -1256,15 +1260,17 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "wifi_last_error" in header
     assert "ble_transport_supported" in header
     assert "coexistence_policy" in header
-    assert '"Setup Dashboard"' in settings_module
+    assert '"More"' in settings_module
+    assert '"Settings and tools"' in settings_module
     assert '"SD Card"' in settings_module
-    assert '"Map Tiles"' in settings_module
+    assert '"Offline Maps"' in settings_module
     assert '"Identity"' in settings_module
     assert '"Advanced"' in settings_module
     assert '"About"' in settings_module
-    assert '"Raw data and adverts"' in settings_module
-    assert "mesh stays offline" in settings_module
-    assert "FAT32 only, no format" in settings_module
+    assert '"Packets"' in settings_module
+    assert '"Bluetooth"' in settings_module
+    assert "snapshot->identity_fingerprint" not in settings_module
+    assert "format_radio_profile_line" not in settings_module
     assert "static lv_obj_t *s_wifi_sheet" in source
     assert "static lv_obj_t *s_ble_sheet" in source
     assert "static lv_obj_t *s_display_sheet" in source
@@ -1330,7 +1336,7 @@ def test_settings_screen_has_safe_touch_radio_editor():
     assert "radio_defaults_event_cb" in source
     assert "radio_edit_from_snapshot" in source
     assert "format_radio_profile_line" in source
-    assert 'render_settings_tile(parent, 238, 128, "Radio"' in settings_module
+    assert '{"Radio", radio_status' in settings_module
     assert '"Radio Settings"' in source
     assert '"Live RF matches saved profile"' in source
     assert '"Saved profile pending next radio start/apply"' in source
