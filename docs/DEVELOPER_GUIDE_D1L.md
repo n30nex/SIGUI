@@ -87,7 +87,9 @@ Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, U
 ## GitHub Actions
 
 The `d1l-ci` workflow runs host checks on Windows plus ESP32 firmware
-build/package generation in `espressif/idf:release-v5.1`. The default path
+build/package generation using the issue #63 selected target,
+`espressif/idf:v5.5.4`. This is a version-pinned tag, not a content-immutable
+image identity or proof that the SDK is already production-qualified. The default path
 skips SD/RP2040 dry-runs and RP2040 Arduino builds so ESP32/UI fixes do not
 rebuild or revalidate the already-working bridge. Expected default artifacts:
 
@@ -109,6 +111,25 @@ Download with:
 ```powershell
 gh run download <run-id> -D artifacts\github\<run-id>
 ```
+
+### Issue #63 SDK qualification
+
+Do not generate or repair `dependencies.lock` by hand or with a local firmware
+build. During the migration, let ESP-IDF Component Manager generate the lock in
+the version-pinned Actions environment. Archive the exact generated lock and
+diff, review and commit that output, then rerun Actions and require the lock to
+remain unchanged. Retain the run ID, commit, selected image tag, resolved image
+identity when Actions exposes it, lock file, package checksums, and artifact
+metadata as one evidence set.
+
+After that clean repeat build passes, flash only its verified artifact to exact
+COM12. Run `version` first and require the JSON response to contain
+`"idf":"v5.5.4"`, then run the issue #63 board, display/touch, Wi-Fi, RF,
+RP2040/SD, Map, health, reboot, and post-power-cycle checks. Refresh the relevant
+commit-matched release-gate evidence before calling v5.5.4 the production
+baseline. The `supported_sdk_baseline` audit item checks the workflow selection
+and committed lock's IDF version; it does not prove lock provenance or replace
+these build and hardware stages.
 
 RP2040 SD bridge UF2 flashing is not an ESP32 `esptool` path. After putting the
 D1L RP2040 into UF2/BOOTSEL mass-storage mode, use the guarded helper so the

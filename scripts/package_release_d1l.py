@@ -17,7 +17,10 @@ from pathlib import Path
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
-EXPECTED_BSP_PATCH = Path("patches/sensecap_indicator_touch_fix.patch")
+EXPECTED_BSP_PATCHES = (
+    Path("patches/sensecap_indicator_touch_fix.patch"),
+    Path("patches/sensecap_indicator_idf55_compat.patch"),
+)
 EXPECTED_BSP_SUBMODULE = Path("third_party/sensecap_indicator_esp32")
 RELEASE_DOC_SPECS = [
     ("docs/USER_GUIDE_D1L.md", "USER_GUIDE_D1L.md"),
@@ -78,16 +81,28 @@ def command_succeeds(cwd: Path, args: list[str]) -> bool:
     return True
 
 
-def expected_bsp_patch_applied(root: Path) -> bool:
+def expected_bsp_patches_applied(root: Path) -> bool:
     root = root.resolve()
-    patch = root / EXPECTED_BSP_PATCH
     submodule = root / EXPECTED_BSP_SUBMODULE
-    if not patch.exists() or not submodule.exists():
+    if not submodule.exists():
         return False
-    return command_succeeds(
-        submodule,
-        ["git", "apply", "--unidiff-zero", "--reverse", "--check", str(patch)],
-    )
+
+    for relative_patch in EXPECTED_BSP_PATCHES:
+        patch = root / relative_patch
+        if not patch.exists() or not command_succeeds(
+            submodule,
+            [
+                "git",
+                "apply",
+                "--unidiff-zero",
+                "--reverse",
+                "--check",
+                "--ignore-space-change",
+                str(patch),
+            ],
+        ):
+            return False
+    return True
 
 
 def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], list[str]]:
@@ -98,8 +113,8 @@ def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], li
     expected_submodule = EXPECTED_BSP_SUBMODULE.as_posix()
     expected_entries = [line for line in entries if status_path(line) == expected_submodule]
     other_entries = [line for line in entries if status_path(line) != expected_submodule]
-    if expected_entries and expected_bsp_patch_applied(root):
-        return other_entries, [EXPECTED_BSP_PATCH.as_posix()]
+    if expected_entries and expected_bsp_patches_applied(root):
+        return other_entries, [patch.as_posix() for patch in EXPECTED_BSP_PATCHES]
 
     return entries, []
 

@@ -199,7 +199,7 @@ def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path):
     assert "`include_sd_bridge=true`" in readme
 
 
-def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
+def test_git_info_treats_expected_bsp_patches_as_clean(monkeypatch, tmp_path):
     def fake_git_value(root, *args):
         if args == ("status", "--porcelain"):
             return "M third_party/sensecap_indicator_esp32"
@@ -212,10 +212,33 @@ def test_git_info_treats_expected_bsp_patch_as_clean(monkeypatch, tmp_path):
         return None
 
     monkeypatch.setattr(package_release_d1l, "git_value", fake_git_value)
-    monkeypatch.setattr(package_release_d1l, "expected_bsp_patch_applied", lambda root: True)
+    monkeypatch.setattr(package_release_d1l, "expected_bsp_patches_applied", lambda root: True)
 
     info = package_release_d1l.git_info(tmp_path)
 
     assert info["dirty"] is False
     assert info["dirty_entries"] == []
-    assert info["source_patches"] == ["patches/sensecap_indicator_touch_fix.patch"]
+    assert info["source_patches"] == [
+        "patches/sensecap_indicator_touch_fix.patch",
+        "patches/sensecap_indicator_idf55_compat.patch",
+    ]
+
+
+def test_expected_bsp_patch_set_fails_closed_when_any_reverse_check_fails(monkeypatch, tmp_path):
+    submodule = tmp_path / package_release_d1l.EXPECTED_BSP_SUBMODULE
+    submodule.mkdir(parents=True)
+    for relative_patch in package_release_d1l.EXPECTED_BSP_PATCHES:
+        patch = tmp_path / relative_patch
+        patch.parent.mkdir(parents=True, exist_ok=True)
+        patch.write_text("patch", encoding="utf-8")
+
+    calls = []
+
+    def fake_command_succeeds(cwd, args):
+        calls.append((cwd, args))
+        return len(calls) == 1
+
+    monkeypatch.setattr(package_release_d1l, "command_succeeds", fake_command_succeeds)
+
+    assert package_release_d1l.expected_bsp_patches_applied(tmp_path) is False
+    assert len(calls) == 2

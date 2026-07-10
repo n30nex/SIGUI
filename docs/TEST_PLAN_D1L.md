@@ -39,6 +39,8 @@ Coverage:
 - Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. The SD-aware soak must report `public_rf_tx=false` and `formats_sd=false` unless the operator explicitly enables an RF mode through a separate flag.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - CI scope contract: `.github/workflows/d1l-ci.yml` must keep ESP32/UI work on the fast default path. The default Actions run builds ESP32 firmware and the release package without rebuilding RP2040 artifacts or running SD/RP2040 host dry-runs; `workflow_dispatch` with `include_sd_bridge=true` or changes under SD/RP2040 paths must opt into the bridge UF2, SD smoke UF2, and SD dry-run checks.
+- Supported-SDK policy contract: the ESP32 firmware job must use the exact selected version tag `espressif/idf:v5.5.4`, and the committed component lock must record IDF 5.5.4; `latest`, moving `release-vX.Y`, EOL, missing, unapproved, and stale selections must fail the P0 `supported_sdk_baseline` audit. Passing these configuration checks does not prove lock provenance or qualify v5.5.4 as the production baseline, and the version tag must not be described as content-immutable.
+- SDK generated-state contract: ESP-IDF Component Manager must generate `dependencies.lock` in the version-pinned Actions environment. The first migration run must archive the exact generated lock and diff for review; after that output is committed without hand-editing its generated hash, the qualifying repeat Actions build must leave the lock unchanged and must surface unexpected generated configuration drift for review.
 - Release gate audit contract: `scripts/release_gate_audit_d1l.py` must fail closed when P0 production evidence is missing, must not require hardware or ports in CI, must reject obsolete SD preflight evidence that recommends any device-format action, must require SD evidence to report `formats_sd=false`, and must report `ready_for_public_release=false` until current-commit smoke, compose-keyboard capture, SD matrix, 12-hour soak, manual physical UI/photos, and full RF/DM evidence are present.
 - Autonomous hardware validation contract: `scripts/autonomous_hardware_validate_d1l.py` must provide a no-user-input orchestration path for the current D1L hardware route. It must default to COM12 for the ESP32 console, treat COM16 as the RP2040 USB/CDC/UF2 path only when an RP2040 refresh is explicitly requested, refuse COM8, COM11, and COM29, use only GitHub Actions-built artifacts, preserve `public_rf_tx=false` and `formats_sd=false`, and reuse the already-validated production RP2040 bridge by default. The bundled COM12 smoke/UI/preflight path is a deliberate multi-surface sweep, not the default proof for every UI P0. Issue work should call the narrow script that matches the acceptance criteria, then reserve the bundled runner for multi-surface issues or final production sweep evidence. It may copy RP2040 UF2 files only when invoked with `--refresh-rp2040-smoke`; that refresh path must restore the production RP2040 bridge after any official SD smoke UF2.
 - UI simulator contract: `tools/ui_simulator.py` must render deterministic 480x480 PNGs plus schema-v2 `ui-sim-report.json`, cover the main touch surfaces and nested pages, fail on missing labels or measured overflow, emit 44x44 touch targets, flag RF/destructive/format-capable actions, and keep `formats_sd=false`. Storage specifically must render a full-height read-only root, separate Card status and scrollable Data locations pages, one fixed no-format footer, plain-language guidance with no raw setup slug, and no mutating callback.
@@ -56,6 +58,31 @@ Coverage:
 - SD boot/use acceptance contract: `scripts/sd_boot_prepare_acceptance_d1l.py --port <D1L_PORT> --scenario <scenario>` must cover `no-card`, `correct-structure`, `missing-structure`, `unformatted`, `existing-data`, and `rp2040-unavailable` without hardcoded ports, Public RF, or any formatting command. Users must supply FAT32 cards prepared on a computer.
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract including retained-history search, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
+
+## Issue #63 Supported-SDK Qualification
+
+Firmware compilation and ESP-IDF dependency resolution are GitHub-Actions-only.
+Do not run a local firmware build and do not hand-edit `dependencies.lock`.
+
+1. Run the complete host suite and confirm the workflow-policy tests reject
+   missing, moving, EOL, and unapproved SDK image tags while accepting only
+   `espressif/idf:v5.5.4` as the selected target.
+2. Run the version-pinned Actions firmware job. Archive the generated
+   `dependencies.lock` and its diff, plus any generated configuration diff,
+   even if the first migration build fails later.
+3. Review and commit the exact Actions-generated lock. Rerun the same commit
+   lineage in Actions and require the firmware/package/checksum jobs to pass
+   without changing the committed lock or silently changing generated config.
+4. Retain the commit, run ID, selected tag, resolved image identity when
+   available, lock, checksums, and downloaded firmware/package metadata.
+5. Flash only that verified Actions artifact to exact COM12. Run `version` and
+   require an OK JSON response whose `idf` field is exactly `v5.5.4`.
+6. On the same artifact, repeat issue #63 board, display/touch, Wi-Fi, RF,
+   RP2040/SD, Map, health, reboot, and post-power-cycle smoke. Use COM16 only
+   when an RP2040-specific proof requires it; do not substitute another ESP32
+   port for COM12.
+7. Refresh all relevant commit-matched release-gate evidence. The SDK migration
+   passes only when `supported_sdk_baseline` and every other P0 gate are green.
 
 ## Hardware Smoke
 

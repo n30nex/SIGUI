@@ -136,20 +136,34 @@ def test_touch_path_uses_pressed_state_not_uninitialized_btn_val():
     assert "hide_sheet();" not in dock_body
 
 
-def test_cmake_applies_parent_owned_seeed_touch_patch():
+def test_cmake_applies_parent_owned_seeed_patch_set():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    patch = (ROOT / "patches" / "sensecap_indicator_touch_fix.patch").read_text(encoding="utf-8")
+    touch_patch = (ROOT / "patches" / "sensecap_indicator_touch_fix.patch").read_text(encoding="utf-8")
+    compat_patch = (ROOT / "patches" / "sensecap_indicator_idf55_compat.patch").read_text(encoding="utf-8")
 
     assert 'COMMAND git rev-parse --short HEAD' in cmake
     assert 'set(PROJECT_VER "${D1L_GIT_SHORT_SHA}")' in cmake
     assert "SEEED_BSP_TOUCH_PATCH" in cmake
+    assert "SEEED_BSP_IDF55_COMPAT_PATCH" in cmake
+    assert "foreach(SEEED_BSP_PATCH IN LISTS SEEED_BSP_PATCHES)" in cmake
     assert "git apply --unidiff-zero --check" in cmake
     assert "git apply --unidiff-zero --reverse --check" in cmake
-    assert "components/bsp/src/indev/indev.c" in patch
-    assert "components/i2c_devices/touch_panel/ft5x06.c" in patch
-    assert "data->btn_val = pressed ? 1 : 0;" in patch
-    assert "ft5x06_write_byte(FT5x06_DEVICE_MODE, 0x00)" in patch
-    assert "ft5x06_write_byte(FT5x06_ID_G_PMODE, 0x00)" in patch
+    assert "--ignore-space-change" in cmake
+    assert "components/bsp/src/indev/indev.c" in touch_patch
+    assert "components/i2c_devices/touch_panel/ft5x06.c" in touch_patch
+    assert "data->btn_val = pressed ? 1 : 0;" in touch_patch
+    assert "ft5x06_write_byte(FT5x06_DEVICE_MODE, 0x00)" in touch_patch
+    assert "ft5x06_write_byte(FT5x06_ID_G_PMODE, 0x00)" in touch_patch
+    assert "tt21100_read((uint8_t *)&reg_val" in compat_patch
+    assert "gtp_get_points(&g_ts_data, points" in compat_patch
+    assert "read_input_pins16" in compat_patch
+    assert "g_dioIrq = dioIrq;" in compat_patch
+    assert "static void (*lvgl_direct_mode_buf_copy)(void)" in compat_patch
+    assert "const esp_lcd_rgb_panel_event_data_t *edata" in compat_patch
+    assert "static esp_err_t lcd_draw_bitmap" in compat_patch
+    assert "const void *data" in compat_patch
+    assert "-fpermissive" not in compat_patch
+    assert "CONFIG_COMPILER_DISABLE_GCC14_WARNINGS" not in compat_patch
 
 
 def test_build_script_is_host_only_and_does_not_rewrite_lcd_config():
@@ -159,4 +173,6 @@ def test_build_script_is_host_only_and_does_not_rewrite_lcd_config():
     assert "CONFIG_LCD_LVGL_DIRECT_MODE" not in script
     assert "disabled_local_github_actions_only" in script
     assert "Use GitHub Actions d1l-ci firmware-build" in script
+    assert 'framework = "ESP-IDF v5.5.4"' in script
+    assert "ESP-IDF v5.1.x" not in script
     assert "& idf.py build" not in script

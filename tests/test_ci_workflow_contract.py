@@ -108,7 +108,27 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
 
     assert "needs: [change-filter, rp2040-sd-bridge-build]" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
+    assert job.count("container: espressif/idf:v5.5.4") == 1
+    assert "espressif/idf:release-v5.1" not in job
+    assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
     assert "idf.py build" in job
+    assert "name: Capture ESP-IDF migration state" in job
+    assert "name: d1l-idf55-migration-state" in job
+    assert "path: artifacts/idf-migration/**" in job
+    assert "dependencies.lock.patch" in job
+    assert "build/config/sdkconfig.json" in job
+    assert "git diff --exit-code -- dependencies.lock" in job
+    assert "git diff --exit-code" not in job.replace(
+        "git diff --exit-code -- dependencies.lock", ""
+    )
+    assert (
+        job.index("name: Build D1L firmware")
+        < job.index("name: Capture ESP-IDF migration state")
+        < job.index("name: d1l-idf55-migration-state")
+        < job.index("name: Require committed dependency solution")
+        < job.index("name: Collect firmware artifacts")
+        < job.index("name: Package D1L release")
+    )
     assert "actions/download-artifact@v7" in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "pattern: rp2040-*-firmware" in job

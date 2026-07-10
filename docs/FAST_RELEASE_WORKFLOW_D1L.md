@@ -83,6 +83,28 @@ Keep `formats_sd=false`; users prepare FAT32 cards on a computer.
 Use a targeted RF/DM proof and keep ports explicit. Do not mix this with SD or
 UI refactors in the same PR.
 
+### Supported-SDK Migration (issue #63)
+
+This release-blocking migration is intentionally broader than a normal
+issue-sized UI proof. The `supported_sdk_baseline` check covers the workflow
+selection of `espressif/idf:v5.5.4` and the committed lock target only; the
+version tag is not a content-immutable image identity, the check does not prove
+lock provenance, and neither is hardware qualification.
+
+1. Run host policy tests and the complete host suite.
+2. Let the version-pinned Actions environment generate `dependencies.lock`.
+   Archive and review that exact output and diff; do not hand-edit its generated
+   hash and do not use a local firmware build to regenerate it.
+3. Commit the generated lock, rerun Actions, and require a clean lock plus
+   passing firmware/package/checksum jobs. Retain the run/image/lock/artifact
+   metadata together.
+4. Flash that exact verified artifact to COM12. Require the serial `version`
+   response to contain `"idf":"v5.5.4"`, then run the issue #63 board,
+   display/touch, Wi-Fi, RF, RP2040/SD, Map, health, reboot, and post-power-cycle
+   checks. Use COM16 only for explicitly required RP2040 proof.
+5. Refresh the relevant commit-matched release evidence and keep the release
+   fail-closed until every P0 gate is green.
+
 ## Local Progress Dashboard
 
 Run this in a separate terminal while Codex works:

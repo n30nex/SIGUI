@@ -19,6 +19,10 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
+SUPPORTED_ESP_IDF_IMAGE = "espressif/idf:v5.5.4"
+SUPPORTED_ESP_IDF_VERSION = "v5.5.4"
+SUPPORTED_ESP_IDF_LOCK_VERSION = "5.5.4"
+ESP_IDF_MIGRATION_ISSUE = 63
 REQUIRED_UI_TELEMETRY_FIELDS = {
     "heap_free",
     "heap_min_free",
@@ -1861,6 +1865,90 @@ def full_rf_gate(hardware_dir: Path, root: Path, commit: str | None) -> GateResu
     )
 
 
+def component_lock_idf_version(text: str) -> str | None:
+    in_dependencies = False
+    in_idf = False
+    for raw_line in text.splitlines():
+        content = raw_line.lstrip(" ")
+        if not content or content.startswith("#"):
+            continue
+        indent = len(raw_line) - len(content)
+        stripped = content.strip()
+        if indent == 0:
+            in_dependencies = stripped == "dependencies:"
+            in_idf = False
+            continue
+        if not in_dependencies:
+            continue
+        if indent == 2:
+            in_idf = stripped == "idf:"
+            continue
+        if in_idf and indent == 4 and stripped.startswith("version:"):
+            version = stripped.partition(":")[2].strip().strip("\"'")
+            return version or None
+    return None
+
+
+def supported_sdk_gate(root: Path) -> GateResult:
+    workflow = root / ".github" / "workflows" / "d1l-ci.yml"
+    component_lock = root / "dependencies.lock"
+    workflow_text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
+    lock_text = component_lock.read_text(encoding="utf-8") if component_lock.is_file() else ""
+    locked_idf_version = component_lock_idf_version(lock_text)
+    job_match = re.search(
+        r"(?ms)^  firmware-build:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*\n|\Z)",
+        workflow_text,
+    )
+    job_text = job_match.group("body") if job_match else ""
+    configured_images = re.findall(r"(?m)^\s{4}container:\s*([^\s#]+)\s*(?:#.*)?$", job_text)
+    moving_images = [
+        image
+        for image in configured_images
+        if image.endswith(":latest") or ":release-v" in image
+    ]
+    exact_release_pin = configured_images == [SUPPORTED_ESP_IDF_IMAGE]
+    exact_component_lock = locked_idf_version == SUPPORTED_ESP_IDF_LOCK_VERSION
+    ok = (
+        workflow.is_file()
+        and job_match is not None
+        and exact_release_pin
+        and not moving_images
+        and exact_component_lock
+    )
+    evidence = [
+        rel(path, root)
+        for path in (workflow, component_lock)
+        if path.is_file()
+    ]
+    return GateResult(
+        "supported_sdk_baseline",
+        "P0",
+        ok,
+        "Supported ESP-IDF release baseline",
+        evidence,
+        f"D1L firmware CI configuration and component lock target ESP-IDF {SUPPORTED_ESP_IDF_VERSION}."
+        if ok else (
+            f"D1L firmware CI must pin exactly {SUPPORTED_ESP_IDF_IMAGE} and its solver-generated "
+            f"component lock must record IDF {SUPPORTED_ESP_IDF_LOCK_VERSION}; moving, EOL, or "
+            "unapproved SDK versions are release-blocking."
+        ),
+        {
+            "issue": ESP_IDF_MIGRATION_ISSUE,
+            "expected_image": SUPPORTED_ESP_IDF_IMAGE,
+            "expected_version": SUPPORTED_ESP_IDF_VERSION,
+            "workflow_found": workflow.is_file(),
+            "firmware_job_found": job_match is not None,
+            "configured_images": configured_images,
+            "moving_images": moving_images,
+            "exact_release_pin": exact_release_pin,
+            "component_lock_found": component_lock.is_file(),
+            "expected_lock_version": SUPPORTED_ESP_IDF_LOCK_VERSION,
+            "locked_idf_version": locked_idf_version,
+            "exact_component_lock": exact_component_lock,
+        },
+    )
+
+
 def docs_freshness_gate(root: Path, commit: str | None, run_id: str | None) -> GateResult:
     docs = [
         root / "README.md",
@@ -1934,6 +2022,7 @@ def build_audit(args: argparse.Namespace) -> dict:
     )
     unformatted_boot_path = newest_boot_prepare_artifact(boot_prepare_roots, args.commit, "unformatted")
 
+    gates.append(supported_sdk_gate(root))
     gates.append(checksum_gate(github_run_dir, root))
     gates.append(notices_gate(github_run_dir, root))
     gates.append(

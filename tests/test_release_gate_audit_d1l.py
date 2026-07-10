@@ -248,6 +248,38 @@ def write_manifest_file(directory: Path, name: str, payload: bytes = b"ok") -> N
     (directory / "SHA256SUMS.txt").write_text(f"{digest}  ./{name}\n", encoding="ascii")
 
 
+def write_supported_sdk_lock(
+    root: Path,
+    version: str = audit.SUPPORTED_ESP_IDF_LOCK_VERSION,
+) -> None:
+    (root / "dependencies.lock").write_text(
+        "dependencies:\n"
+        "  idf:\n"
+        "    source:\n"
+        "      type: idf\n"
+        f"    version: {version}\n"
+        "manifest_hash: test\n"
+        "target: esp32s3\n"
+        "version: 2.0.0\n",
+        encoding="utf-8",
+    )
+
+
+def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_IDF_IMAGE) -> None:
+    workflow = root / ".github" / "workflows" / "d1l-ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text(
+        "name: d1l-ci\n"
+        "jobs:\n"
+        "  firmware-build:\n"
+        "    runs-on: ubuntu-latest\n"
+        f"    container: {image}\n"
+        "    steps: []\n",
+        encoding="utf-8",
+    )
+    write_supported_sdk_lock(root)
+
+
 def write_release_package(run_dir: Path) -> Path:
     package = run_dir / "d1l-release-package" / f"d1l-release-{COMMIT}"
     write_manifest_file(package, "README_RELEASE.md", b"release")
@@ -272,6 +304,7 @@ def write_release_package(run_dir: Path) -> Path:
 
 
 def write_core_evidence(root: Path) -> None:
+    write_supported_sdk_workflow(root)
     run_dir = root / "artifacts" / "github" / RUN_ID
     write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
     write_manifest_file(run_dir / "rp2040-sd-bridge-firmware", "deskos_sd_bridge.ino.uf2", b"uf2")
@@ -880,6 +913,8 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
+    assert gates["supported_sdk_baseline"]["ok"] is True
+    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == "espressif/idf:v5.5.4"
     assert gates["ci_artifacts_checksums"]["ok"] is True
     assert gates["release_notices_included"]["ok"] is True
     assert gates["com12_smoke"]["ok"] is True
@@ -890,6 +925,83 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+def test_supported_sdk_gate_fails_closed_without_workflow_or_firmware_job(tmp_path: Path):
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert missing["ok"] is False
+    assert missing["severity"] == "P0"
+    assert missing["evidence"] == []
+    assert missing["details"]["workflow_found"] is False
+    assert missing["details"]["firmware_job_found"] is False
+
+    workflow = tmp_path / ".github" / "workflows" / "d1l-ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("name: d1l-ci\njobs:\n  host-checks:\n    runs-on: windows-latest\n", encoding="utf-8")
+    missing_job = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert missing_job["ok"] is False
+    assert missing_job["details"]["workflow_found"] is True
+    assert missing_job["details"]["firmware_job_found"] is False
+
+
+def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Path):
+    for image, moving in (
+        ("espressif/idf:release-v5.1", True),
+        ("espressif/idf:release-v5.5", True),
+        ("espressif/idf:latest", True),
+        ("espressif/idf:v5.5.3", False),
+    ):
+        write_supported_sdk_workflow(tmp_path, image)
+        gate = audit.supported_sdk_gate(tmp_path).to_dict()
+
+        assert gate["ok"] is False
+        assert gate["details"]["configured_images"] == [image]
+        assert gate["details"]["moving_images"] == ([image] if moving else [])
+        assert gate["details"]["exact_release_pin"] is False
+
+
+def test_supported_sdk_gate_accepts_only_pinned_v5_5_4(tmp_path: Path):
+    write_supported_sdk_workflow(tmp_path)
+
+    gate = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert gate["ok"] is True
+    assert gate["details"]["expected_version"] == "v5.5.4"
+    assert gate["details"]["configured_images"] == ["espressif/idf:v5.5.4"]
+    assert gate["details"]["moving_images"] == []
+    assert gate["details"]["exact_release_pin"] is True
+    assert gate["details"]["component_lock_found"] is True
+    assert gate["details"]["expected_lock_version"] == "5.5.4"
+    assert gate["details"]["locked_idf_version"] == "5.5.4"
+    assert gate["details"]["exact_component_lock"] is True
+
+
+def test_supported_sdk_gate_rejects_missing_malformed_or_stale_component_lock(tmp_path: Path):
+    write_supported_sdk_workflow(tmp_path)
+    component_lock = tmp_path / "dependencies.lock"
+
+    component_lock.unlink()
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert missing["ok"] is False
+    assert missing["details"]["component_lock_found"] is False
+    assert missing["details"]["locked_idf_version"] is None
+
+    component_lock.write_text(
+        "dependencies:\n  idf:\n    source:\n      type: idf\n    version:\n",
+        encoding="utf-8",
+    )
+    malformed = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert malformed["ok"] is False
+    assert malformed["details"]["component_lock_found"] is True
+    assert malformed["details"]["locked_idf_version"] is None
+
+    write_supported_sdk_lock(tmp_path, "5.1.7")
+    stale = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert stale["ok"] is False
+    assert stale["details"]["locked_idf_version"] == "5.1.7"
+    assert stale["details"]["exact_component_lock"] is False
 
 
 def test_release_gate_checksum_allows_esp32_only_actions_package(tmp_path: Path):

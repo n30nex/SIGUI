@@ -15,7 +15,7 @@ if ($RequireFirmware) {
 $manifest = [ordered]@{
     schema = 1
     project = "MeshCore DeskOS D1L"
-    framework = "ESP-IDF v5.1.x"
+    framework = "ESP-IDF v5.5.4"
     hardware_required = $false
     firmware_build = "disabled_local_github_actions_only"
     artifacts = @()

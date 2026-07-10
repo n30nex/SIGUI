@@ -1,5 +1,7 @@
-# MeshCore DeskOS D1L Phase 1 defaults.
-# Seeed's SDK requires ESP-IDF v5.1.x for SenseCAP Indicator examples.
+# MeshCore DeskOS D1L defaults.
+# The pinned Seeed v1.1.0 BSP/examples target ESP-IDF v5.1.x. Issue #63 selects
+# ESP-IDF v5.5.4 for migration; this configuration remains subject to the
+# Actions build and exact COM12 qualification documented in the release plan.
 CONFIG_IDF_TARGET="esp32s3"
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
 
