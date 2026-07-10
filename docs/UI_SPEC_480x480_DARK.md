@@ -20,6 +20,7 @@ Phase 3 starts the production shell while preserving the diagnostic serial comma
 - Contact Detail uses the full-height nested-page pattern and exposes only two primary destinations: `Message` and `Contact options`. Contact Options owns Route, Export, Rename, favorite/mute state, and the destructive contact-removal path. Route, Export, and Rename return to Contact Options rather than flattening those functions back into Contact Detail.
 - Removing a contact requires a dedicated confirmation page. `Cancel` and every `Back` path are non-destructive and restore Contact Options; only the explicit confirmation callback may delete the retained contact.
 - Packet log screen with bounded recent packet rows, route rows, first route detail sheet, and first packet detail sheet.
+- Mesh Roles follows `Packets -> Mesh Roles -> Rooms or Repeaters`: the full-height root contains only the two role categories, each child owns one bounded 448x320 vertical list, and read-only observation rows have no click, RF, or destructive callback. Child Back returns to Mesh Roles; root Back returns to Packets.
 - More uses disclosure categories and nested rows: Tools, Connections, Storage & maps, Device, Support, and Advanced. Leaf actions include Packets, Diagnostics, Wi-Fi, Bluetooth, Radio, SD Card, Offline Maps, Display, Identity, and About.
 - Radio Settings sheet with staged frequency, bandwidth, SF, CR, TX power, RX boost, US/CAN defaults, explicit Save, and live RF apply status.
 - Modal advert sheet for zero-hop/flood actions.
@@ -41,3 +42,4 @@ The shell consumes `d1l_app_snapshot_t` from `app/app_model` and does not call M
 - Modal and nested pages hide the dock, provide one clear Back or Close action, and cannot leave background navigation looking active.
 - User-facing summaries use plain language. Protocol identifiers, fingerprints, raw packet bytes, and hardware diagnostics live under Technical details or Advanced.
 - Contact actions follow `Network -> Contact Detail -> Contact options -> sub-function`. Destructive removal is never colocated with Message and never occurs from a Back, Cancel, keyboard-cancel, or child-page close callback.
+- Mesh observation browsing follows `Packets -> Mesh Roles -> role list`. Do not flatten Rooms and Repeaters into one mixed scrolling sheet or attach actions to observation rows.

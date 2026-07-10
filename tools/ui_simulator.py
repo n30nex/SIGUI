@@ -45,6 +45,7 @@ CONTACT_HIERARCHY_VIEWS = frozenset(
         "route_trace_sheet",
     }
 )
+MESH_ROLE_VIEWS = frozenset({"mesh_roles_sheet", "mesh_rooms_page", "mesh_repeaters_page"})
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -141,7 +142,7 @@ def sample_snapshot() -> Snapshot:
 
     room = Node("YKF Room", "937D290883817CBD", "Room Server", "-44 dBm / 29 dB", "last 12s, signed advert")
     bot = Node("YKF Corebot", "0BF0A701D5AE2DB6", "Companion", "-41 dBm / 30 dB", "direct route, public key")
-    repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "Repeater", "-52 dBm / 22 dB", "1 hop via Public")
+    repeater = Node("Krabs Lagoon", "60B6ABA17831F883", "Repeater", "-52 dBm / 22 dB", "1 hop via flood path")
     return Snapshot(
         node_name="D1L Desk",
         fingerprint="60B6ABA17831F883",
@@ -2375,18 +2376,116 @@ def render_packet_search_sheet(s: Surface, snap: Snapshot):
 
 
 def render_mesh_roles_sheet(s: Surface, snap: Snapshot):
-    draw_sheet_frame(s, "Mesh Roles", "Room servers and repeater candidates")
-    s.text("Room Servers", (44, 154, 220, 176), 14, MUTED, True)
-    y = 184
-    for node in snap.rooms:
-        draw_row(s, (44, y, 436, y + 36), f"{node.name}  {node.role}", f"{node.fingerprint}  {node.signal}")
-        y += 44
-    s.text("Repeater Candidates", (44, 234, 250, 256), 14, MUTED, True)
-    y = 264
-    for node in snap.repeaters:
-        draw_row(s, (44, y, 436, y + 36), f"{node.name}  {node.role}", f"{node.meta}  {node.signal}")
-        y += 44
-    draw_button(s, (44, 340, 200, 374), "Close", MUTED, action="close_mesh_roles", destination="packets")
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action="close_mesh_roles", destination="packets")
+    s.text("Mesh Roles", (112, 62, 464, 90), 22, TEXT, True)
+    s.text("Browse one role group at a time", (112, 90, 464, 112), 12, MUTED)
+    draw_more_leaf(
+        s,
+        (16, 132, 464, 216),
+        "Rooms",
+        f"{len(snap.rooms)} found",
+        GREEN,
+        action="open_mesh_rooms",
+        destination="mesh_rooms_page",
+    )
+    draw_more_leaf(
+        s,
+        (16, 232, 464, 316),
+        "Repeaters",
+        f"{len(snap.repeaters)} found",
+        AMBER,
+        action="open_mesh_repeaters",
+        destination="mesh_repeaters_page",
+    )
+    s.round_rect((16, 344, 464, 420), (13, 22, 31), BORDER, 8)
+    s.text("Large meshes stay bounded", (28, 354, 452, 378), 14, BLUE, True)
+    s.text("Read-only lists. Each role scrolls separately.", (28, 384, 452, 408), 12, MUTED)
+    s.metrics.update(
+        {
+            "mesh_roles_category_count": 2,
+            "mesh_roles_rooms_source_count": len(snap.rooms),
+            "mesh_roles_repeaters_source_count": len(snap.repeaters),
+        }
+    )
+
+
+def render_mesh_role_list_page(s: Surface, snap: Snapshot, *, kind: str):
+    is_rooms = kind == "rooms"
+    nodes = snap.rooms if is_rooms else snap.repeaters
+    preview_limit = 8
+    loaded_nodes = nodes[:preview_limit]
+    title = "Rooms" if is_rooms else "Repeaters"
+    list_title = "Room servers" if is_rooms else "Repeater candidates"
+    count_unit = "room server" if is_rooms else "repeater candidate"
+    accent = GREEN if is_rooms else AMBER
+    back_action = "close_mesh_rooms" if is_rooms else "close_mesh_repeaters"
+    visible_limit = 4
+    visible_nodes = loaded_nodes[:visible_limit]
+    list_panel = (16, 120, 464, 472)
+
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    draw_button(s, (16, 64, 96, 108), "Back", MUTED, action=back_action, destination="mesh_roles_sheet")
+    s.text(title, (112, 62, 464, 90), 22, TEXT, True)
+    s.text(
+        f"{len(nodes)} {count_unit}{'' if len(nodes) == 1 else 's'}",
+        (112, 90, 464, 112),
+        12,
+        MUTED,
+    )
+    s.round_rect(list_panel, (13, 22, 31), BORDER, 8)
+    s.text(list_title, (28, 132, 280, 154), 13, accent, True)
+    s.text(
+        f"showing {len(visible_nodes)}/{len(loaded_nodes)}",
+        (286, 132, 452, 154),
+        11,
+        MUTED,
+        False,
+        "right",
+    )
+
+    row_boxes: list[list[int]] = []
+    y = 164
+    for node in visible_nodes:
+        row_box = (28, y, 452, y + 56)
+        row_boxes.append(list(row_box))
+        s.round_rect(row_box, SURFACE_2, BORDER, 8)
+        s.text(node.name, (40, y + 7, 440, y + 29), 13, TEXT, True)
+        detail = f"{node.fingerprint}  {node.signal}" if is_rooms else f"{node.signal}  {node.meta}"
+        s.text(detail, (40, y + 30, 440, y + 50), 10, MUTED)
+        y += 64
+
+    scrollable = len(loaded_nodes) > visible_limit
+    if len(nodes) > len(loaded_nodes):
+        footer = f"Newest {len(loaded_nodes)} of {len(nodes)} loaded - scroll"
+    elif scrollable:
+        footer = f"Scroll for {len(loaded_nodes) - len(visible_nodes)} more"
+    else:
+        footer = "All shown"
+    s.text(footer, (28, 432, 452, 458), 12, accent if scrollable else MUTED, True, "center")
+    s.metrics.update(
+        {
+            "mesh_roles_list_kind": kind,
+            f"mesh_{kind}_source_count": len(nodes),
+            f"mesh_{kind}_loaded_count": len(loaded_nodes),
+            f"mesh_{kind}_rendered_count": len(visible_nodes),
+            f"mesh_{kind}_scrollable": scrollable,
+            "mesh_roles_preview_limit": preview_limit,
+            "mesh_roles_visible_limit": visible_limit,
+            "mesh_roles_list_panel": list(list_panel),
+            "mesh_roles_row_boxes": row_boxes,
+        }
+    )
+
+
+def render_mesh_rooms_page(s: Surface, snap: Snapshot):
+    render_mesh_role_list_page(s, snap, kind="rooms")
+
+
+def render_mesh_repeaters_page(s: Surface, snap: Snapshot):
+    render_mesh_role_list_page(s, snap, kind="repeaters")
 
 
 def render_lock_overlay(s: Surface, snap: Snapshot):
@@ -2458,6 +2557,8 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "packet_detail_sheet": render_packet_detail_sheet,
     "packet_search_sheet": render_packet_search_sheet,
     "mesh_roles_sheet": render_mesh_roles_sheet,
+    "mesh_rooms_page": render_mesh_rooms_page,
+    "mesh_repeaters_page": render_mesh_repeaters_page,
     "lock_overlay": render_lock_overlay,
     "onboarding_sheet": render_onboarding_sheet,
 }
@@ -2686,7 +2787,9 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Ping"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
-    "mesh_roles_sheet": ("Mesh Roles", "Room Servers", "Repeater Candidates", "Close"),
+    "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"),
+    "mesh_rooms_page": ("Rooms", "Back", "Room servers"),
+    "mesh_repeaters_page": ("Repeaters", "Back", "Repeater candidates"),
     "lock_overlay": ("MeshCore DeskOS", "Mesh", "Unread", "Tap to unlock"),
     "onboarding_sheet": (
         "MeshCore DeskOS D1L",
@@ -2952,6 +3055,18 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "mesh_roles_browser",
         "steps": (
             {"view": "packets", "action": "open_mesh_roles", "destination": "mesh_roles_sheet"},
+            {"view": "mesh_roles_sheet", "action": "open_mesh_rooms", "destination": "mesh_rooms_page"},
+            {"view": "mesh_rooms_page", "action": "close_mesh_rooms", "destination": "mesh_roles_sheet"},
+            {
+                "view": "mesh_roles_sheet",
+                "action": "open_mesh_repeaters",
+                "destination": "mesh_repeaters_page",
+            },
+            {
+                "view": "mesh_repeaters_page",
+                "action": "close_mesh_repeaters",
+                "destination": "mesh_roles_sheet",
+            },
             {"view": "mesh_roles_sheet", "action": "close_mesh_roles", "destination": "packets"},
         ),
     },

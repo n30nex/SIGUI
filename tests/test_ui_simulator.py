@@ -35,7 +35,7 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
 
     views = {view["name"]: view for view in report["views"]}
     assert set(views) == set(ui_simulator.RENDERERS)
-    assert len(views) == 41
+    assert len(views) == 43
     for name, view in views.items():
         image_path = Path(view["screenshot"])
         assert image_path.exists(), name
@@ -49,6 +49,8 @@ def test_ui_simulator_generates_checked_480x480_screens(tmp_path):
         assert view["dock_target_count"] == (5 if name in ui_simulator.DOCKED_VIEWS else 0)
         assert view["dock_invariant_ok"] is True
         if name in ui_simulator.CONTACT_HIERARCHY_VIEWS:
+            assert view["truncated_labels"] == [], name
+        if name in ui_simulator.MESH_ROLE_VIEWS:
             assert view["truncated_labels"] == [], name
 
 
@@ -104,6 +106,30 @@ def test_ui_simulator_large_mesh_stress_is_bounded(tmp_path):
     assert "Load Older" in set(views["dm_thread_sheet"]["labels"])
     trace = views["route_trace_sheet"]["metrics"]
     assert trace["route_trace_rendered_count"] <= 2
+
+    mesh_root = views["mesh_roles_sheet"]["metrics"]
+    assert mesh_root["mesh_roles_rooms_source_count"] == 6
+    assert mesh_root["mesh_roles_repeaters_source_count"] == 12
+    mesh_rooms = views["mesh_rooms_page"]["metrics"]
+    assert mesh_rooms["mesh_rooms_source_count"] == 6
+    assert mesh_rooms["mesh_rooms_loaded_count"] == 6
+    assert mesh_rooms["mesh_rooms_rendered_count"] == 4
+    assert mesh_rooms["mesh_rooms_scrollable"] is True
+    mesh_repeaters = views["mesh_repeaters_page"]["metrics"]
+    assert mesh_repeaters["mesh_repeaters_source_count"] == 12
+    assert mesh_repeaters["mesh_repeaters_loaded_count"] == 8
+    assert mesh_repeaters["mesh_repeaters_rendered_count"] == 4
+    assert mesh_repeaters["mesh_repeaters_scrollable"] is True
+    for page_name in ("mesh_rooms_page", "mesh_repeaters_page"):
+        page = views[page_name]
+        assert page["truncated_labels"] == []
+        px0, py0, px1, py1 = page["metrics"]["mesh_roles_list_panel"]
+        row_boxes = page["metrics"]["mesh_roles_row_boxes"]
+        assert len(row_boxes) == 4
+        for x0, y0, x1, y1 in row_boxes:
+            assert px0 <= x0 < x1 <= px1
+            assert py0 <= y0 < y1 <= py1
+        assert all(left[3] <= right[1] for left, right in zip(row_boxes, row_boxes[1:]))
 
     public_history = views["public_history_sheet"]["metrics"]
     assert public_history["public_history_source_count"] == 48
@@ -253,7 +279,9 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Backends",
         "No device format; onboard NVS remains fallback.",
     } <= labels_by_view["storage_setup_sheet"]
-    assert {"Room Servers", "Repeater Candidates", "Close"} <= labels_by_view["mesh_roles_sheet"]
+    assert {"Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"} <= labels_by_view["mesh_roles_sheet"]
+    assert {"Rooms", "Back", "Room servers", "All shown"} <= labels_by_view["mesh_rooms_page"]
+    assert {"Repeaters", "Back", "Repeater candidates", "All shown"} <= labels_by_view["mesh_repeaters_page"]
     assert {"Advert", "Zero-hop advert", "Zero Hop", "Flood advert", "Flood", "Close"} <= labels_by_view["advert_sheet"]
     assert {"Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"} <= labels_by_view["packet_search_sheet"]
     assert {"Public History", "Public scrollback", "Search", "Clear", "Close"} <= labels_by_view["public_history_sheet"]
@@ -555,6 +583,39 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["diagnostics_sheet"]["close_diagnostics"]["destination"] == "settings"
     assert actions_by_view["packets"]["pause_packet_feed"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
     assert actions_by_view["packet_detail_sheet"]["toggle_packet_detail_advanced"]["height"] >= ui_simulator.MIN_TOUCH_TARGET
+    assert set(actions_by_view["mesh_roles_sheet"]) == {
+        "close_mesh_roles",
+        "open_mesh_rooms",
+        "open_mesh_repeaters",
+    }
+    assert actions_by_view["mesh_roles_sheet"]["close_mesh_roles"]["destination"] == "packets"
+    assert actions_by_view["mesh_roles_sheet"]["open_mesh_rooms"]["destination"] == "mesh_rooms_page"
+    assert actions_by_view["mesh_roles_sheet"]["open_mesh_repeaters"]["destination"] == "mesh_repeaters_page"
+    assert set(actions_by_view["mesh_rooms_page"]) == {"close_mesh_rooms"}
+    assert actions_by_view["mesh_rooms_page"]["close_mesh_rooms"]["destination"] == "mesh_roles_sheet"
+    assert set(actions_by_view["mesh_repeaters_page"]) == {"close_mesh_repeaters"}
+    assert actions_by_view["mesh_repeaters_page"]["close_mesh_repeaters"]["destination"] == "mesh_roles_sheet"
+    for page_name in ui_simulator.MESH_ROLE_VIEWS:
+        for target in views[page_name]["touch_targets"]:
+            x0, y0, x1, y1 = target["visual_box"]
+            assert x1 - x0 >= ui_simulator.MIN_TOUCH_TARGET, (page_name, target["label"])
+            assert y1 - y0 >= ui_simulator.MIN_TOUCH_TARGET, (page_name, target["label"])
+    assert views["mesh_rooms_page"]["metrics"]["mesh_rooms_source_count"] == 1
+    assert views["mesh_rooms_page"]["metrics"]["mesh_rooms_loaded_count"] == 1
+    assert views["mesh_rooms_page"]["metrics"]["mesh_rooms_rendered_count"] == 1
+    assert views["mesh_rooms_page"]["metrics"]["mesh_rooms_scrollable"] is False
+    assert views["mesh_repeaters_page"]["metrics"]["mesh_repeaters_source_count"] == 1
+    assert views["mesh_repeaters_page"]["metrics"]["mesh_repeaters_loaded_count"] == 1
+    assert views["mesh_repeaters_page"]["metrics"]["mesh_repeaters_rendered_count"] == 1
+    assert views["mesh_repeaters_page"]["metrics"]["mesh_repeaters_scrollable"] is False
+    for page_name in ("mesh_rooms_page", "mesh_repeaters_page"):
+        panel_top = views[page_name]["metrics"]["mesh_roles_list_panel"][1]
+        back_bottom = next(
+            target["visual_box"][3]
+            for target in views[page_name]["touch_targets"]
+            if target["label"] == "Back"
+        )
+        assert back_bottom < panel_top
     assert actions_by_view["advert_sheet"]["send_advert_zero"]["rf_tx"] is True
     assert actions_by_view["advert_sheet"]["send_advert_flood"]["rf_tx"] is True
     assert actions_by_view["storage_setup_sheet"]["close_storage_setup"]["formats_sd"] is False

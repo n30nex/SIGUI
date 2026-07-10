@@ -152,7 +152,10 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
-static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 1500U;
+/* A full retained Packet view can legitimately take longer than 1.5 s to rebuild
+ * before a nested page opens. Keep the serial proof bounded without turning a
+ * populated device into a false timeout. */
+static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
 static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
 static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
@@ -162,14 +165,24 @@ static size_t s_packet_row_limit = 100U;
 static size_t s_packet_skip_newest;
 static size_t s_packet_total_matches;
 static bool s_packet_sd_history_page;
+typedef struct {
+    uint32_t next_id;
+    uint32_t pending_id;
+    uint32_t inflight_id;
+    uint32_t completed_id;
+    uint32_t abandoned_id;
+    uint32_t signaled_id;
+    bool admission_reserved;
+} d1l_ui_probe_gate_t;
+
 static SemaphoreHandle_t s_scroll_probe_done_sem;
 static portMUX_TYPE s_scroll_probe_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_scroll_probe_pending;
+static d1l_ui_probe_gate_t s_scroll_probe_gate;
 static char s_scroll_probe_surface[24];
 static d1l_ui_scroll_probe_result_t s_scroll_probe_result;
 static SemaphoreHandle_t s_compose_probe_done_sem;
 static portMUX_TYPE s_compose_probe_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_compose_probe_pending;
+static d1l_ui_probe_gate_t s_compose_probe_gate;
 static char s_compose_probe_target[16];
 static d1l_ui_compose_probe_result_t s_compose_probe_result;
 
@@ -209,6 +222,7 @@ static void open_message_detail_event_cb(lv_event_t *event);
 static void open_packet_detail_event_cb(lv_event_t *event);
 static void open_packet_search_event_cb(lv_event_t *event);
 static void open_mesh_roles_event_cb(lv_event_t *event);
+static void render_mesh_roles_sheet(void);
 static void packet_pause_event_cb(lv_event_t *event);
 static void packet_load_older_event_cb(lv_event_t *event);
 static void packet_load_newer_event_cb(lv_event_t *event);
@@ -274,6 +288,12 @@ typedef enum {
     D1L_RADIO_EDIT_RX_BOOST,
 } d1l_radio_edit_action_t;
 
+typedef enum {
+    D1L_MESH_ROLES_PAGE_ROOT = 0,
+    D1L_MESH_ROLES_PAGE_ROOM_SERVERS,
+    D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES,
+} d1l_mesh_roles_page_t;
+
 static bool s_content_refresh_pending = false;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
@@ -281,6 +301,7 @@ static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
+static d1l_mesh_roles_page_t s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
 
 static d1l_ui_content_generation_t content_generation_from_snapshot(
     const d1l_app_snapshot_t *snapshot)
@@ -394,12 +415,117 @@ static bool content_refresh_pending(void)
     return pending;
 }
 
+/* Probe-gate helpers are called only while the matching probe lock is held. */
+static bool probe_gate_busy(const d1l_ui_probe_gate_t *gate)
+{
+    return gate && (gate->admission_reserved || gate->pending_id != 0U ||
+                    gate->inflight_id != 0U);
+}
+
+static bool probe_gate_reserve_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || probe_gate_busy(gate)) {
+        return false;
+    }
+    gate->admission_reserved = true;
+    return true;
+}
+
+static uint32_t probe_gate_commit_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || !gate->admission_reserved || gate->pending_id != 0U ||
+        gate->inflight_id != 0U) {
+        return 0U;
+    }
+    gate->next_id++;
+    if (gate->next_id == 0U) {
+        gate->next_id++;
+    }
+    gate->pending_id = gate->next_id;
+    gate->completed_id = 0U;
+    gate->abandoned_id = 0U;
+    gate->signaled_id = 0U;
+    gate->admission_reserved = false;
+    return gate->pending_id;
+}
+
+static void probe_gate_abort_admission(d1l_ui_probe_gate_t *gate)
+{
+    if (gate) {
+        gate->admission_reserved = false;
+    }
+}
+
+static uint32_t probe_gate_begin(d1l_ui_probe_gate_t *gate)
+{
+    if (!gate || gate->pending_id == 0U || gate->inflight_id != 0U) {
+        return 0U;
+    }
+    const uint32_t request_id = gate->pending_id;
+    gate->pending_id = 0U;
+    gate->inflight_id = request_id;
+    return request_id;
+}
+
+static void probe_gate_timeout(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || request_id == 0U) {
+        return;
+    }
+    if (gate->pending_id == request_id) {
+        gate->pending_id = 0U;
+    } else if (gate->inflight_id == request_id) {
+        if (gate->signaled_id == request_id) {
+            gate->inflight_id = 0U;
+            gate->completed_id = 0U;
+            gate->abandoned_id = 0U;
+            gate->signaled_id = 0U;
+        } else {
+            gate->abandoned_id = request_id;
+        }
+    }
+}
+
+static bool probe_gate_publish(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || request_id == 0U || gate->inflight_id != request_id) {
+        return false;
+    }
+    gate->completed_id = request_id;
+    return true;
+}
+
+static void probe_gate_finish_signal(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (gate && gate->inflight_id == request_id) {
+        gate->signaled_id = request_id;
+        if (gate->abandoned_id == request_id) {
+            gate->inflight_id = 0U;
+            gate->completed_id = 0U;
+            gate->abandoned_id = 0U;
+            gate->signaled_id = 0U;
+        }
+    }
+}
+
+static bool probe_gate_acknowledge(d1l_ui_probe_gate_t *gate, uint32_t request_id)
+{
+    if (!gate || gate->inflight_id != request_id || gate->completed_id != request_id) {
+        return false;
+    }
+    gate->inflight_id = 0U;
+    gate->completed_id = 0U;
+    gate->abandoned_id = 0U;
+    gate->signaled_id = 0U;
+    return true;
+}
+
 static bool scroll_probe_pending(void)
 {
     bool pending;
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    pending = s_scroll_probe_pending;
+    pending = probe_gate_busy(&s_scroll_probe_gate);
     portEXIT_CRITICAL(&s_scroll_probe_lock);
     return pending;
 }
@@ -409,7 +535,7 @@ static bool compose_probe_pending(void)
     bool pending;
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    pending = s_compose_probe_pending;
+    pending = probe_gate_busy(&s_compose_probe_gate);
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return pending;
 }
@@ -1211,6 +1337,7 @@ static void hide_packet_search_sheet(void)
 static void hide_mesh_roles_sheet(void)
 {
     d1l_ui_modal_hide(s_mesh_roles_sheet);
+    s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
     restore_dock_for_active_tab();
 }
 
@@ -3440,46 +3567,256 @@ static void close_mesh_roles_event_cb(lv_event_t *event)
     hide_mesh_roles_sheet();
 }
 
+static void mesh_roles_subpage_back_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
+    render_mesh_roles_sheet();
+    show_modal(s_mesh_roles_sheet);
+}
+
+static void open_mesh_room_servers_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOM_SERVERS;
+    render_mesh_roles_sheet();
+    show_modal(s_mesh_roles_sheet);
+}
+
+static void open_mesh_repeater_candidates_event_cb(lv_event_t *event)
+{
+    (void)event;
+    s_mesh_roles_page = D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES;
+    render_mesh_roles_sheet();
+    show_modal(s_mesh_roles_sheet);
+}
+
+static void render_mesh_roles_header(const char *title, lv_event_cb_t back_cb)
+{
+    create_button(s_mesh_roles_sheet, "Back", 12, 8, 76, 44, back_cb, NULL);
+    lv_obj_t *heading = create_label(s_mesh_roles_sheet, title, 0xF4F7FB);
+    lv_obj_set_style_text_font(heading, &lv_font_montserrat_24, 0);
+    lv_label_set_long_mode(heading, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(heading, 360);
+    lv_obj_set_pos(heading, 104, 13);
+}
+
 static void render_room_server_role_row(lv_obj_t *parent, int y, const d1l_mesh_room_server_t *entry)
 {
     char snr[16];
-    lv_obj_t *row = create_panel(parent, 0, y, 424, 44);
+    lv_obj_t *row = create_panel(parent, 0, y, 424, 56);
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *name = create_label(row, entry->name[0] ? entry->name : entry->fingerprint, 0xA7F3D0);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(name, 180);
+    lv_obj_set_width(name, 406);
     lv_obj_align(name, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *role = create_label(row, entry->type[0] ? entry->type : "room", 0x8EA0AE);
-    lv_obj_align(role, LV_ALIGN_TOP_RIGHT, 0, 0);
     format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
     lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
-    label_set_fmt(meta, "%.8s  rssi %d  snr %s  hops %u  heard %lu",
-                  entry->fingerprint, entry->rssi_dbm, snr, entry->path_hops,
-                  (unsigned long)entry->heard_count);
+    label_set_fmt(meta, "%.12s  %d dBm / %s dB",
+                  entry->fingerprint, entry->rssi_dbm, snr);
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
+    lv_obj_set_width(meta, 406);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static const char *friendly_repeater_route(const d1l_mesh_repeater_candidate_t *entry)
+{
+    const char *route = entry && entry->route[0] ? entry->route : "";
+    if (strcmp(route, "heard_path") == 0) {
+        return "heard path";
+    }
+    if (strcmp(route, "flood") == 0) {
+        return "flood path";
+    }
+    if (strcmp(route, "direct") == 0) {
+        return "direct path";
+    }
+    if (!route[0] || strcmp(route, "unknown") == 0 || strchr(route, '_')) {
+        return "route evidence";
+    }
+    return route;
 }
 
 static void render_repeater_role_row(lv_obj_t *parent, int y,
                                      const d1l_mesh_repeater_candidate_t *entry)
 {
-    lv_obj_t *row = create_panel(parent, 0, y, 424, 44);
+    char snr[16];
+    lv_obj_t *row = create_panel(parent, 0, y, 424, 56);
     lv_obj_set_style_pad_all(row, 8, 0);
     lv_obj_t *label = create_label(row, entry->label[0] ? entry->label : entry->target, 0xFBBF24);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(label, 180);
+    lv_obj_set_width(label, 406);
     lv_obj_align(label, LV_ALIGN_TOP_LEFT, 0, 0);
-    lv_obj_t *source = create_label(row, entry->source[0] ? entry->source : "path", 0x8EA0AE);
-    lv_obj_align(source, LV_ALIGN_TOP_RIGHT, 0, 0);
+    format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
     lv_obj_t *meta = create_label(row, "", 0xE5EDF5);
-    label_set_fmt(meta, "%s  %s  hops %u  conf %u  rssi %d",
-                  entry->kind[0] ? entry->kind : "mesh",
-                  entry->route[0] ? entry->route : "unknown",
-                  entry->path_hops, entry->confidence, entry->rssi_dbm);
+    label_set_fmt(meta, "%d dBm / %s dB  %u hop%s via %.16s",
+                  entry->rssi_dbm, snr, entry->path_hops,
+                  entry->path_hops == 1U ? "" : "s",
+                  friendly_repeater_route(entry));
     lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
+    lv_obj_set_width(meta, 406);
     lv_obj_align(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static lv_obj_t *create_mesh_roles_list(const char *title, uint32_t accent,
+                                        size_t loaded_count, uint32_t total_count)
+{
+    const size_t visible_count = loaded_count < 4U ? loaded_count : 4U;
+    if (total_count < loaded_count) {
+        total_count = (uint32_t)loaded_count;
+    }
+
+    lv_obj_t *panel = create_panel(s_mesh_roles_sheet, 16, 64, 448, 352);
+    if (!panel) {
+        return NULL;
+    }
+    lv_obj_set_style_pad_all(panel, 0, 0);
+
+    lv_obj_t *section = create_label(panel, title, accent);
+    lv_obj_set_pos(section, 12, 10);
+    lv_obj_t *showing = create_label(panel, "", 0x8EA0AE);
+    label_set_fmt(showing, "showing %u/%u",
+                  (unsigned)visible_count, (unsigned)loaded_count);
+    lv_label_set_long_mode(showing, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(showing, 160);
+    lv_obj_set_style_text_align(showing, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(showing, 276, 10);
+
+    lv_obj_t *list = create_object(panel, "mesh roles bounded list");
+    if (!list) {
+        return NULL;
+    }
+    lv_obj_set_size(list, 424, 256);
+    lv_obj_set_pos(list, 12, 44);
+    lv_obj_set_style_radius(list, 0, 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 0, 0);
+    lv_obj_add_flag(list, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+
+    lv_obj_t *footer = create_label(panel, "", 0x8EA0AE);
+    if (total_count > loaded_count) {
+        label_set_fmt(footer, "Newest %u of %lu loaded - scroll",
+                      (unsigned)loaded_count, (unsigned long)total_count);
+    } else if (loaded_count > visible_count) {
+        label_set_fmt(footer, "Scroll for %u more",
+                      (unsigned)(loaded_count - visible_count));
+        lv_obj_set_style_text_color(footer, lv_color_hex(accent), 0);
+    } else {
+        lv_label_set_text(footer, "All shown");
+    }
+    lv_label_set_long_mode(footer, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(footer, 424);
+    lv_obj_set_style_text_align(footer, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_pos(footer, 12, 312);
+    return list;
+}
+
+static void render_mesh_roles_root(void)
+{
+    char room_count[32];
+    char repeater_count[32];
+    uint32_t room_total = s_snapshot.signal_summary.room_server_count;
+    uint32_t repeater_total = s_snapshot.signal_summary.repeater_candidate_count;
+    if (room_total < s_snapshot.recent_room_count) {
+        room_total = (uint32_t)s_snapshot.recent_room_count;
+    }
+    if (repeater_total < s_snapshot.recent_repeater_count) {
+        repeater_total = (uint32_t)s_snapshot.recent_repeater_count;
+    }
+    render_mesh_roles_header("Mesh Roles", close_mesh_roles_event_cb);
+
+    lv_obj_t *intro = create_label(s_mesh_roles_sheet,
+                                   "Browse one role group at a time.", 0x8EA0AE);
+    lv_label_set_long_mode(intro, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(intro, 360);
+    lv_obj_set_pos(intro, 104, 36);
+
+    snprintf(room_count, sizeof(room_count), "%lu found  >",
+             (unsigned long)room_total);
+    lv_obj_t *rooms = create_button(s_mesh_roles_sheet, "Rooms",
+                                    16, 76, 448, 84,
+                                    open_mesh_room_servers_event_cb, NULL);
+    style_contact_option_button(rooms, 0xA7F3D0, room_count);
+
+    snprintf(repeater_count, sizeof(repeater_count), "%lu found  >",
+             (unsigned long)repeater_total);
+    lv_obj_t *repeaters = create_button(s_mesh_roles_sheet, "Repeaters",
+                                        16, 176, 448, 84,
+                                        open_mesh_repeater_candidates_event_cb, NULL);
+    style_contact_option_button(repeaters, 0xFBBF24, repeater_count);
+
+    lv_obj_t *note = create_panel(s_mesh_roles_sheet, 16, 288, 448, 76);
+    lv_obj_set_style_pad_all(note, 12, 0);
+    lv_obj_t *note_title = create_label(note, "Large meshes stay bounded", 0x93C5FD);
+    lv_obj_align(note_title, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *note_text = create_label(
+        note, "Read-only lists. Each role scrolls separately.", 0x8EA0AE);
+    lv_label_set_long_mode(note_text, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(note_text, 420);
+    lv_obj_align(note_text, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+}
+
+static void render_mesh_roles_room_servers(void)
+{
+    uint32_t total = s_snapshot.signal_summary.room_server_count;
+    if (total < s_snapshot.recent_room_count) {
+        total = (uint32_t)s_snapshot.recent_room_count;
+    }
+    render_mesh_roles_header("Rooms", mesh_roles_subpage_back_event_cb);
+    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
+    label_set_fmt(meta, "%lu room server%s",
+                  (unsigned long)total, total == 1U ? "" : "s");
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 360);
+    lv_obj_set_pos(meta, 104, 36);
+
+    lv_obj_t *list = create_mesh_roles_list("Room servers", 0xA7F3D0,
+                                            s_snapshot.recent_room_count, total);
+    if (!list) {
+        return;
+    }
+    int y = 0;
+    for (size_t i = 0; i < s_snapshot.recent_room_count; ++i) {
+        render_room_server_role_row(list, y, &s_snapshot.recent_rooms[i]);
+        y += 64;
+    }
+    if (s_snapshot.recent_room_count == 0) {
+        lv_obj_t *empty = create_label(list, "No room servers heard yet.", 0x8EA0AE);
+        lv_obj_set_pos(empty, 8, 12);
+    }
+}
+
+static void render_mesh_roles_repeater_candidates(void)
+{
+    uint32_t total = s_snapshot.signal_summary.repeater_candidate_count;
+    if (total < s_snapshot.recent_repeater_count) {
+        total = (uint32_t)s_snapshot.recent_repeater_count;
+    }
+    render_mesh_roles_header("Repeaters", mesh_roles_subpage_back_event_cb);
+    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
+    label_set_fmt(meta, "%lu repeater candidate%s",
+                  (unsigned long)total, total == 1U ? "" : "s");
+    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(meta, 360);
+    lv_obj_set_pos(meta, 104, 36);
+
+    lv_obj_t *list = create_mesh_roles_list("Repeater candidates", 0xFBBF24,
+                                            s_snapshot.recent_repeater_count, total);
+    if (!list) {
+        return;
+    }
+    int y = 0;
+    for (size_t i = 0; i < s_snapshot.recent_repeater_count; ++i) {
+        render_repeater_role_row(list, y, &s_snapshot.recent_repeaters[i]);
+        y += 64;
+    }
+    if (s_snapshot.recent_repeater_count == 0) {
+        lv_obj_t *empty = create_label(list, "No path-hop candidates yet.", 0x8EA0AE);
+        lv_obj_set_pos(empty, 8, 12);
+    }
 }
 
 static void render_mesh_roles_sheet(void)
@@ -3491,47 +3828,18 @@ static void render_mesh_roles_sheet(void)
     update_chrome(&s_snapshot);
     lv_obj_clean(s_mesh_roles_sheet);
 
-    lv_obj_t *title = create_label(s_mesh_roles_sheet, "Mesh Roles", 0xF4F7FB);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-    lv_label_set_long_mode(title, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(title, 210);
-    lv_obj_set_pos(title, 8, 4);
-    create_button(s_mesh_roles_sheet, "Close", 316, 0, 76, 40, close_mesh_roles_event_cb, NULL);
-
-    lv_obj_t *meta = create_label(s_mesh_roles_sheet, "", 0x8EA0AE);
-    label_set_fmt(meta, "rooms %lu  repeaters %lu  samples %lu",
-                  (unsigned long)s_snapshot.signal_summary.room_server_count,
-                  (unsigned long)s_snapshot.signal_summary.repeater_candidate_count,
-                  (unsigned long)s_snapshot.signal_summary.sample_count);
-    lv_label_set_long_mode(meta, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(meta, 392);
-    lv_obj_set_pos(meta, 8, 44);
-
-    int y = 78;
-    lv_obj_t *rooms = create_label(s_mesh_roles_sheet, "Room Servers", 0x8EA0AE);
-    lv_obj_set_pos(rooms, 8, y);
-    y += 24;
-    for (size_t i = 0; i < s_snapshot.recent_room_count; ++i) {
-        render_room_server_role_row(s_mesh_roles_sheet, y, &s_snapshot.recent_rooms[i]);
-        y += 50;
-    }
-    if (s_snapshot.recent_room_count == 0) {
-        lv_obj_t *empty = create_label(s_mesh_roles_sheet, "No room servers heard", 0x8EA0AE);
-        lv_obj_set_pos(empty, 8, y);
-        y += 28;
-    }
-
-    y += 8;
-    lv_obj_t *repeaters = create_label(s_mesh_roles_sheet, "Repeater Candidates", 0x8EA0AE);
-    lv_obj_set_pos(repeaters, 8, y);
-    y += 24;
-    for (size_t i = 0; i < s_snapshot.recent_repeater_count; ++i) {
-        render_repeater_role_row(s_mesh_roles_sheet, y, &s_snapshot.recent_repeaters[i]);
-        y += 50;
-    }
-    if (s_snapshot.recent_repeater_count == 0) {
-        lv_obj_t *empty = create_label(s_mesh_roles_sheet, "No path-hop candidates", 0x8EA0AE);
-        lv_obj_set_pos(empty, 8, y);
+    switch (s_mesh_roles_page) {
+    case D1L_MESH_ROLES_PAGE_ROOM_SERVERS:
+        render_mesh_roles_room_servers();
+        break;
+    case D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES:
+        render_mesh_roles_repeater_candidates();
+        break;
+    case D1L_MESH_ROLES_PAGE_ROOT:
+    default:
+        s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
+        render_mesh_roles_root();
+        break;
     }
 }
 
@@ -3550,6 +3858,7 @@ static void open_mesh_roles_event_cb(lv_event_t *event)
     hide_route_trace_sheet();
     hide_packet_detail_sheet();
     hide_packet_search_sheet();
+    s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
     render_mesh_roles_sheet();
     if (s_mesh_roles_sheet) {
         show_modal(s_mesh_roles_sheet);
@@ -5830,6 +6139,7 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
 {
     char canonical[24] = {0};
     d1l_ui_tab_t tab = D1L_UI_TAB_HOME;
+    uint32_t request_id = 0U;
     if (!result || !scroll_surface_from_name(surface, canonical, sizeof(canonical), &tab)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -5837,29 +6147,49 @@ esp_err_t d1l_ui_phase1_scroll_probe(const char *surface,
         return ESP_ERR_INVALID_STATE;
     }
 
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    if (!probe_gate_reserve_admission(&s_scroll_probe_gate)) {
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
+
+    /* The idle gate is reserved before stale-token drain, so a late producer
+     * cannot publish between drain and admission. */
     while (xSemaphoreTake(s_scroll_probe_done_sem, 0) == pdTRUE) {
     }
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    if (s_scroll_probe_pending) {
+    request_id = probe_gate_commit_admission(&s_scroll_probe_gate);
+    if (request_id == 0U) {
+        probe_gate_abort_admission(&s_scroll_probe_gate);
         portEXIT_CRITICAL(&s_scroll_probe_lock);
         return ESP_ERR_INVALID_STATE;
     }
     memset(&s_scroll_probe_result, 0, sizeof(s_scroll_probe_result));
     snprintf(s_scroll_probe_surface, sizeof(s_scroll_probe_surface), "%s", canonical);
-    s_scroll_probe_pending = true;
     portEXIT_CRITICAL(&s_scroll_probe_lock);
 
     if (xSemaphoreTake(s_scroll_probe_done_sem,
                        pdMS_TO_TICKS(D1L_UI_SCROLL_PROBE_TIMEOUT_MS)) != pdTRUE) {
         portENTER_CRITICAL(&s_scroll_probe_lock);
-        s_scroll_probe_pending = false;
+        probe_gate_timeout(&s_scroll_probe_gate, request_id);
         portEXIT_CRITICAL(&s_scroll_probe_lock);
         return ESP_ERR_TIMEOUT;
     }
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
+    if (s_scroll_probe_gate.completed_id != request_id ||
+        s_scroll_probe_gate.inflight_id != request_id) {
+        probe_gate_timeout(&s_scroll_probe_gate, request_id);
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     *result = s_scroll_probe_result;
+    if (!probe_gate_acknowledge(&s_scroll_probe_gate, request_id)) {
+        portEXIT_CRITICAL(&s_scroll_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
     return ESP_OK;
 }
@@ -5868,6 +6198,7 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
                                        d1l_ui_compose_probe_result_t *result)
 {
     char canonical[16] = {0};
+    uint32_t request_id = 0U;
     if (!result || !compose_probe_target_from_name(target, canonical, sizeof(canonical))) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -5875,29 +6206,47 @@ esp_err_t d1l_ui_phase1_compose_probe(const char *target,
         return ESP_ERR_INVALID_STATE;
     }
 
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    if (!probe_gate_reserve_admission(&s_compose_probe_gate)) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    portEXIT_CRITICAL(&s_compose_probe_lock);
+
     while (xSemaphoreTake(s_compose_probe_done_sem, 0) == pdTRUE) {
     }
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    if (s_compose_probe_pending) {
+    request_id = probe_gate_commit_admission(&s_compose_probe_gate);
+    if (request_id == 0U) {
+        probe_gate_abort_admission(&s_compose_probe_gate);
         portEXIT_CRITICAL(&s_compose_probe_lock);
         return ESP_ERR_INVALID_STATE;
     }
     memset(&s_compose_probe_result, 0, sizeof(s_compose_probe_result));
     snprintf(s_compose_probe_target, sizeof(s_compose_probe_target), "%s", canonical);
-    s_compose_probe_pending = true;
     portEXIT_CRITICAL(&s_compose_probe_lock);
 
     if (xSemaphoreTake(s_compose_probe_done_sem,
                        pdMS_TO_TICKS(D1L_UI_COMPOSE_PROBE_TIMEOUT_MS)) != pdTRUE) {
         portENTER_CRITICAL(&s_compose_probe_lock);
-        s_compose_probe_pending = false;
+        probe_gate_timeout(&s_compose_probe_gate, request_id);
         portEXIT_CRITICAL(&s_compose_probe_lock);
         return ESP_ERR_TIMEOUT;
     }
 
     portENTER_CRITICAL(&s_compose_probe_lock);
+    if (s_compose_probe_gate.completed_id != request_id ||
+        s_compose_probe_gate.inflight_id != request_id) {
+        probe_gate_timeout(&s_compose_probe_gate, request_id);
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     *result = s_compose_probe_result;
+    if (!probe_gate_acknowledge(&s_compose_probe_gate, request_id)) {
+        portEXIT_CRITICAL(&s_compose_probe_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     portEXIT_CRITICAL(&s_compose_probe_lock);
     return ESP_OK;
 }
@@ -6188,6 +6537,19 @@ static lv_obj_t *scroll_probe_open_contact_surface(const char *surface)
     return NULL;
 }
 
+static lv_obj_t *scroll_probe_open_mesh_surface(const char *surface)
+{
+    open_mesh_roles_event_cb(NULL);
+    if (strcmp(surface, "mesh_rooms") == 0) {
+        open_mesh_room_servers_event_cb(NULL);
+    } else if (strcmp(surface, "mesh_repeaters") == 0) {
+        open_mesh_repeater_candidates_event_cb(NULL);
+    } else if (strcmp(surface, "mesh_roles") != 0) {
+        return NULL;
+    }
+    return s_mesh_roles_sheet;
+}
+
 static void measure_scroll_probe_target(lv_obj_t *target,
                                         d1l_ui_scroll_probe_result_t *result)
 {
@@ -6250,6 +6612,11 @@ static lv_obj_t *scroll_probe_open_surface(const char *surface)
     if (strncmp(surface, "contact_", strlen("contact_")) == 0) {
         return scroll_probe_open_contact_surface(surface);
     }
+    if (strcmp(surface, "mesh_roles") == 0 ||
+        strcmp(surface, "mesh_rooms") == 0 ||
+        strcmp(surface, "mesh_repeaters") == 0) {
+        return scroll_probe_open_mesh_surface(surface);
+    }
     return scroll_probe_find_target(s_content);
 }
 
@@ -6269,47 +6636,67 @@ static void run_scroll_probe_on_ui_task(const char *surface,
     process_pending_tab_switch();
 
     lv_obj_t *target = scroll_probe_open_surface(canonical);
+    const bool static_page =
+        strncmp(canonical, "contact_", strlen("contact_")) == 0 ||
+        strcmp(canonical, "mesh_roles") == 0 ||
+        strcmp(canonical, "mesh_rooms") == 0 ||
+        strcmp(canonical, "mesh_repeaters") == 0;
     force_ui_layout_repaint();
-    measure_scroll_probe_target(target, result);
-    if (strncmp(canonical, "contact_", strlen("contact_")) == 0) {
+    if (static_page) {
+        result->target_found = target != NULL;
+        result->scrollable = target && lv_obj_has_flag(target, LV_OBJ_FLAG_SCROLLABLE);
         result->ok = result->surface_supported && result->target_found;
+        return;
     }
+    measure_scroll_probe_target(target, result);
 }
 
-static bool begin_pending_scroll_probe(char *surface, size_t surface_len)
+static uint32_t begin_pending_scroll_probe(char *surface, size_t surface_len)
 {
-    bool pending;
+    uint32_t request_id;
 
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    pending = s_scroll_probe_pending;
-    if (pending && surface && surface_len > 0) {
+    request_id = probe_gate_begin(&s_scroll_probe_gate);
+    if (request_id != 0U && surface && surface_len > 0) {
         snprintf(surface, surface_len, "%s", s_scroll_probe_surface);
-        s_scroll_probe_pending = false;
     }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
-    return pending;
+    return request_id;
 }
 
-static void finish_pending_scroll_probe(const d1l_ui_scroll_probe_result_t *result)
+static void finish_pending_scroll_probe(const d1l_ui_scroll_probe_result_t *result,
+                                        uint32_t request_id)
 {
+    bool signal_completion;
     portENTER_CRITICAL(&s_scroll_probe_lock);
-    s_scroll_probe_result = *result;
+    signal_completion = probe_gate_publish(&s_scroll_probe_gate, request_id);
+    if (signal_completion) {
+        s_scroll_probe_result = *result;
+    }
     portEXIT_CRITICAL(&s_scroll_probe_lock);
-    if (s_scroll_probe_done_sem) {
+
+    /* Publish before releasing the in-flight owner. A timed-out request can
+     * leave a semaphore token, but no later request can be admitted until the
+     * token has been published and can be drained safely. */
+    if (signal_completion && s_scroll_probe_done_sem) {
         (void)xSemaphoreGive(s_scroll_probe_done_sem);
     }
+    portENTER_CRITICAL(&s_scroll_probe_lock);
+    probe_gate_finish_signal(&s_scroll_probe_gate, request_id);
+    portEXIT_CRITICAL(&s_scroll_probe_lock);
 }
 
 static void process_pending_scroll_probe(void)
 {
     char surface[24] = {0};
-    if (!begin_pending_scroll_probe(surface, sizeof(surface))) {
+    const uint32_t request_id = begin_pending_scroll_probe(surface, sizeof(surface));
+    if (request_id == 0U) {
         return;
     }
 
     d1l_ui_scroll_probe_result_t result = {0};
     run_scroll_probe_on_ui_task(surface, &result);
-    finish_pending_scroll_probe(&result);
+    finish_pending_scroll_probe(&result, request_id);
 }
 
 static bool object_is_visible(lv_obj_t *obj)
@@ -6664,40 +7051,48 @@ static void run_compose_probe_on_ui_task(const char *target,
         textarea_inside_sheet;
 }
 
-static bool begin_pending_compose_probe(char *target, size_t target_len)
+static uint32_t begin_pending_compose_probe(char *target, size_t target_len)
 {
-    bool pending;
+    uint32_t request_id;
 
     portENTER_CRITICAL(&s_compose_probe_lock);
-    pending = s_compose_probe_pending;
-    if (pending && target && target_len > 0) {
+    request_id = probe_gate_begin(&s_compose_probe_gate);
+    if (request_id != 0U && target && target_len > 0) {
         snprintf(target, target_len, "%s", s_compose_probe_target);
-        s_compose_probe_pending = false;
     }
     portEXIT_CRITICAL(&s_compose_probe_lock);
-    return pending;
+    return request_id;
 }
 
-static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result)
+static void finish_pending_compose_probe(const d1l_ui_compose_probe_result_t *result,
+                                         uint32_t request_id)
 {
+    bool signal_completion;
     portENTER_CRITICAL(&s_compose_probe_lock);
-    s_compose_probe_result = *result;
+    signal_completion = probe_gate_publish(&s_compose_probe_gate, request_id);
+    if (signal_completion) {
+        s_compose_probe_result = *result;
+    }
     portEXIT_CRITICAL(&s_compose_probe_lock);
-    if (s_compose_probe_done_sem) {
+    if (signal_completion && s_compose_probe_done_sem) {
         (void)xSemaphoreGive(s_compose_probe_done_sem);
     }
+    portENTER_CRITICAL(&s_compose_probe_lock);
+    probe_gate_finish_signal(&s_compose_probe_gate, request_id);
+    portEXIT_CRITICAL(&s_compose_probe_lock);
 }
 
 static void process_pending_compose_probe(void)
 {
     char target[16] = {0};
-    if (!begin_pending_compose_probe(target, sizeof(target))) {
+    const uint32_t request_id = begin_pending_compose_probe(target, sizeof(target));
+    if (request_id == 0U) {
         return;
     }
 
     d1l_ui_compose_probe_result_t result = {0};
     run_compose_probe_on_ui_task(target, &result);
-    finish_pending_compose_probe(&result);
+    finish_pending_compose_probe(&result, request_id);
 }
 
 static void lock_event_cb(lv_event_t *event)
@@ -7396,14 +7791,13 @@ static void create_mesh_roles_sheet(lv_obj_t *screen)
     if (!s_mesh_roles_sheet) {
         return;
     }
-    lv_obj_set_size(s_mesh_roles_sheet, 448, 320);
-    lv_obj_set_pos(s_mesh_roles_sheet, 16, 82);
-    lv_obj_set_style_radius(s_mesh_roles_sheet, 8, 0);
-    lv_obj_set_style_bg_color(s_mesh_roles_sheet, lv_color_hex(0x111923), 0);
-    lv_obj_set_style_border_color(s_mesh_roles_sheet, lv_color_hex(0x334155), 0);
-    lv_obj_set_style_border_width(s_mesh_roles_sheet, 1, 0);
-    lv_obj_set_style_pad_all(s_mesh_roles_sheet, 12, 0);
-    lv_obj_set_scrollbar_mode(s_mesh_roles_sheet, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_size(s_mesh_roles_sheet, 480, 424);
+    lv_obj_set_pos(s_mesh_roles_sheet, 0, 56);
+    lv_obj_set_style_radius(s_mesh_roles_sheet, 0, 0);
+    lv_obj_set_style_bg_color(s_mesh_roles_sheet, lv_color_hex(0x071018), 0);
+    lv_obj_set_style_border_width(s_mesh_roles_sheet, 0, 0);
+    lv_obj_set_style_pad_all(s_mesh_roles_sheet, 0, 0);
+    lv_obj_clear_flag(s_mesh_roles_sheet, LV_OBJ_FLAG_SCROLLABLE);
     d1l_ui_modal_hide(s_mesh_roles_sheet);
 }
 
