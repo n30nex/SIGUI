@@ -32,6 +32,7 @@
 #include "mesh/packet_log.h"
 #include "mesh/read_state.h"
 #include "mesh/route_store.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
 #include "map/map_png_decoder.h"
@@ -44,6 +45,7 @@
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
+static const uint32_t D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS = 15000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -256,8 +258,10 @@ static void sanitize_node_name(char *name)
 static void cmd_version(void)
 {
     ok_begin("version");
-    printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true}\n",
-           D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, esp_get_idf_version());
+    printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"build_commit\":\"%s\","
+           "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true}\n",
+           D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, D1L_BUILD_GIT_COMMIT,
+           esp_get_idf_version());
 }
 
 static void cmd_board(void)
@@ -2420,7 +2424,7 @@ static bool build_diagnostic_export_payload(const char *token,
         return false;
     }
     if (!append_export_json(dest, dest_size, &used,
-                            "\"health\":{\"uptime_ms\":%lu,\"heap_free\":%lu,"
+                            "\"health\":{\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,"
                             "\"heap_min_free\":%lu,\"heap_largest_free\":%lu,"
                             "\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,"
                             "\"internal_heap_largest_free\":%lu,"
@@ -2430,7 +2434,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"current_task_stack_free_words\":%lu,"
                             "\"ui_task_stack_free_words\":%lu,"
                             "\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,"
-                            "\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\"},",
+                            "\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\"},",
+                            (unsigned long)h.boot_nonce,
                             (unsigned long)h.uptime_ms,
                             (unsigned long)h.heap_free,
                             (unsigned long)h.heap_min_free,
@@ -2448,6 +2453,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.lvgl_free_bytes,
                             (unsigned long)h.lvgl_largest_free_bytes,
                             h.lvgl_used_pct,
+                            bool_json(h.nvs_ready),
+                            esp_err_to_name(h.nvs_error),
                             h.reset_reason ? h.reset_reason : "UNKNOWN")) {
         return false;
     }
@@ -4074,14 +4081,44 @@ static void cmd_routes(void)
     static d1l_route_entry_t entries[8];
     size_t copied = d1l_route_store_copy_recent(entries, 8);
     ok_begin("routes");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,"
+           "\"persistence\":{\"revision\":%llu,\"commit_count\":%lu,"
+           "\"coalesced_count\":%lu,\"fail_count\":%lu,"
+           "\"stale_snapshot_count\":%lu,\"dirty\":%s,"
+           "\"clear_failure_latched\":%s,\"clear_fail_count\":%lu,"
+           "\"clear_last_error\":\"%s\","
+           "\"sd_primary\":{\"required\":%s,\"backend_generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commit_count\":%lu,"
+           "\"fail_count\":%lu,\"last_error\":\"%s\"},"
+           "\"nvs_fallback\":{\"dirty\":%s,\"commit_count\":%lu,"
+           "\"fail_count\":%lu,\"last_error\":\"%s\"}},\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_coalesced_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.persistence_dirty),
+           bool_json(stats.clear_failure_latched),
+           (unsigned long)stats.clear_fail_count,
+           esp_err_to_name(stats.clear_last_error),
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_route_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Routes are learned from MeshCore path metadata on Public and advert packets\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Routes are learned from MeshCore path metadata on Public and advert packets\"}\n",
+           bool_json(!stats.persistence_dirty));
 }
 
 static void cmd_routes_detail(const char *line)
@@ -4347,7 +4384,8 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+           (unsigned long)h.boot_nonce,
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
            (unsigned long)h.heap_largest_free,
@@ -4362,7 +4400,8 @@ static void cmd_health(void)
            (unsigned long)h.ui_task_stack_free_words,
            (unsigned long)h.lvgl_free_bytes,
            (unsigned long)h.lvgl_largest_free_bytes,
-           h.lvgl_used_pct, h.reset_reason,
+           h.lvgl_used_pct, bool_json(h.nvs_ready), esp_err_to_name(h.nvs_error),
+           h.reset_reason,
            d1l_app_model_get()->board_ready ? "true" : "false",
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
@@ -4875,8 +4914,15 @@ static void handle_line(const char *line)
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
     } else if (strcmp(line, "reboot") == 0) {
+        esp_err_t route_flush_ret = d1l_route_store_worker_force_flush(
+            D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS);
+        if (route_flush_ret != ESP_OK) {
+            err_result("reboot", esp_err_to_name(route_flush_ret),
+                       "retained route flush failed; reboot cancelled");
+            return;
+        }
         ok_begin("reboot");
-        printf(",\"rebooting\":true}\n");
+        printf(",\"rebooting\":true,\"route_flush\":\"ESP_OK\"}\n");
         fflush(stdout);
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {

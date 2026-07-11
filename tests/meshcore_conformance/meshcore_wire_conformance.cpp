@@ -345,6 +345,13 @@ struct PathEncodingSweepResult {
     std::size_t invalid = 0U;
 };
 
+struct PayloadVersionGateResult {
+    std::size_t tested = 0U;
+    std::size_t accepted_v1 = 0U;
+    std::size_t rejected_future = 0U;
+    std::size_t preserved_rejections = 0U;
+};
+
 PathEncodingSweepResult verify_all_path_encodings(std::vector<std::string> &failures)
 {
     PathEncodingSweepResult result;
@@ -397,6 +404,62 @@ PathEncodingSweepResult verify_all_path_encodings(std::vector<std::string> &fail
     }
     if (result.tested != 256U || result.valid != 119U || result.invalid != 137U) {
         failures.push_back("path encoding sweep did not produce 256/119/137 counts");
+    }
+    return result;
+}
+
+PayloadVersionGateResult verify_payload_version_gate(
+    std::vector<std::string> &failures)
+{
+    PayloadVersionGateResult result;
+    for (uint8_t version = 0U; version <= 3U; ++version) {
+        const std::array<uint8_t, 3> raw = {
+            static_cast<uint8_t>((version << 6U) |
+                                 (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) |
+                                 ROUTE_TYPE_FLOOD),
+            0x00U,
+            0x42U,
+        };
+
+        d1l_meshcore_wire_packet_t envelope{};
+        if (!d1l_meshcore_wire_decode(raw.data(), raw.size(), &envelope) ||
+            envelope.version != version) {
+            failures.push_back("permissive envelope decoder rejected payload version " +
+                               std::to_string(version));
+            continue;
+        }
+
+        d1l_meshcore_wire_packet_t gated;
+        std::memset(&gated, 0xA5, sizeof(gated));
+        d1l_meshcore_wire_packet_t before;
+        std::memcpy(&before, &gated, sizeof(gated));
+        const bool accepted =
+            d1l_meshcore_wire_decode_v1(raw.data(), raw.size(), &gated);
+        ++result.tested;
+
+        if (version == D1L_MESHCORE_PAYLOAD_VER_1) {
+            if (!accepted || gated.version != D1L_MESHCORE_PAYLOAD_VER_1 ||
+                gated.header != envelope.header || gated.payload_len != 1U ||
+                gated.payload[0] != 0x42U) {
+                failures.push_back("v1 payload gate rejected or changed PAYLOAD_VER_1");
+            } else {
+                ++result.accepted_v1;
+            }
+        } else {
+            if (accepted) {
+                failures.push_back("v1 payload gate accepted future version " +
+                                   std::to_string(version));
+            } else {
+                ++result.rejected_future;
+                if (std::memcmp(&before, &gated, sizeof(gated)) == 0) {
+                    ++result.preserved_rejections;
+                } else {
+                    failures.push_back(
+                        "v1 payload gate changed output while rejecting version " +
+                        std::to_string(version));
+                }
+            }
+        }
     }
     return result;
 }
@@ -463,10 +526,16 @@ int main()
     const std::size_t malformed_encodes = verify_malformed_encodes(failures);
     const PathEncodingSweepResult path_encodings =
         verify_all_path_encodings(failures);
+    const PayloadVersionGateResult version_gate =
+        verify_payload_version_gate(failures);
     const std::size_t undersized_capacities =
         verify_undersized_capacity_sweep(failures);
     const bool passed = failures.empty() && upstream_to_local == 432U &&
-                        local_to_upstream == 432U;
+                        local_to_upstream == 432U &&
+                        version_gate.tested == 4U &&
+                        version_gate.accepted_v1 == 1U &&
+                        version_gate.rejected_future == 3U &&
+                        version_gate.preserved_rejections == 3U;
 
     for (const std::string &failure : failures) {
         std::cerr << failure << '\n';
@@ -483,6 +552,11 @@ int main()
               << ",\"path_length_encodings\":{\"tested\":" << path_encodings.tested
               << ",\"valid\":" << path_encodings.valid
               << ",\"invalid\":" << path_encodings.invalid << "}"
+              << ",\"payload_version_gate\":{\"tested\":" << version_gate.tested
+              << ",\"accepted_v1\":" << version_gate.accepted_v1
+              << ",\"rejected_future\":" << version_gate.rejected_future
+              << ",\"preserved_rejections\":"
+              << version_gate.preserved_rejections << "}"
               << ",\"undersized_encoder_capacities\":" << undersized_capacities
               << ",\"failures\":" << failures.size() << "}\n";
     return passed ? 0 : 1;

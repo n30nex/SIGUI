@@ -26,6 +26,12 @@
     "max_path_bytes": 64,
     "max_packet_payload": 184
   },
+  "payload_version_gate": {
+    "permissive_envelope_versions": [0, 1, 2, 3],
+    "accepted_v1_versions": [0],
+    "rejected_future_versions": [1, 2, 3],
+    "preserve_output_on_reject": true
+  },
   "vectors": {
     "payload_types": 6,
     "route_types": 4,

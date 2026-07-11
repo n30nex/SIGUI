@@ -46,6 +46,12 @@ def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
     assert len(manifest["vector_matrix"]["route_types"]) == 4
     assert len(manifest["vector_matrix"]["path_cases"]) == 9
     assert manifest["vector_matrix"]["payload_lengths"] == [1, 184]
+    assert manifest["payload_version_gate"] == {
+        "permissive_envelope_versions": [0, 1, 2, 3],
+        "accepted_v1_versions": [0],
+        "rejected_future_versions": [1, 2, 3],
+        "preserve_output_on_reject": True,
+    }
     assert manifest["fuzz_corpus"]["manifest"] == "tests/meshcore_conformance/corpus.json"
     assert manifest["fuzz_corpus"]["seed_count"] == 5
     assert manifest["fuzz_corpus"]["sha256"] == canonical_lf_sha256(CORPUS)
@@ -106,17 +112,41 @@ def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
     assert "result.invalid != 137U" in harness
     assert "kRequired == 254U" in harness
     assert "data_region_unchanged" in harness
+    assert "verify_payload_version_gate" in harness
+    assert "payload_version_gate" in harness
     assert "d1l_meshcore_wire_decode" in fuzzer
+    assert "d1l_meshcore_wire_decode_v1" in fuzzer
     assert "d1l_meshcore_wire_encode" in fuzzer
     assert "packet.header != data[0]" in fuzzer
     assert "packet.version != ((data[0] >> 6U) & 0x03U)" in fuzzer
     assert "D1L_MESHCORE_MAX_PACKET_PAYLOAD == MAX_PACKET_PAYLOAD" in shim
     assert "D1L_MESHCORE_ROUTE_DIRECT == ROUTE_TYPE_DIRECT" in shim
     assert "D1L_MESHCORE_PAYLOAD_MULTIPART == PAYLOAD_TYPE_MULTIPART" in shim
+    assert "D1L_MESHCORE_PAYLOAD_VER_1 == PAYLOAD_VER_1" in shim
     assert "Packet" not in fuzzer
     assert "MAX_PACKET_PAYLOAD == 184" in shim
     assert "std::abort()" in sha_stub
     assert "update(const void *" in sha_stub
+
+
+def test_v1_decoder_rejects_future_versions_without_changing_output():
+    source = read("main/mesh/meshcore_wire.c")
+    header = read("main/mesh/meshcore_wire.h")
+    runner = read("scripts/meshcore_conformance_d1l.py")
+    boundary = read("docs/MESHCORE_CONFORMANCE.md")
+
+    assert "#define D1L_MESHCORE_PAYLOAD_VER_1 0x00U" in header
+    assert "bool d1l_meshcore_wire_decode_v1" in header
+    body = source.split("bool d1l_meshcore_wire_decode_v1", 1)[1].split(
+        "bool d1l_meshcore_wire_write_prefix", 1
+    )[0]
+    assert "d1l_meshcore_wire_packet_t packet;" in body
+    assert "d1l_meshcore_wire_decode(raw, size, &packet)" in body
+    assert "packet.version != D1L_MESHCORE_PAYLOAD_VER_1" in body
+    assert body.index("packet.version !=") < body.index("*out_packet = packet")
+    assert 'vector_result.get("payload_version_gate", {}).get("tested") != 4' in runner
+    assert "d1l_meshcore_wire_decode_v1()" in boundary
+    assert "leaves its output unchanged" in boundary
 
 
 def test_production_service_uses_the_codec_exercised_by_the_harness():
@@ -125,7 +155,8 @@ def test_production_service_uses_the_codec_exercised_by_the_harness():
 
     assert '#include "mesh/meshcore_wire.h"' in service
     assert '"mesh/meshcore_wire.c"' in cmake
-    assert service.count("d1l_meshcore_wire_decode(") == 5
+    assert service.count("d1l_meshcore_wire_decode_v1(") == 5
+    assert service.count("d1l_meshcore_wire_decode(") == 0
     assert service.count("d1l_meshcore_wire_write_prefix(") == 3
     assert "parse_wire_packet" not in service
     for legacy_helper in [
@@ -196,6 +227,12 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["scope"]["fuzz_target"] == "local_wire_decoder_only"
     assert report["scope"]["packet_semantics_covered"] is False
     assert len(report["vector_matrix"]["payload_types"]) == 6
+    assert report["payload_version_gate"] == {
+        "permissive_envelope_versions": [0, 1, 2, 3],
+        "accepted_v1_versions": [0],
+        "rejected_future_versions": [1, 2, 3],
+        "preserve_output_on_reject": True,
+    }
     assert report["zero_overrun"] is None
     assert report["zero_corruption"] is None
     commands = "\n".join(" ".join(command) for command in report["commands"])

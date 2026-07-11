@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,16 @@ SUPPORTED_ESP_IDF_IMAGE = "espressif/idf:v5.5.4"
 SUPPORTED_ESP_IDF_VERSION = "v5.5.4"
 SUPPORTED_ESP_IDF_LOCK_VERSION = "5.5.4"
 ESP_IDF_MIGRATION_ISSUE = 63
+MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
+MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
+MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
+MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
+HOST_CHECKS_ARTIFACT_TYPE = "d1l_host_checks_success"
+REQUIRED_ESP32_FLASH_ROLES = {
+    0x0: "build/bootloader/bootloader.bin",
+    0x8000: "build/partition_table/partition-table.bin",
+    0x10000: "build/meshcore_deskos_d1l.bin",
+}
 REQUIRED_UI_TELEMETRY_FIELDS = {
     "heap_free",
     "heap_min_free",
@@ -274,22 +285,22 @@ def artifact_commit_values(data: dict) -> list[str]:
 
 def commit_value_matches(value: str, commit: str) -> bool:
     full = commit.lower()
-    short = full[:7]
     lowered = value.lower()
-    return lowered == full or lowered.startswith(short)
+    return (
+        re.fullmatch(r"[0-9a-f]{40}", full) is not None
+        and re.fullmatch(r"[0-9a-f]{7,40}", lowered) is not None
+        and len(lowered) <= len(full)
+        and full.startswith(lowered)
+    )
 
 
 def artifact_commit_matches(path: Path, data: dict, commit: str | None) -> bool:
     if not commit:
         return True
     metadata_values = artifact_commit_values(data)
-    if metadata_values:
-        return any(commit_value_matches(value, commit) for value in metadata_values)
-
-    name = path.name.lower()
-    full = commit.lower()
-    short = full[:7]
-    return short in name or full in name
+    return bool(metadata_values) and all(
+        commit_value_matches(value, commit) for value in metadata_values
+    )
 
 
 def newest_commit_json(root: Path, commit: str | None, *patterns: str) -> Path | None:
@@ -352,6 +363,321 @@ def find_release_package(github_run_dir: Path | None) -> Path | None:
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_utc_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, OverflowError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    try:
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
+
+
+def meshcore_conformance_evidence_gate(
+    github_run_dir: Path | None,
+    root: Path,
+    commit: str | None,
+    now: datetime | None = None,
+    expected_run_id: str | None = None,
+) -> GateResult:
+    package = find_release_package(github_run_dir)
+    manifest_path = package / "manifest.json" if package else None
+    failures: list[str] = []
+    try:
+        manifest = read_json(manifest_path)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        manifest = {}
+        failures.append("manifest_json_invalid")
+    if not isinstance(manifest, dict):
+        manifest = {}
+        failures.append("manifest_json_invalid")
+    metadata = manifest.get("meshcore_conformance")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if not package:
+        failures.append("release_package_missing")
+    if not commit:
+        failures.append("expected_commit_missing")
+    if github_run_dir is not None and not expected_run_id:
+        failures.append("expected_run_id_missing")
+    if not metadata:
+        failures.append("manifest_metadata_missing")
+
+    evidence_path: Path | None = None
+    relative_path = metadata.get("path")
+    if package and isinstance(relative_path, str) and relative_path:
+        try:
+            candidate = (package / relative_path).resolve()
+            candidate.relative_to(package.resolve())
+        except ValueError:
+            failures.append("evidence_path_outside_package")
+        except (OSError, RuntimeError):
+            failures.append("evidence_path_unresolvable")
+        else:
+            evidence_path = candidate
+    elif metadata:
+        failures.append("evidence_path_missing")
+    if evidence_path and not evidence_path.is_file():
+        failures.append("evidence_file_missing")
+
+    try:
+        report = read_json(evidence_path)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        report = {}
+        failures.append("evidence_json_invalid")
+    if not isinstance(report, dict):
+        report = {}
+        failures.append("evidence_json_invalid")
+    source_verification = report.get("source_verification")
+    source_commit = (
+        source_verification.get("repository_commit")
+        if isinstance(source_verification, dict)
+        else None
+    )
+    package_git = manifest.get("git") if isinstance(manifest.get("git"), dict) else {}
+    package_workflow = (
+        manifest.get("workflow") if isinstance(manifest.get("workflow"), dict) else {}
+    )
+    expected_name = f"meshcore_conformance_{commit}.json" if commit else None
+    if metadata:
+        checks = {
+            "metadata_artifact_type": metadata.get("artifact_type") == MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+            "metadata_source_commit": metadata.get("source_commit") == commit,
+            "metadata_boundary": metadata.get("coverage_boundary") == MESHCORE_CONFORMANCE_BOUNDARY,
+            "metadata_level": metadata.get("coverage_level") == MESHCORE_CONFORMANCE_BOUNDARY,
+            "metadata_closure_ready_false": metadata.get("closure_ready") is False,
+            "metadata_issue_65_false": metadata.get("issue_65_closure_eligible") is False,
+            "metadata_passed": metadata.get("passed") is True,
+            "metadata_execution_complete": metadata.get("execution_complete") is True,
+            "metadata_max_age": metadata.get("max_age_days") == MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+            "package_git_commit": package_git.get("commit") == commit,
+            "package_git_clean": package_git.get("dirty") is False
+            and package_git.get("dirty_entries") == [],
+            "package_workflow_sha": package_workflow.get("sha") == commit,
+            "package_workflow_run_id": bool(expected_run_id)
+            and str(package_workflow.get("run_id")) == str(expected_run_id),
+            "evidence_filename": bool(evidence_path and evidence_path.name == expected_name),
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
+    if report:
+        checks = {
+            "report_schema_version": report.get("schema_version") == 1,
+            "report_artifact_type": report.get("artifact_type") == MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+            "report_passed": report.get("passed") is True,
+            "report_status": report.get("status") == "pass",
+            "report_execution_complete": report.get("execution_complete") is True,
+            "report_source_commit": source_commit == commit,
+            "report_boundary": report.get("coverage_boundary") == MESHCORE_CONFORMANCE_BOUNDARY,
+            "report_level": report.get("coverage_level") == MESHCORE_CONFORMANCE_BOUNDARY,
+            "report_closure_ready_false": report.get("closure_ready") is False,
+            "report_issue_65_false": report.get("issue_65_closure_eligible") is False,
+        }
+        failures.extend(name for name, ok in checks.items() if not ok)
+    elif evidence_path and evidence_path.is_file() and "evidence_json_invalid" not in failures:
+        failures.append("evidence_json_invalid")
+
+    actual_sha = None
+    evidence_size = None
+    if evidence_path and evidence_path.is_file():
+        try:
+            actual_sha = sha256_file(evidence_path)
+        except OSError:
+            failures.append("evidence_hash_unreadable")
+        try:
+            evidence_size = evidence_path.stat().st_size
+        except OSError:
+            failures.append("evidence_stat_unreadable")
+    if metadata and actual_sha != metadata.get("sha256"):
+        failures.append("evidence_sha256_mismatch")
+    if evidence_size is not None and metadata.get("size") != evidence_size:
+        failures.append("evidence_size_mismatch")
+
+    generated_at = parse_utc_timestamp(report.get("generated_at")) if report else None
+    metadata_generated_at = parse_utc_timestamp(metadata.get("generated_at")) if metadata else None
+    metadata_expires_at = parse_utc_timestamp(metadata.get("expires_at")) if metadata else None
+    checked_at = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    expected_expires_at = None
+    expires_at_computable = generated_at is not None
+    if generated_at is not None:
+        try:
+            expected_expires_at = generated_at + timedelta(
+                days=MESHCORE_CONFORMANCE_MAX_AGE_DAYS
+            )
+        except OverflowError:
+            expires_at_computable = False
+    timestamp_checks = {
+        "generated_at_valid": generated_at is not None,
+        "expires_at_computable": expires_at_computable,
+        "metadata_generated_at_matches": generated_at is not None and metadata_generated_at == generated_at,
+        "metadata_expires_at_matches": expected_expires_at is not None
+        and metadata_expires_at == expected_expires_at,
+        "generated_at_not_future": generated_at is not None
+        and generated_at <= checked_at + timedelta(minutes=MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES),
+        "evidence_not_expired": expected_expires_at is not None and checked_at < expected_expires_at,
+    }
+    failures.extend(name for name, ok in timestamp_checks.items() if not ok)
+    failures = list(dict.fromkeys(failures))
+    ok = not failures
+    evidence = []
+    if manifest_path and manifest_path.is_file():
+        evidence.append(rel(manifest_path, root))
+    if evidence_path and evidence_path.is_file():
+        evidence.append(rel(evidence_path, root))
+    return GateResult(
+        "meshcore_wire_conformance_packaged",
+        "P0",
+        ok,
+        "Current-commit MeshCore wire conformance packaged",
+        evidence,
+        (
+            "Release package contains matching, unexpired wire_envelope_only evidence with "
+            "closure_ready=false. This structural prerequisite does not close issue #65."
+            if ok
+            else "Release package is missing matching, unexpired MeshCore wire-envelope evidence; issue #65 remains open."
+        ),
+        {
+            "failures": failures,
+            "expected_commit": commit,
+            "expected_run_id": expected_run_id,
+            "package_run_id": package_workflow.get("run_id"),
+            "package_git_dirty": package_git.get("dirty"),
+            "package_git_dirty_entries": package_git.get("dirty_entries"),
+            "source_commit": source_commit,
+            "sha256": actual_sha,
+            "generated_at": generated_at.isoformat() if generated_at else None,
+            "expires_at": expected_expires_at.isoformat() if expected_expires_at else None,
+            "checked_at": checked_at.isoformat(),
+            "coverage_boundary": report.get("coverage_boundary") if report else None,
+            "coverage_level": report.get("coverage_level") if report else None,
+            "closure_ready": report.get("closure_ready") if report else None,
+            "issue_65_closure_eligible": report.get("issue_65_closure_eligible") if report else None,
+        },
+    )
+
+
+def host_checks_success_gate(
+    github_run_dir: Path | None,
+    root: Path,
+    commit: str | None,
+    expected_run_id: str | None,
+) -> GateResult:
+    failures: list[str] = []
+    commit_valid = isinstance(commit, str) and re.fullmatch(r"[0-9a-fA-F]{40}", commit) is not None
+    run_id_valid = (
+        isinstance(expected_run_id, str)
+        and re.fullmatch(r"[1-9][0-9]*", expected_run_id) is not None
+    )
+    if github_run_dir is None:
+        failures.append("github_run_dir_missing")
+    if not commit_valid:
+        failures.append("expected_commit_invalid")
+    if not run_id_valid:
+        failures.append("expected_run_id_missing_or_invalid")
+
+    marker: Path | None = None
+    if github_run_dir is not None and commit_valid:
+        marker = (
+            github_run_dir
+            / "d1l-host-artifacts"
+            / "host-checks"
+            / f"d1l_host_checks_success_{commit}.json"
+        )
+        if not marker.is_file():
+            failures.append("host_checks_marker_missing")
+
+    try:
+        payload = read_json(marker)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        payload = {}
+        failures.append("host_checks_marker_invalid")
+    if not isinstance(payload, dict):
+        payload = {}
+        failures.append("host_checks_marker_invalid")
+
+    attempt = payload.get("workflow_run_attempt")
+    attempt_valid = (
+        isinstance(attempt, (str, int))
+        and not isinstance(attempt, bool)
+        and str(attempt).isdigit()
+        and int(attempt) >= 1
+    )
+    checks = {
+        "marker_schema": payload.get("schema") == 1,
+        "marker_artifact_type": payload.get("artifact_type") == HOST_CHECKS_ARTIFACT_TYPE,
+        "marker_status": payload.get("status") == "pass",
+        "marker_passed": payload.get("passed") is True,
+        "marker_prior_steps": payload.get("all_prior_steps_completed") is True,
+        "marker_job": payload.get("job") == "host-checks",
+        "marker_commit": commit_valid and payload.get("repository_commit") == commit,
+        "marker_run_id": run_id_valid
+        and str(payload.get("workflow_run_id")) == expected_run_id,
+        "marker_run_attempt": attempt_valid,
+    }
+    failures.extend(name for name, ok in checks.items() if not ok)
+    failures = list(dict.fromkeys(failures))
+    ok = not failures
+    return GateResult(
+        "same_run_host_checks_passed",
+        "P0",
+        ok,
+        "Same-run host checks completed",
+        [rel(marker, root)] if marker and marker.is_file() else [],
+        (
+            "The selected Actions run contains exact-commit host-check success evidence emitted after all host steps passed."
+            if ok
+            else "The selected Actions run lacks valid exact-commit host-check success evidence."
+        ),
+        {
+            "failures": failures,
+            "expected_commit": commit,
+            "expected_run_id": expected_run_id,
+            "marker_commit": payload.get("repository_commit"),
+            "marker_run_id": payload.get("workflow_run_id"),
+            "marker_run_attempt": attempt,
+        },
+    )
+
+
+def meshcore_full_conformance_gate() -> GateResult:
+    """Keep release fail-closed until issue #65 has a dedicated closure artifact.
+
+    The currently packaged report deliberately covers only the structural wire
+    envelope.  A later #65 slice must replace this pending gate with validation
+    of a distinct full-surface artifact; allowing the structural prerequisite
+    to satisfy release readiness would make the audit contradict its evidence.
+    """
+    return GateResult(
+        "meshcore_full_conformance_complete",
+        "P0",
+        False,
+        "Full MeshCore 1.0 conformance complete",
+        [],
+        (
+            "Issue #65 remains open: wire-envelope evidence does not prove the "
+            "semantic, cryptographic, retained-state, duplicate/replay, or real-peer surface."
+        ),
+        {
+            "issue": 65,
+            "closure_artifact_required": True,
+            "closure_artifact_present": False,
+            "closure_ready": False,
+            "wire_envelope_evidence_is_sufficient": False,
+        },
+    )
 
 
 def checksum_gate(github_run_dir: Path | None, root: Path) -> GateResult:
@@ -443,6 +769,327 @@ def simple_json_ok_gate(
         [rel(path, root)] if path else [],
         success if ok else failure,
         {"path_found": bool(path), "artifact_ok": data.get("ok") if data else None},
+    )
+
+
+def exact_full_commit(value: object, commit: str | None) -> bool:
+    return (
+        isinstance(value, str)
+        and isinstance(commit, str)
+        and re.fullmatch(r"[0-9a-fA-F]{40}", value) is not None
+        and value.lower() == commit.lower()
+    )
+
+
+def smoke_device_identity_ok(data: dict, expected_port: str, commit: str | None) -> bool:
+    results = data.get("results")
+    version = next(
+        (
+            row
+            for row in results
+            if isinstance(row, dict) and row.get("cmd") == "version"
+        ),
+        None,
+    ) if isinstance(results, list) else None
+    return (
+        data.get("mode") == "hardware"
+        and data.get("ok") is True
+        and data.get("port") == expected_port
+        and data.get("firmware_identity_required") is True
+        and data.get("firmware_identity_ok") is True
+        and exact_full_commit(data.get("expected_firmware_commit"), commit)
+        and exact_full_commit(data.get("device_build_commit"), commit)
+        and isinstance(version, dict)
+        and version.get("ok") is True
+        and exact_full_commit(version.get("build_commit"), commit)
+    )
+
+
+def checksum_manifest_entries(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="ascii").splitlines()
+    except (OSError, UnicodeError):
+        return {}
+    entries: dict[str, str] = {}
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            digest, relative = line.split(maxsplit=1)
+        except ValueError:
+            return {}
+        if re.fullmatch(r"[0-9a-fA-F]{64}", digest) is None:
+            return {}
+        if relative.startswith("./"):
+            relative = relative[2:]
+        relative = relative.replace("\\", "/")
+        candidate = Path(relative)
+        if (
+            not relative
+            or candidate.is_absolute()
+            or any(part in {"", ".", ".."} for part in candidate.parts)
+            or relative in entries
+        ):
+            return {}
+        entries[relative] = digest.lower()
+    return entries
+
+
+def flash_command_matches_exact_files(
+    command: list,
+    write_flash_args: list[str],
+    expected_targets: dict[int, Path],
+) -> bool:
+    if command.count("write-flash") != 1:
+        return False
+    write_index = command.index("write-flash")
+    tail = [str(token) for token in command[write_index + 1 :]]
+    if tail[: len(write_flash_args)] != write_flash_args:
+        return False
+    file_tokens = tail[len(write_flash_args) :]
+    if len(file_tokens) != len(expected_targets) * 2:
+        return False
+
+    actual_pairs: list[tuple[int, Path]] = []
+    for index in range(0, len(file_tokens), 2):
+        try:
+            offset = int(file_tokens[index], 0)
+        except ValueError:
+            return False
+        candidate_path = Path(file_tokens[index + 1])
+        if not candidate_path.is_absolute():
+            return False
+        try:
+            candidate_file = candidate_path.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return False
+        actual_pairs.append((offset, candidate_file))
+
+    expected_pairs: list[tuple[int, Path]] = []
+    for offset, artifact_file in sorted(expected_targets.items()):
+        try:
+            expected_file = artifact_file.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return False
+        expected_pairs.append((offset, expected_file))
+    return actual_pairs == expected_pairs
+
+
+def command_uses_exact_port(command: list, expected_port: str) -> bool:
+    ports = [
+        str(command[index + 1])
+        for index, token in enumerate(command[:-1])
+        if str(token) in {"-p", "--port"}
+    ]
+    return ports == [expected_port]
+
+
+def esp32_flash_receipt_gate(
+    hardware_dir: Path,
+    github_run_dir: Path | None,
+    root: Path,
+    commit: str | None,
+    expected_run_id: str | None,
+    expected_port: str,
+) -> GateResult:
+    receipt = newest_commit_json(hardware_dir, commit, "esp32_flash_*.json")
+    data = read_json(receipt)
+    failures: list[str] = []
+    if receipt is None:
+        failures.append("flash_receipt_missing")
+    if github_run_dir is None:
+        failures.append("github_run_dir_missing")
+    if not commit:
+        failures.append("expected_commit_missing")
+    if not expected_run_id:
+        failures.append("expected_run_id_missing")
+
+    artifact_root = github_run_dir / "d1l-firmware-artifacts" if github_run_dir else None
+    manifest_path = artifact_root / "SHA256SUMS.txt" if artifact_root else None
+    manifest_entries = checksum_manifest_entries(manifest_path) if manifest_path else {}
+    manifest_verified = bool(
+        manifest_path
+        and manifest_path.is_file()
+        and verify_sha256_manifest(manifest_path)
+    )
+    actual_manifest_sha = None
+    if manifest_path and manifest_path.is_file():
+        try:
+            actual_manifest_sha = sha256_file(manifest_path)
+        except OSError:
+            failures.append("manifest_hash_unreadable")
+
+    verification = data.get("artifact_verification") if isinstance(data, dict) else None
+    verification = verification if isinstance(verification, dict) else {}
+    result = data.get("result") if isinstance(data, dict) else None
+    result = result if isinstance(result, dict) else {}
+    command = data.get("command") if isinstance(data, dict) else None
+    command = command if isinstance(command, list) else []
+    flash_rows = verification.get("flash_files")
+    flash_rows = flash_rows if isinstance(flash_rows, list) else []
+
+    flasher_path = artifact_root / "build" / "flasher_args.json" if artifact_root else None
+    flasher: dict = {}
+    if flasher_path and flasher_path.is_file():
+        try:
+            candidate = json.loads(flasher_path.read_text(encoding="utf-8"))
+            flasher = candidate if isinstance(candidate, dict) else {}
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            failures.append("flasher_args_invalid")
+    else:
+        failures.append("flasher_args_missing")
+
+    expected_flash: dict[int, str] = {}
+    expected_targets: dict[int, Path] = {}
+    write_flash_args: list[str] = []
+    raw_flash_files = flasher.get("flash_files")
+    raw_write_flash_args = flasher.get("write_flash_args", [])
+    if isinstance(raw_write_flash_args, list):
+        write_flash_args = [
+            str(item).replace("_", "-") if str(item).startswith("--") else str(item)
+            for item in raw_write_flash_args
+        ]
+    else:
+        failures.append("flasher_write_flash_args_invalid")
+    if artifact_root and isinstance(raw_flash_files, dict) and raw_flash_files:
+        try:
+            artifact_root_resolved = artifact_root.resolve(strict=True)
+            build_root = (artifact_root_resolved / "build").resolve(strict=True)
+            build_root.relative_to(artifact_root_resolved)
+            for raw_offset, raw_path in raw_flash_files.items():
+                offset = int(str(raw_offset), 0)
+                raw_relative = str(raw_path)
+                relative_path = Path(raw_relative)
+                if (
+                    not raw_relative
+                    or relative_path.is_absolute()
+                    or any(part in {"", ".", ".."} for part in relative_path.parts)
+                    or offset < 0
+                    or offset in expected_flash
+                ):
+                    raise ValueError
+                target = (build_root / relative_path).resolve(strict=True)
+                target.relative_to(build_root)
+                artifact_relative = target.relative_to(artifact_root_resolved).as_posix()
+                expected_flash[offset] = artifact_relative
+                expected_targets[offset] = target
+        except (TypeError, ValueError, OSError, RuntimeError):
+            expected_flash = {}
+            expected_targets = {}
+            failures.append("flasher_flash_files_invalid")
+    else:
+        failures.append("flasher_flash_files_missing")
+
+    row_offsets: set[int] = set()
+    rows_ok = bool(flash_rows) and len(flash_rows) == len(expected_flash)
+    for row in flash_rows:
+        if not isinstance(row, dict):
+            rows_ok = False
+            continue
+        offset = row.get("offset")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0 or offset in row_offsets:
+            rows_ok = False
+            continue
+        row_offsets.add(offset)
+        relative = row.get("path")
+        expected_relative = expected_flash.get(offset)
+        expected_target = expected_targets.get(offset)
+        digest = row.get("sha256")
+        target_hash = None
+        target_size = None
+        target_ok = False
+        if isinstance(relative, str) and relative == expected_relative and expected_target:
+            try:
+                target_ok = expected_target.is_file()
+                if target_ok:
+                    target_size = expected_target.stat().st_size
+                    target_hash = sha256_file(expected_target)
+            except OSError:
+                target_ok = False
+        rows_ok = rows_ok and (
+            relative == expected_relative
+            and row.get("offset_hex") == hex(offset)
+            and isinstance(row.get("size"), int)
+            and not isinstance(row.get("size"), bool)
+            and target_ok
+            and row.get("size") == target_size
+            and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-fA-F]{64}", digest) is not None
+            and manifest_entries.get(str(relative)) == digest.lower()
+            and target_hash == digest.lower()
+        )
+
+    flasher_hash = None
+    if flasher_path and flasher_path.is_file():
+        try:
+            flasher_hash = sha256_file(flasher_path)
+        except OSError:
+            pass
+    safe_command = (
+        bool(command)
+        and command == result.get("args")
+        and "write-flash" in command
+        and command_uses_exact_port(command, expected_port)
+        and not any("erase" in str(token).lower() for token in command)
+    )
+    command_files_exact = flash_command_matches_exact_files(
+        command,
+        write_flash_args,
+        expected_targets,
+    )
+    required_roles_present = expected_flash == REQUIRED_ESP32_FLASH_ROLES
+    checks = {
+        "receipt_hardware_mode": data.get("mode") == "hardware",
+        "receipt_kind": data.get("kind") == "esp32_flash",
+        "receipt_ok": data.get("ok") is True,
+        "receipt_port": data.get("port") == expected_port,
+        "receipt_commit": exact_full_commit(data.get("commit"), commit),
+        "receipt_run_id": bool(expected_run_id)
+        and str(data.get("github_actions_run")) == str(expected_run_id),
+        "receipt_no_public_rf": data.get("public_rf_tx") is False,
+        "receipt_no_format": data.get("formats_sd") is False,
+        "esptool_result": result.get("name") == "esp32_flash"
+        and result.get("ok") is True
+        and result.get("returncode") == 0,
+        "safe_exact_flash_command": safe_command,
+        "artifact_verification": verification.get("ok") is True,
+        "manifest_complete": verification.get("manifest_complete") is True,
+        "manifest_verified": manifest_verified,
+        "manifest_entry_count": verification.get("manifest_entry_count") == len(manifest_entries)
+        and len(manifest_entries) > 0,
+        "manifest_sha256": isinstance(verification.get("manifest_sha256"), str)
+        and actual_manifest_sha == verification.get("manifest_sha256").lower(),
+        "flasher_args_sha256": isinstance(verification.get("flasher_args_sha256"), str)
+        and flasher_hash == verification.get("flasher_args_sha256").lower(),
+        "flash_files_exact": rows_ok and set(expected_flash) == row_offsets,
+        "flash_command_files_exact": command_files_exact,
+        "required_flash_roles": required_roles_present,
+    }
+    failures.extend(name for name, ok in checks.items() if not ok)
+    failures = list(dict.fromkeys(failures))
+    ok = not failures
+    return GateResult(
+        "exact_actions_esp32_flash",
+        "P0",
+        ok,
+        "Exact Actions ESP32 artifact flashed to the selected D1L port",
+        [rel(receipt, root)] if receipt else [],
+        (
+            "A successful non-erasing D1L flash receipt proves the selected run's complete checksummed project image was written."
+            if ok
+            else "No valid successful D1L flash receipt matches the selected commit, run, and complete Actions artifact."
+        ),
+        {
+            "failures": failures,
+            "expected_commit": commit,
+            "expected_run_id": expected_run_id,
+            "expected_port": expected_port,
+            "receipt_run_id": data.get("github_actions_run") if data else None,
+            "receipt_port": data.get("port") if data else None,
+            "manifest_sha256": actual_manifest_sha,
+            "flash_file_count": len(flash_rows),
+        },
     )
 
 
@@ -915,6 +1562,33 @@ def storage_file_gate_ready_status(storage_status: dict) -> bool:
     )
 
 
+def retained_history_sd_ready_status(storage_status: dict) -> bool:
+    if not isinstance(storage_status, dict):
+        return False
+    manager = storage_status.get("manager")
+    stores = storage_status.get("stores")
+    return (
+        storage_file_gate_ready_status(storage_status)
+        and storage_status.get("ok") is True
+        and storage_status.get("data_enabled") is True
+        and storage_status.get("data_backend") == "mixed"
+        and all(
+            storage_status.get(field) == "sd"
+            for field in (
+                "message_store_backend",
+                "dm_store_backend",
+                "route_store_backend",
+                "packet_log_backend",
+            )
+        )
+        and isinstance(stores, dict)
+        and all(stores.get(name) == "sd" for name in ("messages", "dm", "routes", "packets"))
+        and isinstance(manager, dict)
+        and manager.get("running") is True
+        and manager.get("state") == "READY_SD"
+    )
+
+
 def storage_status_fresh_status(storage_status: dict) -> bool:
     sd = storage_status.get("sd") if isinstance(storage_status, dict) else None
     return (
@@ -952,6 +1626,23 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
     )
 
 
+def reboot_transition_proven(data: dict) -> bool:
+    before = data.get("pre_reboot_boot_nonce")
+    after = data.get("post_reboot_boot_nonce")
+    return (
+        data.get("reboot_command_passed") is True
+        and data.get("reboot_route_flush") == "ESP_OK"
+        and data.get("reboot_proven") is True
+        and isinstance(before, int)
+        and not isinstance(before, bool)
+        and before != 0
+        and isinstance(after, int)
+        and not isinstance(after, bool)
+        and after != 0
+        and before != after
+    )
+
+
 def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
     return (
         data.get("mode") == "hardware"
@@ -966,7 +1657,11 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("post_reboot_readbacks_ok") is True
         and data.get("storage_file_gate_ready_before") is True
         and data.get("storage_file_gate_ready_after") is True
-        and storage_file_gate_ready_status(data.get("storage_after"))
+        and data.get("retained_history_sd_ready_before") is True
+        and data.get("retained_history_sd_ready_after") is True
+        and reboot_transition_proven(data)
+        and retained_history_sd_ready_status(data.get("storage_before"))
+        and retained_history_sd_ready_status(data.get("storage_after"))
         and "reboot" in (data.get("commands") or [])
     )
 
@@ -980,11 +1675,18 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("ok") is True
         and data.get("pre_remount_ready") is True
         and data.get("post_remount_ready") is True
+        and data.get("pre_remount_command_passed") is True
+        and data.get("post_remount_command_passed") is True
+        and data.get("retained_history_sd_ready_before") is True
+        and data.get("retained_history_sd_ready_after") is True
         and data.get("retained_canary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
         and data.get("pre_map_tile_canary_passed") is True
         and data.get("post_map_tile_canary_passed") is True
+        and reboot_transition_proven(data)
+        and retained_history_sd_ready_status(data.get("storage_before_reboot"))
+        and retained_history_sd_ready_status(data.get("storage_after_reboot"))
         and storage_status_fresh_status(data.get("storage_before_reboot"))
         and storage_status_fresh_status(data.get("storage_after_reboot"))
         and "reboot" in (data.get("commands") or [])
@@ -1432,8 +2134,15 @@ def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
             "filecanary_passed": data.get("filecanary_passed") if data else None,
             "storage_file_gate_ready_before": data.get("storage_file_gate_ready_before") if data else None,
             "storage_file_gate_ready_after": data.get("storage_file_gate_ready_after") if data else None,
+            "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
+            "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
             "pre_reboot_readbacks_ok": data.get("pre_reboot_readbacks_ok") if data else None,
             "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
+            "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
+            "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
+            "reboot_proven": data.get("reboot_proven") if data else None,
         },
     )
 
@@ -1463,6 +2172,15 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "port": data.get("port") if data else None,
             "pre_remount_ready": data.get("pre_remount_ready") if data else None,
             "post_remount_ready": data.get("post_remount_ready") if data else None,
+            "pre_remount_command_passed": data.get("pre_remount_command_passed") if data else None,
+            "post_remount_command_passed": data.get("post_remount_command_passed") if data else None,
+            "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
+            "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
+            "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
+            "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
+            "reboot_proven": data.get("reboot_proven") if data else None,
             "pre_map_tile_canary_passed": data.get("pre_map_tile_canary_passed") if data else None,
             "post_map_tile_canary_passed": data.get("post_map_tile_canary_passed") if data else None,
         },
@@ -2104,15 +2822,42 @@ def build_audit(args: argparse.Namespace) -> dict:
     unformatted_boot_path = newest_boot_prepare_artifact(boot_prepare_roots, args.commit, "unformatted")
 
     gates.append(supported_sdk_gate(root))
+    gates.append(
+        host_checks_success_gate(
+            github_run_dir,
+            root,
+            args.commit,
+            args.github_run_id,
+        )
+    )
     gates.append(checksum_gate(github_run_dir, root))
+    gates.append(
+        meshcore_conformance_evidence_gate(
+            github_run_dir,
+            root,
+            args.commit,
+            expected_run_id=args.github_run_id,
+        )
+    )
+    gates.append(meshcore_full_conformance_gate())
     gates.append(notices_gate(github_run_dir, root))
+    gates.append(
+        esp32_flash_receipt_gate(
+            hardware_dir,
+            github_run_dir,
+            root,
+            args.commit,
+            args.github_run_id,
+            args.d1l_port,
+        )
+    )
     gates.append(
         simple_json_ok_gate(
             "com12_smoke",
             "D1L hardware smoke",
             newest_commit_json_from_roots(smoke_roots, args.commit, "smoke_*.json", "d1l-smoke-*.json"),
             root,
-            lambda data: data.get("ok") is True and data.get("port") == args.d1l_port,
+            lambda data: smoke_device_identity_ok(data, args.d1l_port, args.commit),
             "Current-commit D1L smoke artifact passes.",
             "No passing current-commit D1L smoke artifact was found.",
         )

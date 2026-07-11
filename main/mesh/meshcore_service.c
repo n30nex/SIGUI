@@ -752,7 +752,7 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
 static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!d1l_meshcore_wire_decode(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_GROUP_TEXT ||
         packet.payload_len < 3U ||
         packet.payload[0] != s_public_channel_hash) {
@@ -785,7 +785,7 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
 static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!d1l_meshcore_wire_decode(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_TEXT ||
         packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
         return;
@@ -880,7 +880,7 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
 static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!d1l_meshcore_wire_decode(payload, size, &packet)) {
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet)) {
         return;
     }
 
@@ -904,7 +904,7 @@ static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, i
 static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!d1l_meshcore_wire_decode(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_PATH ||
         packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
         return;
@@ -1076,7 +1076,7 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
 static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!d1l_meshcore_wire_decode(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_ADVERT ||
         packet.payload_len < D1L_MESHCORE_ADVERT_MIN_PAYLOAD) {
         return;

@@ -138,6 +138,25 @@ jobs:
       - name: Release gate audit dry run
         run: python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json
 
+      - name: Record exact host-check success evidence
+        shell: pwsh
+        run: |
+          $out = Join-Path "artifacts" "host-checks"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $payload = [ordered]@{
+            schema = 1
+            artifact_type = "d1l_host_checks_success"
+            status = "pass"
+            passed = $true
+            all_prior_steps_completed = $true
+            job = "host-checks"
+            repository_commit = $env:GITHUB_SHA
+            workflow_run_id = [string]$env:GITHUB_RUN_ID
+            workflow_run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+          }
+          $path = Join-Path $out ("d1l_host_checks_success_{0}.json" -f $env:GITHUB_SHA)
+          $payload | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+
       - uses: actions/upload-artifact@v7
         with:
           name: d1l-host-artifacts
@@ -269,14 +288,60 @@ jobs:
           retention-days: 14
 
   firmware-build:
-    needs: [change-filter, meshcore-conformance, rp2040-sd-bridge-build]
-    if: ${{ always() && needs.change-filter.result == 'success' && needs.meshcore-conformance.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
+    needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]
+    if: ${{ always() && needs.change-filter.result == 'success' && needs.host-checks.result == 'success' && needs.meshcore-conformance.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.4
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      - name: Download exact MeshCore conformance evidence
+        uses: actions/download-artifact@v7
+        with:
+          name: d1l-meshcore-wire-conformance
+          path: artifacts/meshcore-conformance-input
+
+      - name: Verify exact MeshCore conformance evidence
+        shell: bash
+        run: |
+          mapfile -t conformance_files < <(
+            find artifacts/meshcore-conformance-input -type f \
+              -name "meshcore_conformance_${GITHUB_SHA}.json" -print
+          )
+          if [[ "${#conformance_files[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one current-commit conformance JSON, found %s\n' \
+              "${#conformance_files[@]}" >&2
+            exit 1
+          fi
+          conformance_json="${conformance_files[0]}"
+          python - "$conformance_json" <<'PY'
+          import json
+          import os
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              report = json.load(stream)
+          source = report.get("source_verification") or {}
+          required = {
+              "schema_version": report.get("schema_version") == 1,
+              "artifact_type": report.get("artifact_type") == "d1l_meshcore_wire_conformance",
+              "passed": report.get("passed") is True,
+              "status": report.get("status") == "pass",
+              "execution_complete": report.get("execution_complete") is True,
+              "repository_commit": source.get("repository_commit") == os.environ["GITHUB_SHA"],
+              "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
+              "coverage_level": report.get("coverage_level") == "wire_envelope_only",
+              "closure_ready_false": report.get("closure_ready") is False,
+              "issue_65_closure_eligible_false": report.get("issue_65_closure_eligible") is False,
+          }
+          failed = [name for name, ok in required.items() if not ok]
+          if failed:
+              raise SystemExit("MeshCore conformance validation failed: " + ", ".join(failed))
+          PY
+          printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
 
       - name: Build D1L firmware
         shell: bash
@@ -338,7 +403,7 @@ jobs:
       - name: Package D1L release
         shell: bash
         run: |
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}")
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi

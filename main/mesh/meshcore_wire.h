@@ -20,6 +20,8 @@ extern "C" {
 #define D1L_MESHCORE_PAYLOAD_PATH 0x08U
 #define D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU
 
+#define D1L_MESHCORE_PAYLOAD_VER_1 0x00U
+
 #define D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD \
     ((uint8_t)((D1L_MESHCORE_PAYLOAD_GROUP_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
 #define D1L_MESHCORE_HEADER_DM_TEXT_FLOOD \
@@ -54,6 +56,10 @@ uint8_t d1l_meshcore_wire_path_byte_len(uint8_t path_len);
 bool d1l_meshcore_wire_decode(const uint8_t *raw,
                               size_t size,
                               d1l_meshcore_wire_packet_t *out_packet);
+
+bool d1l_meshcore_wire_decode_v1(const uint8_t *raw,
+                                 size_t size,
+                                 d1l_meshcore_wire_packet_t *out_packet);
 
 bool d1l_meshcore_wire_write_prefix(uint8_t header,
                                     uint16_t transport_code_0,

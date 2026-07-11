@@ -35,8 +35,9 @@ cryptographic oracles because they do not implement production cryptography.
 
 The `meshcore-conformance` Actions job runs on `ubuntu-24.04` with the pinned
 `clang-18`/`clang++-18` packages. The runner builds the local wire codec and
-the pinned upstream packet-envelope code with libFuzzer, AddressSanitizer, and
-UndefinedBehaviorSanitizer, then:
+the pinned upstream packet-envelope code into a structural vector harness with
+AddressSanitizer and UndefinedBehaviorSanitizer. It separately builds the local
+wire decoder as the libFuzzer target, then:
 
 1. exercises valid packet envelopes in both directions;
 2. checks route type, payload type/version, transport prefixes, path hash
@@ -52,11 +53,16 @@ PATH, or multipart packets. In this slice those labels prove only that the
 packet-type byte and envelope survive the round trip; they do not prove the
 meaning, authentication, or state transition for any packet type.
 
-The pinned `Packet::readFrom` envelope path and the local codec expose and
-accept header versions 1 through 3. The pinned MeshCore `Dispatcher` rejects
-versions above `PAYLOAD_VER_1`. Dispatcher validation and behavior are
-semantic coverage deferred from this slice, so the artifact must not report
-versions 2 or 3 as dispatch-compatible or claim Dispatcher conformance.
+The pinned `Packet::readFrom` envelope path and
+`d1l_meshcore_wire_decode()` intentionally expose all four two-bit header
+version values so the structural oracle can compare packet bytes without
+pretending to be the Dispatcher. The separate
+`d1l_meshcore_wire_decode_v1()` boundary accepts only value zero
+(`PAYLOAD_VER_1`) and leaves its output unchanged for malformed or future
+versions. The fixed harness and local-parser fuzz target exercise both
+properties. All five production receive handlers call the v1 boundary before
+crypto or retained-store mutation. This closes version gating only; the
+artifact must not claim the remaining Dispatcher semantics are covered.
 
 The job writes
 `artifacts/meshcore-conformance/meshcore_conformance_<full-commit>.json` and
@@ -74,7 +80,8 @@ This first slice makes no claim about:
 
 - encryption, decryption, MACs, signatures, keys, channel secrets, or identity;
 - semantic dispatch for Public, DM, advert, ACK, PATH, trace, or multipart
-  traffic, including the `PAYLOAD_VER_1` Dispatcher gate;
+  traffic. The production v1 decoder guard is covered, but all remaining
+  Dispatcher behavior is not;
 - ACK timing, retry/delivery state, duplicate or replay control, packet
   lifetime, route selection/fallback, or self-message behavior;
 - persisted/retained state, schema migration, reboot recovery, or write
@@ -106,3 +113,10 @@ python ./scripts/meshcore_conformance_d1l.py \
 The firmware job depends on this job succeeding. That dependency prevents a
 known structural regression from producing a release package; it does not turn
 the structural check into a full protocol or production release gate.
+
+The package step copies the exact current-commit JSON and records its size,
+SHA-256, source commit, generation/expiry time, boundary, and non-closure flags.
+The release audit also requires an exact clean package source tree, an explicit
+selected Actions run ID, and that run's exact-commit host-check success marker.
+Mismatched, cross-run, red-host-check, dirty, tampered, path-escaping,
+out-of-range, expired, or closure-claiming structural evidence fails closed.

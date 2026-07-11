@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from scripts import sd_reboot_remount_acceptance_d1l as remount_accept
 
 
@@ -33,7 +35,14 @@ def ready_storage_line(manager_state: str = "READY_SD") -> str:
         '{"schema":1,"ok":true,"cmd":"storage status",'
         f'"manager":{{"running":true,"state":"{manager_state}"}},'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
-        '"data_root_ready":true,"file_ops":true,"atomic_rename":true}}\n'
+        '"data_root_ready":true,"rp2040_protocol_supported":true,'
+        '"file_ops":true,"atomic_rename":true,"status_stale":false,'
+        '"presence_stale":false,"refresh_failures":0,"file_line_max":512,'
+        '"file_chunk_max":192,"path_max":96},"data_enabled":true,'
+        '"data_backend":"mixed","message_store_backend":"sd",'
+        '"dm_store_backend":"sd","route_store_backend":"sd",'
+        '"packet_log_backend":"sd","stores":{"messages":"sd","dm":"sd",'
+        '"routes":"sd","packets":"sd"}}\n'
     )
 
 
@@ -67,9 +76,24 @@ def filecanary_line() -> str:
     return '{"schema":1,"ok":true,"cmd":"storage filecanary","public_rf_tx":false,"formats_sd":false}\n'
 
 
+CANARY_SEQUENCES = {"public": 101, "dm": 102, "route": 103, "packet": 104}
+
+
 def retained_canary_line(token: str) -> str:
     fp = remount_accept.fingerprint_for_token(token)
-    return f'{{"schema":1,"ok":true,"cmd":"storage retained-canary","token":"{token}","fingerprint":"{fp}"}}\n'
+    return json.dumps(
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "storage retained-canary",
+            "token": token,
+            "fingerprint": fp,
+            **{f"{name}_seq": value for name, value in CANARY_SEQUENCES.items()},
+            "backends": {name: "sd" for name in ("messages", "dm", "routes", "packets")},
+            "public_rf_tx": False,
+            "formats_sd": False,
+        }
+    ) + "\n"
 
 
 def map_tile_canary_line(token: str) -> str:
@@ -90,16 +114,84 @@ def map_tile_check_line(token: str) -> str:
 
 def readback_lines(token: str) -> list[str]:
     fp = remount_accept.fingerprint_for_token(token)
+    text = f"sd-retained-canary {token}"
     return [
-        f'{{"schema":1,"ok":true,"cmd":"messages public","entries":[{{"text":"sd-retained-canary {token}"}}]}}\n',
-        f'{{"schema":1,"ok":true,"cmd":"messages dm","entries":[{{"fingerprint":"{fp}","text":"sd-retained-canary {token}"}}]}}\n',
-        f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[{{"target":"{fp}"}}]}}\n',
-        f'{{"schema":1,"ok":true,"cmd":"packets search","entries":[{{"note":"sd-canary {token}"}}]}}\n',
+        json.dumps(
+            {
+                "schema": 1,
+                "ok": True,
+                "cmd": "messages public",
+                "count": 1,
+                "filtered": True,
+                "search": token,
+                "page_count": 1,
+                "total_matches": 1,
+                "entries": [{"seq": 101, "direction": "tx", "author": "SD Canary", "text": text, "delivered": True}],
+            }
+        ) + "\n",
+        json.dumps(
+            {
+                "schema": 1,
+                "ok": True,
+                "cmd": "messages dm",
+                "count": 1,
+                "filtered": True,
+                "fingerprint": fp,
+                "page_count": 1,
+                "total_matches": 1,
+                "thread_count": 1,
+                "entries": [{
+                    "seq": 102,
+                    "fingerprint": fp,
+                    "alias": "SD Canary",
+                    "direction": "tx",
+                    "text": text,
+                    "delivered": True,
+                    "acked": True,
+                    "ack_hash": remount_accept.retained_canary_hash(token),
+                }],
+            }
+        ) + "\n",
+        json.dumps(
+            {
+                "schema": 1,
+                "ok": True,
+                "cmd": "routes trace",
+                "fingerprint": fp,
+                "route_count": 1,
+                "entries": [{
+                    "seq": 103,
+                    "target": fp,
+                    "label": "SD Canary",
+                    "kind": "sd_canary",
+                    "route": "local",
+                    "direction": "tx",
+                    "payload_len": len(text),
+                }],
+            }
+        ) + "\n",
+        json.dumps(
+            {
+                "schema": 1,
+                "ok": True,
+                "cmd": "packets search",
+                "count": 1,
+                "filter": {"direction": "any", "kind": "any", "search": token},
+                "entries": [{
+                    "seq": 104,
+                    "direction": "tx",
+                    "kind": "sd_canary",
+                    "payload_len": len(text),
+                    "note": f"sd-canary {token}",
+                }],
+            }
+        ) + "\n",
     ]
 
 
-def health_line() -> str:
-    return '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'
+def health_line(boot_nonce: int | None = 2) -> str:
+    nonce = f',"boot_nonce":{boot_nonce}' if boot_nonce is not None else ""
+    return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true{nonce}}}\n'
 
 
 def test_storage_ready_requires_fat32_filesystem():
@@ -137,6 +229,25 @@ def test_dry_run_is_serial_only_and_read_only_after_reboot():
     assert not any("setup confirm" in command for command in report["commands"])
 
 
+def test_reboot_gets_targeted_timeout_without_changing_status_timeout(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {"ok": True, "cmd": command, "rebooting": command == "reboot"}
+
+    monkeypatch.setattr(remount_accept, "send_console_command", fake_send)
+    remount_accept.run_command(object(), "storage status", 5.0)
+    remount_accept.run_command(object(), "reboot", 5.0)
+    remount_accept.run_command(object(), "reboot", 25.0)
+
+    assert calls == [
+        ("storage status", 5.0),
+        ("reboot", 20.0),
+        ("reboot", 25.0),
+    ]
+
+
 def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monkeypatch):
     token = "remount1"
     pre = [
@@ -147,8 +258,9 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
     post = [
         ready_storage_line(),
         mount_line(),
@@ -175,8 +287,17 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     )
 
     assert report["ok"] is True
+    assert report["reboot_command_passed"] is True
+    assert report["reboot_route_flush"] == "ESP_OK"
+    assert report["reboot_proven"] is True
+    assert report["pre_reboot_boot_nonce"] == 1
+    assert report["post_reboot_boot_nonce"] == 2
     assert report["pre_remount_ready"] is True
     assert report["post_remount_ready"] is True
+    assert report["pre_remount_command_passed"] is True
+    assert report["post_remount_command_passed"] is True
+    assert report["retained_history_sd_ready_before"] is True
+    assert report["retained_history_sd_ready_after"] is True
     assert report["retained_canary_passed"] is True
     assert report["pre_reboot_readbacks_ok"] is True
     assert report["post_reboot_readbacks_ok"] is True
@@ -190,6 +311,105 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert "storage map-tile-check remount1" in report["commands"]
 
 
+def test_reboot_flush_failure_cannot_pass_remount_acceptance(monkeypatch):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+        health_line(1),
+    ]
+    reboot = [
+        '{"schema":1,"ok":false,"cmd":"reboot",'
+        '"code":"ESP_ERR_NVS_NOT_ENOUGH_SPACE","rebooting":false}\n'
+    ]
+    post = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        *readback_lines(token),
+        map_tile_check_line(token),
+        health_line(),
+    ]
+    pre_serial = FakeSerial(pre)
+    reboot_serial = FakeSerial(reboot)
+    post_serial = FakeSerial(post)
+    install_fake_serial(monkeypatch, [pre_serial, reboot_serial, post_serial])
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["reboot_command_passed"] is False
+    assert report["reboot_proven"] is False
+    assert report["post_remount_ready"] is False
+    assert report["post_reboot_readbacks_ok"] is False
+    assert report["post_map_tile_canary_passed"] is False
+    assert report["ok"] is False
+    reboot_result = next(row for row in report["results"] if row.get("cmd") == "reboot")
+    assert reboot_result["code"] == "ESP_ERR_NVS_NOT_ENOUGH_SPACE"
+    assert post_serial.writes == []
+    assert f"storage map-tile-check {token}" not in report["commands"]
+
+
+@pytest.mark.parametrize("post_nonce", [1, None])
+def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+        health_line(1),
+    ]
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+    post = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        *readback_lines(token),
+        map_tile_check_line(token),
+        health_line(post_nonce),
+    ]
+    install_fake_serial(
+        monkeypatch,
+        [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)],
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["reboot_command_passed"] is True
+    assert report["reboot_proven"] is False
+    assert report["post_remount_ready"] is False
+    assert report["post_reboot_readbacks_ok"] is False
+    assert report["ok"] is False
+
+
 def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
     token = "remount1"
     pre = [
@@ -201,8 +421,9 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
     post = [
         bridge_wait_storage_line(),
         mount_line(),
@@ -268,3 +489,26 @@ def test_mount_sequence_waits_after_busy_remount_even_when_cached_sd_is_ready(mo
     assert remount_accept.storage_ready(storage_after) is True
     assert commands == ["storage status", "storage remount", "storage status", "storage status"]
     assert ser.writes == [f"{command}\n" for command in commands]
+    assert remount_accept.remount_transition_passed(results[1], storage_after) is True
+
+
+def test_generic_remount_error_cannot_pass_with_cached_ready_status(monkeypatch):
+    ser = FakeSerial(
+        [
+            ready_storage_line(),
+            '{"schema":1,"ok":false,"cmd":"storage remount","code":"ESP_FAIL"}\n',
+            ready_storage_line(),
+        ]
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    _commands, results, storage_after = remount_accept.run_mount_sequence(
+        ser,
+        timeout=1.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert remount_accept.storage_ready(storage_after) is True
+    assert remount_accept.remount_manager_busy(results[1]) is False
+    assert remount_accept.remount_transition_passed(results[1], storage_after) is False

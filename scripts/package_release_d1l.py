@@ -10,7 +10,8 @@ import os
 import re
 import shutil
 import subprocess
-from datetime import datetime, timezone
+import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -33,6 +34,10 @@ RP2040_ARTIFACT_NAMES = [
     "rp2040-sd-smoke-firmware",
     "rp2040-seeed-official-sd-smoke-firmware",
 ]
+MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
+MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
+MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
+MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
 
 
 def utc_stamp() -> str:
@@ -51,6 +56,102 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def parse_utc_timestamp(value: object, field: str) -> datetime:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"MeshCore conformance {field} is missing")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"MeshCore conformance {field} is not a valid timestamp") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"MeshCore conformance {field} must include a timezone")
+    try:
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError(f"MeshCore conformance {field} is outside the supported range") from exc
+
+
+def copy_meshcore_conformance_evidence(
+    source: Path | None,
+    package_dir: Path,
+    expected_commit: str | None,
+) -> dict | None:
+    if source is None:
+        return None
+    source = source.resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Missing MeshCore conformance JSON {source}")
+    if not expected_commit:
+        raise ValueError("Cannot verify MeshCore conformance without an expected release commit")
+
+    try:
+        report = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"MeshCore conformance JSON is unreadable: {source}") from exc
+    if not isinstance(report, dict):
+        raise ValueError("MeshCore conformance JSON must contain an object")
+
+    source_verification = report.get("source_verification")
+    source_commit = (
+        source_verification.get("repository_commit")
+        if isinstance(source_verification, dict)
+        else None
+    )
+    required = {
+        "schema_version": report.get("schema_version") == 1,
+        "artifact_type": report.get("artifact_type") == MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+        "passed": report.get("passed") is True,
+        "status": report.get("status") == "pass",
+        "execution_complete": report.get("execution_complete") is True,
+        "coverage_boundary": report.get("coverage_boundary") == MESHCORE_CONFORMANCE_BOUNDARY,
+        "coverage_level": report.get("coverage_level") == MESHCORE_CONFORMANCE_BOUNDARY,
+        "closure_ready_false": report.get("closure_ready") is False,
+        "issue_65_closure_eligible_false": report.get("issue_65_closure_eligible") is False,
+        "source_commit": source_commit == expected_commit,
+    }
+    failed = [name for name, ok in required.items() if not ok]
+    if failed:
+        raise ValueError("MeshCore conformance validation failed: " + ", ".join(failed))
+
+    generated_at = parse_utc_timestamp(report.get("generated_at"), "generated_at")
+    now = datetime.now(timezone.utc)
+    if generated_at > now + timedelta(minutes=MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES):
+        raise ValueError("MeshCore conformance generated_at is in the future")
+    try:
+        expires_at = generated_at + timedelta(days=MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    except OverflowError as exc:
+        raise ValueError("MeshCore conformance generated_at is outside the supported range") from exc
+    if now >= expires_at:
+        raise ValueError("MeshCore conformance evidence is expired")
+
+    expected_name = f"meshcore_conformance_{expected_commit}.json"
+    if source.name != expected_name:
+        raise ValueError(
+            f"MeshCore conformance filename must be {expected_name}, got {source.name}"
+        )
+    evidence_dir = package_dir / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    dest = evidence_dir / expected_name
+    shutil.copy2(source, dest)
+    return {
+        "artifact_type": MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+        "path": dest.relative_to(package_dir).as_posix(),
+        "size": dest.stat().st_size,
+        "sha256": sha256_file(dest),
+        "source_commit": source_commit,
+        "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        "max_age_days": MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+        "coverage_boundary": MESHCORE_CONFORMANCE_BOUNDARY,
+        "coverage_level": MESHCORE_CONFORMANCE_BOUNDARY,
+        "closure_ready": False,
+        "issue_65_closure_eligible": False,
+        "passed": True,
+        "execution_complete": True,
+        "note": "Structural wire-envelope prerequisite only; this evidence does not close issue #65.",
+    }
+
+
 def git_value(root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -63,7 +164,10 @@ def git_value(root: Path, *args: str) -> str | None:
         )
     except (FileNotFoundError, subprocess.CalledProcessError):
         return None
-    return result.stdout.strip() or None
+    # Porcelain status uses the first two columns as semantic XY state. Keep
+    # leading spaces so a worktree-only submodule edit cannot be confused with
+    # a staged gitlink change.
+    return result.stdout.rstrip("\r\n") or None
 
 
 def command_succeeds(cwd: Path, args: list[str]) -> bool:
@@ -105,6 +209,93 @@ def expected_bsp_patches_applied(root: Path) -> bool:
     return True
 
 
+def run_git_command(
+    cwd: Path,
+    args: list[str],
+    *,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            env=env,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, OSError):
+        return None
+
+
+def exact_expected_bsp_patch_state(root: Path) -> bool:
+    """Prove the BSP worktree is exactly HEAD plus the two tracked patches."""
+    root = root.resolve()
+    submodule = root / EXPECTED_BSP_SUBMODULE
+    patches = [root / relative for relative in EXPECTED_BSP_PATCHES]
+    if not submodule.is_dir() or any(not patch.is_file() for patch in patches):
+        return False
+
+    gitlink = run_git_command(
+        root, ["ls-tree", "HEAD", "--", EXPECTED_BSP_SUBMODULE.as_posix()]
+    )
+    submodule_head = run_git_command(submodule, ["rev-parse", "HEAD"])
+    if gitlink is None or submodule_head is None:
+        return False
+    match = re.fullmatch(
+        r"160000 commit ([0-9a-f]{40})\t" + re.escape(EXPECTED_BSP_SUBMODULE.as_posix()),
+        gitlink.stdout.strip(),
+    )
+    if match is None or submodule_head.stdout.strip() != match.group(1):
+        return False
+
+    # The expected build patches are unstaged worktree edits. Reject staged or
+    # untracked content before comparing the exact tracked tree.
+    if run_git_command(submodule, ["diff", "--cached", "--quiet", "--exit-code"]) is None:
+        return False
+    untracked = run_git_command(
+        submodule, ["ls-files", "--others", "--exclude-standard"]
+    )
+    if untracked is None or untracked.stdout.strip():
+        return False
+
+    with tempfile.TemporaryDirectory(prefix="d1l-bsp-patch-state-") as temporary:
+        temp = Path(temporary)
+        expected_env = os.environ.copy()
+        expected_env["GIT_INDEX_FILE"] = str(temp / "expected.index")
+        actual_env = os.environ.copy()
+        actual_env["GIT_INDEX_FILE"] = str(temp / "actual.index")
+
+        if run_git_command(submodule, ["read-tree", "HEAD"], env=expected_env) is None:
+            return False
+        for patch in patches:
+            if run_git_command(
+                submodule,
+                [
+                    "apply",
+                    "--cached",
+                    "--unidiff-zero",
+                    "--ignore-space-change",
+                    str(patch),
+                ],
+                env=expected_env,
+            ) is None:
+                return False
+        expected_tree = run_git_command(submodule, ["write-tree"], env=expected_env)
+
+        if run_git_command(submodule, ["read-tree", "HEAD"], env=actual_env) is None:
+            return False
+        if run_git_command(submodule, ["add", "-u", "--", "."], env=actual_env) is None:
+            return False
+        actual_tree = run_git_command(submodule, ["write-tree"], env=actual_env)
+        return (
+            expected_tree is not None
+            and actual_tree is not None
+            and expected_tree.stdout.strip() == actual_tree.stdout.strip()
+        )
+
+
 def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], list[str]]:
     entries = [line for line in status.splitlines() if line.strip()]
     if not entries:
@@ -113,7 +304,16 @@ def clean_release_status_entries(root: Path, status: str) -> tuple[list[str], li
     expected_submodule = EXPECTED_BSP_SUBMODULE.as_posix()
     expected_entries = [line for line in entries if status_path(line) == expected_submodule]
     other_entries = [line for line in entries if status_path(line) != expected_submodule]
-    if expected_entries and expected_bsp_patches_applied(root):
+    expected_entry_is_worktree_only = (
+        len(expected_entries) == 1
+        and len(expected_entries[0]) >= 3
+        and expected_entries[0][0] == " "
+        and expected_entries[0][1] in {"M", "m"}
+    )
+    if (
+        expected_entry_is_worktree_only
+        and exact_expected_bsp_patch_state(root)
+    ):
         return other_entries, [patch.as_posix() for patch in EXPECTED_BSP_PATCHES]
 
     return entries, []
@@ -358,12 +558,13 @@ def write_full_flash_image(build_dir: Path, package_dir: Path, flasher_args: dic
 
 def write_sha256sums(package_dir: Path) -> None:
     rows = []
+    manifest = package_dir / "SHA256SUMS.txt"
     for path in sorted(package_dir.rglob("*")):
-        if not path.is_file() or path.name == "SHA256SUMS.txt":
+        if not path.is_file() or path == manifest:
             continue
         rel = path.relative_to(package_dir).as_posix()
         rows.append(f"{sha256_file(path)}  ./{rel}")
-    (package_dir / "SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
+    manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
 
 
 def command_flash_files(entries: list[dict]) -> list[str]:
@@ -479,6 +680,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `full-flash/meshcore_deskos_d1l-full-8mb.bin` is an 8MB factory/recovery image padded with `0xff`.
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
+- `evidence/` contains current-commit MeshCore wire-envelope conformance JSON when supplied by CI. It is a structural prerequisite and does not close issue #65.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash
@@ -523,12 +725,21 @@ def create_release_package(
     package_name: str,
     full_size: int,
     rp2040_artifact_root: Path | None = None,
+    meshcore_conformance_json: Path | None = None,
 ) -> dict:
     flasher_args = load_flasher_args(build_dir)
     package_dir = out_dir / package_name
     if package_dir.exists():
         shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True, exist_ok=True)
+
+    source_git = git_info(root)
+    expected_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
+    meshcore_conformance = copy_meshcore_conformance_evidence(
+        meshcore_conformance_json,
+        package_dir,
+        expected_commit,
+    )
 
     firmware_dir = package_dir / "firmware"
     entries = copy_flash_files(build_dir, firmware_dir, flasher_args)
@@ -547,12 +758,13 @@ def create_release_package(
         "app_version": d1l_firmware_version(root),
         "package": package_name,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "git": git_info(root),
+        "git": source_git,
         "workflow": workflow_info(),
         "source_build_dir": str(build_dir),
         "flash_settings": flasher_args.get("flash_settings", {}),
         "flash_files": entries,
         "rp2040_artifacts": rp2040_artifacts,
+        "meshcore_conformance": meshcore_conformance,
         "update_image": update_image,
         "full_flash_image": full_image,
         "debug_files": debug_files,
@@ -579,6 +791,7 @@ def main() -> int:
     parser.add_argument("--package-name", default=None)
     parser.add_argument("--full-size", type=lambda value: int(value, 0), default=DEFAULT_FLASH_SIZE)
     parser.add_argument("--rp2040-artifact-root", default=None)
+    parser.add_argument("--meshcore-conformance-json", default=None)
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -598,6 +811,12 @@ def main() -> int:
     if rp2040_artifact_root and not rp2040_artifact_root.is_absolute():
         rp2040_artifact_root = root / rp2040_artifact_root
 
+    meshcore_conformance_json = (
+        Path(args.meshcore_conformance_json) if args.meshcore_conformance_json else None
+    )
+    if meshcore_conformance_json and not meshcore_conformance_json.is_absolute():
+        meshcore_conformance_json = root / meshcore_conformance_json
+
     manifest = create_release_package(
         root,
         build_dir,
@@ -605,6 +824,7 @@ def main() -> int:
         package_name,
         args.full_size,
         rp2040_artifact_root=rp2040_artifact_root,
+        meshcore_conformance_json=meshcore_conformance_json,
     )
     print(json.dumps(manifest))
     return 0

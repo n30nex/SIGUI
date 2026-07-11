@@ -44,6 +44,33 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, std::size_t size)
     d1l_meshcore_wire_packet_t before;
     std::memcpy(&before, &packet, sizeof(packet));
     const bool decoded = d1l_meshcore_wire_decode(data, size, &packet);
+
+    d1l_meshcore_wire_packet_t v1_packet;
+    std::memset(&v1_packet, 0xA5, sizeof(v1_packet));
+    d1l_meshcore_wire_packet_t v1_before;
+    std::memcpy(&v1_before, &v1_packet, sizeof(v1_packet));
+    const bool v1_decoded =
+        d1l_meshcore_wire_decode_v1(data, size, &v1_packet);
+    if (!v1_decoded &&
+        std::memcmp(&v1_before, &v1_packet, sizeof(v1_packet)) != 0) {
+        fail();
+    }
+    if (v1_decoded !=
+        (decoded && packet.version == D1L_MESHCORE_PAYLOAD_VER_1)) {
+        fail();
+    }
+    if (v1_decoded &&
+        (v1_packet.header != packet.header ||
+         v1_packet.route != packet.route ||
+         v1_packet.type != packet.type ||
+         v1_packet.version != D1L_MESHCORE_PAYLOAD_VER_1 ||
+         v1_packet.path_len != packet.path_len ||
+         v1_packet.path != packet.path ||
+         v1_packet.path_byte_len != packet.path_byte_len ||
+         v1_packet.payload != packet.payload ||
+         v1_packet.payload_len != packet.payload_len)) {
+        fail();
+    }
     if (!decoded) {
         if (std::memcmp(&before, &packet, sizeof(packet)) != 0) {
             fail();

@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from artifact_metadata import stamp_report
     from sd_file_canary_d1l import storage_status_fresh
     from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import stamp_report
     from scripts.sd_file_canary_d1l import storage_status_fresh
     from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
@@ -217,6 +219,7 @@ def main() -> int:
         report = run_export(args.port, args.baud, args.timeout, args.token, args.allow_unavailable)
 
     root = Path(__file__).resolve().parents[1]
+    stamp_report(report, root)
     if args.out:
         out_path = Path(args.out)
         if not out_path.is_absolute():

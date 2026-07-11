@@ -42,16 +42,23 @@ Status: **complete in this roadmap; enforce in issues, UI, and release docs.**
 
 ### Stage 2 - Establish one supported integration image
 
-Status: **in progress. This is the only current implementation priority.**
+Status: **bounded platform base established, but physical Stage 2 closure is
+still open.** Stage 3 work is proceeding on top of `727bd23` without treating
+that base as final qualification.
 
 1. Integrate the ESP-IDF 5.5.4 migration from PR #64 with the Map/Wi-Fi/boot-loop work from PR #62/#13.
 2. Build firmware, package, checksums, effective `sdkconfig`, dependency lock, and release-gate inputs in Actions from the combined commit.
-3. Flash that exact artifact to COM12 without erasing retained settings or touching SD contents.
+3. Flash that exact artifact to COM12 without erasing retained settings or touching SD contents. Retain a P0 receipt proving the selected full commit/run/port, complete checksum manifest, exact contained offset/file set with required bootloader/partition/application roles and no extras, successful non-erasing esptool result, and an exact full `build_commit` read back by COM12 smoke.
 4. Prove on the same image: ESP-IDF identity, stable boot, Wi-Fi disabled path, enable/connect/reconnect, saved-profile reboot, internal/DMA reserve, radio readiness, autonomous bounded RP2040/SD recovery without a reset storm, no intermittent false no-card state from #78, and no new PANIC/WDT/brownout loop.
 5. Physically enter Map at the saved test location and prove useful local-dark regional detail at default zoom 10; one-finger pan; `-`, `+`, and `Center` across the bounded 8-through-14 range; at most nine requests at one zoom per committed visible generation; no request while a drag is still active; leave-Map cancellation; completed exact-view Home-to-Map retained-frame reuse with no network or SD reread; SD persistence; reboot cache reuse without duplicate network fetches; and passive signed-advert node markers with names below them that update without starting tile or RF work.
 6. Rebase or replace the stale SD PR #36 only if current Stage 2 code still needs it; do not merge a dirty historical branch for its evidence.
 
-Stage 2 closes only when the combined Actions artifact passes the quick COM12 integration proof. Separate green SDK and Map/Wi-Fi branches are necessary evidence but do not close it.
+Stage 2 closes only when one combined Actions artifact passes the COM12
+boot/Wi-Fi/radio/SD integration checks plus physical Map controls/cache/marker
+and touch/photo/power-cycle acceptance under #63/#73, and the exact ESP32/RP2040
+pair passes #78 removal/reinsertion without a false no-card state. Separate
+green SDK, Map/Wi-Fi, marker-source, or SD-source branches and the bounded
+`727bd23` checks are necessary evidence but do not close it.
 
 ### Stage 3 - Establish MeshCore conformance
 
@@ -125,7 +132,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 
 | Workstream | Audit coverage | Existing tracking | Closure proof |
 |---|---|---|---|
-| Supported integration image | P0.1, P0.16 | #63, #13, #12, #14 | One ESP-IDF 5.5.4 Actions artifact passes COM12 boot/Wi-Fi/radio/SD/Map/reboot proof. |
+| Supported integration image | P0.1, P0.16 | #63, #13, #12, #14, #73, #78 | One ESP-IDF 5.5.4 Actions artifact passes COM12 boot/Wi-Fi/radio/SD/Map/reboot plus physical Map marker/touch/photo/power-cycle and SD removal/reinsertion proof. |
 | MeshCore conformance foundation | P0.2, P0.11 | #65 | Bidirectional upstream vectors, malformed input coverage, RX fuzzing, and declared supported packet surface pass in CI. The wire-envelope-only slice is necessary but cannot close this row. |
 | Reliable DM session | P0.3, P0.4, P0.5, P0.10 | #66 | Official peer proves ACK, retry, truthful states, heard-node send, duplicate suppression, timeout, and reboot recovery. |
 | Contact and channel parity | P0.6, P0.7 | #67 | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
@@ -138,13 +145,18 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 
 ## Immediate Work Queue
 
-1. Preserve `727bd23` as the exact Stage 2 hardware-qualified platform candidate. Its Actions run, checksums, ESP32/RP2040 flashes, Wi-Fi/radio/SD health, retained/file canaries, reboot survival, and 120-second persistent-handle soak are banked; do not rerun that whole matrix for every Stage 3 edit.
-2. Finish the current Stage 3 integration batch: pinned #65 wire-envelope conformance, the #69 NVS-capacity/write-rate fix exposed by the soak, and deterministic SD reboot/remount acceptance. Review the combined source first, then run one focused validation pass, one full host pass, and one Actions cycle.
-3. Extend #65 from structural envelopes to deterministic semantic and production-cryptography vectors for signed adverts, Public, DM, ACK/ACK+PATH, PATH/trace, invalid MAC/signature/length, self-message, duplicate/replay, and retained-state transitions. Keep `closure_ready=false` until the entire declared surface is proven against the pinned implementation.
-4. Implement #66, then #67 and #68: reliable DM state/ACK/retry, contact and multi-channel parity, followed by real PATH/trace and direct-route fallback. Use official-peer/two-radio evidence only after the host state machines are complete.
-5. Implement the truthful operator layer on those contracts: #74 Messages, #75 Nodes, #76 compact navigation/Home status, #70 role truthfulness, and #77 authenticated compatible repeater/room administration.
-6. Finish #78 with physical removal/reinsertion proof on the exact ESP32/RP2040 pair, and complete the physical Map control/cache/marker proof. These require manual card/touch actions and are not replaced by serial automation.
-7. Close #69 ownership/schema/time recovery, the remaining #6/#16 runtime boundaries, the full SD/RF/UI matrices and 12-hour soaks, then freeze and audit the exact #71 release candidate before tagging 1.0.
+1. Preserve `727bd23` as the bounded hardware-tested Stage 2 platform base,
+   not a Stage 2 closure claim. Its Actions run, checksums, ESP32/RP2040
+   flashes, Wi-Fi/radio/SD health, retained/file canaries, reboot survival, and
+   120-second persistent-handle soak are banked; do not rerun that whole matrix
+   for every Stage 3 edit. Physical #63/#73/#78 gates remain open.
+2. Finish the current Stage 3 integration batch: pinned #65 wire-envelope conformance; the #69 route NVS-capacity/write-rate fix exposed by the soak; isolated non-durable UI preview slots for Public, DM, route, and packet canaries; and deterministic SD reboot/remount acceptance. Review the combined source first, then run one focused validation pass, one full host pass, and one Actions cycle.
+3. Finish the remaining #69 retained-store boundary before claiming SD fallback complete: Public, DM, and packet stores must read/merge a late-ready or replacement card before any primary overwrite, and a successful SD write followed by a failed NVS mirror must stay dirty and retry until both durability targets are current.
+4. Extend #65 from structural envelopes to deterministic semantic and production-cryptography vectors for signed adverts, Public, DM, ACK/ACK+PATH, PATH/trace, invalid MAC/signature/length, self-message, duplicate/replay, and retained-state transitions. Keep `closure_ready=false` until the entire declared surface is proven against the pinned implementation.
+5. Implement #66, then #67 and #68: reliable DM state/ACK/retry, contact and multi-channel parity, followed by real PATH/trace and direct-route fallback. Use official-peer/two-radio evidence only after the host state machines are complete.
+6. Implement the truthful operator layer on those contracts: #74 Messages, #75 Nodes, #76 compact navigation/Home status, #70 role truthfulness, and #77 authenticated compatible repeater/room administration.
+7. Finish #78 with physical removal/reinsertion proof on the exact ESP32/RP2040 pair, and finish #73 plus #63 physical Map control/cache/marker/touch/photo/power-cycle proof. These require manual card/touch actions and are not replaced by serial automation.
+8. Close #69 ownership/schema/time recovery, the remaining #6/#16 runtime boundaries, the full SD/RF/UI matrices and 12-hour soaks, then freeze and audit the exact #71 release candidate before tagging 1.0.
 
 ## Evidence Already Banked, Not Final Qualification
 

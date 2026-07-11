@@ -1,16 +1,46 @@
 #include "health_monitor.h"
 
 #include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "lvgl.h"
 
 static TaskHandle_t s_ui_task;
 static bool s_lvgl_ready;
+static uint32_t s_boot_nonce;
+static bool s_nvs_ready;
+static esp_err_t s_nvs_error = ESP_ERR_INVALID_STATE;
 static portMUX_TYPE s_lvgl_metrics_lock = portMUX_INITIALIZER_UNLOCKED;
 static uint32_t s_lvgl_free_bytes;
 static uint32_t s_lvgl_largest_free_bytes;
 static uint8_t s_lvgl_used_pct;
+
+static uint32_t generate_boot_nonce(void)
+{
+    uint32_t nonce = 0;
+    while (nonce == 0U) {
+        nonce = esp_random();
+    }
+    return nonce;
+}
+
+void d1l_health_monitor_init(esp_err_t nvs_status)
+{
+    if (s_boot_nonce == 0U) {
+        s_boot_nonce = generate_boot_nonce();
+    }
+    s_nvs_ready = nvs_status == ESP_OK;
+    s_nvs_error = nvs_status;
+}
+
+uint32_t d1l_health_monitor_boot_nonce(void)
+{
+    if (s_boot_nonce == 0U) {
+        s_boot_nonce = generate_boot_nonce();
+    }
+    return s_boot_nonce;
+}
 
 const char *d1l_health_reset_reason_name(int reason)
 {
@@ -68,6 +98,7 @@ void d1l_health_monitor_sample_lvgl(void)
 d1l_health_snapshot_t d1l_health_snapshot(void)
 {
     d1l_health_snapshot_t snapshot = {
+        .boot_nonce = d1l_health_monitor_boot_nonce(),
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
         .heap_free = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_8BIT),
         .heap_min_free = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_8BIT),
@@ -82,6 +113,8 @@ d1l_health_snapshot_t d1l_health_snapshot(void)
         .psram_largest_free = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
         .current_task_stack_free_words = (uint32_t)uxTaskGetStackHighWaterMark(NULL),
         .ui_task_stack_free_words = s_ui_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_ui_task) : 0U,
+        .nvs_ready = s_nvs_ready,
+        .nvs_error = s_nvs_error,
         .reset_reason = d1l_health_reset_reason_name(esp_reset_reason()),
     };
     portENTER_CRITICAL(&s_lvgl_metrics_lock);

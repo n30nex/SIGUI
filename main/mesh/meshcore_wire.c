@@ -89,6 +89,24 @@ bool d1l_meshcore_wire_decode(const uint8_t *raw,
     return true;
 }
 
+bool d1l_meshcore_wire_decode_v1(const uint8_t *raw,
+                                 size_t size,
+                                 d1l_meshcore_wire_packet_t *out_packet)
+{
+    if (!out_packet) {
+        return false;
+    }
+
+    d1l_meshcore_wire_packet_t packet;
+    if (!d1l_meshcore_wire_decode(raw, size, &packet) ||
+        packet.version != D1L_MESHCORE_PAYLOAD_VER_1) {
+        return false;
+    }
+
+    *out_packet = packet;
+    return true;
+}
+
 bool d1l_meshcore_wire_write_prefix(uint8_t header,
                                     uint16_t transport_code_0,
                                     uint16_t transport_code_1,

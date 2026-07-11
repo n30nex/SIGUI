@@ -26,9 +26,17 @@ typedef struct {
     esp_err_t nvs_mirror_last_error;
 } d1l_retained_blob_store_sd_stats_t;
 
+typedef struct {
+    bool enabled;
+    uint32_t generation;
+} d1l_retained_blob_store_backend_state_t;
+
 const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_is_available(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id);
+bool d1l_retained_blob_store_backend_state(
+    d1l_retained_blob_store_id_t store_id,
+    d1l_retained_blob_store_backend_state_t *out_state);
 bool d1l_retained_blob_store_sd_stats(d1l_retained_blob_store_id_t store_id,
                                       d1l_retained_blob_store_sd_stats_t *out_stats);
 bool d1l_retained_blob_store_any_sd_degraded(void);
@@ -38,6 +46,42 @@ void d1l_retained_blob_store_note_sd_backend(bool data_ready,
                                              uint32_t file_line_max,
                                              uint32_t file_chunk_max,
                                              uint32_t path_max);
+esp_err_t d1l_retained_blob_store_read_sd_primary(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    void *dst,
+    size_t *len_inout);
+esp_err_t d1l_retained_blob_store_read_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    void *dst,
+    size_t *len_inout);
+esp_err_t d1l_retained_blob_store_write_sd_primary(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    const void *src,
+    size_t len);
+esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    const void *src,
+    size_t len,
+    uint32_t expected_generation);
+esp_err_t d1l_retained_blob_store_write_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    const void *src,
+    size_t len);
+esp_err_t d1l_retained_blob_store_erase_sd_primary(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key);
+esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key,
+    uint32_t expected_generation);
+esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id,
+    const char *key);
 esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
                                        const char *key,
                                        void *dst,

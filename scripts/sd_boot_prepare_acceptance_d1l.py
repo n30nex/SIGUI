@@ -11,9 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
+    from artifact_metadata import stamp_report
     from sd_file_canary_d1l import storage_status_fresh
     from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.artifact_metadata import stamp_report
     from scripts.sd_file_canary_d1l import storage_status_fresh
     from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
@@ -425,6 +427,7 @@ def run_acceptance(
 
 def write_report(report: dict, out_path: Path | None) -> Path:
     root = Path(__file__).resolve().parents[1]
+    stamp_report(report, root)
     if out_path is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         scenario = str(report.get("scenario", "all")).replace("-", "_")

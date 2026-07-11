@@ -656,8 +656,9 @@ def test_ui_data_canary_uses_volatile_store_paths():
         "main/mesh/packet_log.c",
     ]:
         source = read(rel)
-        assert "static bool is_volatile_ui_canary" in source
-        assert "is_volatile_ui_canary" in source.split("static void fill", 1)[1]
+        assert "s_volatile_entry" in source
+        assert "s_volatile_valid" in source
+        assert "is_volatile_ui_canary" not in source
 
 
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():

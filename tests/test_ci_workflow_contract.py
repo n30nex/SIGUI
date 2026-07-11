@@ -134,14 +134,27 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "--port" not in job
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
 
-    assert "needs: [change-filter, meshcore-conformance, rp2040-sd-bridge-build]" in firmware
+    assert "needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]" in firmware
+    assert "needs.host-checks.result == 'success'" in firmware
     assert "needs.meshcore-conformance.result == 'success'" in firmware
+    assert "name: Download exact MeshCore conformance evidence" in firmware
+    assert "uses: actions/download-artifact@v7" in firmware
+    assert "name: d1l-meshcore-wire-conformance" in firmware
+    assert "path: artifacts/meshcore-conformance-input" in firmware
+    assert "name: Verify exact MeshCore conformance evidence" in firmware
+    assert 'source.get("repository_commit") == os.environ["GITHUB_SHA"]' in firmware
+    assert 'report.get("coverage_boundary") == "wire_envelope_only"' in firmware
+    assert 'report.get("coverage_level") == "wire_envelope_only"' in firmware
+    assert 'report.get("closure_ready") is False' in firmware
+    assert 'report.get("issue_65_closure_eligible") is False' in firmware
+    assert "D1L_MESHCORE_CONFORMANCE_JSON=" in firmware
 
 
 def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     job = job_block("firmware-build")
 
-    assert "needs: [change-filter, meshcore-conformance, rp2040-sd-bridge-build]" in job
+    assert "needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]" in job
+    assert "needs.host-checks.result == 'success'" in job
     assert "needs.meshcore-conformance.result == 'success'" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
     assert job.count("container: espressif/idf:v5.5.4") == 1
@@ -171,6 +184,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "path: artifacts/rp2040-release-inputs" in job
     assert "merge-multiple: false" in job
     assert "package_args=(--build-dir build --out-dir artifacts/release" in job
+    assert '--meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON"' in job
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
@@ -180,3 +194,20 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/" in job
     assert "--port" not in job
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
+
+
+def test_ci_records_exact_host_success_only_after_all_host_checks_pass():
+    host = job_block("host-checks")
+    firmware = job_block("firmware-build")
+
+    assert "name: Record exact host-check success evidence" in host
+    assert 'artifact_type = "d1l_host_checks_success"' in host
+    assert 'status = "pass"' in host
+    assert "passed = $true" in host
+    assert "all_prior_steps_completed = $true" in host
+    assert "repository_commit = $env:GITHUB_SHA" in host
+    assert "workflow_run_id = [string]$env:GITHUB_RUN_ID" in host
+    assert 'd1l_host_checks_success_{0}.json' in host
+    assert host.index("name: Host tests") < host.index("name: Record exact host-check success evidence")
+    assert host.index("name: Record exact host-check success evidence") < host.index("name: d1l-host-artifacts")
+    assert "needs.host-checks.result == 'success'" in firmware

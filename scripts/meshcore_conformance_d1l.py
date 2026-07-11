@@ -59,6 +59,12 @@ EXPECTED_VECTORS = {
     "upstream_to_local": 432,
     "total": 864,
 }
+EXPECTED_PAYLOAD_VERSION_GATE = {
+    "permissive_envelope_versions": [0, 1, 2, 3],
+    "accepted_v1_versions": [0],
+    "rejected_future_versions": [1, 2, 3],
+    "preserve_output_on_reject": True,
+}
 EXPECTED_VECTOR_MATRIX = {
     "payload_types": [
         {"name": "TXT", "code": 2},
@@ -173,6 +179,8 @@ def load_manifest() -> dict[str, Any]:
         raise GateFailure("manifest wire constants drifted")
     if manifest.get("vectors") != EXPECTED_VECTORS:
         raise GateFailure("manifest vector counts drifted")
+    if manifest.get("payload_version_gate") != EXPECTED_PAYLOAD_VERSION_GATE:
+        raise GateFailure("manifest payload version gate drifted")
     if manifest.get("vector_matrix") != EXPECTED_VECTOR_MATRIX:
         raise GateFailure("manifest vector matrix drifted")
     if manifest.get("fuzz") != EXPECTED_FUZZ:
@@ -458,6 +466,7 @@ def base_report(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str,
             "upstream_commit": manifest["upstream"]["commit"],
         },
         "vector_matrix": manifest["vector_matrix"],
+        "payload_version_gate": manifest["payload_version_gate"],
         "corpus": None,
         "commands": command_plan(args.cc, args.cxx),
         "source_verification": None,
@@ -544,6 +553,10 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 or vector_result.get("path_length_encodings", {}).get("tested") != 256
                 or vector_result.get("path_length_encodings", {}).get("valid") != 119
                 or vector_result.get("path_length_encodings", {}).get("invalid") != 137
+                or vector_result.get("payload_version_gate", {}).get("tested") != 4
+                or vector_result.get("payload_version_gate", {}).get("accepted_v1") != 1
+                or vector_result.get("payload_version_gate", {}).get("rejected_future") != 3
+                or vector_result.get("payload_version_gate", {}).get("preserved_rejections") != 3
                 or vector_result.get("undersized_encoder_capacities") != 254
                 or vector_result.get("failures") != 0
             ):

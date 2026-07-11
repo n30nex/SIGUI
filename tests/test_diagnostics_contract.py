@@ -33,6 +33,19 @@ def test_health_monitor_reports_stack_lvgl_and_largest_blocks():
     source = read("main/diagnostics/health_monitor.c")
     ui = read("main/ui/ui_phase1.c")
     console = read("main/comms/usb_console.c")
+    app_main = read("main/app_main.c")
+    assert "boot_nonce" in header
+    assert "nvs_ready" in header
+    assert "nvs_error" in header
+    assert "d1l_health_monitor_init" in header
+    assert "generate_boot_nonce" in source
+    assert "esp_random()" in source
+    assert ".boot_nonce = d1l_health_monitor_boot_nonce()" in source
+    assert ".nvs_ready = s_nvs_ready" in source
+    assert "d1l_health_monitor_init(nvs_ret)" in app_main
+    assert "nvs_flash_erase" not in app_main
+    assert "ESP_ERROR_CHECK(nvs_ret)" not in app_main
+    assert "NVS unavailable; preserving persisted data" in app_main
     assert "heap_largest_free" in header
     assert "internal_heap_free" in header
     assert "internal_heap_min_free" in header
@@ -60,6 +73,20 @@ def test_health_monitor_reports_stack_lvgl_and_largest_blocks():
     assert '\\"internal_heap_largest_free\\":%lu' in console
     assert '\\"dma_heap_free\\":%lu' in console
     assert '\\"dma_heap_largest_free\\":%lu' in console
+    assert '\\"boot_nonce\\":%lu' in console
+    assert '\\"nvs_ready\\":%s' in console
+    assert '\\"nvs_error\\":\\"%s\\"' in console
+
+
+def test_version_reports_exact_actions_or_checkout_build_commit():
+    cmake = read("main/CMakeLists.txt")
+    console = read("main/comms/usb_console.c")
+
+    assert '$ENV{GITHUB_SHA}' in cmake
+    assert "COMMAND git rev-parse HEAD" in cmake
+    assert 'D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"' in cmake
+    assert '\\"build_commit\\":\\"%s\\"' in console
+    assert "D1L_BUILD_GIT_COMMIT" in console
 
 
 def test_console_exposes_crashlog_commands():

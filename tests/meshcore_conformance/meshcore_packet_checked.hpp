@@ -42,6 +42,8 @@ static_assert(PAYLOAD_TYPE_PATH == 0x08,
               "Pinned MeshCore path payload type changed");
 static_assert(PAYLOAD_TYPE_MULTIPART == 0x0A,
               "Pinned MeshCore multipart payload type changed");
+static_assert(D1L_MESHCORE_PAYLOAD_VER_1 == PAYLOAD_VER_1,
+              "Production and pinned v1 payload versions differ");
 static_assert(D1L_MESHCORE_MAX_PACKET_PAYLOAD == MAX_PACKET_PAYLOAD,
               "Production and pinned payload limits differ");
 static_assert(D1L_MESHCORE_MAX_PATH_BYTES == MAX_PATH_SIZE,

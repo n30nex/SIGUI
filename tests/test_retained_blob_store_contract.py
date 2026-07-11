@@ -20,6 +20,8 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_backend_name" in header
     assert "d1l_retained_blob_store_is_available" in header
     assert "d1l_retained_blob_store_uses_sd" in header
+    assert "d1l_retained_blob_store_backend_state_t" in header
+    assert "d1l_retained_blob_store_backend_state" in header
     assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in header
     assert "d1l_retained_blob_store_sd_stats_t" in header
     assert "sd_read_fail_count" in header
@@ -31,6 +33,14 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_sd_stats" in header
     assert "d1l_retained_blob_store_any_sd_degraded" in header
     assert "d1l_retained_blob_store_note_sd_backend" in header
+    assert "d1l_retained_blob_store_read_sd_primary" in header
+    assert "d1l_retained_blob_store_read_nvs_fallback" in header
+    assert "d1l_retained_blob_store_write_sd_primary" in header
+    assert "d1l_retained_blob_store_write_sd_primary_guarded" in header
+    assert "d1l_retained_blob_store_write_nvs_fallback" in header
+    assert "d1l_retained_blob_store_erase_sd_primary" in header
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded" in header
+    assert "d1l_retained_blob_store_erase_nvs_fallback" in header
     assert "d1l_retained_blob_store_read" in header
     assert "d1l_retained_blob_store_read_fallback" in header
     assert "d1l_retained_blob_store_write" in header
@@ -52,6 +62,8 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert '.name = "packet_log"' in source
     assert 'return store_sd_enabled(config) ? "sd" : "nvs";' in source
     assert "s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT]" in source
+    assert "s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT]" in source
+    assert "s_store_state_mux" in source
     assert "s_store_sd_enabled[config->id]" in source
     assert "s_store_sd_stats[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret)" in source
@@ -61,6 +73,21 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "stats->sd_degraded_latched = true" in source
     assert "note_nvs_mirror_failure(config" in source
     assert "d1l_retained_blob_store_note_sd_backend" in source
+    assert "bool d1l_retained_blob_store_backend_state(" in source
+    assert "out_state->enabled = s_store_sd_enabled[config->id]" in source
+    assert "out_state->generation = s_store_backend_generation[config->id]" in source
+    assert "s_store_sd_enabled[i] != can_use_retained_sd" in source
+    assert "s_store_backend_generation[i]++" in source
+    assert "portENTER_CRITICAL(&s_store_state_mux)" in source
+    assert "portEXIT_CRITICAL(&s_store_state_mux)" in source
+    assert "esp_err_t d1l_retained_blob_store_read_sd_primary(" in source
+    assert "esp_err_t d1l_retained_blob_store_read_nvs_fallback(" in source
+    assert "esp_err_t d1l_retained_blob_store_write_sd_primary(" in source
+    assert "esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "esp_err_t d1l_retained_blob_store_write_nvs_fallback(" in source
+    assert "esp_err_t d1l_retained_blob_store_erase_sd_primary(" in source
+    assert "esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(" in source
+    assert "esp_err_t d1l_retained_blob_store_erase_nvs_fallback(" in source
     assert "data_ready &&" in source
     assert "file_ops_supported &&" in source
     assert "atomic_rename_supported &&" in source
@@ -75,6 +102,14 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_rp2040_bridge_file_read" in source
     assert "d1l_rp2040_bridge_file_write" in source
     assert "d1l_rp2040_bridge_file_rename(temp_path, path, true" in source
+    guarded_write = source.split("static esp_err_t sd_write_blob_for_generation", 1)[1].split(
+        "static esp_err_t sd_write_blob(", 1
+    )[0]
+    pre_rename = guarded_write.split("The replace-rename is the destructive commit point", 1)[1].split(
+        "d1l_rp2040_bridge_file_rename", 1
+    )[0]
+    assert "store_backend_generation_matches(config, expected_generation)" in pre_rename
+    assert "d1l_rp2040_bridge_file_delete" not in pre_rename
     assert "d1l_rp2040_bridge_file_delete" in source
     assert "D1L_RP2040_FILE_CHUNK_MAX" in source
     assert "nvs_read_blob" in source

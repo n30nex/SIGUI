@@ -35,6 +35,7 @@ idf_component_register(
         "mesh/packet_log.c"
         "mesh/read_state.c"
         "mesh/route_store.c"
+        "mesh/route_store_worker.c"
         "mesh/meshcore_service.c"
         "mesh/meshcore_wire.c"
         "mesh/meshcore_radio_profile.c"
@@ -80,6 +81,27 @@ idf_component_register(
         nvs_flash
 )
 
+set(D1L_BUILD_GIT_COMMIT "$ENV{GITHUB_SHA}")
+string(LENGTH "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT_LENGTH)
+if(NOT D1L_BUILD_GIT_COMMIT_LENGTH EQUAL 40 OR
+   NOT D1L_BUILD_GIT_COMMIT MATCHES "^[0-9a-fA-F]+$")
+    execute_process(
+        COMMAND git rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+        OUTPUT_VARIABLE D1L_BUILD_GIT_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+string(LENGTH "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT_LENGTH)
+if(NOT D1L_BUILD_GIT_COMMIT_LENGTH EQUAL 40 OR
+   NOT D1L_BUILD_GIT_COMMIT MATCHES "^[0-9a-fA-F]+$")
+    set(D1L_BUILD_GIT_COMMIT "unknown")
+else()
+    string(TOLOWER "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT)
+endif()
+
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     MESHCORE_CA_DESK_MODE=1
+    D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"
 )
