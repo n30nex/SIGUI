@@ -108,6 +108,11 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_lf_text_file(path: Path) -> str:
+    """Hash tracked text using the repository's canonical LF representation."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def run_process(
     command: Sequence[str],
     *,
@@ -180,7 +185,7 @@ def load_corpus(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[st
     expected_path = str(CORPUS_PATH.relative_to(ROOT)).replace("\\", "/")
     if corpus_pin.get("manifest") != expected_path:
         raise GateFailure("primary manifest points at an unexpected fuzz corpus")
-    if corpus_pin.get("sha256") != sha256_file(CORPUS_PATH):
+    if corpus_pin.get("sha256") != sha256_lf_text_file(CORPUS_PATH):
         raise GateFailure("fuzz corpus manifest SHA256 does not match the primary manifest")
     try:
         corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
@@ -485,7 +490,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         _corpus, corpus_seeds = load_corpus(manifest)
         report["corpus"] = {
             "path": str(CORPUS_PATH.relative_to(ROOT)).replace("\\", "/"),
-            "manifest_sha256": sha256_file(CORPUS_PATH),
+            "manifest_sha256": sha256_lf_text_file(CORPUS_PATH),
             "coverage_boundary": "local_wire_decoder_only",
             "seed_count": len(corpus_seeds),
             "seeds": [

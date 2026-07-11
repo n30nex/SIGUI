@@ -21,6 +21,16 @@ def read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
+def canonical_lf_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+def dry_run_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    env.pop("D1L_MESHCORE_CONFORMANCE_CI", None)
+    return env
+
+
 def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
@@ -38,7 +48,7 @@ def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
     assert manifest["vector_matrix"]["payload_lengths"] == [1, 184]
     assert manifest["fuzz_corpus"]["manifest"] == "tests/meshcore_conformance/corpus.json"
     assert manifest["fuzz_corpus"]["seed_count"] == 5
-    assert manifest["fuzz_corpus"]["sha256"] == hashlib.sha256(CORPUS.read_bytes()).hexdigest()
+    assert manifest["fuzz_corpus"]["sha256"] == canonical_lf_sha256(CORPUS)
     assert manifest["fuzz"] == {
         "engine": "libFuzzer",
         "runs": 100000,
@@ -65,6 +75,12 @@ def test_corpus_manifest_is_deterministic_and_hash_checked():
         assert payload
         assert len(payload) <= 255
         assert hashlib.sha256(payload).hexdigest() == seed["sha256"]
+
+
+def test_corpus_pin_is_identical_after_windows_crlf_checkout(tmp_path):
+    crlf = tmp_path / "corpus.json"
+    crlf.write_bytes(CORPUS.read_bytes().replace(b"\n", b"\r\n"))
+    assert conformance.sha256_lf_text_file(crlf) == canonical_lf_sha256(CORPUS)
 
 
 def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
@@ -142,6 +158,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
             "--dry-run",
         ],
         cwd=ROOT,
+        env=dry_run_environment(),
         check=False,
         capture_output=True,
         text=True,
@@ -239,6 +256,7 @@ def test_wrong_seed_writes_failure_json_and_exits_nonzero(tmp_path):
             "--dry-run",
         ],
         cwd=ROOT,
+        env=dry_run_environment(),
         check=False,
         capture_output=True,
         text=True,
