@@ -224,7 +224,7 @@ def verify_sources(manifest: dict[str, Any], expected_commit: str | None) -> dic
     file_results: dict[str, Any] = {}
     for relative, expected_hash in upstream["sources"].items():
         source = upstream_root / relative
-        actual_hash = sha256_file(source) if source.is_file() else None
+        actual_hash = sha256_lf_text_file(source) if source.is_file() else None
         matched = actual_hash == expected_hash
         file_results[relative] = {
             "expected_sha256": expected_hash,
@@ -264,6 +264,7 @@ def verify_sources(manifest: dict[str, Any], expected_commit: str | None) -> dic
         "gitlink_type": gitlink_type,
         "gitlink_commit": gitlink_commit,
         "expected_upstream_commit": upstream["commit"],
+        "source_hash_mode": "canonical_lf_text_sha256",
         "source_files": file_results,
         "allowlisted_source_sha256_verified": all(
             item["matched"] for item in file_results.values()
