@@ -50,11 +50,12 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
 
 def test_meshcore_service_builds_private_text_packets_from_contacts():
     source = read("main/mesh/meshcore_service.c")
+    wire = read("main/mesh/meshcore_wire.h")
     cmake = read("main/CMakeLists.txt")
-    assert "D1L_MESHCORE_PAYLOAD_TEXT 0x02U" in source
-    assert "D1L_MESHCORE_PAYLOAD_ACK 0x03U" in source
-    assert "D1L_MESHCORE_PAYLOAD_PATH 0x08U" in source
-    assert "D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU" in source
+    assert "D1L_MESHCORE_PAYLOAD_TEXT 0x02U" in wire
+    assert "D1L_MESHCORE_PAYLOAD_ACK 0x03U" in wire
+    assert "D1L_MESHCORE_PAYLOAD_PATH 0x08U" in wire
+    assert "D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU" in wire
     assert "D1L_MESHCORE_HEADER_DM_TEXT_FLOOD" in source
     assert "D1L_MESHCORE_HEADER_DM_TEXT_DIRECT" in source
     assert "ed25519_key_exchange(secret, dest_pub, settings->identity_private_key)" in source

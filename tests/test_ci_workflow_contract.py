@@ -104,10 +104,44 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
 
 
+def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
+    job = job_block("meshcore-conformance")
+    firmware = job_block("firmware-build")
+
+    assert "runs-on: ubuntu-24.04" in job
+    assert "timeout-minutes: 10" in job
+    assert "actions/checkout@v7" in job
+    assert "submodules: recursive" in job
+    assert "sudo apt-get install -y clang-18" in job
+    assert "clang-18 --version" in job
+    assert "clang++-18 --version" in job
+    assert "ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1" in job
+    assert "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1" in job
+    assert "python ./scripts/meshcore_conformance_d1l.py" in job
+    assert "--cc clang-18" in job
+    assert "--cxx clang++-18" in job
+    assert '--commit "$GITHUB_SHA"' in job
+    assert "--seed 13746277" in job
+    assert "--runs 100000" in job
+    assert "--dry-run" not in job
+    assert 'artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json' in job
+    assert "name: d1l-meshcore-wire-conformance" in job
+    assert "path: artifacts/meshcore-conformance/**" in job
+    assert "if-no-files-found: error" in job
+    assert "idf.py" not in job
+    assert "esptool" not in job
+    assert "--port" not in job
+    assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
+
+    assert "needs: [change-filter, meshcore-conformance, rp2040-sd-bridge-build]" in firmware
+    assert "needs.meshcore-conformance.result == 'success'" in firmware
+
+
 def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     job = job_block("firmware-build")
 
-    assert "needs: [change-filter, rp2040-sd-bridge-build]" in job
+    assert "needs: [change-filter, meshcore-conformance, rp2040-sd-bridge-build]" in job
+    assert "needs.meshcore-conformance.result == 'success'" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
     assert job.count("container: espressif/idf:v5.5.4") == 1
     assert "espressif/idf:release-v5.1" not in job

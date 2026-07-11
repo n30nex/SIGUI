@@ -1,6 +1,6 @@
 # Source Audit and Attribution
 
-Date: 2026-06-29
+Last updated: 2026-07-10
 
 This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
 
@@ -15,7 +15,9 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
 
 - MeshCore upstream: https://github.com/meshcore-dev/MeshCore
   - License: MIT-style `license.txt` in the upstream repo, with bundled third-party notices.
-  - Use: Protocol/library base for Phase 2 MeshCore service integration.
+  - Pinned gitlink reviewed for the issue #65 wire-envelope slice: `e8d3c53ba1ea863937081cd0caad759b832f3028`.
+  - Use: protocol reference plus the exact structural packet-envelope oracle for the first issue #65 CI slice. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
+  - Conformance boundary: only the pinned packet-envelope implementation is an oracle in this slice. The upstream native-test AES/SHA mocks are not production cryptography and are excluded as cryptographic evidence. A passing `wire_envelope_only` comparison makes no semantic, crypto, retained-state, real-peer, full-conformance, or release claim.
   - Risk: Upstream is Arduino/PlatformIO oriented in many paths; ESP-IDF integration may need an adapter layer rather than direct reuse. Optional web stack dependencies must be reviewed before Wi-Fi management is added.
 
 ## Reference Repositories
