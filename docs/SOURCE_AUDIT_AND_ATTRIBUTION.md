@@ -62,7 +62,7 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
   - Data license: ODbL 1.0, https://opendatacommons.org/licenses/odbl/1-0/
   - Service policy: https://operations.osmfoundation.org/policies/tiles/
   - Required attribution: `© OpenStreetMap contributors`; the UI keeps the hardware-font-compatible `(c) OpenStreetMap contributors` visible on the actual Map.
-  - Request boundary: built-in source only; at most the visible current-view 3x3 at one zoom, only while Map is visible, with cache/reuse. Probes, background tasks, and hidden Map surfaces make no tile requests. No provider editor, arbitrary URL, multi-zoom prefetch, or area download is permitted.
+  - Request boundary: built-in source only; at most the visible current-view 3x3 at one zoom per visible generation, only while Map is visible, with tile-cache reuse. The user may pan with one finger and select zooms 8 through 14, but each committed view remains a separate bounded plan; drag motion, probes, background tasks, and hidden Map surfaces make no tile requests. A completed exact-view Home-to-Map revisit uses its retained rendered frame without network or SD reread. No provider editor, arbitrary URL, multi-zoom prefetch, off-screen batch, or area download is permitted.
   - Privacy: a tile request discloses the viewed approximate area and network address to the tile service/CDN. Network access therefore requires explicit Wi-Fi setup and an actively visible Map.
   - Independence: reference to OpenStreetMap does not imply endorsement by OpenStreetMap or the OpenStreetMap Foundation.
 

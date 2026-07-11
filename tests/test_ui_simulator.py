@@ -1138,6 +1138,12 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert views["map"]["metrics"]["map_hierarchy_level"] == "actual_view"
     assert views["map"]["metrics"]["map_actual_view"] is True
     assert views["map"]["metrics"]["map_landing_action_count"] == 1
+    assert views["map"]["metrics"]["map_view_control_count"] == 3
+    assert views["map"]["metrics"]["map_pan_gesture"] is True
+    assert views["map"]["metrics"]["map_default_zoom"] == 10
+    assert views["map"]["metrics"]["map_min_zoom"] == 8
+    assert views["map"]["metrics"]["map_max_zoom"] == 14
+    assert views["map"]["metrics"]["map_same_view_frame_reuse"] is True
     assert views["map"]["metrics"]["map_visible_tile_limit"] == 9
     assert views["map"]["metrics"]["map_zoom_batch_count"] == 1
     assert views["map"]["metrics"]["map_cached_tile_count"] == 9
@@ -1148,6 +1154,15 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert "SD ready" in labels["map_options"]
     assert "Local area saved" not in labels["map_options"]
     assert views["map_cache"]["metrics"]["map_cache_read_only"] is True
+
+    assert {"map_recenter", "map_zoom_out", "map_zoom_in"}.issubset(actions["map"])
+    for action in ("map_recenter", "map_zoom_out", "map_zoom_in"):
+        target = actions["map"][action]
+        assert target["width"] >= 44
+        assert target["height"] >= 44
+        assert target["rf_tx"] is False
+        assert target["formats_sd"] is False
+    assert {"Center", "Drag to pan", "z10", "-", "+"}.issubset(labels["map"])
 
     assert_pairwise_disjoint(views["map_options"]["metrics"]["map_options_regions"])
     assert_pairwise_disjoint(views["map_cache"]["metrics"]["map_cache_row_boxes"])

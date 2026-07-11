@@ -56,7 +56,7 @@ MAP_HIERARCHY_VIEWS = frozenset(
 )
 STORAGE_SAFETY_COPY = "FAT32 only - This device never formats cards."
 MAP_ATTRIBUTION = "(c) OpenStreetMap contributors"
-MAP_POLICY = "Visible current-view 3x3 · one zoom · cache/reuse"
+MAP_POLICY = "Visible current-view up to 3x3 · touch pan/zoom · cache/reuse"
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -230,11 +230,11 @@ def sample_snapshot() -> Snapshot:
         map_tile_cache_policy="active_map_visible_3x3_one_zoom_cache_reuse",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
         map_tile_download_state="location_required",
-        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at one zoom",
+        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at the selected zoom",
         map_tile_download_supported=False,
         map_tile_render_supported=False,
         map_tile_sideload_supported=True,
-        map_tile_zoom=12,
+        map_tile_zoom=10,
         map_location_set=False,
         map_lat_e7=0,
         map_lon_e7=0,
@@ -346,11 +346,11 @@ def large_mesh_snapshot() -> Snapshot:
         map_tile_cache_policy="active_map_visible_3x3_one_zoom_cache_reuse",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
         map_tile_download_state="location_required",
-        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at one zoom",
+        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at the selected zoom",
         map_tile_download_supported=False,
         map_tile_render_supported=False,
         map_tile_sideload_supported=True,
-        map_tile_zoom=12,
+        map_tile_zoom=10,
         map_location_set=False,
         map_lat_e7=0,
         map_lon_e7=0,
@@ -1786,6 +1786,13 @@ def render_map(s: Surface, snap: Snapshot):
         readiness = f"Wi-Fi {wifi_label}  |  SD {'Ready' if snap.map_tile_cache_ready else 'Not ready'}"
         s.text(readiness, (40, 300, 440, 326), 12, MUTED, False, "center")
 
+    if snap.map_location_set:
+        draw_button(s, (28, 124, 120, 172), "Center", TEXT, action="map_recenter")
+        s.text("Drag to pan", (132, 137, 250, 160), 11, TEXT, True, "center")
+        s.text(f"z{snap.map_tile_zoom}", (302, 137, 350, 160), 11, TEXT, True, "center")
+        draw_button(s, (360, 124, 404, 172), "-", TEXT, action="map_zoom_out")
+        draw_button(s, (408, 124, 452, 172), "+", TEXT, action="map_zoom_in")
+
     # The ready viewport has no technical badges; attribution is the sole overlay.
     s.round_rect((236, 370, 452, 396), (7, 16, 24), (7, 16, 24), 4)
     s.text(MAP_ATTRIBUTION, (242, 372, 446, 394), 10, TEXT, True, "right")
@@ -1794,6 +1801,12 @@ def render_map(s: Surface, snap: Snapshot):
             "map_hierarchy_level": "actual_view",
             "map_actual_view": True,
             "map_landing_action_count": 1,
+            "map_view_control_count": 3 if snap.map_location_set else 0,
+            "map_pan_gesture": snap.map_location_set,
+            "map_default_zoom": 10,
+            "map_min_zoom": 8,
+            "map_max_zoom": 14,
+            "map_same_view_frame_reuse": True,
             "map_viewport": list(viewport),
             "map_frame_ready": frame_ready,
             "map_tile_cache_ready": snap.map_tile_cache_ready,

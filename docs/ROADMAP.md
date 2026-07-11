@@ -10,7 +10,7 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 
 - Core release workflows are persistent identity and adverts, Public messaging, direct messaging with truthful delivery state, contacts, channels, route discovery/fallback, real trace/path diagnostics, radio settings, retained state, and recovery.
 - The 1.0 target is multi-channel. A single hard-coded Public channel is not full 1.0; narrowing that scope requires an explicit product decision, matching UI removal, and release-note language rather than a silent waiver.
-- Map ships in 1.0. It uses built-in OpenStreetMap Standard, a user-set location, visible current-view-only 3x3 downloads at one zoom, SD cache/reuse, visible attribution, and no provider/key/source editor, background download, area download, or device-side SD formatting.
+- Map ships in 1.0. It uses built-in OpenStreetMap Standard, a user-set location, a regional zoom-10 default, user-controlled zooms 8 through 14, one-finger pan, direct `-`/`+`/`Center` controls, and at most one visible current-view 3x3 plan at one zoom per visible generation. Completed exact-view Home-to-Map revisits use the retained rendered frame without network or SD reread; SD tile cache supplies reboot/later-session reuse. Visible attribution remains mandatory, with no provider/key/source editor, background download, multi-zoom prefetch, off-screen batch, area download, or device-side SD formatting.
 - Rooms and Repeaters remain read-only observed/inferred inspectors for 1.0. Management/login controls stay absent until their protocol flows are implemented and accepted.
 - BLE companion, GPS, OTA, and server administration are not release claims. Each must remain visibly experimental with safe failure behavior or be absent/disabled in the release UI until complete and release-tested.
 - Every enabled action must complete end to end or return an honest, actionable error. A working-looking dead end is a release defect.
@@ -47,7 +47,7 @@ Status: **in progress. This is the only current implementation priority.**
 2. Build firmware, package, checksums, effective `sdkconfig`, dependency lock, and release-gate inputs in Actions from the combined commit.
 3. Flash that exact artifact to COM12 without erasing retained settings or touching SD contents.
 4. Prove on the same image: ESP-IDF identity, stable boot, Wi-Fi disabled path, enable/connect/reconnect, saved-profile reboot, internal/DMA reserve, radio readiness, RP2040/SD readiness, and no new PANIC/WDT/brownout loop.
-5. Physically enter Map at the saved test location and prove at most nine one-zoom requests, useful rendered detail, leave-Map cancellation, SD persistence, same-view cache revisit, and reboot cache reuse.
+5. Physically enter Map at the saved test location and prove useful regional detail at default zoom 10; one-finger pan; `-`, `+`, and `Center` across the bounded 8-through-14 range; at most nine requests at one zoom per committed visible generation; no request while a drag is still active; leave-Map cancellation; completed exact-view Home-to-Map retained-frame reuse with no network or SD reread; SD persistence; and reboot cache reuse without duplicate network fetches.
 6. Rebase or replace the stale SD PR #36 only if current Stage 2 code still needs it; do not merge a dirty historical branch for its evidence.
 
 Stage 2 closes only when the combined Actions artifact passes the quick COM12 integration proof. Separate green SDK and Map/Wi-Fi branches are necessary evidence but do not close it.
@@ -125,7 +125,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 1. Publish the combined source merge after its 414-test host pass.
 2. Validate the combined commit in Actions and inspect the exact dependency lock, effective `sdkconfig`, firmware/package checksums, and release-gate inputs.
 3. Flash the exact combined artifact to COM12 and repeat SDK identity, boot, Wi-Fi, radio-readiness, SD, health, and reboot proof.
-4. Complete the still-open physical Map entry, bounded request/render/cancel, SD-cache revisit, and reboot-reuse proof.
+4. Complete the still-open physical Map control proof: default zoom 10, one-finger pan, `-`/`+`/`Center` over zooms 8 through 14, bounded request/render/cancel, instant completed exact-view Home-to-Map retained-frame reuse, SD-cache reread only when the retained frame is unavailable, and reboot reuse without duplicate network fetches.
 5. Reconcile GitHub labels and split the audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
 6. Execute Stages 3-7 in order; do not return to cosmetic-only UI refactoring while a protocol or safety boundary remains open.
 
@@ -141,6 +141,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 - The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `ui_settings.c`, `ui_keyboard.c`, `ui_screen.c`, and `ui_modal.c`; remaining refactors must close an ownership or runtime-safety boundary.
 - `tools/ui_simulator.py` provides deterministic 480x480 schema/pixel checks and must retain large-mesh coverage.
 - Hardware Map automation remains network-suppressed. Only a physical Map entry authorizes the bounded current-view fetch; probe counters must remain unchanged.
+- Each physical pan or zoom may create only one visible 3x3 generation at its selected zoom. Drag motion itself must remain network-silent, and returning from Home to an already completed exact view must reuse the retained frame without replaying SD reads.
 - `ui_capture_d1l.py` reconstructs the firmware-maintained RGB565 shadow for exact pixel evidence, but final release also requires manual physical photos/touch review.
 - Serial route diagnostics remain `routes`, `routes detail <seq>`, `routes trace <fingerprint>`, `routes probe <fingerprint>`, and `routes clear`.
 - Serial diagnostics and test hooks are evidence surfaces, not substitutes for user-complete touchscreen workflows.

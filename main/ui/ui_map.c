@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -21,6 +22,9 @@
 #define MAP_COLOR_WARN 0xFBBF24U
 #define MAP_VIEWPORT_WIDTH 446U
 #define MAP_VIEWPORT_HEIGHT 288U
+#define MAP_DRAG_THRESHOLD_PIXELS 24
+#define MAP_DRAG_MAX_X_PIXELS ((int32_t)MAP_VIEWPORT_WIDTH / 3)
+#define MAP_DRAG_MAX_Y_PIXELS ((int32_t)MAP_VIEWPORT_HEIGHT / 3)
 
 static uint32_t s_viewport_generation;
 static uint32_t s_viewport_revision;
@@ -35,6 +39,18 @@ static lv_obj_t *s_viewport_status_label;
 static lv_obj_t *s_viewport_detail_label;
 static lv_obj_t *s_viewport_readiness_label;
 static lv_obj_t *s_viewport_attribution_label;
+static lv_obj_t *s_viewport_zoom_label;
+static lv_obj_t *s_viewport_zoom_in_button;
+static lv_obj_t *s_viewport_zoom_out_button;
+static bool s_viewport_position_initialized;
+static int32_t s_viewport_saved_lat_e7;
+static int32_t s_viewport_saved_lon_e7;
+static int32_t s_viewport_lat_e7;
+static int32_t s_viewport_lon_e7;
+static uint8_t s_viewport_zoom = D1L_MAP_VIEW_DEFAULT_ZOOM;
+static bool s_viewport_drag_active;
+static int32_t s_viewport_drag_x;
+static int32_t s_viewport_drag_y;
 
 static lv_obj_t *map_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
@@ -195,6 +211,47 @@ static const char *map_sd_status(const d1l_app_snapshot_t *snapshot)
     return snapshot->storage_sd_mounted ? "Preparing" : "Not mounted";
 }
 
+static uint8_t map_zoom_clamp(uint8_t zoom)
+{
+    if (zoom < D1L_MAP_VIEW_MIN_ZOOM) {
+        return D1L_MAP_VIEW_MIN_ZOOM;
+    }
+    if (zoom > D1L_MAP_VIEW_MAX_ZOOM) {
+        return D1L_MAP_VIEW_MAX_ZOOM;
+    }
+    return zoom;
+}
+
+static int32_t map_drag_clamp(int32_t value, int32_t limit)
+{
+    if (value < -limit) {
+        return -limit;
+    }
+    if (value > limit) {
+        return limit;
+    }
+    return value;
+}
+
+static void map_viewport_sync_position(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot || !snapshot->map_location_set) {
+        s_viewport_position_initialized = false;
+        return;
+    }
+    if (s_viewport_position_initialized &&
+        s_viewport_saved_lat_e7 == snapshot->map_lat_e7 &&
+        s_viewport_saved_lon_e7 == snapshot->map_lon_e7) {
+        return;
+    }
+    s_viewport_saved_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_saved_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_lat_e7 = snapshot->map_lat_e7;
+    s_viewport_lon_e7 = snapshot->map_lon_e7;
+    s_viewport_zoom = map_zoom_clamp(snapshot->map_tile_zoom);
+    s_viewport_position_initialized = true;
+}
+
 static bool map_text_contains(const char *text, const char *needle)
 {
     return text && needle && strstr(text, needle) != NULL;
@@ -333,9 +390,20 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         detail = "Tiles could not be loaded. Check Wi-Fi and the SD card.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
+    } else if (!status->frame_ready &&
+               strcmp(status->phase, "loading_cache") == 0) {
+        title = "Loading saved map";
+        detail = "Reading saved tiles from the SD card.";
+        color = MAP_COLOR_INFO;
+        show_overlay = true;
+    } else if (!status->frame_ready && strcmp(status->phase, "queued") == 0) {
+        title = "Preparing map";
+        detail = "Checking saved tiles first.";
+        color = MAP_COLOR_INFO;
+        show_overlay = true;
     } else if (!status->frame_ready) {
-        title = "Loading map";
-        detail = "Downloading a small area around your location.";
+        title = "Downloading map";
+        detail = "Fetching only the visible current view.";
         color = MAP_COLOR_INFO;
         show_overlay = true;
     }
@@ -356,14 +424,219 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
     }
 }
 
+static void map_viewport_update_controls(void)
+{
+    if (s_viewport_zoom_label) {
+        char zoom[8];
+        snprintf(zoom, sizeof(zoom), "z%u", (unsigned)s_viewport_zoom);
+        lv_label_set_text(s_viewport_zoom_label, zoom);
+    }
+    if (s_viewport_zoom_in_button) {
+        if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+            lv_obj_add_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_viewport_zoom_in_button, LV_STATE_DISABLED);
+        }
+    }
+    if (s_viewport_zoom_out_button) {
+        if (s_viewport_zoom <= D1L_MAP_VIEW_MIN_ZOOM) {
+            lv_obj_add_state(s_viewport_zoom_out_button, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_viewport_zoom_out_button, LV_STATE_DISABLED);
+        }
+    }
+}
+
+static bool map_viewport_request_interactive_view(void)
+{
+    uint32_t active_generation;
+    bool suppressed;
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    active_generation = s_viewport_generation;
+    suppressed = s_viewport_suppression_depth > 0U;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    if (!s_viewport_position_initialized || active_generation == 0U || suppressed) {
+        return false;
+    }
+
+    uint32_t generation = 0U;
+    esp_err_t ret = d1l_map_view_service_acquire_visible(
+        s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom,
+        MAP_VIEWPORT_WIDTH, MAP_VIEWPORT_HEIGHT, &generation);
+    if (ret != ESP_OK || generation == 0U) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    if (s_viewport_suppression_depth == 0U && s_viewport_generation != 0U) {
+        s_viewport_generation = generation;
+        s_viewport_revision = 0U;
+    } else {
+        generation = 0U;
+    }
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    if (generation == 0U) {
+        d1l_map_view_service_release_visible(generation);
+        return false;
+    }
+    map_viewport_update_controls();
+    d1l_map_view_status_t status = {0};
+    d1l_map_view_service_status(&status);
+    map_viewport_apply_service_status(&status);
+    return true;
+}
+
+static void map_viewport_reset_image_position(void)
+{
+    if (s_viewport_image_obj) {
+        lv_obj_center(s_viewport_image_obj);
+    }
+}
+
+static void map_viewport_drag_event_cb(lv_event_t *event)
+{
+    if (!event) {
+        return;
+    }
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        portENTER_CRITICAL(&s_viewport_lease_lock);
+        s_viewport_drag_active = true;
+        s_viewport_drag_x = 0;
+        s_viewport_drag_y = 0;
+        portEXIT_CRITICAL(&s_viewport_lease_lock);
+        return;
+    }
+    if (code == LV_EVENT_PRESSING) {
+        lv_indev_t *indev = lv_indev_get_act();
+        if (!indev) {
+            return;
+        }
+        lv_point_t vector = {0};
+        lv_indev_get_vect(indev, &vector);
+        int32_t preview_x = 0;
+        int32_t preview_y = 0;
+        bool drag_active;
+        portENTER_CRITICAL(&s_viewport_lease_lock);
+        drag_active = s_viewport_drag_active;
+        if (drag_active) {
+            s_viewport_drag_x = map_drag_clamp(
+                s_viewport_drag_x + vector.x, MAP_DRAG_MAX_X_PIXELS);
+            s_viewport_drag_y = map_drag_clamp(
+                s_viewport_drag_y + vector.y, MAP_DRAG_MAX_Y_PIXELS);
+            preview_x = s_viewport_drag_x;
+            preview_y = s_viewport_drag_y;
+        }
+        portEXIT_CRITICAL(&s_viewport_lease_lock);
+        if (!drag_active) {
+            return;
+        }
+        if (s_viewport_image_obj) {
+            lv_obj_set_pos(s_viewport_image_obj, 1 + preview_x, 1 + preview_y);
+        }
+        return;
+    }
+    if (code == LV_EVENT_PRESS_LOST) {
+        portENTER_CRITICAL(&s_viewport_lease_lock);
+        s_viewport_drag_active = false;
+        s_viewport_drag_x = 0;
+        s_viewport_drag_y = 0;
+        portEXIT_CRITICAL(&s_viewport_lease_lock);
+        map_viewport_reset_image_position();
+        return;
+    }
+    if (code != LV_EVENT_RELEASED) {
+        return;
+    }
+
+    int32_t drag_x;
+    int32_t drag_y;
+    bool drag_active;
+    portENTER_CRITICAL(&s_viewport_lease_lock);
+    drag_active = s_viewport_drag_active;
+    drag_x = s_viewport_drag_x;
+    drag_y = s_viewport_drag_y;
+    s_viewport_drag_active = false;
+    s_viewport_drag_x = 0;
+    s_viewport_drag_y = 0;
+    portEXIT_CRITICAL(&s_viewport_lease_lock);
+    if (!drag_active) {
+        map_viewport_reset_image_position();
+        return;
+    }
+    map_viewport_reset_image_position();
+    if (abs(drag_x) < MAP_DRAG_THRESHOLD_PIXELS &&
+        abs(drag_y) < MAP_DRAG_THRESHOLD_PIXELS) {
+        return;
+    }
+
+    const int32_t old_lat_e7 = s_viewport_lat_e7;
+    const int32_t old_lon_e7 = s_viewport_lon_e7;
+    const int32_t delta_x = -drag_x;
+    const int32_t delta_y = -drag_y;
+    if (!d1l_map_math_pan_center(old_lat_e7, old_lon_e7, s_viewport_zoom,
+                                 delta_x, delta_y, &s_viewport_lat_e7,
+                                 &s_viewport_lon_e7) ||
+        !map_viewport_request_interactive_view()) {
+        s_viewport_lat_e7 = old_lat_e7;
+        s_viewport_lon_e7 = old_lon_e7;
+    }
+}
+
+static void map_viewport_zoom_in_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_viewport_zoom >= D1L_MAP_VIEW_MAX_ZOOM) {
+        return;
+    }
+    const uint8_t old_zoom = s_viewport_zoom;
+    ++s_viewport_zoom;
+    if (!map_viewport_request_interactive_view()) {
+        s_viewport_zoom = old_zoom;
+    }
+    map_viewport_update_controls();
+}
+
+static void map_viewport_zoom_out_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (s_viewport_zoom <= D1L_MAP_VIEW_MIN_ZOOM) {
+        return;
+    }
+    const uint8_t old_zoom = s_viewport_zoom;
+    --s_viewport_zoom;
+    if (!map_viewport_request_interactive_view()) {
+        s_viewport_zoom = old_zoom;
+    }
+    map_viewport_update_controls();
+}
+
+static void map_viewport_recenter_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (!s_viewport_position_initialized) {
+        return;
+    }
+    const int32_t old_lat_e7 = s_viewport_lat_e7;
+    const int32_t old_lon_e7 = s_viewport_lon_e7;
+    s_viewport_lat_e7 = s_viewport_saved_lat_e7;
+    s_viewport_lon_e7 = s_viewport_saved_lon_e7;
+    if (!map_viewport_request_interactive_view()) {
+        s_viewport_lat_e7 = old_lat_e7;
+        s_viewport_lon_e7 = old_lon_e7;
+    }
+}
+
 bool d1l_ui_map_viewport_refresh(void)
 {
     uint32_t generation;
     portENTER_CRITICAL(&s_viewport_lease_lock);
     generation = s_viewport_generation;
     const bool suppressed = s_viewport_suppression_depth > 0U;
+    const bool drag_active = s_viewport_drag_active;
     portEXIT_CRITICAL(&s_viewport_lease_lock);
-    if (suppressed || generation == 0U || !s_viewport_image_obj) {
+    if (suppressed || generation == 0U || !s_viewport_image_obj ||
+        drag_active) {
         return false;
     }
     d1l_map_view_status_t status = {0};
@@ -500,12 +773,16 @@ void d1l_ui_map_render(lv_obj_t *parent,
     if (!parent || !snapshot || !callbacks) {
         return;
     }
+    map_viewport_sync_position(snapshot);
     d1l_ui_map_viewport_release();
     s_viewport_image_obj = NULL;
     s_viewport_status_label = NULL;
     s_viewport_detail_label = NULL;
     s_viewport_readiness_label = NULL;
     s_viewport_attribution_label = NULL;
+    s_viewport_zoom_label = NULL;
+    s_viewport_zoom_in_button = NULL;
+    s_viewport_zoom_out_button = NULL;
     lv_obj_set_style_pad_bottom(parent, 0, 0);
     lv_obj_t *title = map_label(parent, "Map", MAP_COLOR_TEXT);
     if (title) {
@@ -519,6 +796,12 @@ void d1l_ui_map_render(lv_obj_t *parent,
         return;
     }
     lv_obj_set_style_bg_color(viewport, lv_color_hex(0x0B151E), 0);
+    lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(viewport, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_PRESSED, NULL);
+    lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_PRESS_LOST, NULL);
     s_viewport_image_obj = lv_img_create(viewport);
     if (s_viewport_image_obj) {
         lv_obj_set_size(s_viewport_image_obj, MAP_VIEWPORT_WIDTH, MAP_VIEWPORT_HEIGHT);
@@ -567,14 +850,41 @@ void d1l_ui_map_render(lv_obj_t *parent,
         lv_obj_set_style_pad_all(attribution, 2, 0);
     }
 
+    if (snapshot->map_location_set) {
+        map_button(viewport, "Center", 12, 12, 92, 48,
+                   map_viewport_recenter_event_cb);
+        lv_obj_t *drag_hint = map_label(viewport, "Drag to pan", MAP_COLOR_DETAIL);
+        if (drag_hint) {
+            map_label_dot(drag_hint, 128);
+            lv_obj_set_pos(drag_hint, 116, 29);
+            lv_obj_set_style_bg_color(drag_hint, lv_color_hex(MAP_COLOR_BG), 0);
+            lv_obj_set_style_bg_opa(drag_hint, LV_OPA_80, 0);
+            lv_obj_set_style_pad_all(drag_hint, 2, 0);
+        }
+        s_viewport_zoom_label = map_label(viewport, "z10", MAP_COLOR_DETAIL);
+        if (s_viewport_zoom_label) {
+            map_label_dot(s_viewport_zoom_label, 44);
+            lv_obj_set_style_text_align(s_viewport_zoom_label, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(s_viewport_zoom_label, 292, 29);
+            lv_obj_set_style_bg_color(s_viewport_zoom_label, lv_color_hex(MAP_COLOR_BG), 0);
+            lv_obj_set_style_bg_opa(s_viewport_zoom_label, LV_OPA_80, 0);
+            lv_obj_set_style_pad_all(s_viewport_zoom_label, 2, 0);
+        }
+        s_viewport_zoom_out_button = map_button(
+            viewport, "-", 344, 12, 44, 48, map_viewport_zoom_out_event_cb);
+        s_viewport_zoom_in_button = map_button(
+            viewport, "+", 392, 12, 44, 48, map_viewport_zoom_in_event_cb);
+        map_viewport_update_controls();
+    }
+
     const bool acquire_suppressed = map_viewport_consume_acquire_suppression();
     const bool viewport_memory_ready = !acquire_suppressed && s_viewport_image_obj &&
         map_viewport_ensure_pixels();
     if (snapshot->map_location_set && viewport_memory_ready && !acquire_suppressed) {
         uint32_t generation = 0U;
         esp_err_t ret = d1l_map_view_service_acquire_visible(
-            snapshot->map_lat_e7, snapshot->map_lon_e7,
-            D1L_MAP_VIEW_FIXED_ZOOM, MAP_VIEWPORT_WIDTH, MAP_VIEWPORT_HEIGHT,
+            s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom,
+            MAP_VIEWPORT_WIDTH, MAP_VIEWPORT_HEIGHT,
             &generation);
         if (ret == ESP_OK && generation != 0U) {
             bool accepted;
@@ -829,6 +1139,9 @@ void d1l_ui_map_viewport_release(void)
     generation = s_viewport_generation;
     s_viewport_generation = 0U;
     s_viewport_revision = 0U;
+    s_viewport_drag_active = false;
+    s_viewport_drag_x = 0;
+    s_viewport_drag_y = 0;
     portEXIT_CRITICAL(&s_viewport_lease_lock);
     if (generation != 0U) {
         d1l_map_view_service_release_visible(generation);

@@ -267,6 +267,14 @@ typedef struct {
     size_t packet_count;
 } d1l_ui_content_generation_t;
 
+typedef struct {
+    bool location_set;
+    int32_t lat_e7;
+    int32_t lon_e7;
+    uint8_t zoom;
+    bool cache_ready;
+} d1l_ui_map_render_input_t;
+
 typedef enum {
     D1L_PACKET_FILTER_ALL = 0,
     D1L_PACKET_FILTER_RX,
@@ -302,6 +310,8 @@ static bool s_content_refresh_pending = false;
 static bool s_map_interactive_touch_authorized;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
+static d1l_ui_map_render_input_t s_rendered_map_input;
+static bool s_rendered_map_input_valid = false;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
@@ -377,6 +387,35 @@ static bool content_generation_changed_from_rendered(const d1l_app_snapshot_t *s
         return false;
     }
     return !content_generation_equal(&current, &s_rendered_content_generation);
+}
+
+static d1l_ui_map_render_input_t map_render_input_from_snapshot(
+    const d1l_app_snapshot_t *snapshot)
+{
+    return (d1l_ui_map_render_input_t) {
+        .location_set = snapshot->map_location_set,
+        .lat_e7 = snapshot->map_lat_e7,
+        .lon_e7 = snapshot->map_lon_e7,
+        .zoom = snapshot->map_tile_zoom,
+        .cache_ready = snapshot->map_tile_cache_ready,
+    };
+}
+
+static void remember_rendered_map_input(const d1l_app_snapshot_t *snapshot)
+{
+    s_rendered_map_input = map_render_input_from_snapshot(snapshot);
+    s_rendered_map_input_valid = true;
+}
+
+static bool map_render_input_changed_from_rendered(const d1l_app_snapshot_t *snapshot)
+{
+    const d1l_ui_map_render_input_t current = map_render_input_from_snapshot(snapshot);
+    return !s_rendered_map_input_valid ||
+           current.location_set != s_rendered_map_input.location_set ||
+           current.lat_e7 != s_rendered_map_input.lat_e7 ||
+           current.lon_e7 != s_rendered_map_input.lon_e7 ||
+           current.zoom != s_rendered_map_input.zoom ||
+           current.cache_ready != s_rendered_map_input.cache_ready;
 }
 
 static void request_tab_switch(d1l_ui_tab_t tab)
@@ -6257,6 +6296,7 @@ static void render_active_tab(void)
                                renderers, sizeof(renderers) / sizeof(renderers[0]));
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
+    remember_rendered_map_input(&s_snapshot);
     request_full_screen_repaint();
 }
 
@@ -7328,13 +7368,26 @@ static void refresh_timer_cb(lv_timer_t *timer)
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_onboarding_visibility(&s_snapshot);
-    if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+    const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
+    const bool map_uncovered = map_active &&
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
-        map_interactive_touch_authorized()) {
+        map_interactive_touch_authorized();
+    if (map_uncovered) {
         (void)d1l_ui_map_viewport_refresh();
     }
-    if (content_generation_changed_from_rendered(&s_snapshot)) {
+    if (map_uncovered && map_render_input_changed_from_rendered(&s_snapshot)) {
         request_content_refresh();
+    } else if (content_generation_changed_from_rendered(&s_snapshot)) {
+        if (map_active) {
+            /* Ambient mesh/message counters do not change the Map surface.
+             * A full content render tears down its visible lease and can
+             * cancel a bounded tile batch or an in-progress drag, so simply
+             * acknowledge these counters here.  Explicit Map changes such as
+             * saving/clearing a location still call request_content_refresh(). */
+            remember_rendered_content_generation(&s_snapshot);
+        } else {
+            request_content_refresh();
+        }
     }
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
         lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);

@@ -1690,10 +1690,13 @@ static void cmd_storage_map_policy(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"license_url\":");
     print_json_string(D1L_MAP_TILE_LICENSE_URL);
-    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
+    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"default_zoom\":%u,\"min_zoom\":%u,\"max_zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
            (unsigned)D1L_MAP_VIEW_MAX_TILES,
            (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS,
-           (unsigned)D1L_MAP_VIEW_FIXED_ZOOM,
+           (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
+           (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
+           (unsigned)D1L_MAP_VIEW_MIN_ZOOM,
+           (unsigned)D1L_MAP_VIEW_MAX_ZOOM,
            bool_json(download_supported),
            bool_json(live_network_download));
     print_json_string(download_state);

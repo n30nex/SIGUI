@@ -38,12 +38,18 @@ def test_builtin_openstreetmap_source_is_fixed_identified_and_attributed():
     assert 'strcmp(line, "map tiles status")' in console
 
 
-def test_current_view_planner_is_one_zoom_center_first_and_at_most_three_by_three():
+def test_current_view_planner_accepts_bounded_zoom_and_stays_at_most_three_by_three():
     header = read("main/map/map_math.h")
     source = read("main/map/map_math.c")
 
-    assert "D1L_MAP_VIEW_FIXED_ZOOM 12U" in header
+    assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in header
+    assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in header
     assert "D1L_MAP_VIEW_MAX_TILES 9U" in header
+    assert (
+        "zoom >= D1L_MAP_VIEW_MIN_ZOOM && zoom <= D1L_MAP_VIEW_MAX_ZOOM"
+        in source
+    )
     assert "(max_unwrapped_x - min_unwrapped_x + 1LL) > 3LL" in source
     assert "(max_y - min_y + 1LL) > 3LL" in source
     assert "planned_count >= D1L_MAP_VIEW_MAX_TILES" in source
@@ -52,6 +58,21 @@ def test_current_view_planner_is_one_zoom_center_first_and_at_most_three_by_thre
     assert "already_planned(planned, planned_count, x, y)" in source
     assert "sort_center_first(planned, planned_count)" in source
     assert "distance_sq" in source
+
+
+def test_touch_pan_center_uses_bounded_web_mercator_math():
+    header = read("main/map/map_math.h")
+    source = read("main/map/map_math.c")
+    pan = body(source, "bool d1l_map_math_pan_center", "\n}")
+
+    assert "d1l_map_math_pan_center" in header
+    assert "!map_zoom_valid(zoom)" in pan
+    assert "D1L_MAP_MERCATOR_MAX_LAT_E7" in pan
+    assert "world_x + (double)delta_x_pixels" in pan
+    assert "world_y += (double)delta_y_pixels" in pan
+    assert "fmod(" in pan
+    assert "atan(sinh(mercator))" in pan
+    assert "clamp_i64(new_lon_e7, -1800000000LL, 1800000000LL)" in pan
 
 
 def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_cache():
@@ -208,21 +229,44 @@ def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():
     )
 
 
-def test_same_visible_plan_reuses_generation_and_does_not_notify_worker_again():
+def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay():
     service = read("main/map/map_view_service.c")
     acquire = body(
         service,
         "esp_err_t d1l_map_view_service_acquire_visible",
         "void d1l_map_view_service_release_visible",
     )
-    identical = acquire.split("if (s_map.status.visible", 1)[1].split(
+    identical = acquire.split("if (same_plan &&", 1)[1].split(
         "uint32_t generation", 1
     )[0]
+    completed = body(
+        service, "static bool completed_frame_locked", "static bool generation_continue"
+    )
+    worker = body(service, "static void map_worker", "esp_err_t d1l_map_view_service_init")
 
+    assert "s_map.status.visible || completed_frame_locked()" in identical
+    assert "s_map.status.visible = true" in identical
+    assert "if (completed_frame_locked())" in identical
+    assert 'set_message_locked("ready", "Map ready")' in identical
     assert "*out_generation = s_map.status.generation" in identical
     assert "xTaskNotifyGive" not in identical
     assert "xTaskNotifyGive(s_map.worker)" in acquire
     assert acquire.index("uint32_t generation") < acquire.index("xTaskNotifyGive(s_map.worker)")
+
+    for required in (
+        "s_map.status.frame_ready",
+        "s_map.status.frame_revision > 0U",
+        "s_map.status.planned_tiles > 0U",
+        "s_map.status.attempted_tiles == s_map.status.planned_tiles",
+        "s_map.status.rendered_tiles == s_map.status.planned_tiles",
+        "s_map.status.failed_tiles == 0U",
+    ):
+        assert required in completed
+    assert "if (completed_frame_locked())" in worker
+    assert worker.index("if (completed_frame_locked())") < worker.index(
+        "run_generation(&plan, generation)"
+    )
+    assert "ulTaskNotifyTake(pdTRUE, 0U)" in worker
 
 
 def test_visible_lease_revocation_cannot_time_out_before_worker_notification():

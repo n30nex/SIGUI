@@ -15,9 +15,13 @@ def function_body(source: str, start: str, end: str) -> str:
 def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
     source = read("main/ui/ui_map.c")
     header = read("main/ui/ui_map.h")
+    math_header = read("main/map/map_math.h")
 
     assert '#include "map/map_view_service.h"' in source
-    assert "D1L_MAP_VIEW_FIXED_ZOOM" in source
+    assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in math_header
+    assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in math_header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in math_header
+    assert "s_viewport_zoom = D1L_MAP_VIEW_DEFAULT_ZOOM" in source
     assert "MAP_VIEWPORT_WIDTH 446U" in source
     assert "MAP_VIEWPORT_HEIGHT 288U" in source
     assert "d1l_map_view_service_acquire_visible" in source
@@ -44,6 +48,115 @@ def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
     ):
         assert api in header
         assert api in source
+
+
+def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
+    source = read("main/ui/ui_map.c")
+    render = function_body(
+        source, "void d1l_ui_map_render(", "static void map_render_options_root"
+    )
+    drag = function_body(
+        source,
+        "static void map_viewport_drag_event_cb",
+        "static void map_viewport_zoom_in_event_cb",
+    )
+    pressing = drag.split("if (code == LV_EVENT_PRESSING", 1)[1].split(
+        "if (code == LV_EVENT_PRESS_LOST", 1
+    )[0]
+    released = drag.split("if (code != LV_EVENT_RELEASED", 1)[1]
+    zoom_in = function_body(
+        source,
+        "static void map_viewport_zoom_in_event_cb",
+        "static void map_viewport_zoom_out_event_cb",
+    )
+    zoom_out = function_body(
+        source,
+        "static void map_viewport_zoom_out_event_cb",
+        "static void map_viewport_recenter_event_cb",
+    )
+    recenter = function_body(
+        source,
+        "static void map_viewport_recenter_event_cb",
+        "bool d1l_ui_map_viewport_refresh",
+    )
+
+    assert 'map_button(viewport, "Center", 12, 12, 92, 48' in render
+    assert 'viewport, "-", 344, 12, 44, 48' in render
+    assert 'viewport, "+", 392, 12, 44, 48' in render
+    assert 'map_label(viewport, "Drag to pan"' in render
+    assert "lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE)" in render
+    assert "lv_obj_clear_flag(viewport, LV_OBJ_FLAG_GESTURE_BUBBLE)" in render
+    for event in (
+        "LV_EVENT_PRESSED",
+        "LV_EVENT_PRESSING",
+        "LV_EVENT_RELEASED",
+        "LV_EVENT_PRESS_LOST",
+    ):
+        assert f"map_viewport_drag_event_cb, {event}" in render
+
+    assert "lv_indev_get_vect" in pressing
+    assert "map_drag_clamp" in pressing
+    assert "MAP_DRAG_MAX_X_PIXELS" in pressing
+    assert "MAP_DRAG_MAX_Y_PIXELS" in pressing
+    assert "portENTER_CRITICAL(&s_viewport_lease_lock)" in pressing
+    assert "lv_obj_set_pos(s_viewport_image_obj" in pressing
+    assert "map_viewport_request_interactive_view" not in pressing
+    assert "MAP_DRAG_THRESHOLD_PIXELS" in released
+    assert "d1l_map_math_pan_center" in released
+    assert "map_viewport_request_interactive_view()" in released
+
+    assert "D1L_MAP_VIEW_MAX_ZOOM" in zoom_in
+    assert "++s_viewport_zoom" in zoom_in
+    assert "map_viewport_request_interactive_view()" in zoom_in
+    assert "D1L_MAP_VIEW_MIN_ZOOM" in zoom_out
+    assert "--s_viewport_zoom" in zoom_out
+    assert "map_viewport_request_interactive_view()" in zoom_out
+    assert "s_viewport_lat_e7 = s_viewport_saved_lat_e7" in recenter
+    assert "s_viewport_lon_e7 = s_viewport_saved_lon_e7" in recenter
+    assert "map_viewport_request_interactive_view()" in recenter
+
+    assert (
+        "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in render
+    )
+    refresh = function_body(
+        source, "bool d1l_ui_map_viewport_refresh", "static lv_obj_t *map_menu_row"
+    )
+    assert "s_viewport_drag_active" in refresh
+
+
+def test_ambient_mesh_updates_do_not_tear_down_an_active_map_view():
+    source = read("main/ui/ui_phase1.c")
+    map_input = function_body(
+        source,
+        "static d1l_ui_map_render_input_t map_render_input_from_snapshot",
+        "static void remember_rendered_map_input",
+    )
+    refresh_timer = function_body(
+        source, "static void refresh_timer_cb", "static void create_top_bar"
+    )
+    changed = refresh_timer.split(
+        "if (content_generation_changed_from_rendered(&s_snapshot))", 1
+    )[1]
+
+    for field in (
+        "snapshot->map_location_set",
+        "snapshot->map_lat_e7",
+        "snapshot->map_lon_e7",
+        "snapshot->map_tile_zoom",
+        "snapshot->map_tile_cache_ready",
+    ):
+        assert field in map_input
+    assert "snapshot->wifi_connected" not in map_input
+    assert "d1l_ui_navigation_active() == D1L_UI_TAB_MAP" in refresh_timer
+    assert "map_render_input_changed_from_rendered(&s_snapshot)" in refresh_timer
+    assert refresh_timer.index("map_render_input_changed_from_rendered(&s_snapshot)") < (
+        refresh_timer.index("content_generation_changed_from_rendered(&s_snapshot)")
+    )
+    assert "remember_rendered_content_generation(&s_snapshot);" in changed
+    assert "request_content_refresh();" in changed
+    assert changed.index("remember_rendered_content_generation(&s_snapshot);") < changed.index(
+        "request_content_refresh();"
+    )
 
 
 def test_map_ui_releases_before_covers_and_automation_is_fail_closed():

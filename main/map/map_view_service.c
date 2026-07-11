@@ -48,6 +48,16 @@ static bool generation_visible_locked(uint32_t generation)
     return s_map.status.visible && s_map.status.generation == generation;
 }
 
+static bool completed_frame_locked(void)
+{
+    return s_map.status.frame_ready &&
+           s_map.status.frame_revision > 0U &&
+           s_map.status.planned_tiles > 0U &&
+           s_map.status.attempted_tiles == s_map.status.planned_tiles &&
+           s_map.status.rendered_tiles == s_map.status.planned_tiles &&
+           s_map.status.failed_tiles == 0U;
+}
+
 static bool generation_continue(void *context)
 {
     if (!context || !s_map.lock) {
@@ -390,6 +400,12 @@ static void map_worker(void *context)
                     xSemaphoreGive(s_map.lock);
                     break;
                 }
+                if (completed_frame_locked()) {
+                    s_map.status.worker_running = false;
+                    set_message_locked("ready", "Map ready");
+                    xSemaphoreGive(s_map.lock);
+                    break;
+                }
                 plan = s_map.plan;
                 generation = s_map.status.generation;
                 xSemaphoreGive(s_map.lock);
@@ -471,7 +487,8 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
                                                uint16_t height,
                                                uint32_t *out_generation)
 {
-    if (!out_generation || zoom != D1L_MAP_VIEW_FIXED_ZOOM) {
+    if (!out_generation || zoom < D1L_MAP_VIEW_MIN_ZOOM ||
+        zoom > D1L_MAP_VIEW_MAX_ZOOM) {
         return ESP_ERR_INVALID_ARG;
     }
     esp_err_t ret = d1l_map_view_service_init();
@@ -486,9 +503,17 @@ esp_err_t d1l_map_view_service_acquire_visible(int32_t lat_e7,
     if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
-    if (s_map.status.visible && s_map.plan.lat_e7 == plan.lat_e7 &&
-        s_map.plan.lon_e7 == plan.lon_e7 && s_map.plan.zoom == plan.zoom &&
-        s_map.plan.width == plan.width && s_map.plan.height == plan.height) {
+    const bool same_plan = s_map.plan.lat_e7 == plan.lat_e7 &&
+                           s_map.plan.lon_e7 == plan.lon_e7 &&
+                           s_map.plan.zoom == plan.zoom &&
+                           s_map.plan.width == plan.width &&
+                           s_map.plan.height == plan.height;
+    if (same_plan && (s_map.status.visible || completed_frame_locked())) {
+        s_map.status.visible = true;
+        if (completed_frame_locked()) {
+            s_map.status.worker_running = false;
+            set_message_locked("ready", "Map ready");
+        }
         *out_generation = s_map.status.generation;
         xSemaphoreGive(s_map.lock);
         return ESP_OK;

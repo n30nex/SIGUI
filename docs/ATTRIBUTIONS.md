@@ -12,7 +12,7 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Copyright and attribution terms: https://www.openstreetmap.org/copyright
 - Data license: Open Database License 1.0, https://opendatacommons.org/licenses/odbl/1-0/
 - Tile service policy: https://operations.osmfoundation.org/policies/tiles/
-- Product use: OpenStreetMap Standard is the built-in map source. Requests are limited to the visible current-view 3x3 at one zoom while the actual Map is visible; cache revisits are reused, and background or area download is not provided.
+- Product use: OpenStreetMap Standard is the built-in map source. Users may pan and select zooms 8 through 14, but requests remain limited to the visible current-view 3x3 at one zoom per visible generation while the actual Map is visible. Completed exact-view Home-to-Map revisits reuse the retained frame; later sessions reuse cached tiles. Background fetch, multi-zoom prefetch, off-screen batches, and area download are not provided.
 - No endorsement: OpenStreetMap and the OpenStreetMap Foundation do not endorse this project.
 
 ## LodePNG
