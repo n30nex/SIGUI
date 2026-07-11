@@ -368,7 +368,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Forget contact",
         "Requires confirmation",
     } <= labels_by_view["contact_options_page"]
-    assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
+    assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Advert location", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Rename Contact", "YKF Corebot", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"} <= labels_by_view["contact_edit_sheet"]
     assert "Forget" not in labels_by_view["contact_edit_sheet"]
     assert {"Export Contact", "YKF Corebot", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"} <= labels_by_view["contact_export_sheet"]
@@ -1097,8 +1097,11 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
     assert report["required_labels_missing"] == []
-    assert {"SD card needed", "Options", "(c) OpenStreetMap contributors"} <= labels
+    assert {"Waiting for SD", "Options", "(c) OpenStreetMap contributors"} <= labels
     assert view["metrics"]["map_location_set"] is True
+    assert view["metrics"]["map_progress_bar_supported"] is True
+    assert view["metrics"]["map_progress_bar_visible"] is False
+    assert view["metrics"]["map_tile_style"] == "local_dark_osm_standard"
     assert view["metrics"]["map_center_source"] == "manual"
     assert view["metrics"]["map_center_lat_e7"] == 436532000
     assert view["metrics"]["map_center_lon_e7"] == -793832000
@@ -1241,6 +1244,89 @@ def test_ui_simulator_built_in_map_states_are_deterministic_and_policy_bounded(t
         assert view["metrics"].get("map_probe_network_allowed") is False
         assert view["metrics"].get("map_background_download") is False
         assert view["metrics"].get("map_area_download") is False
+
+
+def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path / "map-markers", views=("map", "node_detail_sheet"), scenario="map-ready"
+    )
+    views = {view["name"]: view for view in report["views"]}
+    map_view = views["map"]
+    detail = views["node_detail_sheet"]
+
+    assert report["ok"] is True
+    assert map_view["metrics"]["map_marker_query_limit"] == 32
+    assert map_view["metrics"]["map_marker_display_limit"] == 8
+    assert map_view["metrics"]["map_marker_query_count"] == 3
+    assert map_view["metrics"]["map_marker_displayed_count"] == 3
+    assert set(map_view["metrics"]["map_marker_full_names"]) == {
+        "YKF Corebot",
+        "YKF Room",
+        "Krabs Lagoon Repeater",
+    }
+    assert set(map_view["metrics"]["map_marker_names"]) == {
+        "YKF Corebot",
+        "YKF Room",
+        "Krabs Lagoo...",
+    }
+    assert map_view["metrics"]["map_marker_name_max_chars"] == 14
+    assert map_view["metrics"]["map_marker_truncated_count"] == 1
+    assert map_view["metrics"]["map_marker_labels_below"] is True
+    assert map_view["metrics"]["map_marker_overlay_separate"] is True
+    assert map_view["metrics"]["map_marker_refresh_rebuilds_tiles"] is False
+    assert map_view["metrics"]["map_marker_hit_diameter_px"] == 44
+    assert map_view["metrics"]["map_marker_source"] == "signed_advert_location"
+    assert map_view["metrics"]["map_saved_center_pin"] == "omitted"
+    assert len(set(map_view["metrics"]["map_marker_colors"])) == 3
+    assert "#F87171" not in map_view["metrics"]["map_marker_colors"]
+    assert set(map_view["metrics"]["map_marker_colors"]) == {
+        "#2DD4BF",
+        "#FACC15",
+        "#C084FC",
+    }
+    assert_pairwise_disjoint(map_view["metrics"]["map_marker_bounds"])
+    for marker_box in map_view["metrics"]["map_marker_bounds"]:
+        for exclusion_box in map_view["metrics"]["map_marker_exclusion_boxes"]:
+            assert boxes_overlap(marker_box, exclusion_box) is False
+    marker_targets = [
+        target for target in map_view["touch_targets"]
+        if target["kind"] == "map_marker_hit"
+    ]
+    assert len(marker_targets) == 3
+    assert all(target["width"] == 44 and target["height"] == 44 for target in marker_targets)
+    assert all(target["action"] == "open_map_node_detail" for target in marker_targets)
+    assert all(target["destination"] == "node_detail_sheet" for target in marker_targets)
+    assert all(target["rf_tx"] is False and target["formats_sd"] is False for target in marker_targets)
+    assert "Krabs Lagoo..." in map_view["labels"]
+    assert "Advert location" in detail["labels"]
+    assert detail["metrics"]["node_detail_location_provenance"] == "advert"
+    assert detail["metrics"]["node_detail_advert_location"] == "43.675000, -79.440000"
+    assert detail["metrics"]["node_detail_dm_available"] is True
+    assert detail["metrics"]["node_detail_management_gated"] is False
+    dm_targets = [
+        target for target in detail["touch_targets"]
+        if target["action"] == "open_node_dm"
+    ]
+    assert len(dm_targets) == 1
+    assert dm_targets[0]["destination"] == "compose_sheet"
+    assert detail["metrics"]["node_detail_return_destination"] == "map"
+    assert detail["metrics"]["node_detail_return_reuses_map_view"] is True
+
+
+def test_ui_simulator_map_downloading_shows_determinate_progress(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path / "map-downloading", views=("map",), scenario="map-downloading"
+    )
+    view = report["views"][0]
+
+    assert report["ok"] is True
+    assert "Downloading 3/9" in view["labels"]
+    assert view["metrics"]["map_frame_ready"] is False
+    assert view["metrics"]["map_progress_bar_supported"] is True
+    assert view["metrics"]["map_progress_bar_visible"] is True
+    assert view["metrics"]["map_progress_completed"] == 3
+    assert view["metrics"]["map_progress_total"] == 9
+    assert view["metrics"]["map_marker_displayed_count"] == 0
 
 
 def test_ui_simulator_map_setup_connection_live_and_cached_states(tmp_path):

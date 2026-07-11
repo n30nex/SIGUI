@@ -15,6 +15,7 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "ed_25519.h"
+#include "mesh/advert_data.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/meshcore_radio_profile.h"
@@ -46,7 +47,7 @@
 #define D1L_MESHCORE_SEED_SIZE 32U
 #define D1L_MESHCORE_ADVERT_MIN_PAYLOAD \
     (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
-#define D1L_MESHCORE_MAX_ADVERT_DATA 32U
+#define D1L_MESHCORE_MAX_ADVERT_DATA D1L_ADVERT_DATA_MAX_LEN
 #define D1L_MESHCORE_CIPHER_BLOCK_SIZE 16U
 #define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
 #define D1L_MESHCORE_MAX_RAW_PACKET 255U
@@ -66,6 +67,8 @@ _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ chars");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
                "MeshCore plaintext buffer must fit the user text limit");
+_Static_assert(D1L_ADVERT_DATA_NAME_LEN == D1L_HEARD_NODE_NAME_LEN,
+               "Advert parser and heard-node name bounds must match");
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
@@ -1060,60 +1063,6 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
     }
 }
 
-static char advert_type_code(uint8_t flags)
-{
-    switch (flags & 0x0fU) {
-    case 1:
-        return 'C';
-    case 2:
-        return 'R';
-    case 3:
-        return 'O';
-    case 4:
-        return 'S';
-    default:
-        return 'N';
-    }
-}
-
-static bool parse_advert_name(const uint8_t *app_data, size_t app_data_len, char *name, size_t name_size)
-{
-    if (!name || name_size == 0) {
-        return false;
-    }
-    name[0] = '\0';
-    if (!app_data || app_data_len == 0) {
-        return true;
-    }
-
-    const uint8_t flags = app_data[0];
-    size_t i = 1;
-    if ((flags & 0x10U) != 0) {
-        i += 8U;
-    }
-    if ((flags & 0x20U) != 0) {
-        i += 2U;
-    }
-    if ((flags & 0x40U) != 0) {
-        i += 2U;
-    }
-    if (i > app_data_len) {
-        return false;
-    }
-    if ((flags & 0x80U) == 0 || i == app_data_len) {
-        return true;
-    }
-
-    char raw_name[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    size_t out = 0;
-    while (i < app_data_len && out + 1U < sizeof(raw_name)) {
-        raw_name[out++] = (char)app_data[i++];
-    }
-    raw_name[out] = '\0';
-    sanitize_note(name, name_size, raw_name);
-    return true;
-}
-
 static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *timestamp,
                                     const uint8_t *signature, const uint8_t *app_data,
                                     size_t app_data_len)
@@ -1216,15 +1165,19 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
     const uint8_t *timestamp = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE];
     const uint8_t *signature = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE + 4U];
     const uint8_t *app_data = &packet.payload[D1L_MESHCORE_ADVERT_MIN_PAYLOAD];
-    size_t app_data_len = packet.payload_len - D1L_MESHCORE_ADVERT_MIN_PAYLOAD;
-    if (app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
-        app_data_len = D1L_MESHCORE_MAX_ADVERT_DATA;
-    }
+    const size_t app_data_len = packet.payload_len - D1L_MESHCORE_ADVERT_MIN_PAYLOAD;
 
     char pub_prefix[17] = {0};
     hex_prefix(pub_prefix, sizeof(pub_prefix), pub_key, 8U);
     char pub_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     hex_prefix(pub_key_hex, sizeof(pub_key_hex), pub_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    if (app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "app_oversize pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_bad_app", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
     const bool valid_signature =
         verify_advert_signature(pub_key, timestamp, signature, app_data, app_data_len);
     if (!valid_signature) {
@@ -1235,29 +1188,57 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
         return;
     }
 
-    char name[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    bool app_data_valid = parse_advert_name(app_data, app_data_len, name, sizeof(name));
-    const char type = app_data_len > 0 ? advert_type_code(app_data[0]) : 'N';
+    const d1l_settings_t *settings = d1l_settings_current();
+    if (settings->identity_ready &&
+        memcmp(pub_key, settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE) == 0) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "self pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_self", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
+
+    d1l_advert_data_t advert = {0};
+    if (!d1l_advert_data_parse(app_data, app_data_len, &advert)) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "app_invalid pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_bad_app", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
+
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    if (name[0]) {
+    if (advert.name[0]) {
         char short_name[13] = {0};
-        sanitize_note(short_name, sizeof(short_name), name);
-        snprintf(note, sizeof(note), "adv %c %s %.8s", type, short_name, pub_prefix);
+        sanitize_note(short_name, sizeof(short_name), advert.name);
+        snprintf(note, sizeof(note), "adv %c %s %.8s", advert.type_code, short_name, pub_prefix);
     } else {
-        snprintf(note, sizeof(note), "adv %c %.8s%s", type, pub_prefix,
-                 app_data_valid ? "" : " app_bad");
+        snprintf(note, sizeof(note), "adv %c %.8s", advert.type_code, pub_prefix);
     }
     s_status.rx_packets++;
-    s_status.rx_adverts++;
-    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, name, type, rssi,
+    const uint32_t advert_timestamp = read_le32(timestamp);
+    bool advert_stale = false;
+    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name,
+                                                 advert.type_code, rssi,
                                                  (snr * 10) / 4,
                                                  packet.path_hash_bytes, packet.path_hops,
-                                                 read_le32(timestamp));
+                                                 advert_timestamp, advert.location_valid,
+                                                 advert.lat_e6, advert.lon_e6,
+                                                 &advert_stale);
+    if (advert_stale) {
+        snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
+                 (unsigned long)advert_timestamp);
+        append_packet_log("rx", "advert_replay", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
     }
+    s_status.rx_adverts++;
     esp_err_t route_ret =
-        d1l_route_store_upsert_observation(pub_prefix, name[0] ? name : pub_prefix, "advert",
+        d1l_route_store_upsert_observation(pub_prefix,
+                                           advert.name[0] ? advert.name : pub_prefix, "advert",
                                            route_name(packet.route), "rx", rssi,
                                            (snr * 10) / 4, packet.path_hash_bytes,
                                            packet.path_hops, size);
@@ -1759,6 +1740,20 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     if (ret != ESP_OK) {
         return ret;
     }
+
+    /* Resolve and authorize the target before identity/radio side effects.
+     * Only canonical chat adverts are direct-message endpoints. */
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
+        contact.public_key_hex[0] == '\0') {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (strcmp(contact.type, "chat") != 0) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+
     ret = d1l_meshcore_service_ensure_identity();
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
@@ -1775,13 +1770,6 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     if (s_tx_busy) {
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
-    }
-
-    d1l_contact_entry_t contact = {0};
-    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
-        contact.public_key_hex[0] == '\0') {
-        s_status.rejected_commands++;
-        return ESP_ERR_NOT_FOUND;
     }
 
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];

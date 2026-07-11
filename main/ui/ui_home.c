@@ -349,8 +349,8 @@ void d1l_ui_home_render(lv_obj_t *parent,
         map_status = "Needs Wi-Fi";
         map_status_color = 0xFBBF24;
     }
-    render_destination_card(parent, D1L_UI_HOME_DESTINATION_MAP, LV_SYMBOL_GPS, "Map",
-                            "Location and a small local map area",
+    render_destination_card(parent, D1L_UI_HOME_DESTINATION_MAP, LV_SYMBOL_IMAGE, "Map",
+                            "Saved center and a small local map area",
                             map_status, map_status_color,
                             D1L_UI_HOME_ACTION_MAP);
 

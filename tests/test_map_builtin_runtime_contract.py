@@ -79,10 +79,30 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     service = read("main/map/map_view_service.c")
     store = read("main/storage/map_tile_store.c")
     run = body(service, "static void run_generation", "static void map_worker")
+    wait_for_sd = body(
+        service, "static bool wait_for_sd_cache", "static void fill_placeholder"
+    )
 
     assert run.count("for (uint8_t i = 0;") == 1
     assert run.index("d1l_map_tile_store_read(") < run.index("d1l_map_tile_store_fetch(")
-    assert "if (!sd_ready || !publish_initial_frame" in run
+    assert "wait_for_sd_cache(generation, &storage)" in run
+    assert run.index("wait_for_sd_cache(generation, &storage)") < run.index(
+        "publish_initial_frame(plan, generation)"
+    ) < run.index("for (uint8_t i = 0;")
+    assert "generation_continue(&generation)" in wait_for_sd
+    assert "d1l_storage_status(&storage)" in wait_for_sd
+    assert "d1l_map_tile_store_sd_ready(&storage)" in wait_for_sd
+    assert "*out_storage = storage" in wait_for_sd
+    assert "D1L_MAP_SD_POLL_MS 500U" in service
+    for forbidden in (
+        "d1l_storage_status_refresh",
+        "d1l_storage_status_mount",
+        "d1l_storage_manager_reset_bridge",
+        "d1l_map_tile_store_read",
+        "d1l_map_tile_store_fetch",
+        "network_requests",
+    ):
+        assert forbidden not in wait_for_sd
     assert "generation_continue(&generation)" in run
     assert "generation_continue, &generation" in run
     assert "wait_for_wifi(generation)" in run
@@ -112,6 +132,72 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     assert "result.status_code == 429" in fetch
     assert "png_content_type(headers.content_type)" in fetch
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
+
+
+def test_osm_standard_tiles_are_dark_styled_locally_after_decode():
+    decoder = read("main/map/map_png_decoder.c")
+    service = read("main/map/map_view_service.c")
+    store = read("main/storage/map_tile_store.h")
+
+    assert "static uint16_t dark_style_rgb565" in decoder
+    assert '#define D1L_MAP_RENDER_STYLE_ID "local-dark-v1"' in read(
+        "main/map/map_png_decoder.h"
+    )
+    assert "77U * red" in decoder
+    assert "150U * green" in decoder
+    assert "29U * blue" in decoder
+    assert "+ 128U) >> 8U" in decoder
+    assert "(255U - luminance) * 207U + 128U" in decoder
+    assert "dark_style_chroma_adjust" in decoder
+    assert "delta * 3" in decoder
+    assert "out_pixels[i] = dark_style_rgb565(red, green, blue)" in decoder
+    assert "d1l_map_png_decode_rgb565" in service
+    assert "decode_started_us = esp_timer_get_time()" in service
+    assert "decode_total_us" in service
+    assert "decode_max_us" in service
+    assert "decode_samples" in service
+    console = read("main/comms/usb_console.c")
+    assert "D1L_MAP_RENDER_STYLE_ID" in console
+    assert '\\"decode_total_us\\":%lu' in console
+    assert '\\"decode_max_us\\":%lu' in console
+    assert 'D1L_MAP_TILE_SOURCE_ID "openstreetmap-standard"' in store
+    assert "tile.openstreetmap.org" in store
+
+
+def test_local_dark_style_golden_palette_and_grayscale_contrast():
+    def styled_rgb565(red: int, green: int, blue: int) -> int:
+        luminance = (77 * red + 150 * green + 29 * blue + 128) >> 8
+        dark_luminance = 14 + (((255 - luminance) * 207 + 128) >> 8)
+
+        def adjust(channel: int) -> int:
+            scaled = (channel - luminance) * 3
+            if scaled > 0:
+                return (scaled + 4) // 8
+            if scaled < 0:
+                return -((-scaled + 4) // 8)
+            return 0
+
+        channels = [
+            max(0, min(255, dark_luminance + adjust(channel)))
+            for channel in (red, green, blue)
+        ]
+        return ((channels[0] >> 3) << 11) | ((channels[1] >> 2) << 5) | (
+            channels[2] >> 3
+        )
+
+    assert styled_rgb565(255, 255, 255) == 0x0861
+    assert styled_rgb565(242, 239, 233) == 0x18C3
+    assert styled_rgb565(68, 68, 68) == 0xA534
+    assert styled_rgb565(170, 211, 223) == 0x29E8
+    assert styled_rgb565(0, 0, 0) == 0xDEFB
+
+    grayscale = [styled_rgb565(value, value, value) for value in range(256)]
+    decoded_luminance = [
+        (((pixel >> 11) & 0x1F) << 3) + (((pixel >> 5) & 0x3F) << 2) +
+        ((pixel & 0x1F) << 3)
+        for pixel in grayscale
+    ]
+    assert all(left >= right for left, right in zip(decoded_luminance, decoded_luminance[1:]))
 
 
 def test_http_header_length_contract_handles_errors_chunking_and_hard_bounds():

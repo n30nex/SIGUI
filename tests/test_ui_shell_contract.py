@@ -1302,6 +1302,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     detail = static_void_body(source, "render_contact_detail_sheet")
     assert '"Back"' in detail
     assert '"Message"' in detail
+    assert '"Messaging unavailable for this role"' in detail
+    assert "contact_can_dm(entry)" in detail
     assert '"Contact options"' in detail
     for hidden_action in ('"Trace"', '"Edit"', '"Export"', '"Fav"', '"Mute"', '"Forget'):
         assert hidden_action not in detail

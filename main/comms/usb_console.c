@@ -34,6 +34,7 @@
 #include "mesh/route_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
+#include "map/map_png_decoder.h"
 #include "map/map_view_service.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
@@ -1310,6 +1311,9 @@ static void cmd_rp2040_ping(void)
 {
     d1l_rp2040_ping_t ping = {0};
     esp_err_t ret = d1l_rp2040_bridge_ping(&ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+    if (ret == ESP_OK && ping.bridge_ready && ping.protocol_supported) {
+        d1l_storage_status_note_valid_bridge_response();
+    }
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 ping\",\"code\":\"%s\",\"bridge_ready\":%s,\"protocol_supported\":%s,\"response_truncated\":%s,\"version\":%lu,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"sd_touched\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":",
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK),
@@ -1373,10 +1377,16 @@ static void cmd_storage_status(void)
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
-    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
+           "\"initial_ping_timeouts\":%lu,\"bridge_response_seen\":%s,"
+           "\"auto_reset_pending\":%s,\"auto_reset_attempted\":%s},\"sd\":{\"state\":",
            (unsigned long)status.manager_attempt,
            (unsigned long)status.manager_backoff_ms,
-           bool_json(status.force_nvs));
+           bool_json(status.force_nvs),
+           (unsigned long)status.manager_initial_ping_timeouts,
+           bool_json(status.manager_bridge_response_seen),
+           bool_json(status.manager_auto_reset_pending),
+           bool_json(status.manager_auto_reset_attempted));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
     printf(",\"interface\":");
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
@@ -1537,10 +1547,16 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
            esp_err_to_name(ret),
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
-    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
+           "\"initial_ping_timeouts\":%lu,\"bridge_response_seen\":%s,"
+           "\"auto_reset_pending\":%s,\"auto_reset_attempted\":%s},\"sd\":{\"state\":",
            (unsigned long)status.manager_attempt,
            (unsigned long)status.manager_backoff_ms,
-           bool_json(status.force_nvs));
+           bool_json(status.force_nvs),
+           (unsigned long)status.manager_initial_ping_timeouts,
+           bool_json(status.manager_bridge_response_seen),
+           bool_json(status.manager_auto_reset_pending),
+           bool_json(status.manager_auto_reset_attempted));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
     printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s},\"setup_action\":",
            bool_json(status.rp2040_bridge_ready),
@@ -1717,15 +1733,20 @@ static void cmd_map_tiles_status(void)
     ok_begin("map tiles status");
     printf(",\"source\":");
     print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"render_style\":");
+    print_json_string(D1L_MAP_RENDER_STYLE_ID);
     printf(",\"attribution\":");
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
-    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
            bool_json(status.initialized), bool_json(status.visible),
            bool_json(status.worker_running), bool_json(status.frame_ready),
            bool_json(status.sd_cache_ready), bool_json(status.wifi_connected),
            bool_json(status.rate_limited), bool_json(status.current_view_only),
            (unsigned long)status.generation, (unsigned long)status.frame_revision,
-           (unsigned long)status.retry_after_sec, (long)status.lat_e7,
+           (unsigned long)status.retry_after_sec,
+           (unsigned long)status.decode_total_us,
+           (unsigned long)status.decode_max_us,
+           (unsigned)status.decode_samples, (long)status.lat_e7,
            (long)status.lon_e7, (unsigned)status.width, (unsigned)status.height,
            (unsigned)status.zoom, (unsigned)status.planned_tiles,
            (unsigned)status.attempted_tiles, (unsigned)status.cache_hits,
@@ -2682,11 +2703,19 @@ static bool append_data_export_node_entries(char *dest, size_t dest_size, size_t
             !append_export_json_string_field(dest, dest_size, used, "type", e->type) ||
             !append_export_json(dest, dest_size, used,
                                 ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
-                                "\"path_hash_bytes\":%u,\"path_hops\":%u}",
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"location_valid\":%s,\"lat_e6\":%ld,"
+                                "\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,"
+                                "\"location_seq\":%lu}",
                                 e->rssi_dbm,
                                 e->snr_tenths,
                                 (unsigned)e->path_hash_bytes,
-                                (unsigned)e->path_hops)) {
+                                (unsigned)e->path_hops,
+                                bool_json(e->location_valid),
+                                (long)e->lat_e6,
+                                (long)e->lon_e6,
+                                (unsigned long)e->location_advert_timestamp,
+                                (unsigned long)e->location_seq)) {
             return false;
         }
     }
@@ -3689,6 +3718,7 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
+    const uint32_t marker_generation = d1l_node_store_marker_generation();
     static d1l_node_view_t entries[8];
     const d1l_node_query_t query = {
         .filter = D1L_NODE_FILTER_ALL,
@@ -3699,22 +3729,26 @@ static void cmd_nodes(void)
     };
     size_t copied = d1l_node_store_query(&query, entries, 8);
     ok_begin("nodes");
-    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"marker_generation\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned)D1L_NODE_RAM_ACTIVE_CAPACITY,
            (unsigned)D1L_NODE_SD_HISTORY_CAPACITY,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           (unsigned long)marker_generation);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_node_view_t *view = &entries[i];
         const d1l_node_entry_t *e = &view->node;
-        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u}",
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
                (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
                (unsigned long)e->heard_count, e->fingerprint, e->public_key_hex,
                e->name, view->display_name, e->type, view->role,
                bool_json(view->favorite), bool_json(view->muted),
                bool_json(view->keyed), bool_json(view->reachable),
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
+               bool_json(e->location_valid), (long)e->lat_e6, (long)e->lon_e6,
+               (unsigned long)e->location_advert_timestamp,
+               (unsigned long)e->location_seq);
     }
     printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
 }

@@ -130,6 +130,7 @@ static bool s_map_location_returns_to_options;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
 static d1l_node_view_t s_node_detail_node;
+static bool s_node_detail_returns_to_map;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
@@ -150,6 +151,7 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
+static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
 /* A full retained Packet view can legitimately take longer than 1.5 s to rebuild
  * before a nested page opens. Keep the serial proof bounded without turning a
  * populated device into a false timeout. */
@@ -211,6 +213,7 @@ static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_contact_options_event_cb(lv_event_t *event);
 static void open_contact_forget_event_cb(lv_event_t *event);
 static void open_node_detail_event_cb(lv_event_t *event);
+static void open_map_node_detail(const char *fingerprint);
 static void node_detail_dm_event_cb(lv_event_t *event);
 static void open_node_dm_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
@@ -644,6 +647,7 @@ static const d1l_ui_map_callbacks_t callbacks = {
     .clear_location = map_location_clear_event_cb,
     .location_textarea = map_location_textarea_event_cb,
     .location_keyboard = map_location_keyboard_event_cb,
+    .open_node_detail = open_map_node_detail,
 };
 
 static const char *tab_name(d1l_ui_tab_t tab)
@@ -1221,6 +1225,9 @@ static void show_modal(lv_obj_t *obj)
     if (!obj) {
         return;
     }
+    if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
+        d1l_ui_map_viewport_prepare_cover();
+    }
     d1l_ui_map_viewport_release();
     set_dock_hidden(true);
     d1l_ui_modal_show(obj);
@@ -1386,6 +1393,7 @@ static void hide_node_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_node_detail_sheet);
     memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
+    s_node_detail_returns_to_map = false;
     restore_dock_for_active_tab();
 }
 
@@ -1674,7 +1682,19 @@ static bool node_view_can_dm(const d1l_node_view_t *view)
     return view &&
            view->node.fingerprint[0] != '\0' &&
            view->node.public_key_hex[0] != '\0' &&
-           !node_role_is_managed_service(view->role);
+           strcmp(view->role, "companion") == 0;
+}
+
+static bool contact_can_dm(const d1l_contact_entry_t *entry)
+{
+    return entry && entry->fingerprint[0] != '\0' &&
+           entry->public_key_hex[0] != '\0' && strcmp(entry->type, "chat") == 0;
+}
+
+static bool contact_can_export(const d1l_contact_entry_t *entry)
+{
+    return entry && d1l_contact_store_has_export_key(entry) &&
+           d1l_contact_store_meshcore_type_id(entry->type) != 0U;
 }
 
 static bool node_view_management_gated(const d1l_node_view_t *view)
@@ -2100,10 +2120,11 @@ static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_
     lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
     label_set_dot_width(alias, 166);
     obj_align_if(alias, LV_ALIGN_TOP_LEFT, 0, 0);
-    if (entry->public_key_hex[0] != '\0') {
+    if (contact_can_dm(entry)) {
         create_button(row, "DM", 350, -1, 48, 34, open_dm_compose_event_cb, (void *)entry);
     } else {
-        lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
+        lv_obj_t *type = create_label(row, entry->type[0] ? entry->type : "unknown",
+                                      0xA7F3D0);
         obj_align_if(type, LV_ALIGN_TOP_RIGHT, 0, 0);
     }
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
@@ -2214,7 +2235,7 @@ static void mark_messages_read_event_cb(lv_event_t *event)
 
 static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
 {
-    if (!entry || entry->public_key_hex[0] == '\0') {
+    if (!contact_can_dm(entry)) {
         show_toast("DM", ESP_ERR_INVALID_STATE);
         return;
     }
@@ -2538,9 +2559,20 @@ static void render_contact_options_sheet(void)
                                    (void *)s_contact_action_mute);
     style_contact_option_button(mute, 0xC4B5FD,
                                 entry->muted ? "On  >" : "Off  >");
-    lv_obj_t *export = create_button(s_contact_options_sheet, "Export QR", 16, 280, 448, 48,
-                                     contact_detail_export_event_cb, NULL);
-    style_contact_option_button(export, 0xA7F3D0, "Share QR  >");
+    if (contact_can_export(entry)) {
+        lv_obj_t *export = create_button(s_contact_options_sheet, "Export QR", 16, 280,
+                                         448, 48, contact_detail_export_event_cb, NULL);
+        style_contact_option_button(export, 0xA7F3D0, "Share QR  >");
+    } else {
+        lv_obj_t *export = create_panel(s_contact_options_sheet, 16, 280, 448, 48);
+        if (export) {
+            lv_obj_set_style_pad_all(export, 0, 0);
+            lv_obj_t *title = create_label(export, "Export unavailable", 0x8EA0AE);
+            obj_align_if(title, LV_ALIGN_LEFT_MID, 12, 0);
+            lv_obj_t *reason = create_label(export, "Missing key or role", 0x8EA0AE);
+            obj_align_if(reason, LV_ALIGN_RIGHT_MID, -12, 0);
+        }
+    }
     lv_obj_t *forget = create_button(s_contact_options_sheet, "Forget contact", 16, 334, 448, 48,
                                      open_contact_forget_event_cb, NULL);
     style_danger_button(forget);
@@ -2921,8 +2953,15 @@ static void render_contact_detail_sheet(void)
 
     lv_obj_t *actions = create_label(s_contact_detail_sheet, "Actions", 0x5EEAD4);
     lv_obj_set_pos(actions, 16, 210);
-    create_button(s_contact_detail_sheet, "Message", 16, 238, 448, 52,
-                  contact_detail_dm_event_cb, NULL);
+    if (contact_can_dm(entry)) {
+        create_button(s_contact_detail_sheet, "Message", 16, 238, 448, 52,
+                      contact_detail_dm_event_cb, NULL);
+    } else {
+        lv_obj_t *unavailable = create_label(s_contact_detail_sheet,
+                                             "Messaging unavailable for this role",
+                                             0x8EA0AE);
+        lv_obj_set_pos(unavailable, 16, 254);
+    }
     create_button(s_contact_detail_sheet, "Contact options", 16, 304, 448, 52,
                   open_contact_options_event_cb, NULL);
 }
@@ -2983,7 +3022,26 @@ static void open_contact_detail_event_cb(lv_event_t *event)
 static void close_node_detail_event_cb(lv_event_t *event)
 {
     (void)event;
+    const bool return_to_map = s_node_detail_returns_to_map;
     hide_node_detail_sheet();
+    if (return_to_map && d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+        !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
+        map_interactive_touch_authorized() && !d1l_ui_map_viewport_reacquire()) {
+        request_content_refresh();
+    }
+}
+
+static void format_advert_coordinate(char *dest, size_t dest_len, int32_t value_e6)
+{
+    if (!dest || dest_len == 0U) {
+        return;
+    }
+    const int64_t value = value_e6;
+    const bool negative = value < 0;
+    const uint64_t magnitude = (uint64_t)(negative ? -value : value);
+    snprintf(dest, dest_len, "%s%llu.%06llu", negative ? "-" : "",
+             (unsigned long long)(magnitude / 1000000ULL),
+             (unsigned long long)(magnitude % 1000000ULL));
 }
 
 static void render_node_detail_sheet(void)
@@ -3060,6 +3118,20 @@ static void render_node_detail_sheet(void)
     lv_obj_set_width(path, 392);
     lv_obj_set_pos(path, 8, 218);
 
+    lv_obj_t *location = create_label(s_node_detail_sheet, "", 0x93C5FD);
+    if (entry->location_valid) {
+        char latitude[16];
+        char longitude[16];
+        format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
+        format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
+        label_set_fmt(location, "Advert location %s, %s", latitude, longitude);
+    } else {
+        lv_label_set_text(location, "Advert location not provided");
+    }
+    lv_label_set_long_mode(location, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(location, 392);
+    lv_obj_set_pos(location, 8, 242);
+
     lv_obj_t *heard = create_label(s_node_detail_sheet, "", 0x8EA0AE);
     label_set_fmt(heard, "Last heard %lums  first %lums  count %lu",
                   (unsigned long)entry->last_heard_ms,
@@ -3067,12 +3139,11 @@ static void render_node_detail_sheet(void)
                   (unsigned long)entry->heard_count);
     lv_label_set_long_mode(heard, LV_LABEL_LONG_DOT);
     lv_obj_set_width(heard, 392);
-    lv_obj_set_pos(heard, 8, 252);
+    lv_obj_set_pos(heard, 8, 266);
 }
 
-static void open_node_detail_event_cb(lv_event_t *event)
+static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_map)
 {
-    const d1l_node_view_t *view = (const d1l_node_view_t *)lv_event_get_user_data(event);
     if (!view || view->node.fingerprint[0] == '\0') {
         show_toast("Node", ESP_ERR_INVALID_STATE);
         return;
@@ -3091,10 +3162,38 @@ static void open_node_detail_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_node_detail_node = *view;
+    s_node_detail_returns_to_map = return_to_map;
     render_node_detail_sheet();
     if (s_node_detail_sheet) {
         show_modal(s_node_detail_sheet);
     }
+}
+
+static void open_node_detail_event_cb(lv_event_t *event)
+{
+    show_node_detail_view((const d1l_node_view_t *)lv_event_get_user_data(event), false);
+}
+
+static void open_map_node_detail(const char *fingerprint)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        show_toast("Node", ESP_ERR_INVALID_ARG);
+        return;
+    }
+    const d1l_node_query_t query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+        .text = fingerprint,
+    };
+    const size_t count = d1l_app_model_query_nodes(
+        &query, s_node_rows, D1L_NODE_STORE_CAPACITY);
+    for (size_t i = 0; i < count; ++i) {
+        if (strcmp(s_node_rows[i].node.fingerprint, fingerprint) == 0) {
+            show_node_detail_view(&s_node_rows[i], true);
+            return;
+        }
+    }
+    show_toast("Node", ESP_ERR_NOT_FOUND);
 }
 
 static void close_route_detail_event_cb(lv_event_t *event)
@@ -7340,6 +7439,9 @@ static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_lock_overlay) {
+        if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
+            d1l_ui_map_viewport_prepare_cover();
+        }
         d1l_ui_map_viewport_release();
         s_lock_visible = true;
         lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -7356,6 +7458,18 @@ static void unlock_event_cb(lv_event_t *event)
             !d1l_ui_modal_has_active() && !s_onboarding_visible) {
             request_content_refresh();
         }
+    }
+}
+
+static void map_viewport_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    const bool map_uncovered =
+        d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+        !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
+        map_interactive_touch_authorized();
+    if (map_uncovered) {
+        (void)d1l_ui_map_viewport_refresh();
     }
 }
 
@@ -7839,8 +7953,8 @@ static void create_node_detail_sheet(lv_obj_t *screen)
     if (!s_node_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_node_detail_sheet, 448, 286);
-    lv_obj_set_pos(s_node_detail_sheet, 16, 100);
+    lv_obj_set_size(s_node_detail_sheet, 448, 320);
+    lv_obj_set_pos(s_node_detail_sheet, 16, 82);
     lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_node_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_node_detail_sheet, lv_color_hex(0x334155), 0);
@@ -8247,6 +8361,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_onboarding_sheet(s_screen);
 
     render_active_tab();
+    lv_timer_create(map_viewport_timer_cb, D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
     lv_timer_create(refresh_timer_cb, 2000, NULL);
     lv_scr_load(s_screen);
     return ESP_OK;

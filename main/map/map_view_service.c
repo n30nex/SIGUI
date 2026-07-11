@@ -16,6 +16,7 @@
 
 #define D1L_MAP_WORKER_STACK_BYTES 12288U
 #define D1L_MAP_WORKER_PRIORITY 2U
+#define D1L_MAP_SD_POLL_MS 500U
 #define D1L_MAP_WIFI_POLL_MS 500U
 #define D1L_MAP_TILE_GAP_MS 100U
 #define D1L_MAP_DEFAULT_RETRY_AFTER_SEC 300U
@@ -84,6 +85,34 @@ static bool wait_for_frame_slot(uint8_t slot, uint32_t generation)
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return false;
+}
+
+static bool wait_for_sd_cache(uint32_t generation,
+                              d1l_storage_status_t *out_storage)
+{
+    if (!out_storage) {
+        return false;
+    }
+    while (generation_continue(&generation)) {
+        d1l_storage_status_t storage = {0};
+        d1l_storage_status(&storage);
+        const bool ready = d1l_map_tile_store_sd_ready(&storage);
+        if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (s_map.status.generation == generation) {
+                s_map.status.sd_cache_ready = ready;
+                set_message_locked(ready ? "loading_cache" : "sd_cache_required",
+                                   ready ? "Loading current map view" :
+                                           "Waiting for the SD cache");
+            }
+            xSemaphoreGive(s_map.lock);
+        }
+        if (ready) {
+            *out_storage = storage;
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(D1L_MAP_SD_POLL_MS));
     }
     return false;
 }
@@ -263,11 +292,12 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
             s_map.status.wifi_connected = initial_connectivity.wifi_connected;
             set_message_locked(sd_ready ? "loading_cache" : "sd_cache_required",
                                sd_ready ? "Loading current map view" :
-                                          "SD cache required for map tiles");
+                                          "Waiting for the SD cache");
         }
         xSemaphoreGive(s_map.lock);
     }
-    if (!sd_ready || !publish_initial_frame(plan, generation)) {
+    if ((!sd_ready && !wait_for_sd_cache(generation, &storage)) ||
+        !publish_initial_frame(plan, generation)) {
         return;
     }
 
@@ -361,9 +391,30 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
         if (!generation_continue(&generation)) {
             break;
         }
+        const int64_t decode_started_us = esp_timer_get_time();
         ret = d1l_map_png_decode_rgb565(s_map.compressed, compressed_len,
                                         s_map.decoded_tile,
                                         D1L_MAP_DECODED_TILE_PIXELS);
+        const int64_t decode_elapsed_us = esp_timer_get_time() - decode_started_us;
+        if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (s_map.status.generation == generation) {
+                const uint32_t elapsed_us = decode_elapsed_us <= 0 ? 0U :
+                    (decode_elapsed_us > UINT32_MAX ? UINT32_MAX :
+                     (uint32_t)decode_elapsed_us);
+                if (UINT32_MAX - s_map.status.decode_total_us < elapsed_us) {
+                    s_map.status.decode_total_us = UINT32_MAX;
+                } else {
+                    s_map.status.decode_total_us += elapsed_us;
+                }
+                if (elapsed_us > s_map.status.decode_max_us) {
+                    s_map.status.decode_max_us = elapsed_us;
+                }
+                if (s_map.status.decode_samples < UINT8_MAX) {
+                    ++s_map.status.decode_samples;
+                }
+            }
+            xSemaphoreGive(s_map.lock);
+        }
         if (ret != ESP_OK) {
             note_failure(generation, "decode", "A cached map tile was invalid");
             continue;

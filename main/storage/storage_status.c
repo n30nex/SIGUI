@@ -7,6 +7,7 @@
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #include "hal/rp2040_bridge.h"
@@ -24,6 +25,7 @@
 #define D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS 8U
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS 500U
+#define D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U
 
 typedef enum {
     D1L_STORAGE_MANAGER_BRIDGE_WAIT,
@@ -40,11 +42,20 @@ typedef enum {
 static d1l_storage_status_t s_status;
 static TaskHandle_t s_storage_manager_task;
 static d1l_storage_manager_state_t s_manager_state = D1L_STORAGE_MANAGER_BRIDGE_WAIT;
-static volatile bool s_manager_remount_requested;
-static volatile bool s_manager_reset_bridge_requested;
+static bool s_manager_remount_requested;
+static bool s_manager_reset_bridge_requested;
 static int64_t s_manager_pause_until_us;
 static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_manager_control_lock = portMUX_INITIALIZER_UNLOCKED;
+static StaticSemaphore_t s_manager_sequence_mutex_storage;
+static SemaphoreHandle_t s_manager_sequence_mutex;
 static bool s_force_nvs;
+static uint32_t s_manager_initial_ping_timeouts;
+static bool s_manager_bridge_response_seen;
+static bool s_manager_auto_reset_pending;
+static bool s_manager_auto_reset_attempted;
+static bool s_manager_initial_reset_budget_spent;
+static bool s_manager_reset_recovery_active;
 
 static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mount);
 
@@ -101,6 +112,174 @@ static void set_manager_state(d1l_storage_manager_state_t state)
 {
     s_manager_state = state;
     s_status.manager_state = storage_manager_state_name(state);
+}
+
+static void ensure_manager_sequence_mutex(void)
+{
+    if (!s_manager_sequence_mutex) {
+        s_manager_sequence_mutex =
+            xSemaphoreCreateMutexStatic(&s_manager_sequence_mutex_storage);
+    }
+}
+
+static bool manager_sequence_try_take(void)
+{
+    ensure_manager_sequence_mutex();
+    return s_manager_sequence_mutex &&
+           xSemaphoreTake(s_manager_sequence_mutex, 0) == pdTRUE;
+}
+
+static void manager_sequence_give(void)
+{
+    if (s_manager_sequence_mutex) {
+        xSemaphoreGive(s_manager_sequence_mutex);
+    }
+}
+
+static void sync_initial_recovery_status_locked(void)
+{
+    s_status.manager_initial_ping_timeouts = s_manager_initial_ping_timeouts;
+    s_status.manager_bridge_response_seen = s_manager_bridge_response_seen;
+    s_status.manager_auto_reset_pending = s_manager_auto_reset_pending;
+    s_status.manager_auto_reset_attempted = s_manager_auto_reset_attempted;
+}
+
+void d1l_storage_status_note_valid_bridge_response(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    s_manager_bridge_response_seen = true;
+    s_manager_initial_ping_timeouts = 0U;
+    s_manager_auto_reset_pending = false;
+    sync_initial_recovery_status_locked();
+    portEXIT_CRITICAL(&s_manager_control_lock);
+}
+
+static bool initial_ping_timeout_requires_reset(esp_err_t result)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    if (s_manager_bridge_response_seen || s_manager_auto_reset_attempted ||
+        s_manager_initial_reset_budget_spent) {
+        sync_initial_recovery_status_locked();
+        portEXIT_CRITICAL(&s_manager_control_lock);
+        return false;
+    }
+    if (result != ESP_ERR_TIMEOUT) {
+        s_manager_initial_ping_timeouts = 0U;
+        sync_initial_recovery_status_locked();
+        portEXIT_CRITICAL(&s_manager_control_lock);
+        return false;
+    }
+    if (s_manager_initial_ping_timeouts <
+        D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT) {
+        ++s_manager_initial_ping_timeouts;
+    }
+    if (s_manager_initial_ping_timeouts <
+        D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT) {
+        sync_initial_recovery_status_locked();
+        portEXIT_CRITICAL(&s_manager_control_lock);
+        return false;
+    }
+    s_manager_auto_reset_pending = true;
+    sync_initial_recovery_status_locked();
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    return true;
+}
+
+static bool claim_initial_bridge_reset(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    const bool claimed = s_manager_auto_reset_pending &&
+                         !s_manager_bridge_response_seen &&
+                         !s_manager_auto_reset_attempted &&
+                         !s_manager_initial_reset_budget_spent &&
+                         !s_manager_reset_recovery_active &&
+                         !s_force_nvs;
+    s_manager_auto_reset_pending = false;
+    if (claimed) {
+        s_manager_auto_reset_attempted = true;
+        s_manager_initial_reset_budget_spent = true;
+        s_manager_initial_ping_timeouts = 0U;
+        s_manager_reset_recovery_active = true;
+    }
+    sync_initial_recovery_status_locked();
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    return claimed;
+}
+
+static bool initial_bridge_reset_is_pending(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    const bool pending = s_manager_auto_reset_pending &&
+                         !s_manager_bridge_response_seen &&
+                         !s_manager_auto_reset_attempted &&
+                         !s_force_nvs;
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    return pending;
+}
+
+static void manager_control_take(bool *out_force_nvs,
+                                 bool *out_reset_bridge,
+                                 bool *out_remount)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    if (out_force_nvs) {
+        *out_force_nvs = s_force_nvs;
+    }
+    if (out_reset_bridge) {
+        *out_reset_bridge = s_manager_reset_bridge_requested;
+    }
+    if (out_remount) {
+        *out_remount = s_manager_remount_requested;
+    }
+    s_manager_reset_bridge_requested = false;
+    s_manager_remount_requested = false;
+    portEXIT_CRITICAL(&s_manager_control_lock);
+}
+
+static bool manager_force_nvs_enabled(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    const bool force_nvs = s_force_nvs;
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    return force_nvs;
+}
+
+static bool manager_control_begin_manual_reset(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    const bool claimed = !s_force_nvs && !s_manager_reset_recovery_active;
+    if (claimed) {
+        s_manager_initial_ping_timeouts = 0U;
+        s_manager_auto_reset_pending = false;
+        s_manager_initial_reset_budget_spent = true;
+        s_manager_reset_recovery_active = true;
+        s_manager_reset_bridge_requested = false;
+        s_manager_remount_requested = false;
+        sync_initial_recovery_status_locked();
+    }
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    return claimed;
+}
+
+static void manager_control_satisfy_reset(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    /* A request received while a reset pulse was already in progress is
+     * coalesced into that pulse and its following mount attempt. */
+    s_manager_initial_ping_timeouts = 0U;
+    s_manager_auto_reset_pending = false;
+    s_manager_initial_reset_budget_spent = true;
+    s_manager_reset_bridge_requested = false;
+    s_manager_remount_requested = false;
+    sync_initial_recovery_status_locked();
+    portEXIT_CRITICAL(&s_manager_control_lock);
+}
+
+static void manager_control_finish_reset_recovery(void)
+{
+    portENTER_CRITICAL(&s_manager_control_lock);
+    s_manager_reset_recovery_active = false;
+    portEXIT_CRITICAL(&s_manager_control_lock);
 }
 
 static void set_store_backends(d1l_storage_status_t *status)
@@ -270,6 +449,10 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         ((strcmp(sd->state, "error") == 0 || !sd->card_present) &&
          (sd->probe_error == 3U || sd->probe_error == 4U));
 
+    if (sd->bridge_ready && sd->protocol_supported) {
+        d1l_storage_status_note_valid_bridge_response();
+    }
+
     s_status.rp2040_bridge_ready = sd->bridge_ready;
     s_status.rp2040_sd_protocol_supported = sd->protocol_supported;
     s_status.sd_present = sd->card_present;
@@ -362,6 +545,7 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 
 esp_err_t d1l_storage_status_init(void)
 {
+    ensure_manager_sequence_mutex();
     memset(&s_status, 0, sizeof(s_status));
     s_status.initialized = true;
     s_status.mount_point = D1L_STORAGE_SD_MOUNT_POINT;
@@ -369,9 +553,18 @@ esp_err_t d1l_storage_status_init(void)
     s_status.sd_filesystem = "unknown";
     s_status.manager_state = storage_manager_state_name(s_manager_state);
     s_status.manager_running = s_storage_manager_task != NULL;
-    s_status.force_nvs = s_force_nvs;
     s_status.manager_attempt = 0;
     s_status.manager_backoff_ms = 0;
+    portENTER_CRITICAL(&s_manager_control_lock);
+    s_manager_initial_ping_timeouts = 0U;
+    s_manager_bridge_response_seen = false;
+    s_manager_auto_reset_pending = false;
+    s_manager_auto_reset_attempted = false;
+    s_manager_initial_reset_budget_spent = false;
+    s_manager_reset_recovery_active = false;
+    s_status.force_nvs = s_force_nvs;
+    sync_initial_recovery_status_locked();
+    portEXIT_CRITICAL(&s_manager_control_lock);
     s_status.last_error = ESP_ERR_NOT_SUPPORTED;
 
 #if CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L
@@ -399,6 +592,10 @@ void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result)
 {
     if (!s_status.initialized) {
         (void)d1l_storage_status_init();
+    }
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
+        return;
     }
     s_status.rp2040_bridge_ready = (rp2040_init_result == ESP_OK);
     if (s_status.rp2040_bridge_required && !s_status.rp2040_bridge_ready) {
@@ -434,7 +631,7 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_probe_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    if (s_force_nvs) {
+    if (manager_force_nvs_enabled()) {
         apply_force_nvs_status();
     }
     return ret;
@@ -470,25 +667,34 @@ static bool remount_timeout_needs_bridge_reset(void)
            !s_status.rp2040_sd_protocol_supported;
 }
 
-static void request_bridge_reset_remount_recovery(void)
+static bool request_bridge_reset_remount_recovery(void)
 {
-    s_force_nvs = false;
-    s_status.force_nvs = false;
-    s_manager_reset_bridge_requested = true;
-    s_manager_remount_requested = true;
+    portENTER_CRITICAL(&s_manager_control_lock);
+    const bool queued = !s_force_nvs && !s_manager_reset_recovery_active;
+    if (queued) {
+        s_manager_reset_bridge_requested = true;
+        s_manager_remount_requested = true;
+    }
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    if (!queued) {
+        return false;
+    }
     s_status.manager_backoff_ms = 0;
     set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+    return true;
 }
 
 static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
 {
-    s_manager_reset_bridge_requested = false;
-    s_manager_remount_requested = false;
+    if (!manager_control_begin_manual_reset()) {
+        return ESP_ERR_INVALID_STATE;
+    }
     set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
 
     esp_err_t ret =
         d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
                                 D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
+    manager_control_satisfy_reset();
     d1l_storage_status_note_rp2040(ret);
     if (ret != ESP_OK) {
         return ret;
@@ -501,6 +707,7 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
         ret = d1l_rp2040_bridge_ping(&ping,
                                       D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
         if (ret == ESP_OK) {
+            d1l_storage_status_note_valid_bridge_response();
             break;
         }
         d1l_storage_status_note_rp2040(ret);
@@ -524,8 +731,9 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
 
 static void classify_storage_manager_state(esp_err_t ret)
 {
-    s_status.force_nvs = s_force_nvs;
-    if (s_force_nvs) {
+    const bool force_nvs = manager_force_nvs_enabled();
+    s_status.force_nvs = force_nvs;
+    if (force_nvs) {
         apply_force_nvs_status();
         s_status.manager_backoff_ms = 0;
         return;
@@ -556,18 +764,40 @@ static void classify_storage_manager_state(esp_err_t ret)
     }
 }
 
-static void storage_manager_run_once(void)
+static void storage_manager_run_once_owned(void)
 {
     s_status.manager_running = true;
     s_status.manager_attempt++;
-    s_status.force_nvs = s_force_nvs;
-    if (s_force_nvs) {
+    bool force_nvs = false;
+    bool manual_reset_requested = false;
+    bool manual_remount_requested = false;
+    manager_control_take(&force_nvs, &manual_reset_requested,
+                         &manual_remount_requested);
+    s_status.force_nvs = force_nvs;
+    if (force_nvs) {
         apply_force_nvs_status();
         return;
     }
 
-    if (s_manager_reset_bridge_requested) {
-        s_manager_reset_bridge_requested = false;
+    bool auto_reset_performed = false;
+    bool ping_already_valid = false;
+    if (!manual_reset_requested && initial_bridge_reset_is_pending()) {
+        set_manager_state(D1L_STORAGE_MANAGER_PING);
+        d1l_rp2040_ping_t final_ping = {0};
+        const esp_err_t final_ping_ret = d1l_rp2040_bridge_ping(
+            &final_ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        if (final_ping_ret == ESP_OK) {
+            d1l_storage_status_note_valid_bridge_response();
+            d1l_storage_status_note_rp2040(ESP_OK);
+            ping_already_valid = true;
+        }
+    }
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
+        return;
+    }
+    if (!ping_already_valid && !manual_reset_requested &&
+        claim_initial_bridge_reset()) {
         set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
         esp_err_t reset_ret =
             d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
@@ -577,24 +807,74 @@ static void storage_manager_run_once(void)
             classify_storage_manager_state(reset_ret);
             return;
         }
+        auto_reset_performed = true;
+        manager_control_satisfy_reset();
     }
 
-    set_manager_state(D1L_STORAGE_MANAGER_PING);
-    d1l_rp2040_ping_t ping = {0};
-    esp_err_t ret =
-        d1l_rp2040_bridge_ping(&ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
-    if (ret != ESP_OK) {
-        d1l_storage_status_note_rp2040(ret);
-        classify_storage_manager_state(ret);
+    if (manual_reset_requested) {
+        if (manager_force_nvs_enabled()) {
+            apply_force_nvs_status();
+            return;
+        }
+        if (!manager_control_begin_manual_reset()) {
+            if (manager_force_nvs_enabled()) {
+                apply_force_nvs_status();
+            }
+            return;
+        }
+        set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+        esp_err_t reset_ret =
+            d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
+                                    D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
+        d1l_storage_status_note_rp2040(reset_ret);
+        if (reset_ret != ESP_OK) {
+            classify_storage_manager_state(reset_ret);
+            return;
+        }
+        manager_control_satisfy_reset();
+        ping_already_valid = false;
+    }
+
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
         return;
     }
-    d1l_storage_status_note_rp2040(ESP_OK);
+    esp_err_t ret = ESP_OK;
+    if (!ping_already_valid) {
+        set_manager_state(D1L_STORAGE_MANAGER_PING);
+        d1l_rp2040_ping_t ping = {0};
+        ret = d1l_rp2040_bridge_ping(
+            &ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        if (ret != ESP_OK) {
+            d1l_storage_status_note_rp2040(ret);
+            if (initial_ping_timeout_requires_reset(ret)) {
+                set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
+                s_status.manager_backoff_ms = 0;
+                return;
+            }
+            classify_storage_manager_state(ret);
+            return;
+        }
+        d1l_storage_status_note_valid_bridge_response();
+        d1l_storage_status_note_rp2040(ESP_OK);
+    }
+
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
+        return;
+    }
 
     set_manager_state(D1L_STORAGE_MANAGER_STATUS);
     ret = d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
 
-    const bool remount_requested = s_manager_remount_requested;
-    s_manager_remount_requested = false;
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
+        return;
+    }
+
+    const bool remount_requested = manual_remount_requested ||
+                                   manual_reset_requested ||
+                                   auto_reset_performed;
     if ((ret == ESP_OK || ret == ESP_ERR_TIMEOUT) &&
         (remount_requested ||
          strcmp(s_status.sd_state, "mount_required") == 0 ||
@@ -609,13 +889,24 @@ static void storage_manager_run_once(void)
                 ret = poll_ret;
             }
         }
-        if (ret == ESP_ERR_TIMEOUT && remount_requested &&
+        if (ret == ESP_ERR_TIMEOUT && manual_remount_requested &&
+            !manual_reset_requested && !auto_reset_performed &&
             remount_timeout_needs_bridge_reset()) {
             request_bridge_reset_remount_recovery();
         }
     }
 
     classify_storage_manager_state(ret);
+}
+
+static void storage_manager_run_once(void)
+{
+    if (!manager_sequence_try_take()) {
+        return;
+    }
+    storage_manager_run_once_owned();
+    manager_control_finish_reset_recovery();
+    manager_sequence_give();
 }
 
 static uint32_t storage_manager_pause_delay_ms(void)
@@ -702,18 +993,26 @@ esp_err_t d1l_storage_manager_start(void)
 
 esp_err_t d1l_storage_manager_request_remount(void)
 {
+    portENTER_CRITICAL(&s_manager_control_lock);
     s_force_nvs = false;
+    if (!s_manager_reset_recovery_active) {
+        s_manager_remount_requested = true;
+    }
+    portEXIT_CRITICAL(&s_manager_control_lock);
     s_status.force_nvs = false;
-    s_manager_remount_requested = true;
     return d1l_storage_manager_start();
 }
 
 esp_err_t d1l_storage_manager_reset_bridge(void)
 {
+    portENTER_CRITICAL(&s_manager_control_lock);
     s_force_nvs = false;
+    if (!s_manager_reset_recovery_active) {
+        s_manager_reset_bridge_requested = true;
+        s_manager_remount_requested = true;
+    }
+    portEXIT_CRITICAL(&s_manager_control_lock);
     s_status.force_nvs = false;
-    s_manager_reset_bridge_requested = true;
-    s_manager_remount_requested = true;
     return d1l_storage_manager_start();
 }
 
@@ -740,12 +1039,20 @@ void d1l_storage_manager_resume(void)
 
 void d1l_storage_manager_force_nvs(bool force_nvs)
 {
+    portENTER_CRITICAL(&s_manager_control_lock);
     s_force_nvs = force_nvs;
+    if (force_nvs) {
+        s_manager_reset_bridge_requested = false;
+        s_manager_remount_requested = false;
+        s_manager_auto_reset_pending = false;
+        sync_initial_recovery_status_locked();
+    } else if (!s_manager_reset_recovery_active) {
+        s_manager_remount_requested = true;
+    }
+    portEXIT_CRITICAL(&s_manager_control_lock);
     s_status.force_nvs = force_nvs;
     if (force_nvs) {
         apply_force_nvs_status();
-    } else {
-        s_manager_remount_requested = true;
     }
 }
 
@@ -760,7 +1067,12 @@ static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mou
         return ESP_ERR_NOT_SUPPORTED;
     }
 
-    if (!force_bridge_mount && !s_force_nvs && storage_sd_ready_for_files()) {
+    if (manager_force_nvs_enabled()) {
+        apply_force_nvs_status();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!force_bridge_mount && storage_sd_ready_for_files()) {
         s_status.last_error = ESP_OK;
         return ESP_OK;
     }
@@ -768,7 +1080,7 @@ static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mou
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_mount_sd(&sd, timeout_ms);
     apply_rp2040_sd_status(&sd);
-    if (s_force_nvs) {
+    if (manager_force_nvs_enabled()) {
         apply_force_nvs_status();
     }
     return ret;
@@ -790,9 +1102,20 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
         return ESP_ERR_NOT_SUPPORTED;
     }
 
+    /* The serial blocking path and background manager share one high-level
+     * owner. A command racing an active manager recovery reports busy instead
+     * of starting a second reset/remount sequence. */
+    if (!manager_sequence_try_take()) {
+        s_status.last_error = ESP_ERR_INVALID_STATE;
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    portENTER_CRITICAL(&s_manager_control_lock);
     s_force_nvs = false;
-    s_status.force_nvs = false;
+    s_manager_reset_bridge_requested = false;
     s_manager_remount_requested = false;
+    portEXIT_CRITICAL(&s_manager_control_lock);
+    s_status.force_nvs = false;
 
     d1l_storage_status_note_rp2040(ESP_OK);
 
@@ -806,13 +1129,11 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
     }
     if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
         ret = reset_bridge_and_remount_blocking(timeout_ms);
-        if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
-            request_bridge_reset_remount_recovery();
-            (void)d1l_storage_manager_start();
-        }
     }
 
     classify_storage_manager_state(ret);
+    manager_control_finish_reset_recovery();
+    manager_sequence_give();
     return ret;
 }
 
@@ -825,5 +1146,9 @@ void d1l_storage_status(d1l_storage_status_t *out_status)
         (void)d1l_storage_status_init();
     }
     refresh_retained_sd_health(&s_status);
+    portENTER_CRITICAL(&s_manager_control_lock);
+    s_status.force_nvs = s_force_nvs;
+    sync_initial_recovery_status_locked();
     *out_status = s_status;
+    portEXIT_CRITICAL(&s_manager_control_lock);
 }

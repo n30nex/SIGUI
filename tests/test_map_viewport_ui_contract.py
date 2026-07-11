@@ -43,6 +43,8 @@ def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
         "d1l_ui_map_viewport_set_suppressed",
         "d1l_ui_map_viewport_suppress_next_acquire",
         "d1l_ui_map_viewport_refresh",
+        "d1l_ui_map_viewport_reacquire",
+        "d1l_ui_map_viewport_prepare_cover",
         "d1l_ui_map_viewport_lease_active",
         "d1l_ui_map_viewport_generation",
     ):
@@ -90,6 +92,10 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert "lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF)" in render
     assert 'map_label(viewport, "Drag to pan"' in render
     assert "s_viewport_drag_hint_label = drag_hint" in render
+    assert "s_viewport_progress_bar = lv_bar_create(viewport)" in render
+    assert "lv_obj_set_size(s_viewport_progress_bar, 280, 8)" in render
+    assert "lv_bar_set_range(s_viewport_progress_bar, 0," in render
+    assert "lv_obj_clear_flag(s_viewport_progress_bar, LV_OBJ_FLAG_CLICKABLE)" in render
     assert "lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE)" in render
     assert "LV_OBJ_FLAG_GESTURE_BUBBLE" in render
     for event in (
@@ -106,6 +112,7 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert "MAP_DRAG_MAX_Y_PIXELS" in pressing
     assert "portENTER_CRITICAL(&s_viewport_lease_lock)" in pressing
     assert "lv_obj_set_pos(s_viewport_image_obj" in pressing
+    assert "lv_obj_set_pos(s_viewport_marker_layer" in pressing
     assert "map_viewport_request_interactive_view" not in pressing
     assert "MAP_DRAG_THRESHOLD_PIXELS" in released
     assert "d1l_map_math_pan_center" in released
@@ -129,6 +136,21 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
         "static void map_viewport_apply_service_status",
         "static void map_viewport_update_controls",
     )
+    assert 'title = "Waiting for SD"' in status
+    assert 'detail = "Insert a FAT32 card, or wait while it prepares."' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Waiting for SD")' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Waiting for Wi-Fi")' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Checking secure time")' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Map paused")' in status
+    assert "status->rendered_tiles + status->failed_tiles" in status
+    assert "lv_bar_set_value(s_viewport_progress_bar, completed, LV_ANIM_OFF)" in status
+    assert 'strcmp(status->phase, "loading_cache") == 0' in status
+    assert 'strcmp(status->phase, "downloading") == 0' in status
+    assert "lv_obj_clear_flag(s_viewport_progress_bar, LV_OBJ_FLAG_HIDDEN)" in status
+    assert "lv_obj_add_flag(s_viewport_progress_bar, LV_OBJ_FLAG_HIDDEN)" in status
+    assert status.index('strcmp(status->phase, "sd_cache_required") == 0') < status.index(
+        'status->worker_running && status->planned_tiles > 0U'
+    )
     assert '"Downloading" : "Loading"' in status
     assert '"%s %u/%u"' in status
     assert 'lv_label_set_text(s_viewport_drag_hint_label, "Drag to pan")' in status
@@ -138,8 +160,168 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert "s_viewport_drag_active" in refresh
 
 
+def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
+    source = read("main/ui/ui_map.c")
+    header = read("main/ui/ui_map.h")
+    marker_refresh = function_body(
+        source,
+        "static bool map_viewport_refresh_markers",
+        "static bool map_viewport_try_marker_tap",
+    )
+    marker_tap = function_body(
+        source,
+        "static bool map_viewport_try_marker_tap",
+        "static bool map_viewport_consume_acquire_suppression",
+    )
+    drag = function_body(
+        source,
+        "static void map_viewport_drag_event_cb",
+        "static void map_viewport_zoom_in_event_cb",
+    )
+    release = function_body(
+        source,
+        "void d1l_ui_map_viewport_release",
+        "void d1l_ui_map_viewport_set_suppressed",
+    )
+    viewport_refresh = function_body(
+        source,
+        "bool d1l_ui_map_viewport_refresh",
+        "bool d1l_ui_map_viewport_reacquire",
+    )
+
+    assert '#include "map/map_point_projection.h"' in source
+    assert '#include "mesh/node_store.h"' in source
+    assert "MAP_MARKER_QUERY_LIMIT 32U" in source
+    assert "MAP_MARKER_DISPLAY_LIMIT 8U" in source
+    assert "MAP_MARKER_HIT_RADIUS 22" in source
+    assert "d1l_node_store_marker_generation()" in marker_refresh
+    assert "d1l_node_store_copy_markers(" in marker_refresh
+    assert "d1l_map_point_project_e6(" in marker_refresh
+    assert "map_marker_placement_allowed(&bounds)" in marker_refresh
+    assert "map_marker_display_name(" in marker_refresh
+    assert "LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE" in marker_refresh
+    assert "label_y = point.screen_y + dot_radius + MAP_MARKER_LABEL_GAP" in marker_refresh
+    assert "s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT" in marker_refresh
+    assert "d1l_map_view_service_acquire_visible" not in marker_refresh
+    assert "d1l_map_view_service_acquire_frame" not in marker_refresh
+    assert "memcpy(s_viewport_pixels" not in marker_refresh
+    assert "lv_obj_invalidate(s_viewport_image_obj)" not in marker_refresh
+    assert "lv_obj_invalidate(s_viewport_marker_layer)" in marker_refresh
+    assert "MAP_COLOR_TEXT" in marker_refresh
+    assert "0xF87171" not in marker_refresh
+    assert "s_viewport_marker_frame_revision" not in source
+    assert "status->frame_revision != s_viewport_revision" not in marker_refresh
+    assert 'strcmp(type, "chat") == 0' in source
+    for ambiguous_legacy_role in ('strcmp(type, "R")', 'strcmp(type, "O")',
+                                  'strcmp(type, "C")', 'strcmp(type, "S")'):
+        assert ambiguous_legacy_role not in source
+    assert "map_viewport_refresh_markers(&status)" in source
+    assert "status.frame_revision > s_viewport_revision" in viewport_refresh
+    assert "frame_update_available ?" in viewport_refresh
+    assert "ESP_ERR_NOT_FOUND" in viewport_refresh
+
+    assert "MAP_MARKER_HIT_RADIUS * MAP_MARKER_HIT_RADIUS" in marker_tap
+    assert "s_viewport_open_node_detail(fingerprint);" in marker_tap
+    assert "map_viewport_try_marker_tap()" in drag
+    assert "lv_obj_set_pos(s_viewport_marker_layer, 1 + preview_x" in drag
+    assert "map_viewport_reset_marker_state();" not in release
+    assert "lv_obj_" not in release
+    assert "map_viewport_marker_lease_valid" in marker_refresh
+    assert marker_refresh.count("map_viewport_marker_lease_valid") >= 3
+    assert marker_tap.count("map_viewport_marker_lease_valid") >= 2
+    render = function_body(
+        source, "void d1l_ui_map_render", "static void map_render_options_root"
+    )
+    assert "map_viewport_reset_marker_state();" in render
+    assert "d1l_ui_map_open_node_detail_cb_t" in header
+
+
+def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view():
+    source = read("main/ui/ui_phase1.c")
+    detail = function_body(
+        source,
+        "static void render_node_detail_sheet",
+        "static void show_node_detail_view",
+    )
+    open_from_map = function_body(
+        source,
+        "static void open_map_node_detail",
+        "static void close_route_detail_event_cb",
+    )
+    close = function_body(
+        source,
+        "static void close_node_detail_event_cb",
+        "static void format_advert_coordinate",
+    )
+
+    assert '"Advert location %s, %s"' in detail
+    assert '"Advert location not provided"' in detail
+    assert "entry->location_valid" in detail
+    assert "entry->lat_e6" in detail
+    assert "entry->lon_e6" in detail
+    assert "GPS" not in detail
+    assert "lv_obj_set_size(s_node_detail_sheet, 448, 320);" in source
+    assert "lv_obj_set_pos(s_node_detail_sheet, 16, 82);" in source
+    assert "d1l_app_model_query_nodes(" in open_from_map
+    assert "&query, s_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
+    assert "D1L_NODE_STORE_CAPACITY" in open_from_map
+    assert "strcmp(s_node_rows[i].node.fingerprint, fingerprint) == 0" in open_from_map
+    assert "show_node_detail_view(&s_node_rows[i], true);" in open_from_map
+    assert "s_node_detail_returns_to_map" in close
+    assert "d1l_ui_map_viewport_reacquire()" in close
+    assert "request_content_refresh();" in close
+
+
+def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
+    source = read("main/ui/ui_phase1.c")
+    node_gate = function_body(
+        source, "static bool node_view_can_dm", "static bool contact_can_dm"
+    )
+    contact_gate = function_body(
+        source, "static bool contact_can_dm", "static bool contact_can_export"
+    )
+    compose = function_body(
+        source, "static void open_dm_compose_for_contact", "static void open_dm_compose_event_cb"
+    )
+    detail = function_body(
+        source, "static void render_contact_detail_sheet", "static void update_contact_detail_flags"
+    )
+
+    assert 'strcmp(view->role, "companion") == 0' in node_gate
+    assert 'strcmp(entry->type, "chat") == 0' in contact_gate
+    assert "if (!contact_can_dm(entry))" in compose
+    assert "if (contact_can_dm(entry))" in detail
+    assert '"Messaging unavailable for this role"' in detail
+
+    contact_row = function_body(
+        source, "static void render_contact_row", "static void update_compose_counter"
+    )
+    assert "if (contact_can_dm(entry))" in contact_row
+
+    options = function_body(
+        source, "static void render_contact_options_sheet(void)\n{",
+        "static void show_contact_options_sheet"
+    )
+    assert "if (contact_can_export(entry))" in options
+    assert '"Export unavailable"' in options
+    assert "create_panel(s_contact_options_sheet, 16, 280, 448, 48)" in options
+
+
+def test_map_copy_and_icon_do_not_imply_onboard_gps_positioning():
+    map_source = read("main/ui/ui_map.c")
+    home_source = read("main/ui/ui_home.c")
+    assert '"Downloading a small area around the saved map center."' in map_source
+    assert '"Preparing the saved map area."' in map_source
+    assert "your location" not in map_source.lower()
+    assert "LV_SYMBOL_GPS" not in home_source
+    assert '"Saved center and a small local map area"' in home_source
+
+
 def test_ambient_mesh_updates_do_not_tear_down_an_active_map_view():
     source = read("main/ui/ui_phase1.c")
+    map_timer = function_body(
+        source, "static void map_viewport_timer_cb", "static void refresh_timer_cb"
+    )
     map_input = function_body(
         source,
         "static d1l_ui_map_render_input_t map_render_input_from_snapshot",
@@ -161,6 +343,11 @@ def test_ambient_mesh_updates_do_not_tear_down_an_active_map_view():
         assert field in map_input
     assert "snapshot->map_tile_cache_ready" not in map_input
     assert "snapshot->wifi_connected" not in map_input
+    assert "D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U" in source
+    assert "d1l_ui_navigation_active() == D1L_UI_TAB_MAP" in map_timer
+    assert "map_interactive_touch_authorized()" in map_timer
+    assert "(void)d1l_ui_map_viewport_refresh();" in map_timer
+    assert "lv_timer_create(map_viewport_timer_cb," in source
     assert "d1l_ui_navigation_active() == D1L_UI_TAB_MAP" in refresh_timer
     assert "map_render_input_changed_from_rendered(&s_snapshot)" in refresh_timer
     assert refresh_timer.index("map_render_input_changed_from_rendered(&s_snapshot)") < (
@@ -177,6 +364,9 @@ def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
     source = read("main/ui/ui_phase1.c")
 
     show_modal = function_body(source, "static void show_modal", "static void layout_content_for_active_tab")
+    assert show_modal.index("d1l_ui_map_viewport_prepare_cover();") < show_modal.index(
+        "d1l_ui_map_viewport_release();"
+    )
     assert show_modal.index("d1l_ui_map_viewport_release();") < show_modal.index(
         "d1l_ui_modal_show(obj);"
     )
@@ -259,12 +449,12 @@ def test_removed_provider_and_offline_map_ui_cannot_reappear():
         assert removed not in ui_source
 
     for required in (
-        "map options",
-        "set location",
-        "cache status",
-        "wi-fi needed",
-        "sd card needed",
-        "loading map",
+            "map options",
+            "set location",
+            "cache status",
+            "wi-fi needed",
+            "waiting for sd",
+            "loading map",
         "map unavailable",
     ):
         assert required in ui_source

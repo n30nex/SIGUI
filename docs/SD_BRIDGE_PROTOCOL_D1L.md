@@ -202,6 +202,13 @@ still pending, or the ready file-operation gate is not available.
 After retained stores initialize, `storage_manager` continues convergence in
 the background with explicit states `BRIDGE_WAIT`, `PING`, `STATUS`, `MOUNT`,
 `READY_SD`, `READY_NVS`, `NEEDS_FAT32`, `NO_CARD`, and `ERROR_BACKOFF`.
+Before any valid DeskOS bridge response is seen, three consecutive initial ping
+timeouts queue the existing reset-and-remount recovery exactly once per ESP32
+boot. The manager sends one final bounded ping before claiming that queued
+reset. Any valid DeskOS ping, status, or mount response cancels that automatic
+pulse and permanently disables another for the rest of the boot, so
+an active or mounted SD bridge cannot enter a reset storm. The recovery remains
+non-formatting and sends no RF.
 `storage remount` queues a new non-formatting mount attempt, `storage
 reset-bridge` resets the RP2040 bridge and remounts, and `storage force-nvs
 [on|off]` provides an operator fallback override without formatting or Public

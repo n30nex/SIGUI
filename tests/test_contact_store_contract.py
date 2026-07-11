@@ -29,11 +29,19 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "D1L_CONTACT_OUT_PATH_MAX 64U" in header
     assert "public_key_hex" in header
     assert "out_path_valid" in header
-    assert "D1L_CONTACT_STORE_SCHEMA 3U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA 4U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V3 3U" in source
+    assert "D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U" in source
+    assert "d1l_contact_store_blob_v3_t" in source
     assert "d1l_contact_store_blob_v2_t" in source
     assert "d1l_contact_store_blob_v1_t" in source
     assert "migrate_v1_blob" in source
     assert "migrate_v2_blob" in source
+    assert "migrate_v3_blob" in source
+    assert "migrate_legacy_advert_type" in source
+    assert "contact schema v1 layout changed" in source
+    assert "contact schema v2 layout changed" in source
+    assert "contact schema v3 layout changed" in source
     assert 'D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"' in source
     assert 'D1L_CONTACT_STORE_KEY "contacts"' in source
     assert "nvs_get_blob" in source

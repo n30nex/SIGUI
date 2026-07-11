@@ -8,11 +8,12 @@ Release status: the current audit remains `ready_for_public_release=false`. `scr
 
 DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that a normal user can operate without a serial console.
 
-- Core release workflows are persistent identity and adverts, Public messaging, direct messaging with truthful delivery state, contacts, channels, route discovery/fallback, real trace/path diagnostics, radio settings, retained state, and recovery.
+- Core release workflows are persistent identity and adverts, Public messaging, direct messaging with truthful delivery state, contacts, heard-node discovery, channels, route discovery/fallback, real trace/path diagnostics, authenticated repeater/room administration, radio settings, retained state, and recovery.
 - The 1.0 target is multi-channel. A single hard-coded Public channel is not full 1.0; narrowing that scope requires an explicit product decision, matching UI removal, and release-note language rather than a silent waiver.
-- Map ships in 1.0. It uses built-in OpenStreetMap Standard, a user-set location, a regional zoom-10 default, user-controlled zooms 8 through 14, one-finger pan, direct `-`/`+`/`Center` controls, and at most one visible current-view 3x3 plan at one zoom per visible generation. Completed exact-view Home-to-Map revisits use the retained rendered frame without network or SD reread; SD tile cache supplies reboot/later-session reuse. Visible attribution remains mandatory, with no provider/key/source editor, background download, multi-zoom prefetch, off-screen batch, area download, or device-side SD formatting.
-- Rooms and Repeaters remain read-only observed/inferred inspectors for 1.0. Management/login controls stay absent until their protocol flows are implemented and accepted.
-- BLE companion, GPS, OTA, and server administration are not release claims. Each must remain visibly experimental with safe failure behavior or be absent/disabled in the release UI until complete and release-tested.
+- Map ships in 1.0. It uses built-in OpenStreetMap Standard with a deterministic local dark render style, an explicit user-set center, a regional zoom-10 default, user-controlled zooms 8 through 14, one-finger pan, direct `-`/`+`/`Center` controls, and at most one visible current-view 3x3 plan at one zoom per visible generation. Passive signed peer-advert coordinates appear as bounded bright node markers with readable names below them; they are labelled as advert locations, never as live GPS. Completed exact-view Home-to-Map revisits use the retained rendered frame without network or SD reread; SD tile cache supplies reboot/later-session reuse. Visible attribution remains mandatory, with no provider/key/source editor, background download, multi-zoom prefetch, off-screen batch, area download, or device-side SD formatting.
+- DeskOS 1.0 uses a simple user-facing hierarchy: Messages opens two large Public and Direct-message destinations before chat-style conversation pages; Network is renamed Nodes and shows truthful heard/type totals plus a scan-friendly node list; More is renamed Tools/Settings; the bottom dock is compact and icon-led; and Home device state is a compact evidence-backed icon row rather than a dense status block. These requirements are tracked by #74, #75, and #76.
+- Rooms and Repeaters remain read-only observed/inferred inspectors until authenticated administration is implemented, but compatible repeater and room-server login, status, command, and settings flows are now required for 1.0 under #77. Unsupported or unauthenticated actions stay absent rather than appearing as dead controls.
+- D1L has no onboard GPS and DeskOS does not expose or claim local GPS support. BLE companion and OTA are not 1.0 release claims; each remains absent/disabled until explicitly implemented and release-tested.
 - Every enabled action must complete end to end or return an honest, actionable error. A working-looking dead end is a release defect.
 - Persisted invalid settings, missing radio/RP2040, failed Wi-Fi, no/bad SD media, and upgrade state must never cause a permanent boot loop.
 
@@ -35,8 +36,8 @@ The order below supersedes the former screenshot-first queue. Platform integrati
 Status: **complete in this roadmap; enforce in issues, UI, and release docs.**
 
 - Ship multi-channel MeshCore client behavior and the bounded current-view Map.
-- Keep Rooms/Repeaters observational and the D1L non-forwarding.
-- Hide or clearly mark incomplete BLE/GPS/OTA/server functions.
+- Keep Rooms/Repeaters observational until #77's authenticated protocol is proven; the D1L remains a non-forwarding client while managing compatible remote services.
+- Keep local GPS absent; hide or clearly mark incomplete BLE/OTA functions, and keep server-administration controls absent until #77 is implemented and proven.
 - Publish a matching supported/experimental/absent feature matrix before the release candidate freezes.
 
 ### Stage 2 - Establish one supported integration image
@@ -46,8 +47,8 @@ Status: **in progress. This is the only current implementation priority.**
 1. Integrate the ESP-IDF 5.5.4 migration from PR #64 with the Map/Wi-Fi/boot-loop work from PR #62/#13.
 2. Build firmware, package, checksums, effective `sdkconfig`, dependency lock, and release-gate inputs in Actions from the combined commit.
 3. Flash that exact artifact to COM12 without erasing retained settings or touching SD contents.
-4. Prove on the same image: ESP-IDF identity, stable boot, Wi-Fi disabled path, enable/connect/reconnect, saved-profile reboot, internal/DMA reserve, radio readiness, RP2040/SD readiness, and no new PANIC/WDT/brownout loop.
-5. Physically enter Map at the saved test location and prove useful regional detail at default zoom 10; one-finger pan; `-`, `+`, and `Center` across the bounded 8-through-14 range; at most nine requests at one zoom per committed visible generation; no request while a drag is still active; leave-Map cancellation; completed exact-view Home-to-Map retained-frame reuse with no network or SD reread; SD persistence; and reboot cache reuse without duplicate network fetches.
+4. Prove on the same image: ESP-IDF identity, stable boot, Wi-Fi disabled path, enable/connect/reconnect, saved-profile reboot, internal/DMA reserve, radio readiness, autonomous bounded RP2040/SD recovery without a reset storm, no intermittent false no-card state from #78, and no new PANIC/WDT/brownout loop.
+5. Physically enter Map at the saved test location and prove useful local-dark regional detail at default zoom 10; one-finger pan; `-`, `+`, and `Center` across the bounded 8-through-14 range; at most nine requests at one zoom per committed visible generation; no request while a drag is still active; leave-Map cancellation; completed exact-view Home-to-Map retained-frame reuse with no network or SD reread; SD persistence; reboot cache reuse without duplicate network fetches; and passive signed-advert node markers with names below them that update without starting tile or RF work.
 6. Rebase or replace the stale SD PR #36 only if current Stage 2 code still needs it; do not merge a dirty historical branch for its evidence.
 
 Stage 2 closes only when the combined Actions artifact passes the quick COM12 integration proof. Separate green SDK and Map/Wi-Fi branches are necessary evidence but do not close it.
@@ -62,7 +63,7 @@ Stage 2 closes only when the combined Actions artifact passes the quick COM12 in
 
 Stage 3 closes only when CI proves SIGUI-generated traffic is accepted upstream and upstream-generated traffic is accepted by SIGUI for the entire declared 1.0 surface.
 
-### Stage 4 - Complete reliable messaging, contacts, channels, and routing
+### Stage 4 - Complete reliable messaging, Nodes, contacts, channels, routing, and administration
 
 1. Implement inbound DM ACK with correct direct/flood timing and ACK+PATH behavior.
 2. Implement the outbound DM state machine: queued, waiting for radio, transmitting, sent over RF, acknowledged, retrying, timed out/failed, and cancelled if supported.
@@ -72,8 +73,12 @@ Stage 3 closes only when CI proves SIGUI-generated traffic is accepted upstream 
 6. Implement persistent multi-channel configuration, selection, keyed RX/TX, history/unread separation, diagnostics identity, and official-client exchange on at least two independent channels.
 7. Implement real path discovery, reciprocal paths, route age/invalidation, deterministic selection, direct failure fallback, and a real MeshCore trace request/response that never pollutes DM history.
 8. Deduplicate Public, DM, ACK, advert, PATH, and trace traffic with bounded tables and no ACK/retry storms.
+9. Implement #74: a Home-themed Messages root with two large Public and Direct-message destinations, then familiar left/right chat bubbles, truthful delivery metadata, sticky compose entry, and simple empty/offline/failure states.
+10. Implement #75: rename user-visible Network to Nodes, show truthful heard-node and canonical-role totals in a compact header, and render a scan-friendly bounded node/contact list without dead role actions.
+11. Implement #76: rename More to Tools/Settings, add compact icon-led bottom navigation with smaller labels and 44x44 targets, rename the Home Network destination to Nodes, and replace the large Home Device status block with evidence-backed status icons.
+12. Implement #77 against a pinned compatible MeshCore administration protocol: authenticated repeater and room-server login/session handling, status, allowlisted command/settings flows, confirmation for mutations, secret redaction, expiry/replay protection, and 480x480 UI acceptance.
 
-Stage 4 closes only with official-client/two-radio proof for success and failure paths, including lost ACK, absent recipient, radio busy, TX timeout, duplicate delivery, stale route, and reboot during a pending DM.
+Stage 4 closes only with official-client/two-radio proof for success and failure paths, including lost ACK, absent recipient, radio busy, TX timeout, duplicate delivery, stale route, reboot during a pending DM, the final Messages/Nodes/chrome physical UI, and authenticated compatible repeater/room administration.
 
 ### Stage 5 - Harden ownership, persistence, settings, and truthfulness
 
@@ -82,7 +87,7 @@ Stage 4 closes only with official-client/two-radio proof for success and failure
 3. Coalesce hot NVS/SD persistence, avoid unchanged writes, measure commits per hour, and prove atomic old-or-new recovery across power loss.
 4. Version every persisted schema and test supported upgrade, same-version reboot, corrupted-field recovery, factory reset, and downgrade rejection.
 5. Keep protocol time monotonic and truthful; add retained network time if Wi-Fi ships, otherwise display relative/unknown time. Test ordering across reboot and clock correction.
-6. Label Rooms/Repeaters as observed/inferred, remove unsupported management actions, and keep the client/non-forwarding role explicit.
+6. Label Rooms/Repeaters as observed/inferred before authentication, expose management only through #77's proven compatible session, and keep the local client/non-forwarding role explicit.
 7. Stress simultaneous RX, UI refresh, Wi-Fi, storage flush, rapid navigation, modal open/close, and large retained stores with no stale callback, split frame, watchdog, queue corruption, or monotonic heap loss.
 
 Stage 5 closes only when host state-machine tests and current-commit hardware stress prove bounded ownership, write rate, recovery, and truthful UI state.
@@ -114,26 +119,29 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 | Supported integration image | P0.1, P0.16 | #63, #13, #12, #14 | One ESP-IDF 5.5.4 Actions artifact passes COM12 boot/Wi-Fi/radio/SD/Map/reboot proof. |
 | MeshCore conformance foundation | P0.2, P0.11 | #7 and #17 are insufficiently specific | Bidirectional upstream vectors, malformed input coverage, RX fuzzing, and declared supported packet surface pass in CI. |
 | Reliable DM session | P0.3, P0.4, P0.5, P0.10 | #7 | Official peer proves ACK, retry, truthful states, heard-node send, duplicate suppression, timeout, and reboot recovery. |
-| Contact and channel parity | P0.6, P0.7 | #20 is currently P2 and too narrow | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
+| Contact and channel parity | P0.6, P0.7 | #67; #20 is currently P2 and too narrow | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
 | Routing and diagnostics | P0.8, P0.9 | #7, #19 | Real trace/PATH, reciprocal learning, route expiry, direct send, and safe flood fallback pass against a compatible peer. |
 | Runtime durability | P0.12, P0.13, P0.14, P0.15, P0.19 | #6, #16, #18, #22 | Single-owner protocol/UI paths, bounded queues/writes, schemas/recovery, truthful time, and hardware stress are green. |
-| SD and role truthfulness | P0.17, P0.18 | #4, #11 | Full media/bridge/power/fallback matrix passes; role pages expose only evidence-backed labels/actions. |
+| Operator messaging and Nodes UX | P0.6, P0.7, P0.13, P0.20 | #74, #75, #76 | Public/DM chat, Nodes totals/list, compact dock, Tools/Settings, and Home status icons pass simulator, exact pixels, manual touch, and truthful-state checks. |
+| Remote role administration | P0.2, P0.8, P0.13, P0.18 | #77 | Pinned-protocol repeater and room-server authentication, status, allowlisted mutations, expiry, redaction, and controlled-peer proof pass. |
+| SD and role truthfulness | P0.17, P0.18 | #4, #11, #78 | Full media/bridge/power/fallback matrix passes with no intermittent false no-card state; role pages expose only evidence-backed labels/actions. |
 | Frozen release qualification | P0.20 | #8 plus release gate | Current physical review, full RF, SD/electrical, idle and active soaks, package audit, and exact-tag gate are green. |
 
 ## Immediate Work Queue
 
-1. Publish the combined source merge after its 414-test host pass.
+1. Publish the combined source merge after its 443-test host pass.
 2. Validate the combined commit in Actions and inspect the exact dependency lock, effective `sdkconfig`, firmware/package checksums, and release-gate inputs.
 3. Flash the exact combined artifact to COM12 and repeat SDK identity, boot, Wi-Fi, radio-readiness, SD, health, and reboot proof.
 4. Complete the still-open physical Map control proof: default zoom 10, one-finger pan, `-`/`+`/`Center` over zooms 8 through 14, bounded request/render/cancel, instant completed exact-view Home-to-Map retained-frame reuse, SD-cache reread only when the retained frame is unavailable, and reboot reuse without duplicate network fetches.
-5. Reconcile GitHub labels and split the audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
-6. Execute Stages 3-7 in order; do not return to cosmetic-only UI refactoring while a protocol or safety boundary remains open.
+5. Reproduce and close #78's intermittent SD disappearance/false no-card state with transition telemetry, bounded recovery, Map/cache use, reboot, removal/reinsertion, and idle/active hardware windows.
+6. Reconcile GitHub labels and split any remaining audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
+7. Execute Stages 3-7 in order. Issues #74-#77 are functional release work, not cosmetic cleanup, but they follow the current Stage 2 integration/SD gate and the Stage 3 wire-conformance foundation.
 
 ## Evidence Already Banked, Not Final Qualification
 
 - Map/Wi-Fi branch `de79c9f` passes its Actions jobs and exact-COM12 boot-loop recovery, Wi-Fi enable/reconnect/reboot, bounded scan, internal/DMA telemetry, SD readiness, and ten-minute stability checks. Physical Map entry/download/cache proof is still open.
 - Standalone ESP-IDF 5.5.4 branch `39a043c` passes host, firmware, package, checksum, release, dependency-lock, and effective-config checks in Actions, but has no hardware qualification. Its evidence does not qualify this integration result; the combined commit needs fresh Actions and COM12 proof.
-- The integration source merge preserves both safety contracts and passes 414 host tests plus Map simulator/dry-run checks. It remains unqualified until its Actions jobs, checksums, effective configuration, and exact-COM12 checks pass.
+- The integration source merge preserves both safety contracts and passes 443 host tests plus Map simulator/dry-run checks. It remains unqualified until its Actions jobs, checksums, effective configuration, and exact-COM12 checks pass.
 - Existing COM12 UI hierarchy/pixel artifacts, SD canaries, and short soaks remain useful regression evidence, but they do not replace current-commit screenshots, the final SD/RF matrices, or the frozen-candidate soak.
 
 ## Validation Notes

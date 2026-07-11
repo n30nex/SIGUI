@@ -10,9 +10,11 @@
 
 #define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
+#define D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U
 #define D1L_CONTACT_STORE_SCHEMA_V1 1U
 #define D1L_CONTACT_STORE_SCHEMA_V2 2U
-#define D1L_CONTACT_STORE_SCHEMA 3U
+#define D1L_CONTACT_STORE_SCHEMA_V3 3U
+#define D1L_CONTACT_STORE_SCHEMA 4U
 
 typedef struct {
     uint32_t seq;
@@ -21,7 +23,7 @@ typedef struct {
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char alias[D1L_CONTACT_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
-    char type[D1L_NODE_TYPE_LEN];
+    char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
     int last_rssi_dbm;
     int last_snr_tenths;
     uint8_t path_hash_bytes;
@@ -47,7 +49,7 @@ typedef struct {
     char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
     char alias[D1L_CONTACT_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
-    char type[D1L_NODE_TYPE_LEN];
+    char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
     int last_rssi_dbm;
     int last_snr_tenths;
     uint8_t path_hash_bytes;
@@ -64,6 +66,50 @@ typedef struct {
     uint32_t count;
     d1l_contact_entry_v2_t entries[D1L_CONTACT_STORE_CAPACITY];
 } d1l_contact_store_blob_v2_t;
+
+/* Schema v3 predates canonical advert roles and the 9-byte repeater string. */
+typedef struct {
+    uint32_t seq;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    uint32_t out_path_updated_ms;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+    char alias[D1L_CONTACT_ALIAS_LEN];
+    char heard_name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool out_path_valid;
+    uint8_t out_path_len;
+    uint8_t out_path[D1L_CONTACT_OUT_PATH_MAX];
+    bool favorite;
+    bool muted;
+} d1l_contact_entry_v3_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_v3_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_v3_t;
+
+_Static_assert(sizeof(d1l_contact_entry_v1_t) == 100U,
+               "contact schema v1 layout changed");
+_Static_assert(sizeof(d1l_contact_entry_v2_t) == 164U,
+               "contact schema v2 layout changed");
+_Static_assert(sizeof(d1l_contact_entry_v3_t) == 236U,
+               "contact schema v3 layout changed");
+_Static_assert(offsetof(d1l_contact_entry_v1_t, last_rssi_dbm) == 88U,
+               "contact schema v1 type offset changed");
+_Static_assert(offsetof(d1l_contact_entry_v2_t, last_rssi_dbm) == 152U,
+               "contact schema v2 type offset changed");
+_Static_assert(offsetof(d1l_contact_entry_v3_t, last_rssi_dbm) == 156U,
+               "contact schema v3 type offset changed");
 
 typedef struct {
     uint32_t schema;
@@ -98,6 +144,25 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
         dest[out++] = (char)c;
     }
     dest[out] = '\0';
+}
+
+static void migrate_legacy_advert_type(
+    char dest[D1L_NODE_TYPE_LEN],
+    const char legacy_type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN])
+{
+    char legacy[D1L_CONTACT_STORE_LEGACY_TYPE_LEN + 1U] = {0};
+    memcpy(legacy, legacy_type, D1L_CONTACT_STORE_LEGACY_TYPE_LEN);
+    const char *canonical = "unknown";
+    if (strcmp(legacy, "chat") == 0) {
+        canonical = "chat";
+    } else if (strcmp(legacy, "room") == 0 ||
+               strcmp(legacy, "repeater") == 0) {
+        /* The legacy advert decoder mapped upstream type 2 to room. */
+        canonical = "repeater";
+    }
+    /* Legacy sensor is ambiguous: the old decoder used it for upstream room
+     * type 3 and sensor type 4. Keep it unknown until a fresh signed advert. */
+    snprintf(dest, D1L_NODE_TYPE_LEN, "%s", canonical);
 }
 
 static void clear_ram(void)
@@ -183,6 +248,14 @@ static bool blob_v2_is_valid(const d1l_contact_store_blob_v2_t *blob, size_t len
            blob->next_seq > 0;
 }
 
+static bool blob_v3_is_valid(const d1l_contact_store_blob_v3_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA_V3 &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
 static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
 {
     clear_ram();
@@ -199,7 +272,7 @@ static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
         memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
         memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
                sizeof(s_entries[i].heard_name));
-        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
         s_entries[i].last_rssi_dbm = old_blob->entries[i].last_rssi_dbm;
         s_entries[i].last_snr_tenths = old_blob->entries[i].last_snr_tenths;
         s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
@@ -227,11 +300,45 @@ static void migrate_v2_blob(const d1l_contact_store_blob_v2_t *old_blob)
         memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
         memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
                sizeof(s_entries[i].heard_name));
-        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
         s_entries[i].last_rssi_dbm = old_blob->entries[i].last_rssi_dbm;
         s_entries[i].last_snr_tenths = old_blob->entries[i].last_snr_tenths;
         s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
         s_entries[i].path_hops = old_blob->entries[i].path_hops;
+        s_entries[i].favorite = old_blob->entries[i].favorite;
+        s_entries[i].muted = old_blob->entries[i].muted;
+    }
+}
+
+static void migrate_v3_blob(const d1l_contact_store_blob_v3_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0; i < s_count; ++i) {
+        s_entries[i].seq = old_blob->entries[i].seq;
+        s_entries[i].created_ms = old_blob->entries[i].created_ms;
+        s_entries[i].updated_ms = old_blob->entries[i].updated_ms;
+        s_entries[i].out_path_updated_ms = old_blob->entries[i].out_path_updated_ms;
+        memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
+               sizeof(s_entries[i].fingerprint));
+        memcpy(s_entries[i].public_key_hex, old_blob->entries[i].public_key_hex,
+               sizeof(s_entries[i].public_key_hex));
+        memcpy(s_entries[i].alias, old_blob->entries[i].alias,
+               sizeof(s_entries[i].alias));
+        memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
+               sizeof(s_entries[i].heard_name));
+        migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
+        s_entries[i].last_rssi_dbm = old_blob->entries[i].last_rssi_dbm;
+        s_entries[i].last_snr_tenths = old_blob->entries[i].last_snr_tenths;
+        s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
+        s_entries[i].path_hops = old_blob->entries[i].path_hops;
+        s_entries[i].out_path_valid = old_blob->entries[i].out_path_valid;
+        s_entries[i].out_path_len = old_blob->entries[i].out_path_len;
+        memcpy(s_entries[i].out_path, old_blob->entries[i].out_path,
+               sizeof(s_entries[i].out_path));
         s_entries[i].favorite = old_blob->entries[i].favorite;
         s_entries[i].muted = old_blob->entries[i].muted;
     }
@@ -336,6 +443,10 @@ esp_err_t d1l_contact_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK &&
+               blob_v3_is_valid((const d1l_contact_store_blob_v3_t *)&s_blob_scratch, len)) {
+        migrate_v3_blob((const d1l_contact_store_blob_v3_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK &&
                blob_v1_is_valid((const d1l_contact_store_blob_v1_t *)&s_blob_scratch, len)) {
         migrate_v1_blob((const d1l_contact_store_blob_v1_t *)&s_blob_scratch);
@@ -638,6 +749,9 @@ esp_err_t d1l_contact_store_delete(const char *fingerprint, d1l_contact_entry_t 
 uint8_t d1l_contact_store_meshcore_type_id(const char *type)
 {
     if (!type) {
+        return 0U;
+    }
+    if (strcmp(type, "chat") == 0) {
         return 1U;
     }
     if (strcmp(type, "repeater") == 0) {
@@ -649,7 +763,7 @@ uint8_t d1l_contact_store_meshcore_type_id(const char *type)
     if (strcmp(type, "sensor") == 0) {
         return 4U;
     }
-    return 1U;
+    return 0U;
 }
 
 bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry)
@@ -675,6 +789,10 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
     if (!d1l_contact_store_has_export_key(entry)) {
         return ESP_ERR_INVALID_STATE;
     }
+    const uint8_t type_id = d1l_contact_store_meshcore_type_id(entry->type);
+    if (type_id == 0U) {
+        return ESP_ERR_INVALID_STATE;
+    }
 
     const char *name = entry->alias[0] ? entry->alias :
                        (entry->heard_name[0] ? entry->heard_name : entry->fingerprint);
@@ -687,7 +805,7 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
     int written = snprintf(dest, dest_size,
                            "meshcore://contact/add?name=%s&public_key=%s&type=%u",
                            encoded_name, entry->public_key_hex,
-                           (unsigned)d1l_contact_store_meshcore_type_id(entry->type));
+                           (unsigned)type_id);
     if (written < 0 || (size_t)written >= dest_size) {
         dest[0] = '\0';
         return ESP_ERR_NO_MEM;

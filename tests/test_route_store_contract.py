@@ -48,7 +48,8 @@ def test_meshcore_public_and_advert_paths_feed_routes():
     assert '#include "mesh/route_store.h"' in source
     assert "route_name(packet.route)" in source
     assert 'd1l_route_store_upsert_observation("public", "Public", "public_text"' in source
-    assert 'd1l_route_store_upsert_observation(pub_prefix, name[0] ? name : pub_prefix, "advert"' in source
+    assert "advert.name[0] ? advert.name : pub_prefix" in source
+    assert '"advert"' in source
     assert 'route store public tx failed' in source
     assert 'route store advert tx failed' in source
     assert "D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT" in source

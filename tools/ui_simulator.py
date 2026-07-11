@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
@@ -97,6 +98,8 @@ class Node:
     role: str
     signal: str
     meta: str
+    advert_lat_e6: int | None = None
+    advert_lon_e6: int | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +168,8 @@ class Snapshot:
     wifi_connected: bool = False
     map_cached_tile_count: int = 0
     map_visible_tile_count: int = 9
+    map_progress_completed: int = 0
+    map_progress_total: int = 0
 
 
 def sample_snapshot() -> Snapshot:
@@ -533,8 +538,20 @@ def map_wifi_connecting_snapshot() -> Snapshot:
 
 
 def map_ready_snapshot() -> Snapshot:
+    base = storage_ready_map_tiles_sd_snapshot()
+    located_heard = (
+        replace(base.heard[0], advert_lat_e6=43_675_000, advert_lon_e6=-79_440_000),
+        replace(base.heard[1], advert_lat_e6=43_620_000, advert_lon_e6=-79_300_000),
+        replace(
+            base.heard[2],
+            name="Krabs Lagoon Repeater",
+            advert_lat_e6=43_700_000,
+            advert_lon_e6=-79_620_000,
+        ),
+    )
     return replace(
-        storage_ready_map_tiles_sd_snapshot(),
+        base,
+        heard=located_heard,
         map_location_set=True,
         map_lat_e7=436532000,
         map_lon_e7=-793832000,
@@ -545,6 +562,16 @@ def map_ready_snapshot() -> Snapshot:
         map_tile_render_supported=True,
         map_tile_download_state="active_view_ready",
         map_cached_tile_count=9,
+    )
+
+
+def map_downloading_snapshot() -> Snapshot:
+    return replace(
+        map_ready_snapshot(),
+        map_tile_download_state="downloading",
+        map_cached_tile_count=3,
+        map_progress_completed=3,
+        map_progress_total=9,
     )
 
 
@@ -580,6 +607,7 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "map-location-wifi-off": map_location_wifi_off_snapshot,
     "map-wifi-connecting": map_wifi_connecting_snapshot,
     "map-ready": map_ready_snapshot,
+    "map-downloading": map_downloading_snapshot,
     "map-cached-revisit": map_cached_revisit_snapshot,
 }
 
@@ -864,6 +892,12 @@ def format_e7(value: int) -> str:
     return f"{sign}{scaled // 10_000_000}.{scaled % 10_000_000:07d}"
 
 
+def format_e6(value: int) -> str:
+    sign = "-" if value < 0 else ""
+    scaled = abs(value)
+    return f"{sign}{scaled // 1_000_000}.{scaled % 1_000_000:06d}"
+
+
 def role_badge_text(role: str) -> str:
     normalized = role.lower()
     if "room" in normalized:
@@ -888,6 +922,25 @@ def role_badge_color(role: str) -> tuple[int, int, int]:
     if "companion" in normalized:
         return ACCENT
     return BLUE
+
+
+def map_marker_color(role: str) -> tuple[int, int, int]:
+    """Match ui_map.c's canonical bright marker palette."""
+    normalized = role.lower()
+    if "repeat" in normalized:
+        return (250, 204, 21)
+    if "room" in normalized:
+        return (192, 132, 252)
+    if "sensor" in normalized:
+        return (56, 189, 248)
+    if "companion" in normalized or normalized == "chat":
+        return (45, 212, 191)
+    return (163, 230, 53)
+
+
+def map_marker_display_name(name: str) -> str:
+    max_chars = 14
+    return name if len(name) <= max_chars else name[: max_chars - 3] + "..."
 
 
 def storage_needs_attention(snap: Snapshot) -> bool:
@@ -1731,9 +1784,11 @@ def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
     if not snap.map_location_set:
         return ("Set a location", "Open Options to choose the area shown here.", AMBER)
     if not snap.map_tile_cache_ready:
-        return ("SD card needed", "Map tiles are kept on a ready FAT32 card.", AMBER)
+        return ("Waiting for SD", "Insert a FAT32 card, or wait while it prepares.", AMBER)
     if snap.wifi_connecting:
         return ("Connecting to Wi-Fi", "Connect Wi-Fi to load this local map area.", AMBER)
+    if snap.wifi_connected and snap.map_tile_download_state in ("downloading", "loading_cache"):
+        return ("Loading map", "Loading only the visible current view.", BLUE)
     return ("Wi-Fi needed", "Connect Wi-Fi to load this local map area.", AMBER)
 
 
@@ -1759,24 +1814,167 @@ def draw_map_grid(s: Surface, snap: Snapshot, box: tuple[int, int, int, int]):
     s.line(((x_start + 110, y_start), (x_start + 266, y_end)), (92, 129, 126))
     s.line(((x_start, y_start + 242), (x_end, y_start + 220)), (66, 102, 110))
 
-    if snap.map_location_set:
-        center_x = (x_start + x_end) // 2
-        center_y = (y_start + y_end) // 2
-        s.draw.ellipse((center_x - 14, center_y - 14, center_x + 14, center_y + 14), fill=(247, 92, 92), outline=(255, 230, 230), width=2)
-        s.draw.ellipse((center_x - 4, center_y - 4, center_x + 4, center_y + 4), fill=(255, 255, 255))
+
+
+def map_project_node(snap: Snapshot, node: Node, viewport: tuple[int, int, int, int]) -> tuple[int, int] | None:
+    if node.advert_lat_e6 is None or node.advert_lon_e6 is None:
+        return None
+    world = float(256 * (1 << snap.map_tile_zoom))
+
+    def mercator(lat_e6: int, lon_e6: int) -> tuple[float, float]:
+        latitude = max(-85.05112878, min(85.05112878, lat_e6 / 1_000_000.0))
+        longitude = lon_e6 / 1_000_000.0
+        x = (longitude + 180.0) / 360.0 * world
+        lat_rad = math.radians(latitude)
+        y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) * 0.5 * world
+        return (x, y)
+
+    center_x, center_y = mercator(snap.map_lat_e7 // 10, snap.map_lon_e7 // 10)
+    node_x, node_y = mercator(node.advert_lat_e6, node.advert_lon_e6)
+    delta_x = node_x - center_x
+    if delta_x > world / 2.0:
+        delta_x -= world
+    elif delta_x < -world / 2.0:
+        delta_x += world
+    x0, y0, x1, y1 = viewport
+    screen_x = int(round((x0 + x1) / 2.0 + delta_x))
+    screen_y = int(round((y0 + y1) / 2.0 + node_y - center_y))
+    if not (x0 <= screen_x < x1 and y0 <= screen_y < y1):
+        return None
+    return (screen_x, screen_y)
+
+
+def boxes_intersect(left: tuple[int, int, int, int], right: tuple[int, int, int, int]) -> bool:
+    return left[0] < right[2] and left[2] > right[0] and left[1] < right[3] and left[3] > right[1]
+
+
+def draw_map_markers(s: Surface, snap: Snapshot, viewport: tuple[int, int, int, int]) -> dict[str, object]:
+    query_limit = 32
+    display_limit = 8
+    label_width = 112
+    label_height = 20
+    dot_radius = 7
+    label_gap = 3
+    exclusions = (
+        (0, TOP_BAR_H, 112, TOP_BAR_H + 64),
+        (108, TOP_BAR_H + 10, 412, TOP_BAR_H + 64),
+        (412, TOP_BAR_H, 478, TOP_BAR_H + 152),
+        (0, TOP_BAR_H + 294, 112, TOP_BAR_H + 360),
+        (220, TOP_BAR_H + 326, 478, TOP_BAR_H + 360),
+    )
+    placed: list[tuple[int, int, int, int]] = []
+    names: list[str] = []
+    full_names: list[str] = []
+    fingerprints: list[str] = []
+    roles: list[str] = []
+    colors: list[str] = []
+    located = [
+        node for node in snap.heard
+        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+    ][:query_limit]
+    for node in located:
+        if len(placed) >= display_limit:
+            break
+        point = map_project_node(snap, node, viewport)
+        if point is None:
+            continue
+        x, y = point
+        label_box = (
+            x - label_width // 2,
+            y + dot_radius + label_gap,
+            x + label_width // 2,
+            y + dot_radius + label_gap + label_height,
+        )
+        bounds = (label_box[0], y - dot_radius, label_box[2], label_box[3])
+        if bounds[0] < viewport[0] or bounds[1] < viewport[1] or bounds[2] > viewport[2] or bounds[3] > viewport[3]:
+            continue
+        if any(boxes_intersect(bounds, exclusion) for exclusion in exclusions):
+            continue
+        if any(boxes_intersect(bounds, accepted) for accepted in placed):
+            continue
+
+        color = map_marker_color(node.role)
+        display_name = map_marker_display_name(node.name)
+        s.draw.ellipse((x - dot_radius, y - dot_radius, x + dot_radius, y + dot_radius), fill=color, outline=TEXT, width=2)
+        s.round_rect(label_box, (7, 16, 24), (7, 16, 24), 4)
+        s.text(display_name, label_box, 11, TEXT, True, "center")
+        s.touch_target(
+            f"Map node {node.name}",
+            (x - 22, y - 22, x + 22, y + 22),
+            kind="map_marker_hit",
+            action="open_map_node_detail",
+            destination="node_detail_sheet",
+        )
+        placed.append(bounds)
+        names.append(display_name)
+        full_names.append(node.name)
+        fingerprints.append(node.fingerprint)
+        roles.append(node.role)
+        colors.append(f"#{color[0]:02X}{color[1]:02X}{color[2]:02X}")
+    return {
+        "map_marker_query_limit": query_limit,
+        "map_marker_display_limit": display_limit,
+        "map_marker_query_count": len(located),
+        "map_marker_displayed_count": len(placed),
+        "map_marker_names": names,
+        "map_marker_full_names": full_names,
+        "map_marker_name_max_chars": 14,
+        "map_marker_truncated_count": sum(
+            visible != full for visible, full in zip(names, full_names)
+        ),
+        "map_marker_fingerprints": fingerprints,
+        "map_marker_roles": roles,
+        "map_marker_colors": colors,
+        "map_marker_bounds": [list(box) for box in placed],
+        "map_marker_exclusion_boxes": [list(box) for box in exclusions],
+        "map_marker_labels_below": True,
+        "map_marker_collision_policy": "newest_first_skip_if_below_label_conflicts",
+        "map_marker_overlay_separate": True,
+        "map_marker_refresh_rebuilds_tiles": False,
+        "map_marker_hit_diameter_px": 44,
+        "map_marker_source": "signed_advert_location",
+        "map_saved_center_pin": "omitted",
+    }
 
 
 def render_map(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
     ready_for_live = snap.map_location_set and snap.wifi_connected
-    frame_ready = ready_for_live or snap.map_cached_tile_count > 0
+    frame_ready = snap.map_tile_download_state in ("active_view_ready", "cache_reuse") and (
+        ready_for_live or snap.map_cached_tile_count > 0
+    )
+    progress_visible = (
+        snap.map_tile_download_state in ("downloading", "loading_cache")
+        and snap.map_progress_total > 0
+        and snap.map_progress_completed < snap.map_progress_total
+    )
 
     # Match ui_map.c: the entire space between global chrome is the map canvas.
     # Controls are sparse edge overlays so the map remains the dominant surface.
     viewport = (0, TOP_BAR_H, WIDTH, DOCK_Y)
     if frame_ready:
         draw_map_grid(s, snap, viewport)
+        marker_metrics = draw_map_markers(s, snap, viewport)
     else:
+        marker_metrics = {
+            "map_marker_query_limit": 32,
+            "map_marker_display_limit": 8,
+            "map_marker_query_count": 0,
+            "map_marker_displayed_count": 0,
+            "map_marker_names": [],
+            "map_marker_fingerprints": [],
+            "map_marker_roles": [],
+            "map_marker_colors": [],
+            "map_marker_bounds": [],
+            "map_marker_exclusion_boxes": [],
+            "map_marker_labels_below": True,
+            "map_marker_collision_policy": "newest_first_skip_if_below_label_conflicts",
+            "map_marker_overlay_separate": True,
+            "map_marker_refresh_rebuilds_tiles": False,
+            "map_marker_hit_diameter_px": 44,
+            "map_marker_source": "signed_advert_location",
+            "map_saved_center_pin": "omitted",
+        }
         s.rect(viewport, (11, 21, 30))
         view_status, view_detail, view_color = map_view_status(snap)
         s.text(view_status, (30, 168, 450, 202), 22, view_color, True, "center")
@@ -1797,7 +1995,39 @@ def render_map(s: Surface, snap: Snapshot):
     if snap.map_location_set:
         draw_button(s, (8, DOCK_Y - 60, 104, DOCK_Y - 8), "Center", TEXT, action="map_recenter")
         s.round_rect((142, TOP_BAR_H + 14, 314, TOP_BAR_H + 46), (7, 16, 24), (7, 16, 24), 5)
-        s.text("Drag to pan", (146, TOP_BAR_H + 18, 310, TOP_BAR_H + 42), 11, TEXT, True, "center")
+        progress_label = (
+            "Drag to pan"
+            if frame_ready
+            else (
+                "Waiting for SD"
+                if not snap.map_tile_cache_ready
+                else (
+                    f"Downloading {snap.map_progress_completed}/{snap.map_progress_total}"
+                    if progress_visible and snap.map_tile_download_state == "downloading"
+                    else (
+                        f"Loading {snap.map_progress_completed}/{snap.map_progress_total}"
+                        if progress_visible
+                        else "Loading 1/9"
+                    )
+                )
+            )
+        )
+        s.text(progress_label, (146, TOP_BAR_H + 18, 310, TOP_BAR_H + 42), 11, TEXT, True, "center")
+        if progress_visible:
+            progress_box = (116, TOP_BAR_H + 52, 396, TOP_BAR_H + 60)
+            s.round_rect(progress_box, (7, 16, 24), (7, 16, 24), 4)
+            completed_width = int(
+                (progress_box[2] - progress_box[0])
+                * snap.map_progress_completed
+                / snap.map_progress_total
+            )
+            if completed_width > 0:
+                s.round_rect(
+                    (progress_box[0], progress_box[1], progress_box[0] + completed_width, progress_box[3]),
+                    BLUE,
+                    BLUE,
+                    4,
+                )
         draw_button(s, (420, TOP_BAR_H + 8, 472, TOP_BAR_H + 60), "+", TEXT, action="map_zoom_in")
         s.round_rect((420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), (7, 16, 24), (7, 16, 24), 4)
         s.text(f"z{snap.map_tile_zoom}", (420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), 11, TEXT, True, "center")
@@ -1815,6 +2045,10 @@ def render_map(s: Surface, snap: Snapshot):
             "map_full_bleed_content": True,
             "map_local_header_height": 0,
             "map_controls_overlay_canvas": True,
+            "map_progress_bar_supported": True,
+            "map_progress_bar_visible": progress_visible,
+            "map_progress_completed": snap.map_progress_completed,
+            "map_progress_total": snap.map_progress_total,
             "map_min_control_target": 48,
             "map_default_zoom": 10,
             "map_min_zoom": 8,
@@ -1825,6 +2059,7 @@ def render_map(s: Surface, snap: Snapshot):
             "map_tile_cache_ready": snap.map_tile_cache_ready,
             "map_tile_download_supported": snap.map_tile_download_supported,
             "map_tile_render_supported": snap.map_tile_render_supported,
+            "map_tile_style": "local_dark_osm_standard",
             "map_location_set": snap.map_location_set,
             "map_center_source": snap.map_center_source,
             "map_center_lat_e7": snap.map_lat_e7,
@@ -1840,6 +2075,7 @@ def render_map(s: Surface, snap: Snapshot):
             "map_attribution_visible": True,
             "map_attribution": MAP_ATTRIBUTION,
             "map_policy": MAP_POLICY,
+            **marker_metrics,
         }
     )
     draw_dock(s, "Map")
@@ -2511,6 +2747,28 @@ def render_contact_options_page(s: Surface, snap: Snapshot):
 def render_node_detail_sheet(s: Surface, snap: Snapshot):
     node = snap.heard[0]
     draw_sheet_frame(s, "Node Detail", node.name)
+    normalized_role = node.role.lower()
+    dm_available = "companion" in normalized_role or normalized_role == "chat"
+    management_gated = "room" in normalized_role or "repeat" in normalized_role
+    if dm_available:
+        draw_button(
+            s,
+            (210, 86, 264, 130),
+            "DM",
+            ACCENT,
+            action="open_node_dm",
+            destination="compose_sheet",
+        )
+    elif management_gated:
+        s.text("Manage locked", (190, 96, 316, 120), 12, MUTED, True, "center")
+    draw_button(
+        s,
+        (332, 86, 408, 130),
+        "Close",
+        MUTED,
+        action="close_node_detail",
+        destination="map" if node.advert_lat_e6 is not None else "nodes",
+    )
     s.round_rect((44, 150, 118, 176), (22, 39, 49), role_badge_color(node.role), 8)
     s.text(role_badge_text(node.role), (50, 152, 112, 174), 11, role_badge_color(node.role), True, "center")
     s.text("Role", (132, 150, 210, 170), 13, MUTED, True)
@@ -2523,9 +2781,26 @@ def render_node_detail_sheet(s: Surface, snap: Snapshot):
     s.text(node.signal, (132, 282, 270, 302), 14, GREEN, True)
     s.text("Path", (280, 282, 336, 302), 13, MUTED, True)
     s.text(node.meta, (336, 282, 436, 302), 12, MUTED)
-    s.text("Last heard", (44, 318, 150, 338), 13, MUTED, True)
-    s.text("12s ago  heard 24", (152, 318, 436, 338), 14, TEXT)
-    draw_button(s, (44, 358, 200, 392), "Close", MUTED, action="close_node_detail", destination="nodes")
+    location = (
+        f"{format_e6(node.advert_lat_e6)}, {format_e6(node.advert_lon_e6)}"
+        if node.advert_lat_e6 is not None and node.advert_lon_e6 is not None
+        else "not provided"
+    )
+    s.text("Advert location", (44, 304, 166, 324), 13, BLUE, True)
+    s.text(location, (168, 304, 436, 324), 13, TEXT)
+    s.text("Last heard", (44, 326, 150, 346), 13, MUTED, True)
+    s.text("12s ago  heard 24", (152, 326, 436, 346), 14, TEXT)
+    return_destination = "map" if node.advert_lat_e6 is not None else "nodes"
+    s.metrics.update(
+        {
+            "node_detail_location_provenance": "advert",
+            "node_detail_advert_location": location,
+            "node_detail_return_destination": return_destination,
+            "node_detail_return_reuses_map_view": return_destination == "map",
+            "node_detail_dm_available": dm_available,
+            "node_detail_management_gated": management_gated,
+        }
+    )
 
 
 def render_contact_edit_sheet(s: Surface, snap: Snapshot):
@@ -3545,7 +3820,17 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Forget contact",
         "Requires confirmation",
     ),
-    "node_detail_sheet": ("Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"),
+    "node_detail_sheet": (
+        "Node Detail",
+        "Role",
+        "Fingerprint",
+        "Public key",
+        "Signal",
+        "Path",
+        "Advert location",
+        "Last heard",
+        "Close",
+    ),
     "contact_edit_sheet": ("Rename Contact", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"),
     "contact_export_sheet": ("Export Contact", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"),
     "forget_contact_confirm_page": (
