@@ -433,6 +433,19 @@ static uint32_t map_marker_role_color(const char *type)
     return 0xA3E635U;
 }
 
+static void map_copy_bounded_text(char *dest, size_t dest_len, const char *source)
+{
+    if (!dest || dest_len == 0U) {
+        return;
+    }
+    size_t copied = 0U;
+    while (source && source[copied] != '\0' && copied + 1U < dest_len) {
+        dest[copied] = source[copied];
+        ++copied;
+    }
+    dest[copied] = '\0';
+}
+
 static void map_marker_display_name(const d1l_node_marker_t *marker,
                                     char *dest, size_t dest_len)
 {
@@ -446,7 +459,7 @@ static void map_marker_display_name(const d1l_node_marker_t *marker,
     const char *source = marker->name[0] ? marker->name : marker->fingerprint;
     const size_t source_len = strlen(source);
     if (source_len <= MAP_MARKER_NAME_MAX_CHARS) {
-        snprintf(dest, dest_len, "%s", source);
+        map_copy_bounded_text(dest, dest_len, source);
         return;
     }
     const size_t prefix_len = MAP_MARKER_NAME_MAX_CHARS - 3U;
@@ -585,9 +598,9 @@ static bool map_viewport_refresh_markers(const d1l_map_view_status_t *status)
         s_viewport_marker_bounds[shown] = bounds;
         s_viewport_marker_hits[shown].screen_x = point.screen_x;
         s_viewport_marker_hits[shown].screen_y = point.screen_y;
-        snprintf(s_viewport_marker_hits[shown].fingerprint,
-                 sizeof(s_viewport_marker_hits[shown].fingerprint), "%s",
-                 s_viewport_marker_candidates[i].fingerprint);
+        map_copy_bounded_text(s_viewport_marker_hits[shown].fingerprint,
+                              sizeof(s_viewport_marker_hits[shown].fingerprint),
+                              s_viewport_marker_candidates[i].fingerprint);
     }
 
     s_viewport_marker_store_generation = marker_generation;

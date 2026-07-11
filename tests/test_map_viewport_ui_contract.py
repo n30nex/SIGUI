@@ -199,6 +199,7 @@ def test_map_marker_overlay_is_bounded_named_passive_and_tile_independent():
     assert "d1l_map_point_project_e6(" in marker_refresh
     assert "map_marker_placement_allowed(&bounds)" in marker_refresh
     assert "map_marker_display_name(" in marker_refresh
+    assert "map_copy_bounded_text(" in marker_refresh
     assert "LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE" in marker_refresh
     assert "label_y = point.screen_y + dot_radius + MAP_MARKER_LABEL_GAP" in marker_refresh
     assert "s_viewport_marker_count < MAP_MARKER_DISPLAY_LIMIT" in marker_refresh
