@@ -11,6 +11,11 @@ typedef struct {
     uint32_t heap_free;
     uint32_t heap_min_free;
     uint32_t heap_largest_free;
+    uint32_t internal_heap_free;
+    uint32_t internal_heap_min_free;
+    uint32_t internal_heap_largest_free;
+    uint32_t dma_heap_free;
+    uint32_t dma_heap_largest_free;
     uint32_t psram_free;
     uint32_t psram_min_free;
     uint32_t psram_largest_free;

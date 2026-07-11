@@ -176,9 +176,6 @@ bool d1l_ui_keyboard_normalize_probe_target(const char *name, char *out_target,
         target = "onboarding";
     } else if (strcmp(normalized, "map_location") == 0) {
         target = "map_location";
-    } else if (strcmp(normalized, "map_provider") == 0 ||
-               strcmp(normalized, "map_tiles") == 0) {
-        target = "map_provider";
     } else if (strcmp(normalized, "wifi") == 0 ||
                strcmp(normalized, "wifi_ssid") == 0) {
         target = "wifi_ssid";
@@ -220,7 +217,6 @@ bool d1l_ui_keyboard_probe_requires_hidden_dock(const char *target)
         strcmp(target, "packet_search") == 0 ||
         strcmp(target, "contact_edit") == 0 ||
         strcmp(target, "map_location") == 0 ||
-        strcmp(target, "map_provider") == 0 ||
         strcmp(target, "wifi_ssid") == 0 ||
         strcmp(target, "wifi_password") == 0;
 }

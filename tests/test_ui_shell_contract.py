@@ -80,22 +80,22 @@ def test_app_model_exposes_bounded_ui_snapshot():
     assert "map_tile_download_state" in header
     assert "map_tile_download_requires" in header
     assert "map_location_set" in header
-    assert "map_tile_provider_saved" in header
-    assert "map_tile_url_template" in header
-    assert "map_tile_attribution" in header
+    assert "map_tile_provider_saved" not in header
+    assert "map_tile_url_template" not in header
+    assert "map_tile_attribution" not in header
     assert "map_tile_zoom" in header
     assert "map_lat_e7" in header
     assert "map_lon_e7" in header
     assert "d1l_map_tile_store_sd_ready(&storage)" in source
     assert "D1L_MAP_TILE_CACHE_POLICY" in source
-    assert '"provider_required"' in source
+    assert "snapshot->map_tile_provider_policy = D1L_MAP_TILE_PROVIDER_POLICY" in source
+    assert "snapshot->map_tile_provider_attribution = D1L_MAP_TILE_PROVIDER_ATTRIBUTION" in source
+    assert '"sd_cache_required"' in source
     assert '"location_required"' in source
     assert '"ready"' in source
     assert "snapshot->map_location_set = settings->map_location_set" in source
-    assert "snapshot->map_tile_provider_saved = settings->map_tile_provider_saved" in source
-    assert "settings->map_tile_url_template" in source
-    assert "d1l_app_model_save_map_tile_provider" in header
-    assert "d1l_app_model_download_center_map_tile" in header
+    assert "d1l_app_model_save_map_tile_provider" not in header
+    assert "d1l_app_model_download_center_map_tile" not in header
     assert "d1l_app_radio_profile_edit_t" in header
     assert "radio_frequency_hz" in header
     assert "radio_bandwidth_tenths_khz" in header
@@ -126,6 +126,8 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     source = read("main/ui/ui_phase1.c")
     chrome = read("main/ui/ui_chrome.c")
     chrome_header = read("main/ui/ui_chrome.h")
+    map_source = read("main/ui/ui_map.c")
+    map_header = read("main/ui/ui_map.h")
     cmake = read("main/CMakeLists.txt")
     assert "D1L_UI_TAB_HOME" in source
     assert "D1L_UI_TAB_MESSAGES" in source
@@ -142,7 +144,11 @@ def test_phase3_shell_replaces_diagnostic_tile_home():
     assert "create_onboarding_sheet" in source
     assert "Phase 1 hardware bring-up" not in source
     assert '"ui/ui_chrome.c"' in cmake
+    assert '"ui/ui_map.c"' in cmake
     assert "#include \"ui_chrome.h\"" in source
+    assert "#include \"ui_map.h\"" in source
+    assert "d1l_ui_map_render" in map_source
+    assert "d1l_ui_map_render" in map_header
     assert "d1l_ui_chrome_layout_t" in chrome_header
     assert "d1l_ui_chrome_layout_for_screen" in source
     assert "static void restore_dock_for_active_tab(void)" in source
@@ -324,6 +330,7 @@ def test_p0_message_layouts_keep_text_out_of_headers_and_dock():
 
 def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     source = read("main/ui/ui_phase1.c")
+    map_source = read("main/ui/ui_map.c")
     header = read("main/ui/ui_phase1.h")
     console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
@@ -367,10 +374,12 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "cmd_ui_capture_end" in console
     assert '"ui status"' in console
     assert "ui tab <home|messages|nodes|map|packets|settings>" in console
-    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>" in console
+    assert "ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>" in console
     assert "contact_probe_surfaces" in console
     assert '\\"storage_probe_surfaces\\":[\\"storage\\",\\"storage_card\\",\\"storage_data\\"]' in console
-    assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>" in console
+    assert '\\"map_probe_surfaces\\":[\\"map\\",\\"map_options\\",\\"map_location\\",\\"map_cache\\"]' in console
+    assert '\\"map_probes_read_only\\":true' in console
+    assert "ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>" in console
     assert '"ui/ui_keyboard.c"' in cmake
     assert '#include "ui_keyboard.h"' in source
     assert "d1l_ui_keyboard_normalize_probe_target" in source
@@ -403,7 +412,8 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert 'strcmp(normalized, "public_search") == 0' in keyboard
     assert 'strcmp(normalized, "packet_search") == 0' in keyboard
     assert 'strcmp(normalized, "contact_edit") == 0' in keyboard
-    assert 'strcmp(normalized, "map_provider") == 0' in keyboard
+    assert 'strcmp(normalized, "map_location") == 0' in keyboard
+    assert 'strcmp(normalized, "map_provider") == 0' not in keyboard
     assert 'strcmp(normalized, "wifi_password") == 0' in keyboard
     assert "d1l_ui_keyboard_probe_target_is_compose(target)" in keyboard
     assert "d1l_ui_keyboard_probe_requires_hidden_dock" in keyboard
@@ -419,13 +429,14 @@ def test_main_content_root_is_scrollable_and_serial_tab_switchable():
     assert "d1l_ui_keyboard_configure_input(s_packet_search_keyboard, s_packet_search_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_contact_edit_keyboard, s_contact_edit_textarea" in source
     assert "d1l_ui_keyboard_configure_input(s_onboarding_keyboard, s_onboarding_name_textarea" in source
-    assert "d1l_ui_keyboard_configure_input(s_map_location_keyboard, s_map_lat_textarea" in source
-    assert "d1l_ui_keyboard_configure_input(s_map_tiles_keyboard, s_map_tiles_url_textarea" in source
+    assert "d1l_ui_keyboard_configure_input(controls->location_keyboard" in map_source
+    assert "controls->latitude_textarea" in map_source
+    assert "tile_source_keyboard" not in map_source
+    assert "tile_url_textarea" not in map_source
     assert "d1l_ui_keyboard_configure_input(s_wifi_keyboard, s_wifi_ssid_textarea" in source
     assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_location_keyboard, event" in source
-    assert "d1l_ui_keyboard_focus_textarea_from_event(s_map_tiles_keyboard, event" in source
+    assert "s_map_tiles_keyboard" not in source
     assert "d1l_ui_keyboard_focus_textarea_from_event(s_wifi_keyboard, event" in source
-    assert "d1l_ui_keyboard_clear_textarea(s_map_tiles_keyboard)" in source
     assert 'strcmp(target, "public_search") == 0' in source
     assert 'strcmp(target, "packet_search") == 0' in source
     assert 'strcmp(target, "contact_edit") == 0' in source
@@ -761,11 +772,15 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "open_nodes": "dock_event_cb",
         "open_packets": "D1L_UI_SETTINGS_ACTION_PACKETS",
         "open_settings": "dock_event_cb",
-        "open_map_location_picker": "open_map_location_sheet_event_cb",
+        "open_map_options": "open_map_options_sheet_event_cb",
+        "close_map_options": "close_map_options_sheet_event_cb",
+        "open_map_location": "open_map_location_from_options_event_cb",
         "edit_map_latitude": "s_map_lat_textarea",
         "edit_map_longitude": "s_map_lon_textarea",
         "save_map_location": "map_location_save_event_cb",
-        "skip_map_location": "close_map_location_sheet_event_cb",
+        "close_map_location": "close_map_location_sheet_event_cb",
+        "open_map_cache": "open_map_cache_status_event_cb",
+        "close_map_cache": "back_to_map_options_event_cb",
         "open_contact_export": "contact_detail_export_event_cb",
         "close_contact_export": "close_contact_export_event_cb",
         "open_route_trace": "open_route_trace_event_cb",
@@ -1042,68 +1057,132 @@ def test_node_detail_sheet_opens_from_heard_node_rows():
     assert "create_node_detail_sheet(s_screen)" in source
 
 
-def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
+def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     source = read("main/ui/ui_phase1.c")
+    map_source = read("main/ui/ui_map.c")
+    map_header = read("main/ui/ui_map.h")
+    map_service_header = read("main/map/map_view_service.h")
+    cmake = read("main/CMakeLists.txt")
     header = read("main/app/app_model.h")
     model = read("main/app/app_model.c")
 
     assert "D1L_UI_TAB_MAP" in source
-    assert "render_map" in source
-    assert '"Map"' in source
-    assert '"Set Pin"' in source
-    assert '"Move Pin"' in source
-    assert '"Tiles"' in source
-    assert '"Map Tiles"' in source
-    assert '"Allowed provider template"' in source
-    assert '"Attribution"' in source
-    assert '"Download"' in source
-    assert "if (tile_download_supported)" in source
-    assert '"Live download unavailable"' in source
-    assert '"Tile render pending; use serial canaries for SD cache proof."' in source
-    assert '"No public OSM bulk tile servers. Visible attribution is required."' in source
-    assert '"Set D1L Location"' in source
-    assert '"Map needs your D1L location"' in source
-    assert '"Enter decimal degrees"' in source
-    assert '"Latitude"' in source
-    assert '"Longitude"' in source
-    assert '"43.6532000"' in source
-    assert '"-79.3832000"' in source
-    assert '"Tile Cache"' in source
-    assert '"Downloads"' in source
-    assert '"Offline Cache"' in source
-    assert '"No Offline Tiles"' in source
-    assert '"Connect Wi-Fi and download allowed tiles for your area."' in source
-    assert '"Allowed provider and visible attribution required."' in source
-    assert '"Center"' in source
-    assert '"Manual Location  %s, %s"' in source
-    assert '"Manual Location unset"' in source
-    assert '"Routes"' in source
-    assert "snapshot->map_tile_cache_ready" in source
-    assert "snapshot->map_tile_download_supported" in source
-    assert "snapshot->map_tile_render_supported" in model
-    assert "snapshot->map_tile_cache_policy" in source
-    assert "snapshot->map_tile_cache_path_template" in source
-    assert "snapshot->map_tile_download_requires" in source
-    assert "snapshot->map_tile_provider_policy" in model
-    assert "snapshot->map_tile_provider_attribution" in model
-    assert "snapshot->map_location_set" in source
-    assert "s_map_location_prompt_seen" in source
+    assert '"ui/ui_map.c"' in cmake
+    assert '#include "ui_map.h"' in source
+    for api in (
+        "d1l_ui_map_render",
+        "d1l_ui_map_render_options",
+        "d1l_ui_map_render_location",
+        "d1l_ui_map_viewport_release",
+        "d1l_ui_map_viewport_set_suppressed",
+        "d1l_ui_map_viewport_refresh",
+    ):
+        assert api in map_header
+        assert api in map_source
+
+    wrapper = source.split(
+        "static void render_map(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)", 1
+    )[1].split("\n}", 1)[0]
+    assert "d1l_ui_map_render(content, snapshot, &callbacks);" in wrapper
+    assert "d1l_ui_map_viewport_suppress_next_acquire();" in wrapper
+    assert "map_panel(" not in wrapper
+    assert "map_button(" not in wrapper
+    assert "render_metric_card(" not in wrapper
+
+    for label in (
+        '"Map"',
+        '"Options"',
+        '"Map options"',
+        '"Set location"',
+        '"Cache status"',
+        '"Save location"',
+        '"Clear location"',
+        '"Wi-Fi"',
+        '"SD card"',
+        '"Map view"',
+        '"(c) OpenStreetMap contributors"',
+    ):
+        assert label in map_source
+
+    for removed_surface in (
+        '"Offline Maps"',
+        '"Offline maps"',
+        '"Tile source"',
+        '"Save source"',
+        '"Remove tile source?"',
+        '"Remove source"',
+    ):
+        assert removed_surface not in map_source
+
+    landing = map_source.split("void d1l_ui_map_render(", 1)[1].split(
+        "static void map_render_options_root", 1
+    )[0]
+    assert landing.count('map_button(parent, "Options"') == 1
+    assert "map_view_service_acquire_visible" in landing
+    assert "D1L_MAP_VIEW_FIXED_ZOOM" in landing
+    assert "MAP_VIEWPORT_WIDTH 446U" in map_source
+    assert "MAP_VIEWPORT_HEIGHT 288U" in map_source
+
+    options = map_source.split("static void map_render_options_root", 1)[1].split(
+        "static void map_render_cache_status", 1
+    )[0]
+    assert 'map_menu_row(parent, 68, "Set location"' in options
+    assert 'map_menu_row(parent, 140, "Cache status"' in options
+    assert 'cache_ready ? "SD ready" : "Needs SD"' in options
+    assert options.count("map_menu_row(") == 2
+    assert '"Built-in map"' not in options
+    assert (
+        '"Tiles download only while Map is open. Reopening the same area uses the saved copy."'
+        in options
+    )
+    assert "D1L_UI_MAP_OPTIONS_ROOT" in map_header
+    assert "D1L_UI_MAP_OPTIONS_CACHE_STATUS" in map_header
+    assert "D1L_UI_MAP_TILE_SOURCE" not in map_header
+    assert "D1L_UI_MAP_REMOVE_CONFIRM" not in map_header
+
+    concrete_map_buttons = [
+        (int(width), int(height))
+        for width, height in re.findall(
+            r'map_button\(\s*[^,]+,\s*(?:"[^"]+"|back_label),\s*'
+            r'-?\d+,\s*-?\d+,\s*(\d+),\s*(\d+),',
+            map_source,
+            re.S,
+        )
+    ]
+    assert concrete_map_buttons
+    assert all(width >= 44 and height >= 44 for width, height in concrete_map_buttons)
+    for control in ("latitude_textarea", "longitude_textarea"):
+        match = re.search(
+            rf"lv_obj_set_size\(controls->{control},\s*(\d+),\s*(\d+)\)",
+            map_source,
+        )
+        assert match, control
+        assert int(match.group(1)) >= 44 and int(match.group(2)) >= 44, control
+
+    assert "s_map_location_prompt_seen" not in source
+    assert "d1l_app_model_download_center_map_tile" not in source
+    assert "d1l_app_model_download_center_map_tile" not in map_source
+    assert "download_center" not in map_header
+    assert "d1l_app_model_" not in map_source
+    assert "d1l_meshcore_" not in map_source
+    assert "d1l_connectivity_" not in map_source
+    assert "d1l_storage_" not in map_source
+
+    assert "snapshot->map_tile_cache_ready" in map_source
+    assert "snapshot->map_location_set" in map_source
     assert "create_map_location_sheet(s_screen)" in source
     assert "open_map_location_sheet_event_cb" in source
-    assert "open_map_tiles_sheet_event_cb" in source
-    assert "render_map_tiles_sheet" in source
-    assert "create_map_tiles_sheet(s_screen)" in source
-    assert "d1l_app_model_save_map_tile_provider(url, attribution" in source
-    assert "d1l_app_model_download_center_map_tile(&result)" in source
+    assert "open_map_options_sheet_event_cb" in source
+    assert "render_map_options_sheet" in source
+    assert "create_map_options_sheet(s_screen)" in source
+    assert "open_map_tiles_sheet_event_cb" not in source
+    assert "create_map_tiles_sheet" not in source
+    assert "map_provider" not in source
     assert "map_location_textarea_event_cb" in source
-    assert "map_tiles_textarea_event_cb" in source
-    assert "map_tiles_keyboard_event_cb" in source
     assert "map_location_keyboard_event_cb" in source
     assert "parse_coord_text_e7" in source
     assert "map_location_save_event_cb" in source
-    assert "format_coord_e7" in source
-    assert "render_metric_card(content, 18, 48" in source
-    assert "render_metric_card(content, 238, 48" in source
+    assert "map_format_coordinate" in map_source
     assert 'static const char *const labels[] = {"Home", "Msg", "Network", "Map", "More"}' in source
     assert "static const d1l_ui_tab_t tabs[]" in source
     assert "D1L_UI_TAB_PACKETS" not in source.split("static void create_dock", 1)[1].split(
@@ -1117,14 +1196,22 @@ def test_map_screen_reports_offline_tile_policy_without_rf_or_downloads():
     assert "map_tile_sideload_supported" in header
     assert "map_tile_provider_policy" in header
     assert "map_tile_provider_attribution" in header
-    assert "D1L_MAP_TILE_RENDER_SUPPORTED false" in header
+    assert "D1L_MAP_TILE_RENDER_SUPPORTED true" in header
     assert "connectivity.wifi_connected" in model
-    assert "snapshot->map_tile_provider_saved &&" in model
     assert "snapshot->map_tile_render_supported" in model
     assert '"tile_render_pending"' in model
     assert '"sd_cache_required"' in model
     assert '"wifi_required"' in model
-    assert "snapshot->map_tile_sideload_supported = true" in model
+    assert "snapshot->map_tile_sideload_supported = false" in model
+    assert "snapshot->map_tile_provider_policy = D1L_MAP_TILE_PROVIDER_POLICY" in model
+    assert "snapshot->map_tile_provider_attribution = D1L_MAP_TILE_PROVIDER_ATTRIBUTION" in model
+    for api in (
+        "d1l_map_view_service_acquire_visible",
+        "d1l_map_view_service_release_visible",
+        "d1l_map_view_service_acquire_frame",
+        "d1l_map_view_service_release_frame",
+    ):
+        assert api in map_service_header
 
 
 def test_messages_screen_renders_bounded_preview_rows():
@@ -1405,7 +1492,7 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
         ("D1L_UI_SETTINGS_ACTION_WIFI", "open_wifi_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_BLE", "open_ble_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_RADIO", "open_radio_settings_event_cb(NULL);"),
-        ("D1L_UI_SETTINGS_ACTION_MAP_TILES", "open_map_tiles_sheet_event_cb(NULL);"),
+        ("D1L_UI_SETTINGS_ACTION_MAP_TILES", "open_map_options_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_DISPLAY", "open_display_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_DIAGNOSTICS", "open_diagnostics_sheet_event_cb(NULL);"),
         ("D1L_UI_SETTINGS_ACTION_ADVANCED", "open_sheet_event_cb(NULL);"),
@@ -1455,7 +1542,8 @@ def test_settings_screen_reports_companion_wireless_state():
     assert '"More"' in settings_module
     assert '"Settings and tools"' in settings_module
     assert '"SD Card"' in settings_module
-    assert '"Offline Maps"' in settings_module
+    assert '"Map options"' in settings_module
+    assert '"Offline Maps"' not in settings_module
     assert '"Identity"' in settings_module
     assert '"Advanced"' in settings_module
     assert '"About"' in settings_module

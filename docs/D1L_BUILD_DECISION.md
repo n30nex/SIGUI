@@ -11,6 +11,8 @@ The original ESP-IDF v5.1.x baseline is end of life. Espressif's [v5.1.7 release
 
 Espressif's [official Docker-image documentation](https://docs.espressif.com/projects/esp-idf/en/v5.5.4/esp32s3/api-guides/tools/idf-docker-image.html) distinguishes version tags such as `v5.5.4` from moving release-branch tags such as `release-v5.5`. The official registry publishes `espressif/idf:v5.5.4`, so issue #63 uses that exact version tag to avoid intentional release-branch drift. A tag is not a content-immutable image identity and does not, by itself, make the build reproducible; retain the Actions run metadata and resolved image identity when available.
 
+Status review (2026-07-10): standalone migration commit `39a043c` builds successfully with ESP-IDF v5.5.4 in GitHub Actions using the exact generated-and-committed dependency lock, the tracked Seeed compatibility patch, and the expected effective configuration. It is not yet the qualified production baseline because the combined Map/Wi-Fi candidate still needs its own green Actions build, exact COM12 `version.idf=v5.5.4`, and the complete behavioral gate matrix. The EOL v5.1.x line remains historical vendor context only, not an approved release fallback.
+
 ## Rationale
 
 The Seeed SenseCAP Indicator ESP32 SDK is ESP-IDF based and explicitly says to use ESP-IDF `v5.1.x`. Its examples select `CONFIG_LCD_BOARD_SENSECAP_INDICATOR_D1L=y` and include D1L paths for RGB LCD, touch, IO expander, RP2040 reset, and SX1262 LoRa bring-up. The repository tracks that BSP as the `third_party/sensecap_indicator_esp32` git submodule at commit `77edb8d2b9a92fc67965c1b2d4a838f0d09a1800` (`v1.1.0`). It remains a pinned compatibility and board-support reference while its v5.5.4 behavior is qualified; it is not an untracked dependency and does not determine the production ESP-IDF version.
@@ -47,7 +49,7 @@ The decision is considered provisional until real hardware validation confirms:
 - SX1262 status read without DIO3 TCXO control.
 - Repeatable clean build from checkout.
 
-Without a connected D1L, this repo can currently validate only the source contracts, scripts, and host tests.
+Standalone branch evidence is scoped to its exact artifact. This framework decision remains provisional until the combined Actions artifact passes the staged COM12 qualification above.
 
 ## Guardrails
 

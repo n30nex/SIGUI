@@ -139,6 +139,22 @@ bool d1l_ui_scroll_surface_from_name(const char *name,
     } else if (strcmp(normalized, "map") == 0) {
         surface = "map";
         screen = D1L_UI_SCREEN_MAP;
+    } else if (strcmp(normalized, "map_options") == 0 ||
+               strcmp(normalized, "map_options_sheet") == 0 ||
+               strcmp(normalized, "map_options_page") == 0 ||
+               strcmp(normalized, "map_menu") == 0) {
+        surface = "map_options";
+        screen = D1L_UI_SCREEN_MAP;
+    } else if (strcmp(normalized, "map_location") == 0 ||
+               strcmp(normalized, "map_location_sheet") == 0 ||
+               strcmp(normalized, "map_location_page") == 0) {
+        surface = "map_location";
+        screen = D1L_UI_SCREEN_MAP;
+    } else if (strcmp(normalized, "map_cache") == 0 ||
+               strcmp(normalized, "map_cache_page") == 0 ||
+               strcmp(normalized, "tile_cache") == 0) {
+        surface = "map_cache";
+        screen = D1L_UI_SCREEN_MAP;
     } else {
         return false;
     }

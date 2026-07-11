@@ -92,13 +92,13 @@ void app_main(void)
     if (storage_manager_ret != ESP_OK) {
         ESP_LOGW(TAG, "storage manager start failed: %s", esp_err_to_name(storage_manager_ret));
     }
+    d1l_meshcore_service_init();
+
+    esp_err_t board_ret = d1l_board_init();
     esp_err_t connectivity_ret = d1l_connectivity_init();
     if (connectivity_ret != ESP_OK) {
         ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));
     }
-    d1l_meshcore_service_init();
-
-    esp_err_t board_ret = d1l_board_init();
 
     if (board_ret == ESP_OK) {
         ESP_LOGI(TAG, "D1L board initialized");

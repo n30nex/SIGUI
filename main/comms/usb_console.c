@@ -34,6 +34,7 @@
 #include "mesh/route_store.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
+#include "map/map_view_service.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
@@ -281,13 +282,14 @@ static void cmd_settings_get(void)
     print_e7_json(settings->map_location_set ? settings->map_lat_e7 : 0);
     printf(",\"lon\":");
     print_e7_json(settings->map_location_set ? settings->map_lon_e7 : 0);
-    printf(",\"source\":\"%s\"},\"map_tiles\":{\"provider_saved\":%s,\"zoom\":%u,\"url_template\":",
-           settings->map_location_set ? "manual" : "unset",
-           bool_json(settings->map_tile_provider_saved),
+    printf(",\"source\":\"%s\"},\"map_tiles\":{\"source\":",
+           settings->map_location_set ? "manual" : "unset");
+    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"built_in\":true,\"zoom\":%u,\"url_template\":",
            (unsigned)settings->map_tile_zoom);
-    print_json_string(settings->map_tile_provider_saved ? settings->map_tile_url_template : "");
+    print_json_string(D1L_MAP_TILE_SOURCE_URL_TEMPLATE);
     printf(",\"attribution\":");
-    print_json_string(settings->map_tile_provider_saved ? settings->map_tile_attribution : "");
+    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"policy\":\"%s\"},\"radio\":{\"frequency_hz\":%lu,\"bandwidth_khz\":%.1f,\"sf\":%u,\"cr\":%u,\"tx_power_dbm\":%d,\"rx_boost\":%s,\"tcxo\":\"%s\",\"applied_to_radio\":%s,\"radio_apply_pending\":%s,\"radio_apply_error\":\"%s\"}}\n",
            D1L_MAP_TILE_PROVIDER_POLICY,
            (unsigned long)settings->frequency_hz,
@@ -702,7 +704,7 @@ static void cmd_ui_scroll_probe(const char *line)
     }
     if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
         err_result("ui scroll-probe", "INVALID_SURFACE",
-                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>");
+                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>");
         return;
     }
 
@@ -710,7 +712,7 @@ static void cmd_ui_scroll_probe(const char *line)
     esp_err_t ret = d1l_ui_phase1_scroll_probe(surface, &probe);
     if (ret != ESP_OK) {
         err_result("ui scroll-probe", esp_err_to_name(ret),
-                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>");
+                   "usage: ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>");
         return;
     }
 
@@ -748,7 +750,7 @@ static void cmd_ui_compose_probe(const char *line)
     }
     if (len == 0 || (arg[len] != '\0' && !isspace((unsigned char)arg[len]))) {
         err_result("ui compose-probe", "INVALID_TARGET",
-                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>");
+                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
         return;
     }
 
@@ -756,7 +758,7 @@ static void cmd_ui_compose_probe(const char *line)
     esp_err_t ret = d1l_ui_phase1_compose_probe(target, &probe);
     if (ret != ESP_OK) {
         err_result("ui compose-probe", esp_err_to_name(ret),
-                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>");
+                   "usage: ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>");
         return;
     }
 
@@ -1365,6 +1367,8 @@ static void cmd_storage_status(void)
 {
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
+    d1l_connectivity_status_t connectivity = {0};
+    d1l_connectivity_status(&connectivity);
     ok_begin("storage status");
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
@@ -1424,12 +1428,18 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_CACHE_POLICY);
     printf(",\"map_tile_cache_path_template\":");
     print_json_string(D1L_MAP_TILE_CACHE_PATH_TEMPLATE);
-    printf(",\"map_tile_download_supported\":false,\"map_tile_download_state\":");
-    print_json_string(D1L_MAP_TILE_DOWNLOAD_STATE);
-    printf(",\"map_tile_provider_policy\":");
+    printf(",\"map_tile_download_supported\":%s,\"map_tile_source\":",
+           bool_json(connectivity.wifi_build_enabled &&
+                     d1l_map_tile_store_sd_ready(&status)));
+    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"map_tile_download_state\":");
+    print_json_string(!d1l_map_tile_store_sd_ready(&status) ? "sd_cache_required" :
+                      !connectivity.wifi_connected ? "wifi_required" :
+                      D1L_MAP_TILE_DOWNLOAD_STATE);
+    printf(",\"map_tile_policy\":");
     print_json_string(D1L_MAP_TILE_PROVIDER_POLICY);
-    printf(",\"map_tile_provider_attribution\":");
-    print_json_string(D1L_MAP_TILE_PROVIDER_ATTRIBUTION);
+    printf(",\"map_tile_attribution\":");
+    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
     printf(",\"retained_sd\":{\"degraded\":%s,\"note\":",
@@ -1672,21 +1682,56 @@ static void cmd_storage_map_policy(void)
     const char *download_state = !cache_ready ? "sd_cache_required" :
                                  !connectivity.wifi_connected ? "wifi_required" :
                                  D1L_MAP_TILE_DOWNLOAD_STATE;
-    printf(",\"zoom_max\":%u,\"sideload_supported\":true,\"canary_command\":\"storage map-tile-canary <token>\",\"download_command\":\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
-           (unsigned)D1L_MAP_TILE_ZOOM_MAX,
+    printf(",\"source\":");
+    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"url_template\":");
+    print_json_string(D1L_MAP_TILE_SOURCE_URL_TEMPLATE);
+    printf(",\"attribution\":");
+    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
+    printf(",\"license_url\":");
+    print_json_string(D1L_MAP_TILE_LICENSE_URL);
+    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
+           (unsigned)D1L_MAP_VIEW_MAX_TILES,
+           (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS,
+           (unsigned)D1L_MAP_VIEW_FIXED_ZOOM,
            bool_json(download_supported),
            bool_json(live_network_download));
     print_json_string(download_state);
     printf(",\"download_requires\":");
     print_json_string(D1L_MAP_TILE_DOWNLOAD_REQUIRES);
-    printf(",\"provider_policy\":");
+    printf(",\"policy\":");
     print_json_string(D1L_MAP_TILE_PROVIDER_POLICY);
-    printf(",\"provider_attribution\":");
-    print_json_string(D1L_MAP_TILE_PROVIDER_ATTRIBUTION);
     printf(",\"wifi_state\":");
     print_json_string(connectivity.wifi_state ? connectivity.wifi_state : "off");
-    printf(",\"wifi_build_enabled\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Offline map shell and SD cache policy are available; connect Wi-Fi and configure an allowed provider before downloading only the needed area\"}\n",
+    printf(",\"wifi_build_enabled\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Set a location and enable Wi-Fi; the built-in OpenStreetMap source fetches only the visible current view into the persistent SD cache\"}\n",
            bool_json(connectivity.wifi_build_enabled));
+}
+
+static void cmd_map_tiles_status(void)
+{
+    d1l_map_view_status_t status = {0};
+    d1l_map_view_service_status(&status);
+    ok_begin("map tiles status");
+    printf(",\"source\":");
+    print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"attribution\":");
+    print_json_string(D1L_MAP_TILE_ATTRIBUTION);
+    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+           bool_json(status.initialized), bool_json(status.visible),
+           bool_json(status.worker_running), bool_json(status.frame_ready),
+           bool_json(status.sd_cache_ready), bool_json(status.wifi_connected),
+           bool_json(status.rate_limited), bool_json(status.current_view_only),
+           (unsigned long)status.generation, (unsigned long)status.frame_revision,
+           (unsigned long)status.retry_after_sec, (long)status.lat_e7,
+           (long)status.lon_e7, (unsigned)status.width, (unsigned)status.height,
+           (unsigned)status.zoom, (unsigned)status.planned_tiles,
+           (unsigned)status.attempted_tiles, (unsigned)status.cache_hits,
+           (unsigned)status.network_requests, (unsigned)status.downloaded_tiles,
+           (unsigned)status.rendered_tiles, (unsigned)status.failed_tiles);
+    print_json_string(status.phase);
+    printf(",\"message\":");
+    print_json_string(status.message);
+    printf(",\"public_rf_tx\":false,\"formats_sd\":false}\n");
 }
 
 static void print_storage_setup_payload(const d1l_storage_status_t *status)
@@ -2033,97 +2078,6 @@ static bool strip_message_offset_suffix(char *text, size_t *out_offset)
     return true;
 }
 
-static void print_storage_map_tile_download_error(const d1l_map_tile_download_result_t *download,
-                                                  esp_err_t ret,
-                                                  const char *hint)
-{
-    printf("{\"schema\":%d,\"ok\":false,\"cmd\":\"storage map-tile-download\",\"code\":\"%s\",\"step\":",
-           D1L_CONSOLE_SCHEMA, esp_err_to_name(ret));
-    print_json_string(download && download->step[0] ? download->step : "unknown");
-    printf(",\"provider_allowed\":%s,\"wifi_connected\":%s,\"sd_ready\":%s,\"status_code\":%d,\"bytes\":%u,\"public_rf_tx\":false,\"formats_sd\":false,\"hint\":",
-           bool_json(download && download->provider_allowed),
-           bool_json(download && download->wifi_connected),
-           bool_json(download && download->sd_ready),
-           download ? download->status_code : 0,
-           (unsigned)(download ? download->bytes : 0U));
-    print_json_string(hint ? hint :
-                      "requires connected Wi-Fi, ready SD cache, allowed HTTPS provider template, and attribution");
-    printf("}\n");
-}
-
-static void cmd_storage_map_tile_download(const char *line)
-{
-    static const char prefix[] = "storage map-tile-download ";
-    const char *arg = line + strlen(prefix);
-    char z_word[8] = {0};
-    char x_word[12] = {0};
-    char y_word[12] = {0};
-    char url_template[D1L_MAP_TILE_URL_TEMPLATE_MAX + 1U] = {0};
-    char attribution[D1L_MAP_TILE_ATTRIBUTION_MAX + 1U] = {0};
-    if (strncmp(line, prefix, strlen(prefix)) != 0 ||
-        !read_storage_word(&arg, z_word, sizeof(z_word)) ||
-        !read_storage_word(&arg, x_word, sizeof(x_word)) ||
-        !read_storage_word(&arg, y_word, sizeof(y_word)) ||
-        !read_storage_word(&arg, url_template, sizeof(url_template)) ||
-        !read_storage_word(&arg, attribution, sizeof(attribution)) ||
-        arg[0] != '\0') {
-        err_result("storage map-tile-download", "INVALID_ARGS",
-                   "usage: storage map-tile-download <z> <x> <y> <https-url-template-with-{z}-{x}-{y}> <attribution>");
-        return;
-    }
-
-    uint32_t z = 0;
-    uint32_t x = 0;
-    uint32_t y = 0;
-    if (!parse_u32_word(z_word, &z) ||
-        !parse_u32_word(x_word, &x) ||
-        !parse_u32_word(y_word, &y) ||
-        z > D1L_MAP_TILE_ZOOM_MAX ||
-        !d1l_map_tile_store_coord_valid((uint8_t)z, x, y)) {
-        err_result("storage map-tile-download", "INVALID_COORD",
-                   "tile coordinate must fit the supported z/x/y range");
-        return;
-    }
-
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
-    d1l_storage_status_t status = {0};
-    d1l_storage_status(&status);
-    d1l_connectivity_status_t connectivity = {0};
-    d1l_connectivity_status(&connectivity);
-
-    d1l_map_tile_download_result_t download = {0};
-    esp_err_t ret = d1l_map_tile_store_download(
-        url_template, attribution, (uint8_t)z, x, y, &status,
-        connectivity.wifi_connected, &download);
-    if (ret != ESP_OK) {
-        print_storage_map_tile_download_error(&download, ret, NULL);
-        return;
-    }
-
-    ok_begin("storage map-tile-download");
-    printf(",\"z\":%u,\"x\":%lu,\"y\":%lu,\"path\":",
-           (unsigned)download.z,
-           (unsigned long)download.x,
-           (unsigned long)download.y);
-    print_json_string(download.path);
-    printf(",\"tmp_path\":");
-    print_json_string(download.tmp_path);
-    printf(",\"attribution\":");
-    print_json_string(download.attribution);
-    printf(",\"attribution_path\":");
-    print_json_string(download.attribution_path);
-    printf(",\"bytes\":%u,\"status_code\":%d,\"provider_allowed\":%s,\"attribution_saved\":%s,\"wifi_connected\":%s,\"sd_ready\":%s,\"write_tmp\":%s,\"rename_replace\":%s,\"max_bytes\":%u,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":\"Tile downloaded from an allowed HTTPS provider into the SD offline cache with attribution metadata\"}\n",
-           (unsigned)download.bytes,
-           download.status_code,
-           bool_json(download.provider_allowed),
-           bool_json(download.attribution_saved),
-           bool_json(download.wifi_connected),
-           bool_json(download.sd_ready),
-           bool_json(download.write_tmp),
-           bool_json(download.rename_replace),
-           (unsigned)D1L_MAP_TILE_DOWNLOAD_MAX_BYTES);
-}
-
 static void print_storage_export_error(const char *cmd,
                                        const char *step,
                                        esp_err_t ret,
@@ -2438,6 +2392,9 @@ static bool build_diagnostic_export_payload(const char *token,
     if (!append_export_json(dest, dest_size, &used,
                             "\"health\":{\"uptime_ms\":%lu,\"heap_free\":%lu,"
                             "\"heap_min_free\":%lu,\"heap_largest_free\":%lu,"
+                            "\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,"
+                            "\"internal_heap_largest_free\":%lu,"
+                            "\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,"
                             "\"psram_free\":%lu,\"psram_min_free\":%lu,"
                             "\"psram_largest_free\":%lu,"
                             "\"current_task_stack_free_words\":%lu,"
@@ -2448,6 +2405,11 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.heap_free,
                             (unsigned long)h.heap_min_free,
                             (unsigned long)h.heap_largest_free,
+                            (unsigned long)h.internal_heap_free,
+                            (unsigned long)h.internal_heap_min_free,
+                            (unsigned long)h.internal_heap_largest_free,
+                            (unsigned long)h.dma_heap_free,
+                            (unsigned long)h.dma_heap_largest_free,
                             (unsigned long)h.psram_free,
                             (unsigned long)h.psram_min_free,
                             (unsigned long)h.psram_largest_free,
@@ -4342,10 +4304,15 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
            (unsigned long)h.heap_largest_free,
+           (unsigned long)h.internal_heap_free,
+           (unsigned long)h.internal_heap_min_free,
+           (unsigned long)h.internal_heap_largest_free,
+           (unsigned long)h.dma_heap_free,
+           (unsigned long)h.dma_heap_largest_free,
            (unsigned long)h.psram_free, (unsigned long)h.psram_min_free,
            (unsigned long)h.psram_largest_free,
            (unsigned long)h.current_task_stack_free_words,
@@ -4581,7 +4548,50 @@ static void cmd_help(void)
     printf(",\"contact_probe_surfaces\":[\"contact_detail\",\"contact_options\","
            "\"contact_forget\",\"contact_route\"]");
     printf(",\"storage_probe_surfaces\":[\"storage\",\"storage_card\",\"storage_data\"]");
-    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\",\"settings set name <name>\",\"settings set pathhash <1|2|3>\",\"settings set location <lat> <lon>\",\"settings clear location\",\"settings onboarding status\",\"settings onboarding complete <name>\",\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\",\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\",\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\",\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\",\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\",\"ui tab <home|messages|nodes|map|packets|settings>\",\"ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map>\",\"ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|map-provider|wifi-ssid|wifi-password>\",\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\",\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\",\"map center set <lat> <lon>\",\"map center clear\",\"mesh status\",\"companion status\",\"rp2040 status\",\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\",\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\",\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\",\"storage status\",\"storage mount\",\"storage remount\",\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\",\"storage diag raw\",\"storage map-policy\",\"storage setup\",\"storage filecanary\",\"storage map-tile-canary <token>\",\"storage map-tile-check <token>\",\"storage map-tile-download <z> <x> <y> <url-template> <attribution>\",\"storage export-canary <token>\",\"storage export-diagnostics <token>\",\"storage export-data <token>\",\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\",\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\",\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\",\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\",\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\",\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\",\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\",\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\",\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\",\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\",\"routes probe <fingerprint>\",\"routes clear\",\"packets\",\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\",\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\",\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\",\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\",\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\",\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
+    printf(",\"map_probe_surfaces\":[\"map\",\"map_options\",\"map_location\",\"map_cache\"]");
+    printf(",\"map_probes_read_only\":true");
+    printf(",\"commands\":[\"help\",\"version\",\"board\",\"settings get\",\"settings reset\","
+           "\"settings set name <name>\",\"settings set pathhash <1|2|3>\","
+           "\"settings set location <lat> <lon>\",\"settings clear location\","
+           "\"settings onboarding status\",\"settings onboarding complete <name>\","
+           "\"settings onboarding reset\",\"identity status\",\"i2c\",\"display test\","
+           "\"touch test\",\"touch raw\",\"button\",\"backlight <0-100>\",\"radiohw\","
+           "\"radio get\",\"radio set preset uscan\",\"radio set freq 910.525\","
+           "\"radio set bw 62.5\",\"radio set sf 7\",\"radio set cr 5\","
+           "\"radio set txpower 20\",\"radio set rxboost <0|1>\",\"ui status\","
+           "\"ui tab <home|messages|nodes|map|packets|settings>\","
+           "\"ui scroll-probe <home|public_messages|dm_thread|nodes|contact_detail|contact_options|contact_forget|contact_route|mesh_roles|mesh_rooms|mesh_repeaters|packets|settings|storage|storage_card|storage_data|wifi|map|map_options|map_location|map_cache>\","
+           "\"ui compose-probe <public|public-long|dm|dm-long|public-search|packet-search|contact-edit|onboarding|map-location|wifi-ssid|wifi-password>\","
+           "\"ui data-canary <token>\",\"ui capture status\",\"ui capture begin\","
+           "\"ui capture chunk <offset> <len>\",\"ui capture end\",\"map center\","
+           "\"map center set <lat> <lon>\",\"map center clear\",\"map tiles status\","
+           "\"mesh status\",\"companion status\",\"rp2040 status\","
+           "\"rp2040 set-baud <baud>\",\"rp2040 baud-probe [timeout_ms]\","
+           "\"rp2040 ping\",\"rp2040 bootloader\",\"rp2040 stock-probe\","
+           "\"rp2040 double-reset [hold_ms gap_ms [settle_ms]]\",\"rp2040 reset\","
+           "\"storage status\",\"storage mount\",\"storage remount\","
+           "\"storage reset-bridge\",\"storage force-nvs [on|off]\",\"storage diag\","
+           "\"storage diag raw\",\"storage map-policy\",\"storage setup\","
+           "\"storage filecanary\",\"storage map-tile-canary <token>\","
+           "\"storage map-tile-check <token>\",\"storage export-canary <token>\","
+           "\"storage export-diagnostics <token>\",\"storage export-data <token>\","
+           "\"storage retained-canary <token>\",\"mesh advert zero\",\"mesh advert flood\","
+           "\"mesh send public <text>\",\"mesh send dm <fingerprint> <text>\","
+           "\"messages public [offset <n>]\",\"messages public search <text> [offset <n>]\","
+           "\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\","
+           "\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\","
+           "\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\","
+           "\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\","
+           "\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\","
+           "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
+           "\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\","
+           "\"routes probe <fingerprint>\",\"routes clear\",\"packets\","
+           "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
+           "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
+           "\"roomservers\",\"repeaters\",\"health\",\"crashlog\",\"crashlog clear\","
+           "\"wifi status\",\"wifi scan\",\"wifi save <ssid> [password]\","
+           "\"wifi connect\",\"wifi clear\",\"wifi on\",\"wifi off\",\"ble status\","
+           "\"ble on\",\"ble off\",\"reboot\",\"factory-reset-confirm\"]}\n");
 }
 
 static void handle_line(const char *line)
@@ -4628,6 +4638,8 @@ static void handle_line(const char *line)
         cmd_map_center_set(line);
     } else if (strcmp(line, "map center clear") == 0) {
         cmd_map_center_clear();
+    } else if (strcmp(line, "map tiles status") == 0) {
+        cmd_map_tiles_status();
     } else if (strcmp(line, "settings onboarding status") == 0) {
         cmd_settings_onboarding_status();
     } else if (strncmp(line, "settings onboarding complete ", 29) == 0) {
@@ -4714,8 +4726,6 @@ static void handle_line(const char *line)
         cmd_storage_map_tile_canary(line);
     } else if (strncmp(line, "storage map-tile-check ", strlen("storage map-tile-check ")) == 0) {
         cmd_storage_map_tile_check(line);
-    } else if (strncmp(line, "storage map-tile-download ", strlen("storage map-tile-download ")) == 0) {
-        cmd_storage_map_tile_download(line);
     } else if (strncmp(line, "storage export-canary ", strlen("storage export-canary ")) == 0) {
         cmd_storage_export_canary(line);
     } else if (strncmp(line, "storage export-diagnostics ", strlen("storage export-diagnostics ")) == 0) {

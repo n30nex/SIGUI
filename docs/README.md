@@ -6,6 +6,7 @@ This folder contains only active release-facing documentation. Historical phase 
 
 - [Project README](../README.md): public overview, feature matrix, screenshots, hardware route.
 - [Roadmap](ROADMAP.md): current release blockers and work queue.
+- [KRAB'S THOUGHTS release audit](KRABSTHOUGHTS.MD): detailed 1.0 product definition, P0.1-P0.20 blocker rationale, and acceptance criteria incorporated into the roadmap.
 - [Release checklist](RELEASE_CHECKLIST.md): evidence required before tagging.
 - [Known limitations](KNOWN_LIMITATIONS.md): honest current gaps and non-goals.
 - [Test plan](TEST_PLAN_D1L.md): host, hardware, SD, RF, UI, soak, and release-gate validation.
@@ -13,7 +14,7 @@ This folder contains only active release-facing documentation. Historical phase 
 - [Build decision](D1L_BUILD_DECISION.md): selected ESP-IDF target and the staged issue #63 qualification requirements.
 - [Codex goal prompt](CODEX_GOAL_PROMPT_D1L.md): copy-paste prompt for the next iterative release cycle.
 
-Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the source of truth for release readiness. Issue #63 selects the version-pinned `espressif/idf:v5.5.4` Actions target, but supported-SDK qualification remains open until the Actions-generated dependency lock, clean repeat build/package run, exact COM12 `version.idf=v5.5.4` and behavioral checks, and refreshed release evidence pass. Latest Home evidence from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) proves the current icon launcher pixel capture plus simulator diff. Broader UI evidence from `59610ab` / Actions `28723265336` still proves targeted UI corruption, scroll probing, and the older Public/DM compose capture subset. Latest core SD evidence from `1a29876` / Actions `28714355561` proves the installed FAT32 card path. Public release still fails closed until SDK qualification, RF/DM, remaining physical SD matrix, manual photos/review, expanded `--targets all` keyboard/sheet review, and 12-hour soak evidence are complete.
+Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the release-readiness source of truth. Standalone Map/Wi-Fi `de79c9f` has green Actions and exact-COM12 boot-loop/Wi-Fi/memory/SD stability proof, with physical Map acceptance still open. Standalone ESP-IDF 5.5.4 `39a043c` has the exact Actions-generated dependency lock plus green host, firmware, package, checksum, effective-config, and release checks, with no hardware qualification. The combined candidate needs fresh Actions and exact-COM12 proof before either evidence set can qualify it. Public release also remains blocked by the KRAB-derived MeshCore conformance, reliable DM/ACK/retry/PATH/trace, contact/channel, runtime durability, remaining RF/SD/physical UI, soak, package, and final exact-commit gate requirements.
 
 ## User And Developer Guides
 

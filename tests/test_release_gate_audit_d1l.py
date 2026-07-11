@@ -19,7 +19,6 @@ COMPOSE_CAPTURE_TARGETS = [
     "contact-edit",
     "onboarding",
     "map-location",
-    "map-provider",
     "wifi-ssid",
     "wifi-password",
 ]
@@ -33,6 +32,9 @@ SCROLL_SURFACES = {
     "storage": "settings",
     "wifi": "settings",
     "map": "map",
+    "map_options": "map",
+    "map_location": "map",
+    "map_cache": "map",
 }
 STRICT_SD_GATE_IDS = (
     "sd_raw_diag_complete",
@@ -60,6 +62,19 @@ def ui_corruption_probe_payload(**overrides: object) -> dict:
         "release_min_rounds": 20,
         "data_refresh_events": 20,
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
+        "map_network_evidence": {
+            "command": "map tiles status",
+            "measured": True,
+            "before": {"ok": True, "network_requests": 7},
+            "after": {"ok": True, "network_requests": 7},
+            "before_count": 7,
+            "after_count": 7,
+            "delta": 0,
+            "samples_valid": True,
+            "unchanged": True,
+        },
         "formats_sd": False,
         "skip_data_canary": False,
         "failure_count": 0,
@@ -68,6 +83,7 @@ def ui_corruption_probe_payload(**overrides: object) -> dict:
             "data_refresh_exercised": True,
             "data_refreshes_pass": True,
             "no_public_rf": True,
+            "no_map_network_requests": True,
             "no_formatting": True,
             "no_stuck_pending": True,
             "final_active_tab_known": True,
@@ -150,7 +166,6 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
             "contact-edit": "nodes",
             "onboarding": "home",
             "map-location": "map",
-            "map-provider": "map",
             "wifi-ssid": "settings",
             "wifi-password": "settings",
         }.get(target, "messages")
@@ -180,6 +195,8 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
             "raw_path": f"artifacts/hardware/com12/ui_compose_{target}.rgb565",
             "target_visible": True,
             "public_rf_tx": False,
+            "network_tx": False,
+            "map_network_requests": False,
             "formats_sd": False,
         }
 
@@ -192,6 +209,8 @@ def compose_keyboard_capture_payload(**overrides: object) -> dict:
         "captures": [capture(target) for target in COMPOSE_CAPTURE_TARGETS],
         "capture_count": len(COMPOSE_CAPTURE_TARGETS),
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
         "formats_sd": False,
     }
     payload.update(overrides)
@@ -226,6 +245,26 @@ def scroll_probe_payload(**overrides: object) -> dict:
             for screen, tab in SCROLL_SURFACES.items()
         ],
         "probe_results": probe_results,
+        "read_only": True,
+        "network_tx": False,
+        "map_network_requests": False,
+        "map_network_evidence": {
+            "command": "map tiles status",
+            "measured": True,
+            "before": {"ok": True, "network_requests": 11},
+            "after": {"ok": True, "network_requests": 11},
+            "before_count": 11,
+            "after_count": 11,
+            "delta": 0,
+            "samples_valid": True,
+            "unchanged": True,
+        },
+        "background_download": False,
+        "area_download": False,
+        "visible_tile_limit": 9,
+        "zoom_batch_limit": 1,
+        "wifi_mutation": False,
+        "storage_mutation": False,
         "events": [
             {"screen": screen, "tab": tab, "probe": probe_results[screen]}
             for screen, tab in SCROLL_SURFACES.items()
@@ -1349,6 +1388,24 @@ def test_release_gate_audit_requires_ui_corruption_probe_to_finish_not_pending(t
     assert gates["ui_corruption_probe"]["ok"] is False
 
 
+def test_release_gate_audit_rejects_corruption_probe_when_map_network_counter_grows(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = ui_corruption_probe_payload()
+    payload["map_network_evidence"].update(
+        {
+            "after": {"ok": True, "network_requests": 8},
+            "after_count": 8,
+            "delta": 1,
+            "unchanged": False,
+        }
+    )
+    write_json(hardware / "ui_corruption_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    assert gate_by_id(report)["ui_corruption_probe"]["ok"] is False
+
+
 def test_release_gate_audit_requires_hardware_ui_pixel_capture(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
@@ -1428,6 +1485,38 @@ def test_release_gate_audit_requires_all_scroll_surfaces(tmp_path: Path):
     gates = gate_by_id(report)
 
     assert gates["ui_scroll_probe"]["ok"] is False
+
+
+def test_release_gate_audit_rejects_map_probe_network_or_area_download(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload(
+        network_tx=True,
+        map_network_requests=True,
+        area_download=True,
+    )
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    assert gate_by_id(report)["ui_scroll_probe"]["ok"] is False
+
+
+def test_release_gate_audit_rejects_scroll_probe_when_map_network_counter_grows(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    payload = scroll_probe_payload()
+    payload["map_network_evidence"].update(
+        {
+            "after": {"ok": True, "network_requests": 12},
+            "after_count": 12,
+            "delta": 1,
+            "unchanged": False,
+        }
+    )
+    write_json(hardware / "scroll_probe_68350bf.json", payload)
+
+    report = build_audit(audit_args(tmp_path))
+    assert gate_by_id(report)["ui_scroll_probe"]["ok"] is False
 
 
 def test_release_gate_audit_requires_scroll_probe_movement(tmp_path: Path):

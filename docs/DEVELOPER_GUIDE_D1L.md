@@ -22,7 +22,7 @@ python .\tools\ui_simulator.py --scenario storage-states --out artifacts\ui-sim-
 python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\ui_capture_d1l.py --dry-run
-python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,wifi,map
+python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 ```
