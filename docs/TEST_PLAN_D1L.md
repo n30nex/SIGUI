@@ -367,7 +367,7 @@ For Phase 4 touch direct-message thread validation:
 3. Verify the full-height DM Thread opens with Back, the contact alias, fingerprint metadata, retained rows for the same fingerprint, and one sticky `Reply` action. Opening the thread marks it read automatically.
 4. Tap `Reply`, type a short message, and tap `Send`.
 5. Verify `messages dm` contains the new TX row for that fingerprint and `health` remains `board_ready=true` and `ui_ready=true`.
-6. If the long hardware validation session causes `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, erase only the NVS partition from the current partition table and rerun smoke before continuing persistence checks.
+6. If a long hardware validation session reports `ESP_ERR_NVS_NOT_ENOUGH_SPACE`, stop persistence mutations and capture `storage status`, retained-store counters, `settings get`, and `health`. Treat the condition as a release-blocking durability failure; do not erase NVS, settings, identity, contacts, or history to make the test pass. Resume only with a firmware fix or a separately authorized, documented factory-reset/recovery test.
 7. For Phase 5/Phase D connectivity validation, run smoke with `--persistence-test` and verify `settings get`, `wifi status`, `wifi scan`, and `ble status` report Wi-Fi/BLE disabled after reboot; then, on the downloaded Actions artifact only, explicitly test `wifi on`, `wifi scan`, and `wifi connect` with a local 2.4 GHz network when hardware/network validation is in scope.
 8. For Phase 7 diagnostics validation, run `crashlog clear`, `reboot`, then verify `crashlog` contains a new `SW` reset entry and `health` reports nonzero stack watermarks with `board_ready=true` and `ui_ready=true`.
 

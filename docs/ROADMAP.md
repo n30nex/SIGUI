@@ -55,9 +55,10 @@ Stage 2 closes only when the combined Actions artifact passes the quick COM12 in
 
 ### Stage 3 - Establish MeshCore conformance
 
-Status: **in progress under issue #65.** The first bounded slice extracts and
-checks only the wire envelope against the pinned upstream packet code under
-ASan/UBSan/libFuzzer. Its artifact is
+Status: **in progress under issue #65.** The first bounded slice is integrated
+on top of the exact `727bd23` platform candidate and extracts and checks only
+the wire envelope against the pinned upstream packet code under
+ASan/UBSan/libFuzzer. Its next combined Actions artifact is
 `coverage_level="wire_envelope_only"`, must remain `closure_ready=false`, and
 does not satisfy the semantic, cryptographic, retained-state, real-peer, or
 full issue #65 closure requirements. See
@@ -126,30 +127,30 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 |---|---|---|---|
 | Supported integration image | P0.1, P0.16 | #63, #13, #12, #14 | One ESP-IDF 5.5.4 Actions artifact passes COM12 boot/Wi-Fi/radio/SD/Map/reboot proof. |
 | MeshCore conformance foundation | P0.2, P0.11 | #65 | Bidirectional upstream vectors, malformed input coverage, RX fuzzing, and declared supported packet surface pass in CI. The wire-envelope-only slice is necessary but cannot close this row. |
-| Reliable DM session | P0.3, P0.4, P0.5, P0.10 | #7 | Official peer proves ACK, retry, truthful states, heard-node send, duplicate suppression, timeout, and reboot recovery. |
-| Contact and channel parity | P0.6, P0.7 | #67; #20 is currently P2 and too narrow | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
-| Routing and diagnostics | P0.8, P0.9 | #7, #19 | Real trace/PATH, reciprocal learning, route expiry, direct send, and safe flood fallback pass against a compatible peer. |
-| Runtime durability | P0.12, P0.13, P0.14, P0.15, P0.19 | #6, #16, #18, #22 | Single-owner protocol/UI paths, bounded queues/writes, schemas/recovery, truthful time, and hardware stress are green. |
+| Reliable DM session | P0.3, P0.4, P0.5, P0.10 | #66 | Official peer proves ACK, retry, truthful states, heard-node send, duplicate suppression, timeout, and reboot recovery. |
+| Contact and channel parity | P0.6, P0.7 | #67 | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
+| Routing and diagnostics | P0.8, P0.9 | #68 | Real trace/PATH, reciprocal learning, route expiry, direct send, and safe flood fallback pass against a compatible peer. |
+| Runtime durability | P0.12, P0.13, P0.14, P0.15, P0.19 | #6, #16, #69 | Single-owner protocol/UI paths, bounded queues/writes, schemas/recovery, truthful time, and hardware stress are green. |
 | Operator messaging and Nodes UX | P0.6, P0.7, P0.13, P0.20 | #74, #75, #76 | Public/DM chat, Nodes totals/list, compact dock, Tools/Settings, and Home status icons pass simulator, exact pixels, manual touch, and truthful-state checks. |
 | Remote role administration | P0.2, P0.8, P0.13, P0.18 | #77 | Pinned-protocol repeater and room-server authentication, status, allowlisted mutations, expiry, redaction, and controlled-peer proof pass. |
-| SD and role truthfulness | P0.17, P0.18 | #4, #11, #78 | Full media/bridge/power/fallback matrix passes with no intermittent false no-card state; role pages expose only evidence-backed labels/actions. |
-| Frozen release qualification | P0.20 | #8 plus release gate | Current physical review, full RF, SD/electrical, idle and active soaks, package audit, and exact-tag gate are green. |
+| SD and role truthfulness | P0.17, P0.18 | #4, #11, #70, #78 | Full media/bridge/power/fallback matrix passes with no intermittent false no-card state; role pages expose only evidence-backed labels/actions. |
+| Frozen release qualification | P0.20 | #8, #71 | Current physical review, full RF, SD/electrical, idle and active soaks, package audit, and exact-tag gate are green. |
 
 ## Immediate Work Queue
 
-1. Publish the combined source merge plus #78 SD-state hardening after its 461-test host pass.
-2. Validate the combined commit in Actions and inspect the exact dependency lock, effective `sdkconfig`, firmware/package checksums, and release-gate inputs.
-3. Flash the exact combined artifact to COM12 and repeat SDK identity, boot, Wi-Fi, radio-readiness, SD, health, and reboot proof.
-4. Complete the still-open physical Map control proof: default zoom 10, one-finger pan, `-`/`+`/`Center` over zooms 8 through 14, bounded request/render/cancel, instant completed exact-view Home-to-Map retained-frame reuse, SD-cache reread only when the retained frame is unavailable, and reboot reuse without duplicate network fetches.
-5. Finish #78 hardware closure. Source reproduction identified two false-state boundaries: periodic pings erased the last confirmed SD snapshot, and valid mount-error replies could report `present=0` without proving removal. The source now preserves confirmed presence unless a strict `no_card` reply arrives, rejects malformed/contradictory/non-FAT32-ready replies, fails closed after three stale refreshes, exposes freshness/presence telemetry, and prevents COM12 test scripts from asserting reset lines. The RP2040 bridge debounces removal and reinsertion only after a ready card proves the exact-board detect signature; a cold mount failure remains an honest error rather than a guessed absence. Exact-commit Map/cache, reboot, removal/reinsertion, and idle/active hardware windows remain required.
-6. Reconcile GitHub labels and split any remaining audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
-7. Execute Stages 3-7 in order. Issues #74-#77 are functional release work, not cosmetic cleanup, but they follow the current Stage 2 integration/SD gate and the Stage 3 wire-conformance foundation.
+1. Preserve `727bd23` as the exact Stage 2 hardware-qualified platform candidate. Its Actions run, checksums, ESP32/RP2040 flashes, Wi-Fi/radio/SD health, retained/file canaries, reboot survival, and 120-second persistent-handle soak are banked; do not rerun that whole matrix for every Stage 3 edit.
+2. Finish the current Stage 3 integration batch: pinned #65 wire-envelope conformance, the #69 NVS-capacity/write-rate fix exposed by the soak, and deterministic SD reboot/remount acceptance. Review the combined source first, then run one focused validation pass, one full host pass, and one Actions cycle.
+3. Extend #65 from structural envelopes to deterministic semantic and production-cryptography vectors for signed adverts, Public, DM, ACK/ACK+PATH, PATH/trace, invalid MAC/signature/length, self-message, duplicate/replay, and retained-state transitions. Keep `closure_ready=false` until the entire declared surface is proven against the pinned implementation.
+4. Implement #66, then #67 and #68: reliable DM state/ACK/retry, contact and multi-channel parity, followed by real PATH/trace and direct-route fallback. Use official-peer/two-radio evidence only after the host state machines are complete.
+5. Implement the truthful operator layer on those contracts: #74 Messages, #75 Nodes, #76 compact navigation/Home status, #70 role truthfulness, and #77 authenticated compatible repeater/room administration.
+6. Finish #78 with physical removal/reinsertion proof on the exact ESP32/RP2040 pair, and complete the physical Map control/cache/marker proof. These require manual card/touch actions and are not replaced by serial automation.
+7. Close #69 ownership/schema/time recovery, the remaining #6/#16 runtime boundaries, the full SD/RF/UI matrices and 12-hour soaks, then freeze and audit the exact #71 release candidate before tagging 1.0.
 
 ## Evidence Already Banked, Not Final Qualification
 
 - Map/Wi-Fi branch `de79c9f` passes its Actions jobs and exact-COM12 boot-loop recovery, Wi-Fi enable/reconnect/reboot, bounded scan, internal/DMA telemetry, SD readiness, and ten-minute stability checks. Physical Map entry/download/cache proof is still open.
 - Standalone ESP-IDF 5.5.4 branch `39a043c` passes host, firmware, package, checksum, release, dependency-lock, and effective-config checks in Actions, but has no hardware qualification. Its evidence does not qualify this integration result; the combined commit needs fresh Actions and COM12 proof.
-- The integration source merge plus #78 source hardening preserves the safety contracts and passes 461 host tests, including executable native malformed-reply/presence/stale-policy vectors, generated host-reference wire lines through the production parser, and COM12 serial-line ordering checks. It remains unqualified until its Actions jobs, checksums, effective configuration, and exact-COM12 checks pass.
+- The integration source merge plus #78 source hardening at `727bd23` preserves the safety contracts and passes 461 host tests. Actions run `29166341373` built ESP-IDF v5.5.4 with a clean release manifest; the exact ESP32 application and RP2040 UF2 checksums were verified before flashing. COM12/COM16 then passed safe bridge preflight, FAT32/READY_SD, file and retained-history canaries, reboot survival, delayed post-remount map-cache verification, and a 120-second persistent-handle soak with zero command failures, zero crash-like resets, and zero Public TX. Physical card removal/reinsertion and physical Map/touch proof remain open.
 - Existing COM12 UI hierarchy/pixel artifacts, SD canaries, and short soaks remain useful regression evidence, but they do not replace current-commit screenshots, the final SD/RF matrices, or the frozen-candidate soak.
 
 ## Validation Notes
