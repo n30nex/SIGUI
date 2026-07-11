@@ -711,6 +711,34 @@ static void reverse_entries(d1l_packet_log_entry_t *entries, size_t count)
     }
 }
 
+/* The RAM window is authoritative for its sequence range.  SD segment reads
+ * may transiently fail while the current RAM copy is still complete, so long
+ * history queries must consult RAM before SD for those newest records. */
+static bool copy_durable_ram_entry_by_seq(uint32_t seq,
+                                          d1l_packet_log_entry_t *out_entry)
+{
+    if (seq == 0U || !out_entry) {
+        return false;
+    }
+
+    bool found = false;
+    d1l_store_lock_take(&s_store_lock);
+    const size_t oldest = s_count == 0U ? 0U :
+        (s_head + D1L_PACKET_LOG_CAPACITY - s_count) %
+        D1L_PACKET_LOG_CAPACITY;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_packet_log_entry_t *entry =
+            &s_entries[(oldest + i) % D1L_PACKET_LOG_CAPACITY];
+        if (entry->seq == seq) {
+            *out_entry = *entry;
+            found = true;
+            break;
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return found;
+}
+
 static bool packet_query_unfiltered(const char *direction, const char *kind,
                                     const char *search_text)
 {
@@ -780,6 +808,7 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
                                size_t skip_newest, const char *direction,
                                const char *kind, const char *search_text,
                                uint32_t newest_seq, uint32_t history_records,
+                               uint32_t ram_oldest_seq, uint32_t ram_newest_seq,
                                size_t *out_total_matches, size_t *out_valid_records)
 {
     if (out_total_matches) {
@@ -807,7 +836,12 @@ static size_t query_sd_history(d1l_packet_log_entry_t *out_entries, size_t max_e
         }
         const uint32_t seq = newest_seq - scanned;
         d1l_packet_log_entry_t entry = {0};
-        if (!read_sd_history_entry(seq, &entry)) {
+        const bool in_ram_window = ram_oldest_seq > 0U &&
+            seq >= ram_oldest_seq && seq <= ram_newest_seq;
+        const bool read_ok = (in_ram_window &&
+                              copy_durable_ram_entry_by_seq(seq, &entry)) ||
+            read_sd_history_entry(seq, &entry);
+        if (!read_ok) {
             consecutive_misses++;
             if (consecutive_misses >= D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES) {
                 break;
@@ -870,6 +904,16 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
     const uint32_t newest_seq = s_next_seq > 0 ? s_next_seq - 1U : 0;
     const uint32_t history_records = sd_history_enabled ? s_sd_history_records : 0;
     const bool use_sd = sd_history_enabled && history_records > s_count;
+    const size_t ram_oldest_index = s_count == 0U ? 0U :
+        (s_head + D1L_PACKET_LOG_CAPACITY - s_count) %
+        D1L_PACKET_LOG_CAPACITY;
+    const size_t ram_newest_index = s_count == 0U ? 0U :
+        (s_head + D1L_PACKET_LOG_CAPACITY - 1U) %
+        D1L_PACKET_LOG_CAPACITY;
+    const uint32_t ram_oldest_seq = s_count == 0U ? 0U :
+        s_entries[ram_oldest_index].seq;
+    const uint32_t ram_newest_seq = s_count == 0U ? 0U :
+        s_entries[ram_newest_index].seq;
     const bool volatile_matches = s_volatile_valid &&
         packet_matches(&s_volatile_entry, direction, kind, search_text);
     const d1l_packet_log_entry_t volatile_entry = s_volatile_entry;
@@ -892,6 +936,7 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
     size_t copied = query_sd_history(out_entries, history_limit, history_skip,
                                      direction, kind, search_text,
                                      newest_seq, history_records,
+                                     ram_oldest_seq, ram_newest_seq,
                                      history_matches_out, &valid_records);
     if (include_volatile) {
         out_entries[copied++] = volatile_entry;
@@ -902,7 +947,7 @@ size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max
     if (out_sd_used) {
         *out_sd_used = valid_records > 0;
     }
-    if (valid_records > 0 || skip_newest > 0) {
+    if (valid_records > 0U || skip_newest > 0U) {
         return copied;
     }
 

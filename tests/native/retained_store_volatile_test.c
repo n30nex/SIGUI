@@ -37,7 +37,9 @@ static uint32_t s_write_count[D1L_RETAINED_BLOB_STORE_COUNT];
 static uint8_t s_history_segments[D1L_PACKET_LOG_SD_SEGMENT_COUNT]
                                  [MOCK_HISTORY_SEGMENT_BYTES];
 static size_t s_history_segment_len[D1L_PACKET_LOG_SD_SEGMENT_COUNT];
+static size_t s_history_record_len;
 static bool s_use_packet_sd;
+static uint32_t s_fail_history_read_seq_min;
 static int64_t s_now_us;
 
 static void mock_reset(void)
@@ -47,7 +49,9 @@ static void mock_reset(void)
     memset(s_write_count, 0, sizeof(s_write_count));
     memset(s_history_segments, 0, sizeof(s_history_segments));
     memset(s_history_segment_len, 0, sizeof(s_history_segment_len));
+    s_history_record_len = 0U;
     s_use_packet_sd = false;
+    s_fail_history_read_seq_min = 0U;
     s_now_us = 1000000;
 }
 
@@ -238,6 +242,13 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
         offset >= s_history_segment_len[segment]) {
         return ESP_ERR_NOT_FOUND;
     }
+    const uint32_t seq = s_history_record_len == 0U ? 0U :
+        (uint32_t)segment * D1L_PACKET_LOG_SD_SEGMENT_CAPACITY +
+        offset / (uint32_t)s_history_record_len + 1U;
+    if (s_fail_history_read_seq_min > 0U &&
+        seq >= s_fail_history_read_seq_min) {
+        return ESP_FAIL;
+    }
     const size_t available = s_history_segment_len[segment] - offset;
     const size_t copied = available < max_len ? available : max_len;
     memcpy(out_data, s_history_segments[segment] + offset, copied);
@@ -264,6 +275,10 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
     if (truncate) {
         s_history_segment_len[segment] = 0;
     }
+    if (s_history_record_len == 0U) {
+        s_history_record_len = len;
+    }
+    assert(s_history_record_len == len);
     memcpy(s_history_segments[segment] + offset, data, len);
     if (s_history_segment_len[segment] < offset + len) {
         s_history_segment_len[segment] = offset + len;
@@ -657,6 +672,67 @@ static void test_packet_sd_query_orders_volatile_preview_after_history(void)
     assert(strcmp(page[2].note, "sd-packet-real-next") == 0);
 }
 
+static void test_packet_sd_query_uses_recent_ram_when_newest_segment_reads_fail(void)
+{
+    mock_reset();
+    s_use_packet_sd = true;
+    assert(d1l_packet_log_init() == ESP_OK);
+    char note[40];
+    for (uint32_t i = 1U; i <= D1L_PACKET_LOG_CAPACITY + 2U; ++i) {
+        (void)snprintf(note, sizeof(note), "overlay-packet-%lu",
+                       (unsigned long)i);
+        assert(append_packet(note, false));
+    }
+    s_fail_history_read_seq_min = D1L_PACKET_LOG_CAPACITY + 1U;
+    const uint32_t newest_seq = D1L_PACKET_LOG_CAPACITY + 2U;
+    char target[40];
+    (void)snprintf(target, sizeof(target), "overlay-packet-%lu",
+                   (unsigned long)newest_seq);
+
+    d1l_packet_log_entry_t direct = {0};
+    assert(d1l_packet_log_find_by_seq(newest_seq, &direct) == ESP_OK);
+    assert(strcmp(direct.note, target) == 0);
+
+    d1l_packet_log_entry_t page[3] = {0};
+    size_t matches = 0U;
+    bool sd_used = false;
+    assert(d1l_packet_log_query_page(
+               page, 3U, 0U, "any", "any", target,
+               &matches, &sd_used) == 1U);
+    assert(sd_used);
+    assert(matches == 1U);
+    assert(page[0].seq == newest_seq);
+    assert(strcmp(page[0].note, target) == 0);
+
+    memset(page, 0, sizeof(page));
+    assert(d1l_packet_log_query_page(page, 3U, 0U, "any", "any", "any",
+                                     &matches, &sd_used) == 3U);
+    assert(sd_used);
+    assert(matches == D1L_PACKET_LOG_CAPACITY + 2U);
+    assert(page[0].seq == D1L_PACKET_LOG_CAPACITY);
+    assert(page[1].seq == D1L_PACKET_LOG_CAPACITY + 1U);
+    assert(page[2].seq == D1L_PACKET_LOG_CAPACITY + 2U);
+
+    memset(page, 0, sizeof(page));
+    assert(d1l_packet_log_query_page(page, 3U, 1U, "any", "any", "any",
+                                     &matches, &sd_used) == 3U);
+    assert(sd_used);
+    assert(matches == D1L_PACKET_LOG_CAPACITY + 2U);
+    assert(page[0].seq == D1L_PACKET_LOG_CAPACITY - 1U);
+    assert(page[1].seq == D1L_PACKET_LOG_CAPACITY);
+    assert(page[2].seq == D1L_PACKET_LOG_CAPACITY + 1U);
+
+    memset(page, 0, sizeof(page));
+    assert(d1l_packet_log_query_page(page, 3U, 1U, "any", "any",
+                                     "overlay-packet", &matches,
+                                     &sd_used) == 3U);
+    assert(sd_used);
+    assert(matches == D1L_PACKET_LOG_CAPACITY + 2U);
+    assert(page[0].seq == D1L_PACKET_LOG_CAPACITY - 1U);
+    assert(page[1].seq == D1L_PACKET_LOG_CAPACITY);
+    assert(page[2].seq == D1L_PACKET_LOG_CAPACITY + 1U);
+}
+
 static void test_sentinel_shaped_durable_rows_survive_persistence(void)
 {
     static const char fingerprint[] = "0123456789abcdef";
@@ -717,6 +793,7 @@ int main(void)
     test_dm_volatile_preview_does_not_consume_history();
     test_packet_volatile_preview_does_not_consume_history();
     test_packet_sd_query_orders_volatile_preview_after_history();
+    test_packet_sd_query_uses_recent_ram_when_newest_segment_reads_fail();
     test_sentinel_shaped_durable_rows_survive_persistence();
     puts("native volatile retained-store isolation: ok");
     return 0;
