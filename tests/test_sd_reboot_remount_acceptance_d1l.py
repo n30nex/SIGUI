@@ -28,9 +28,10 @@ class FakeSerial:
         return False
 
 
-def ready_storage_line() -> str:
+def ready_storage_line(manager_state: str = "READY_SD") -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
+        f'"manager":{{"running":true,"state":"{manager_state}"}},'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"file_ops":true,"atomic_rename":true}}\n'
     )
@@ -39,6 +40,7 @@ def ready_storage_line() -> str:
 def bridge_wait_storage_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"manager":{"running":true,"state":"BRIDGE_WAIT"},'
         '"sd":{"state":"rp2040_unavailable","present":false,"mounted":false,'
         '"data_root_ready":false,"file_ops":false,"atomic_rename":false}}\n'
     )
@@ -48,6 +50,15 @@ def mount_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage remount",'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true},'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
+def busy_remount_line(manager_state: str = "PING") -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"storage remount","code":"ESP_ERR_INVALID_STATE",'
+        f'"manager":{{"running":true,"state":"{manager_state}"}},'
+        '"sd":{"state":"ready","present":true,"mounted":true,"data_root_ready":true},'
         '"public_rf_tx":false,"formats_sd":false}\n'
     )
 
@@ -96,6 +107,14 @@ def test_storage_ready_requires_fat32_filesystem():
     assert remount_accept.storage_ready(ready) is True
     ready["sd"]["filesystem"] = "exfat"
     assert remount_accept.storage_ready(ready) is False
+
+
+def test_storage_ready_requires_manager_ready_sd_not_cached_sd_fields():
+    cached_ready = json.loads(ready_storage_line("PING"))
+    assert remount_accept.storage_ready(cached_ready) is False
+
+    cached_ready["manager"]["state"] = "READY_SD"
+    assert remount_accept.storage_ready(cached_ready) is True
 
 
 def install_fake_serial(monkeypatch, serials):
@@ -225,3 +244,27 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         "storage status\n",
         "storage status\n",
     ]
+
+
+def test_mount_sequence_waits_after_busy_remount_even_when_cached_sd_is_ready(monkeypatch):
+    ser = FakeSerial(
+        [
+            ready_storage_line("PING"),
+            busy_remount_line("PING"),
+            ready_storage_line("READY_SD"),
+            ready_storage_line("READY_SD"),
+        ]
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    commands, results, storage_after = remount_accept.run_mount_sequence(
+        ser,
+        timeout=1.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert remount_accept.remount_manager_busy(results[1]) is True
+    assert remount_accept.storage_ready(storage_after) is True
+    assert commands == ["storage status", "storage remount", "storage status", "storage status"]
+    assert ser.writes == [f"{command}\n" for command in commands]

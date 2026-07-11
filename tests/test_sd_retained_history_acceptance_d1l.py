@@ -63,6 +63,31 @@ def test_fingerprint_for_token_is_stable_hex():
     assert all(ch in "0123456789ABCDEF" for ch in first)
 
 
+def test_retained_canary_gets_targeted_longer_command_timeout(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {"ok": True, "cmd": command}
+
+    monkeypatch.setattr(retained_accept, "send_console_command", fake_send)
+    retained_accept.run_commands(
+        object(),
+        [
+            "storage filecanary",
+            "storage retained-canary sdToken1",
+            "messages public search sdToken1",
+        ],
+        5.0,
+    )
+
+    assert calls == [
+        ("storage filecanary", 5.0),
+        ("storage retained-canary sdToken1", 20.0),
+        ("messages public search sdToken1", 5.0),
+    ]
+
+
 def test_allow_unavailable_accepts_pre_bridge_refusal(monkeypatch):
     token = "sdToken1"
     fp = retained_accept.fingerprint_for_token(token)

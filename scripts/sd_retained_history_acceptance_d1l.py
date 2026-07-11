@@ -21,6 +21,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
+RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 20.0
 
 
 def retained_canary_hash(token: str) -> int:
@@ -112,8 +113,15 @@ def readbacks_pass(results: dict[str, dict], token: str, fingerprint: str) -> bo
     )
 
 
+def run_command(ser, command: str, timeout: float) -> dict:
+    command_timeout = timeout
+    if command.startswith("storage retained-canary "):
+        command_timeout = max(timeout, RETAINED_CANARY_MIN_TIMEOUT_SECONDS)
+    return send_console_command(ser, command, command_timeout)
+
+
 def run_commands(ser, commands: list[str], timeout: float) -> list[dict]:
-    return [send_console_command(ser, command, timeout) for command in commands]
+    return [run_command(ser, command, timeout) for command in commands]
 
 
 def run_acceptance(

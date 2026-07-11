@@ -30,6 +30,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 20.0
 
 
 def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
@@ -85,11 +86,24 @@ def sd_state(result: dict | None) -> str | None:
     return state if isinstance(state, str) else None
 
 
+def manager_status(result: dict | None) -> dict:
+    if not isinstance(result, dict):
+        return {}
+    manager = result.get("manager")
+    return manager if isinstance(manager, dict) else {}
+
+
+def storage_manager_ready(result: dict | None) -> bool:
+    manager = manager_status(result)
+    return manager.get("running") is True and manager.get("state") == "READY_SD"
+
+
 def storage_ready(result: dict | None) -> bool:
     sd = sd_status(result)
     return (
         isinstance(result, dict)
         and result.get("ok") is True
+        and storage_manager_ready(result)
         and sd.get("state") == "ready"
         and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
@@ -97,6 +111,17 @@ def storage_ready(result: dict | None) -> bool:
         and sd.get("data_root_ready") is True
         and sd.get("file_ops") is True
         and sd.get("atomic_rename") is True
+    )
+
+
+def remount_manager_busy(result: dict | None) -> bool:
+    manager = manager_status(result)
+    return (
+        isinstance(result, dict)
+        and result.get("cmd") == "storage remount"
+        and result.get("ok") is False
+        and result.get("code") == "ESP_ERR_INVALID_STATE"
+        and manager.get("running") is True
     )
 
 
@@ -139,7 +164,7 @@ def run_command(ser, command: str, timeout: float) -> dict:
         raise RuntimeError(f"refusing destructive/RF command in SD remount acceptance: {command}")
     command_timeout = timeout
     if command.startswith("storage retained-canary "):
-        command_timeout = max(timeout, 25.0)
+        command_timeout = max(timeout, RETAINED_CANARY_MIN_TIMEOUT_SECONDS)
     elif (
         command in {"storage mount", "storage remount", "storage filecanary"}
         or command.startswith("storage map-tile-")
@@ -162,13 +187,18 @@ def run_mount_sequence(
         run_command(ser, "storage status", timeout),
     ]
     storage_after = results[-1]
+    # A remount can race the boot-time storage manager.  Even if the cached SD
+    # fields already look ready, require a later status sample after that busy
+    # response before allowing file/map checks to start.
+    require_post_busy_poll = remount_manager_busy(results[1])
     for _attempt in range(mount_poll_attempts):
-        if storage_ready(storage_after):
+        if storage_ready(storage_after) and not require_post_busy_poll:
             break
         time.sleep(mount_poll_interval_sec)
         commands.append("storage status")
         storage_after = run_command(ser, "storage status", timeout)
         results.append(storage_after)
+        require_post_busy_poll = False
     return commands, results, storage_after
 
 
@@ -218,11 +248,13 @@ def run_acceptance(
     }
     retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
     pre_map_tile = pre_by_command.get(f"storage map-tile-canary {token}", {})
+    pre_remount_busy = any(remount_manager_busy(result) for result in pre_mount_results)
 
     post_storage = {}
     post_by_command: dict[str, dict] = {}
     post_map_tile = {}
     health = {}
+    post_remount_busy = False
     if include_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             commands.append("reboot")
@@ -238,6 +270,7 @@ def run_acceptance(
             )
             commands.extend(post_mount_commands)
             results.extend(post_mount_results)
+            post_remount_busy = any(remount_manager_busy(result) for result in post_mount_results)
             post_commands = [
                 *retained_readback_commands(token),
                 f"storage map-tile-check {token}",
@@ -291,6 +324,8 @@ def run_acceptance(
         "formats_sd": formats_sd,
         "pre_remount_ready": pre_ready,
         "post_remount_ready": post_ready,
+        "pre_remount_manager_busy": pre_remount_busy,
+        "post_remount_manager_busy": post_remount_busy,
         "retained_canary_passed": retained_ok,
         "pre_reboot_readbacks_ok": pre_readbacks_ok,
         "post_reboot_readbacks_ok": post_readbacks_ok,
