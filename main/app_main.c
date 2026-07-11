@@ -95,6 +95,12 @@ void app_main(void)
     d1l_meshcore_service_init();
 
     esp_err_t board_ret = d1l_board_init();
+    if (board_ret == ESP_OK) {
+        esp_err_t mesh_rx_ret = d1l_meshcore_service_start_rx_async();
+        if (mesh_rx_ret != ESP_OK) {
+            ESP_LOGW(TAG, "MeshCore RX start queue failed: %s", esp_err_to_name(mesh_rx_ret));
+        }
+    }
     esp_err_t connectivity_ret = d1l_connectivity_init();
     if (connectivity_ret != ESP_OK) {
         ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));

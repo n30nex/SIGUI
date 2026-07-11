@@ -72,6 +72,7 @@ static d1l_meshcore_service_status_t s_status;
 static SemaphoreHandle_t s_status_mutex;
 static QueueHandle_t s_service_queue;
 static TaskHandle_t s_service_task;
+static bool s_service_initialized;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static bool s_pending_public_tx;
@@ -1366,7 +1367,7 @@ static esp_err_t ensure_radio_started(void)
         return ret;
     }
     s_status.radio_ready = true;
-    s_status.identity_ready = true;
+    s_status.identity_ready = d1l_settings_current()->identity_ready;
     s_status.companion_framing_ready = true;
     if (!s_tx_busy) {
         s_status.state = D1L_MESHCORE_SERVICE_READY;
@@ -1452,6 +1453,10 @@ static void meshcore_service_task(void *arg)
             ret = ESP_ERR_INVALID_ARG;
             break;
         }
+        if (cmd.type == D1L_MESHCORE_SERVICE_CMD_START_RX &&
+            cmd.reply_task == NULL && ret != ESP_OK) {
+            ESP_LOGW(TAG, "asynchronous MeshCore RX start failed: %s", esp_err_to_name(ret));
+        }
         meshcore_service_reply(&cmd, ret);
     }
 }
@@ -1525,6 +1530,18 @@ static void meshcore_service_request_rx_async(void)
     (void)xQueueSend(s_service_queue, &cmd, 0);
 }
 
+esp_err_t d1l_meshcore_service_start_rx_async(void)
+{
+    esp_err_t ret = meshcore_service_start_task();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    return xQueueSend(s_service_queue, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
 static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
                                            uint8_t raw_len,
                                            uint32_t timeout_ms)
@@ -1543,8 +1560,15 @@ static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
 void d1l_meshcore_service_init(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
-    (void)meshcore_service_start_task();
+    const esp_err_t task_ret = meshcore_service_start_task();
     status_lock();
+    // Runtime settings flows reuse init; preserve the live radio and queued work.
+    if (s_service_initialized) {
+        s_status.path_hash_bytes = settings->path_hash_bytes;
+        s_status.identity_ready = settings->identity_ready;
+        status_unlock();
+        return;
+    }
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO;
     s_status.path_hash_bytes = settings->path_hash_bytes;
@@ -1560,6 +1584,7 @@ void d1l_meshcore_service_init(void)
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    s_service_initialized = task_ret == ESP_OK;
     status_unlock();
 }
 

@@ -101,6 +101,8 @@ def test_meshcore_service_uses_meshcore_narrow_radio_profile():
 
 def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     source = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/meshcore_service.h")
+    app_main = read("main/app_main.c")
     status_body = source.split("d1l_meshcore_service_status_t d1l_meshcore_service_status", 1)[
         1
     ].split("esp_err_t d1l_meshcore_service_request_advert", 1)[0]
@@ -131,6 +133,46 @@ def test_meshcore_status_getter_is_passive_and_radio_owned_by_service_task():
     assert "radio_profile_strings_match(lhs->tcxo, rhs->tcxo)" in source
     assert "mark_radio_apply_result(&profile, ret)" in source
     assert "radio_profiles_match(&applied_profile, &current_profile)" in status_body
+    assert "esp_err_t d1l_meshcore_service_start_rx_async(void);" in header
+    assert "esp_err_t d1l_meshcore_service_start_rx_async(void)" in source
+    start_async = source.split("esp_err_t d1l_meshcore_service_start_rx_async(void)", 1)[1].split(
+        "static esp_err_t meshcore_service_send_raw", 1
+    )[0]
+    assert "meshcore_service_start_task()" in start_async
+    assert ".type = D1L_MESHCORE_SERVICE_CMD_START_RX" in start_async
+    assert "xQueueSend(s_service_queue, &cmd, 0)" in start_async
+    assert "Radio." not in start_async
+    assert 'ESP_LOGW(TAG, "asynchronous MeshCore RX start failed: %s"' in source
+    ensure_radio = source.split("static esp_err_t ensure_radio_started(void)", 1)[1].split(
+        "static void d1l_meshcore_start_rx(void)", 1
+    )[0]
+    assert "s_status.identity_ready = d1l_settings_current()->identity_ready;" in ensure_radio
+    assert app_main.index("d1l_board_init()") < app_main.index(
+        "d1l_meshcore_service_start_rx_async()"
+    ) < app_main.index("d1l_connectivity_init()")
+
+
+def test_meshcore_service_reinitialization_preserves_live_radio_and_pending_work():
+    source = read("main/mesh/meshcore_service.c")
+    assert "static bool s_service_initialized;" in source
+    init_body = source.split("void d1l_meshcore_service_init(void)", 1)[1].split(
+        "esp_err_t d1l_meshcore_service_ensure_identity", 1
+    )[0]
+    repeated_init = init_body.split("if (s_service_initialized)", 1)[1].split(
+        "memset(&s_status", 1
+    )[0]
+    assert "s_status.path_hash_bytes = settings->path_hash_bytes;" in repeated_init
+    assert "s_status.identity_ready = settings->identity_ready;" in repeated_init
+    assert "status_unlock();" in repeated_init
+    assert "return;" in repeated_init
+    for destructive_reset in [
+        "s_radio_started = false",
+        "s_tx_busy = false",
+        "s_pending_public_tx = false",
+        "memset(&s_pending_dm_tx",
+    ]:
+        assert destructive_reset not in repeated_init
+    assert "s_service_initialized = task_ret == ESP_OK;" in init_body
 
 
 def test_console_reports_phase2_public_rf_evidence():
