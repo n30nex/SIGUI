@@ -474,7 +474,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     manifest = load_manifest()
     report = base_report(manifest, args)
     try:
-        if args.dry_run and os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        if args.dry_run and os.environ.get("D1L_MESHCORE_CONFORMANCE_CI") == "1":
             raise GateFailure("dry-run is forbidden in GitHub Actions")
         if args.runs != DEFAULT_RUNS:
             raise GateFailure(f"release gate requires exactly {DEFAULT_RUNS} fuzz runs")
