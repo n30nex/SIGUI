@@ -57,9 +57,7 @@ def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
         "sanitizers": ["address", "undefined"],
     }
     for relative, expected in manifest["upstream"]["sources"].items():
-        actual = hashlib.sha256(
-            (ROOT / "third_party" / "MeshCore" / relative).read_bytes()
-        ).hexdigest()
+        actual = canonical_lf_sha256(ROOT / "third_party" / "MeshCore" / relative)
         assert actual == expected
 
 
@@ -81,6 +79,17 @@ def test_corpus_pin_is_identical_after_windows_crlf_checkout(tmp_path):
     crlf = tmp_path / "corpus.json"
     crlf.write_bytes(CORPUS.read_bytes().replace(b"\n", b"\r\n"))
     assert conformance.sha256_lf_text_file(crlf) == canonical_lf_sha256(CORPUS)
+
+
+def test_upstream_source_pins_are_identical_after_windows_crlf_checkout(tmp_path):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+    for relative, expected in manifest["upstream"]["sources"].items():
+        source = ROOT / "third_party" / "MeshCore" / relative
+        crlf = tmp_path / Path(relative).name
+        canonical = source.read_bytes().replace(b"\r\n", b"\n")
+        crlf.write_bytes(canonical.replace(b"\n", b"\r\n"))
+        assert conformance.sha256_lf_text_file(crlf) == expected
 
 
 def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
@@ -180,6 +189,9 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     )
     assert report["source_verification"]["checkout_commit"] == commit
     assert report["source_verification"]["allowlisted_source_sha256_verified"] is True
+    assert report["source_verification"]["source_hash_mode"] == (
+        "canonical_lf_text_sha256"
+    )
     assert report["corpus"]["verified"] is True
     assert report["scope"]["fuzz_target"] == "local_wire_decoder_only"
     assert report["scope"]["packet_semantics_covered"] is False

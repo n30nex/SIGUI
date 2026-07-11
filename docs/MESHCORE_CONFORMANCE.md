@@ -19,8 +19,10 @@ wire codec with the packet-envelope implementation at that exact pin. It does
 not compare against a moving branch or a separately installed MeshCore copy.
 
 `tests/meshcore_conformance/manifest.json` locks the upstream commit and source
-hashes together with the vector and fuzz contract. The runner must fail closed
-if the gitlink, checked-out submodule, source hashes, or manifest disagree.
+hashes together with the vector and fuzz contract. Because Git may check text
+out with CRLF on Windows, tracked text is hashed in its canonical LF form; all
+other byte changes still invalidate the pin. The runner must fail closed if the
+gitlink, checked-out submodule, source hashes, or manifest disagree.
 
 Any MeshCore gitlink change invalidates the prior result. A pin update requires
 an intentional review of the adapter, vector matrix, malformed cases, and this
