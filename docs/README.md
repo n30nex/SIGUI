@@ -6,6 +6,7 @@ This folder contains only active release-facing documentation. Historical phase 
 
 - [Project README](../README.md): public overview, feature matrix, screenshots, hardware route.
 - [Roadmap](ROADMAP.md): current release blockers and work queue.
+- [KRAB'S THOUGHTS release audit](KRABSTHOUGHTS.MD): detailed 1.0 product definition, P0.1-P0.20 blocker rationale, and acceptance criteria incorporated into the roadmap.
 - [Release checklist](RELEASE_CHECKLIST.md): evidence required before tagging.
 - [Known limitations](KNOWN_LIMITATIONS.md): honest current gaps and non-goals.
 - [Test plan](TEST_PLAN_D1L.md): host, hardware, SD, RF, UI, soak, and release-gate validation.
