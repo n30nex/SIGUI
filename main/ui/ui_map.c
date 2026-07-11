@@ -39,6 +39,7 @@ static lv_obj_t *s_viewport_status_label;
 static lv_obj_t *s_viewport_detail_label;
 static lv_obj_t *s_viewport_readiness_label;
 static lv_obj_t *s_viewport_attribution_label;
+static lv_obj_t *s_viewport_drag_hint_label;
 static lv_obj_t *s_viewport_zoom_label;
 static lv_obj_t *s_viewport_zoom_in_button;
 static lv_obj_t *s_viewport_zoom_out_button;
@@ -419,6 +420,30 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
     map_set_hidden(s_viewport_status_label, !show_overlay);
     map_set_hidden(s_viewport_detail_label, !show_overlay);
     map_set_hidden(s_viewport_readiness_label, !show_overlay);
+    if (s_viewport_drag_hint_label) {
+        char progress[32];
+        if (status->worker_running && status->planned_tiles > 0U &&
+            status->rendered_tiles < status->planned_tiles) {
+            uint8_t current = status->attempted_tiles;
+            if (current == 0U) {
+                current = 1U;
+            } else if (current > status->planned_tiles) {
+                current = status->planned_tiles;
+            }
+            snprintf(progress, sizeof(progress), "%s %u/%u",
+                     strcmp(status->phase, "downloading") == 0 ?
+                         "Downloading" : "Loading",
+                     (unsigned)current, (unsigned)status->planned_tiles);
+            lv_label_set_text(s_viewport_drag_hint_label, progress);
+            lv_obj_set_style_text_color(s_viewport_drag_hint_label,
+                                        lv_color_hex(MAP_COLOR_INFO), 0);
+        } else {
+            lv_label_set_text(s_viewport_drag_hint_label, "Drag to pan");
+            lv_obj_set_style_text_color(s_viewport_drag_hint_label,
+                                        lv_color_hex(MAP_COLOR_DETAIL), 0);
+        }
+        lv_obj_move_foreground(s_viewport_drag_hint_label);
+    }
     if (s_viewport_attribution_label) {
         lv_obj_move_foreground(s_viewport_attribution_label);
     }
@@ -780,6 +805,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
     s_viewport_detail_label = NULL;
     s_viewport_readiness_label = NULL;
     s_viewport_attribution_label = NULL;
+    s_viewport_drag_hint_label = NULL;
     s_viewport_zoom_label = NULL;
     s_viewport_zoom_in_button = NULL;
     s_viewport_zoom_out_button = NULL;
@@ -854,6 +880,7 @@ void d1l_ui_map_render(lv_obj_t *parent,
         map_button(viewport, "Center", 12, 12, 92, 48,
                    map_viewport_recenter_event_cb);
         lv_obj_t *drag_hint = map_label(viewport, "Drag to pan", MAP_COLOR_DETAIL);
+        s_viewport_drag_hint_label = drag_hint;
         if (drag_hint) {
             map_label_dot(drag_hint, 128);
             lv_obj_set_pos(drag_hint, 116, 29);

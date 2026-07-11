@@ -272,7 +272,6 @@ typedef struct {
     int32_t lat_e7;
     int32_t lon_e7;
     uint8_t zoom;
-    bool cache_ready;
 } d1l_ui_map_render_input_t;
 
 typedef enum {
@@ -397,7 +396,6 @@ static d1l_ui_map_render_input_t map_render_input_from_snapshot(
         .lat_e7 = snapshot->map_lat_e7,
         .lon_e7 = snapshot->map_lon_e7,
         .zoom = snapshot->map_tile_zoom,
-        .cache_ready = snapshot->map_tile_cache_ready,
     };
 }
 
@@ -414,8 +412,7 @@ static bool map_render_input_changed_from_rendered(const d1l_app_snapshot_t *sna
            current.location_set != s_rendered_map_input.location_set ||
            current.lat_e7 != s_rendered_map_input.lat_e7 ||
            current.lon_e7 != s_rendered_map_input.lon_e7 ||
-           current.zoom != s_rendered_map_input.zoom ||
-           current.cache_ready != s_rendered_map_input.cache_ready;
+           current.zoom != s_rendered_map_input.zoom;
 }
 
 static void request_tab_switch(d1l_ui_tab_t tab)

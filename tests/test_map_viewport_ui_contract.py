@@ -84,6 +84,7 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert 'viewport, "-", 344, 12, 44, 48' in render
     assert 'viewport, "+", 392, 12, 44, 48' in render
     assert 'map_label(viewport, "Drag to pan"' in render
+    assert "s_viewport_drag_hint_label = drag_hint" in render
     assert "lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE)" in render
     assert "lv_obj_clear_flag(viewport, LV_OBJ_FLAG_GESTURE_BUBBLE)" in render
     for event in (
@@ -118,6 +119,14 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
     assert (
         "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in render
     )
+    status = function_body(
+        source,
+        "static void map_viewport_apply_service_status",
+        "static void map_viewport_update_controls",
+    )
+    assert '"Downloading" : "Loading"' in status
+    assert '"%s %u/%u"' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Drag to pan")' in status
     refresh = function_body(
         source, "bool d1l_ui_map_viewport_refresh", "static lv_obj_t *map_menu_row"
     )
@@ -143,9 +152,9 @@ def test_ambient_mesh_updates_do_not_tear_down_an_active_map_view():
         "snapshot->map_lat_e7",
         "snapshot->map_lon_e7",
         "snapshot->map_tile_zoom",
-        "snapshot->map_tile_cache_ready",
     ):
         assert field in map_input
+    assert "snapshot->map_tile_cache_ready" not in map_input
     assert "snapshot->wifi_connected" not in map_input
     assert "d1l_ui_navigation_active() == D1L_UI_TAB_MAP" in refresh_timer
     assert "map_render_input_changed_from_rendered(&s_snapshot)" in refresh_timer
