@@ -116,6 +116,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "clang-18 --version" in job
     assert "clang++-18 --version" in job
     assert "ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1" in job
+    assert 'D1L_MESHCORE_CONFORMANCE_CI: "1"' in job
     assert "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1" in job
     assert "python ./scripts/meshcore_conformance_d1l.py" in job
     assert "--cc clang-18" in job

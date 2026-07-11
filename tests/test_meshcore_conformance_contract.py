@@ -192,7 +192,7 @@ def test_manifest_validation_rejects_empty_upstream_source_allowlist(tmp_path, m
 def test_github_actions_cannot_turn_dry_run_into_a_green_gate(tmp_path):
     output = tmp_path / "forbidden-dry-run.json"
     env = os.environ.copy()
-    env["GITHUB_ACTIONS"] = "true"
+    env["D1L_MESHCORE_CONFORMANCE_CI"] = "1"
     result = subprocess.run(
         [
             sys.executable,
