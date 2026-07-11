@@ -12,9 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 CANARY_COMMANDS = [
@@ -42,12 +42,29 @@ def _number_at_least(value, minimum: int) -> bool:
         return False
 
 
+def storage_status_fresh(storage_status: dict) -> bool:
+    sd = storage_status.get("sd")
+    if not isinstance(sd, dict):
+        return False
+    try:
+        refresh_failures = int(sd.get("refresh_failures"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        sd.get("status_stale") is False
+        and sd.get("presence_stale") is False
+        and refresh_failures == 0
+    )
+
+
 def storage_file_gate_ready(storage_status: dict) -> bool:
     sd = storage_status.get("sd")
     if not isinstance(sd, dict):
         return False
     return (
-        sd.get("state") == "ready"
+        storage_status_fresh(storage_status)
+        and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -163,7 +180,7 @@ def run_canary(
         raise SystemExit("pyserial is required for hardware SD canary: python -m pip install pyserial") from exc
 
     results: list[dict] = []
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         before, ready_wait_results, mount_attempt = wait_for_storage_ready(
             ser,

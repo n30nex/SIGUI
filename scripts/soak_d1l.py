@@ -13,10 +13,10 @@ from typing import Callable, Iterable
 
 try:
     from artifact_metadata import stamp_report
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ModuleNotFoundError:
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 SOAK_COMMANDS = [
@@ -31,6 +31,7 @@ STORAGE_STATUS_COMMAND = "storage status"
 SD_FILE_CANARY_COMMAND = "storage filecanary"
 STORAGE_REQUIRED_SD_FIELDS = (
     "state",
+    "filesystem",
     "interface",
     "rp2040_protocol_supported",
     "file_ops",
@@ -38,6 +39,9 @@ STORAGE_REQUIRED_SD_FIELDS = (
     "file_line_max",
     "file_chunk_max",
     "path_max",
+    "status_stale",
+    "presence_stale",
+    "refresh_failures",
 )
 STORAGE_REQUIRED_TOP_FIELDS = ("data_backend", "packet_log_backend", "stores")
 STORAGE_STORE_KEYS = (
@@ -124,10 +128,14 @@ def file_ops_ready(row: dict) -> bool:
         and row.get("data_backend") == "mixed"
         and row.get("packet_log_backend") == "sd"
         and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
         and sd.get("rp2040_protocol_supported") is True
+        and sd.get("status_stale") is False
+        and sd.get("presence_stale") is False
+        and number_or_none(sd.get("refresh_failures")) == 0
         and storage_file_capability_ready(row)
     )
 
@@ -313,6 +321,21 @@ def summarize_soak(
         for row in storage
         if "rp2040_protocol_supported" in sd_status(row)
     ]
+    storage_stale_flags = [
+        sd_status(row).get("status_stale")
+        for row in storage
+        if "status_stale" in sd_status(row)
+    ]
+    storage_presence_stale_flags = [
+        sd_status(row).get("presence_stale")
+        for row in storage
+        if "presence_stale" in sd_status(row)
+    ]
+    storage_refresh_failures = [
+        number_or_none(sd_status(row).get("refresh_failures"))
+        for row in storage
+        if "refresh_failures" in sd_status(row)
+    ]
     storage_malformed_count = sum(1 for row in storage if storage_status_malformed(row))
     storage_file_capability_ready_values = [storage_file_capability_ready(row) for row in storage]
     storage_file_ops_ready = [file_ops_ready(row) for row in storage]
@@ -378,6 +401,12 @@ def summarize_soak(
         threshold_failures.append("storage_status_malformed")
     if storage and not stable_values(storage_states):
         threshold_failures.append("storage_state_changed")
+    if any(value is not False for value in storage_stale_flags):
+        threshold_failures.append("storage_status_stale")
+    if any(value is not False for value in storage_presence_stale_flags):
+        threshold_failures.append("storage_presence_stale")
+    if any(value is None or value > 0 for value in storage_refresh_failures):
+        threshold_failures.append("storage_refresh_failures")
     if storage_data_backends and not stable_values(storage_data_backends):
         threshold_failures.append("storage_data_backend_changed")
     if storage_packet_log_backends and not stable_values(storage_packet_log_backends):
@@ -425,6 +454,17 @@ def summarize_soak(
         "storage_packet_log_backend_stable": stable_values(storage_packet_log_backends)
         if storage_packet_log_backends else None,
         "storage_status_malformed_count": storage_malformed_count,
+        "storage_status_stale_count": sum(
+            1 for value in storage_stale_flags if value is not False
+        ),
+        "storage_presence_stale_count": sum(
+            1 for value in storage_presence_stale_flags if value is not False
+        ),
+        "storage_refresh_failures_max": (
+            max(value for value in storage_refresh_failures if value is not None)
+            if any(value is not None for value in storage_refresh_failures)
+            else None
+        ),
         "storage_store_backends": storage_store_backends,
         "storage_store_backend_stable": storage_store_backend_stable,
         "storage_store_backend_stable_all": bool(storage_store_backend_stable)
@@ -529,7 +569,7 @@ def run_serial_soak(
     started_at = datetime.now(timezone.utc)
     commands = soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary)
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(startup_settle_sec)
         ser.reset_input_buffer()
 

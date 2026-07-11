@@ -73,6 +73,21 @@ static bool settings_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
                                         "inspect_rp2040_sd_mount_error_firmware_path");
 }
 
+static const char *settings_map_storage_state(const d1l_app_snapshot_t *snapshot)
+{
+    if (settings_storage_needs_attention(snapshot)) {
+        return "Check SD";
+    }
+    if (snapshot->storage_setup_action &&
+        settings_storage_text_equals(snapshot->storage_setup_action, "insert_card")) {
+        return "Insert SD";
+    }
+    if (snapshot->storage_sd_needs_fat32) {
+        return "Needs FAT32";
+    }
+    return "SD starting";
+}
+
 static lv_obj_t *settings_create_label(lv_obj_t *parent, const char *text, uint32_t color)
 {
     if (!parent || !text) {
@@ -349,25 +364,29 @@ void d1l_ui_settings_render(lv_obj_t *parent,
         ? "Applying"
         : ((snapshot->radio_ready || snapshot->radio_applied) ? "Ready" : "Needs setup");
     const bool storage_needs_attention = settings_storage_needs_attention(snapshot);
+    const bool storage_reconnecting = settings_storage_text_equals(
+        snapshot->storage_setup_action, "wait_for_storage_reconnect");
     const bool storage_ready = snapshot->storage_data_enabled ||
                                snapshot->storage_sd_data_root_ready;
-    const char *storage_status = storage_needs_attention
+    const char *storage_status = storage_reconnecting
+        ? "Reconnecting"
+        : (storage_needs_attention
         ? "Needs attention"
         : (storage_ready
             ? "Ready"
             : (snapshot->storage_setup_required
                 ? "Needs setup"
-                : (snapshot->storage_sd_present ? "Detected" : "Internal storage")));
+                : (snapshot->storage_sd_present ? "Detected" : "Internal storage"))));
     const char *map_status = !snapshot->map_location_set
         ? "Set location"
-        : (!snapshot->wifi_connected
-            ? "Needs Wi-Fi"
-            : (!snapshot->map_tile_cache_ready
-                ? "Needs SD"
+        : (!snapshot->map_tile_cache_ready
+            ? settings_map_storage_state(snapshot)
+            : (!snapshot->wifi_connected
+                ? "Needs Wi-Fi"
                 : (snapshot->map_tile_render_supported ? "Ready" : "Loading")));
     const char *storage_category_summary = storage_needs_attention
         ? "SD needs attention"
-        : "SD card and map";
+        : (storage_reconnecting ? "SD reconnecting" : "SD card and map");
 
     const settings_menu_item_t tools[] = {
         {"Packets", packet_status, 0x93C5FD, D1L_UI_SETTINGS_ACTION_PACKETS, false},
@@ -387,8 +406,9 @@ void d1l_ui_settings_render(lv_obj_t *parent,
     };
     const settings_menu_item_t storage_maps[] = {
         {"SD Card", storage_status,
-         storage_needs_attention ? 0xF87171 :
-            (storage_ready ? 0x5EEAD4 : 0xF4F7FB),
+          storage_needs_attention ? 0xF87171 :
+            (storage_reconnecting ? 0xFBBF24 :
+             (storage_ready ? 0x5EEAD4 : 0xF4F7FB)),
          D1L_UI_SETTINGS_ACTION_STORAGE, storage_needs_attention},
         {"Map options", map_status,
          snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xF4F7FB,

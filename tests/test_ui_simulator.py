@@ -1097,7 +1097,7 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
     assert report["required_labels_missing"] == []
-    assert {"Waiting for SD", "Options", "(c) OpenStreetMap contributors"} <= labels
+    assert {"Waiting for storage", "Options", "(c) OpenStreetMap contributors"} <= labels
     assert view["metrics"]["map_location_set"] is True
     assert view["metrics"]["map_progress_bar_supported"] is True
     assert view["metrics"]["map_progress_bar_visible"] is False
@@ -1110,7 +1110,7 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
 def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
     expected = {
         "default": "Set a location",
-        "manual-location": "Needs SD",
+        "manual-location": "SD starting",
         "map-location-wifi-off": "Needs Wi-Fi",
         "map-ready": "Ready to open",
     }
@@ -1123,6 +1123,112 @@ def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
         assert status in labels, scenario
         assert "Map cache ready" not in labels, scenario
         assert "Set up Map" not in labels, scenario
+
+
+def test_map_storage_copy_state_table_distinguishes_starting_absent_fat32_and_error():
+    base = ui_simulator.manual_location_snapshot()
+    cases = (
+        (
+            replace(base, storage_setup_action="bridge_protocol_pending"),
+            "SD starting",
+            "Waiting for storage",
+        ),
+        (
+            replace(base, storage_setup_action="wait_for_storage_reconnect"),
+            "SD starting",
+            "Waiting for storage",
+        ),
+        (
+            replace(base, storage_setup_action="insert_card"),
+            "Insert SD",
+            "SD card required",
+        ),
+        (
+            replace(
+                base,
+                storage_setup_action="prepare_fat32_on_computer",
+                storage_sd_present=True,
+                storage_sd_needs_fat32=True,
+            ),
+            "Needs FAT32",
+            "FAT32 card required",
+        ),
+        (
+            replace(base, storage_sd_state="error"),
+            "Check SD",
+            "Map unavailable",
+        ),
+    )
+    for snapshot, summary, viewport_title in cases:
+        assert ui_simulator.map_storage_summary(snapshot) == summary
+        assert ui_simulator.map_view_status(snapshot)[0] == viewport_title
+
+    reconnecting = replace(
+        base,
+        storage_setup_action="wait_for_storage_reconnect",
+        storage_data_enabled=True,
+    )
+    assert ui_simulator.storage_menu_status(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_menu_status(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_readiness(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_state(reconnecting) == "Card reader reconnecting"
+    assert ui_simulator.storage_friendly_state(reconnecting)[1:3] == (
+        "Last confirmed SD remains active briefly.",
+        "Internal fallback takes over if status retries fail.",
+    )
+    reconnecting_fallback = replace(reconnecting, storage_data_enabled=False)
+    assert ui_simulator.storage_friendly_state(reconnecting_fallback)[1:3] == (
+        "Internal storage is active.",
+        "SD access resumes after a valid status reply.",
+    )
+
+
+def test_settings_map_status_matches_location_storage_wifi_and_renderer_priority():
+    base = ui_simulator.manual_location_snapshot()
+    cases = (
+        (replace(base, map_location_set=False), "Set location"),
+        (replace(base, storage_setup_action="bridge_protocol_pending"), "SD starting"),
+        (replace(base, storage_setup_action="insert_card"), "Insert SD"),
+        (
+            replace(
+                base,
+                storage_setup_action="prepare_fat32_on_computer",
+                storage_sd_needs_fat32=True,
+            ),
+            "Needs FAT32",
+        ),
+        (replace(base, storage_sd_state="error"), "Check SD"),
+        (
+            replace(base, map_tile_cache_ready=True, wifi_connected=False),
+            "Needs Wi-Fi",
+        ),
+        (
+            replace(
+                base,
+                map_tile_cache_ready=True,
+                wifi_connected=True,
+                map_tile_render_supported=False,
+            ),
+            "Loading",
+        ),
+        (
+            replace(
+                base,
+                map_tile_cache_ready=True,
+                wifi_connected=True,
+                map_tile_render_supported=True,
+            ),
+            "Ready",
+        ),
+    )
+    for snapshot, expected in cases:
+        assert ui_simulator.settings_map_status(snapshot) == expected
+        storage_category = next(
+            category
+            for category in ui_simulator.more_category_specs(snapshot)
+            if category["key"] == "storage_maps"
+        )
+        assert storage_category["leaves"][1][1] == expected
 
 
 def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):

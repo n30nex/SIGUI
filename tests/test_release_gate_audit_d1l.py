@@ -525,10 +525,14 @@ def ready_storage_status() -> dict:
         "cmd": "storage status",
         "sd": {
             "state": "ready",
+            "filesystem": "fat32",
             "present": True,
             "mounted": True,
             "data_root_ready": True,
             "rp2040_protocol_supported": True,
+            "status_stale": False,
+            "presence_stale": False,
+            "refresh_failures": 0,
             "file_ops": True,
             "atomic_rename": True,
             "file_line_max": 512,
@@ -573,6 +577,7 @@ def write_ready_sd_preflight(root: Path, commit: str = COMMIT, metadata_commit: 
                 "sd_state": "ready",
                 "next_action": "run_sd_file_and_export_acceptance",
             },
+            "storage_status": ready_storage_status(),
             "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -737,6 +742,8 @@ def write_file_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit
             "canary_unavailable_ok": False,
             "storage_file_gate_ready_before": True,
             "storage_file_gate_ready_after": True,
+            "storage_before": ready_storage_status(),
+            "storage_after": ready_storage_status(),
             "retained_history_sd_ready_before": False,
             "retained_history_sd_ready_after": False,
             "commands": ["storage status", "storage filecanary", "storage status", "packets", "health"],
@@ -760,6 +767,9 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "filecanary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "storage_file_gate_ready_before": True,
+            "storage_file_gate_ready_after": True,
+            "storage_after": ready_storage_status(),
             "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "reboot", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -783,6 +793,8 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_reboot_readbacks_ok": True,
             "pre_map_tile_canary_passed": True,
             "post_map_tile_canary_passed": True,
+            "storage_before_reboot": ready_storage_status(),
+            "storage_after_reboot": ready_storage_status(),
             "commands": ["storage status", "storage remount", "storage map-tile-canary sd1", "reboot", "storage map-tile-check sd1", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -806,6 +818,8 @@ def write_map_tile_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "storage_file_gate_ready_after": True,
             "map_tile_backend_ready_before": True,
             "map_tile_backend_ready_after": True,
+            "storage_before": ready_storage_status(),
+            "storage_after": ready_storage_status(),
             "commands": ["storage status", "storage map-tile-canary map1", "storage status", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -825,6 +839,8 @@ def write_export_evidence(root: Path, commit: str = COMMIT, metadata_commit: str
         "storage_file_gate_ready_after": True,
         "export_backend_ready_before": True,
         "export_backend_ready_after": True,
+        "storage_before": ready_storage_status(),
+        "storage_after": ready_storage_status(),
         **({"firmware_commit": metadata_commit} if metadata_commit else {}),
     }
     write_json(
@@ -1215,6 +1231,87 @@ def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
     assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
     assert report["ready_for_public_release"] is False
     assert report["p0_failed_count"] == 3
+
+
+def test_release_gate_audit_rejects_stale_sd_status_even_when_cached_ready_fields_pass(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_official_seeed_smoke_evidence(tmp_path)
+    write_ready_sd_preflight(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+
+    canary_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_file_canary_{COMMIT[:7]}.json"
+    )
+    canary = json.loads(canary_path.read_text(encoding="utf-8"))
+    canary["storage_after"]["sd"]["status_stale"] = True
+    canary["storage_after"]["sd"]["refresh_failures"] = 3
+    write_json(canary_path, canary)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["sd_filecanary_independent"]["ok"] is False
+    assert audit.storage_file_gate_ready_status(canary["storage_after"]) is False
+
+
+def test_release_gate_ready_status_rejects_unconfirmed_card_presence():
+    status = ready_storage_status()
+    assert audit.storage_file_gate_ready_status(status) is True
+
+    status["sd"]["presence_stale"] = True
+    assert audit.storage_file_gate_ready_status(status) is False
+
+    status = ready_storage_status()
+    status["sd"]["filesystem"] = "exfat"
+    assert audit.storage_file_gate_ready_status(status) is False
+
+
+def test_release_gate_audit_rejects_retained_readbacks_from_nvs_without_post_reboot_sd(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_official_seeed_smoke_evidence(tmp_path)
+    write_ready_sd_preflight(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+
+    retained_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_retained_history_{COMMIT[:7]}.json"
+    )
+    retained = json.loads(retained_path.read_text(encoding="utf-8"))
+    retained["storage_after"] = {
+        "ok": True,
+        "data_backend": "nvs",
+        "stores": {"messages": "nvs", "dm": "nvs", "routes": "nvs", "packets": "nvs"},
+        "sd": {
+            "state": "no_card",
+            "present": False,
+            "mounted": False,
+            "data_root_ready": False,
+            "rp2040_protocol_supported": True,
+            "file_ops": False,
+            "atomic_rename": False,
+            "status_stale": False,
+            "presence_stale": False,
+            "refresh_failures": 0,
+        },
+    }
+    # Keep the summary flag optimistic to prove the gate validates raw post-reboot status.
+    retained["storage_file_gate_ready_after"] = True
+    write_json(retained_path, retained)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_retained_canary_passed"]
+
+    assert retained["pre_reboot_readbacks_ok"] is True
+    assert retained["post_reboot_readbacks_ok"] is True
+    assert audit.storage_file_gate_ready_status(retained["storage_after"]) is False
+    assert gate["ok"] is False
 
 
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):

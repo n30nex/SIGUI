@@ -14,6 +14,7 @@
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
+#include "storage/storage_status_policy.h"
 
 #define D1L_STORAGE_BOOT_POLL_INTERVAL_MS 250U
 #define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U
@@ -326,7 +327,9 @@ static void set_default_actions(d1l_storage_status_t *status)
 
 static bool storage_sd_ready_for_files(void)
 {
-    return s_status.rp2040_sd_protocol_supported &&
+    return d1l_storage_status_policy_allows_cached_io(
+               s_status.bridge_status_refresh_failures) &&
+           s_status.rp2040_sd_protocol_supported &&
            s_status.sd_present &&
            s_status.sd_mounted &&
            s_status.sd_data_root_ready &&
@@ -350,6 +353,7 @@ static void clear_sd_runtime_fields(d1l_storage_status_t *status)
 {
     status->rp2040_sd_protocol_supported = false;
     status->sd_present = false;
+    status->sd_presence_stale = false;
     status->sd_mounted = false;
     status->sd_data_root_ready = false;
     status->sd_needs_fat32 = false;
@@ -441,9 +445,20 @@ static const char *stable_filesystem(const char *filesystem)
 
 static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 {
-    const bool mount_failed_with_diag = sd->card_present &&
-                                        !sd->filesystem_mounted &&
-                                        (sd->mount_error != 0U || sd->mount_data != 0U);
+    const bool previous_present = s_status.sd_present;
+    const uint32_t previous_capacity_kb = s_status.capacity_kb;
+    const uint32_t previous_free_kb = s_status.free_kb;
+    const char *previous_filesystem = s_status.sd_filesystem;
+    const bool explicit_no_card = strcmp(sd->state, "no_card") == 0;
+    const bool effective_present =
+        d1l_storage_status_policy_effective_present(previous_present,
+                                                    sd->state,
+                                                    sd->card_present);
+    const bool presence_stale = previous_present && !sd->card_present &&
+                                !explicit_no_card;
+    const bool mount_failed_with_diag = effective_present &&
+                                         !sd->filesystem_mounted &&
+                                         (sd->mount_error != 0U || sd->mount_data != 0U);
     const bool probe_rejected_card =
         strcmp(sd->note, "sd_probe_rejected_card") == 0 ||
         ((strcmp(sd->state, "error") == 0 || !sd->card_present) &&
@@ -455,21 +470,23 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
 
     s_status.rp2040_bridge_ready = sd->bridge_ready;
     s_status.rp2040_sd_protocol_supported = sd->protocol_supported;
-    s_status.sd_present = sd->card_present;
+    s_status.sd_present = effective_present;
+    s_status.sd_presence_stale = presence_stale;
     s_status.sd_mounted = sd->filesystem_mounted;
     s_status.sd_data_root_ready = sd->deskos_root_ready;
     s_status.sd_needs_fat32 = !probe_rejected_card &&
-                              (sd->needs_fat32 ||
-                               (sd->card_present && !sd->filesystem_mounted));
-    s_status.setup_required = sd->card_present && (!sd->filesystem_mounted ||
-                                                    !sd->deskos_root_ready ||
-                                                    s_status.sd_needs_fat32);
-    s_status.setup_supported = sd->protocol_supported && sd->card_present;
+                               (sd->needs_fat32 ||
+                                (effective_present && !sd->filesystem_mounted &&
+                                 !mount_failed_with_diag && !presence_stale));
+    s_status.setup_required = effective_present && (!sd->filesystem_mounted ||
+                                                     !sd->deskos_root_ready ||
+                                                     s_status.sd_needs_fat32);
+    s_status.setup_supported = sd->protocol_supported && effective_present;
     s_status.file_ops_supported = sd->file_ops_supported;
     s_status.atomic_rename_supported = sd->atomic_rename_supported;
     s_status.response_truncated = sd->response_truncated;
-    s_status.capacity_kb = sd->capacity_kb;
-    s_status.free_kb = sd->free_kb;
+    s_status.capacity_kb = presence_stale ? previous_capacity_kb : sd->capacity_kb;
+    s_status.free_kb = presence_stale ? previous_free_kb : sd->free_kb;
     s_status.file_line_max = sd->file_line_max;
     s_status.file_chunk_max = sd->file_chunk_max;
     s_status.path_max = sd->path_max;
@@ -482,8 +499,11 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     snprintf(s_status.sd_probe_mode, sizeof(s_status.sd_probe_mode), "%s",
              sd->probe_mode[0] ? sd->probe_mode : "unknown");
     s_status.last_error = sd->last_error;
+    s_status.bridge_status_refresh_failures = 0U;
+    s_status.bridge_status_stale = false;
     s_status.sd_state = stable_sd_state(sd->state);
-    s_status.sd_filesystem = stable_filesystem(sd->filesystem);
+    s_status.sd_filesystem = presence_stale ? previous_filesystem :
+                             stable_filesystem(sd->filesystem);
     d1l_retained_blob_store_note_sd_backend(sd->data_ready,
                                             sd->file_ops_supported,
                                             sd->atomic_rename_supported,
@@ -508,19 +528,21 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.setup_action = "inspect_rp2040_sd_cmd0_firmware_path";
         s_status.note =
             "RP2040 SD probe rejected the card init response; inspect firmware CMD0/CMD8 diagnostics before changing the card";
-    } else if (!sd->card_present) {
+    } else if (explicit_no_card) {
         s_status.setup_action = "insert_card";
         s_status.note = "No SD card reported by the RP2040 bridge; onboard NVS remains the default data store";
+    } else if (mount_failed_with_diag) {
+        s_status.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
+        s_status.note =
+            "The last confirmed card is not mounted; inspect RP2040 mount diagnostics while onboard fallback remains active";
+    } else if (presence_stale) {
+        s_status.setup_action = "wait_for_storage_reconnect";
+        s_status.note =
+            "The card was previously confirmed, but the latest bridge reply could not confirm its presence; onboard fallback remains active";
     } else if (s_status.sd_needs_fat32) {
-        if (mount_failed_with_diag) {
-            s_status.setup_action = "inspect_rp2040_sd_mount_error_firmware_path";
-            s_status.note =
-                "SD card is present but the RP2040 SdFat mount failed; inspect firmware mount diagnostics before changing the card";
-        } else {
-            s_status.setup_action = "prepare_fat32_on_computer";
-            s_status.note =
-                "SD card is present but not usable; prepare a FAT32 card on a computer and reinsert it";
-        }
+        s_status.setup_action = "prepare_fat32_on_computer";
+        s_status.note =
+            "SD card is present but not usable; prepare a FAT32 card on a computer and reinsert it";
     } else if (!sd->deskos_root_ready) {
         s_status.setup_action =
             strcmp(s_status.sd_state, "deskos_manifest_invalid") == 0 ?
@@ -541,6 +563,43 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
         s_status.map_tile_backend = d1l_map_tile_store_sd_ready(&s_status) ?
             "sd_map_tiles_ready" : "sd_pending_store_migration";
     }
+}
+
+static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
+{
+    s_status.bridge_status_refresh_failures =
+        d1l_storage_status_policy_note_failure(
+            s_status.bridge_status_refresh_failures);
+    s_status.bridge_status_stale =
+        d1l_storage_status_policy_is_stale(
+            s_status.bridge_status_refresh_failures);
+    if (!d1l_storage_status_policy_allows_cached_io(
+            s_status.bridge_status_refresh_failures)) {
+        d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
+        set_store_backends(&s_status);
+    }
+    s_status.response_truncated = response_truncated;
+    s_status.last_error = ret;
+    s_status.setup_action = "wait_for_storage_reconnect";
+    s_status.note = d1l_storage_status_policy_allows_cached_io(
+                        s_status.bridge_status_refresh_failures) ?
+        "Storage status is reconnecting; the last confirmed SD state remains active during a bounded grace period" :
+        "Storage status did not recover; SD file access is paused and onboard fallback remains active until a valid status reply";
+}
+
+static void apply_rp2040_sd_exchange_result(const d1l_rp2040_sd_status_t *sd,
+                                            esp_err_t ret)
+{
+    if (ret == ESP_OK) {
+        apply_rp2040_sd_status(sd);
+        return;
+    }
+
+    /* A timeout or malformed reply is not evidence that an inserted card
+     * disappeared. Keep the last parsed card/filesystem diagnostics, allow a
+     * short I/O grace, then fail closed to onboard fallback. A real removal is
+     * still applied immediately because it arrives as a valid no_card reply. */
+    note_rp2040_exchange_failure(ret, sd->response_truncated);
 }
 
 esp_err_t d1l_storage_status_init(void)
@@ -630,7 +689,7 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
 
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_probe_sd(&sd, timeout_ms);
-    apply_rp2040_sd_status(&sd);
+    apply_rp2040_sd_exchange_result(&sd, ret);
     if (manager_force_nvs_enabled()) {
         apply_force_nvs_status();
     }
@@ -788,7 +847,6 @@ static void storage_manager_run_once_owned(void)
             &final_ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
         if (final_ping_ret == ESP_OK) {
             d1l_storage_status_note_valid_bridge_response();
-            d1l_storage_status_note_rp2040(ESP_OK);
             ping_already_valid = true;
         }
     }
@@ -846,17 +904,17 @@ static void storage_manager_run_once_owned(void)
         ret = d1l_rp2040_bridge_ping(
             &ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
         if (ret != ESP_OK) {
-            d1l_storage_status_note_rp2040(ret);
             if (initial_ping_timeout_requires_reset(ret)) {
+                d1l_storage_status_note_rp2040(ret);
                 set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
                 s_status.manager_backoff_ms = 0;
                 return;
             }
+            note_rp2040_exchange_failure(ret, false);
             classify_storage_manager_state(ret);
             return;
         }
         d1l_storage_status_note_valid_bridge_response();
-        d1l_storage_status_note_rp2040(ESP_OK);
     }
 
     if (manager_force_nvs_enabled()) {
@@ -1079,7 +1137,7 @@ static esp_err_t storage_status_mount(uint32_t timeout_ms, bool force_bridge_mou
 
     d1l_rp2040_sd_status_t sd = {0};
     esp_err_t ret = d1l_rp2040_bridge_mount_sd(&sd, timeout_ms);
-    apply_rp2040_sd_status(&sd);
+    apply_rp2040_sd_exchange_result(&sd, ret);
     if (manager_force_nvs_enabled()) {
         apply_force_nvs_status();
     }

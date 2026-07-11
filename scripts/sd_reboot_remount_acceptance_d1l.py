@@ -12,14 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
     from sd_retained_history_acceptance_d1l import (
         fingerprint_for_token,
         readbacks_pass,
         retained_readback_commands,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
     from scripts.sd_retained_history_acceptance_d1l import (
         fingerprint_for_token,
         readbacks_pass,
@@ -91,6 +91,7 @@ def storage_ready(result: dict | None) -> bool:
         isinstance(result, dict)
         and result.get("ok") is True
         and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -191,7 +192,7 @@ def run_acceptance(
     results: list[dict] = []
     commands: list[str] = []
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         pre_mount_commands, pre_mount_results, pre_storage = run_mount_sequence(
             ser,
@@ -223,11 +224,11 @@ def run_acceptance(
     post_map_tile = {}
     health = {}
     if include_reboot:
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             commands.append("reboot")
             results.append(run_command(ser, "reboot", timeout))
         time.sleep(reboot_settle_sec)
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
             post_mount_commands, post_mount_results, post_storage = run_mount_sequence(
                 ser,
@@ -252,7 +253,7 @@ def run_acceptance(
             post_map_tile = post_by_command.get(f"storage map-tile-check {token}", {})
             health = post_by_command.get("health", {})
     else:
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
             commands.append("health")
             health = run_command(ser, "health", timeout)

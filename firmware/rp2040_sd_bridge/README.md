@@ -125,11 +125,23 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   `state=mount_required`; after `DESKOS_SD_MOUNT` or file operations, it
   returns the cached latest SD state. Ready cached cards
   advertise `file_ops=1`, `file_line_max=512`, `file_chunk_max=192`,
-  `path_max=96`, and `atomic_rename=1`. Status replies include optional cached
-  probe diagnostics:
-  `probe_power`, `probe_mode`, `probe_present`, `probe_err`, `probe_data`,
-  raw GPIO7 detect tokens `detect`, `detect_driven`, `det_pullup`, and
-  `det_pulldown`, plus `mount_err` and `mount_data`.
+  `path_max=96`, and `atomic_rename=1`. Status replies include cached hardware
+  context. The current ESP32 parser requires `probe_power`,
+  `probe_mode`, `probe_err`, `probe_data`, `mount_err`, and `mount_data` so a
+  partial/prefix-only reply cannot look ready. `probe_present` and the raw
+  GPIO7 tokens `detect`, `detect_driven`, `det_pullup`, and `det_pulldown` are
+  additional diagnostics and are not part of the ESP32 ready decision. Older
+  bridge builds that omit required fields fail closed and must be upgraded.
+  When a successful mounted snapshot has already proven the inserted-card
+  signature (`detect=low detect_driven=1`), status polling also samples only
+  GPIO7. Three consecutive samples that no longer match that proven signature
+  invalidate the cached mount and report `state=no_card note=card_removed`.
+  The bridge retains only that proven detect signature; three consecutive
+  matching samples after removal publish
+  `state=mount_required note=card_reinserted`, allowing the ESP32 storage
+  manager to request a fresh mount without the status poll touching the bus.
+  This bounded runtime-removal check never probes the SD bus, formats, writes,
+  or assumes a detect polarity before a successful mount has established it.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The
@@ -144,6 +156,11 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   filesystem is rejected before `/deskos` creation unless `SD.fatType()==32`,
   and reports `not_fat32_or_unmountable` with `needs_fat32=1`. Users must
   prepare FAT32 cards on a computer.
+  If a ready snapshot is already cached, an explicit mount request performs a
+  real close/power-cycle/remount validation instead of returning the cached
+  result. A debounced `no_card` remains cached and bus-silent until the proven
+  detect signature returns, so an empty-slot remount cannot erase reinsertion
+  monitoring.
 - `DESKOS_SD_PING` reports protocol/file-operation limits and `sd_touch=0`
   without probing, mounting, formatting, or writing SD. ESP32 exposes this as
   `rp2040 ping` for bridge-app validation before any SD-specific request.

@@ -268,6 +268,18 @@ typedef struct {
     size_t contact_count;
     size_t route_count;
     size_t packet_count;
+    bool storage_sd_present;
+    bool storage_sd_mounted;
+    bool storage_sd_data_root_ready;
+    bool storage_sd_needs_fat32;
+    bool storage_setup_required;
+    bool storage_data_enabled;
+    bool storage_retained_sd_degraded;
+    bool map_tile_cache_ready;
+    bool wifi_connected;
+    bool wifi_connecting;
+    const char *storage_sd_state;
+    const char *storage_setup_action;
 } d1l_ui_content_generation_t;
 
 typedef struct {
@@ -346,7 +358,27 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .contact_count = snapshot->contact_count,
         .route_count = snapshot->route_count,
         .packet_count = snapshot->packet_count,
+        .storage_sd_present = snapshot->storage_sd_present,
+        .storage_sd_mounted = snapshot->storage_sd_mounted,
+        .storage_sd_data_root_ready = snapshot->storage_sd_data_root_ready,
+        .storage_sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
+        .storage_setup_required = snapshot->storage_setup_required,
+        .storage_data_enabled = snapshot->storage_data_enabled,
+        .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .wifi_connected = snapshot->wifi_connected,
+        .wifi_connecting = snapshot->wifi_connecting,
+        .storage_sd_state = snapshot->storage_sd_state,
+        .storage_setup_action = snapshot->storage_setup_action,
     };
+}
+
+static bool content_generation_text_equal(const char *left, const char *right)
+{
+    if (left == right) {
+        return true;
+    }
+    return left && right && strcmp(left, right) == 0;
 }
 
 static bool content_generation_equal(const d1l_ui_content_generation_t *left,
@@ -371,7 +403,21 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->node_count == right->node_count &&
         left->contact_count == right->contact_count &&
         left->route_count == right->route_count &&
-        left->packet_count == right->packet_count;
+        left->packet_count == right->packet_count &&
+        left->storage_sd_present == right->storage_sd_present &&
+        left->storage_sd_mounted == right->storage_sd_mounted &&
+        left->storage_sd_data_root_ready == right->storage_sd_data_root_ready &&
+        left->storage_sd_needs_fat32 == right->storage_sd_needs_fat32 &&
+        left->storage_setup_required == right->storage_setup_required &&
+        left->storage_data_enabled == right->storage_data_enabled &&
+        left->storage_retained_sd_degraded == right->storage_retained_sd_degraded &&
+        left->map_tile_cache_ready == right->map_tile_cache_ready &&
+        left->wifi_connected == right->wifi_connected &&
+        left->wifi_connecting == right->wifi_connecting &&
+        content_generation_text_equal(left->storage_sd_state,
+                                      right->storage_sd_state) &&
+        content_generation_text_equal(left->storage_setup_action,
+                                      right->storage_setup_action);
 }
 
 static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
@@ -5267,6 +5313,10 @@ static const char *storage_card_state_friendly(const d1l_app_snapshot_t *snapsho
     if (storage_snapshot_needs_attention(snapshot)) {
         return "Card needs attention";
     }
+    if (storage_text_equals(snapshot->storage_setup_action,
+                            "wait_for_storage_reconnect")) {
+        return "Card reader reconnecting";
+    }
     if (storage_text_equals(snapshot->storage_setup_action, "run_storage_mount") ||
         storage_text_equals(snapshot->storage_setup_action, "wait_for_storage_mount")) {
         return "Checking card";
@@ -5330,6 +5380,9 @@ static const char *storage_readiness_friendly(const d1l_app_snapshot_t *snapshot
     if (storage_snapshot_needs_attention(snapshot) ||
         storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
         return "Needs attention";
+    }
+    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
+        return "Reconnecting";
     }
     if (storage_text_equals(action, "run_storage_mount") ||
         storage_text_equals(action, "wait_for_storage_mount")) {
@@ -5492,7 +5545,15 @@ static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
         copy.accent = 0xFCA5A5;
         return copy;
     }
-    if (storage_text_equals(action, "bridge_unavailable")) {
+    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
+        copy.state = "Card reader reconnecting";
+        copy.detail = snapshot->storage_data_enabled ?
+            "Last confirmed SD remains active briefly." :
+            "Internal storage is active.";
+        copy.guidance = snapshot->storage_data_enabled ?
+            "Internal fallback takes over if status retries fail." :
+            "SD access resumes after a valid status reply.";
+    } else if (storage_text_equals(action, "bridge_unavailable")) {
         copy.detail = "SD support is unavailable.";
         copy.guidance = "Internal storage remains active.";
     } else if (storage_text_equals(action, "bridge_protocol_pending")) {

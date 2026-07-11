@@ -13,11 +13,11 @@ from pathlib import Path
 try:
     from artifact_metadata import stamp_report
     from scroll_probe_d1l import summarize_map_network_evidence
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ModuleNotFoundError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
     from scripts.scroll_probe_d1l import summarize_map_network_evidence
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 TAB_SEQUENCE = ("home", "messages", "nodes", "map", "packets", "settings")
@@ -318,7 +318,7 @@ def run_probe(
     started_at = datetime.now(timezone.utc)
     run_prefix = token_prefix_for_run(started_at)
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         setup_events.append({"cmd": "ui status", "result": send_console_command(ser, "ui status", timeout)})

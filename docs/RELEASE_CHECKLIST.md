@@ -3,7 +3,7 @@
 ## Phase 1
 
 - [x] Standalone Map/Wi-Fi and ESP-IDF 5.5.4 branch host suites pass.
-- [x] The combined integration source passes all 414 host tests plus Map simulator and network-suppressed dry-run checks.
+- [x] The combined integration source passes all 461 host tests, including Map simulator, network-suppressed dry-run, strict native SD reply/state, and host-reference wire checks.
 - [ ] The combined commit passes the version-pinned Actions firmware/package/checksum/effective-config path without changing the generated lock.
 - [x] Historical firmware builds passed with ESP-IDF v5.1.x in GitHub Actions; that EOL baseline is not release-acceptable. Local firmware builds are not part of validation.
 - [x] Issue #63 selected-target policy passes: the firmware job uses exact version-pinned `espressif/idf:v5.5.4`, the committed component lock records IDF 5.5.4, and the release audit rejects missing, moving, EOL, unapproved, or stale selections. These configuration checks alone do not qualify the SDK.
@@ -94,6 +94,7 @@
 - [x] CI-buildable RP2040 SD bridge target added for `DESKOS_SD_STATUS`, `DESKOS_SD_MOUNT`, `DESKOS_SD_DIAG`, and bounded `DESKOS_SD_FILE` operations with no SD formatting command.
 - [x] FAT32-only SD policy implemented: users prepare FAT32 cards on a computer, and DeskOS only creates missing `/deskos` folders/manifests on mounted FAT32 media.
 - [ ] #78 reproduces and fixes the intermittent inserted-card disappearance/false no-card state, distinguishes bridge/protocol/media/removal causes, and passes exact Actions-built COM12 reboot, Map/cache, removal/reinsertion, idle, and active windows without formatting or reset storms.
+- [x] #78 source boundary is covered: only a strict parsed `no_card` reply clears confirmed presence; malformed/error/pending replies cannot masquerade as removal; three stale refreshes fail closed to onboard fallback; Map/Storage copy distinguishes starting, reconnecting, missing, FAT32, and attention states; release artifacts reject stale/presence-stale evidence; and COM12 host tools set DTR/RTS false before opening. Hardware acceptance above remains open.
 - [x] Generic RP2040 SD file-operation protocol foundation added for future SD-backed stores: bounded `DESKOS_SD_FILE v=1` stat/read/write/append/delete/rename with path validation, base64url payloads, CRC32 checks, and simulator coverage.
 - [x] Retained blob-store abstraction can use the RP2040 SD file protocol for retained Public/DM message history, route history, and packet history when a ready card reports file operations and atomic rename; NVS remains mirrored as fallback.
 - [x] Serial-only SD file-operation proof command added: `storage filecanary` performs guarded temp write, read-back compare, `rename replace=1`, stat, final read, delete, and deleted-stat verification without Public RF or formatting.

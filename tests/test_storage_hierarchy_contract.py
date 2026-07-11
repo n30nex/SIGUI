@@ -134,6 +134,12 @@ def test_storage_touch_ui_prioritizes_all_attention_states():
     assert hero.index("snapshot->storage_retained_sd_degraded") < hero.index(
         "snapshot->storage_data_enabled"
     )
+    assert hero.index('storage_text_equals(action, "wait_for_storage_reconnect")') < hero.index(
+        "snapshot->storage_data_enabled"
+    )
+    assert 'copy.state = "Card reader reconnecting";' in hero
+    assert '"Last confirmed SD remains active briefly."' in hero
+    assert '"Internal fallback takes over if status retries fail."' in hero
     assert 'copy.accent = 0xFCA5A5;' in hero
 
 

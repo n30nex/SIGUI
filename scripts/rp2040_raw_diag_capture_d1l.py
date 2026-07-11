@@ -12,10 +12,10 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 DIAG_COMMAND = "storage diag raw"
@@ -63,7 +63,7 @@ def capture_diag(port: str, baud: int, timeout: float,
 
     replies: dict[str, dict] = {}
     initial_storage_diag: dict = {}
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         initial_storage_diag = send_console_command(ser, DIAG_COMMAND, timeout)

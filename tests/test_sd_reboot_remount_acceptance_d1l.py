@@ -1,3 +1,5 @@
+import json
+
 from scripts import sd_reboot_remount_acceptance_d1l as remount_accept
 
 
@@ -16,6 +18,9 @@ class FakeSerial:
     def reset_input_buffer(self):
         self.reset_count += 1
 
+    def open(self):
+        pass
+
     def __enter__(self):
         return self
 
@@ -26,7 +31,7 @@ class FakeSerial:
 def ready_storage_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
-        '"sd":{"state":"ready","present":true,"mounted":true,'
+        '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"file_ops":true,"atomic_rename":true}}\n'
     )
 
@@ -42,7 +47,7 @@ def bridge_wait_storage_line() -> str:
 def mount_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage remount",'
-        '"sd":{"state":"ready","present":true,"mounted":true},'
+        '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true},'
         '"public_rf_tx":false,"formats_sd":false}\n'
     )
 
@@ -84,6 +89,13 @@ def readback_lines(token: str) -> list[str]:
 
 def health_line() -> str:
     return '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n'
+
+
+def test_storage_ready_requires_fat32_filesystem():
+    ready = json.loads(ready_storage_line())
+    assert remount_accept.storage_ready(ready) is True
+    ready["sd"]["filesystem"] = "exfat"
+    assert remount_accept.storage_ready(ready) is False
 
 
 def install_fake_serial(monkeypatch, serials):

@@ -235,15 +235,39 @@ static const char *map_wifi_status(const d1l_app_snapshot_t *snapshot)
     return snapshot->wifi_enabled ? "Not connected" : "Off";
 }
 
+static bool map_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
+{
+    return snapshot &&
+           (snapshot->storage_retained_sd_degraded ||
+            (snapshot->storage_sd_state &&
+             (strcmp(snapshot->storage_sd_state, "error") == 0 ||
+              strcmp(snapshot->storage_sd_state, "bridge_reported") == 0)) ||
+            (snapshot->storage_setup_action &&
+             (strcmp(snapshot->storage_setup_action,
+                     "inspect_rp2040_sd_cmd0_firmware_path") == 0 ||
+              strcmp(snapshot->storage_setup_action,
+                     "inspect_rp2040_sd_mount_error_firmware_path") == 0)));
+}
+
+static bool map_storage_is_starting(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot || !snapshot->storage_setup_action) {
+        return false;
+    }
+    const char *action = snapshot->storage_setup_action;
+    return strcmp(action, "bridge_unavailable") == 0 ||
+           strcmp(action, "bridge_protocol_pending") == 0 ||
+           strcmp(action, "wait_for_storage_mount") == 0 ||
+           strcmp(action, "run_storage_mount") == 0 ||
+           strcmp(action, "wait_for_storage_reconnect") == 0;
+}
+
 static const char *map_sd_status(const d1l_app_snapshot_t *snapshot)
 {
     if (!snapshot) {
         return "Unavailable";
     }
-    if (snapshot->storage_retained_sd_degraded ||
-        (snapshot->storage_sd_state &&
-         (strcmp(snapshot->storage_sd_state, "error") == 0 ||
-          strcmp(snapshot->storage_sd_state, "bridge_reported") == 0))) {
+    if (map_storage_needs_attention(snapshot)) {
         return "Error";
     }
     if (snapshot->storage_sd_needs_fat32) {
@@ -251,6 +275,13 @@ static const char *map_sd_status(const d1l_app_snapshot_t *snapshot)
     }
     if (snapshot->map_tile_cache_ready) {
         return "Ready";
+    }
+    if (snapshot->storage_setup_action &&
+        strcmp(snapshot->storage_setup_action, "insert_card") == 0) {
+        return "Not inserted";
+    }
+    if (map_storage_is_starting(snapshot)) {
+        return "Starting";
     }
     if (!snapshot->storage_sd_present) {
         return "Not inserted";
@@ -312,10 +343,7 @@ static void map_viewport_copy(const d1l_app_snapshot_t *snapshot,
         return;
     }
     const char *download_state = snapshot->map_tile_download_state;
-    if (snapshot->storage_retained_sd_degraded ||
-        (snapshot->storage_sd_state &&
-         (strcmp(snapshot->storage_sd_state, "error") == 0 ||
-          strcmp(snapshot->storage_sd_state, "bridge_reported") == 0)) ||
+    if (map_storage_needs_attention(snapshot) ||
         map_text_contains(download_state, "error") ||
         map_text_contains(download_state, "failed")) {
         *title = "Map unavailable";
@@ -326,8 +354,17 @@ static void map_viewport_copy(const d1l_app_snapshot_t *snapshot,
         *detail = "Open Options to choose the area shown here.";
         *color = MAP_COLOR_WARN;
     } else if (!snapshot->map_tile_cache_ready) {
-        *title = "Waiting for SD";
-        *detail = "Insert a FAT32 card, or wait while it prepares.";
+        if (snapshot->storage_setup_action &&
+            strcmp(snapshot->storage_setup_action, "insert_card") == 0) {
+            *title = "SD card required";
+            *detail = "Insert a FAT32 card to save and load map tiles.";
+        } else if (snapshot->storage_sd_needs_fat32) {
+            *title = "FAT32 card required";
+            *detail = "Prepare the card as FAT32 on a computer, then reinsert it.";
+        } else {
+            *title = "Waiting for storage";
+            *detail = "The card reader is starting or checking the SD card.";
+        }
         *color = MAP_COLOR_WARN;
     } else if (!snapshot->wifi_connected) {
         *title = snapshot->wifi_connecting ? "Connecting to Wi-Fi" : "Wi-Fi needed";
@@ -722,9 +759,25 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
         detail = "The tile service asked us to wait before retrying.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
-    } else if (strcmp(status->phase, "sd_cache_required") == 0) {
-        title = "Waiting for SD";
-        detail = "Insert a FAT32 card, or wait while it prepares.";
+    } else if (strcmp(status->phase, "sd_attention") == 0) {
+        title = "Map unavailable";
+        detail = "Check the SD card, then reopen Map.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
+    } else if (strcmp(status->phase, "sd_card_required") == 0) {
+        title = "SD card required";
+        detail = "Insert a FAT32 card to save and load map tiles.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
+    } else if (strcmp(status->phase, "sd_fat32_required") == 0) {
+        title = "FAT32 card required";
+        detail = "Prepare the card as FAT32 on a computer, then reinsert it.";
+        color = MAP_COLOR_WARN;
+        show_overlay = true;
+    } else if (strcmp(status->phase, "sd_reconnecting") == 0 ||
+               strcmp(status->phase, "sd_cache_required") == 0) {
+        title = "Waiting for storage";
+        detail = "The card reader is starting or checking the SD card.";
         color = MAP_COLOR_WARN;
         show_overlay = true;
     } else if (strcmp(status->phase, "wifi_required") == 0) {
@@ -773,8 +826,21 @@ static void map_viewport_apply_service_status(const d1l_map_view_status_t *statu
     map_set_hidden(s_viewport_readiness_label, !show_overlay);
     if (s_viewport_drag_hint_label) {
         char progress[32];
-        if (strcmp(status->phase, "sd_cache_required") == 0) {
-            lv_label_set_text(s_viewport_drag_hint_label, "Waiting for SD");
+        if (strcmp(status->phase, "sd_card_required") == 0) {
+            lv_label_set_text(s_viewport_drag_hint_label, "Insert SD card");
+            lv_obj_set_style_text_color(s_viewport_drag_hint_label,
+                                        lv_color_hex(MAP_COLOR_WARN), 0);
+        } else if (strcmp(status->phase, "sd_fat32_required") == 0) {
+            lv_label_set_text(s_viewport_drag_hint_label, "Needs FAT32");
+            lv_obj_set_style_text_color(s_viewport_drag_hint_label,
+                                        lv_color_hex(MAP_COLOR_WARN), 0);
+        } else if (strcmp(status->phase, "sd_attention") == 0) {
+            lv_label_set_text(s_viewport_drag_hint_label, "Check SD card");
+            lv_obj_set_style_text_color(s_viewport_drag_hint_label,
+                                        lv_color_hex(MAP_COLOR_WARN), 0);
+        } else if (strcmp(status->phase, "sd_reconnecting") == 0 ||
+                   strcmp(status->phase, "sd_cache_required") == 0) {
+            lv_label_set_text(s_viewport_drag_hint_label, "Storage starting");
             lv_obj_set_style_text_color(s_viewport_drag_hint_label,
                                         lv_color_hex(MAP_COLOR_WARN), 0);
         } else if (strcmp(status->phase, "wifi_required") == 0) {
@@ -1461,9 +1527,20 @@ static void map_render_options_root(lv_obj_t *parent,
                  snapshot->map_location_set ? MAP_COLOR_GOOD : MAP_COLOR_WARN,
                  callbacks->open_location);
     const bool cache_ready = snapshot->map_tile_cache_ready;
-    map_menu_row(parent, 140, "Cache status", cache_ready ? "SD ready" : "Needs SD",
-                 cache_ready ? MAP_COLOR_GOOD : MAP_COLOR_WARN,
-                 callbacks->open_cache_status);
+    const char *cache_status = "Storage starting";
+    if (cache_ready) {
+        cache_status = "SD ready";
+    } else if (map_storage_needs_attention(snapshot)) {
+        cache_status = "Check SD";
+    } else if (snapshot->storage_setup_action &&
+               strcmp(snapshot->storage_setup_action, "insert_card") == 0) {
+        cache_status = "Insert SD";
+    } else if (snapshot->storage_sd_needs_fat32) {
+        cache_status = "Needs FAT32";
+    }
+    map_menu_row(parent, 140, "Cache status", cache_status,
+                  cache_ready ? MAP_COLOR_GOOD : MAP_COLOR_WARN,
+                  callbacks->open_cache_status);
     lv_obj_t *policy = map_panel(parent, 16, 280, 448, 80);
     if (policy) {
         lv_obj_t *text = map_label(policy,

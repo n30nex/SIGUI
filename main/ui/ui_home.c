@@ -51,13 +51,16 @@ const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot)
     if (home_storage_needs_attention(snapshot)) {
         return "Needs attention";
     }
+    const char *action = snapshot->storage_setup_action;
+    if (home_storage_text_equals(action, "wait_for_storage_reconnect")) {
+        return "reconnecting";
+    }
     if (snapshot->storage_data_enabled || snapshot->storage_sd_data_root_ready) {
         return "ready";
     }
     if (snapshot->storage_setup_required) {
         return "setup";
     }
-    const char *action = snapshot->storage_setup_action;
     if (home_storage_text_equals(action, "bridge_unavailable") ||
         home_storage_text_equals(action, "bridge_protocol_pending")) {
         return "offline";
@@ -113,6 +116,25 @@ const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot)
         return "FAT32 ready";
     }
     return "internal";
+}
+
+static const char *home_map_storage_state(const d1l_app_snapshot_t *snapshot)
+{
+    if (snapshot->storage_setup_action &&
+        strcmp(snapshot->storage_setup_action, "insert_card") == 0) {
+        return "Insert SD";
+    }
+    if (home_storage_needs_attention(snapshot)) {
+        return "Check SD";
+    }
+    if (snapshot->storage_sd_needs_fat32) {
+        return "Needs FAT32";
+    }
+    const char *state = d1l_ui_home_sd_state(snapshot);
+    if (strcmp(state, "no card") == 0) {
+        return "Insert SD";
+    }
+    return "SD starting";
 }
 
 d1l_ui_home_box_t d1l_ui_home_destination_box(d1l_ui_home_destination_slot_t slot)
@@ -343,7 +365,7 @@ void d1l_ui_home_render(lv_obj_t *parent,
         map_status = "Set a location";
         map_status_color = 0xFBBF24;
     } else if (!snapshot->map_tile_cache_ready) {
-        map_status = "Needs SD";
+        map_status = home_map_storage_state(snapshot);
         map_status_color = 0xFBBF24;
     } else if (!snapshot->wifi_connected) {
         map_status = "Needs Wi-Fi";

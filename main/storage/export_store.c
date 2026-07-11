@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "storage/storage_status_policy.h"
+
 static bool result_path_set(d1l_export_canary_result_t *result,
                             const char *token)
 {
@@ -209,6 +211,8 @@ bool d1l_export_store_token_valid(const char *token)
 bool d1l_export_store_sd_ready(const d1l_storage_status_t *status)
 {
     return status &&
+           d1l_storage_status_policy_allows_cached_io(
+               status->bridge_status_refresh_failures) &&
            status->sd_present &&
            status->sd_mounted &&
            status->sd_data_root_ready &&

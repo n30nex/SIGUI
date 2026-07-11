@@ -955,6 +955,8 @@ def storage_needs_attention(snap: Snapshot) -> bool:
 
 
 def storage_menu_status(snap: Snapshot) -> str:
+    if snap.storage_setup_action == "wait_for_storage_reconnect":
+        return "Reconnecting"
     if storage_needs_attention(snap):
         return "Needs attention"
     if snap.storage_data_enabled or snap.storage_sd_data_root_ready:
@@ -994,6 +996,21 @@ def storage_friendly_state(snap: Snapshot) -> tuple[str, str, str, tuple[int, in
             "Using internal storage",
             "SD support is starting.",
             "Your data stays available internally.",
+            AMBER,
+        )
+    if action == "wait_for_storage_reconnect":
+        return (
+            "Card reader reconnecting",
+            (
+                "Last confirmed SD remains active briefly."
+                if snap.storage_data_enabled
+                else "Internal storage is active."
+            ),
+            (
+                "Internal fallback takes over if status retries fail."
+                if snap.storage_data_enabled
+                else "SD access resumes after a valid status reply."
+            ),
             AMBER,
         )
     if action in ("run_storage_mount", "wait_for_storage_mount"):
@@ -1501,11 +1518,31 @@ def draw_row(
         s.text(badge, (x1 - 58, y0 + 10, x1 - 14, y0 + 30), 11, badge_color, True, "center")
 
 
+def map_storage_summary(snap: Snapshot) -> str:
+    if snap.storage_setup_action == "insert_card":
+        return "Insert SD"
+    if snap.storage_sd_needs_fat32:
+        return "Needs FAT32"
+    if storage_needs_attention(snap):
+        return "Check SD"
+    return "SD starting"
+
+
+def settings_map_status(snap: Snapshot) -> str:
+    if not snap.map_location_set:
+        return "Set location"
+    if not snap.map_tile_cache_ready:
+        return map_storage_summary(snap)
+    if not snap.wifi_connected:
+        return "Needs Wi-Fi"
+    return "Ready" if snap.map_tile_render_supported else "Loading"
+
+
 def draw_home_body(s: Surface, snap: Snapshot):
     if not snap.map_location_set:
         map_status, map_color = "Set a location", ACCENT
     elif not snap.map_tile_cache_ready:
-        map_status, map_color = "Needs SD", AMBER
+        map_status, map_color = map_storage_summary(snap), AMBER
     elif not snap.wifi_connected:
         map_status, map_color = "Needs Wi-Fi", AMBER
     else:
@@ -1781,10 +1818,20 @@ def map_wifi_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
 def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
     """Return the same calm empty-state copy used by the firmware viewport."""
 
+    if storage_needs_attention(snap):
+        return ("Map unavailable", "Check the SD card, then reopen Map.", AMBER)
     if not snap.map_location_set:
         return ("Set a location", "Open Options to choose the area shown here.", AMBER)
     if not snap.map_tile_cache_ready:
-        return ("Waiting for SD", "Insert a FAT32 card, or wait while it prepares.", AMBER)
+        if snap.storage_setup_action == "insert_card":
+            return ("SD card required", "Insert a FAT32 card to save and load map tiles.", AMBER)
+        if snap.storage_sd_needs_fat32:
+            return (
+                "FAT32 card required",
+                "Prepare the card as FAT32 on a computer, then reinsert it.",
+                AMBER,
+            )
+        return ("Waiting for storage", "The card reader is starting or checking the SD card.", AMBER)
     if snap.wifi_connecting:
         return ("Connecting to Wi-Fi", "Connect Wi-Fi to load this local map area.", AMBER)
     if snap.wifi_connected and snap.map_tile_download_state in ("downloading", "loading_cache"):
@@ -1999,7 +2046,7 @@ def render_map(s: Surface, snap: Snapshot):
             "Drag to pan"
             if frame_ready
             else (
-                "Waiting for SD"
+                "Storage starting"
                 if not snap.map_tile_cache_ready
                 else (
                     f"Downloading {snap.map_progress_completed}/{snap.map_progress_total}"
@@ -2101,7 +2148,7 @@ def render_map_options(s: Surface, snap: Snapshot):
         ),
         (
             "Cache status",
-            "SD ready" if snap.map_tile_cache_ready else "Needs SD",
+            "SD ready" if snap.map_tile_cache_ready else map_storage_summary(snap),
             GREEN if snap.map_tile_cache_ready else AMBER,
             "open_map_cache",
             "map_cache",
@@ -2311,7 +2358,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
     packet_status = f"{len(snap.packets)} saved"
     storage_status = storage_menu_status(snap)
     storage_warning = storage_needs_attention(snap)
-    map_status = "Ready" if snap.map_location_set and (snap.wifi_connected or snap.map_cached_tile_count > 0) else "Set up"
+    map_status = settings_map_status(snap)
     return (
         {
             "key": "tools",
@@ -2341,7 +2388,15 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
         {
             "key": "storage_maps",
             "title": "Storage & maps",
-            "summary": "SD needs attention" if storage_warning else "SD card and map cache",
+            "summary": (
+                "SD needs attention"
+                if storage_warning
+                else (
+                    "SD reconnecting"
+                    if snap.storage_setup_action == "wait_for_storage_reconnect"
+                    else "SD card and map cache"
+                )
+            ),
             "color": WARNING_TEXT if storage_warning else AMBER,
             "warning": storage_warning,
             "action": "toggle_more_storage_maps",
@@ -2919,6 +2974,8 @@ def storage_card_menu_status(snap: Snapshot) -> str:
         return "Starting"
     if snap.storage_setup_action == "bridge_unavailable":
         return "Unavailable"
+    if snap.storage_setup_action == "wait_for_storage_reconnect":
+        return "Reconnecting"
     if snap.storage_setup_action in ("run_storage_mount", "wait_for_storage_mount"):
         return "Checking"
     if snap.storage_sd_present and snap.storage_sd_mounted and snap.storage_sd_data_root_ready:
@@ -2933,6 +2990,8 @@ def storage_card_readiness(snap: Snapshot) -> str:
         return "Needs attention"
     if snap.storage_setup_action in ("bridge_unavailable", "bridge_protocol_pending"):
         return "Not available"
+    if snap.storage_setup_action == "wait_for_storage_reconnect":
+        return "Reconnecting"
     if snap.storage_setup_action == "insert_card":
         return "No card"
     if snap.storage_setup_action in ("run_storage_mount", "wait_for_storage_mount"):
@@ -2954,6 +3013,8 @@ def storage_card_state(snap: Snapshot) -> str:
         return "Card reader unavailable"
     if action == "bridge_protocol_pending":
         return "Card reader starting"
+    if action == "wait_for_storage_reconnect":
+        return "Card reader reconnecting"
     if action == "insert_card":
         return "No card inserted"
     if action in ("run_storage_mount", "wait_for_storage_mount"):

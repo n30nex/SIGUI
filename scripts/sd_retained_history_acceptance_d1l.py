@@ -13,10 +13,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
     from sd_file_canary_d1l import storage_file_gate_ready, wait_for_storage_ready
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
     from scripts.sd_file_canary_d1l import storage_file_gate_ready, wait_for_storage_ready
 
 
@@ -140,7 +140,7 @@ def run_acceptance(
     ]
     post_commands = ["storage status", *retained_readback_commands(token), "health"]
     results: list[dict] = []
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         storage_before, ready_wait_results, mount_attempt = wait_for_storage_ready(
             ser,
@@ -170,6 +170,8 @@ def run_acceptance(
             "retained_canary_unavailable_ok": True,
             "filecanary_unavailable_ok": filecanary_unavailable(filecanary_result),
             "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
+            "storage_file_gate_ready_after": False,
+            "storage_after": storage_before,
             "storage_ready_waited": len(ready_wait_results) > 1,
             "storage_ready_poll_count": sum(
                 1 for result in ready_wait_results if result.get("cmd") == "storage status"
@@ -181,16 +183,16 @@ def run_acceptance(
         return report
 
     if include_reboot:
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             reboot_result = send_console_command(ser, "reboot", timeout)
             results.append(reboot_result)
         time.sleep(reboot_settle_sec)
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
             results.extend(run_commands(ser, post_commands, timeout))
         commands = [*pre_commands, "reboot", *post_commands]
     else:
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
             results.append(send_console_command(ser, "health", timeout))
         commands = [*pre_commands, "health"]
@@ -207,6 +209,8 @@ def run_acceptance(
     post_readbacks_ok = readbacks_pass(post_by_command, token, fingerprint) if include_reboot else True
     health_ok = by_command.get("health", {}).get("ok") is True
     storage_after = post_by_command.get("storage status", pre_by_command.get("storage status", {}))
+    storage_file_gate_ready_before = storage_file_gate_ready(storage_before)
+    storage_file_gate_ready_after = storage_file_gate_ready(storage_after)
 
     return {
         "schema": 1,
@@ -221,7 +225,8 @@ def run_acceptance(
         "allow_unavailable": allow_unavailable,
         "retained_canary_passed": canary_ok,
         "filecanary_passed": filecanary_ok,
-        "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
+        "storage_file_gate_ready_before": storage_file_gate_ready_before,
+        "storage_file_gate_ready_after": storage_file_gate_ready_after,
         "storage_ready_waited": len(ready_wait_results) > 1,
         "storage_ready_poll_count": sum(
             1 for result in ready_wait_results if result.get("cmd") == "storage status"
@@ -231,7 +236,15 @@ def run_acceptance(
         "post_reboot_readbacks_ok": post_readbacks_ok,
         "storage_after": storage_after,
         "health_ok": health_ok,
-        "ok": canary_ok and filecanary_ok and pre_readbacks_ok and post_readbacks_ok and health_ok,
+        "ok": (
+            canary_ok
+            and filecanary_ok
+            and storage_file_gate_ready_before
+            and storage_file_gate_ready_after
+            and pre_readbacks_ok
+            and post_readbacks_ok
+            and health_ok
+        ),
         "results": results,
     }
 

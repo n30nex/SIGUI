@@ -2,10 +2,11 @@ from scripts import sd_retained_history_acceptance_d1l as retained_accept
 
 
 READY_STORAGE = (
-    '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready",'
+    '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready","filesystem":"fat32",'
     '"present":true,"mounted":true,"data_root_ready":true,'
     '"rp2040_protocol_supported":true,"file_ops":true,"atomic_rename":true,'
-    '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
+    '"file_line_max":512,"file_chunk_max":192,"path_max":96,'
+    '"status_stale":false,"presence_stale":false,"refresh_failures":0},'
     '"data_enabled":true,"data_backend":"mixed","message_store_backend":"sd",'
     '"dm_store_backend":"sd","route_store_backend":"sd","packet_log_backend":"sd",'
     '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
@@ -29,6 +30,9 @@ class FakeSerial:
 
     def reset_input_buffer(self):
         self.reset_count += 1
+
+    def open(self):
+        pass
 
     def __enter__(self):
         return self
@@ -108,7 +112,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
         f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[{{"target":"{fp}"}}]}}\n',
         f'{{"schema":1,"ok":true,"cmd":"packets search","entries":[{{"note":"sd-canary {token}"}}]}}\n',
         '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
-        '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready"}}\n',
+        READY_STORAGE,
         f'{{"schema":1,"ok":true,"cmd":"messages public","entries":[{{"text":"sd-retained-canary {token}"}}]}}\n',
         f'{{"schema":1,"ok":true,"cmd":"messages dm","entries":[{{"fingerprint":"{fp}","text":"sd-retained-canary {token}"}}]}}\n',
         f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[{{"target":"{fp}"}}]}}\n',
@@ -137,5 +141,61 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
     assert report["retained_canary_passed"] is True
     assert report["pre_reboot_readbacks_ok"] is True
     assert report["post_reboot_readbacks_ok"] is True
+    assert report["storage_file_gate_ready_before"] is True
+    assert report["storage_file_gate_ready_after"] is True
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
+
+
+def test_acceptance_rejects_nvs_readbacks_when_post_reboot_sd_is_missing(monkeypatch):
+    token = "sdToken1"
+    fp = retained_accept.fingerprint_for_token(token)
+    no_card_storage = (
+        '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"no_card",'
+        '"present":false,"mounted":false,"data_root_ready":false,'
+        '"rp2040_protocol_supported":true,"file_ops":false,"atomic_rename":false,'
+        '"status_stale":false,"presence_stale":false,"refresh_failures":0},'
+        '"data_enabled":true,"data_backend":"nvs","message_store_backend":"nvs",'
+        '"dm_store_backend":"nvs","route_store_backend":"nvs","packet_log_backend":"nvs",'
+        '"stores":{"messages":"nvs","dm":"nvs","routes":"nvs","packets":"nvs"}}\n'
+    )
+    responses = [
+        READY_STORAGE,
+        '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+        f'{{"schema":1,"ok":true,"cmd":"storage retained-canary","token":"{token}","fingerprint":"{fp}"}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"messages public","entries":[{{"text":"sd-retained-canary {token}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"messages dm","entries":[{{"fingerprint":"{fp}","text":"sd-retained-canary {token}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[{{"target":"{fp}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"packets search","entries":[{{"note":"sd-canary {token}"}}]}}\n',
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true}\n',
+        no_card_storage,
+        f'{{"schema":1,"ok":true,"cmd":"messages public","entries":[{{"text":"sd-retained-canary {token}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"messages dm","entries":[{{"fingerprint":"{fp}","text":"sd-retained-canary {token}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[{{"target":"{fp}"}}]}}\n',
+        f'{{"schema":1,"ok":true,"cmd":"packets search","entries":[{{"note":"sd-canary {token}"}}]}}\n',
+        '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+    ]
+    serials = [FakeSerial(responses[:7]), FakeSerial(responses[7:8]), FakeSerial(responses[8:])]
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: serials.pop(0)
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
+        allow_unavailable=False,
+    )
+
+    assert report["pre_reboot_readbacks_ok"] is True
+    assert report["post_reboot_readbacks_ok"] is True
+    assert report["storage_file_gate_ready_before"] is True
+    assert report["storage_file_gate_ready_after"] is False
+    assert report["storage_after"]["sd"]["state"] == "no_card"
+    assert report["ok"] is False

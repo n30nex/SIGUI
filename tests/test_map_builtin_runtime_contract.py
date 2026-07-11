@@ -82,6 +82,11 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     wait_for_sd = body(
         service, "static bool wait_for_sd_cache", "static void fill_placeholder"
     )
+    wait_reason = body(
+        service,
+        "static void set_storage_wait_message_locked",
+        "static bool generation_visible_locked",
+    )
 
     assert run.count("for (uint8_t i = 0;") == 1
     assert run.index("d1l_map_tile_store_read(") < run.index("d1l_map_tile_store_fetch(")
@@ -93,6 +98,18 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     assert "d1l_storage_status(&storage)" in wait_for_sd
     assert "d1l_map_tile_store_sd_ready(&storage)" in wait_for_sd
     assert "*out_storage = storage" in wait_for_sd
+    assert "set_storage_wait_message_locked(&storage)" in wait_for_sd
+    assert "set_storage_wait_message_locked(&storage)" in run
+    for phase in (
+        '"sd_attention"',
+        '"sd_card_required"',
+        '"sd_fat32_required"',
+        '"sd_reconnecting"',
+        '"sd_cache_required"',
+    ):
+        assert phase in wait_reason
+    assert '"insert_card"' in wait_reason
+    assert '"wait_for_storage_reconnect"' in wait_reason
     assert "D1L_MAP_SD_POLL_MS 500U" in service
     for forbidden in (
         "d1l_storage_status_refresh",

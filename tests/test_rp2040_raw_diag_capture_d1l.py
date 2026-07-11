@@ -27,6 +27,9 @@ class FakeSerial:
     def reset_input_buffer(self):
         self.reset_count += 1
 
+    def open(self):
+        pass
+
     def __enter__(self):
         return self
 

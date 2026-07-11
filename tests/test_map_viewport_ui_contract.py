@@ -136,12 +136,31 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
         "static void map_viewport_apply_service_status",
         "static void map_viewport_update_controls",
     )
-    assert 'title = "Waiting for SD"' in status
-    assert 'detail = "Insert a FAT32 card, or wait while it prepares."' in status
-    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Waiting for SD")' in status
+    assert 'title = "Waiting for storage"' in status
+    assert 'detail = "The card reader is starting or checking the SD card."' in status
+    assert 'lv_label_set_text(s_viewport_drag_hint_label, "Storage starting")' in status
+
+    initial = function_body(
+        source,
+        "static void map_viewport_copy",
+        "static int32_t map_drag_clamp",
+    )
+    assert 'map_storage_needs_attention(snapshot)' in initial
+    assert '*title = "SD card required";' in initial
+    assert '*title = "FAT32 card required";' in initial
+    assert '*title = "Waiting for storage";' in initial
+    assert '"Insert a FAT32 card, or wait while it prepares."' not in initial
     assert 'lv_label_set_text(s_viewport_drag_hint_label, "Waiting for Wi-Fi")' in status
     assert 'lv_label_set_text(s_viewport_drag_hint_label, "Checking secure time")' in status
     assert 'lv_label_set_text(s_viewport_drag_hint_label, "Map paused")' in status
+    for phase in (
+        '"sd_attention"',
+        '"sd_card_required"',
+        '"sd_fat32_required"',
+        '"sd_reconnecting"',
+        '"sd_cache_required"',
+    ):
+        assert phase in status
     assert "status->rendered_tiles + status->failed_tiles" in status
     assert "lv_bar_set_value(s_viewport_progress_bar, completed, LV_ANIM_OFF)" in status
     assert 'strcmp(status->phase, "loading_cache") == 0' in status
@@ -361,6 +380,64 @@ def test_ambient_mesh_updates_do_not_tear_down_an_active_map_view():
     )
 
 
+def test_storage_and_wifi_transitions_refresh_non_map_ui_without_tearing_down_map():
+    source = read("main/ui/ui_phase1.c")
+    generation_struct = source.split("typedef struct {\n    uint32_t rx_packets;", 1)[1].split(
+        "} d1l_ui_content_generation_t;", 1
+    )[0]
+    generation_builder = function_body(
+        source,
+        "static d1l_ui_content_generation_t content_generation_from_snapshot",
+        "static bool content_generation_text_equal",
+    )
+    generation_equal = function_body(
+        source,
+        "static bool content_generation_equal",
+        "static void remember_rendered_content_generation",
+    )
+    map_input = function_body(
+        source,
+        "static d1l_ui_map_render_input_t map_render_input_from_snapshot",
+        "static void remember_rendered_map_input",
+    )
+    refresh_timer = function_body(
+        source, "static void refresh_timer_cb", "static void create_top_bar"
+    )
+    changed = refresh_timer.split(
+        "if (content_generation_changed_from_rendered(&s_snapshot))", 1
+    )[1]
+
+    fields = (
+        "storage_sd_present",
+        "storage_sd_mounted",
+        "storage_sd_data_root_ready",
+        "storage_sd_needs_fat32",
+        "storage_setup_required",
+        "storage_data_enabled",
+        "storage_retained_sd_degraded",
+        "map_tile_cache_ready",
+        "wifi_connected",
+        "wifi_connecting",
+        "storage_sd_state",
+        "storage_setup_action",
+    )
+    for field in fields:
+        assert field in generation_struct
+        assert f".{field} = snapshot->{field}" in generation_builder
+        assert f"left->{field}" in generation_equal
+        assert f"right->{field}" in generation_equal
+
+    assert "content_generation_text_equal(left->storage_sd_state" in generation_equal
+    assert "content_generation_text_equal(left->storage_setup_action" in generation_equal
+    assert "snapshot->map_tile_cache_ready" not in map_input
+    assert "snapshot->wifi_connected" not in map_input
+    map_branch = changed.split("} else {", 1)[0]
+    non_map_branch = changed.split("} else {", 1)[1]
+    assert "if (map_active)" in changed
+    assert "remember_rendered_content_generation(&s_snapshot);" in map_branch
+    assert "request_content_refresh();" in non_map_branch
+
+
 def test_map_ui_releases_before_covers_and_automation_is_fail_closed():
     source = read("main/ui/ui_phase1.c")
 
@@ -454,7 +531,7 @@ def test_removed_provider_and_offline_map_ui_cannot_reappear():
             "set location",
             "cache status",
             "wi-fi needed",
-            "waiting for sd",
+            "waiting for storage",
             "loading map",
         "map unavailable",
     ):
@@ -469,7 +546,10 @@ def test_map_options_is_a_quiet_two_row_menu():
 
     assert 'map_menu_row(parent, 68, "Set location"' in options
     assert 'map_menu_row(parent, 140, "Cache status"' in options
-    assert 'cache_ready ? "SD ready" : "Needs SD"' in options
+    assert 'const char *cache_status = "Storage starting";' in options
+    assert 'cache_status = "SD ready";' in options
+    assert 'cache_status = "Insert SD";' in options
+    assert 'cache_status = "Needs FAT32";' in options
     assert options.count("map_menu_row(") == 2
     assert 'map_panel(parent, 16, 280, 448, 80)' in options
     assert (
@@ -534,7 +614,19 @@ def test_home_map_status_reports_setup_requirements_not_sd_as_saved_content():
 
     assert 'const char *map_status = "Ready to open";' in source
     assert 'map_status = "Set a location";' in source
-    assert 'map_status = "Needs SD";' in source
+    assert "map_status = home_map_storage_state(snapshot);" in source
+    assert 'return "SD starting";' in source
+    assert 'return "Insert SD";' in source
+    helper = source.split("static const char *home_map_storage_state", 1)[1].split(
+        "d1l_ui_home_box_t d1l_ui_home_destination_box", 1
+    )[0]
+    assert helper.index('strcmp(snapshot->storage_setup_action, "insert_card")') < helper.index(
+        "d1l_ui_home_sd_state(snapshot)"
+    )
+    assert helper.index("snapshot->storage_sd_needs_fat32") < helper.index(
+        "d1l_ui_home_sd_state(snapshot)"
+    )
+    assert "home_storage_needs_attention(snapshot)" in helper
     assert 'map_status = "Needs Wi-Fi";' in source
     assert '"Map cache ready"' not in source
     assert '"Map setup needed"' not in source

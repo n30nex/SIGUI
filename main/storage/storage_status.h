@@ -39,12 +39,15 @@ typedef struct {
     uint32_t manager_attempt;
     uint32_t manager_backoff_ms;
     uint32_t manager_initial_ping_timeouts;
+    uint32_t bridge_status_refresh_failures;
     esp_err_t last_error;
     bool manager_running;
     bool force_nvs;
     bool manager_bridge_response_seen;
     bool manager_auto_reset_pending;
     bool manager_auto_reset_attempted;
+    bool bridge_status_stale;
+    bool sd_presence_stale;
     bool retained_sd_degraded;
     char sd_probe_power[8];
     char sd_probe_mode[16];

@@ -1,3 +1,5 @@
+import json
+
 from scripts import sd_file_canary_d1l
 
 
@@ -8,8 +10,9 @@ def ready_storage_status(manager_state: str | None = None) -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
         f"{manager}"
-        '"sd":{"state":"ready","present":true,"mounted":true,'
+        '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"rp2040_protocol_supported":true,'
+        '"status_stale":false,"presence_stale":false,"refresh_failures":0,'
         '"file_ops":true,"atomic_rename":true,'
         '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
         '"data_enabled":true,"data_backend":"mixed",'
@@ -17,6 +20,27 @@ def ready_storage_status(manager_state: str | None = None) -> str:
         '"route_store_backend":"sd","packet_log_backend":"sd",'
         '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
     )
+
+
+def test_sd_file_gate_rejects_stale_or_failed_status_refresh():
+    fresh = json.loads(ready_storage_status())
+    assert sd_file_canary_d1l.storage_file_gate_ready(fresh)
+
+    stale = json.loads(ready_storage_status())
+    stale["sd"]["status_stale"] = True
+    assert not sd_file_canary_d1l.storage_file_gate_ready(stale)
+
+    presence_stale = json.loads(ready_storage_status())
+    presence_stale["sd"]["presence_stale"] = True
+    assert not sd_file_canary_d1l.storage_file_gate_ready(presence_stale)
+
+    failed = json.loads(ready_storage_status())
+    failed["sd"]["refresh_failures"] = 1
+    assert not sd_file_canary_d1l.storage_file_gate_ready(failed)
+
+    wrong_filesystem = json.loads(ready_storage_status())
+    wrong_filesystem["sd"]["filesystem"] = "exfat"
+    assert not sd_file_canary_d1l.storage_file_gate_ready(wrong_filesystem)
 
 
 def canary_success() -> str:
@@ -48,6 +72,9 @@ class FakeSerial:
 
     def reset_input_buffer(self):
         self.reset_count += 1
+
+    def open(self):
+        pass
 
     def __enter__(self):
         return self

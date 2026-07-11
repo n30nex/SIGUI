@@ -179,6 +179,26 @@ def send_console_command(ser, command: str, timeout: float) -> dict:
     return read_command_result(ser, expected_command_name(command), timeout)
 
 
+def open_d1l_serial(serial_module, *, port: str, baudrate: int, timeout: float):
+    """Open the ESP32 console without pulsing its auto-reset control lines."""
+    ser = serial_module.Serial(port=None, baudrate=baudrate, timeout=timeout)
+    try:
+        # pySerial applies its cached DTR/RTS states while opening. Configure
+        # both while the handle is still closed so CH340-backed D1L consoles
+        # never observe pySerial's reset-prone default asserted states.
+        ser.dtr = False
+        ser.rts = False
+        ser.port = port
+        ser.open()
+    except Exception:
+        try:
+            ser.close()
+        except Exception:
+            pass
+        raise
+    return ser
+
+
 def wait_after_reboot(ser, settle_seconds: float) -> None:
     time.sleep(max(settle_seconds, 7.0))
     ser.reset_input_buffer()
@@ -276,7 +296,7 @@ def run_serial_smoke(port: str, baud: int, timeout: float, manual_touch: bool, p
         raise SystemExit("pyserial is required for hardware smoke: python -m pip install pyserial") from exc
 
     results: list[dict] = []
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         for command in SMOKE_COMMANDS:

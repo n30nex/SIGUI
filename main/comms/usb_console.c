@@ -1392,12 +1392,13 @@ static void cmd_storage_status(void)
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
     printf(",\"filesystem\":");
     print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
-    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"mount_point\":",
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"presence_stale\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"status_stale\":%s,\"refresh_failures\":%lu,\"mount_point\":",
            bool_json(status.direct_supported),
            bool_json(status.rp2040_bridge_required),
            bool_json(status.rp2040_bridge_ready),
            bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
+           bool_json(status.sd_presence_stale),
            bool_json(status.sd_mounted),
            bool_json(status.sd_data_root_ready),
            bool_json(status.sd_needs_fat32),
@@ -1408,7 +1409,9 @@ static void cmd_storage_status(void)
            (unsigned long)status.file_chunk_max,
            (unsigned long)status.path_max,
            bool_json(status.atomic_rename_supported),
-           bool_json(status.response_truncated));
+           bool_json(status.response_truncated),
+           bool_json(status.bridge_status_stale),
+           (unsigned long)status.bridge_status_refresh_failures);
     print_json_string(status.mount_point ? status.mount_point : "");
     printf(",\"data_root\":");
     print_json_string(status.data_root ? status.data_root : "");
@@ -1558,12 +1561,15 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
            bool_json(status.manager_auto_reset_pending),
            bool_json(status.manager_auto_reset_attempted));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
-    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s},\"setup_action\":",
+    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"presence_stale\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"status_stale\":%s,\"refresh_failures\":%lu},\"setup_action\":",
            bool_json(status.rp2040_bridge_ready),
            bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
+           bool_json(status.sd_presence_stale),
            bool_json(status.sd_mounted),
-           bool_json(status.sd_data_root_ready));
+           bool_json(status.sd_data_root_ready),
+           bool_json(status.bridge_status_stale),
+           (unsigned long)status.bridge_status_refresh_failures);
     print_json_string(status.setup_action ? status.setup_action : "not_available");
     printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"note\":");
     print_json_string(status.note ? status.note : "");

@@ -87,8 +87,10 @@ def test_status_protocol_lines_cover_boot_states():
     assert ready["needs_fat32"] == "0"
     assert setup["state"] == "not_fat32_or_unmountable"
     assert setup["needs_fat32"] == "1"
+    assert fat16["state"] == "not_fat32_or_unmountable"
     assert fat16["mounted"] == "1"
     assert fat16["fs"] == "fat16"
+    assert fat16["needs_fat32"] == "1"
     assert fat16["file_ops"] == "0"
     assert ready["file_ops"] == "1"
     assert ready["file_line_max"] == str(FILE_LINE_MAX)
@@ -317,6 +319,7 @@ def test_non_fat32_mounted_card_blocks_file_ops_before_deskos_prepare():
 def test_storage_edge_scenarios_and_constants_match_c_contract():
     root_missing = parse_tokens(reply_for_request(STATUS_REQUEST, SCENARIOS["root-missing"]))
 
+    assert root_missing["state"] == "creating_deskos_files"
     assert root_missing["present"] == "1"
     assert root_missing["mounted"] == "1"
     assert root_missing["deskos"] == "0"

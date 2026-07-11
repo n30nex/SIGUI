@@ -894,11 +894,17 @@ def unsafe_sd_commands(data: dict) -> list[str]:
 
 
 def storage_file_gate_ready_status(storage_status: dict) -> bool:
+    if not isinstance(storage_status, dict):
+        return False
     sd = storage_status.get("sd")
     if not isinstance(sd, dict):
         return False
     return (
-        sd.get("state") == "ready"
+        sd.get("status_stale") is False
+        and sd.get("presence_stale") is False
+        and int_value(sd.get("refresh_failures")) == 0
+        and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -906,6 +912,16 @@ def storage_file_gate_ready_status(storage_status: dict) -> bool:
         and sd.get("file_ops") is True
         and sd.get("atomic_rename") is True
         and all(int_value(sd.get(key)) is not None and int_value(sd.get(key)) >= minimum for key, minimum in SD_FILE_LIMITS.items())
+    )
+
+
+def storage_status_fresh_status(storage_status: dict) -> bool:
+    sd = storage_status.get("sd") if isinstance(storage_status, dict) else None
+    return (
+        isinstance(sd, dict)
+        and sd.get("status_stale") is False
+        and sd.get("presence_stale") is False
+        and int_value(sd.get("refresh_failures")) == 0
     )
 
 
@@ -931,6 +947,8 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("allow_unavailable") is not True
         and data.get("storage_file_gate_ready_before") is True
         and data.get("storage_file_gate_ready_after") is True
+        and storage_status_fresh_status(data.get("storage_before"))
+        and storage_status_fresh_status(data.get("storage_after"))
     )
 
 
@@ -946,6 +964,9 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("filecanary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
+        and data.get("storage_file_gate_ready_before") is True
+        and data.get("storage_file_gate_ready_after") is True
+        and storage_file_gate_ready_status(data.get("storage_after"))
         and "reboot" in (data.get("commands") or [])
     )
 
@@ -964,6 +985,8 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("post_reboot_readbacks_ok") is True
         and data.get("pre_map_tile_canary_passed") is True
         and data.get("post_map_tile_canary_passed") is True
+        and storage_status_fresh_status(data.get("storage_before_reboot"))
+        and storage_status_fresh_status(data.get("storage_after_reboot"))
         and "reboot" in (data.get("commands") or [])
     )
 
@@ -982,6 +1005,8 @@ def sd_map_tile_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("storage_file_gate_ready_after") is True
         and data.get("map_tile_backend_ready_before") is True
         and data.get("map_tile_backend_ready_after") is True
+        and storage_status_fresh_status(data.get("storage_before"))
+        and storage_status_fresh_status(data.get("storage_after"))
     )
 
 
@@ -999,6 +1024,8 @@ def sd_export_artifact_common_ok(data: dict, expected_port: str, passed_field: s
         and data.get("storage_file_gate_ready_after") is True
         and data.get("export_backend_ready_before") is True
         and data.get("export_backend_ready_after") is True
+        and storage_status_fresh_status(data.get("storage_before"))
+        and storage_status_fresh_status(data.get("storage_after"))
     )
 
 
@@ -1086,7 +1113,7 @@ def raw_diag_complete(data: dict, expected_port: str) -> bool:
 def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -> bool:
     classification = data.get("classification")
     storage_after = data.get("storage_after") if isinstance(data.get("storage_after"), dict) else {}
-    file_gate_ok = data.get("storage_file_gate_ready") is True or storage_file_gate_ready_status(storage_after)
+    file_gate_ok = storage_file_gate_ready_status(storage_after)
     format_policy_ok = (
         scenario not in {"unformatted", "existing-data"}
         or data.get("format_allowed") is False
@@ -1306,7 +1333,11 @@ def sd_gate(preflight_path: Path | None, root: Path) -> GateResult:
     preflight = read_json(preflight_path)
     classification = preflight.get("classification") if isinstance(preflight.get("classification"), dict) else {}
     classification, obsolete_format_action = sanitized_sd_classification(preflight, classification)
-    ready = preflight.get("ready_for_sd_acceptance") is True and classification.get("storage_file_gate_ready") is True
+    ready = (
+        preflight.get("ready_for_sd_acceptance") is True
+        and classification.get("storage_file_gate_ready") is True
+        and storage_file_gate_ready_status(preflight.get("storage_status"))
+    )
     no_device_format_policy_ok = preflight.get("formats_sd") is False and not obsolete_format_action
     ok = bool(preflight_path and preflight.get("ok") is True and ready and no_device_format_policy_ok)
     details = {
@@ -1399,6 +1430,8 @@ def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
             "port": data.get("port") if data else None,
             "retained_canary_passed": data.get("retained_canary_passed") if data else None,
             "filecanary_passed": data.get("filecanary_passed") if data else None,
+            "storage_file_gate_ready_before": data.get("storage_file_gate_ready_before") if data else None,
+            "storage_file_gate_ready_after": data.get("storage_file_gate_ready_after") if data else None,
             "pre_reboot_readbacks_ok": data.get("pre_reboot_readbacks_ok") if data else None,
             "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
         },

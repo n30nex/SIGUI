@@ -1132,7 +1132,10 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     )[0]
     assert 'map_menu_row(parent, 68, "Set location"' in options
     assert 'map_menu_row(parent, 140, "Cache status"' in options
-    assert 'cache_ready ? "SD ready" : "Needs SD"' in options
+    assert 'const char *cache_status = "Storage starting";' in options
+    assert 'cache_status = "SD ready";' in options
+    assert 'cache_status = "Insert SD";' in options
+    assert 'cache_status = "Needs FAT32";' in options
     assert options.count("map_menu_row(") == 2
     assert '"Built-in map"' not in options
     assert (

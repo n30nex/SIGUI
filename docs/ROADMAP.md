@@ -129,11 +129,11 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 
 ## Immediate Work Queue
 
-1. Publish the combined source merge after its 443-test host pass.
+1. Publish the combined source merge plus #78 SD-state hardening after its 461-test host pass.
 2. Validate the combined commit in Actions and inspect the exact dependency lock, effective `sdkconfig`, firmware/package checksums, and release-gate inputs.
 3. Flash the exact combined artifact to COM12 and repeat SDK identity, boot, Wi-Fi, radio-readiness, SD, health, and reboot proof.
 4. Complete the still-open physical Map control proof: default zoom 10, one-finger pan, `-`/`+`/`Center` over zooms 8 through 14, bounded request/render/cancel, instant completed exact-view Home-to-Map retained-frame reuse, SD-cache reread only when the retained frame is unavailable, and reboot reuse without duplicate network fetches.
-5. Reproduce and close #78's intermittent SD disappearance/false no-card state with transition telemetry, bounded recovery, Map/cache use, reboot, removal/reinsertion, and idle/active hardware windows.
+5. Finish #78 hardware closure. Source reproduction identified two false-state boundaries: periodic pings erased the last confirmed SD snapshot, and valid mount-error replies could report `present=0` without proving removal. The source now preserves confirmed presence unless a strict `no_card` reply arrives, rejects malformed/contradictory/non-FAT32-ready replies, fails closed after three stale refreshes, exposes freshness/presence telemetry, and prevents COM12 test scripts from asserting reset lines. The RP2040 bridge debounces removal and reinsertion only after a ready card proves the exact-board detect signature; a cold mount failure remains an honest error rather than a guessed absence. Exact-commit Map/cache, reboot, removal/reinsertion, and idle/active hardware windows remain required.
 6. Reconcile GitHub labels and split any remaining audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
 7. Execute Stages 3-7 in order. Issues #74-#77 are functional release work, not cosmetic cleanup, but they follow the current Stage 2 integration/SD gate and the Stage 3 wire-conformance foundation.
 
@@ -141,7 +141,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 
 - Map/Wi-Fi branch `de79c9f` passes its Actions jobs and exact-COM12 boot-loop recovery, Wi-Fi enable/reconnect/reboot, bounded scan, internal/DMA telemetry, SD readiness, and ten-minute stability checks. Physical Map entry/download/cache proof is still open.
 - Standalone ESP-IDF 5.5.4 branch `39a043c` passes host, firmware, package, checksum, release, dependency-lock, and effective-config checks in Actions, but has no hardware qualification. Its evidence does not qualify this integration result; the combined commit needs fresh Actions and COM12 proof.
-- The integration source merge preserves both safety contracts and passes 443 host tests plus Map simulator/dry-run checks. It remains unqualified until its Actions jobs, checksums, effective configuration, and exact-COM12 checks pass.
+- The integration source merge plus #78 source hardening preserves the safety contracts and passes 461 host tests, including executable native malformed-reply/presence/stale-policy vectors, generated host-reference wire lines through the production parser, and COM12 serial-line ordering checks. It remains unqualified until its Actions jobs, checksums, effective configuration, and exact-COM12 checks pass.
 - Existing COM12 UI hierarchy/pixel artifacts, SD canaries, and short soaks remain useful regression evidence, but they do not replace current-commit screenshots, the final SD/RF matrices, or the frozen-candidate soak.
 
 ## Validation Notes

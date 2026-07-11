@@ -44,6 +44,38 @@ static void set_message_locked(const char *phase, const char *message)
              message ? message : "");
 }
 
+static bool storage_text_equals(const char *value, const char *expected)
+{
+    return value && expected && strcmp(value, expected) == 0;
+}
+
+static void set_storage_wait_message_locked(const d1l_storage_status_t *storage)
+{
+    if (!storage) {
+        set_message_locked("sd_cache_required", "Waiting for the SD cache");
+        return;
+    }
+    const bool needs_attention = storage->retained_sd_degraded ||
+        storage_text_equals(storage->sd_state, "error") ||
+        storage_text_equals(storage->sd_state, "bridge_reported") ||
+        storage_text_equals(storage->setup_action,
+                            "inspect_rp2040_sd_cmd0_firmware_path") ||
+        storage_text_equals(storage->setup_action,
+                            "inspect_rp2040_sd_mount_error_firmware_path");
+    if (needs_attention) {
+        set_message_locked("sd_attention", "Check the SD card");
+    } else if (storage_text_equals(storage->setup_action, "insert_card")) {
+        set_message_locked("sd_card_required", "Insert a FAT32 SD card");
+    } else if (storage->sd_needs_fat32) {
+        set_message_locked("sd_fat32_required", "A FAT32 SD card is required");
+    } else if (storage_text_equals(storage->setup_action,
+                                   "wait_for_storage_reconnect")) {
+        set_message_locked("sd_reconnecting", "Storage is reconnecting");
+    } else {
+        set_message_locked("sd_cache_required", "Waiting for the SD cache");
+    }
+}
+
 static bool generation_visible_locked(uint32_t generation)
 {
     return s_map.status.visible && s_map.status.generation == generation;
@@ -102,9 +134,11 @@ static bool wait_for_sd_cache(uint32_t generation,
         if (xSemaphoreTake(s_map.lock, pdMS_TO_TICKS(100)) == pdTRUE) {
             if (s_map.status.generation == generation) {
                 s_map.status.sd_cache_ready = ready;
-                set_message_locked(ready ? "loading_cache" : "sd_cache_required",
-                                   ready ? "Loading current map view" :
-                                           "Waiting for the SD cache");
+                if (ready) {
+                    set_message_locked("loading_cache", "Loading current map view");
+                } else {
+                    set_storage_wait_message_locked(&storage);
+                }
             }
             xSemaphoreGive(s_map.lock);
         }
@@ -290,9 +324,11 @@ static void run_generation(const d1l_map_tile_plan_t *plan, uint32_t generation)
             s_map.status.worker_running = true;
             s_map.status.sd_cache_ready = sd_ready;
             s_map.status.wifi_connected = initial_connectivity.wifi_connected;
-            set_message_locked(sd_ready ? "loading_cache" : "sd_cache_required",
-                               sd_ready ? "Loading current map view" :
-                                          "Waiting for the SD cache");
+            if (sd_ready) {
+                set_message_locked("loading_cache", "Loading current map view");
+            } else {
+                set_storage_wait_message_locked(&storage);
+            }
         }
         xSemaphoreGive(s_map.lock);
     }
