@@ -27,6 +27,17 @@
 - [x] MeshCore local identity is generated and retained.
 - [x] Controlled MeshCore advert TX/RX validated with a local bot.
 - [x] Controlled MeshCore Public `test` TX/RX validated with a local bot.
+- [x] Issue #65 has a separate Ubuntu 24.04, recursively checked-out,
+  Clang-18 ASan+UBSan/libFuzzer wire-envelope job that gates firmware build
+  and uploads a commit-named JSON artifact.
+- [ ] The current commit's wire-envelope artifact passes with
+  `coverage_level="wire_envelope_only"`, `closure_ready=false`, the exact
+  upstream gitlink, 100,000 deterministic fuzz inputs, and zero sanitizer or
+  canary failures. This is structural evidence only.
+- [ ] Issue #65 full conformance closes only after semantic,
+  production-cryptography, duplicate/replay/lifetime, retained-state, and
+  real-peer coverage passes for the entire declared MeshCore 1.0 surface; the
+  wire-envelope artifact cannot satisfy this item.
 - [x] Smoke JSON and monitor logs archived.
 
 ## Phase 3 UI Shell

@@ -1,0 +1,251 @@
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from scripts import meshcore_conformance_d1l as conformance
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
+MANIFEST = ROOT / "tests" / "meshcore_conformance" / "manifest.json"
+CORPUS = ROOT / "tests" / "meshcore_conformance" / "corpus.json"
+
+
+def read(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+    assert manifest["coverage_boundary"] == "wire_envelope_only"
+    assert manifest["issue_65_closure_eligible"] is False
+    assert manifest["upstream"]["commit"] == "e8d3c53ba1ea863937081cd0caad759b832f3028"
+    assert manifest["vectors"]["local_to_upstream"] == 432
+    assert manifest["vectors"]["upstream_to_local"] == 432
+    assert manifest["vectors"]["total"] == 864
+    assert [item["name"] for item in manifest["vector_matrix"]["payload_types"]] == [
+        "TXT", "ACK", "ADVERT", "GRP_TXT", "PATH", "MULTIPART"
+    ]
+    assert len(manifest["vector_matrix"]["route_types"]) == 4
+    assert len(manifest["vector_matrix"]["path_cases"]) == 9
+    assert manifest["vector_matrix"]["payload_lengths"] == [1, 184]
+    assert manifest["fuzz_corpus"]["manifest"] == "tests/meshcore_conformance/corpus.json"
+    assert manifest["fuzz_corpus"]["seed_count"] == 5
+    assert manifest["fuzz_corpus"]["sha256"] == hashlib.sha256(CORPUS.read_bytes()).hexdigest()
+    assert manifest["fuzz"] == {
+        "engine": "libFuzzer",
+        "runs": 100000,
+        "seed": 13746277,
+        "max_input_bytes": 255,
+        "sanitizers": ["address", "undefined"],
+    }
+    for relative, expected in manifest["upstream"]["sources"].items():
+        actual = hashlib.sha256(
+            (ROOT / "third_party" / "MeshCore" / relative).read_bytes()
+        ).hexdigest()
+        assert actual == expected
+
+
+def test_corpus_manifest_is_deterministic_and_hash_checked():
+    corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
+
+    assert corpus["encoding"] == "hex"
+    assert corpus["coverage_boundary"] == "local_wire_decoder_only"
+    assert len(corpus["seeds"]) >= 5
+    assert len({seed["name"] for seed in corpus["seeds"]}) == len(corpus["seeds"])
+    for seed in corpus["seeds"]:
+        payload = bytes.fromhex(seed["hex"])
+        assert payload
+        assert len(payload) <= 255
+        assert hashlib.sha256(payload).hexdigest() == seed["sha256"]
+
+
+def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
+    harness = read("tests/meshcore_conformance/meshcore_wire_conformance.cpp")
+    fuzzer = read("tests/meshcore_conformance/meshcore_wire_fuzz.cpp")
+    shim = read("tests/meshcore_conformance/meshcore_packet_checked.hpp")
+    sha_stub = read("tests/meshcore_conformance/stubs/SHA256.h")
+
+    assert "kExpectedPerDirection == 432" in harness
+    assert "upstream_to_local == 432U" in harness
+    assert "local_to_upstream == 432U" in harness
+    assert "value <= 0xFFU" in harness
+    assert "result.valid != 119U" in harness
+    assert "result.invalid != 137U" in harness
+    assert "kRequired == 254U" in harness
+    assert "data_region_unchanged" in harness
+    assert "d1l_meshcore_wire_decode" in fuzzer
+    assert "d1l_meshcore_wire_encode" in fuzzer
+    assert "packet.header != data[0]" in fuzzer
+    assert "packet.version != ((data[0] >> 6U) & 0x03U)" in fuzzer
+    assert "D1L_MESHCORE_MAX_PACKET_PAYLOAD == MAX_PACKET_PAYLOAD" in shim
+    assert "D1L_MESHCORE_ROUTE_DIRECT == ROUTE_TYPE_DIRECT" in shim
+    assert "D1L_MESHCORE_PAYLOAD_MULTIPART == PAYLOAD_TYPE_MULTIPART" in shim
+    assert "Packet" not in fuzzer
+    assert "MAX_PACKET_PAYLOAD == 184" in shim
+    assert "std::abort()" in sha_stub
+    assert "update(const void *" in sha_stub
+
+
+def test_production_service_uses_the_codec_exercised_by_the_harness():
+    service = read("main/mesh/meshcore_service.c")
+    cmake = read("main/CMakeLists.txt")
+
+    assert '#include "mesh/meshcore_wire.h"' in service
+    assert '"mesh/meshcore_wire.c"' in cmake
+    assert service.count("d1l_meshcore_wire_decode(") == 5
+    assert service.count("d1l_meshcore_wire_write_prefix(") == 3
+    assert "parse_wire_packet" not in service
+    for legacy_helper in [
+        "path_len_valid",
+        "path_hash_size",
+        "path_hash_count",
+        "path_byte_len",
+    ]:
+        assert not re.search(
+            rf"static\s+(?:bool|uint8_t)\s+{legacy_helper}\s*\(", service
+        )
+
+
+def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    output = tmp_path / "meshcore_conformance.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--cc",
+            "clang-18",
+            "--cxx",
+            "clang++-18",
+            "--commit",
+            commit,
+            "--seed",
+            "13746277",
+            "--runs",
+            "100000",
+            "--out",
+            str(output),
+            "--dry-run",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["execution_complete"] is False
+    assert report["status"] == "dry_run"
+    assert report["coverage_boundary"] == "wire_envelope_only"
+    assert report["coverage_level"] == "wire_envelope_only"
+    assert report["issue_65_closure_eligible"] is False
+    assert report["closure_ready"] is False
+    assert report["source_verification"]["verified"] is True
+    assert report["source_verification"]["gitlink_mode"] == "160000"
+    assert report["source_verification"]["gitlink_commit"] == (
+        "e8d3c53ba1ea863937081cd0caad759b832f3028"
+    )
+    assert report["source_verification"]["checkout_commit"] == commit
+    assert report["source_verification"]["allowlisted_source_sha256_verified"] is True
+    assert report["corpus"]["verified"] is True
+    assert report["scope"]["fuzz_target"] == "local_wire_decoder_only"
+    assert report["scope"]["packet_semantics_covered"] is False
+    assert len(report["vector_matrix"]["payload_types"]) == 6
+    assert report["zero_overrun"] is None
+    assert report["zero_corruption"] is None
+    commands = "\n".join(" ".join(command) for command in report["commands"])
+    assert "third_party\\MeshCore\\src\\Packet.cpp" in commands or (
+        "third_party/MeshCore/src/Packet.cpp" in commands
+    )
+    assert "-fsanitize=fuzzer,address,undefined" in commands
+    assert "-fsanitize=address,undefined" in commands
+    assert not re.search(r"\bCOM\d+\b", commands, re.IGNORECASE)
+
+
+def test_manifest_validation_rejects_empty_upstream_source_allowlist(tmp_path, monkeypatch):
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    manifest["upstream"]["sources"] = {}
+    changed = tmp_path / "manifest.json"
+    changed.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(conformance, "MANIFEST_PATH", changed)
+
+    with pytest.raises(conformance.GateFailure, match="source allowlist"):
+        conformance.load_manifest()
+
+
+def test_github_actions_cannot_turn_dry_run_into_a_green_gate(tmp_path):
+    output = tmp_path / "forbidden-dry-run.json"
+    env = os.environ.copy()
+    env["GITHUB_ACTIONS"] = "true"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--out",
+            str(output),
+            "--dry-run",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["status"] == "fail"
+    assert report["passed"] is False
+    assert "dry-run is forbidden in GitHub Actions" in report["failure"]
+
+
+def test_runner_persists_fuzzer_reproducers_and_records_elapsed_time():
+    runner = SCRIPT.read_text(encoding="utf-8")
+    assert "meshcore_conformance_findings_" in runner
+    assert 'f"-artifact_prefix={findings_dir}{os.sep}"' in runner
+    assert '"duration_ms": fuzz_duration_ms' in runner
+    assert 'report["zero_overrun"] = True' in runner
+    assert 'report["zero_corruption"] = True' in runner
+
+
+def test_wrong_seed_writes_failure_json_and_exits_nonzero(tmp_path):
+    output = tmp_path / "failed.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--seed",
+            "1",
+            "--runs",
+            "100000",
+            "--out",
+            str(output),
+            "--dry-run",
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["status"] == "fail"
+    assert "deterministic seed 13746277" in report["failure"]

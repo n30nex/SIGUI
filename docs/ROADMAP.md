@@ -55,6 +55,14 @@ Stage 2 closes only when the combined Actions artifact passes the quick COM12 in
 
 ### Stage 3 - Establish MeshCore conformance
 
+Status: **in progress under issue #65.** The first bounded slice extracts and
+checks only the wire envelope against the pinned upstream packet code under
+ASan/UBSan/libFuzzer. Its artifact is
+`coverage_level="wire_envelope_only"`, must remain `closure_ready=false`, and
+does not satisfy the semantic, cryptographic, retained-state, real-peer, or
+full issue #65 closure requirements. See
+[MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
+
 1. Decide and document a narrow adapter around pinned upstream MeshCore packet/routing/chat machinery, or document why the local implementation remains and its conformance boundary.
 2. Add bidirectional golden vectors for every supported packet type and channel mode against pinned MeshCore.
 3. Cover advert, Public, DM encryption/decryption, ACK, multipart ACK+PATH, flood/direct headers, PATH, trace, invalid length/MAC/signature/path/payload, and self-message behavior.
@@ -117,7 +125,7 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 | Workstream | Audit coverage | Existing tracking | Closure proof |
 |---|---|---|---|
 | Supported integration image | P0.1, P0.16 | #63, #13, #12, #14 | One ESP-IDF 5.5.4 Actions artifact passes COM12 boot/Wi-Fi/radio/SD/Map/reboot proof. |
-| MeshCore conformance foundation | P0.2, P0.11 | #7 and #17 are insufficiently specific | Bidirectional upstream vectors, malformed input coverage, RX fuzzing, and declared supported packet surface pass in CI. |
+| MeshCore conformance foundation | P0.2, P0.11 | #65 | Bidirectional upstream vectors, malformed input coverage, RX fuzzing, and declared supported packet surface pass in CI. The wire-envelope-only slice is necessary but cannot close this row. |
 | Reliable DM session | P0.3, P0.4, P0.5, P0.10 | #7 | Official peer proves ACK, retry, truthful states, heard-node send, duplicate suppression, timeout, and reboot recovery. |
 | Contact and channel parity | P0.6, P0.7 | #67; #20 is currently P2 and too narrow | Official-client contact import/export plus two independently keyed retained channels pass without history leakage. |
 | Routing and diagnostics | P0.8, P0.9 | #7, #19 | Real trace/PATH, reciprocal learning, route expiry, direct send, and safe flood fallback pass against a compatible peer. |

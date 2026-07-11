@@ -10,8 +10,9 @@ def read(rel: str) -> str:
 
 def test_meshcore_service_builds_public_group_text_packets():
     source = read("main/mesh/meshcore_service.c")
+    wire = read("main/mesh/meshcore_wire.h")
     assert "D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD" in source
-    assert "D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U" in source
+    assert "D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U" in wire
     assert "0x8b, 0x33, 0x87, 0xe9" in source
     assert "mbedtls_aes_crypt_ecb" in source
     assert "mbedtls_md_hmac" in source
@@ -33,7 +34,7 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
         "static esp_err_t calc_dm_ack_hash", 1
     )[0]
     dm_builder = source.split("static esp_err_t build_dm_text_packet", 1)[1].split(
-        "static uint8_t path_hash_size", 1
+        "static void parse_rx_public_packet", 1
     )[0]
     public_sender = source.split("esp_err_t d1l_meshcore_service_send_public", 1)[1].split(
         "esp_err_t d1l_meshcore_service_send_dm", 1
@@ -64,9 +65,10 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
 
 def test_meshcore_service_decodes_verified_adverts():
     source = read("main/mesh/meshcore_service.c")
+    wire = read("main/mesh/meshcore_wire.h")
     cmake = read("main/CMakeLists.txt")
     header = read("main/mesh/meshcore_service.h")
-    assert "D1L_MESHCORE_PAYLOAD_ADVERT 0x04U" in source
+    assert "D1L_MESHCORE_PAYLOAD_ADVERT 0x04U" in wire
     assert "D1L_MESHCORE_ADVERT_MIN_PAYLOAD" in source
     assert "ed25519_verify" in source
     assert "d1l_node_store_upsert_advert" in source

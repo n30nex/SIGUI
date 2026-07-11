@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "encoding": "hex",
+  "coverage_boundary": "local_wire_decoder_only",
+  "seeds": [
+    {
+      "name": "minimal_flood_text",
+      "description": "Smallest accepted flood text envelope",
+      "hex": "090000",
+      "sha256": "bdb8cd2e44905845887b8f16d3a0c9f33103496315703d1838f94d0c4eccb1b2"
+    },
+    {
+      "name": "transport_direct",
+      "description": "Transport-direct envelope with two little-endian codes",
+      "hex": "0b3412cdab0042",
+      "sha256": "a0de8b07cbdacabe9ffacf3c6ce1ffdf1f855a55833954dd74c3f8b40ef58339"
+    },
+    {
+      "name": "direct_one_hop",
+      "description": "Direct envelope with one one-byte path hash",
+      "hex": "0a01aa55",
+      "sha256": "b1c7e66661f91f2bd9559634f314b140a0f6de567fd33a0d3cac694257d1ce67"
+    },
+    {
+      "name": "reserved_path",
+      "description": "Rejected reserved four-byte path-hash mode",
+      "hex": "09c000",
+      "sha256": "403573251dcd0698a90031ca7be245fa98a9600ce5a6503645c64373ab75a44d"
+    },
+    {
+      "name": "size3_two_hops",
+      "description": "Accepted three-byte path-hash envelope with two hops",
+      "hex": "1582010203040506ff",
+      "sha256": "13ff473653fb9becdcaeace6679ba4e80cf65ffa832aea7ee9e4b308ce8e9d39"
+    }
+  ]
+}

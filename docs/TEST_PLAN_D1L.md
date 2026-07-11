@@ -35,6 +35,18 @@ Coverage:
 - Backup command builder.
 - Checksum verifier.
 - MeshCore 3-byte companion transport codec.
+- MeshCore wire-envelope conformance contract: the separate Ubuntu 24.04
+  `meshcore-conformance` job must recursively check out the pinned MeshCore
+  submodule, use `clang-18`/`clang++-18` with
+  ASan+UBSan/libFuzzer, run 100,000 deterministic local-parser inputs with
+  seed `13746277` (`0xD1C065`), upload
+  `artifacts/meshcore-conformance/meshcore_conformance_<full-commit>.json`, and
+  gate `firmware-build`. The result must report
+  `coverage_level="wire_envelope_only"` and `closure_ready=false`. This check
+  covers structural bidirectional envelopes, malformed inputs, and memory
+  safety only; it makes no semantic, cryptographic, duplicate/replay,
+  retained-state, hardware, real-peer, complete-surface, or issue #65 closure
+  claim. See [MeshCore Conformance Boundary](MESHCORE_CONFORMANCE.md).
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 5/Phase D connectivity contract: `wifi status`, `wifi scan`, `wifi save <ssid> [password]`, `wifi connect`, `wifi clear`, `wifi on|off`, `ble status`, and `ble on|off` must be machine-readable. `wifi save` must persist SSID/password intent without printing the password, `wifi scan` must return bounded network records only when Wi-Fi is enabled and compiled in, `wifi connect` must never echo the password, `wifi clear` must remove the saved profile and disable Wi-Fi intent, and BLE remains gated until a measured runtime is enabled.
 - Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.

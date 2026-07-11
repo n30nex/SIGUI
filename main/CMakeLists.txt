@@ -36,6 +36,7 @@ idf_component_register(
         "mesh/read_state.c"
         "mesh/route_store.c"
         "mesh/meshcore_service.c"
+        "mesh/meshcore_wire.c"
         "mesh/meshcore_radio_profile.c"
         "storage/retained_blob_store.c"
         "storage/export_store.c"
