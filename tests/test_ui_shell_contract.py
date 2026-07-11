@@ -1090,7 +1090,6 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "render_metric_card(" not in wrapper
 
     for label in (
-        '"Map"',
         '"Options"',
         '"Map options"',
         '"Set location"',
@@ -1117,15 +1116,16 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     landing = map_source.split("void d1l_ui_map_render(", 1)[1].split(
         "static void map_render_options_root", 1
     )[0]
-    assert landing.count('map_button(parent, "Options"') == 1
+    assert 'map_label(parent, "Map"' not in landing
+    assert landing.count('viewport, "Options", 8, 8, 96, 48') == 1
     assert "map_view_service_acquire_visible" in landing
     assert "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in landing
-    assert 'map_button(viewport, "Center"' in landing
-    assert 'viewport, "-", 344, 12, 44, 48' in landing
-    assert 'viewport, "+", 392, 12, 44, 48' in landing
+    assert 'viewport, "Center", 8, 302, 96, 52' in landing
+    assert 'viewport, "-", 420, 92, 52, 52' in landing
+    assert 'viewport, "+", 420, 8, 52, 52' in landing
     assert 'map_label(viewport, "Drag to pan"' in landing
-    assert "MAP_VIEWPORT_WIDTH 446U" in map_source
-    assert "MAP_VIEWPORT_HEIGHT 288U" in map_source
+    assert "MAP_VIEWPORT_WIDTH 478U" in map_source
+    assert "MAP_VIEWPORT_HEIGHT 360U" in map_source
 
     options = map_source.split("static void map_render_options_root", 1)[1].split(
         "static void map_render_cache_status", 1

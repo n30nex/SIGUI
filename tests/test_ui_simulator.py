@@ -199,7 +199,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "Mesh ready, listening" not in labels_by_view["home"]
     assert "D1L Desk" not in labels_by_view["home"]
     assert not any(label.startswith("--:--  Mesh") for label in labels_by_view["home"])
+    assert ui_simulator.TOP_BAR_H == 56
     assert ui_simulator.HOME_TOP_BAR_H == 16
+    assert ui_simulator.DOCK_Y == 418
+    assert ui_simulator.DOCK_H == 62
     assert "RX" not in labels_by_view["home"]
     assert "TX" not in labels_by_view["home"]
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
@@ -1140,6 +1143,11 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert views["map"]["metrics"]["map_landing_action_count"] == 1
     assert views["map"]["metrics"]["map_view_control_count"] == 3
     assert views["map"]["metrics"]["map_pan_gesture"] is True
+    assert views["map"]["metrics"]["map_full_bleed_content"] is True
+    assert views["map"]["metrics"]["map_local_header_height"] == 0
+    assert views["map"]["metrics"]["map_controls_overlay_canvas"] is True
+    assert views["map"]["metrics"]["map_min_control_target"] == 48
+    assert views["map"]["metrics"]["map_viewport"] == [0, ui_simulator.TOP_BAR_H, 480, ui_simulator.DOCK_Y]
     assert views["map"]["metrics"]["map_default_zoom"] == 10
     assert views["map"]["metrics"]["map_min_zoom"] == 8
     assert views["map"]["metrics"]["map_max_zoom"] == 14
@@ -1158,8 +1166,8 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert {"map_recenter", "map_zoom_out", "map_zoom_in"}.issubset(actions["map"])
     for action in ("map_recenter", "map_zoom_out", "map_zoom_in"):
         target = actions["map"][action]
-        assert target["width"] >= 44
-        assert target["height"] >= 44
+        assert target["width"] >= 48
+        assert target["height"] >= 48
         assert target["rf_tx"] is False
         assert target["formats_sd"] is False
     assert {"Center", "Drag to pan", "z10", "-", "+"}.issubset(labels["map"])

@@ -14,10 +14,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 WIDTH = 480
 HEIGHT = 480
-TOP_BAR_H = 54
+TOP_BAR_H = 56
 HOME_TOP_BAR_H = 16
-DOCK_Y = 420
-DOCK_H = 60
+DOCK_Y = 418
+DOCK_H = 62
 MIN_TOUCH_TARGET = 44
 DOCKED_VIEWS = frozenset(
     {
@@ -1771,31 +1771,40 @@ def render_map(s: Surface, snap: Snapshot):
     ready_for_live = snap.map_location_set and snap.wifi_connected
     frame_ready = ready_for_live or snap.map_cached_tile_count > 0
 
-    # Match ui_map.c: a simple title/action row and one 448x290 inset viewport.
-    s.text("Map", (16, 58, 328, 102), 22, TEXT, True)
-    draw_button(s, (344, 58, 464, 102), "Options", MUTED, action="open_map_options", destination="map_options")
-    viewport = (16, 112, 464, 402)
-    s.round_rect(viewport, (11, 21, 30), BORDER, 8)
+    # Match ui_map.c: the entire space between global chrome is the map canvas.
+    # Controls are sparse edge overlays so the map remains the dominant surface.
+    viewport = (0, TOP_BAR_H, WIDTH, DOCK_Y)
     if frame_ready:
-        draw_map_grid(s, snap, (17, 113, 463, 401))
+        draw_map_grid(s, snap, viewport)
     else:
+        s.rect(viewport, (11, 21, 30))
         view_status, view_detail, view_color = map_view_status(snap)
-        s.text(view_status, (40, 202, 440, 236), 22, view_color, True, "center")
-        s.wrapped_text(view_detail, (40, 242, 440, 292), 13, TEXT, line_height=20, align="center")
+        s.text(view_status, (30, 168, 450, 202), 22, view_color, True, "center")
+        s.wrapped_text(view_detail, (30, 210, 450, 260), 13, TEXT, line_height=20, align="center")
         wifi_label, _ = map_wifi_status(snap)
         readiness = f"Wi-Fi {wifi_label}  |  SD {'Ready' if snap.map_tile_cache_ready else 'Not ready'}"
-        s.text(readiness, (40, 300, 440, 326), 12, MUTED, False, "center")
+        s.text(readiness, (30, 268, 450, 294), 12, MUTED, False, "center")
+
+    draw_button(
+        s,
+        (8, TOP_BAR_H + 8, 104, TOP_BAR_H + 56),
+        "Options",
+        MUTED,
+        action="open_map_options",
+        destination="map_options",
+    )
 
     if snap.map_location_set:
-        draw_button(s, (28, 124, 120, 172), "Center", TEXT, action="map_recenter")
-        s.text("Drag to pan", (132, 137, 250, 160), 11, TEXT, True, "center")
-        s.text(f"z{snap.map_tile_zoom}", (302, 137, 350, 160), 11, TEXT, True, "center")
-        draw_button(s, (360, 124, 404, 172), "-", TEXT, action="map_zoom_out")
-        draw_button(s, (408, 124, 452, 172), "+", TEXT, action="map_zoom_in")
+        draw_button(s, (8, DOCK_Y - 60, 104, DOCK_Y - 8), "Center", TEXT, action="map_recenter")
+        s.round_rect((142, TOP_BAR_H + 14, 314, TOP_BAR_H + 46), (7, 16, 24), (7, 16, 24), 5)
+        s.text("Drag to pan", (146, TOP_BAR_H + 18, 310, TOP_BAR_H + 42), 11, TEXT, True, "center")
+        draw_button(s, (420, TOP_BAR_H + 8, 472, TOP_BAR_H + 60), "+", TEXT, action="map_zoom_in")
+        s.round_rect((420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), (7, 16, 24), (7, 16, 24), 4)
+        s.text(f"z{snap.map_tile_zoom}", (420, TOP_BAR_H + 66, 472, TOP_BAR_H + 88), 11, TEXT, True, "center")
+        draw_button(s, (420, TOP_BAR_H + 92, 472, TOP_BAR_H + 144), "-", TEXT, action="map_zoom_out")
 
-    # The ready viewport has no technical badges; attribution is the sole overlay.
-    s.round_rect((236, 370, 452, 396), (7, 16, 24), (7, 16, 24), 4)
-    s.text(MAP_ATTRIBUTION, (242, 372, 446, 394), 10, TEXT, True, "right")
+    s.round_rect((228, DOCK_Y - 30, 472, DOCK_Y - 6), (7, 16, 24), (7, 16, 24), 4)
+    s.text(MAP_ATTRIBUTION, (234, DOCK_Y - 28, 466, DOCK_Y - 8), 10, TEXT, True, "right")
     s.metrics.update(
         {
             "map_hierarchy_level": "actual_view",
@@ -1803,6 +1812,10 @@ def render_map(s: Surface, snap: Snapshot):
             "map_landing_action_count": 1,
             "map_view_control_count": 3 if snap.map_location_set else 0,
             "map_pan_gesture": snap.map_location_set,
+            "map_full_bleed_content": True,
+            "map_local_header_height": 0,
+            "map_controls_overlay_canvas": True,
+            "map_min_control_target": 48,
             "map_default_zoom": 10,
             "map_min_zoom": 8,
             "map_max_zoom": 14,

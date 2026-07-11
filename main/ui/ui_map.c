@@ -20,8 +20,8 @@
 #define MAP_COLOR_GOOD 0x5EEAD4U
 #define MAP_COLOR_INFO 0x93C5FDU
 #define MAP_COLOR_WARN 0xFBBF24U
-#define MAP_VIEWPORT_WIDTH 446U
-#define MAP_VIEWPORT_HEIGHT 288U
+#define MAP_VIEWPORT_WIDTH 478U
+#define MAP_VIEWPORT_HEIGHT 360U
 #define MAP_DRAG_THRESHOLD_PIXELS 24
 #define MAP_DRAG_MAX_X_PIXELS ((int32_t)MAP_VIEWPORT_WIDTH / 3)
 #define MAP_DRAG_MAX_Y_PIXELS ((int32_t)MAP_VIEWPORT_HEIGHT / 3)
@@ -140,6 +140,17 @@ static void map_style_primary_button(lv_obj_t *button)
     lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x174A40), LV_STATE_PRESSED);
     lv_obj_set_style_border_color(button, lv_color_hex(MAP_COLOR_GOOD), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+}
+
+static void map_style_overlay_button(lv_obj_t *button)
+{
+    if (!button) {
+        return;
+    }
+    lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, lv_color_hex(MAP_COLOR_BORDER), 0);
     lv_obj_set_style_border_width(button, 1, 0);
 }
 
@@ -809,21 +820,23 @@ void d1l_ui_map_render(lv_obj_t *parent,
     s_viewport_zoom_label = NULL;
     s_viewport_zoom_in_button = NULL;
     s_viewport_zoom_out_button = NULL;
+    lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_scroll_dir(parent, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_style_pad_bottom(parent, 0, 0);
-    lv_obj_t *title = map_label(parent, "Map", MAP_COLOR_TEXT);
-    if (title) {
-        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
-        lv_obj_set_pos(title, 16, 6);
-    }
-    map_button(parent, "Options", 344, 4, 120, 44, callbacks->open_options);
-
-    lv_obj_t *viewport = map_panel(parent, 16, 58, 448, 290);
+    lv_obj_t *viewport = map_panel(parent, 0, 0, 480, 362);
     if (!viewport) {
         return;
     }
     lv_obj_set_style_bg_color(viewport, lv_color_hex(0x0B151E), 0);
+    lv_obj_set_style_radius(viewport, 0, 0);
+    lv_obj_set_style_border_width(viewport, 0, 0);
     lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(viewport, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_clear_flag(viewport, LV_OBJ_FLAG_SCROLLABLE |
+                                LV_OBJ_FLAG_SCROLL_CHAIN |
+                                LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_scroll_dir(viewport, LV_DIR_NONE);
+    lv_obj_set_scrollbar_mode(viewport, LV_SCROLLBAR_MODE_OFF);
     lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(viewport, map_viewport_drag_event_cb, LV_EVENT_RELEASED, NULL);
@@ -843,16 +856,16 @@ void d1l_ui_map_render(lv_obj_t *parent,
     s_viewport_status_label = status;
     if (status) {
         lv_obj_set_style_text_font(status, &lv_font_montserrat_24, 0);
-        map_label_dot(status, 400);
+        map_label_dot(status, 420);
         lv_obj_set_style_text_align(status, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(status, 24, 94);
+        lv_obj_set_pos(status, 30, 116);
     }
     lv_obj_t *detail = map_label(viewport, state_detail, MAP_COLOR_DETAIL);
     s_viewport_detail_label = detail;
     if (detail) {
-        map_label_wrap(detail, 400);
+        map_label_wrap(detail, 420);
         lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(detail, 24, 134);
+        lv_obj_set_pos(detail, 30, 158);
     }
     char readiness[96];
     snprintf(readiness, sizeof(readiness), "Wi-Fi %s  |  SD %s",
@@ -860,47 +873,56 @@ void d1l_ui_map_render(lv_obj_t *parent,
     lv_obj_t *ready = map_label(viewport, readiness, MAP_COLOR_MUTED);
     s_viewport_readiness_label = ready;
     if (ready) {
-        map_label_dot(ready, 400);
+        map_label_dot(ready, 420);
         lv_obj_set_style_text_align(ready, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_pos(ready, 24, 188);
+        lv_obj_set_pos(ready, 30, 216);
     }
     lv_obj_t *attribution = map_label(viewport, "(c) OpenStreetMap contributors",
                                       MAP_COLOR_DETAIL);
     s_viewport_attribution_label = attribution;
     if (attribution) {
-        map_label_dot(attribution, 416);
+        map_label_dot(attribution, 240);
         lv_obj_set_style_text_align(attribution, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_set_pos(attribution, 16, 260);
+        lv_obj_set_pos(attribution, 228, 334);
         lv_obj_set_style_bg_color(attribution, lv_color_hex(0x071018), 0);
         lv_obj_set_style_bg_opa(attribution, LV_OPA_80, 0);
         lv_obj_set_style_pad_all(attribution, 2, 0);
     }
 
+    lv_obj_t *options_button = map_button(
+        viewport, "Options", 8, 8, 96, 48, callbacks->open_options);
+    map_style_overlay_button(options_button);
+
     if (snapshot->map_location_set) {
-        map_button(viewport, "Center", 12, 12, 92, 48,
-                   map_viewport_recenter_event_cb);
+        lv_obj_t *center_button = map_button(
+            viewport, "Center", 8, 302, 96, 52,
+            map_viewport_recenter_event_cb);
+        map_style_overlay_button(center_button);
         lv_obj_t *drag_hint = map_label(viewport, "Drag to pan", MAP_COLOR_DETAIL);
         s_viewport_drag_hint_label = drag_hint;
         if (drag_hint) {
-            map_label_dot(drag_hint, 128);
-            lv_obj_set_pos(drag_hint, 116, 29);
+            map_label_dot(drag_hint, 172);
+            lv_obj_set_style_text_align(drag_hint, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(drag_hint, 142, 22);
             lv_obj_set_style_bg_color(drag_hint, lv_color_hex(MAP_COLOR_BG), 0);
             lv_obj_set_style_bg_opa(drag_hint, LV_OPA_80, 0);
             lv_obj_set_style_pad_all(drag_hint, 2, 0);
         }
         s_viewport_zoom_label = map_label(viewport, "z10", MAP_COLOR_DETAIL);
         if (s_viewport_zoom_label) {
-            map_label_dot(s_viewport_zoom_label, 44);
+            map_label_dot(s_viewport_zoom_label, 52);
             lv_obj_set_style_text_align(s_viewport_zoom_label, LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_set_pos(s_viewport_zoom_label, 292, 29);
+            lv_obj_set_pos(s_viewport_zoom_label, 420, 66);
             lv_obj_set_style_bg_color(s_viewport_zoom_label, lv_color_hex(MAP_COLOR_BG), 0);
             lv_obj_set_style_bg_opa(s_viewport_zoom_label, LV_OPA_80, 0);
             lv_obj_set_style_pad_all(s_viewport_zoom_label, 2, 0);
         }
         s_viewport_zoom_out_button = map_button(
-            viewport, "-", 344, 12, 44, 48, map_viewport_zoom_out_event_cb);
+            viewport, "-", 420, 92, 52, 52, map_viewport_zoom_out_event_cb);
         s_viewport_zoom_in_button = map_button(
-            viewport, "+", 392, 12, 44, 48, map_viewport_zoom_in_event_cb);
+            viewport, "+", 420, 8, 52, 52, map_viewport_zoom_in_event_cb);
+        map_style_overlay_button(s_viewport_zoom_out_button);
+        map_style_overlay_button(s_viewport_zoom_in_button);
         map_viewport_update_controls();
     }
 

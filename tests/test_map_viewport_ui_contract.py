@@ -22,8 +22,8 @@ def test_map_ui_uses_bounded_core_viewport_and_visible_attribution():
     assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in math_header
     assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in math_header
     assert "s_viewport_zoom = D1L_MAP_VIEW_DEFAULT_ZOOM" in source
-    assert "MAP_VIEWPORT_WIDTH 446U" in source
-    assert "MAP_VIEWPORT_HEIGHT 288U" in source
+    assert "MAP_VIEWPORT_WIDTH 478U" in source
+    assert "MAP_VIEWPORT_HEIGHT 360U" in source
     assert "d1l_map_view_service_acquire_visible" in source
     assert "d1l_map_view_service_acquire_frame" in source
     assert "d1l_map_view_service_release_frame" in source
@@ -80,13 +80,18 @@ def test_map_viewport_touch_controls_pan_on_release_and_request_one_new_view():
         "bool d1l_ui_map_viewport_refresh",
     )
 
-    assert 'map_button(viewport, "Center", 12, 12, 92, 48' in render
-    assert 'viewport, "-", 344, 12, 44, 48' in render
-    assert 'viewport, "+", 392, 12, 44, 48' in render
+    assert 'viewport, "Options", 8, 8, 96, 48' in render
+    assert 'viewport, "Center", 8, 302, 96, 52' in render
+    assert 'viewport, "-", 420, 92, 52, 52' in render
+    assert 'viewport, "+", 420, 8, 52, 52' in render
+    assert "map_style_overlay_button" in render
+    assert "LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN" in render
+    assert "lv_obj_set_scroll_dir(parent, LV_DIR_NONE)" in render
+    assert "lv_obj_set_scrollbar_mode(parent, LV_SCROLLBAR_MODE_OFF)" in render
     assert 'map_label(viewport, "Drag to pan"' in render
     assert "s_viewport_drag_hint_label = drag_hint" in render
     assert "lv_obj_add_flag(viewport, LV_OBJ_FLAG_CLICKABLE)" in render
-    assert "lv_obj_clear_flag(viewport, LV_OBJ_FLAG_GESTURE_BUBBLE)" in render
+    assert "LV_OBJ_FLAG_GESTURE_BUBBLE" in render
     for event in (
         "LV_EVENT_PRESSED",
         "LV_EVENT_PRESSING",
