@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_retained_backend_generation_records_unobserved_transition_cycle(tmp_path):
+def test_retained_backend_generation_and_partition_migration_contract(tmp_path):
     compiler = shutil.which("gcc") or shutil.which("clang")
     if compiler is None:
         raise AssertionError("A C compiler is required for native retained-store tests")
@@ -36,4 +36,7 @@ def test_retained_backend_generation_records_unobserved_transition_cycle(tmp_pat
     completed = subprocess.run(
         [str(executable)], cwd=ROOT, check=True, capture_output=True, text=True
     )
-    assert completed.stdout.strip() == "native retained backend generation: ok"
+    assert (
+        completed.stdout.strip()
+        == "native retained backend generation and NVS partition: ok"
+    )

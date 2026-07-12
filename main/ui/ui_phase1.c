@@ -275,6 +275,7 @@ typedef struct {
     bool storage_setup_required;
     bool storage_data_enabled;
     bool storage_retained_sd_degraded;
+    bool storage_retained_backup_degraded;
     bool map_tile_cache_ready;
     bool wifi_connected;
     bool wifi_connecting;
@@ -365,6 +366,7 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .storage_setup_required = snapshot->storage_setup_required,
         .storage_data_enabled = snapshot->storage_data_enabled,
         .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .storage_retained_backup_degraded = snapshot->storage_retained_backup_degraded,
         .map_tile_cache_ready = snapshot->map_tile_cache_ready,
         .wifi_connected = snapshot->wifi_connected,
         .wifi_connecting = snapshot->wifi_connecting,
@@ -411,6 +413,7 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->storage_setup_required == right->storage_setup_required &&
         left->storage_data_enabled == right->storage_data_enabled &&
         left->storage_retained_sd_degraded == right->storage_retained_sd_degraded &&
+        left->storage_retained_backup_degraded == right->storage_retained_backup_degraded &&
         left->map_tile_cache_ready == right->map_tile_cache_ready &&
         left->wifi_connected == right->wifi_connected &&
         left->wifi_connecting == right->wifi_connecting &&
@@ -5458,12 +5461,18 @@ static bool storage_backend_uses_sd(const char *backend)
            storage_text_equals(backend, "sd_diagnostic_exports_ready");
 }
 
-static const char *storage_retained_backend_friendly(const char *backend)
+static const char *storage_retained_backend_friendly(
+    const d1l_app_snapshot_t *snapshot, const char *backend)
 {
     if (storage_text_equals(backend, "sd") || storage_text_equals(backend, "mixed")) {
-        return "SD + internal backup";
+        return snapshot && snapshot->storage_retained_backup_degraded ?
+            "SD; backup degraded" : "SD + internal backup";
     }
-    return "Internal";
+    if (storage_text_equals(backend, "nvs")) {
+        return snapshot && snapshot->storage_retained_backup_degraded ?
+            "Internal issue" : "Internal";
+    }
+    return "Unavailable";
 }
 
 static const char *storage_map_backend_friendly(const char *backend)
@@ -5487,13 +5496,17 @@ static const char *storage_export_backend_friendly(const char *backend)
 
 static const char *storage_data_summary(const d1l_app_snapshot_t *snapshot)
 {
-    if (snapshot &&
+    const bool uses_sd = snapshot &&
         (storage_backend_uses_sd(snapshot->message_store_backend) ||
          storage_backend_uses_sd(snapshot->dm_store_backend) ||
          storage_backend_uses_sd(snapshot->packet_log_backend) ||
          storage_backend_uses_sd(snapshot->route_store_backend) ||
          storage_backend_uses_sd(snapshot->map_tile_backend) ||
-         storage_backend_uses_sd(snapshot->export_backend))) {
+         storage_backend_uses_sd(snapshot->export_backend));
+    if (snapshot && snapshot->storage_retained_backup_degraded) {
+        return uses_sd ? "SD; backup issue" : "Storage issue";
+    }
+    if (uses_sd) {
         return "SD + internal";
     }
     return "Internal";
@@ -5520,12 +5533,32 @@ typedef struct {
 static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
 {
     storage_hero_copy_t copy = {
-        .state = "Using internal storage",
-        .detail = "SD is not ready yet.",
-        .guidance = "Your data stays available internally.",
+        .state = "Storage starting",
+        .detail = "Checking saved-data storage.",
+        .guidance = "Status updates automatically.",
         .accent = 0xFBBF24,
     };
     if (!snapshot) {
+        return copy;
+    }
+
+    if (snapshot->storage_retained_backup_degraded) {
+        if (snapshot->storage_retained_sd_degraded) {
+            copy.state = "Saved storage needs attention";
+            copy.detail = "SD and internal backup reported errors.";
+            copy.guidance = "See USB diagnostics before relying on saved history.";
+            copy.accent = 0xFCA5A5;
+        } else if (snapshot->storage_data_enabled) {
+            copy.state = "SD card ready";
+            copy.detail = "Saved data is using SD.";
+            copy.guidance = "Internal backup needs attention.";
+            copy.accent = 0xFBBF24;
+        } else {
+            copy.state = "Storage needs attention";
+            copy.detail = "Internal saved-data storage is unavailable.";
+            copy.guidance = "See USB diagnostics before relying on saved history.";
+            copy.accent = 0xFCA5A5;
+        }
         return copy;
     }
 
@@ -5756,16 +5789,16 @@ static void render_storage_data_locations(void)
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
     render_storage_location_row(list, 0, "Messages",
-                                storage_retained_backend_friendly(s_snapshot.message_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.message_store_backend),
                                 storage_backend_accent(s_snapshot.message_store_backend));
     render_storage_location_row(list, 56, "Direct messages",
-                                storage_retained_backend_friendly(s_snapshot.dm_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.dm_store_backend),
                                 storage_backend_accent(s_snapshot.dm_store_backend));
     render_storage_location_row(list, 112, "Packets",
-                                storage_retained_backend_friendly(s_snapshot.packet_log_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.packet_log_backend),
                                 storage_backend_accent(s_snapshot.packet_log_backend));
     render_storage_location_row(list, 168, "Routes",
-                                storage_retained_backend_friendly(s_snapshot.route_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.route_store_backend),
                                 storage_backend_accent(s_snapshot.route_store_backend));
     render_storage_location_row(list, 224, "Map tiles",
                                 storage_map_backend_friendly(s_snapshot.map_tile_backend),

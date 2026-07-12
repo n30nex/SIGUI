@@ -1048,7 +1048,12 @@ def test_storage_root_summary_uses_all_six_child_backends():
 
     retained_only = replace(pending, message_store_backend="sd")
     assert ui_simulator.storage_root_location_summary(retained_only) == "SD + internal"
-    assert ui_simulator.retained_storage_label(retained_only.message_store_backend) == "SD + internal backup"
+    assert (
+        ui_simulator.retained_storage_label(
+            retained_only, retained_only.message_store_backend
+        )
+        == "SD + internal backup"
+    )
 
     map_only = ui_simulator.storage_ready_map_only_sd_snapshot()
     assert ui_simulator.storage_root_location_summary(map_only) == "SD + internal"
@@ -1059,6 +1064,59 @@ def test_storage_root_summary_uses_all_six_child_backends():
     assert ui_simulator.storage_root_location_summary(export_only) == "SD + internal"
     assert ui_simulator.map_storage_label(export_only.map_tile_backend) == "Pending"
     assert ui_simulator.export_storage_label(export_only.export_backend) == "SD card"
+
+
+def test_backup_degradation_is_truthful_without_disabling_healthy_sd_map():
+    sd_primary = ui_simulator.storage_backup_degraded_sd_snapshot()
+    state, detail, guidance, color = ui_simulator.storage_friendly_state(sd_primary)
+
+    assert state == "SD card ready"
+    assert detail == "Saved data is using SD."
+    assert guidance == "Internal backup needs attention."
+    assert color == ui_simulator.AMBER
+    assert ui_simulator.storage_menu_status(sd_primary) == "Needs attention"
+    assert ui_simulator.home_storage_status(sd_primary) == "backup issue"
+    assert ui_simulator.storage_card_menu_status(sd_primary) == "Ready"
+    assert ui_simulator.storage_card_readiness(sd_primary) == "Ready"
+    assert ui_simulator.map_storage_summary(sd_primary) == "SD starting"
+    assert ui_simulator.storage_root_location_summary(sd_primary) == "SD; backup issue"
+    assert (
+        ui_simulator.retained_storage_label(
+            sd_primary, sd_primary.message_store_backend
+        )
+        == "SD; backup degraded"
+    )
+    storage_category = next(
+        category
+        for category in ui_simulator.more_category_specs(sd_primary)
+        if category["key"] == "storage_maps"
+    )
+    assert storage_category["summary"] == "Backup needs attention"
+    assert storage_category["leaves"][0][1] == "Ready"
+    assert storage_category["leaves"][0][5] is False
+
+    internal = ui_simulator.storage_backup_degraded_internal_snapshot()
+    state, detail, guidance, color = ui_simulator.storage_friendly_state(internal)
+    assert state == "Storage needs attention"
+    assert detail == "Internal saved-data storage is unavailable."
+    assert "USB diagnostics" in guidance
+    assert color == ui_simulator.WARNING_TEXT
+    assert ui_simulator.storage_root_location_summary(internal) == "Storage issue"
+    assert (
+        ui_simulator.retained_storage_label(
+            internal, internal.message_store_backend
+        )
+        == "Unavailable"
+    )
+
+    combined = replace(sd_primary, storage_retained_sd_degraded=True)
+    assert ui_simulator.home_storage_status(combined) == "storage issue"
+    combined_category = next(
+        category
+        for category in ui_simulator.more_category_specs(combined)
+        if category["key"] == "storage_maps"
+    )
+    assert combined_category["summary"] == "Storage needs attention"
 
 
 def test_storage_warning_propagates_to_collapsed_and_expanded_more_rows(tmp_path):

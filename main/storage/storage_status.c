@@ -78,6 +78,18 @@ static void refresh_retained_sd_health(d1l_storage_status_t *status)
                                            &status->retained_sd_stats[
                                                D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
     status->retained_sd_degraded = d1l_retained_blob_store_any_sd_degraded();
+    bool nvs_mirror_failed = false;
+    for (size_t i = 0U; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        if (status->retained_sd_stats[i].nvs_mirror_last_error != ESP_OK) {
+            nvs_mirror_failed = true;
+            break;
+        }
+    }
+    status->retained_backup_degraded =
+        !d1l_retained_blob_store_nvs_ready() ||
+        d1l_retained_blob_store_nvs_error() != ESP_OK ||
+        d1l_retained_blob_store_nvs_migration_error() != ESP_OK ||
+        nvs_mirror_failed;
     if (status->retained_sd_degraded) {
         status->note = D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE;
     }
@@ -297,7 +309,8 @@ static void set_store_backends(d1l_storage_status_t *status)
                                  dm_messages_on_sd ||
                                  routes_on_sd ||
                                  packet_log_on_sd;
-    status->data_backend = any_retained_sd ? "mixed" : "nvs";
+    status->data_backend = any_retained_sd ? "mixed" :
+        (d1l_retained_blob_store_nvs_ready() ? "nvs" : "unavailable");
     status->message_store_backend =
         d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES);
     status->dm_store_backend =

@@ -138,6 +138,7 @@ class Snapshot:
     storage_setup_required: bool
     storage_data_enabled: bool
     storage_retained_sd_degraded: bool
+    storage_retained_backup_degraded: bool
     storage_sd_state: str
     storage_sd_filesystem: str
     storage_capacity_kb: int
@@ -219,6 +220,7 @@ def sample_snapshot() -> Snapshot:
         storage_setup_required=False,
         storage_data_enabled=False,
         storage_retained_sd_degraded=False,
+        storage_retained_backup_degraded=False,
         storage_sd_state="protocol_pending",
         storage_sd_filesystem="unknown",
         storage_capacity_kb=0,
@@ -335,6 +337,7 @@ def large_mesh_snapshot() -> Snapshot:
         storage_setup_required=False,
         storage_data_enabled=False,
         storage_retained_sd_degraded=False,
+        storage_retained_backup_degraded=False,
         storage_sd_state="protocol_pending",
         storage_sd_filesystem="unknown",
         storage_capacity_kb=0,
@@ -489,6 +492,25 @@ def storage_degraded_snapshot() -> Snapshot:
     )
 
 
+def storage_backup_degraded_sd_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_retained_history_sd_snapshot(),
+        storage_retained_backup_degraded=True,
+    )
+
+
+def storage_backup_degraded_internal_snapshot() -> Snapshot:
+    return replace(
+        sample_snapshot(),
+        storage_backend="unavailable",
+        message_store_backend="unavailable",
+        dm_store_backend="unavailable",
+        packet_log_backend="unavailable",
+        route_store_backend="unavailable",
+        storage_retained_backup_degraded=True,
+    )
+
+
 def storage_media_error_snapshot() -> Snapshot:
     return replace(
         sample_snapshot(),
@@ -601,6 +623,8 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-ready-map-only-sd": storage_ready_map_only_sd_snapshot,
     "storage-ready-export-only-sd": storage_ready_export_only_sd_snapshot,
     "storage-degraded": storage_degraded_snapshot,
+    "storage-backup-degraded-sd": storage_backup_degraded_sd_snapshot,
+    "storage-backup-degraded-internal": storage_backup_degraded_internal_snapshot,
     "storage-media-error": storage_media_error_snapshot,
     "storage-bridge-reported": storage_bridge_reported_snapshot,
     "manual-location": manual_location_snapshot,
@@ -943,7 +967,7 @@ def map_marker_display_name(name: str) -> str:
     return name if len(name) <= max_chars else name[: max_chars - 3] + "..."
 
 
-def storage_needs_attention(snap: Snapshot) -> bool:
+def storage_sd_needs_attention(snap: Snapshot) -> bool:
     return (
         snap.storage_retained_sd_degraded
         or snap.storage_setup_action in (
@@ -952,6 +976,10 @@ def storage_needs_attention(snap: Snapshot) -> bool:
         )
         or snap.storage_sd_state in ("error", "bridge_reported")
     )
+
+
+def storage_needs_attention(snap: Snapshot) -> bool:
+    return snap.storage_retained_backup_degraded or storage_sd_needs_attention(snap)
 
 
 def storage_menu_status(snap: Snapshot) -> str:
@@ -968,8 +996,37 @@ def storage_menu_status(snap: Snapshot) -> str:
     return "Internal storage"
 
 
+def home_storage_status(snap: Snapshot) -> str:
+    if snap.storage_retained_backup_degraded and storage_sd_needs_attention(snap):
+        return "storage issue"
+    if snap.storage_retained_backup_degraded:
+        return "backup issue"
+    return storage_menu_status(snap)
+
+
 def storage_friendly_state(snap: Snapshot) -> tuple[str, str, str, tuple[int, int, int]]:
     action = snap.storage_setup_action
+    if snap.storage_retained_backup_degraded:
+        if snap.storage_retained_sd_degraded:
+            return (
+                "Saved storage needs attention",
+                "SD and internal backup reported errors.",
+                "See USB diagnostics before relying on saved history.",
+                WARNING_TEXT,
+            )
+        if snap.storage_data_enabled:
+            return (
+                "SD card ready",
+                "Saved data is using SD.",
+                "Internal backup needs attention.",
+                AMBER,
+            )
+        return (
+            "Storage needs attention",
+            "Internal saved-data storage is unavailable.",
+            "See USB diagnostics before relying on saved history.",
+            WARNING_TEXT,
+        )
     if storage_needs_attention(snap):
         if not snap.storage_retained_sd_degraded:
             return (
@@ -1077,10 +1134,16 @@ def storage_friendly_state(snap: Snapshot) -> tuple[str, str, str, tuple[int, in
     )
 
 
-def retained_storage_label(backend: str) -> str:
+def retained_storage_label(snap: Snapshot, backend: str) -> str:
     if backend in ("sd", "mixed"):
-        return "SD + internal backup"
-    return "Internal"
+        return (
+            "SD; backup degraded"
+            if snap.storage_retained_backup_degraded
+            else "SD + internal backup"
+        )
+    if backend == "nvs":
+        return "Internal issue" if snap.storage_retained_backup_degraded else "Internal"
+    return "Unavailable"
 
 
 def map_storage_label(backend: str) -> str:
@@ -1109,6 +1172,8 @@ def storage_root_location_summary(snap: Snapshot) -> str:
         or snap.map_tile_backend == "sd_map_tiles_ready"
         or snap.export_backend == "sd_diagnostic_exports_ready"
     )
+    if snap.storage_retained_backup_degraded:
+        return "SD; backup issue" if uses_sd else "Storage issue"
     return "SD + internal" if uses_sd else "Internal"
 
 
@@ -1131,7 +1196,7 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
     s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
     wifi_state = "connected" if snap.wifi_connected else ("connecting" if snap.wifi_connecting else "off")
-    s.text(f"Wi-Fi {wifi_state}  BLE off  SD {storage_menu_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
+    s.text(f"Wi-Fi {wifi_state}  BLE off  SD {home_storage_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -1523,7 +1588,7 @@ def map_storage_summary(snap: Snapshot) -> str:
         return "Insert SD"
     if snap.storage_sd_needs_fat32:
         return "Needs FAT32"
-    if storage_needs_attention(snap):
+    if storage_sd_needs_attention(snap):
         return "Check SD"
     return "SD starting"
 
@@ -1604,8 +1669,10 @@ def draw_home_body(s: Surface, snap: Snapshot):
         )
 
     device_box = (12, 312, 468, 428)
-    storage_status = storage_menu_status(snap)
-    storage_color = GREEN if storage_status == "Ready" else (RED if snap.storage_retained_sd_degraded else AMBER)
+    storage_status = home_storage_status(snap)
+    storage_color = GREEN if storage_status == "Ready" else (
+        RED if storage_sd_needs_attention(snap) else AMBER
+    )
     s.round_rect(device_box, (13, 23, 18), (31, 55, 46), 8)
     s.text("Device status", (26, 320, 230, 346), 16, TEXT, True)
     s.text("Settings and support", (26, 342, 260, 362), 10, MUTED)
@@ -1818,7 +1885,7 @@ def map_wifi_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
 def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
     """Return the same calm empty-state copy used by the firmware viewport."""
 
-    if storage_needs_attention(snap):
+    if storage_sd_needs_attention(snap):
         return ("Map unavailable", "Check the SD card, then reopen Map.", AMBER)
     if not snap.map_location_set:
         return ("Set a location", "Open Options to choose the area shown here.", AMBER)
@@ -2356,8 +2423,9 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
     """Return the stable More hierarchy represented by the firmware accordion."""
 
     packet_status = f"{len(snap.packets)} saved"
-    storage_status = storage_menu_status(snap)
+    storage_status = storage_card_menu_status(snap)
     storage_warning = storage_needs_attention(snap)
+    sd_warning = storage_sd_needs_attention(snap)
     map_status = settings_map_status(snap)
     return (
         {
@@ -2389,12 +2457,20 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
             "key": "storage_maps",
             "title": "Storage & maps",
             "summary": (
+                "Storage needs attention"
+                if snap.storage_retained_backup_degraded and sd_warning
+                else (
+                "Backup needs attention"
+                if snap.storage_retained_backup_degraded
+                else (
                 "SD needs attention"
-                if storage_warning
+                if sd_warning
                 else (
                     "SD reconnecting"
                     if snap.storage_setup_action == "wait_for_storage_reconnect"
                     else "SD card and map cache"
+                )
+                )
                 )
             ),
             "color": WARNING_TEXT if storage_warning else AMBER,
@@ -2404,10 +2480,10 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
                 (
                     "SD Card",
                     storage_status,
-                    RED if storage_warning else (GREEN if storage_status == "Ready" else TEXT),
+                    RED if sd_warning else (GREEN if storage_status == "Ready" else TEXT),
                     "open_storage_setup",
                     "storage_setup_sheet",
-                    storage_warning,
+                    sd_warning,
                 ),
                 ("Map options", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_options", "map_options", False),
             ),
@@ -2968,7 +3044,7 @@ def draw_storage_text_pair(
 
 
 def storage_card_menu_status(snap: Snapshot) -> str:
-    if storage_needs_attention(snap):
+    if storage_sd_needs_attention(snap):
         return "Needs attention"
     if snap.storage_setup_action == "bridge_protocol_pending":
         return "Starting"
@@ -2986,7 +3062,7 @@ def storage_card_menu_status(snap: Snapshot) -> str:
 
 
 def storage_card_readiness(snap: Snapshot) -> str:
-    if storage_needs_attention(snap):
+    if storage_sd_needs_attention(snap):
         return "Needs attention"
     if snap.storage_setup_action in ("bridge_unavailable", "bridge_protocol_pending"):
         return "Not available"
@@ -3007,7 +3083,7 @@ def storage_card_readiness(snap: Snapshot) -> str:
 
 def storage_card_state(snap: Snapshot) -> str:
     action = snap.storage_setup_action
-    if storage_needs_attention(snap):
+    if storage_sd_needs_attention(snap):
         return "Card needs attention"
     if action == "bridge_unavailable":
         return "Card reader unavailable"
@@ -3158,10 +3234,10 @@ def render_storage_data_page(s: Surface, snap: Snapshot):
     list_panel = (16, 120, 464, 412)
     s.round_rect(list_panel, (13, 22, 31), BORDER, 8)
     rows = (
-        ("Messages", retained_storage_label(snap.message_store_backend)),
-        ("Direct messages", retained_storage_label(snap.dm_store_backend)),
-        ("Packets", retained_storage_label(snap.packet_log_backend)),
-        ("Routes", retained_storage_label(snap.route_store_backend)),
+        ("Messages", retained_storage_label(snap, snap.message_store_backend)),
+        ("Direct messages", retained_storage_label(snap, snap.dm_store_backend)),
+        ("Packets", retained_storage_label(snap, snap.packet_log_backend)),
+        ("Routes", retained_storage_label(snap, snap.route_store_backend)),
         ("Map tiles", map_storage_label(snap.map_tile_backend)),
         ("Exports", export_storage_label(snap.export_backend)),
     )

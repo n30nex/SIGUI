@@ -1567,6 +1567,9 @@ def retained_history_sd_ready_status(storage_status: dict) -> bool:
         return False
     manager = storage_status.get("manager")
     stores = storage_status.get("stores")
+    retained_nvs = storage_status.get("retained_nvs")
+    retained_sd = storage_status.get("retained_sd")
+    retained_store_stats = retained_sd.get("stores") if isinstance(retained_sd, dict) else None
     return (
         storage_file_gate_ready_status(storage_status)
         and storage_status.get("ok") is True
@@ -1583,6 +1586,21 @@ def retained_history_sd_ready_status(storage_status: dict) -> bool:
         )
         and isinstance(stores, dict)
         and all(stores.get(name) == "sd" for name in ("messages", "dm", "routes", "packets"))
+        and isinstance(retained_nvs, dict)
+        and retained_nvs.get("partition") == "d1l_retained"
+        and retained_nvs.get("marker_ready") is True
+        and retained_nvs.get("ready") is True
+        and retained_nvs.get("init_error") == "ESP_OK"
+        and retained_nvs.get("migration_error") == "ESP_OK"
+        and isinstance(retained_sd, dict)
+        and retained_sd.get("degraded") is False
+        and retained_sd.get("backup_degraded") is False
+        and isinstance(retained_store_stats, dict)
+        and all(
+            isinstance(retained_store_stats.get(name), dict)
+            and retained_store_stats[name].get("nvs_mirror_last_error") == "ESP_OK"
+            for name in ("messages", "dm", "routes", "packets")
+        )
         and isinstance(manager, dict)
         and manager.get("running") is True
         and manager.get("state") == "READY_SD"
@@ -1658,9 +1676,11 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("storage_file_gate_ready_before") is True
         and data.get("storage_file_gate_ready_after") is True
         and data.get("retained_history_sd_ready_before") is True
+        and data.get("retained_history_sd_ready_after_canary") is True
         and data.get("retained_history_sd_ready_after") is True
         and reboot_transition_proven(data)
         and retained_history_sd_ready_status(data.get("storage_before"))
+        and retained_history_sd_ready_status(data.get("storage_after_canary"))
         and retained_history_sd_ready_status(data.get("storage_after"))
         and "reboot" in (data.get("commands") or [])
     )

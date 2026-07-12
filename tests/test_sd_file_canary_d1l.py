@@ -18,6 +18,14 @@ def ready_storage_status(manager_state: str | None = None) -> str:
         '"data_enabled":true,"data_backend":"mixed",'
         '"message_store_backend":"sd","dm_store_backend":"sd",'
         '"route_store_backend":"sd","packet_log_backend":"sd",'
+        '"retained_nvs":{"partition":"d1l_retained","marker_ready":true,'
+        '"initialized_this_boot":false,"ready":true,"init_error":"ESP_OK",'
+        '"migrated_keys":4,"migration_error":"ESP_OK"},'
+        '"retained_sd":{"degraded":false,"backup_degraded":false,"stores":{'
+        '"messages":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"dm":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"routes":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"packets":{"nvs_mirror_last_error":"ESP_OK"}}},'
         '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
     )
 

@@ -14,6 +14,14 @@ READY_STORAGE = (
     '"status_stale":false,"presence_stale":false,"refresh_failures":0},'
     '"data_enabled":true,"data_backend":"mixed","message_store_backend":"sd",'
     '"dm_store_backend":"sd","route_store_backend":"sd","packet_log_backend":"sd",'
+    '"retained_nvs":{"partition":"d1l_retained","marker_ready":true,'
+    '"initialized_this_boot":false,"ready":true,'
+    '"init_error":"ESP_OK","migrated_keys":4,"migration_error":"ESP_OK"},'
+    '"retained_sd":{"degraded":false,"backup_degraded":false,'
+    '"stores":{"messages":{"nvs_mirror_last_error":"ESP_OK"},'
+    '"dm":{"nvs_mirror_last_error":"ESP_OK"},'
+    '"routes":{"nvs_mirror_last_error":"ESP_OK"},'
+    '"packets":{"nvs_mirror_last_error":"ESP_OK"}}},'
     '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
 )
 
@@ -178,6 +186,14 @@ def test_dry_run_is_serial_only_and_has_no_format_or_public_rf():
     assert report["formats_sd"] is False
     assert "storage retained-canary sdToken1" in report["commands"]
     assert "reboot" in report["commands"]
+    expected_readbacks = retained_accept.retained_readback_commands("sdToken1")
+    canary_index = report["commands"].index("storage retained-canary sdToken1")
+    reboot_index = report["commands"].index("reboot")
+    assert report["commands"][canary_index + 1 : reboot_index] == [
+        *expected_readbacks,
+        "storage status",
+        "health",
+    ]
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("setup confirm" in command for command in report["commands"])
     assert not any("COM11" in command or "COM29" in command for command in report["commands"])
@@ -294,6 +310,7 @@ def test_allow_unavailable_accepts_pre_bridge_refusal(monkeypatch):
             f'{{"schema":1,"ok":true,"cmd":"messages dm","fingerprint":"{fp}","entries":[]}}\n',
             f'{{"schema":1,"ok":true,"cmd":"routes trace","fingerprint":"{fp}","entries":[]}}\n',
             '{"schema":1,"ok":true,"cmd":"packets search","entries":[]}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"protocol_pending"}}\n',
             health_line(1),
         ]
     )
@@ -328,13 +345,14 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         retained_canary_line(token, fp),
         *retained_readback_lines(token, fp),
+        READY_STORAGE,
         health_line(1),
         '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n',
         READY_STORAGE,
         *retained_readback_lines(token, fp),
         health_line(2),
     ]
-    serials = [FakeSerial(responses[:8]), FakeSerial(responses[8:9]), FakeSerial(responses[9:])]
+    serials = [FakeSerial(responses[:9]), FakeSerial(responses[9:10]), FakeSerial(responses[10:])]
 
     class FakeSerialModule:
         Serial = lambda self, **_kwargs: serials.pop(0)
@@ -364,6 +382,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
     assert report["storage_file_gate_ready_before"] is True
     assert report["storage_file_gate_ready_after"] is True
     assert report["retained_history_sd_ready_before"] is True
+    assert report["retained_history_sd_ready_after_canary"] is True
     assert report["retained_history_sd_ready_after"] is True
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
@@ -379,6 +398,7 @@ def test_acceptance_reports_and_rejects_public_rf_flag_from_canary(monkeypatch):
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         json.dumps(canary) + "\n",
         *retained_readback_lines(token, fingerprint),
+        READY_STORAGE,
         health_line(1),
     ]
     post = [READY_STORAGE, *retained_readback_lines(token, fingerprint), health_line(2)]
@@ -410,6 +430,61 @@ def test_acceptance_reports_and_rejects_public_rf_flag_from_canary(monkeypatch):
     assert report["ok"] is False
 
 
+def test_acceptance_rejects_mirror_failure_immediately_after_canary(monkeypatch):
+    token = "sdToken1"
+    fingerprint = retained_accept.fingerprint_for_token(token)
+    mirror_failure_payload = json.loads(READY_STORAGE)
+    mirror_failure_payload["retained_sd"]["backup_degraded"] = True
+    mirror_failure_payload["retained_sd"]["stores"]["dm"][
+        "nvs_mirror_last_error"
+    ] = "ESP_ERR_NVS_NOT_ENOUGH_SPACE"
+    mirror_failure_status = json.dumps(mirror_failure_payload) + "\n"
+    pre = [
+        READY_STORAGE,
+        '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+        retained_canary_line(token, fingerprint),
+        *retained_readback_lines(token, fingerprint),
+        mirror_failure_status,
+        health_line(1),
+    ]
+    post = [
+        READY_STORAGE,
+        *retained_readback_lines(token, fingerprint),
+        health_line(2),
+    ]
+    serials = [
+        FakeSerial(pre),
+        FakeSerial(
+            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+        ),
+        FakeSerial(post),
+    ]
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: serials.pop(0)
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
+        allow_unavailable=False,
+    )
+
+    assert report["retained_history_sd_ready_before"] is True
+    assert report["retained_history_sd_ready_after_canary"] is False
+    assert report["retained_history_sd_ready_after"] is True
+    assert report["storage_after_canary"]["retained_sd"]["stores"]["dm"][
+        "nvs_mirror_last_error"
+    ] == "ESP_ERR_NVS_NOT_ENOUGH_SPACE"
+    assert report["ok"] is False
+
+
 def test_reboot_flush_failure_cannot_pass_retained_acceptance(monkeypatch):
     token = "sdToken1"
     fp = retained_accept.fingerprint_for_token(token)
@@ -418,6 +493,7 @@ def test_reboot_flush_failure_cannot_pass_retained_acceptance(monkeypatch):
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         retained_canary_line(token, fp),
         *retained_readback_lines(token, fp),
+        READY_STORAGE,
         health_line(1),
     ]
     reboot = [
@@ -470,6 +546,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         retained_canary_line(token, fp),
         *retained_readback_lines(token, fp),
+        READY_STORAGE,
         health_line(1),
     ]
     reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
@@ -520,13 +597,14 @@ def test_acceptance_rejects_nvs_readbacks_when_post_reboot_sd_is_missing(monkeyp
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         retained_canary_line(token, fp),
         *retained_readback_lines(token, fp),
+        READY_STORAGE,
         health_line(1),
         '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n',
         no_card_storage,
         *retained_readback_lines(token, fp),
         health_line(2),
     ]
-    serials = [FakeSerial(responses[:8]), FakeSerial(responses[8:9]), FakeSerial(responses[9:])]
+    serials = [FakeSerial(responses[:9]), FakeSerial(responses[9:10]), FakeSerial(responses[10:])]
 
     class FakeSerialModule:
         Serial = lambda self, **_kwargs: serials.pop(0)
@@ -556,21 +634,25 @@ def test_acceptance_rejects_nvs_readbacks_when_post_reboot_sd_is_missing(monkeyp
 def test_acceptance_rejects_nvs_backends_even_when_post_reboot_file_gate_is_ready(monkeypatch):
     token = "sdToken1"
     fp = retained_accept.fingerprint_for_token(token)
-    post_nvs = READY_STORAGE.replace(
-        '"data_backend":"mixed","message_store_backend":"sd",'
-        '"dm_store_backend":"sd","route_store_backend":"sd",'
-        '"packet_log_backend":"sd","stores":{"messages":"sd","dm":"sd",'
-        '"routes":"sd","packets":"sd"}',
-        '"data_backend":"nvs","message_store_backend":"nvs",'
-        '"dm_store_backend":"nvs","route_store_backend":"nvs",'
-        '"packet_log_backend":"nvs","stores":{"messages":"nvs","dm":"nvs",'
-        '"routes":"nvs","packets":"nvs"}',
-    )
+    post_nvs_payload = json.loads(READY_STORAGE)
+    post_nvs_payload["data_backend"] = "nvs"
+    for field in (
+        "message_store_backend",
+        "dm_store_backend",
+        "route_store_backend",
+        "packet_log_backend",
+    ):
+        post_nvs_payload[field] = "nvs"
+    post_nvs_payload["stores"] = {
+        name: "nvs" for name in ("messages", "dm", "routes", "packets")
+    }
+    post_nvs = json.dumps(post_nvs_payload) + "\n"
     pre = [
         READY_STORAGE,
         '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
         retained_canary_line(token, fp),
         *retained_readback_lines(token, fp),
+        READY_STORAGE,
         health_line(1),
     ]
     post = [

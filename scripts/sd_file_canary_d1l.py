@@ -93,6 +93,9 @@ def storage_ready_for_filecanary(storage_status: dict) -> bool:
 def retained_history_backends_ready(storage_status: dict) -> bool:
     stores = storage_status.get("stores")
     store_backends = stores if isinstance(stores, dict) else {}
+    retained_nvs = storage_status.get("retained_nvs")
+    retained_sd = storage_status.get("retained_sd")
+    retained_store_stats = retained_sd.get("stores") if isinstance(retained_sd, dict) else None
     return (
         storage_status.get("ok") is True
         and storage_status.get("data_enabled") is True
@@ -102,6 +105,21 @@ def retained_history_backends_ready(storage_status: dict) -> bool:
         and store_backends.get("dm") == "sd"
         and store_backends.get("routes") == "sd"
         and store_backends.get("packets") == "sd"
+        and isinstance(retained_nvs, dict)
+        and retained_nvs.get("partition") == "d1l_retained"
+        and retained_nvs.get("marker_ready") is True
+        and retained_nvs.get("ready") is True
+        and retained_nvs.get("init_error") == "ESP_OK"
+        and retained_nvs.get("migration_error") == "ESP_OK"
+        and isinstance(retained_sd, dict)
+        and retained_sd.get("degraded") is False
+        and retained_sd.get("backup_degraded") is False
+        and isinstance(retained_store_stats, dict)
+        and all(
+            isinstance(retained_store_stats.get(name), dict)
+            and retained_store_stats[name].get("nvs_mirror_last_error") == "ESP_OK"
+            for name in ("messages", "dm", "routes", "packets")
+        )
         and storage_file_gate_ready(storage_status)
     )
 

@@ -48,6 +48,13 @@ const char *d1l_ui_home_sd_state(const d1l_app_snapshot_t *snapshot)
     if (!snapshot) {
         return "unknown";
     }
+    if (snapshot->storage_retained_backup_degraded &&
+        home_storage_needs_attention(snapshot)) {
+        return "storage issue";
+    }
+    if (snapshot->storage_retained_backup_degraded) {
+        return "backup issue";
+    }
     if (home_storage_needs_attention(snapshot)) {
         return "Needs attention";
     }
@@ -308,8 +315,9 @@ static void render_device_status(lv_obj_t *parent, const d1l_app_snapshot_t *sna
         snapshot->wifi_enabled ? 0x5EEAD4 : 0x8EA0AE,
         snapshot->ble_companion_enabled ? 0xA7F3D0 : 0x8EA0AE,
         home_storage_needs_attention(snapshot) ? 0xF87171 :
+        (snapshot->storage_retained_backup_degraded ? 0xFBBF24 :
         (snapshot->storage_data_enabled ? 0x5EEAD4 :
-            (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE)),
+            (snapshot->storage_setup_required ? 0xFBBF24 : 0x8EA0AE))),
     };
 
     for (int index = 0; index < 4; ++index) {

@@ -1459,8 +1459,16 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf(",\"retained_sd\":{\"degraded\":%s,\"note\":",
-           bool_json(status.retained_sd_degraded));
+    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\"}",
+           bool_json(d1l_retained_blob_store_nvs_marker_ready()),
+           bool_json(d1l_retained_blob_store_nvs_initialized_this_boot()),
+           bool_json(d1l_retained_blob_store_nvs_ready()),
+           esp_err_to_name(d1l_retained_blob_store_nvs_error()),
+           (unsigned long)d1l_retained_blob_store_nvs_migrated_keys(),
+           esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
+    printf(",\"retained_sd\":{\"degraded\":%s,\"backup_degraded\":%s,\"note\":",
+           bool_json(status.retained_sd_degraded),
+           bool_json(status.retained_backup_degraded));
     print_json_string(status.retained_sd_degraded ?
                       D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE : "");
     printf(",\"stores\":{\"messages\":");

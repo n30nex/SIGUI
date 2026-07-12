@@ -125,6 +125,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "sd_probe_error" in header
     assert "sd_mount_error" in header
     assert "retained_sd_degraded" in header
+    assert "retained_backup_degraded" in header
     assert "retained_sd_stats" in header
     assert "s_status.file_ops_supported = sd->file_ops_supported" in source
     assert "s_status.atomic_rename_supported = sd->atomic_rename_supported" in source
@@ -144,6 +145,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
+    assert "d1l_retained_blob_store_nvs_ready()" in source
+    assert "nvs_mirror_last_error != ESP_OK" in source
     assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in source
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
@@ -151,7 +154,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
-    assert 'status->data_backend = any_retained_sd ? "mixed" : "nvs"' in source
+    assert 'status->data_backend = any_retained_sd ? "mixed" :' in source
     assert '#include "storage/map_tile_store.h"' in source
     assert "d1l_map_tile_store_sd_ready(status)" in source
     assert '"sd_map_tiles_ready" : "unavailable"' in source
@@ -588,7 +591,10 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '"Data locations"' in ui
     assert "This device never formats cards." in ui
     assert "const bool storage_needs_attention = settings_storage_needs_attention(snapshot)" in settings_ui
-    assert 'storage_needs_attention\n        ? "Needs attention"' in settings_ui
+    assert "const bool sd_needs_attention = settings_sd_needs_attention(snapshot)" in settings_ui
+    assert 'sd_needs_attention\n        ? "Needs attention"' in settings_ui
+    assert '"Backup needs attention"' in settings_ui
+    assert '"Storage needs attention"' in settings_ui
     assert '? "Ready"' in settings_ui
     assert '"Needs setup"' in settings_ui
     assert '"Internal storage"' in settings_ui

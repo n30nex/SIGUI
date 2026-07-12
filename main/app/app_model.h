@@ -103,6 +103,7 @@ typedef struct {
     bool storage_data_enabled;
     bool storage_response_truncated;
     bool storage_retained_sd_degraded;
+    bool storage_retained_backup_degraded;
     bool time_available;
     bool map_page_supported;
     bool map_tile_cache_ready;

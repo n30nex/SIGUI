@@ -49,6 +49,7 @@ typedef struct {
     bool bridge_status_stale;
     bool sd_presence_stale;
     bool retained_sd_degraded;
+    bool retained_backup_degraded;
     char sd_probe_power[8];
     char sd_probe_mode[16];
     const char *manager_state;

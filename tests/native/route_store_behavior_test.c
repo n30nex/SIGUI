@@ -414,6 +414,45 @@ static void test_partial_nvs_failure_retries_without_rewriting_sd(void)
     assert(((const fallback_blob_t *)s_nvs_v2.data)->schema == FALLBACK_SCHEMA);
 }
 
+static void test_forced_retry_honors_floor_then_retries_only_nvs(void)
+{
+    mock_retained_reset();
+    assert(d1l_route_store_init() == ESP_OK);
+    assert(observe("reboot-safe", "direct", 2U, 0U) == ESP_OK);
+    s_fail_next_nvs_write = ESP_ERR_NVS_NOT_ENOUGH_SPACE;
+
+    assert(d1l_route_store_flush() == ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    assert(s_sd_write_count == 1U);
+    assert(s_nvs_write_count == 1U);
+    d1l_route_store_stats_t stats = d1l_route_store_stats();
+    assert(!stats.sd_primary_dirty);
+    assert(stats.nvs_fallback_dirty);
+    assert(stats.persistence_dirty);
+
+    assert(d1l_route_store_flush() == ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    assert(s_sd_write_count == 1U);
+    assert(s_nvs_write_count == 1U);
+    mock_timer_set_us(4999000LL);
+    assert(d1l_route_store_flush() == ESP_ERR_NVS_NOT_ENOUGH_SPACE);
+    assert(s_sd_write_count == 1U);
+    assert(s_nvs_write_count == 1U);
+
+    mock_timer_set_us(5000000LL);
+    assert(d1l_route_store_flush() == ESP_OK);
+    assert(s_sd_write_count == 1U);
+    assert(s_nvs_write_count == 2U);
+    stats = d1l_route_store_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(s_nvs_v2.valid);
+
+    mock_set_sd(false);
+    assert(d1l_route_store_init() == ESP_OK);
+    d1l_route_entry_t restored = {0};
+    assert(d1l_route_store_copy_for_target("reboot-safe", &restored, 1U) == 1U);
+    assert(strcmp(restored.target, "reboot-safe") == 0);
+}
+
 static void test_concurrent_callback_keeps_new_revision_dirty(void)
 {
     mock_retained_reset();
@@ -1144,6 +1183,8 @@ static void test_generation_edge_during_temp_write_never_replace_renames(void)
     assert(stats.persistence_dirty);
     assert(stats.sd_primary_reconcile_pending);
 
+    assert(d1l_route_store_flush() == ESP_ERR_INVALID_STATE);
+    mock_timer_set_us(10000000LL);
     assert(d1l_route_store_flush() == ESP_OK);
     const full_blob_t *committed = (const full_blob_t *)s_sd_v2.data;
     bool found_replacement = false;
@@ -1162,6 +1203,7 @@ static void test_generation_edge_during_temp_write_never_replace_renames(void)
 int main(void)
 {
     test_partial_nvs_failure_retries_without_rewriting_sd();
+    test_forced_retry_honors_floor_then_retries_only_nvs();
     test_concurrent_callback_keeps_new_revision_dirty();
     test_legacy_full_blob_migrates_without_recovery_erase();
     test_nvs_full_legacy_migration_reclaims_only_route_cache();

@@ -79,6 +79,7 @@ def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
         "storage filecanary",
         f"storage retained-canary {token}",
         *retained_readback_commands(token),
+        "storage status",
     ]
     if include_reboot:
         commands.extend(["health", "reboot"])
@@ -326,6 +327,7 @@ def run_acceptance(
         "storage filecanary",
         f"storage retained-canary {token}",
         *retained_readback_commands(token),
+        "storage status",
     ]
     if include_reboot:
         retained_commands.append("health")
@@ -364,8 +366,10 @@ def run_acceptance(
             "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
             "storage_file_gate_ready_after": False,
             "retained_history_sd_ready_before": retained_storage_ready(storage_before),
+            "retained_history_sd_ready_after_canary": False,
             "retained_history_sd_ready_after": False,
             "storage_before": storage_before,
+            "storage_after_canary": {},
             "storage_after": storage_before,
             "storage_ready_waited": len(ready_wait_results) > 1,
             "storage_ready_poll_count": sum(
@@ -409,6 +413,7 @@ def run_acceptance(
     canary_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
     filecanary_ok = filecanary_result.get("ok") is True
     pre_readbacks_ok = readbacks_pass(pre_by_command, token, fingerprint, retained_result)
+    storage_after_canary = pre_by_command.get("storage status", {})
     pre_health = pre_by_command.get("health", {})
     post_health = post_by_command.get("health", {})
     reboot_proof_ok = (
@@ -434,6 +439,7 @@ def run_acceptance(
         else storage_file_gate_ready(storage_after)
     )
     retained_history_sd_ready_before = retained_storage_ready(storage_before)
+    retained_history_sd_ready_after_canary = retained_storage_ready(storage_after_canary)
     retained_history_sd_ready_after = (
         reboot_proof_ok and retained_storage_ready(storage_after)
         if include_reboot
@@ -457,6 +463,7 @@ def run_acceptance(
         "storage_file_gate_ready_before": storage_file_gate_ready_before,
         "storage_file_gate_ready_after": storage_file_gate_ready_after,
         "retained_history_sd_ready_before": retained_history_sd_ready_before,
+        "retained_history_sd_ready_after_canary": retained_history_sd_ready_after_canary,
         "retained_history_sd_ready_after": retained_history_sd_ready_after,
         "storage_ready_waited": len(ready_wait_results) > 1,
         "storage_ready_poll_count": sum(
@@ -475,6 +482,7 @@ def run_acceptance(
         "pre_reboot_readbacks_ok": pre_readbacks_ok,
         "post_reboot_readbacks_ok": post_readbacks_ok,
         "storage_before": storage_before,
+        "storage_after_canary": storage_after_canary,
         "storage_after": storage_after,
         "health_ok": health_ok,
         "ok": (
@@ -485,6 +493,7 @@ def run_acceptance(
             and storage_file_gate_ready_before
             and storage_file_gate_ready_after
             and retained_history_sd_ready_before
+            and retained_history_sd_ready_after_canary
             and retained_history_sd_ready_after
             and reboot_ok
             and reboot_proof_ok

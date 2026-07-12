@@ -82,6 +82,15 @@ The other local MeshCore bot may be used as the controlled DM RF peer for produc
 
 Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, UI, or scripts. Production validation assumes users provide FAT32 cards prepared on a computer; the current validation device has a fresh FAT32 32 GB card installed. DeskOS may create the `/deskos` folders/manifests on a mounted FAT32 card and otherwise falls back to NVS.
 
+The 8 MB layout preserves the default 24 KiB `nvs` partition for settings,
+identity, Wi-Fi, contacts, nodes, read state, and crash state. Public, DM,
+route, and packet fallback blobs use the separate 124 KiB `d1l_retained`
+partition at `0x7E1000`; its redundant 4 KiB marker sector starts at
+`0x7E0000`. The factory app remains at `0x10000` and ends before that marker.
+Upgrade reads copy a scoped legacy retained key from default
+NVS only after the dedicated write commits, then erase only that old key; no
+whole-default-NVS migration erase is allowed.
+
 `ui_capture_d1l.py` is the hardware display truth path for the split-page UI blocker. It reads the 480x480 RGB565 frame back over the COM12 console, writes JSON/PNG/raw artifacts, and must stay non-destructive: no RF send, no SD format, and no manual touch requirement.
 
 ## GitHub Actions

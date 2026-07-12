@@ -64,6 +64,21 @@ static bool settings_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
     if (!snapshot) {
         return false;
     }
+    return snapshot->storage_retained_backup_degraded ||
+           snapshot->storage_retained_sd_degraded ||
+           settings_storage_text_equals(snapshot->storage_sd_state, "error") ||
+           settings_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
+           settings_storage_text_equals(snapshot->storage_setup_action,
+                                        "inspect_rp2040_sd_cmd0_firmware_path") ||
+           settings_storage_text_equals(snapshot->storage_setup_action,
+                                        "inspect_rp2040_sd_mount_error_firmware_path");
+}
+
+static bool settings_sd_needs_attention(const d1l_app_snapshot_t *snapshot)
+{
+    if (!snapshot) {
+        return false;
+    }
     return snapshot->storage_retained_sd_degraded ||
            settings_storage_text_equals(snapshot->storage_sd_state, "error") ||
            settings_storage_text_equals(snapshot->storage_sd_state, "bridge_reported") ||
@@ -75,7 +90,7 @@ static bool settings_storage_needs_attention(const d1l_app_snapshot_t *snapshot)
 
 static const char *settings_map_storage_state(const d1l_app_snapshot_t *snapshot)
 {
-    if (settings_storage_needs_attention(snapshot)) {
+    if (settings_sd_needs_attention(snapshot)) {
         return "Check SD";
     }
     if (snapshot->storage_setup_action &&
@@ -364,13 +379,14 @@ void d1l_ui_settings_render(lv_obj_t *parent,
         ? "Applying"
         : ((snapshot->radio_ready || snapshot->radio_applied) ? "Ready" : "Needs setup");
     const bool storage_needs_attention = settings_storage_needs_attention(snapshot);
+    const bool sd_needs_attention = settings_sd_needs_attention(snapshot);
     const bool storage_reconnecting = settings_storage_text_equals(
         snapshot->storage_setup_action, "wait_for_storage_reconnect");
     const bool storage_ready = snapshot->storage_data_enabled ||
                                snapshot->storage_sd_data_root_ready;
     const char *storage_status = storage_reconnecting
         ? "Reconnecting"
-        : (storage_needs_attention
+        : (sd_needs_attention
         ? "Needs attention"
         : (storage_ready
             ? "Ready"
@@ -384,9 +400,14 @@ void d1l_ui_settings_render(lv_obj_t *parent,
             : (!snapshot->wifi_connected
                 ? "Needs Wi-Fi"
                 : (snapshot->map_tile_render_supported ? "Ready" : "Loading")));
-    const char *storage_category_summary = storage_needs_attention
+    const char *storage_category_summary =
+        snapshot->storage_retained_backup_degraded && sd_needs_attention
+        ? "Storage needs attention"
+        : (snapshot->storage_retained_backup_degraded
+        ? "Backup needs attention"
+        : (sd_needs_attention
         ? "SD needs attention"
-        : (storage_reconnecting ? "SD reconnecting" : "SD card and map");
+        : (storage_reconnecting ? "SD reconnecting" : "SD card and map")));
 
     const settings_menu_item_t tools[] = {
         {"Packets", packet_status, 0x93C5FD, D1L_UI_SETTINGS_ACTION_PACKETS, false},
@@ -406,10 +427,10 @@ void d1l_ui_settings_render(lv_obj_t *parent,
     };
     const settings_menu_item_t storage_maps[] = {
         {"SD Card", storage_status,
-          storage_needs_attention ? 0xF87171 :
+          sd_needs_attention ? 0xF87171 :
             (storage_reconnecting ? 0xFBBF24 :
              (storage_ready ? 0x5EEAD4 : 0xF4F7FB)),
-         D1L_UI_SETTINGS_ACTION_STORAGE, storage_needs_attention},
+         D1L_UI_SETTINGS_ACTION_STORAGE, sd_needs_attention},
         {"Map options", map_status,
          snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xF4F7FB,
          D1L_UI_SETTINGS_ACTION_MAP_TILES, false},

@@ -31,6 +31,13 @@ typedef struct {
     uint32_t generation;
 } d1l_retained_blob_store_backend_state_t;
 
+esp_err_t d1l_retained_blob_store_init(void);
+bool d1l_retained_blob_store_nvs_ready(void);
+esp_err_t d1l_retained_blob_store_nvs_error(void);
+bool d1l_retained_blob_store_nvs_marker_ready(void);
+bool d1l_retained_blob_store_nvs_initialized_this_boot(void);
+uint32_t d1l_retained_blob_store_nvs_migrated_keys(void);
+esp_err_t d1l_retained_blob_store_nvs_migration_error(void);
 const char *d1l_retained_blob_store_backend_name(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_is_available(d1l_retained_blob_store_id_t store_id);
 bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id);

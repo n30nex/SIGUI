@@ -767,6 +767,23 @@ def ready_storage_status() -> dict:
         "dm_store_backend": "sd",
         "route_store_backend": "sd",
         "packet_log_backend": "sd",
+        "retained_nvs": {
+            "partition": "d1l_retained",
+            "marker_ready": True,
+            "initialized_this_boot": False,
+            "ready": True,
+            "init_error": "ESP_OK",
+            "migrated_keys": 4,
+            "migration_error": "ESP_OK",
+        },
+        "retained_sd": {
+            "degraded": False,
+            "backup_degraded": False,
+            "stores": {
+                name: {"nvs_mirror_last_error": "ESP_OK"}
+                for name in ("messages", "dm", "routes", "packets")
+            }
+        },
         "stores": {"messages": "sd", "dm": "sd", "routes": "sd", "packets": "sd"},
     }
 
@@ -997,10 +1014,12 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "storage_file_gate_ready_before": True,
             "storage_file_gate_ready_after": True,
             "retained_history_sd_ready_before": True,
+            "retained_history_sd_ready_after_canary": True,
             "retained_history_sd_ready_after": True,
             "storage_before": ready_storage_status(),
+            "storage_after_canary": ready_storage_status(),
             "storage_after": ready_storage_status(),
-            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "reboot", "health"],
+            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "storage status", "reboot", "storage status", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -1927,6 +1946,34 @@ def test_release_gate_audit_rejects_retained_readbacks_from_nvs_without_post_reb
     assert retained["pre_reboot_readbacks_ok"] is True
     assert retained["post_reboot_readbacks_ok"] is True
     assert audit.storage_file_gate_ready_status(retained["storage_after"]) is False
+    assert gate["ok"] is False
+
+
+def test_release_gate_audit_rejects_pre_reboot_mirror_failure(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    retained_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_retained_history_{COMMIT[:7]}.json"
+    )
+    retained = json.loads(retained_path.read_text(encoding="utf-8"))
+    retained["storage_after_canary"]["retained_sd"]["backup_degraded"] = True
+    retained["storage_after_canary"]["retained_sd"]["stores"]["packets"][
+        "nvs_mirror_last_error"
+    ] = "ESP_ERR_NVS_NOT_ENOUGH_SPACE"
+    # Keep the producer summary optimistic; the audit must inspect raw status.
+    retained["retained_history_sd_ready_after_canary"] = True
+    write_json(retained_path, retained)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_retained_canary_passed"]
+
+    assert audit.retained_history_sd_ready_status(
+        retained["storage_after_canary"]
+    ) is False
     assert gate["ok"] is False
 
 

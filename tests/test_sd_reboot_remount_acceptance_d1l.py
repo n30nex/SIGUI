@@ -42,7 +42,15 @@ def ready_storage_line(manager_state: str = "READY_SD") -> str:
         '"data_backend":"mixed","message_store_backend":"sd",'
         '"dm_store_backend":"sd","route_store_backend":"sd",'
         '"packet_log_backend":"sd","stores":{"messages":"sd","dm":"sd",'
-        '"routes":"sd","packets":"sd"}}\n'
+        '"routes":"sd","packets":"sd"},'
+        '"retained_nvs":{"partition":"d1l_retained","marker_ready":true,'
+        '"initialized_this_boot":false,"ready":true,'
+        '"init_error":"ESP_OK","migrated_keys":4,"migration_error":"ESP_OK"},'
+        '"retained_sd":{"degraded":false,"backup_degraded":false,'
+        '"stores":{"messages":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"dm":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"routes":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"packets":{"nvs_mirror_last_error":"ESP_OK"}}}}\n'
     )
 
 

@@ -368,6 +368,19 @@ static esp_err_t persist_route_snapshot(bool force)
     const bool recovery_due = s_retry_pending && retry_ready;
     const bool immediate_reconcile = sd_primary_required &&
         s_sd_reconcile_pending && s_persistence_immediate_due && !s_retry_pending;
+    if (force && s_retry_pending && !retry_ready) {
+        esp_err_t pending_error = ESP_ERR_INVALID_STATE;
+        if ((s_sd_primary_dirty || s_sd_reconcile_pending) &&
+            s_sd_primary_last_error != ESP_OK) {
+            pending_error = s_sd_primary_last_error;
+        } else if (s_nvs_fallback_dirty &&
+                   s_nvs_fallback_last_error != ESP_OK) {
+            pending_error = s_nvs_fallback_last_error;
+        }
+        d1l_store_lock_give(&s_store_lock);
+        d1l_store_lock_give(&s_persist_io_lock);
+        return pending_error;
+    }
     if (!force &&
         ((!retry_ready && !immediate_reconcile) ||
          (!s_persistence_immediate_due && !material_due &&

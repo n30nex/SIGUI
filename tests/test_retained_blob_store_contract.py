@@ -18,6 +18,13 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "D1L_RETAINED_BLOB_STORE_ROUTES" in header
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in header
     assert "d1l_retained_blob_store_backend_name" in header
+    assert "d1l_retained_blob_store_init" in header
+    assert "d1l_retained_blob_store_nvs_ready" in header
+    assert "d1l_retained_blob_store_nvs_error" in header
+    assert "d1l_retained_blob_store_nvs_marker_ready" in header
+    assert "d1l_retained_blob_store_nvs_initialized_this_boot" in header
+    assert "d1l_retained_blob_store_nvs_migrated_keys" in header
+    assert "d1l_retained_blob_store_nvs_migration_error" in header
     assert "d1l_retained_blob_store_is_available" in header
     assert "d1l_retained_blob_store_uses_sd" in header
     assert "d1l_retained_blob_store_backend_state_t" in header
@@ -60,7 +67,7 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert '.name = "dm_messages"' in source
     assert '.name = "routes"' in source
     assert '.name = "packet_log"' in source
-    assert 'return store_sd_enabled(config) ? "sd" : "nvs";' in source
+    assert 'return s_retained_nvs_ready ? "nvs" : "unavailable";' in source
     assert "s_store_sd_enabled[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_backend_generation[D1L_RETAINED_BLOB_STORE_COUNT]" in source
     assert "s_store_state_mux" in source
@@ -73,6 +80,17 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "stats->sd_degraded_latched = true" in source
     assert "note_nvs_mirror_failure(config" in source
     assert "d1l_retained_blob_store_note_sd_backend" in source
+    assert 'D1L_RETAINED_NVS_PARTITION "d1l_retained"' in source
+    assert 'D1L_RETAINED_NVS_META_PARTITION "d1l_ret_meta"' in source
+    assert "retained_nvs_partition_erased" in source
+    assert "esp_partition_erase_range(nvs_partition" not in source
+    assert "retained_nvs_marker_valid" in source
+    assert "nvs_flash_init_partition(" in source
+    assert "nvs_open_from_partition(" in source
+    assert "migrate_known_legacy_nvs_keys();" in source
+    assert '\\"retained_nvs\\":{\\"partition\\":\\"d1l_retained\\"' in read(
+        "main/comms/usb_console.c"
+    )
     assert "bool d1l_retained_blob_store_backend_state(" in source
     assert "out_state->enabled = s_store_sd_enabled[config->id]" in source
     assert "out_state->generation = s_store_backend_generation[config->id]" in source
@@ -147,7 +165,7 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_DM_MESSAGES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_ROUTES)" in storage_status
     assert "d1l_retained_blob_store_backend_name(D1L_RETAINED_BLOB_STORE_PACKET_LOG)" in storage_status
-    assert 'status->data_backend = any_retained_sd ? "mixed" : "nvs"' in storage_status
+    assert 'status->data_backend = any_retained_sd ? "mixed" :' in storage_status
     assert '"retained_history_sd_enabled"' in storage_status
     assert 'status->message_store_backend = "nvs"' not in storage_status
     assert 'status->dm_store_backend = "nvs"' not in storage_status
