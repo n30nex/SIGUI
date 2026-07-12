@@ -4,6 +4,8 @@ This is the active roadmap. Historical phase checkpoints and Codex handoff docs 
 
 Release status: `scripts/release_gate_audit_d1l.py` reports `ready_for_public_release=false` until all P0 evidence gates pass on the release commit. No release tag should be cut until the audit is green.
 
+Execution checkpoint: WP-00 is merged on `main` at `157c9670eb43a0119280f1e8119d9584b06dcfbf`; exact-main Actions run `29208908642` and the downloaded completion-ledger receipt are green. [COMPLETION_LEDGER.yaml](COMPLETION_LEDGER.yaml) remains the machine-readable execution source, with [COMPLETION_STATUS.md](COMPLETION_STATUS.md) as its generated view. This does not advance WP-01, which remains `in_progress`, `proof_banked=false`, and unmerged.
+
 The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `ui_settings.c`, `ui_keyboard.c`, `ui_screen.c`, and `ui_modal.c`.
 
 ## Current P0 Release Blockers
@@ -12,7 +14,7 @@ The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `
 |---|---|---|
 | UI modular ownership and current hierarchy proof | Navigation, shared chrome/layout, Home state/geometry/rendering, the top-level More hierarchy/actions, keyboard policy, the screen-root boundary, and single-active modal ownership are split across focused modules. PR #60 / source `0b138be` passed push Actions `29068006554` and PR Actions `29068007961`, then proved Mesh Roles, Rooms, and Repeaters on COM12 with exact CRC matches `63DE54FB`, `FD538D71`, and `5C41EE08`, passing simulator diffs, and a clean three-round probe without Public RF or formatting. The current host slice applies the same full-height progressive disclosure to read-only Storage, Card status, and Data locations pages with a fixed no-format footer. The remaining #16/#6 work is to own the Messages renderer and Network/routes, Map, Packets, contact, and settings page domains; add UI-task command ownership; finish sheet-specific keyboard submit/cancel ownership; and deepen single-root/callback-lifetime invariants. | Build this Storage slice in Actions, capture `storage`, `storage_card`, and `storage_data` on COM12, and physically verify Back, fixed-footer, and Data locations scrolling. Do not rerun PR #60 Mesh Roles pixels for this unrelated slice. The final frozen release commit still needs commit-matched gate evidence. |
 | Full RF/DM acceptance | Public and outbound DM foundations exist; full inbound DM, ACK/PATH, direct-route proof remains open. | Produce `rf_full_acceptance_*.json` with health and no-Public-command proof. |
-| SD release matrix | Core SD file/history/remount/map/export canaries, raw diagnostics, RP2040-unavailable fallback, and the official Seeed FAT32 smoke pass on the current FAT32 card from `1a29876` / Actions `28714355561`. | Add physical no-card and unformatted/non-FAT32 proof, <=32GB FAT32 matrix, no-format language proof for unusable media, and power/electrical evidence. |
+| SD release matrix | Core historical evidence from `1a29876` / Actions `28714355561` remains valid for that SHA. On the current WP-01 `07322ed` pair, official FAT32 smoke and basic file/Map/export canaries passed, but qualification was not banked: a clean `READY_SD` preflight with zero counters was contaminated when asynchronous `storage diag raw` exceeded fixed settle and overlapped the one-second retained worker; packet append then failed and reboot correctly cancelled with `ESP_ERR_INVALID_STATE`. No WDT/PANIC, Public RF, or formatting occurred. | Run raw diagnostics only in an isolated maintenance boot, then reset/reflash the exact Actions artifacts, require clean `READY_SD` with zero counters, and repeat the retained/reboot/inserted/remove-reinsert/soak gate before continuing the remaining FAT32 matrix. A 750 ms ordinary-timeout increase is not the fix. |
 | Physical screenshots/review | Host simulator screenshots are committed under `docs/screenshots`; PR #56 / Actions `29060900359` provides current hierarchy framebuffer proof on COM12 with CRC `E72745BA`. | Add physical device photos and the manual UI review artifact. |
 | Long soak | Short evidence exists. | Run 12-hour idle/listening soak on the release artifact. |
 
@@ -37,12 +39,13 @@ The active UI boundary includes `ui_navigation.c`, `ui_chrome.c`, `ui_home.c`, `
 
 ## Active Work Queue
 
-1. Prove the host-complete Storage/Card status/Data locations hierarchy on exact Actions-built COM12 pixels, Back paths, fixed no-format footer, and bounded Data locations scrolling, then continue the screenshot-audited #16/#6 slices through remaining owned page domains before adding the bounded UI command queue.
-2. Finish RF/DM acceptance without reserved local ports.
-3. Complete the remaining physical SD release matrix now that core SD works.
-4. Capture physical device photos and manual UI review.
-5. Run the 12-hour idle/listening soak.
-6. Run the final release-gate sweep on the release artifact.
+1. Close WP-01 by isolating raw diagnostics in a maintenance boot, resetting/reflashing the exact `07322ed` artifacts, proving a clean zero-counter `READY_SD` preflight, and rerunning only the exact retained/reboot/inserted/remove-reinsert/soak gate.
+2. Prove the host-complete Storage/Card status/Data locations hierarchy on exact Actions-built COM12 pixels, Back paths, fixed no-format footer, and bounded Data locations scrolling, then continue the screenshot-audited #16/#6 slices through remaining owned page domains before adding the bounded UI command queue.
+3. Finish RF/DM acceptance without reserved local ports.
+4. Complete the remaining physical SD release matrix after WP-01 closes.
+5. Capture physical device photos and manual UI review.
+6. Run the 12-hour idle/listening soak.
+7. Run the final release-gate sweep on the release artifact.
 
 ## Validation Notes
 
