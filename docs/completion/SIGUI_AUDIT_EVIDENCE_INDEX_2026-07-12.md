@@ -19,6 +19,13 @@
 | Conformance closure | false; `wire_envelope_only` |
 | Release status | not ready to tag |
 
+## Live post-audit reconciliation
+
+- PR #81 merged WP-00 on live `main` at `157c9670eb43a0119280f1e8119d9584b06dcfbf`.
+- Exact-main Actions run `29208908642` passed change filtering, host checks including the completion-ledger validator, firmware packaging, and checksum verification. RP2040 stayed correctly out of scope.
+- Downloaded host receipt `completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json` reports `passed=true`, `error_count=0`, and `repository_commit=157c9670eb43a0119280f1e8119d9584b06dcfbf`; its SHA-256 is `13b977eafb883d421ccdbfca4eba8dc8c3838b5198745dcf63c08cee86e741c8`.
+- This closes WP-00 only. WP-01 remains `in_progress`, `proof_banked=false`, and unmerged. Its exact `07322ed` pair reached a clean `READY_SD` preflight with zero retained counters, but asynchronous `storage diag raw` exceeded its fixed settle window and overlapped the one-second retained worker before the packet-append failure and correctly cancelled reboot. A 750 ms ordinary-timeout increase is not accepted as the fix; the next proof isolates diagnostics in a maintenance boot, resets/reflashes the exact artifacts, and requires another clean zero-counter preflight before canaries.
+
 ## Branch and PR evidence
 
 ### PR #62

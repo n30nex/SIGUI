@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-12T20:45:27Z",
+  "snapshot_at": "2026-07-12T21:07:19Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,15 +12,16 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "7c36ea8d9243b2237fe751162dda2989b67486da",
-      "actions_run": "29207372605",
+      "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "actions_run": "29208908642",
       "actions_status": "success",
-      "note": "Completion-program documentation is merged; the implementation stack is not."
+      "note": "WP-00 live completion ledger is merged through PR #81; the implementation stack is not."
     },
     "working_branch": {
-      "name": "codex/wp00-completion-ledger",
-      "base_commit": "7c36ea8d9243b2237fe751162dda2989b67486da",
-      "pull_request": 81
+      "name": "codex/wp00-postmerge-ledger",
+      "base_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "pull_request": 82,
+      "merged_pull_request": 81
     },
     "audit_snapshot": {
       "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
@@ -75,7 +76,7 @@
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents.",
-      "resolution": "Use live main 7c36ea8d9243b2237fe751162dda2989b67486da; retain the audited SHA only as history."
+      "resolution": "Use live main 157c9670eb43a0119280f1e8119d9584b06dcfbf after merged PR #81; retain the audited SHA only as history."
     },
     {
       "conflict": "PR #80 text says its fresh workflows are queued.",
@@ -232,14 +233,52 @@
       "lane": "release",
       "depends_on": [],
       "tracks": ["coordination"],
-      "status": "in_progress",
+      "status": "merged",
       "dependency_gate": "merged",
-      "implementation_commit": null,
-      "implementation_merged": false,
+      "implementation_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "evidence_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "implementation_merged": true,
       "proof_banked": false,
       "required_evidence": ["completion_ledger_validation_<sha>.json"],
-      "evidence": [],
-      "latest_valid_receipt": null,
+      "evidence": [
+        {
+          "filename": "completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json",
+          "kind": "actions_completion_ledger_validation",
+          "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+          "workflow_run": "29208908642",
+          "valid": true,
+          "closure_required": true,
+          "scope": "exact_merged_main",
+          "sha256": "13b977eafb883d421ccdbfca4eba8dc8c3838b5198745dcf63c08cee86e741c8",
+          "metadata": {
+            "artifact_type": "completion_ledger_validation",
+            "generated_at": "2026-07-12T21:04:27.610365Z",
+            "passed": true,
+            "error_count": 0,
+            "repository_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+            "ledger_main_commit": "7c36ea8d9243b2237fe751162dda2989b67486da",
+            "highest_priority_runnable": "WP-01"
+          }
+        }
+      ],
+      "latest_valid_receipt": {
+        "filename": "completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json",
+        "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+        "scope": "exact_merged_main",
+        "closure_eligible": true
+      },
+      "verification": {
+        "actions": {
+          "status": "success",
+          "run": "29208908642",
+          "jobs": ["change-filter", "host-checks", "firmware-build"],
+          "rp2040_job": "skipped_as_out_of_scope"
+        },
+        "host_artifact": {
+          "downloaded": true,
+          "metadata_verified": true
+        }
+      },
       "blockers": []
     },
     {

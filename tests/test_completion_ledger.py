@@ -57,12 +57,12 @@ def test_current_runnable_selection_keeps_failed_wp01_root_cause_work_active():
     assert runnable_work_packages(ledger)[0] == "WP-01"
 
 
-def test_execution_blocker_defers_wp01_without_hiding_other_work():
+def test_execution_blocker_removes_wp01_from_runnable_work():
     ledger = ledger_copy()
     blocker = next(item for item in ledger["blockers"] if item["status"] == "open")
     blocker["blocks_execution"] = True
 
-    assert runnable_work_packages(ledger)[0] == "WP-00"
+    assert runnable_work_packages(ledger) == []
 
 
 def test_unknown_state_is_rejected():
@@ -95,6 +95,8 @@ def test_merged_item_without_required_evidence_is_rejected():
     item["implementation_commit"] = ledger["repository"]["main"]["commit"]
     item["evidence_commit"] = ledger["repository"]["main"]["commit"]
     item["implementation_merged"] = True
+    item["evidence"] = []
+    item["latest_valid_receipt"] = None
 
     assert any("WP-00 is merged but lacks evidence" in error for error in validate_ledger(ledger))
 

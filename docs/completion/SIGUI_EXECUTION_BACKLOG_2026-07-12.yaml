@@ -109,7 +109,7 @@ work_packages:
   depends_on: []
   tracks:
   - coordination
-  status: open
+  status: merged
   required_artifacts:
   - completion_ledger_validation_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
