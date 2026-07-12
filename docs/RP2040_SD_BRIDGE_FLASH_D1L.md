@@ -67,9 +67,15 @@ acceptance runners to prove storage-manager convergence.
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
 port with `rp2040 status`, `rp2040 ping`, safe `storage status`, explicit
-`storage mount`, conditional safe-status polling if a build reports `state="mount_pending"`,
+`storage mount`, bounded safe-status polling while SD reports
+`state="mount_pending"` or the manager reports `BRIDGE_WAIT`, `PING`, `STATUS`,
+or `MOUNT`,
 optional `storage diag`, and `health`,
-and reports the next safe action as JSON. `rp2040 ping` must report
+and reports the next safe action as JSON. Acceptance requires both the fresh
+FAT32 file-operation gate and `manager.state="READY_SD"`; exhausted manager
+transitions set top-level `ok=false`, return nonzero, and remain fail-closed with
+separate total/mount/manager poll counts plus exhaustion fields, even if the
+serial commands themselves succeeded. `rp2040 ping` must report
 `sd_touched=false`; `storage mount` and `storage diag` are non-formatting and
 may be unavailable on older bridge firmware. If preflight reports
 `state="rp2040_protocol_pending"` or `state="sd_card_not_present_diag_pending"`
