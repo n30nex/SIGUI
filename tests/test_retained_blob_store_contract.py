@@ -22,6 +22,10 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_nvs_ready" in header
     assert "d1l_retained_blob_store_nvs_error" in header
     assert "d1l_retained_blob_store_nvs_marker_ready" in header
+    assert "d1l_retained_blob_store_nvs_markers_complete" in header
+    assert "d1l_retained_blob_store_nvs_anchor_ready" in header
+    assert "d1l_retained_blob_store_nvs_sentinel_ready" in header
+    assert "d1l_retained_blob_store_nvs_external_init_required" in header
     assert "d1l_retained_blob_store_nvs_initialized_this_boot" in header
     assert "d1l_retained_blob_store_nvs_migrated_keys" in header
     assert "d1l_retained_blob_store_nvs_migration_error" in header
@@ -82,9 +86,20 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_retained_blob_store_note_sd_backend" in source
     assert 'D1L_RETAINED_NVS_PARTITION "d1l_retained"' in source
     assert 'D1L_RETAINED_NVS_META_PARTITION "d1l_ret_meta"' in source
+    assert 'D1L_RETAINED_NVS_ANCHOR_KEY "anchor"' in source
+    assert "D1L_RETAINED_NVS_META_LEGACY_VERSION 1U" in source
+    assert "D1L_RETAINED_NVS_META_VERSION 2U" in source
     assert "retained_nvs_partition_erased" in source
     assert "esp_partition_erase_range(nvs_partition" not in source
+    assert "sentinel_present" in source
+    assert "ensure_default_retained_nvs_sentinel" in source
+    assert "ensure_retained_nvs_anchor" in source
+    assert "blank_resume_allowed" in source
+    assert "require_retained_nvs_anchor" in source
+    assert "NVS initialization is not a read-only probe" in source
     assert "retained_nvs_marker_valid" in source
+    assert "retained_nvs_legacy_marker_valid" in source
+    assert "finalize_retained_nvs_markers" in source
     assert "nvs_flash_init_partition(" in source
     assert "nvs_open_from_partition(" in source
     assert "migrate_known_legacy_nvs_keys();" in source
@@ -175,3 +190,22 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
     assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
     assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
+
+
+def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes():
+    developer = read("docs/DEVELOPER_GUIDE_D1L.md")
+    checklist = read("docs/RELEASE_CHECKLIST.md")
+    roadmap = read("docs/ROADMAP.md")
+    test_plan = read("docs/TEST_PLAN_D1L.md")
+    limitations = read("docs/KNOWN_LIMITATIONS.md")
+    combined = "\n".join([developer, checklist, roadmap, test_plan, limitations])
+
+    assert "external_init_required=true" in combined
+    assert "markers_complete=true" in combined
+    assert "prepare_retained_nvs_upgrade_d1l.py" in developer
+    assert "prepare_retained_nvs_upgrade_d1l.py" in checklist
+    assert "prepare_retained_nvs_upgrade_d1l.py" in test_plan
+    assert "firmware neither probes nor erases ambiguous nonblank bytes" in checklist
+    assert "firmware must not delete it automatically" in test_plan
+    assert "direct scoped first-upgrade erase" not in combined
+    assert "triple absence directly" not in combined

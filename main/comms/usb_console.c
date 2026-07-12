@@ -1459,8 +1459,12 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\"}",
+    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"markers_complete\":%s,\"anchor_ready\":%s,\"sentinel_ready\":%s,\"external_init_required\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\"}",
            bool_json(d1l_retained_blob_store_nvs_marker_ready()),
+           bool_json(d1l_retained_blob_store_nvs_markers_complete()),
+           bool_json(d1l_retained_blob_store_nvs_anchor_ready()),
+           bool_json(d1l_retained_blob_store_nvs_sentinel_ready()),
+           bool_json(d1l_retained_blob_store_nvs_external_init_required()),
            bool_json(d1l_retained_blob_store_nvs_initialized_this_boot()),
            bool_json(d1l_retained_blob_store_nvs_ready()),
            esp_err_to_name(d1l_retained_blob_store_nvs_error()),

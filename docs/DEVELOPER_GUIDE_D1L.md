@@ -85,11 +85,63 @@ Do not format SD cards from DeskOS firmware, RP2040 firmware, serial commands, U
 The 8 MB layout preserves the default 24 KiB `nvs` partition for settings,
 identity, Wi-Fi, contacts, nodes, read state, and crash state. Public, DM,
 route, and packet fallback blobs use the separate 124 KiB `d1l_retained`
-partition at `0x7E1000`; its redundant 4 KiB marker sector starts at
-`0x7E0000`. The factory app remains at `0x10000` and ends before that marker.
-Upgrade reads copy a scoped legacy retained key from default
-NVS only after the dedicated write commits, then erase only that old key; no
-whole-default-NVS migration erase is allowed.
+partition at `0x7E1000`; its 4 KiB metadata sector at `0x7E0000` holds two
+versioned marker copies. The dedicated partition itself stores a versioned
+`d1l_ret_meta/anchor`, and a final completion claim is stored in default NVS as
+the `d1l_ret_meta/initialized` sentinel. The factory app remains at `0x10000`
+and ends before the metadata sector. Upgrade reads copy a scoped legacy
+retained key from default NVS only after the dedicated write commits, then
+erase only that old key; the completion sentinel is committed after all known
+legacy-key migration succeeds.
+
+Marker format v2 is the release format. On blank first use, firmware writes
+metadata marker 1, initializes NVS, writes and commits the dedicated anchor,
+and only then writes metadata marker 2. Scoped legacy migration follows, and
+the default-NVS completion sentinel is committed last. The anchor makes a
+genuinely initialized user-empty store physically nonblank, while marker 2
+proves that the anchor-commit point was crossed. The only blank owned-state
+resume is the exact pre-initialization power-loss state with marker 1 valid,
+marker 2 erased, and no default sentinel.
+
+`nvs_flash_init_partition` is not a read-only probe. ESP-IDF initialization may
+erase or activate a corrupt page, so firmware never uses it to classify a
+nonblank region that has neither a valid current/future metadata marker nor a
+valid default sentinel. It performs zero retained-region erases, returns
+fail-closed status with `external_init_required=true`, and leaves the ambiguous
+bytes untouched. The installer or hardware procedure must first verify the
+supported predecessor partition/layout provenance, then perform a separately
+audited erase scoped strictly to `d1l_retained` at `0x7E1000` for `0x1F000`
+bytes. Firmware then verifies blank first use and executes marker 1 -> NVS init
+-> anchor commit -> marker 2 -> legacy migration -> sentinel.
+Use `scripts/prepare_retained_nvs_upgrade_d1l.py` for the external step. It
+requires an exact running SHA from the audited predecessor allowlist, validates
+the partition table's MD5 record, exact entries, and exact Actions artifact
+hash, then requires the exact erase-scope confirmation. The one known failed
+pre-anchor candidate is incident-specific: live failure-shaped status alone is
+never authorization. Its committed evidence manifest is hash-pinned in the
+tool and binds the exact flash and first-boot receipt hashes, COM port, ESP32-S3
+MAC, the previously captured MeshCore identity fingerprint, and the complete pre-erase
+`d1l_retained` raw SHA256. The tool rereads and matches all of those facts while
+the chip is held in the bootloader, fsyncs staged JSON intent before mutation,
+erases only the retained range without rebooting, rereads it before allowing a
+hard reset, requires every byte to be `0xFF`, and retains no raw backup.
+
+Marker- or sentinel-owned recovery performs no explicit retained-partition
+erase. With only the default sentinel remaining, marker reconstruction proceeds
+only after NVS initialization succeeds and the existing dedicated anchor is
+verified. If both metadata markers and the default sentinel are lost
+simultaneously, including an anchor-only valid NVS, firmware preserves the
+region and reports `external_init_required=true`; it does not delete that state
+automatically.
+
+Published pre-anchor marker format v1 is an explicit supported upgrade path.
+Valid v1 markers prove ownership even for an empty partition, so firmware
+initializes it and commits the v2 anchor without erasing retained data, migrates
+legacy keys, commits the default sentinel, and only then rewrites both metadata
+slots as v2. Release hardware status must show `marker_ready=true`,
+`markers_complete=true`, `anchor_ready=true`, `sentinel_ready=true`,
+`external_init_required=false`, `ready=true`, and both init and migration errors
+as `ESP_OK`. No automatic whole-default-NVS erase is allowed.
 
 `ui_capture_d1l.py` is the hardware display truth path for the split-page UI blocker. It reads the 480x480 RGB565 frame back over the COM12 console, writes JSON/PNG/raw artifacts, and must stay non-destructive: no RF send, no SD format, and no manual touch requirement.
 

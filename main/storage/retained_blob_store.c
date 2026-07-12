@@ -13,7 +13,11 @@
 #define D1L_RETAINED_NVS_PARTITION "d1l_retained"
 #define D1L_RETAINED_NVS_META_PARTITION "d1l_ret_meta"
 #define D1L_RETAINED_NVS_META_MAGIC 0x44314C52U
-#define D1L_RETAINED_NVS_META_VERSION 1U
+#define D1L_RETAINED_NVS_META_LEGACY_VERSION 1U
+#define D1L_RETAINED_NVS_META_VERSION 2U
+#define D1L_RETAINED_NVS_SENTINEL_NAMESPACE "d1l_ret_meta"
+#define D1L_RETAINED_NVS_SENTINEL_KEY "initialized"
+#define D1L_RETAINED_NVS_ANCHOR_KEY "anchor"
 #define D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"
 #define D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"
 #define D1L_RETAINED_ROUTE_NAMESPACE "d1l_routes"
@@ -80,6 +84,11 @@ static portMUX_TYPE s_store_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_retained_nvs_ready;
 static esp_err_t s_retained_nvs_error = ESP_ERR_INVALID_STATE;
 static bool s_retained_nvs_marker_ready;
+static bool s_retained_nvs_markers_complete;
+static bool s_retained_nvs_anchor_ready;
+static bool s_retained_nvs_sentinel_ready;
+static bool s_retained_nvs_external_init_required;
+static bool s_retained_nvs_marker_finalize_pending;
 static bool s_retained_nvs_initialized_this_boot;
 static uint32_t s_retained_nvs_migrated_keys;
 static esp_err_t s_retained_nvs_migration_error = ESP_OK;
@@ -360,6 +369,13 @@ static bool retained_nvs_marker_valid(const d1l_retained_nvs_marker_t *marker)
            marker->version == D1L_RETAINED_NVS_META_VERSION;
 }
 
+static bool retained_nvs_legacy_marker_valid(
+    const d1l_retained_nvs_marker_t *marker)
+{
+    return retained_nvs_marker_structurally_valid(marker) &&
+           marker->version == D1L_RETAINED_NVS_META_LEGACY_VERSION;
+}
+
 static bool retained_nvs_marker_erased(const d1l_retained_nvs_marker_t *marker)
 {
     if (!marker) {
@@ -402,6 +418,198 @@ static esp_err_t retained_nvs_partition_erased(
     return ESP_OK;
 }
 
+static d1l_retained_nvs_marker_t retained_nvs_marker_value(void)
+{
+    return (d1l_retained_nvs_marker_t) {
+        .magic = D1L_RETAINED_NVS_META_MAGIC,
+        .version = D1L_RETAINED_NVS_META_VERSION,
+        .magic_inverse = ~D1L_RETAINED_NVS_META_MAGIC,
+        .version_inverse = ~D1L_RETAINED_NVS_META_VERSION,
+    };
+}
+
+static esp_err_t read_default_retained_nvs_sentinel(bool *out_present)
+{
+    if (!out_present) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_present = false;
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+                             NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_retained_nvs_marker_t sentinel = {0};
+    size_t sentinel_len = sizeof(sentinel);
+    ret = nvs_get_blob(handle, D1L_RETAINED_NVS_SENTINEL_KEY,
+                       &sentinel, &sentinel_len);
+    nvs_close(handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK || sentinel_len != sizeof(sentinel) ||
+        !retained_nvs_marker_valid(&sentinel)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    *out_present = true;
+    return ESP_OK;
+}
+
+static esp_err_t ensure_default_retained_nvs_sentinel(void)
+{
+    bool present = false;
+    esp_err_t ret = read_default_retained_nvs_sentinel(&present);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (present) {
+        s_retained_nvs_sentinel_ready = true;
+        return ESP_OK;
+    }
+
+    nvs_handle_t handle;
+    ret = nvs_open(D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+                   NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const d1l_retained_nvs_marker_t sentinel = retained_nvs_marker_value();
+    ret = nvs_set_blob(handle, D1L_RETAINED_NVS_SENTINEL_KEY,
+                       &sentinel, sizeof(sentinel));
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (ret == ESP_OK) {
+        s_retained_nvs_sentinel_ready = true;
+    }
+    return ret;
+}
+
+static esp_err_t read_retained_nvs_anchor(bool *out_present)
+{
+    if (!out_present) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_present = false;
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open_from_partition(
+        D1L_RETAINED_NVS_PARTITION, D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+        NVS_READONLY, &handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    d1l_retained_nvs_marker_t anchor = {0};
+    size_t anchor_len = sizeof(anchor);
+    ret = nvs_get_blob(handle, D1L_RETAINED_NVS_ANCHOR_KEY,
+                       &anchor, &anchor_len);
+    nvs_close(handle);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        return ESP_OK;
+    }
+    if (ret != ESP_OK || anchor_len != sizeof(anchor) ||
+        !retained_nvs_marker_valid(&anchor)) {
+        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+    }
+    *out_present = true;
+    return ESP_OK;
+}
+
+static esp_err_t require_retained_nvs_anchor(void)
+{
+    bool present = false;
+    const esp_err_t ret = read_retained_nvs_anchor(&present);
+    if (ret == ESP_OK && present) {
+        s_retained_nvs_anchor_ready = true;
+        return ESP_OK;
+    }
+    return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+}
+
+static esp_err_t ensure_retained_nvs_anchor(void)
+{
+    bool present = false;
+    esp_err_t ret = read_retained_nvs_anchor(&present);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (present) {
+        s_retained_nvs_anchor_ready = true;
+        return ESP_OK;
+    }
+
+    nvs_handle_t handle;
+    ret = nvs_open_from_partition(
+        D1L_RETAINED_NVS_PARTITION, D1L_RETAINED_NVS_SENTINEL_NAMESPACE,
+        NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const d1l_retained_nvs_marker_t anchor = retained_nvs_marker_value();
+    ret = nvs_set_blob(handle, D1L_RETAINED_NVS_ANCHOR_KEY,
+                       &anchor, sizeof(anchor));
+    if (ret == ESP_OK) {
+        ret = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    if (ret == ESP_OK) {
+        s_retained_nvs_anchor_ready = true;
+    }
+    return ret;
+}
+
+static esp_err_t prepare_retained_nvs_markers(
+    const esp_partition_t *meta_partition,
+    const d1l_retained_nvs_marker_t *marker_first,
+    const d1l_retained_nvs_marker_t *marker_last,
+    bool initialize_blank_nvs)
+{
+    if (!meta_partition || !marker_first || !marker_last) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const d1l_retained_nvs_marker_t marker = retained_nvs_marker_value();
+    esp_err_t ret = ESP_OK;
+    if (!retained_nvs_marker_erased(marker_first) ||
+        !retained_nvs_marker_erased(marker_last)) {
+        ret = esp_partition_erase_range(meta_partition, 0U,
+                                        meta_partition->size);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    ret = esp_partition_write(meta_partition, 0U, &marker, sizeof(marker));
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    s_retained_nvs_marker_ready = true;
+    if (initialize_blank_nvs) {
+        ret = nvs_flash_init_partition(D1L_RETAINED_NVS_PARTITION);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        s_retained_nvs_initialized_this_boot = true;
+    }
+    ret = ensure_retained_nvs_anchor();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = esp_partition_write(meta_partition,
+                              meta_partition->size - sizeof(marker),
+                              &marker, sizeof(marker));
+    if (ret == ESP_OK) {
+        s_retained_nvs_markers_complete = true;
+    }
+    return ret;
+}
+
 static esp_err_t initialize_retained_nvs_partition(void)
 {
     const esp_partition_t *meta_partition = esp_partition_find_first(
@@ -430,73 +638,176 @@ static esp_err_t initialize_retained_nvs_partition(void)
         return ret;
     }
 
-    const d1l_retained_nvs_marker_t marker = {
-        .magic = D1L_RETAINED_NVS_META_MAGIC,
-        .version = D1L_RETAINED_NVS_META_VERSION,
-        .magic_inverse = ~D1L_RETAINED_NVS_META_MAGIC,
-        .version_inverse = ~D1L_RETAINED_NVS_META_VERSION,
-    };
+    const d1l_retained_nvs_marker_t marker = retained_nvs_marker_value();
+    bool sentinel_present = false;
+    ret = read_default_retained_nvs_sentinel(&sentinel_present);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    s_retained_nvs_sentinel_ready = sentinel_present;
+    const bool marker_first_valid = retained_nvs_marker_valid(&marker_first);
+    const bool marker_last_valid = retained_nvs_marker_valid(&marker_last);
+    const bool marker_first_legacy =
+        retained_nvs_legacy_marker_valid(&marker_first);
+    const bool marker_last_legacy =
+        retained_nvs_legacy_marker_valid(&marker_last);
     if ((retained_nvs_marker_structurally_valid(&marker_first) &&
-         !retained_nvs_marker_valid(&marker_first)) ||
+         !marker_first_valid && !marker_first_legacy) ||
         (retained_nvs_marker_structurally_valid(&marker_last) &&
-         !retained_nvs_marker_valid(&marker_last))) {
+         !marker_last_valid && !marker_last_legacy)) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (retained_nvs_marker_valid(&marker_first) ||
-        retained_nvs_marker_valid(&marker_last)) {
+    if ((marker_first_valid || marker_last_valid) &&
+        (marker_first_legacy || marker_last_legacy) && !sentinel_present) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (marker_first_valid || marker_last_valid) {
+        /* A completely blank retained region is a legitimate power-loss
+         * resume only after the first marker and before NVS initialization.
+         * Every later durable state has either the dedicated anchor, the
+         * second marker, or the default sentinel and must fail closed if the
+         * retained region is subsequently erased. */
+        const bool blank_resume_allowed =
+            marker_first_valid && retained_nvs_marker_erased(&marker_last) &&
+            !sentinel_present;
+        if (!blank_resume_allowed) {
+            bool established_partition_erased = false;
+            ret = retained_nvs_partition_erased(
+                nvs_partition, &established_partition_erased);
+            if (ret != ESP_OK || established_partition_erased) {
+                return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
+            }
+        }
+        s_retained_nvs_marker_ready = true;
+        s_retained_nvs_markers_complete =
+            marker_first_valid && marker_last_valid;
+        ret = nvs_flash_init_partition(D1L_RETAINED_NVS_PARTITION);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        ret = blank_resume_allowed ? ensure_retained_nvs_anchor() :
+                                     require_retained_nvs_anchor();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        if (marker_first_valid &&
+            retained_nvs_marker_erased(&marker_last)) {
+            ret = esp_partition_write(
+                meta_partition,
+                meta_partition->size - sizeof(marker),
+                &marker, sizeof(marker));
+            if (ret == ESP_OK) {
+                s_retained_nvs_markers_complete = true;
+            }
+            return ret;
+        }
+        if (marker_last_valid &&
+            retained_nvs_marker_erased(&marker_first)) {
+            ret = esp_partition_write(meta_partition, 0U,
+                                      &marker, sizeof(marker));
+            if (ret == ESP_OK) {
+                s_retained_nvs_markers_complete = true;
+            }
+            return ret;
+        }
+        /* A non-erased corrupt companion cannot be repaired in place. Wait
+         * until the external sentinel is durable, then rebuild both marker
+         * slots around the already-required anchor. If power fails during
+         * this metadata-sector repair, sentinel-owned recovery is still
+         * non-destructive. */
+        if (sentinel_present && !(marker_first_valid && marker_last_valid)) {
+            return prepare_retained_nvs_markers(
+                meta_partition, &marker_first, &marker_last, false);
+        }
+        s_retained_nvs_marker_finalize_pending =
+            !s_retained_nvs_markers_complete;
+        return ESP_OK;
+    }
+
+    /* Version-1 markers belong to the published pre-anchor candidate. They
+     * prove ownership even when its empty NVS never programmed a page. Keep
+     * those markers in place while initializing and committing the anchor;
+     * migration and the default sentinel complete before v2 rewrites meta. */
+    if (marker_first_legacy || marker_last_legacy) {
         s_retained_nvs_marker_ready = true;
         ret = nvs_flash_init_partition(D1L_RETAINED_NVS_PARTITION);
         if (ret != ESP_OK) {
             return ret;
         }
-        if (retained_nvs_marker_valid(&marker_first) &&
-            retained_nvs_marker_erased(&marker_last)) {
-            return esp_partition_write(
-                meta_partition,
-                meta_partition->size - sizeof(marker),
-                &marker, sizeof(marker));
+        ret = ensure_retained_nvs_anchor();
+        if (ret != ESP_OK) {
+            return ret;
         }
-        if (retained_nvs_marker_valid(&marker_last) &&
-            retained_nvs_marker_erased(&marker_first)) {
-            return esp_partition_write(meta_partition, 0U,
-                                       &marker, sizeof(marker));
-        }
+        s_retained_nvs_marker_finalize_pending = true;
         return ESP_OK;
     }
 
-    /* First use is accepted only when both redundant marker slots and every
-     * byte of the newly carved NVS partition are already erased. A corrupt,
-     * lost, or future-version marker and any non-blank retained region are
-     * ambiguous, so they fail closed without a recovery erase. */
-    if (!retained_nvs_marker_erased(&marker_first) ||
-        !retained_nvs_marker_erased(&marker_last)) {
-        return ESP_ERR_INVALID_STATE;
-    }
     bool partition_erased = false;
     ret = retained_nvs_partition_erased(nvs_partition, &partition_erased);
-    if (ret != ESP_OK || !partition_erased) {
-        return ret == ESP_OK ? ESP_ERR_INVALID_STATE : ret;
-    }
-    /* Commit one durable marker before NVS initialization. If power is lost
-     * after NVS programs the formerly blank region, the next boot sees this
-     * marker and resumes initialization instead of mistaking it for damage. */
-    ret = esp_partition_write(meta_partition, 0U, &marker, sizeof(marker));
     if (ret != ESP_OK) {
         return ret;
     }
-    s_retained_nvs_marker_ready = true;
-    ret = nvs_flash_init_partition(D1L_RETAINED_NVS_PARTITION);
+    if (partition_erased) {
+        if (sentinel_present) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        return prepare_retained_nvs_markers(
+            meta_partition, &marker_first, &marker_last, true);
+    }
+
+    /* Only the default-NVS sentinel proves an unmarked region belongs to the
+     * retained store. NVS initialization is not a read-only probe: ESP-IDF
+     * can erase a corrupt page while activating it. With sentinel ownership,
+     * require the already-committed dedicated anchor before rebuilding the
+     * metadata markers, and never explicitly erase on a recovery failure. */
+    if (sentinel_present) {
+        ret = nvs_flash_init_partition(D1L_RETAINED_NVS_PARTITION);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        ret = require_retained_nvs_anchor();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        return prepare_retained_nvs_markers(
+            meta_partition, &marker_first, &marker_last, false);
+    }
+
+    /* Nonblank bytes with no ownership claim are ambiguous. Firmware never
+     * probes or erases them: an installer must first verify the predecessor
+     * layout and perform the separately audited, scoped partition erase. */
+    s_retained_nvs_external_init_required = true;
+    return ESP_ERR_INVALID_STATE;
+}
+
+static esp_err_t finalize_retained_nvs_markers(void)
+{
+    const esp_partition_t *meta_partition = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
+        D1L_RETAINED_NVS_META_PARTITION);
+    if (!meta_partition ||
+        meta_partition->size < (2U * sizeof(d1l_retained_nvs_marker_t))) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    d1l_retained_nvs_marker_t marker_first = {0};
+    d1l_retained_nvs_marker_t marker_last = {0};
+    esp_err_t ret = esp_partition_read(meta_partition, 0U,
+                                       &marker_first, sizeof(marker_first));
     if (ret != ESP_OK) {
         return ret;
     }
-    s_retained_nvs_initialized_this_boot = true;
-    ret = esp_partition_write(meta_partition,
-                              meta_partition->size - sizeof(marker),
-                              &marker, sizeof(marker));
+    ret = esp_partition_read(meta_partition,
+                             meta_partition->size - sizeof(marker_last),
+                             &marker_last, sizeof(marker_last));
     if (ret != ESP_OK) {
         return ret;
     }
-    return ESP_OK;
+    ret = prepare_retained_nvs_markers(
+        meta_partition, &marker_first, &marker_last, false);
+    if (ret == ESP_OK) {
+        s_retained_nvs_marker_finalize_pending = false;
+    }
+    return ret;
 }
 
 static esp_err_t retained_nvs_unavailable_error(void)
@@ -880,6 +1191,11 @@ esp_err_t d1l_retained_blob_store_init(void)
 {
     s_retained_nvs_ready = false;
     s_retained_nvs_marker_ready = false;
+    s_retained_nvs_markers_complete = false;
+    s_retained_nvs_anchor_ready = false;
+    s_retained_nvs_sentinel_ready = false;
+    s_retained_nvs_external_init_required = false;
+    s_retained_nvs_marker_finalize_pending = false;
     s_retained_nvs_initialized_this_boot = false;
     s_retained_nvs_migrated_keys = 0U;
     s_retained_nvs_migration_error = ESP_OK;
@@ -891,7 +1207,19 @@ esp_err_t d1l_retained_blob_store_init(void)
         return ret;
     }
 
-    const esp_err_t migration_ret = migrate_known_legacy_nvs_keys();
+    esp_err_t migration_ret = migrate_known_legacy_nvs_keys();
+    if (migration_ret == ESP_OK) {
+        migration_ret = ensure_default_retained_nvs_sentinel();
+        if (migration_ret != ESP_OK) {
+            s_retained_nvs_migration_error = migration_ret;
+        }
+    }
+    if (migration_ret == ESP_OK && s_retained_nvs_marker_finalize_pending) {
+        migration_ret = finalize_retained_nvs_markers();
+        if (migration_ret != ESP_OK) {
+            s_retained_nvs_migration_error = migration_ret;
+        }
+    }
     s_retained_nvs_ready = migration_ret == ESP_OK;
     return migration_ret;
 }
@@ -909,6 +1237,26 @@ esp_err_t d1l_retained_blob_store_nvs_error(void)
 bool d1l_retained_blob_store_nvs_marker_ready(void)
 {
     return s_retained_nvs_marker_ready;
+}
+
+bool d1l_retained_blob_store_nvs_markers_complete(void)
+{
+    return s_retained_nvs_markers_complete;
+}
+
+bool d1l_retained_blob_store_nvs_anchor_ready(void)
+{
+    return s_retained_nvs_anchor_ready;
+}
+
+bool d1l_retained_blob_store_nvs_sentinel_ready(void)
+{
+    return s_retained_nvs_sentinel_ready;
+}
+
+bool d1l_retained_blob_store_nvs_external_init_required(void)
+{
+    return s_retained_nvs_external_init_required;
 }
 
 bool d1l_retained_blob_store_nvs_initialized_this_boot(void)

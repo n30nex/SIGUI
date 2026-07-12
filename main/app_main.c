@@ -41,11 +41,16 @@ void app_main(void)
                  esp_err_to_name(retained_nvs_ret));
     }
 
-    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
+    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
            D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION,
            (unsigned long)d1l_health_monitor_boot_nonce(),
            nvs_ret == ESP_OK ? "true" : "false", esp_err_to_name(nvs_ret),
            d1l_retained_blob_store_nvs_marker_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_markers_complete() ? "true" : "false",
+           d1l_retained_blob_store_nvs_anchor_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_sentinel_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_external_init_required() ?
+               "true" : "false",
            d1l_retained_blob_store_nvs_initialized_this_boot() ? "true" : "false",
            d1l_retained_blob_store_nvs_ready() ? "true" : "false",
            esp_err_to_name(d1l_retained_blob_store_nvs_error()),

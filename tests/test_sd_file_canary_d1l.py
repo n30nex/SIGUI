@@ -19,6 +19,10 @@ def ready_storage_status(manager_state: str | None = None) -> str:
         '"message_store_backend":"sd","dm_store_backend":"sd",'
         '"route_store_backend":"sd","packet_log_backend":"sd",'
         '"retained_nvs":{"partition":"d1l_retained","marker_ready":true,'
+        '"markers_complete":true,'
+        '"anchor_ready":true,'
+        '"sentinel_ready":true,'
+        '"external_init_required":false,'
         '"initialized_this_boot":false,"ready":true,"init_error":"ESP_OK",'
         '"migrated_keys":4,"migration_error":"ESP_OK"},'
         '"retained_sd":{"degraded":false,"backup_degraded":false,"stores":{'
@@ -49,6 +53,25 @@ def test_sd_file_gate_rejects_stale_or_failed_status_refresh():
     wrong_filesystem = json.loads(ready_storage_status())
     wrong_filesystem["sd"]["filesystem"] = "exfat"
     assert not sd_file_canary_d1l.storage_file_gate_ready(wrong_filesystem)
+
+
+def test_retained_history_backends_require_dedicated_anchor():
+    ready = json.loads(ready_storage_status())
+    assert sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    incomplete = json.loads(ready_storage_status())
+    incomplete["retained_nvs"]["markers_complete"] = False
+    assert not sd_file_canary_d1l.retained_history_backends_ready(incomplete)
+
+    ready["retained_nvs"]["anchor_ready"] = False
+    assert not sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    del ready["retained_nvs"]["anchor_ready"]
+    assert not sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    external = json.loads(ready_storage_status())
+    external["retained_nvs"]["external_init_required"] = True
+    assert not sd_file_canary_d1l.retained_history_backends_ready(external)
 
 
 def canary_success() -> str:

@@ -108,6 +108,10 @@ def retained_history_backends_ready(storage_status: dict) -> bool:
         and isinstance(retained_nvs, dict)
         and retained_nvs.get("partition") == "d1l_retained"
         and retained_nvs.get("marker_ready") is True
+        and retained_nvs.get("markers_complete") is True
+        and retained_nvs.get("anchor_ready") is True
+        and retained_nvs.get("sentinel_ready") is True
+        and retained_nvs.get("external_init_required") is False
         and retained_nvs.get("ready") is True
         and retained_nvs.get("init_error") == "ESP_OK"
         and retained_nvs.get("migration_error") == "ESP_OK"

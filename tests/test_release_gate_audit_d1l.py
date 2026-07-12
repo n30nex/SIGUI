@@ -770,6 +770,10 @@ def ready_storage_status() -> dict:
         "retained_nvs": {
             "partition": "d1l_retained",
             "marker_ready": True,
+            "markers_complete": True,
+            "anchor_ready": True,
+            "sentinel_ready": True,
+            "external_init_required": False,
             "initialized_this_boot": False,
             "ready": True,
             "init_error": "ESP_OK",
@@ -2015,6 +2019,25 @@ def test_release_gate_audit_rejects_nvs_backends_behind_ready_file_gate(tmp_path
     assert audit.storage_file_gate_ready_status(storage_after) is True
     assert audit.retained_history_sd_ready_status(storage_after) is False
     assert gate["ok"] is False
+
+
+def test_retained_history_ready_rejects_missing_dedicated_anchor():
+    storage = ready_storage_status()
+    assert audit.retained_history_sd_ready_status(storage)
+
+    storage["retained_nvs"]["anchor_ready"] = False
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    del storage["retained_nvs"]["anchor_ready"]
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    storage = ready_storage_status()
+    storage["retained_nvs"]["markers_complete"] = False
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    storage = ready_storage_status()
+    storage["retained_nvs"]["external_init_required"] = True
+    assert audit.retained_history_sd_ready_status(storage) is False
 
 
 def test_release_gate_audit_rejects_failed_remount_summary(tmp_path: Path):

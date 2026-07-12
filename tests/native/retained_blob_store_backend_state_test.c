@@ -16,12 +16,13 @@
 #define TEST_RETAINED_META_SIZE 0x1000U
 #define TEST_RETAINED_NVS_SIZE 0x1f000U
 #define TEST_RETAINED_META_MAGIC 0x44314C52U
-#define TEST_RETAINED_META_VERSION 1U
-#define TEST_NVS_ENTRY_COUNT 8U
+#define TEST_RETAINED_META_LEGACY_VERSION 1U
+#define TEST_RETAINED_META_VERSION 2U
+#define TEST_NVS_ENTRY_COUNT 16U
 #define TEST_NVS_HANDLE_COUNT 4U
 #define TEST_NVS_NAME_MAX 31U
 #define TEST_NVS_BLOB_MAX 128U
-#define TEST_NVS_EVENT_COUNT 128U
+#define TEST_NVS_EVENT_COUNT 512U
 
 typedef enum {
     TEST_NVS_EVENT_INIT_PARTITION = 0,
@@ -82,8 +83,14 @@ static uint32_t s_rename_count;
 static uint32_t s_delete_count;
 static bool s_nvs_enabled;
 static esp_err_t s_partition_init_result = ESP_OK;
+static esp_err_t s_anchor_commit_result = ESP_OK;
+static esp_err_t s_sentinel_commit_result = ESP_OK;
 static esp_err_t s_dedicated_commit_result = ESP_OK;
 static esp_err_t s_legacy_commit_result = ESP_OK;
+static size_t s_meta_write_attempt;
+static size_t s_meta_write_fail_on_attempt;
+static esp_err_t s_meta_erase_result = ESP_OK;
+static bool s_meta_erase_partial;
 static char s_init_partition[TEST_NVS_NAME_MAX + 1U];
 static test_nvs_entry_t s_nvs_entries[TEST_NVS_ENTRY_COUNT];
 static test_nvs_handle_t s_nvs_handles[TEST_NVS_HANDLE_COUNT];
@@ -118,6 +125,14 @@ static test_retained_marker_t valid_retained_marker(void)
     return marker;
 }
 
+static test_retained_marker_t legacy_retained_marker(void)
+{
+    test_retained_marker_t marker = valid_retained_marker();
+    marker.version = TEST_RETAINED_META_LEGACY_VERSION;
+    marker.version_inverse = ~marker.version;
+    return marker;
+}
+
 static void seed_valid_retained_markers(void)
 {
     const test_retained_marker_t marker = valid_retained_marker();
@@ -125,6 +140,23 @@ static void seed_valid_retained_markers(void)
     memcpy(s_retained_meta, &marker, sizeof(marker));
     memcpy(s_retained_meta + sizeof(s_retained_meta) - sizeof(marker),
            &marker, sizeof(marker));
+}
+
+static void seed_nvs_blob(bool dedicated, const char *namespace_name,
+                          const char *key, const void *blob, size_t blob_len);
+
+static void seed_valid_default_sentinel(void)
+{
+    const test_retained_marker_t marker = valid_retained_marker();
+    seed_nvs_blob(false, "d1l_ret_meta", "initialized",
+                  &marker, sizeof(marker));
+}
+
+static void seed_valid_dedicated_anchor(void)
+{
+    const test_retained_marker_t marker = valid_retained_marker();
+    seed_nvs_blob(true, "d1l_ret_meta", "anchor",
+                  &marker, sizeof(marker));
 }
 
 static void copy_name(char *dst, const char *src)
@@ -228,8 +260,14 @@ static void clear_nvs_case(void)
     memset(s_nvs_events, 0, sizeof(s_nvs_events));
     s_nvs_event_count = 0U;
     s_dedicated_commit_result = ESP_OK;
+    s_anchor_commit_result = ESP_OK;
+    s_sentinel_commit_result = ESP_OK;
     s_legacy_commit_result = ESP_OK;
     s_partition_init_result = ESP_OK;
+    s_meta_write_attempt = 0U;
+    s_meta_write_fail_on_attempt = 0U;
+    s_meta_erase_result = ESP_OK;
+    s_meta_erase_partial = false;
     s_retained_partition_erased = false;
     s_retained_partition_read_count = 0U;
     seed_valid_retained_markers();
@@ -292,7 +330,21 @@ esp_err_t esp_partition_write(const esp_partition_t *partition,
         return ESP_ERR_INVALID_ARG;
     }
     note_nvs_event(TEST_NVS_EVENT_WRITE_META);
-    memcpy(s_retained_meta + dst_offset, src, size);
+    s_meta_write_attempt++;
+    const uint8_t *source = (const uint8_t *)src;
+    for (size_t i = 0U; i < size; ++i) {
+        if ((s_retained_meta[dst_offset + i] & source[i]) != source[i]) {
+            return ESP_FAIL;
+        }
+    }
+    const size_t write_size =
+        s_meta_write_fail_on_attempt == s_meta_write_attempt ? size / 2U : size;
+    for (size_t i = 0U; i < write_size; ++i) {
+        s_retained_meta[dst_offset + i] &= source[i];
+    }
+    if (s_meta_write_fail_on_attempt == s_meta_write_attempt) {
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
 
@@ -305,6 +357,13 @@ esp_err_t esp_partition_erase_range(const esp_partition_t *partition,
     }
     if (partition == &s_meta_partition) {
         note_nvs_event(TEST_NVS_EVENT_ERASE_META);
+        if (s_meta_erase_result != ESP_OK) {
+            if (s_meta_erase_partial) {
+                memset(s_retained_meta, 0xff,
+                       sizeof(s_retained_meta) / 2U);
+            }
+            return s_meta_erase_result;
+        }
         memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
         return ESP_OK;
     }
@@ -315,6 +374,7 @@ esp_err_t esp_partition_erase_range(const esp_partition_t *partition,
                 memset(&s_nvs_entries[i], 0, sizeof(s_nvs_entries[i]));
             }
         }
+        s_retained_partition_erased = true;
         return ESP_OK;
     }
     return ESP_ERR_INVALID_ARG;
@@ -375,10 +435,8 @@ esp_err_t nvs_flash_init_partition(const char *partition_label)
     }
     copy_name(s_init_partition, partition_label);
     note_nvs_event(TEST_NVS_EVENT_INIT_PARTITION);
-    if (s_partition_init_result == ESP_OK) {
-        s_retained_partition_erased = false;
-    }
-    return s_partition_init_result;
+    esp_err_t ret = s_partition_init_result;
+    return ret;
 }
 
 esp_err_t nvs_open(const char *namespace_name, nvs_open_mode_t open_mode,
@@ -472,9 +530,15 @@ esp_err_t nvs_commit(nvs_handle_t handle)
     assert(context);
     note_nvs_event(context->dedicated ? TEST_NVS_EVENT_COMMIT_DEDICATED
                                       : TEST_NVS_EVENT_COMMIT_LEGACY);
-    const esp_err_t configured_result = context->dedicated
-                                            ? s_dedicated_commit_result
-                                            : s_legacy_commit_result;
+    const bool anchor_commit = context->dedicated &&
+        strcmp(context->namespace_name, "d1l_ret_meta") == 0;
+    const bool sentinel_commit = !context->dedicated &&
+        strcmp(context->namespace_name, "d1l_ret_meta") == 0;
+    const esp_err_t configured_result =
+        anchor_commit ? s_anchor_commit_result :
+        sentinel_commit ? s_sentinel_commit_result :
+        context->dedicated ? s_dedicated_commit_result :
+                             s_legacy_commit_result;
     if (configured_result != ESP_OK) {
         return configured_result;
     }
@@ -483,6 +547,9 @@ esp_err_t nvs_commit(nvs_handle_t handle)
             context->dedicated, context->namespace_name, context->pending_key);
         memcpy(entry->blob, context->pending_blob, context->pending_blob_len);
         entry->blob_len = context->pending_blob_len;
+        if (context->dedicated) {
+            s_retained_partition_erased = false;
+        }
     } else if (context->pending == TEST_NVS_PENDING_ERASE) {
         test_nvs_entry_t *entry = find_nvs_entry(
             context->dedicated, context->namespace_name, context->pending_key);
@@ -599,12 +666,15 @@ static void test_retained_partition_init(void)
 {
     s_nvs_enabled = true;
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     memset(s_init_partition, 0, sizeof(s_init_partition));
 
     assert(d1l_retained_blob_store_init() == ESP_OK);
     assert(strcmp(s_init_partition, TEST_RETAINED_PARTITION) == 0);
     assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 1U);
     assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
     assert(!d1l_retained_blob_store_nvs_initialized_this_boot());
 }
 
@@ -620,6 +690,8 @@ static void test_first_use_initializes_only_new_retained_region(void)
 
     assert(d1l_retained_blob_store_init() == ESP_OK);
     assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
     assert(d1l_retained_blob_store_nvs_initialized_this_boot());
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
@@ -647,6 +719,8 @@ static void test_first_marker_recovers_init_power_loss_window(void)
 
     assert(d1l_retained_blob_store_init() == ESP_OK);
     assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
     assert(d1l_retained_blob_store_nvs_ready());
     assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 1U);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
@@ -659,7 +733,103 @@ static void test_first_marker_recovers_init_power_loss_window(void)
     assert(repaired.version == TEST_RETAINED_META_VERSION);
 }
 
-static void test_ambiguous_or_future_marker_never_erases_retained_data(void)
+static void test_version_one_marker_candidate_upgrades_after_sentinel(void)
+{
+    const test_retained_marker_t legacy = legacy_retained_marker();
+    const size_t last_offset = sizeof(s_retained_meta) - sizeof(legacy);
+
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    memcpy(s_retained_meta, &legacy, sizeof(legacy));
+    memcpy(s_retained_meta + last_offset, &legacy, sizeof(legacy));
+    s_retained_partition_erased = true;
+
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(!d1l_retained_blob_store_nvs_external_init_required());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 2U);
+    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_DEDICATED) <
+           first_nvs_event(TEST_NVS_EVENT_COMMIT_LEGACY));
+    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_LEGACY) <
+           first_nvs_event(TEST_NVS_EVENT_ERASE_META));
+
+    test_retained_marker_t upgraded_first = {0};
+    test_retained_marker_t upgraded_last = {0};
+    memcpy(&upgraded_first, s_retained_meta, sizeof(upgraded_first));
+    memcpy(&upgraded_last, s_retained_meta + last_offset,
+           sizeof(upgraded_last));
+    assert(upgraded_first.version == TEST_RETAINED_META_VERSION);
+    assert(upgraded_last.version == TEST_RETAINED_META_VERSION);
+}
+
+static void test_populated_version_one_upgrade_survives_finalize_failures(void)
+{
+    static const char payload[] = "published v1 retained payload";
+    static const struct {
+        const char *namespace_name;
+        const char *key;
+    } stores[] = {
+        {"d1l_messages", "public"},
+        {"d1l_dms", "threads"},
+        {"d1l_routes", "routes_v2"},
+        {"d1l_packets", "ring"},
+    };
+    const test_retained_marker_t legacy = legacy_retained_marker();
+    const size_t last_offset = sizeof(s_retained_meta) - sizeof(legacy);
+
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    memcpy(s_retained_meta, &legacy, sizeof(legacy));
+    memcpy(s_retained_meta + last_offset, &legacy, sizeof(legacy));
+    for (size_t i = 0U; i < sizeof(stores) / sizeof(stores[0]); ++i) {
+        seed_nvs_blob(true, stores[i].namespace_name, stores[i].key,
+                      payload, sizeof(payload));
+        seed_nvs_blob(false, stores[i].namespace_name, stores[i].key,
+                      payload, sizeof(payload));
+    }
+    s_sentinel_commit_result = ESP_FAIL;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(!d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(!d1l_retained_blob_store_nvs_markers_complete());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+    for (size_t i = 0U; i < sizeof(stores) / sizeof(stores[0]); ++i) {
+        assert_nvs_blob(true, stores[i].namespace_name, stores[i].key,
+                        payload, sizeof(payload));
+        assert(find_nvs_entry(false, stores[i].namespace_name,
+                              stores[i].key) == NULL);
+    }
+
+    s_sentinel_commit_result = ESP_OK;
+    s_meta_erase_result = ESP_FAIL;
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(!d1l_retained_blob_store_nvs_markers_complete());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
+    for (size_t i = 0U; i < sizeof(stores) / sizeof(stores[0]); ++i) {
+        assert_nvs_blob(true, stores[i].namespace_name, stores[i].key,
+                        payload, sizeof(payload));
+    }
+
+    s_meta_erase_result = ESP_OK;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    for (size_t i = 0U; i < sizeof(stores) / sizeof(stores[0]); ++i) {
+        assert_nvs_blob(true, stores[i].namespace_name, stores[i].key,
+                        payload, sizeof(payload));
+    }
+}
+
+static void test_marker_loss_recovers_valid_nvs_and_unsafe_states_fail_closed(void)
 {
     static const char dedicated_blob[] = "must survive marker failure";
     const test_retained_marker_t valid = valid_retained_marker();
@@ -668,23 +838,53 @@ static void test_ambiguous_or_future_marker_never_erases_retained_data(void)
     clear_nvs_case();
     seed_nvs_blob(true, "d1l_messages", "public",
                   dedicated_blob, sizeof(dedicated_blob));
+    seed_valid_dedicated_anchor();
+    seed_valid_default_sentinel();
     memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
-    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
-    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 1U);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 2U);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    dedicated_blob, sizeof(dedicated_blob));
+
+    /* A corrupt companion slot is rebuilt only after this boot commits the
+     * default sentinel, so power loss during metadata repair remains owned. */
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    seed_nvs_blob(true, "d1l_messages", "public",
+                  dedicated_blob, sizeof(dedicated_blob));
+    memcpy(s_retained_meta, &valid, sizeof(valid));
+    test_retained_marker_t corrupt_companion = valid;
+    corrupt_companion.magic ^= 1U;
+    memcpy(s_retained_meta + last_offset,
+           &corrupt_companion, sizeof(corrupt_companion));
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 2U);
+    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_LEGACY) <
+           first_nvs_event(TEST_NVS_EVENT_ERASE_META));
     assert_nvs_blob(true, "d1l_messages", "public",
                     dedicated_blob, sizeof(dedicated_blob));
 
     clear_nvs_case();
     seed_nvs_blob(true, "d1l_messages", "public",
                   dedicated_blob, sizeof(dedicated_blob));
+    seed_valid_dedicated_anchor();
+    seed_valid_default_sentinel();
     test_retained_marker_t corrupt = valid;
     corrupt.magic ^= 1U;
     memcpy(s_retained_meta, &corrupt, sizeof(corrupt));
     memcpy(s_retained_meta + last_offset, &corrupt, sizeof(corrupt));
-    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
-    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 1U);
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
     assert_nvs_blob(true, "d1l_messages", "public",
                     dedicated_blob, sizeof(dedicated_blob));
 
@@ -692,7 +892,7 @@ static void test_ambiguous_or_future_marker_never_erases_retained_data(void)
     seed_nvs_blob(true, "d1l_messages", "public",
                   dedicated_blob, sizeof(dedicated_blob));
     test_retained_marker_t future = valid;
-    future.version = 2U;
+    future.version = 3U;
     future.version_inverse = ~future.version;
     memcpy(s_retained_meta, &future, sizeof(future));
     memcpy(s_retained_meta + last_offset, &future, sizeof(future));
@@ -707,7 +907,7 @@ static void test_ambiguous_or_future_marker_never_erases_retained_data(void)
                   dedicated_blob, sizeof(dedicated_blob));
     memcpy(s_retained_meta, &valid, sizeof(valid));
     test_retained_marker_t mixed_future = valid;
-    mixed_future.version = 2U;
+    mixed_future.version = 3U;
     mixed_future.version_inverse = ~mixed_future.version;
     memcpy(s_retained_meta + last_offset,
            &mixed_future, sizeof(mixed_future));
@@ -716,6 +916,227 @@ static void test_ambiguous_or_future_marker_never_erases_retained_data(void)
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
     assert_nvs_blob(true, "d1l_messages", "public",
                     dedicated_blob, sizeof(dedicated_blob));
+
+    /* A completion sentinel beside unreadable retained NVS proves this is not
+     * a predecessor app tail, so neither partition may be erased. */
+    clear_nvs_case();
+    seed_nvs_blob(true, "d1l_messages", "public",
+                  dedicated_blob, sizeof(dedicated_blob));
+    seed_valid_dedicated_anchor();
+    seed_valid_default_sentinel();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    s_partition_init_result = ESP_FAIL;
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    dedicated_blob, sizeof(dedicated_blob));
+}
+
+static void test_nonblank_unowned_region_requires_external_initialization(void)
+{
+    static const char legacy_blob[] = "predecessor retained history";
+
+    clear_nvs_case();
+    memset(s_retained_meta, 0xa5, sizeof(s_retained_meta));
+    s_retained_partition_erased = false;
+    seed_nvs_blob(false, "d1l_messages", "public",
+                  legacy_blob, sizeof(legacy_blob));
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(d1l_retained_blob_store_nvs_external_init_required());
+    assert(!d1l_retained_blob_store_nvs_marker_ready());
+    assert(!d1l_retained_blob_store_nvs_anchor_ready());
+    assert(!d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 0U);
+    assert_nvs_blob(false, "d1l_messages", "public",
+                    legacy_blob, sizeof(legacy_blob));
+
+    /* The installer has separately verified the predecessor layout and owns
+     * this one scoped erase; firmware sees only a blank first-use region. */
+    assert(esp_partition_erase_range(&s_retained_partition, 0U,
+                                     s_retained_partition.size) == ESP_OK);
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(!d1l_retained_blob_store_nvs_external_init_required());
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(d1l_retained_blob_store_nvs_initialized_this_boot());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 2U);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    legacy_blob, sizeof(legacy_blob));
+    assert(find_nvs_entry(false, "d1l_messages", "public") == NULL);
+    assert(find_nvs_entry(false, "d1l_ret_meta", "initialized") != NULL);
+}
+
+static void test_anchor_only_claim_loss_fails_closed(void)
+{
+    static const char orphaned_blob[] = "anchor-only multi-fault state";
+
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    seed_valid_dedicated_anchor();
+    seed_nvs_blob(true, "d1l_messages", "public",
+                  orphaned_blob, sizeof(orphaned_blob));
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(d1l_retained_blob_store_nvs_external_init_required());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    orphaned_blob, sizeof(orphaned_blob));
+
+    /* A default sentinel owns the region but cannot recreate a missing
+     * dedicated anchor; recovery stays fail-closed without an explicit erase. */
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    seed_valid_default_sentinel();
+    seed_nvs_blob(true, "d1l_messages", "public",
+                  orphaned_blob, sizeof(orphaned_blob));
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+    assert_nvs_blob(true, "d1l_messages", "public",
+                    orphaned_blob, sizeof(orphaned_blob));
+}
+
+static void test_completion_sentinel_blocks_blank_established_partition(void)
+{
+    clear_nvs_case();
+    s_retained_partition_erased = true;
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+
+    clear_nvs_case();
+    seed_valid_default_sentinel();
+    s_retained_partition_erased = true;
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 0U);
+
+    /* A last-slot marker cannot be the marker-first initialization window. */
+    clear_nvs_case();
+    const test_retained_marker_t marker = valid_retained_marker();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    memcpy(s_retained_meta + sizeof(s_retained_meta) - sizeof(marker),
+           &marker, sizeof(marker));
+    s_retained_partition_erased = true;
+
+    assert(d1l_retained_blob_store_init() == ESP_ERR_INVALID_STATE);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 0U);
+}
+
+static void test_anchor_commit_failure_is_retryable_and_fail_closed(void)
+{
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    s_retained_partition_erased = true;
+    s_anchor_commit_result = ESP_FAIL;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(!d1l_retained_blob_store_nvs_anchor_ready());
+    assert(!d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+
+    s_anchor_commit_result = ESP_OK;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(d1l_retained_blob_store_nvs_ready());
+}
+
+static void test_marker_flash_failures_are_retryable_and_ordered(void)
+{
+    /* A partial first-marker write cannot initialize or mutate retained NVS. */
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    s_retained_partition_erased = true;
+    s_meta_write_fail_on_attempt = 1U;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(!d1l_retained_blob_store_nvs_marker_ready());
+    assert(!d1l_retained_blob_store_nvs_anchor_ready());
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_RETAINED) == 0U);
+
+    s_meta_write_fail_on_attempt = 0U;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+
+    /* A partial second marker leaves marker 1 plus the committed anchor. The
+     * retry commits the default sentinel before erasing/rebuilding metadata. */
+    clear_nvs_case();
+    memset(s_retained_meta, 0xff, sizeof(s_retained_meta));
+    s_retained_partition_erased = true;
+    s_meta_write_fail_on_attempt = 2U;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(!d1l_retained_blob_store_nvs_markers_complete());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(!d1l_retained_blob_store_nvs_sentinel_ready());
+
+    s_meta_write_fail_on_attempt = 0U;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(first_nvs_event(TEST_NVS_EVENT_COMMIT_LEGACY) <
+           first_nvs_event(TEST_NVS_EVENT_ERASE_META));
+
+    /* A partial metadata-sector erase fails before marker 1 or NVS init. */
+    clear_nvs_case();
+    memset(s_retained_meta, 0xa5, sizeof(s_retained_meta));
+    s_retained_partition_erased = true;
+    s_meta_erase_result = ESP_FAIL;
+    s_meta_erase_partial = true;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(count_nvs_event(TEST_NVS_EVENT_ERASE_META) == 1U);
+    assert(count_nvs_event(TEST_NVS_EVENT_WRITE_META) == 0U);
+    assert(count_nvs_event(TEST_NVS_EVENT_INIT_PARTITION) == 0U);
+
+    s_meta_erase_result = ESP_OK;
+    s_meta_erase_partial = false;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_markers_complete());
+}
+
+static void test_sentinel_commit_failure_is_retryable_and_fail_closed(void)
+{
+    clear_nvs_case();
+    seed_valid_dedicated_anchor();
+    s_sentinel_commit_result = ESP_FAIL;
+
+    assert(d1l_retained_blob_store_init() == ESP_FAIL);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(!d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(!d1l_retained_blob_store_nvs_ready());
+    assert(d1l_retained_blob_store_nvs_migration_error() == ESP_FAIL);
+
+    s_sentinel_commit_result = ESP_OK;
+    assert(d1l_retained_blob_store_init() == ESP_OK);
+    assert(d1l_retained_blob_store_nvs_marker_ready());
+    assert(d1l_retained_blob_store_nvs_anchor_ready());
+    assert(d1l_retained_blob_store_nvs_sentinel_ready());
+    assert(d1l_retained_blob_store_nvs_ready());
 }
 
 static void test_partition_init_proactively_migrates_known_legacy_key(void)
@@ -723,6 +1144,7 @@ static void test_partition_init_proactively_migrates_known_legacy_key(void)
     static const char legacy_blob[] = "boot-time public history";
 
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     seed_nvs_blob(false, "d1l_messages", "public",
                   legacy_blob, sizeof(legacy_blob));
     assert(d1l_retained_blob_store_init() == ESP_OK);
@@ -745,6 +1167,7 @@ static void test_divergent_upgrade_copies_fail_closed(void)
     size_t readback_len = sizeof(readback);
 
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     d1l_retained_blob_store_note_sd_backend(false, false, false,
                                              0U, 0U, 0U);
     seed_nvs_blob(true, "d1l_messages", "public",
@@ -772,6 +1195,7 @@ static void test_divergent_upgrade_copies_fail_closed(void)
     assert(count_nvs_event(TEST_NVS_EVENT_ERASE_LEGACY) == 0U);
 
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     seed_nvs_blob(true, "d1l_messages", "public",
                   dedicated_blob, sizeof(dedicated_blob));
     seed_nvs_blob(false, "d1l_messages", "public",
@@ -794,6 +1218,7 @@ static void test_dedicated_read_precedes_legacy(void)
     size_t readback_len = sizeof(readback);
 
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     seed_nvs_blob(true, "d1l_routes", "routes_v2",
                   dedicated_blob, sizeof(dedicated_blob));
     seed_nvs_blob(false, "d1l_routes", "routes_v2",
@@ -921,6 +1346,7 @@ static void test_partition_init_failure_never_falls_back_or_resurrects(void)
     size_t readback_len = sizeof(readback);
 
     clear_nvs_case();
+    seed_valid_dedicated_anchor();
     seed_nvs_blob(true, "d1l_routes", "routes_v2",
                   dedicated_blob, sizeof(dedicated_blob));
     seed_nvs_blob(false, "d1l_routes", "routes_v2",
@@ -1024,7 +1450,15 @@ int main(void)
     test_retained_partition_init();
     test_first_use_initializes_only_new_retained_region();
     test_first_marker_recovers_init_power_loss_window();
-    test_ambiguous_or_future_marker_never_erases_retained_data();
+    test_version_one_marker_candidate_upgrades_after_sentinel();
+    test_populated_version_one_upgrade_survives_finalize_failures();
+    test_marker_loss_recovers_valid_nvs_and_unsafe_states_fail_closed();
+    test_nonblank_unowned_region_requires_external_initialization();
+    test_anchor_only_claim_loss_fails_closed();
+    test_completion_sentinel_blocks_blank_established_partition();
+    test_anchor_commit_failure_is_retryable_and_fail_closed();
+    test_marker_flash_failures_are_retryable_and_ordered();
+    test_sentinel_commit_failure_is_retryable_and_fail_closed();
     test_partition_init_proactively_migrates_known_legacy_key();
     test_divergent_upgrade_copies_fail_closed();
     test_dedicated_read_precedes_legacy();
