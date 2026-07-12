@@ -202,7 +202,11 @@ python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --
 
 That refresh path copies only Actions-built RP2040 UF2 artifacts, captures the
 RP2040-unavailable fallback window after official SD smoke, restores the
-production bridge, and then runs the COM12 SD canary suite.
+production bridge, then checksum-verifies and non-erasingly reflashes the exact
+ESP32 image before the strict pre-diagnostic clean gate. This fresh boot clears
+failure latches intentionally observed while the smoke firmware made the bridge
+unavailable; a failed reflash stops before preflight. The runner then executes
+the COM12 SD canary suite.
 
 Expected commands:
 

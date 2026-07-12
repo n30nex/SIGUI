@@ -111,7 +111,10 @@ limited to exactly one newly appeared volume correlated with the commanded D1L
 transition. COM17 and other discovered RP2040-looking ports are reported only
 as read-only inventory; configured COM16 must be present and is the only RP2040
 serial port the runner may touch. When access is available, the runner flashes the official Seeed SD smoke UF2,
-captures its COM16 JSON, and restores the exact production bridge UF2. Raw
+captures its COM16 JSON, restores the exact production bridge UF2, and performs
+a second checksum-verified, non-erasing exact ESP32 flash. That fresh ESP32 boot
+is a required boundary because the intentional bridge-unavailable smoke window
+can latch retained-store I/O failures; failure stops before preflight. Raw
 diagnostics then run under a bounded deadline as an isolated maintenance phase,
 but only after a clean `READY_SD` zero-counter preflight. Before any SD canary,
 the runner restores that exact bridge again, reflashes the

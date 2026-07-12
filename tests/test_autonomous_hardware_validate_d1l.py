@@ -662,6 +662,7 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "rp2040_autonomous_access_precheck" in plan["steps"]
     assert "flash_official_rp2040_sd_smoke" not in plan["steps"]
     assert "restore_exact_rp2040_bridge_pre_diag" in plan["steps"]
+    assert "reflash_exact_esp32_pre_diag" not in plan["steps"]
     assert "restore_exact_rp2040_bridge_post_diag" in plan["steps"]
     assert "reflash_exact_esp32_post_diag" in plan["steps"]
     assert "pre_diag_clean_preflight_gate" in plan["steps"]
@@ -678,6 +679,210 @@ def test_dry_run_plan_is_noninteractive_and_port_safe(tmp_path):
     assert "d1l_scroll_probe" not in plan["steps"]
     assert "d1l_ui_pixel_capture" not in plan["steps"]
     assert "d1l_ui_compose_keyboard_capture" not in plan["steps"]
+
+
+def test_refresh_plan_reflashes_exact_esp32_after_bridge_restore(tmp_path):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--dry-run",
+            "--refresh-rp2040-smoke",
+        ]
+    )
+
+    plan = runner.plan_report(runner.build_context(args), args)
+    restore_index = plan["steps"].index("restore_exact_rp2040_bridge_pre_diag")
+    reflash_index = plan["steps"].index("reflash_exact_esp32_pre_diag")
+    preflight_index = plan["steps"].index("rp2040_bridge_preflight_pre_diag")
+
+    assert restore_index < reflash_index < preflight_index
+
+
+def test_refresh_reflashes_esp32_before_pre_diag_preflight(tmp_path, monkeypatch):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--refresh-rp2040-smoke",
+        ]
+    )
+    events = []
+
+    def ok_step(kind: str) -> dict:
+        return {"schema": 1, "kind": kind, "ok": True}
+
+    monkeypatch.setattr(
+        runner,
+        "verify_inputs",
+        lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"),
+    )
+
+    def flash(ctx, dry_run, phase="initial"):
+        events.append(f"flash:{phase}")
+        return {**ok_step("esp32_flash"), "phase": phase}
+
+    def restore(ctx, volume, uf2_timeout, dry_run, phase="initial"):
+        events.append(f"restore:{phase}")
+        return {**ok_step("rp2040_bridge_restore"), "phase": phase}
+
+    def preflight(ctx, dry_run, verify_artifact, phase="initial"):
+        events.append(f"preflight:{phase}")
+        return {**ok_step("rp2040_preflight"), "phase": phase}
+
+    monkeypatch.setattr(runner, "flash_esp32", flash)
+    monkeypatch.setattr(
+        runner,
+        "rp2040_access_precheck",
+        lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_official_sd_smoke",
+        lambda *args, **kwargs: events.append("official_smoke")
+        or ok_step("seeed_official_sd_smoke_capture"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_sd_boot_prepare_scenario",
+        lambda ctx, scenario, dry_run: events.append(f"scenario:{scenario}")
+        or ok_step(f"sd_boot_prepare_{scenario.replace('-', '_')}"),
+    )
+    monkeypatch.setattr(runner, "restore_bridge", restore)
+    monkeypatch.setattr(runner, "run_preflight", preflight)
+    monkeypatch.setattr(
+        runner,
+        "run_clean_preflight_gate",
+        lambda ctx, preflight, dry_run, phase="post_diag": {
+            **ok_step(f"{phase}_clean_preflight_gate"),
+            "ok": False,
+            "phase": phase,
+            "error": "test_stop_after_preflight",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_release_gate",
+        lambda ctx, dry_run, phase=None: {
+            **ok_step("release_gate_audit"),
+            "ready_for_public_release": False,
+        },
+    )
+
+    report = runner.run_validation(args)
+
+    assert report["ok"] is False
+    assert events == [
+        "flash:initial",
+        "official_smoke",
+        "scenario:rp2040-unavailable",
+        "restore:pre_diag",
+        "flash:pre_diag",
+        "preflight:pre_diag",
+    ]
+
+
+def test_refresh_stops_before_preflight_when_pre_diag_esp32_reflash_fails(
+    tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    args = runner.parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-run-id",
+            "28663994079",
+            "--github-run-dir",
+            str(run_dir),
+            "--refresh-rp2040-smoke",
+        ]
+    )
+    flash_phases = []
+
+    def ok_step(kind: str) -> dict:
+        return {"schema": 1, "kind": kind, "ok": True}
+
+    def flash(ctx, dry_run, phase="initial"):
+        flash_phases.append(phase)
+        return {
+            **ok_step("esp32_flash"),
+            "phase": phase,
+            "ok": phase == "initial",
+            "error": None if phase == "initial" else "checksum_bound_flash_failed",
+        }
+
+    monkeypatch.setattr(
+        runner,
+        "verify_inputs",
+        lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"),
+    )
+    monkeypatch.setattr(runner, "flash_esp32", flash)
+    monkeypatch.setattr(
+        runner,
+        "rp2040_access_precheck",
+        lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_official_sd_smoke",
+        lambda *args, **kwargs: ok_step("seeed_official_sd_smoke_capture"),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_sd_boot_prepare_scenario",
+        lambda ctx, scenario, dry_run: ok_step(
+            f"sd_boot_prepare_{scenario.replace('-', '_')}"
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "restore_bridge",
+        lambda ctx, volume, uf2_timeout, dry_run, phase="initial": {
+            **ok_step("rp2040_bridge_restore"),
+            "phase": phase,
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_preflight",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("preflight must not run after failed ESP32 reflash")
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "run_release_gate",
+        lambda ctx, dry_run, phase=None: {
+            **ok_step("release_gate_audit"),
+            "ready_for_public_release": False,
+        },
+    )
+
+    report = runner.run_validation(args)
+
+    assert report["ok"] is False
+    assert report["error"] == "pre_diag_esp32_reflash_failed"
+    assert flash_phases == ["initial", "pre_diag"]
+    assert [step["phase"] for step in report["runs"] if step["kind"] == "esp32_flash"] == [
+        "initial",
+        "pre_diag",
+    ]
 
 
 def test_dry_run_plan_includes_pixel_capture_with_ui_probes(tmp_path):

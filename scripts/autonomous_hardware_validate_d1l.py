@@ -2342,6 +2342,15 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
                 if sd_suite
                 else (["restore_rp2040_bridge"] if refresh_rp2040 else [])
             ),
+            *(
+                [
+                    "reflash_exact_esp32_pre_diag"
+                    if sd_suite
+                    else "reflash_exact_esp32_post_official_smoke"
+                ]
+                if refresh_rp2040
+                else []
+            ),
             *((
                 "rp2040_bridge_preflight_pre_diag",
                 "pre_diag_clean_preflight_gate",
@@ -2661,6 +2670,39 @@ def run_validation(args: argparse.Namespace) -> dict:
                 report["ok"] = False
                 attach_release_gate_summary(report, runs)
                 return report
+
+            # The official smoke image intentionally makes the production bridge
+            # unavailable long enough for retained ESP32 stores to observe real
+            # I/O failures. Restore the exact ESP32 image as well as the bridge so
+            # the following clean gate starts from a fresh, checksum-bound boot.
+            if refresh_rp2040:
+                try:
+                    preflight_esp32_flash = flash_esp32(
+                        ctx,
+                        dry_run=args.dry_run,
+                        phase=initial_bridge_phase,
+                    )
+                except Exception as exc:
+                    preflight_esp32_flash = phase_exception_step(
+                        ctx,
+                        "esp32_flash",
+                        exc,
+                        phase=initial_bridge_phase,
+                        out=esp32_flash_out(ctx, initial_bridge_phase),
+                        port=ctx.d1l_port,
+                    )
+                runs.append(preflight_esp32_flash)
+                if preflight_esp32_flash.get("ok") is not True and not args.dry_run:
+                    append_release_gate_safely(
+                        ctx,
+                        runs,
+                        dry_run=args.dry_run,
+                        phase=f"{initial_bridge_phase}_esp32_reflash_failed",
+                    )
+                    report["error"] = f"{initial_bridge_phase}_esp32_reflash_failed"
+                    report["ok"] = False
+                    attach_release_gate_summary(report, runs)
+                    return report
 
         if sd_suite:
             try:
