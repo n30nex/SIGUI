@@ -5,6 +5,8 @@ This folder contains only active release-facing documentation. Historical phase 
 ## Start Here
 
 - [Project README](../README.md): public overview, feature matrix, screenshots, hardware route.
+- [Completion status](COMPLETION_STATUS.md): concise generated view of live work-package, blocker, and release-gate state.
+- [Completion ledger](COMPLETION_LEDGER.yaml): machine-readable source used to generate and validate completion status.
 - [Roadmap](ROADMAP.md): current release blockers and work queue.
 - [Release checklist](RELEASE_CHECKLIST.md): evidence required before tagging.
 - [Known limitations](KNOWN_LIMITATIONS.md): honest current gaps and non-goals.
