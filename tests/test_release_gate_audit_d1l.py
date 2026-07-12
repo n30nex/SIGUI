@@ -884,11 +884,28 @@ def boot_prepare_payload(
         "storage_file_gate_ready": storage_file_gate_ready,
         "retained_store_gate_ready": retained_store_gate_ready,
         "filecanary_passed": filecanary_passed,
+        "retained_worker_quiesce_acquired": (
+            None if scenario == "rp2040-unavailable" else True
+        ),
+        "storage_remount": (
+            None
+            if scenario == "rp2040-unavailable"
+            else {
+                "schema": 1,
+                "ok": True,
+                "cmd": "storage remount",
+                "retained_worker_quiesce_acquired": True,
+            }
+        ),
         "ok": True,
         "storage_after": storage_after or {},
         "storage_setup": storage_setup,
         "health": {"ok": True},
-        "commands": ["rp2040 ping", "storage status", "storage remount", "storage status", "health"],
+        "commands": (
+            ["rp2040 ping", "storage status", "health"]
+            if scenario == "rp2040-unavailable"
+            else ["rp2040 ping", "storage status", "storage remount", "storage status", "health"]
+        ),
     }
     if commit:
         payload["firmware_commit"] = commit
@@ -1021,6 +1038,7 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "reboot_command_passed": True,
             "reboot_route_flush": "ESP_OK",
             "reboot_storage_manager_quiesced": True,
+            "reboot_retained_worker_quiesced": True,
             "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
@@ -1038,7 +1056,7 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "commands": ["health", "reboot", "health"],
             "results": [
                 {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
-                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
                 {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
             ],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
@@ -1064,6 +1082,10 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_remount_ready": True,
             "pre_remount_command_passed": True,
             "post_remount_command_passed": True,
+            "pre_remount_manager_busy": False,
+            "post_remount_manager_busy": False,
+            "pre_remount_retained_worker_quiesce_acquired": True,
+            "post_remount_retained_worker_quiesce_acquired": True,
             "retained_history_sd_ready_before": True,
             "retained_history_sd_ready_after": True,
             "filecanary_passed": True,
@@ -1074,6 +1096,7 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "reboot_command_passed": True,
             "reboot_route_flush": "ESP_OK",
             "reboot_storage_manager_quiesced": True,
+            "reboot_retained_worker_quiesced": True,
             "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
@@ -1087,7 +1110,7 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "commands": ["health", "reboot", "health"],
             "results": [
                 {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
-                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
                 {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
             ],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
@@ -2093,6 +2116,75 @@ def test_release_gate_audit_rejects_failed_remount_summary(tmp_path: Path):
     assert gate["details"]["post_remount_command_passed"] is False
 
 
+def test_release_gate_requires_retained_worker_quiesce_receipts(tmp_path: Path):
+    write_retained_canary_evidence(tmp_path)
+    write_reboot_remount_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    retained = json.loads(
+        (hardware / f"sd_retained_history_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    remount = json.loads(
+        (hardware / f"sd_reboot_remount_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is True
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is True
+
+    missing_summary = json.loads(json.dumps(retained))
+    missing_summary.pop("reboot_retained_worker_quiesced")
+    assert audit.sd_retained_canary_artifact_ok(missing_summary, "COM12") is False
+
+    missing_raw = json.loads(json.dumps(retained))
+    reboot = next(row for row in missing_raw["results"] if row.get("cmd") == "reboot")
+    reboot.pop("retained_worker_quiesced")
+    assert audit.sd_retained_canary_artifact_ok(missing_raw, "COM12") is False
+
+    missing_remount_receipt = json.loads(json.dumps(remount))
+    missing_remount_receipt.pop("pre_remount_retained_worker_quiesce_acquired")
+    assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
+    missing_remount_receipt["pre_remount_manager_busy"] = True
+    assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
+
+
+def test_boot_prepare_gate_requires_remount_worker_receipt_except_bridge_unavailable():
+    payload = boot_prepare_payload(
+        "correct-structure",
+        "ready_sd_file_gate",
+        storage_after=ready_storage_status(),
+        storage_file_gate_ready=True,
+        retained_store_gate_ready=True,
+        filecanary_passed=True,
+    )
+    assert audit.sd_boot_prepare_artifact_ok(
+        payload, "correct-structure", "COM12"
+    ) is True
+
+    missing_top_level = json.loads(json.dumps(payload))
+    missing_top_level.pop("retained_worker_quiesce_acquired")
+    assert audit.sd_boot_prepare_artifact_ok(
+        missing_top_level, "correct-structure", "COM12"
+    ) is False
+
+    false_raw = json.loads(json.dumps(payload))
+    false_raw["storage_remount"]["retained_worker_quiesce_acquired"] = False
+    assert audit.sd_boot_prepare_artifact_ok(
+        false_raw, "correct-structure", "COM12"
+    ) is False
+
+    unavailable = boot_prepare_payload(
+        "rp2040-unavailable",
+        "bridge_unavailable_fallback",
+        storage_after={"ok": True, "sd": {"state": "rp2040_unavailable"}},
+    )
+    assert unavailable["storage_remount"] is None
+    assert audit.sd_boot_prepare_artifact_ok(
+        unavailable, "rp2040-unavailable", "COM12"
+    ) is True
+
+
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
@@ -2415,6 +2507,7 @@ def test_release_gate_allows_only_immediate_proven_reboot_boot_help_boundary():
         "cmd": "reboot",
         "rebooting": True,
         "storage_manager_quiesced": True,
+        "retained_worker_quiesced": True,
         "rp2040_bridge_quiesced": True,
         "retained_flush": "ESP_OK",
         "route_flush": "ESP_OK",
@@ -2434,6 +2527,7 @@ def test_release_gate_allows_only_immediate_proven_reboot_boot_help_boundary():
         "reboot_command_passed": True,
         "reboot_route_flush": "ESP_OK",
         "reboot_storage_manager_quiesced": True,
+        "reboot_retained_worker_quiesced": True,
         "reboot_rp2040_bridge_quiesced": True,
         "reboot_nonce_proven": True,
         "reboot_proven": True,

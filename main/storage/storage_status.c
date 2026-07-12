@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 
 #include "hal/rp2040_bridge.h"
+#include "mesh/route_store_worker.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
@@ -711,16 +712,37 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     return ret;
 }
 
-static esp_err_t poll_mount_pending(void)
+static uint32_t storage_deadline_remaining_ms(int64_t deadline_us)
+{
+    const int64_t remaining_us = deadline_us - esp_timer_get_time();
+    if (remaining_us <= 0) {
+        return 0U;
+    }
+    return (uint32_t)((remaining_us + 999LL) / 1000LL);
+}
+
+static esp_err_t poll_mount_pending_until(int64_t deadline_us)
 {
     esp_err_t last_ret = ESP_OK;
     for (uint32_t attempt = 0; attempt < D1L_STORAGE_BOOT_POLL_ATTEMPTS; ++attempt) {
         if (strcmp(s_status.sd_state, "mount_pending") != 0) {
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_BOOT_POLL_INTERVAL_MS));
-        esp_err_t poll_ret =
-            d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS);
+        uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t delay_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_INTERVAL_MS ?
+            remaining_ms : D1L_STORAGE_BOOT_POLL_INTERVAL_MS;
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+
+        remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t poll_timeout_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_BOOT_POLL_TIMEOUT_MS;
+        esp_err_t poll_ret = d1l_storage_status_refresh(poll_timeout_ms);
         if (poll_ret != ESP_OK && poll_ret != ESP_ERR_TIMEOUT) {
             return poll_ret;
         }
@@ -731,6 +753,15 @@ static esp_err_t poll_mount_pending(void)
         return ESP_OK;
     }
     return last_ret;
+}
+
+static esp_err_t poll_mount_pending(void)
+{
+    const uint32_t attempt_budget_ms =
+        D1L_STORAGE_BOOT_POLL_INTERVAL_MS + D1L_STORAGE_BOOT_POLL_TIMEOUT_MS;
+    const int64_t deadline_us = esp_timer_get_time() +
+        ((int64_t)D1L_STORAGE_BOOT_POLL_ATTEMPTS * attempt_budget_ms * 1000LL);
+    return poll_mount_pending_until(deadline_us);
 }
 
 static bool remount_timeout_needs_bridge_reset(void)
@@ -758,13 +789,18 @@ static bool request_bridge_reset_remount_recovery(void)
     return true;
 }
 
-static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
+static esp_err_t reset_bridge_and_remount_blocking(int64_t deadline_us)
 {
     if (!manager_control_begin_manual_reset()) {
         return ESP_ERR_INVALID_STATE;
     }
     set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
 
+    const uint32_t reset_duration_ms = D1L_STORAGE_MANAGER_RESET_HOLD_MS +
+                                       D1L_STORAGE_MANAGER_RESET_SETTLE_MS;
+    if (storage_deadline_remaining_ms(deadline_us) <= reset_duration_ms) {
+        return ESP_ERR_TIMEOUT;
+    }
     esp_err_t ret =
         d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
                                 D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
@@ -773,19 +809,37 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     if (ret != ESP_OK) {
         return ret;
     }
+    if (storage_deadline_remaining_ms(deadline_us) == 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
 
     set_manager_state(D1L_STORAGE_MANAGER_PING);
     for (uint32_t attempt = 0; attempt < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS;
          ++attempt) {
+        uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t ping_timeout_ms =
+            remaining_ms < D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS;
         d1l_rp2040_ping_t ping = {0};
-        ret = d1l_rp2040_bridge_ping(&ping,
-                                      D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        ret = d1l_rp2040_bridge_ping(&ping, ping_timeout_ms);
         if (ret == ESP_OK) {
             d1l_storage_status_note_valid_bridge_response();
             break;
         }
         d1l_storage_status_note_rp2040(ret);
-        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS));
+        if (attempt + 1U < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS) {
+            remaining_ms = storage_deadline_remaining_ms(deadline_us);
+            if (remaining_ms == 0U) {
+                return ESP_ERR_TIMEOUT;
+            }
+            const uint32_t delay_ms =
+                remaining_ms < D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS ?
+                remaining_ms : D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS;
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        }
     }
     if (ret != ESP_OK) {
         return ret;
@@ -793,9 +847,13 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     d1l_storage_status_note_rp2040(ESP_OK);
 
     set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
-    ret = storage_status_mount(timeout_ms, true);
+    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    if (remaining_ms == 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
+    ret = storage_status_mount(remaining_ms, true);
     if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-        esp_err_t poll_ret = poll_mount_pending();
+        esp_err_t poll_ret = poll_mount_pending_until(deadline_us);
         if (poll_ret != ESP_OK && ret == ESP_OK) {
             ret = poll_ret;
         }
@@ -1211,11 +1269,21 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
     return storage_status_mount(timeout_ms, false);
 }
 
-esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
+esp_err_t d1l_storage_status_remount_blocking(
+    uint32_t timeout_ms, bool *out_retained_worker_quiesce_acquired)
 {
+    if (out_retained_worker_quiesce_acquired) {
+        *out_retained_worker_quiesce_acquired = false;
+    }
     if (!s_status.initialized) {
         (void)d1l_storage_status_init();
     }
+    if (timeout_ms == 0U) {
+        s_status.last_error = ESP_ERR_INVALID_ARG;
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t deadline_us = esp_timer_get_time() +
+                                ((int64_t)timeout_ms * 1000LL);
 
     if (!s_status.rp2040_bridge_required) {
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
@@ -1230,6 +1298,18 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
         return ESP_ERR_INVALID_STATE;
     }
 
+    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    const esp_err_t retained_quiesce_ret = remaining_ms > 0U ?
+        d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (retained_quiesce_ret != ESP_OK) {
+        s_status.last_error = retained_quiesce_ret;
+        manager_sequence_give();
+        return retained_quiesce_ret;
+    }
+    if (out_retained_worker_quiesce_acquired) {
+        *out_retained_worker_quiesce_acquired = true;
+    }
+
     portENTER_CRITICAL(&s_manager_control_lock);
     s_force_nvs = false;
     s_manager_reset_bridge_requested = false;
@@ -1240,19 +1320,22 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
     d1l_storage_status_note_rp2040(ESP_OK);
 
     set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
-    esp_err_t ret = storage_status_mount(timeout_ms, true);
+    remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    esp_err_t ret = remaining_ms > 0U ?
+        storage_status_mount(remaining_ms, true) : ESP_ERR_TIMEOUT;
     if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-        esp_err_t poll_ret = poll_mount_pending();
+        esp_err_t poll_ret = poll_mount_pending_until(deadline_us);
         if (poll_ret != ESP_OK && ret == ESP_OK) {
             ret = poll_ret;
         }
     }
     if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
-        ret = reset_bridge_and_remount_blocking(timeout_ms);
+        ret = reset_bridge_and_remount_blocking(deadline_us);
     }
 
     classify_storage_manager_state(ret);
     manager_control_finish_reset_recovery();
+    d1l_route_store_worker_quiesce_end();
     manager_sequence_give();
     return ret;
 }

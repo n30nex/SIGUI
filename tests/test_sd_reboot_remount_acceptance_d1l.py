@@ -70,6 +70,7 @@ def bridge_wait_storage_line() -> str:
 def mount_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage remount",'
+        '"retained_worker_quiesce_acquired":true,'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true},'
         '"public_rf_tx":false,"formats_sd":false}\n'
     )
@@ -259,7 +260,7 @@ def test_slow_sd_operations_get_bounded_long_timeouts(monkeypatch):
 
     assert calls == [
         ("storage status", 5.0),
-        ("storage remount", 120.0),
+        ("storage remount", 75.0),
         ("storage filecanary", 120.0),
         ("storage retained-canary remount1", 180.0),
         ("storage map-tile-canary remount1", 120.0),
@@ -331,7 +332,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         '{"schema":1,"ok":true,"cmd":"help"}\n',
         ready_storage_line(),
@@ -361,6 +362,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert report["ok"] is True
     assert report["reboot_command_passed"] is True
     assert report["reboot_route_flush"] == "ESP_OK"
+    assert report["reboot_retained_worker_quiesced"] is True
     assert report["reboot_proven"] is True
     assert report["pre_reboot_boot_nonce"] == 1
     assert report["post_reboot_boot_nonce"] == 2
@@ -368,6 +370,8 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert report["post_remount_ready"] is True
     assert report["pre_remount_command_passed"] is True
     assert report["post_remount_command_passed"] is True
+    assert report["pre_remount_retained_worker_quiesce_acquired"] is True
+    assert report["post_remount_retained_worker_quiesce_acquired"] is True
     assert report["retained_history_sd_ready_before"] is True
     assert report["retained_history_sd_ready_after"] is True
     assert report["filecanary_passed"] is True
@@ -408,7 +412,7 @@ def test_reboot_remount_rejects_watchdog_after_commanded_reboot(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [
         ready_storage_line(),
@@ -456,7 +460,7 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
         '"route_flush":"ESP_OK"}\n'
     ]
     post = [
@@ -557,7 +561,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         ready_storage_line(),
         mount_line(),
@@ -603,7 +607,7 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         bridge_wait_storage_line(),
         mount_line(),
@@ -654,6 +658,8 @@ def test_mount_sequence_waits_after_busy_remount_even_when_cached_sd_is_ready(mo
             busy_remount_line("PING"),
             ready_storage_line("READY_SD"),
             ready_storage_line("READY_SD"),
+            mount_line(),
+            ready_storage_line("READY_SD"),
         ]
     )
     monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
@@ -667,9 +673,66 @@ def test_mount_sequence_waits_after_busy_remount_even_when_cached_sd_is_ready(mo
 
     assert remount_accept.remount_manager_busy(results[1]) is True
     assert remount_accept.storage_ready(storage_after) is True
-    assert commands == ["storage status", "storage remount", "storage status", "storage status"]
+    assert commands == [
+        "storage status",
+        "storage remount",
+        "storage status",
+        "storage status",
+        "storage remount",
+        "storage status",
+    ]
     assert ser.writes == [f"{command}\n" for command in commands]
-    assert remount_accept.remount_transition_passed(results[1], storage_after) is True
+    assert remount_accept.remount_transition_passed(results[1], storage_after) is False
+    assert remount_accept.remount_transition_passed(results[-2], storage_after) is True
+
+
+def test_busy_remount_retry_without_worker_receipt_stops_before_canaries(monkeypatch):
+    ser = FakeSerial(
+        [
+            ready_storage_line("PING"),
+            busy_remount_line("PING"),
+            ready_storage_line("READY_SD"),
+            ready_storage_line("READY_SD"),
+            busy_remount_line("PING"),
+            ready_storage_line("READY_SD"),
+            filecanary_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, [ser])
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "remount1",
+        include_reboot=False,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["pre_remount_manager_busy"] is True
+    assert report["pre_remount_command_passed"] is False
+    assert report["pre_remount_retained_worker_quiesce_acquired"] is None
+    assert report["pre_sequence_complete"] is False
+    assert "storage filecanary\n" not in ser.writes
+    assert report["ok"] is False
+
+
+def test_successful_remount_requires_retained_worker_quiesce_receipt():
+    storage_after = json.loads(ready_storage_line())
+    success = json.loads(mount_line())
+    assert remount_accept.remount_transition_passed(success, storage_after) is True
+
+    success.pop("retained_worker_quiesce_acquired")
+    assert remount_accept.remount_transition_passed(success, storage_after) is False
+
+    success["retained_worker_quiesce_acquired"] = False
+    assert remount_accept.remount_transition_passed(success, storage_after) is False
+
+    busy = json.loads(busy_remount_line("PING"))
+    assert remount_accept.remount_transition_passed(busy, storage_after) is False
 
 
 def test_generic_remount_error_cannot_pass_with_cached_ready_status(monkeypatch):
@@ -771,7 +834,7 @@ def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [
         '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'

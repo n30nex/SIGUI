@@ -1599,6 +1599,7 @@ def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
         and data.get("reboot_command_passed") is True
         and data.get("reboot_route_flush") == "ESP_OK"
         and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_retained_worker_quiesced") is True
         and data.get("reboot_rp2040_bridge_quiesced") is True
         and data.get("reboot_nonce_proven") is True
         and data.get("reboot_proven") is True
@@ -1609,6 +1610,7 @@ def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
         and reboot.get("cmd") == "reboot"
         and reboot.get("rebooting") is True
         and reboot.get("storage_manager_quiesced") is True
+        and reboot.get("retained_worker_quiesced") is True
         and reboot.get("rp2040_bridge_quiesced") is True
         and reboot.get("retained_flush") == "ESP_OK"
         and reboot.get("route_flush") == "ESP_OK"
@@ -1835,6 +1837,7 @@ def reboot_transition_proven(data: dict) -> bool:
         and result.get("ok") is True
         and result.get("rebooting") is True
         and result.get("storage_manager_quiesced") is True
+        and result.get("retained_worker_quiesced") is True
         and result.get("rp2040_bridge_quiesced") is True
         and result.get("retained_flush") == "ESP_OK"
         and result.get("route_flush") == "ESP_OK"
@@ -1856,6 +1859,7 @@ def reboot_transition_proven(data: dict) -> bool:
         data.get("reboot_command_passed") is True
         and data.get("reboot_route_flush") == "ESP_OK"
         and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_retained_worker_quiesced") is True
         and data.get("reboot_rp2040_bridge_quiesced") is True
         and data.get("reboot_nonce_proven") is True
         and data.get("reboot_proven") is True
@@ -1930,6 +1934,8 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("post_remount_ready") is True
         and data.get("pre_remount_command_passed") is True
         and data.get("post_remount_command_passed") is True
+        and data.get("pre_remount_retained_worker_quiesce_acquired") is True
+        and data.get("post_remount_retained_worker_quiesce_acquired") is True
         and data.get("retained_history_sd_ready_before") is True
         and data.get("retained_history_sd_ready_after") is True
         and data.get("filecanary_passed") is True
@@ -2070,6 +2076,17 @@ def raw_diag_complete(data: dict, expected_port: str) -> bool:
 def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -> bool:
     classification = data.get("classification")
     storage_after = data.get("storage_after") if isinstance(data.get("storage_after"), dict) else {}
+    storage_remount = (
+        data.get("storage_remount")
+        if isinstance(data.get("storage_remount"), dict)
+        else {}
+    )
+    remount_receipt_ok = scenario == "rp2040-unavailable" or (
+        data.get("retained_worker_quiesce_acquired") is True
+        and storage_remount.get("ok") is True
+        and storage_remount.get("cmd") == "storage remount"
+        and storage_remount.get("retained_worker_quiesce_acquired") is True
+    )
     file_gate_ok = storage_file_gate_ready_status(storage_after)
     format_policy_ok = (
         scenario not in {"unformatted", "existing-data"}
@@ -2092,6 +2109,7 @@ def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -
         and data.get("commands_safe") is True
         and not unsafe_sd_commands(data)
         and classification in SD_BOOT_PREPARE_EXPECTED_CLASSIFICATIONS[scenario]
+        and remount_receipt_ok
         and format_policy_ok
     )
 
@@ -2395,6 +2413,7 @@ def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
             "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
@@ -2429,10 +2448,13 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "post_remount_ready": data.get("post_remount_ready") if data else None,
             "pre_remount_command_passed": data.get("pre_remount_command_passed") if data else None,
             "post_remount_command_passed": data.get("post_remount_command_passed") if data else None,
+            "pre_remount_retained_worker_quiesce_acquired": data.get("pre_remount_retained_worker_quiesce_acquired") if data else None,
+            "post_remount_retained_worker_quiesce_acquired": data.get("post_remount_retained_worker_quiesce_acquired") if data else None,
             "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
             "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
@@ -2651,6 +2673,17 @@ def sd_boot_prepare_gate(artifact_roots: list[Path], root: Path, commit: str | N
             "mode": data.get("mode") if data else None,
             "port": data.get("port") if data else None,
             "classification": data.get("classification") if data else None,
+            "retained_worker_quiesce_acquired": data.get("retained_worker_quiesce_acquired") if data else None,
+            "storage_remount_ok": (
+                data.get("storage_remount", {}).get("ok")
+                if data and isinstance(data.get("storage_remount"), dict)
+                else None
+            ),
+            "storage_remount_retained_worker_quiesce_acquired": (
+                data.get("storage_remount", {}).get("retained_worker_quiesce_acquired")
+                if data and isinstance(data.get("storage_remount"), dict)
+                else None
+            ),
             "formats_sd": data.get("formats_sd") if data else None,
             "public_rf_tx": data.get("public_rf_tx") if data else None,
         }

@@ -13,6 +13,7 @@ def read(rel: str) -> str:
 def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     header = read("main/storage/storage_status.h")
     source = read("main/storage/storage_status.c")
+    console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     sdkconfig = read("sdkconfig.defaults")
@@ -170,7 +171,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
     assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
     assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
-    assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in source
+    assert "poll_timeout_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_TIMEOUT_MS" in source
+    assert "d1l_storage_status_refresh(poll_timeout_ms)" in source
     assert 'strcmp(s_status.sd_state, "mount_pending")' in source
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
@@ -189,10 +191,16 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
         "void d1l_storage_status", 1
     )[0]
+    assert "#define D1L_STORAGE_REMOUNT_TIMEOUT_MS 60000U" in header
+    assert "D1L_STORAGE_REMOUNT_TIMEOUT_MS" in console
+    assert "const int64_t deadline_us = esp_timer_get_time()" in remount_body
+    assert "storage_deadline_remaining_ms(deadline_us)" in remount_body
     assert "d1l_storage_status_note_rp2040(ESP_OK)" in remount_body
-    assert "storage_status_mount(timeout_ms, true)" in remount_body
+    assert "d1l_route_store_worker_quiesce_begin(remaining_ms)" in remount_body
+    assert "storage_status_mount(remaining_ms, true)" in remount_body
+    assert "poll_mount_pending_until(deadline_us)" in remount_body
     assert "remount_timeout_needs_bridge_reset()" in remount_body
-    assert "reset_bridge_and_remount_blocking(timeout_ms)" in remount_body
+    assert "reset_bridge_and_remount_blocking(deadline_us)" in remount_body
     assert "manager_sequence_try_take()" in remount_body
     assert "ESP_ERR_INVALID_STATE" in remount_body
     assert "manager_sequence_give()" in remount_body
@@ -204,12 +212,15 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     sync_recovery_body = source.split("static esp_err_t reset_bridge_and_remount_blocking", 1)[1].split(
         "static void classify_storage_manager_state", 1
     )[0]
+    assert "storage_deadline_remaining_ms(deadline_us)" in sync_recovery_body
+    assert "reset_duration_ms" in sync_recovery_body
     assert "d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS" in sync_recovery_body
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in sync_recovery_body
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in sync_recovery_body
     assert "d1l_rp2040_bridge_ping(&ping," in sync_recovery_body
-    assert "storage_status_mount(timeout_ms, true)" in sync_recovery_body
-    assert "poll_mount_pending()" in sync_recovery_body
+    assert "d1l_rp2040_bridge_ping(&ping, ping_timeout_ms)" in sync_recovery_body
+    assert "storage_status_mount(remaining_ms, true)" in sync_recovery_body
+    assert "poll_mount_pending_until(deadline_us)" in sync_recovery_body
     manager_run_body = source.split("static void storage_manager_run_once", 1)[1].split(
         "static uint32_t storage_manager_pause_delay_ms", 1
     )[0]
@@ -525,7 +536,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_storage_status_refresh(" not in setup_body
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
-    assert "d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "d1l_storage_status_remount_blocking(" in console
+    assert "&retained_worker_quiesce_acquired" in console
+    assert r'\"retained_worker_quiesce_acquired\":%s' in console
     assert "d1l_storage_manager_reset_bridge" in console
     assert "d1l_storage_manager_force_nvs" in console
     assert '\\"manager\\":{\\"running\\":%s' in console

@@ -10,6 +10,9 @@
 #define D1L_STORAGE_SD_DATA_ROOT "/sdcard/deskos"
 #define D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS 10000U
 #define D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U
+/* Serial remount includes retained-worker quiesce, a mount/poll pass, and one
+ * bounded RP2040 reset recovery under a single monotonic deadline. */
+#define D1L_STORAGE_REMOUNT_TIMEOUT_MS 60000U
 
 typedef struct {
     bool initialized;
@@ -87,5 +90,6 @@ void d1l_storage_manager_quiesce_end(void);
 void d1l_storage_manager_force_nvs(bool force_nvs);
 esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms);
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms);
-esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms);
+esp_err_t d1l_storage_status_remount_blocking(
+    uint32_t timeout_ms, bool *out_retained_worker_quiesce_acquired);
 void d1l_storage_status(d1l_storage_status_t *out_status);

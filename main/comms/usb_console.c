@@ -1566,7 +1566,8 @@ static void cmd_storage_mount(void)
     printf("}\n");
 }
 
-static void print_storage_manager_result(const char *cmd, esp_err_t ret)
+static void print_storage_manager_result(const char *cmd, esp_err_t ret,
+                                         bool retained_worker_quiesce_acquired)
 {
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
@@ -1574,8 +1575,9 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK));
     print_json_string(cmd);
-    printf(",\"code\":\"%s\",\"manager\":{\"running\":%s,\"state\":",
+    printf(",\"code\":\"%s\",\"retained_worker_quiesce_acquired\":%s,\"manager\":{\"running\":%s,\"state\":",
            esp_err_to_name(ret),
+           bool_json(retained_worker_quiesce_acquired),
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
     printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
@@ -1606,15 +1608,19 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
 
 static void cmd_storage_remount(void)
 {
+    bool retained_worker_quiesce_acquired = false;
     esp_err_t ret =
-        d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
-    print_storage_manager_result("storage remount", ret);
+        d1l_storage_status_remount_blocking(
+            D1L_STORAGE_REMOUNT_TIMEOUT_MS,
+            &retained_worker_quiesce_acquired);
+    print_storage_manager_result("storage remount", ret,
+                                 retained_worker_quiesce_acquired);
 }
 
 static void cmd_storage_reset_bridge(void)
 {
     esp_err_t ret = d1l_storage_manager_reset_bridge();
-    print_storage_manager_result("storage reset-bridge", ret);
+    print_storage_manager_result("storage reset-bridge", ret, false);
 }
 
 static void cmd_storage_force_nvs(const char *line)
@@ -1630,7 +1636,8 @@ static void cmd_storage_force_nvs(const char *line)
     }
     d1l_storage_manager_force_nvs(force);
     esp_err_t ret = d1l_storage_manager_start();
-    print_storage_manager_result(force ? "storage force-nvs" : "storage force-nvs off", ret);
+    print_storage_manager_result(force ? "storage force-nvs" : "storage force-nvs off",
+                                 ret, false);
 }
 
 static void print_storage_diag_probe(const char *name,
@@ -5031,9 +5038,20 @@ static void handle_line(const char *line)
         }
 
         remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t retained_quiesce_ret = remaining_ms > 0U ?
+            d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+        if (retained_quiesce_ret != ESP_OK) {
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(retained_quiesce_ret),
+                       "retained worker quiesce failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
         esp_err_t bridge_quiesce_ret = remaining_ms > 0U ?
             d1l_rp2040_bridge_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
         if (bridge_quiesce_ret != ESP_OK) {
+            d1l_route_store_worker_quiesce_end();
             d1l_storage_manager_quiesce_end();
             err_result("reboot", esp_err_to_name(bridge_quiesce_ret),
                        "RP2040 bridge quiesce failed; reboot cancelled");
@@ -5042,16 +5060,17 @@ static void handle_line(const char *line)
 
         if (reboot_deadline_remaining_ms(reboot_started_us) == 0U) {
             d1l_rp2040_bridge_quiesce_end();
+            d1l_route_store_worker_quiesce_end();
             d1l_storage_manager_quiesce_end();
             err_result("reboot", esp_err_to_name(ESP_ERR_TIMEOUT),
                        "reboot quiesce deadline expired; reboot cancelled");
             return;
         }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
+        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
         fflush(stdout);
-        /* Keep both quiesce locks held so no new UART2 SD exchange can begin
-         * while the restart path drains enabled UART FIFOs. */
+        /* Keep all three quiesce locks held so neither retained persistence nor
+         * a new UART2 SD exchange can begin while restart drains UART FIFOs. */
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");

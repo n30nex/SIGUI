@@ -749,6 +749,11 @@ def run_acceptance(
             if include_reboot and isinstance(reboot_result, dict)
             else None
         ),
+        "reboot_retained_worker_quiesced": (
+            reboot_result.get("retained_worker_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
         "reboot_rp2040_bridge_quiesced": (
             reboot_result.get("rp2040_bridge_quiesced")
             if include_reboot and isinstance(reboot_result, dict)

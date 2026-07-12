@@ -40,8 +40,8 @@ def test_retained_store_diagnostics_report_target_truth_and_reboot_is_combined()
     assert r'\"journal\":{\"dirty\":%s' in packets
     assert "sd_primary_reconcile_pending" in packets
 
-    assert "flush_retained_stores(true)" in worker
-    assert "flush_retained_stores(false)" in worker
+    assert "flush_retained_stores_locked(true)" in worker
+    assert "flush_retained_stores_locked(false)" in worker
     for store in ("message_store", "dm_store", "packet_log", "route_store"):
         assert f"d1l_{store}_flush()" in worker
         assert f"d1l_{store}_flush_if_due()" in worker
@@ -58,7 +58,11 @@ def test_retained_store_diagnostics_report_target_truth_and_reboot_is_combined()
         "d1l_route_store_worker_force_flush"
     )
     assert reboot.index("d1l_route_store_worker_force_flush") < reboot.index(
+        "d1l_route_store_worker_quiesce_begin"
+    )
+    assert reboot.index("d1l_route_store_worker_quiesce_begin") < reboot.index(
         "d1l_rp2040_bridge_quiesce_begin"
     )
     assert r'\"storage_manager_quiesced\":true' in reboot
+    assert r'\"retained_worker_quiesced\":true' in reboot
     assert r'\"rp2040_bridge_quiesced\":true' in reboot

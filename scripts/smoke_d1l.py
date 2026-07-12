@@ -238,6 +238,7 @@ def reboot_command_passed(result: dict | None) -> bool:
         and result.get("ok") is True
         and result.get("rebooting") is True
         and result.get("storage_manager_quiesced") is True
+        and result.get("retained_worker_quiesced") is True
         and result.get("rp2040_bridge_quiesced") is True
         and result.get("retained_flush") == "ESP_OK"
         and result.get("route_flush") == "ESP_OK"

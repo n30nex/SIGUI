@@ -64,6 +64,7 @@ MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
 SD_OPERATION_MIN_TIMEOUT_SECONDS = 120.0
 RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
+REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS = 75.0
 
 
 def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
@@ -162,9 +163,11 @@ def remount_manager_busy(result: dict | None) -> bool:
 def remount_transition_passed(result: dict | None, storage_after: dict | None) -> bool:
     if not isinstance(result, dict) or result.get("cmd") != "storage remount":
         return False
-    if result.get("ok") is True:
-        return True
-    return remount_manager_busy(result) and storage_ready(storage_after)
+    return (
+        result.get("ok") is True
+        and result.get("retained_worker_quiesce_acquired") is True
+        and storage_ready(storage_after)
+    )
 
 
 def canary_passed(result: dict | None) -> bool:
@@ -229,8 +232,10 @@ def run_command(ser, command: str, timeout: float) -> dict:
     command_timeout = timeout_for_reboot_command(command, timeout)
     if command.startswith("storage retained-canary "):
         command_timeout = max(timeout, RETAINED_CANARY_MIN_TIMEOUT_SECONDS)
+    elif command == "storage remount":
+        command_timeout = max(timeout, REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS)
     elif (
-        command in {"storage mount", "storage remount", "storage filecanary"}
+        command in {"storage mount", "storage filecanary"}
         or command.startswith("storage map-tile-")
     ):
         command_timeout = max(timeout, SD_OPERATION_MIN_TIMEOUT_SECONDS)
@@ -281,10 +286,11 @@ def run_mount_sequence(
     if not sequence_completed(commands, results, initial_commands):
         return commands, results, storage_after
 
-    # A remount can race the boot-time storage manager.  Even if the cached SD
-    # fields already look ready, require a later status sample after that busy
-    # response before allowing file/map checks to start.
-    require_post_busy_poll = remount_manager_busy(results[1])
+    # A remount can race the boot-time storage manager. A busy receipt is only
+    # diagnostic: require a later status sample, then retry once and require
+    # the retry to prove retained-worker quiesce before any data command.
+    initial_remount_busy = remount_manager_busy(results[1])
+    require_post_busy_poll = initial_remount_busy
     for _attempt in range(mount_poll_attempts):
         if storage_ready(storage_after) and not require_post_busy_poll:
             break
@@ -295,6 +301,31 @@ def run_mount_sequence(
         if host_timed_out(storage_after) or unexpected_console_restart([storage_after]):
             break
         require_post_busy_poll = False
+
+    if (
+        initial_remount_busy
+        and not require_post_busy_poll
+        and storage_ready(storage_after)
+        and not host_timed_out(storage_after)
+        and not unexpected_console_restart([storage_after])
+    ):
+        retry_commands = ["storage remount", "storage status"]
+        retry_ran, retry_results = run_commands_until_terminal(
+            ser, retry_commands, timeout
+        )
+        commands.extend(retry_ran)
+        results.extend(retry_results)
+        storage_after = retry_results[-1] if retry_results else storage_after
+        if sequence_completed(retry_ran, retry_results, retry_commands):
+            for _attempt in range(mount_poll_attempts):
+                if storage_ready(storage_after):
+                    break
+                time.sleep(mount_poll_interval_sec)
+                commands.append("storage status")
+                storage_after = run_command(ser, "storage status", timeout)
+                results.append(storage_after)
+                if host_timed_out(storage_after) or unexpected_console_restart([storage_after]):
+                    break
     return commands, results, storage_after
 
 
@@ -338,10 +369,34 @@ def run_acceptance(
         )
         commands.extend(pre_mount_commands)
         results.extend(pre_mount_results)
-        pre_mount_complete = (
+        pre_remount_results = [
+            result
+            for result in pre_mount_results
+            if result.get("cmd") == "storage remount"
+        ]
+        pre_remount_result = pre_remount_results[-1] if pre_remount_results else {}
+        pre_remount_busy = any(
+            remount_manager_busy(result) for result in pre_mount_results
+        )
+        pre_remount_retained_worker_quiesce_acquired = (
+            pre_remount_result.get("retained_worker_quiesce_acquired")
+            if isinstance(pre_remount_result, dict)
+            and pre_remount_result.get("ok") is True
+            else None
+        )
+        pre_mount_transport_complete = (
             len(pre_mount_commands) >= 3
             and not any(host_timed_out(result) for result in pre_mount_results)
             and not unexpected_console_restart(pre_mount_results)
+        )
+        pre_remount_command_passed = (
+            pre_mount_transport_complete
+            and remount_transition_passed(pre_remount_result, pre_storage)
+        )
+        pre_mount_complete = (
+            pre_mount_transport_complete
+            and pre_remount_command_passed
+            and storage_ready(pre_storage)
         )
         if pre_mount_complete:
             pre_data_commands, pre_data_results = run_commands_until_terminal(
@@ -359,16 +414,6 @@ def run_acceptance(
     filecanary_result = pre_by_command.get("storage filecanary", {})
     retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
     pre_map_tile = pre_by_command.get(f"storage map-tile-canary {token}", {})
-    pre_remount_result = next(
-        (result for result in pre_mount_results if result.get("cmd") == "storage remount"),
-        {},
-    )
-    pre_remount_busy = any(remount_manager_busy(result) for result in pre_mount_results)
-    pre_remount_command_passed = (
-        pre_mount_complete
-        and remount_transition_passed(pre_remount_result, pre_storage)
-    )
-
     post_storage: dict = {}
     post_by_command: dict[str, dict] = {}
     post_map_tile: dict = {}
@@ -378,6 +423,7 @@ def run_acceptance(
     post_data_commands: list[str] = []
     post_data_results: list[dict] = []
     post_remount_busy = False
+    post_remount_retained_worker_quiesce_acquired = None
     post_remount_command_passed = not include_reboot
     post_sequence_complete = False
     reboot_result: dict | None = None
@@ -402,7 +448,7 @@ def run_acceptance(
                 )
                 commands.extend(post_mount_commands)
                 results.extend(post_mount_results)
-                post_mount_complete = (
+                post_mount_transport_complete = (
                     len(post_mount_commands) >= 3
                     and not any(host_timed_out(result) for result in post_mount_results)
                     and not unexpected_console_restart(post_mount_results)
@@ -410,17 +456,28 @@ def run_acceptance(
                 post_remount_busy = any(
                     remount_manager_busy(result) for result in post_mount_results
                 )
-                post_remount_result = next(
-                    (
-                        result
-                        for result in post_mount_results
-                        if result.get("cmd") == "storage remount"
-                    ),
-                    {},
+                post_remount_results = [
+                    result
+                    for result in post_mount_results
+                    if result.get("cmd") == "storage remount"
+                ]
+                post_remount_result = (
+                    post_remount_results[-1] if post_remount_results else {}
                 )
                 post_remount_command_passed = (
-                    post_mount_complete
+                    post_mount_transport_complete
                     and remount_transition_passed(post_remount_result, post_storage)
+                )
+                post_remount_retained_worker_quiesce_acquired = (
+                    post_remount_result.get("retained_worker_quiesce_acquired")
+                    if isinstance(post_remount_result, dict)
+                    and post_remount_result.get("ok") is True
+                    else None
+                )
+                post_mount_complete = (
+                    post_mount_transport_complete
+                    and post_remount_command_passed
+                    and storage_ready(post_storage)
                 )
                 post_data_plan = [
                     *retained_readback_commands(token),
@@ -522,6 +579,8 @@ def run_acceptance(
         "post_remount_ready": post_ready,
         "pre_remount_manager_busy": pre_remount_busy,
         "post_remount_manager_busy": post_remount_busy,
+        "pre_remount_retained_worker_quiesce_acquired": pre_remount_retained_worker_quiesce_acquired,
+        "post_remount_retained_worker_quiesce_acquired": post_remount_retained_worker_quiesce_acquired,
         "pre_remount_command_passed": pre_remount_command_passed,
         "post_remount_command_passed": post_remount_command_passed,
         "retained_history_sd_ready_before": pre_retained_sd_ready,
@@ -534,6 +593,11 @@ def run_acceptance(
         ),
         "reboot_storage_manager_quiesced": (
             reboot_result.get("storage_manager_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
+        "reboot_retained_worker_quiesced": (
+            reboot_result.get("retained_worker_quiesced")
             if include_reboot and isinstance(reboot_result, dict)
             else None
         ),

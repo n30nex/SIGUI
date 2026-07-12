@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from scripts import sd_boot_prepare_acceptance_d1l as boot_accept
@@ -38,6 +39,22 @@ def rp2040_ping_line() -> str:
     )
 
 
+def clean_retained_health_json() -> str:
+    store = (
+        '"sd_read_fail_count":0,"sd_write_fail_count":0,'
+        '"sd_rename_fail_count":0,"nvs_mirror_fail_count":0,'
+        '"sd_last_error":"ESP_OK","nvs_mirror_last_error":"ESP_OK",'
+        '"sd_degraded_latched":false'
+    )
+    stores = ",".join(
+        f'"{name}":{{{store}}}' for name in boot_accept.RETAINED_STORE_NAMES
+    )
+    return (
+        '"retained_sd":{"degraded":false,"backup_degraded":false,'
+        f'"stores":{{{stores}}}}}'
+    )
+
+
 def ready_storage_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
@@ -51,8 +68,32 @@ def ready_storage_line() -> str:
         '"data_backend":"mixed","message_store_backend":"sd",'
         '"dm_store_backend":"sd","route_store_backend":"sd",'
         '"packet_log_backend":"sd",'
-        '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
+        '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"},'
+        f'{clean_retained_health_json()}}}\n'
     )
+
+
+def degraded_ready_storage_line() -> str:
+    payload = json.loads(ready_storage_line())
+    packets = payload["retained_sd"]["stores"]["packets"]
+    packets["sd_read_fail_count"] = 1
+    packets["sd_last_error"] = "ESP_ERR_TIMEOUT"
+    packets["sd_degraded_latched"] = True
+    payload["retained_sd"]["degraded"] = True
+    return json.dumps(payload, separators=(",", ":")) + "\n"
+
+
+def degraded_existing_data_fallback_line() -> str:
+    payload = json.loads(setup_required_storage_line())
+    payload["retained_sd"] = json.loads("{" + clean_retained_health_json() + "}")[
+        "retained_sd"
+    ]
+    packets = payload["retained_sd"]["stores"]["packets"]
+    packets["sd_write_fail_count"] = 1
+    packets["sd_last_error"] = "ESP_ERR_TIMEOUT"
+    packets["sd_degraded_latched"] = True
+    payload["retained_sd"]["degraded"] = True
+    return json.dumps(payload, separators=(",", ":")) + "\n"
 
 
 def setup_required_storage_line() -> str:
@@ -78,9 +119,10 @@ def firmware_mount_error_storage_line() -> str:
     )
 
 
-def storage_mount_line(state: str = "ready") -> str:
+def storage_mount_line(state: str = "ready", *, quiesced: bool = True) -> str:
     return (
         f'{{"schema":1,"ok":true,"cmd":"storage remount",'
+        f'"retained_worker_quiesce_acquired":{str(quiesced).lower()},'
         f'"sd":{{"state":"{state}","rp2040_protocol_supported":true}},'
         f'"public_rf_tx":false,"formats_sd":false}}\n'
     )
@@ -156,6 +198,33 @@ def test_dry_run_unformatted_never_formats():
     ]
 
 
+def test_retained_store_gate_rejects_every_degraded_counter_error_and_latch():
+    clean = json.loads(ready_storage_line())
+    assert boot_accept.retained_store_gate_ready(clean) is True
+
+    mutations = [
+        ("degraded", True),
+        ("backup_degraded", True),
+    ]
+    for field, value in mutations:
+        payload = json.loads(ready_storage_line())
+        payload["retained_sd"][field] = value
+        assert boot_accept.retained_store_gate_ready(payload) is False
+
+    for store_name in boot_accept.RETAINED_STORE_NAMES:
+        for field in boot_accept.RETAINED_STORE_COUNTER_FIELDS:
+            payload = json.loads(ready_storage_line())
+            payload["retained_sd"]["stores"][store_name][field] = 1
+            assert boot_accept.retained_store_gate_ready(payload) is False
+        for field in ("sd_last_error", "nvs_mirror_last_error"):
+            payload = json.loads(ready_storage_line())
+            payload["retained_sd"]["stores"][store_name][field] = "ESP_ERR_TIMEOUT"
+            assert boot_accept.retained_store_gate_ready(payload) is False
+        payload = json.loads(ready_storage_line())
+        payload["retained_sd"]["stores"][store_name]["sd_degraded_latched"] = True
+        assert boot_accept.retained_store_gate_ready(payload) is False
+
+
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
     ser = FakeSerial(
         [
@@ -190,6 +259,143 @@ def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
         "storage filecanary\n",
         "health\n",
     ]
+
+
+def test_correct_structure_rejects_remount_without_retained_worker_quiesce(
+    monkeypatch,
+):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_line(quiesced=False),
+            ready_storage_line(),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "retained_worker_not_quiesced"
+    assert report["retained_worker_quiesce_acquired"] is False
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+    ]
+
+
+def test_boot_acceptance_stops_immediately_after_failed_remount(monkeypatch):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            '{"schema":1,"ok":false,"cmd":"storage remount","code":"ESP_FAIL"}\n',
+            ready_storage_line(),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "storage_remount_failed"
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+    ]
+
+
+def test_existing_data_ready_but_degraded_retained_store_polls_then_fails(
+    monkeypatch,
+):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_line(),
+            degraded_ready_storage_line(),
+            degraded_ready_storage_line(),
+            degraded_ready_storage_line(),
+            storage_setup_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="existing-data",
+        mount_poll_attempts=2,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["retained_worker_quiesce_acquired"] is True
+    assert report["storage_file_gate_ready"] is True
+    assert report["retained_store_gate_ready"] is False
+    assert report["classification"] == "existing_data_policy_not_reported"
+    assert ser.writes.count("storage status\n") == 4
+
+
+def test_existing_data_fallback_rejects_degraded_retained_health(monkeypatch):
+    degraded_fallback = degraded_existing_data_fallback_line()
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_mount_line(),
+            degraded_fallback,
+            storage_setup_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="existing-data",
+        mount_poll_attempts=0,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "existing_data_policy_not_reported"
+    assert report["scenario_prerequisite"]["satisfied"] is False
+    assert boot_accept.retained_store_health_clean(json.loads(degraded_fallback)) is False
+
+
+def test_boot_remount_timeout_exceeds_firmware_deadline(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {"ok": True, "cmd": command}
+
+    monkeypatch.setattr(boot_accept, "send_console_command", fake_send)
+    boot_accept.send_with_timeout(object(), "storage remount", 1.0)
+
+    assert calls == [("storage remount", 75.0)]
 
 
 def test_correct_structure_waits_through_bridge_resync_states(monkeypatch):

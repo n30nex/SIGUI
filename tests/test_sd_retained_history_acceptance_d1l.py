@@ -679,7 +679,7 @@ def test_post_reboot_storage_timeout_stops_before_readbacks(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
         '"route_flush":"ESP_OK"}\n'
     ]
     post = [
@@ -760,7 +760,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
         *retained_readback_lines(token, fp),
         READY_STORAGE,
         health_line(1),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
         '{"schema":1,"ok":true,"cmd":"help"}\n',
         READY_STORAGE,
         *retained_readback_lines(token, fp),
@@ -787,6 +787,7 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
     assert report["ok"] is True
     assert report["reboot_command_passed"] is True
     assert report["reboot_route_flush"] == "ESP_OK"
+    assert report["reboot_retained_worker_quiesced"] is True
     assert report["reboot_proven"] is True
     assert report["pre_reboot_boot_nonce"] == 1
     assert report["post_reboot_boot_nonce"] == 2
@@ -824,7 +825,7 @@ def test_retained_acceptance_rejects_watchdog_after_commanded_reboot(monkeypatch
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [READY_STORAGE, *retained_readback_lines(token, fp), health_line(2, "WDT")]
     serials = [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)]
@@ -890,7 +891,7 @@ def test_acceptance_waits_for_post_reboot_autonomous_sd_mount(monkeypatch):
     serials = [
         FakeSerial(pre),
         FakeSerial(
-            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
         ),
         FakeSerial(post),
     ]
@@ -938,7 +939,7 @@ def test_acceptance_reports_and_rejects_public_rf_flag_from_canary(monkeypatch):
     post = [READY_STORAGE, *retained_readback_lines(token, fingerprint), health_line(2)]
     serials = [
         FakeSerial(pre),
-        FakeSerial(['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']),
+        FakeSerial(['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']),
         FakeSerial(post),
     ]
 
@@ -989,7 +990,7 @@ def test_acceptance_rejects_mirror_failure_immediately_after_canary(monkeypatch)
     serials = [
         FakeSerial(pre),
         FakeSerial(
-            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
         ),
         FakeSerial(post),
     ]
@@ -1083,7 +1084,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         READY_STORAGE,
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         READY_STORAGE,
         *retained_readback_lines(token, fp),
@@ -1133,7 +1134,7 @@ def test_acceptance_rejects_nvs_readbacks_when_post_reboot_sd_is_missing(monkeyp
         *retained_readback_lines(token, fp),
         READY_STORAGE,
         health_line(1),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
         no_card_storage,
         *retained_readback_lines(token, fp),
         health_line(2),
@@ -1196,7 +1197,7 @@ def test_acceptance_rejects_nvs_backends_even_when_post_reboot_file_gate_is_read
     ]
     serials = [
         FakeSerial(pre),
-        FakeSerial(['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']),
+        FakeSerial(['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']),
         FakeSerial(post),
     ]
 

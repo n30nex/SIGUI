@@ -29,6 +29,7 @@ SCENARIOS = (
     "rp2040-unavailable",
 )
 FILE_GATE_SCENARIOS = {"correct-structure", "missing-structure"}
+RETAINED_GATE_SCENARIOS = FILE_GATE_SCENARIOS | {"existing-data"}
 SETUP_SCENARIOS = {"no-card", "unformatted", "existing-data"}
 FIRMWARE_MOUNT_ERROR_ACTION = "inspect_rp2040_sd_mount_error_firmware_path"
 FALLBACK_SETUP_ACTIONS = {
@@ -44,6 +45,14 @@ TRANSIENT_RESYNC_STATES = {
     "protocol_pending",
     "rp2040_unavailable",
 }
+RETAINED_STORE_NAMES = ("messages", "dm", "routes", "packets")
+RETAINED_STORE_COUNTER_FIELDS = (
+    "sd_read_fail_count",
+    "sd_write_fail_count",
+    "sd_rename_fail_count",
+    "nvs_mirror_fail_count",
+)
+REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS = 75.0
 
 
 def command_plan(scenario: str) -> list[str]:
@@ -126,8 +135,35 @@ def storage_file_gate_ready(storage_status: dict | None) -> bool:
     )
 
 
-def retained_store_gate_ready(storage_status: dict | None) -> bool:
+def retained_store_health_clean(storage_status: dict | None) -> bool:
     if not isinstance(storage_status, dict):
+        return False
+    retained = storage_status.get("retained_sd")
+    if not isinstance(retained, dict):
+        return False
+    retained_stores = retained.get("stores")
+    if not isinstance(retained_stores, dict):
+        return False
+    if retained.get("degraded") is not False or retained.get("backup_degraded") is not False:
+        return False
+    for store_name in RETAINED_STORE_NAMES:
+        store = retained_stores.get(store_name)
+        if not isinstance(store, dict):
+            return False
+        for field in RETAINED_STORE_COUNTER_FIELDS:
+            if type(store.get(field)) is not int or store.get(field) != 0:
+                return False
+        if store.get("sd_last_error") != "ESP_OK":
+            return False
+        if store.get("nvs_mirror_last_error") != "ESP_OK":
+            return False
+        if store.get("sd_degraded_latched") is not False:
+            return False
+    return True
+
+
+def retained_store_gate_ready(storage_status: dict | None) -> bool:
+    if not isinstance(storage_status, dict) or not retained_store_health_clean(storage_status):
         return False
     stores = storage_status.get("stores")
     store_backends = stores if isinstance(stores, dict) else {}
@@ -157,7 +193,7 @@ def filecanary_passed(result: dict | None) -> bool:
 
 def storage_converged_for_scenario(scenario: str, storage_status: dict | None) -> bool:
     state = sd_state(storage_status)
-    if scenario in FILE_GATE_SCENARIOS:
+    if scenario in RETAINED_GATE_SCENARIOS:
         if storage_file_gate_ready(storage_status) and retained_store_gate_ready(storage_status):
             return True
         return state not in TRANSIENT_RESYNC_STATES and state != "ready"
@@ -249,14 +285,18 @@ def boot_prepare_passed(
         return False, "unformatted_policy_not_reported"
 
     if scenario == "existing-data":
-        if state == "ready" and sd_status(storage_after).get("data_root_ready") is True:
+        if (
+            state == "ready"
+            and storage_file_gate_ready(storage_after)
+            and retained_store_gate_ready(storage_after)
+        ):
             return True, "existing_data_preserved_ready"
-        if setup_policy_reported(storage_setup) and (
+        if retained_store_health_clean(storage_after) and setup_policy_reported(storage_setup) and (
             setup_action == FIRMWARE_MOUNT_ERROR_ACTION
             or sd_mount_error_present(storage_after)
         ):
             return True, "existing_data_firmware_mount_fallback"
-        if setup_policy_reported(storage_setup) and (
+        if retained_store_health_clean(storage_after) and setup_policy_reported(storage_setup) and (
             setup_action in FALLBACK_SETUP_ACTIONS
             or state in {"not_fat32_or_unmountable", "deskos_manifest_invalid", "error", "bridge_reported"}
         ):
@@ -295,7 +335,13 @@ def scenario_prerequisite_report(
         satisfied = storage_file_gate_ready(storage_after) and retained_store_gate_ready(storage_after)
         expected = "FAT32 card ready for file operations"
     elif scenario == "existing-data":
-        satisfied = state == "ready" or setup_policy_reported(storage_setup)
+        satisfied = (
+            storage_file_gate_ready(storage_after)
+            and retained_store_gate_ready(storage_after)
+        ) or (
+            retained_store_health_clean(storage_after)
+            and setup_policy_reported(storage_setup)
+        )
         expected = "existing card data preserved or rejected without formatting"
     else:
         satisfied = False
@@ -311,7 +357,9 @@ def scenario_prerequisite_report(
 
 
 def send_with_timeout(ser, command: str, timeout: float) -> dict:
-    if command in {"storage mount", "storage remount", "storage filecanary"}:
+    if command == "storage remount":
+        command_timeout = max(timeout, REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS)
+    elif command in {"storage mount", "storage filecanary"}:
         command_timeout = max(timeout, 15.0)
     else:
         command_timeout = timeout
@@ -354,22 +402,33 @@ def run_acceptance(
         storage_after = initial_storage
         storage_setup = None
         filecanary = None
+        storage_remount = None
 
         if scenario != "rp2040-unavailable":
-            run_command(ser, "storage remount")
-            storage_after = run_command(ser, "storage status")
-            for _attempt in range(mount_poll_attempts):
-                if storage_converged_for_scenario(scenario, storage_after):
-                    break
-                time.sleep(mount_poll_interval_sec)
+            storage_remount = run_command(ser, "storage remount")
+            remount_passed = (
+                isinstance(storage_remount, dict)
+                and storage_remount.get("ok") is True
+                and storage_remount.get("retained_worker_quiesce_acquired") is True
+            )
+            if remount_passed:
                 storage_after = run_command(ser, "storage status")
+                for _attempt in range(mount_poll_attempts):
+                    if storage_converged_for_scenario(scenario, storage_after):
+                        break
+                    time.sleep(mount_poll_interval_sec)
+                    storage_after = run_command(ser, "storage status")
 
-            if scenario in FILE_GATE_SCENARIOS:
-                filecanary = run_command(ser, "storage filecanary")
-            if scenario in SETUP_SCENARIOS:
-                storage_setup = run_command(ser, "storage setup")
+                if scenario in FILE_GATE_SCENARIOS:
+                    filecanary = run_command(ser, "storage filecanary")
+                if scenario in SETUP_SCENARIOS:
+                    storage_setup = run_command(ser, "storage setup")
 
-        health = run_command(ser, "health")
+        health = (
+            run_command(ser, "health")
+            if scenario == "rp2040-unavailable" or storage_remount is None or remount_passed
+            else None
+        )
 
     public_rf_tx = any_flag(results, "public_rf_tx")
     format_command_sent = False
@@ -386,6 +445,23 @@ def run_acceptance(
         public_rf_tx=public_rf_tx,
         formats_sd=formats_sd,
     )
+    retained_worker_quiesce_acquired = (
+        storage_remount.get("retained_worker_quiesce_acquired") is True
+        if isinstance(storage_remount, dict)
+        else None
+    )
+    if scenario != "rp2040-unavailable" and (
+        not isinstance(storage_remount, dict)
+        or storage_remount.get("ok") is not True
+        or retained_worker_quiesce_acquired is not True
+    ):
+        scenario_ok = False
+        classification = (
+            "storage_remount_failed"
+            if not isinstance(storage_remount, dict)
+            or storage_remount.get("ok") is not True
+            else "retained_worker_not_quiesced"
+        )
     commands_safe = not any(
         command_is_destructive(
             command,
@@ -413,9 +489,11 @@ def run_acceptance(
         "scenario_state_mismatch": None if scenario_ok else classification,
         "storage_file_gate_ready": storage_file_gate_ready(storage_after),
         "retained_store_gate_ready": retained_store_gate_ready(storage_after),
+        "retained_worker_quiesce_acquired": retained_worker_quiesce_acquired,
         "filecanary_passed": filecanary_passed(filecanary) if filecanary is not None else None,
         "ok": scenario_ok and commands_safe,
         "initial_storage": initial_storage,
+        "storage_remount": storage_remount,
         "storage_after": storage_after,
         "storage_setup": storage_setup,
         "format_result": None,

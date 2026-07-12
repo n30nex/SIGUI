@@ -100,11 +100,14 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     reboot = console.split(
         '} else if (strcmp(line, "reboot") == 0) {', 1
     )[1].split('} else if (strcmp(line, "factory-reset-confirm") == 0) {', 1)[0]
-    assert reboot.count("reboot_deadline_remaining_ms(reboot_started_us)") == 4
+    assert reboot.count("reboot_deadline_remaining_ms(reboot_started_us)") == 5
     assert reboot.index("d1l_storage_manager_quiesce_begin") < reboot.index(
         "d1l_route_store_worker_force_flush"
     )
     assert reboot.index("d1l_route_store_worker_force_flush") < reboot.index(
+        "d1l_route_store_worker_quiesce_begin"
+    )
+    assert reboot.index("d1l_route_store_worker_quiesce_begin") < reboot.index(
         "d1l_rp2040_bridge_quiesce_begin"
     )
     assert reboot.index("d1l_rp2040_bridge_quiesce_begin") < reboot.index(
@@ -116,10 +119,13 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     ) < reboot.index(
         "esp_restart()"
     )
-    assert reboot.count("d1l_storage_manager_quiesce_end()") == 3
+    assert reboot.count("d1l_storage_manager_quiesce_end()") == 4
+    assert reboot.count("d1l_route_store_worker_quiesce_end()") == 2
     assert reboot.count("d1l_rp2040_bridge_quiesce_end()") == 1
     final_deadline = reboot.index("reboot quiesce deadline expired")
     assert reboot.rfind("d1l_rp2040_bridge_quiesce_end()", 0, final_deadline) < reboot.rfind(
+        "d1l_route_store_worker_quiesce_end()", 0, final_deadline
+    ) < reboot.rfind(
         "d1l_storage_manager_quiesce_end()", 0, final_deadline
     )
     assert final_deadline < reboot.index("ok_begin(\"reboot\")")
@@ -130,4 +136,74 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     assert "storage manager quiesce failed; reboot cancelled" in reboot
     assert "RP2040 bridge quiesce failed; reboot cancelled" in reboot
     assert r'\"storage_manager_quiesced\":true' in reboot
+    assert r'\"retained_worker_quiesced\":true' in reboot
     assert r'\"rp2040_bridge_quiesced\":true' in reboot
+
+
+def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reordering():
+    worker = read("main/mesh/route_store_worker.c")
+    header = read("main/mesh/route_store_worker.h")
+    storage = read("main/storage/storage_status.c")
+    console = read("main/comms/usb_console.c")
+
+    assert "d1l_route_store_worker_quiesce_begin" in header
+    assert "d1l_route_store_worker_quiesce_end" in header
+    assert "s_flush_mutex" in worker
+    assert "flush_retained_stores_locked(true)" in worker
+    assert "flush_retained_stores_locked(false)" in worker
+
+    begin = worker.split(
+        "esp_err_t d1l_route_store_worker_quiesce_begin", 1
+    )[1].split("void d1l_route_store_worker_quiesce_end", 1)[0]
+    end = worker.split(
+        "void d1l_route_store_worker_quiesce_end", 1
+    )[1]
+    assert "return ESP_ERR_INVALID_ARG" in begin
+    assert "return ESP_ERR_INVALID_STATE" in begin
+    assert "xSemaphoreTake(s_flush_mutex, ticks)" in begin
+    assert begin.index("xSemaphoreTake(s_request_mutex, ticks)") < begin.index(
+        "xSemaphoreTake(s_flush_mutex, ticks)"
+    ) < begin.index(
+        "s_quiesce_owner = xTaskGetCurrentTaskHandle()"
+    )
+    assert "s_quiesce_owner != current" in end
+    assert end.index("s_quiesce_owner = NULL") < end.index(
+        "xSemaphoreGive(s_flush_mutex)"
+    ) < end.index("xSemaphoreGive(s_request_mutex)")
+
+    remount = storage.split(
+        "esp_err_t d1l_storage_status_remount_blocking", 1
+    )[1].split(
+        "void d1l_storage_status", 1
+    )[0]
+    assert remount.index("manager_sequence_try_take") < remount.index(
+        "d1l_route_store_worker_quiesce_begin"
+    ) < remount.index("storage_status_mount")
+    assert remount.rindex("d1l_route_store_worker_quiesce_end") < remount.rindex(
+        "manager_sequence_give()"
+    )
+    acquisition_failure = remount.split(
+        "if (retained_quiesce_ret != ESP_OK)", 1
+    )[1].split(
+        "if (out_retained_worker_quiesce_acquired)", 1
+    )[0]
+    assert "manager_sequence_give()" in acquisition_failure
+    assert "storage_status_mount" not in acquisition_failure
+    assert "return retained_quiesce_ret" in acquisition_failure
+    assert remount.count("d1l_route_store_worker_quiesce_end()") == 1
+    assert r'\"retained_worker_quiesce_acquired\":%s' in console
+
+    reboot = console.split(
+        '} else if (strcmp(line, "reboot") == 0) {', 1
+    )[1].split('} else if (strcmp(line, "factory-reset-confirm") == 0) {', 1)[0]
+    assert reboot.index("d1l_storage_manager_quiesce_begin") < reboot.index(
+        "d1l_route_store_worker_force_flush"
+    ) < reboot.index("d1l_route_store_worker_quiesce_begin") < reboot.index(
+        "d1l_rp2040_bridge_quiesce_begin"
+    )
+    bridge_failure = reboot.split("if (bridge_quiesce_ret != ESP_OK)", 1)[1].split(
+        "if (reboot_deadline_remaining_ms", 1
+    )[0]
+    assert bridge_failure.index("d1l_route_store_worker_quiesce_end") < bridge_failure.index(
+        "d1l_storage_manager_quiesce_end"
+    )

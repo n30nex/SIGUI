@@ -30,9 +30,12 @@ typedef struct {
 
 static QueueHandle_t s_request_queue;
 static SemaphoreHandle_t s_request_mutex;
+static SemaphoreHandle_t s_flush_mutex;
 static TaskHandle_t s_worker_task;
 static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_quiesce_owner_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_worker_starting;
+static TaskHandle_t s_quiesce_owner;
 static uint32_t s_next_request_id;
 static uint32_t s_result_request_id;
 static esp_err_t s_result;
@@ -63,6 +66,33 @@ static esp_err_t flush_retained_stores(bool force)
     return first_error;
 }
 
+static esp_err_t flush_retained_stores_locked(bool force)
+{
+    if (!s_flush_mutex) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_flush_mutex, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    const esp_err_t ret = flush_retained_stores(force);
+    (void)xSemaphoreGive(s_flush_mutex);
+    return ret;
+}
+
+static TickType_t quiesce_remaining_ticks(int64_t started_us,
+                                          uint32_t timeout_ms)
+{
+    const int64_t elapsed_us = esp_timer_get_time() - started_us;
+    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
+    if (elapsed_us >= timeout_us) {
+        return 0;
+    }
+    const uint32_t remaining_ms =
+        (uint32_t)((timeout_us - elapsed_us + 999LL) / 1000LL);
+    TickType_t ticks = pdMS_TO_TICKS(remaining_ms);
+    return ticks == 0U ? 1U : ticks;
+}
+
 static void publish_result(uint32_t request_id, esp_err_t result)
 {
     portENTER_CRITICAL(&s_state_mux);
@@ -78,9 +108,9 @@ static void route_store_worker_task(void *arg)
     for (;;) {
         if (xQueueReceive(s_request_queue, &request,
                           pdMS_TO_TICKS(D1L_ROUTE_STORE_WORKER_INTERVAL_MS)) == pdTRUE) {
-            publish_result(request.request_id, flush_retained_stores(true));
+            publish_result(request.request_id, flush_retained_stores_locked(true));
         } else {
-            (void)flush_retained_stores(false);
+            (void)flush_retained_stores_locked(false);
         }
     }
 }
@@ -104,6 +134,15 @@ esp_err_t d1l_route_store_worker_start(void)
     if (!s_request_mutex) {
         s_request_mutex = xSemaphoreCreateMutex();
         if (!s_request_mutex) {
+            portENTER_CRITICAL(&s_state_mux);
+            s_worker_starting = false;
+            portEXIT_CRITICAL(&s_state_mux);
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (!s_flush_mutex) {
+        s_flush_mutex = xSemaphoreCreateMutex();
+        if (!s_flush_mutex) {
             portENTER_CRITICAL(&s_state_mux);
             s_worker_starting = false;
             portEXIT_CRITICAL(&s_state_mux);
@@ -189,4 +228,51 @@ esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms)
         }
         vTaskDelay(pdMS_TO_TICKS(D1L_ROUTE_STORE_WORKER_POLL_MS));
     }
+}
+
+esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t started_us = esp_timer_get_time();
+    esp_err_t ret = d1l_route_store_worker_start();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    const bool already_quiesced = s_quiesce_owner != NULL;
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    if (already_quiesced) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    TickType_t ticks = quiesce_remaining_ticks(started_us, timeout_ms);
+    if (ticks == 0U || xSemaphoreTake(s_request_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    ticks = quiesce_remaining_ticks(started_us, timeout_ms);
+    if (ticks == 0U || xSemaphoreTake(s_flush_mutex, ticks) != pdTRUE) {
+        (void)xSemaphoreGive(s_request_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    s_quiesce_owner = xTaskGetCurrentTaskHandle();
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    return ESP_OK;
+}
+
+void d1l_route_store_worker_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    if (s_quiesce_owner != current) {
+        portEXIT_CRITICAL(&s_quiesce_owner_mux);
+        return;
+    }
+    s_quiesce_owner = NULL;
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    (void)xSemaphoreGive(s_flush_mutex);
+    (void)xSemaphoreGive(s_request_mutex);
 }
