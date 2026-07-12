@@ -45,8 +45,8 @@ plain ASCII rather than Seeed's sensor `PacketSerial` framing.
 ## Build
 
 Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
-adds the `earlephilhower/arduino-pico` board package URL, installs
-`rp2040:rp2040`, and compiles the sketch with FQBN
+adds the `earlephilhower/arduino-pico` board package URL, installs pinned
+`rp2040:rp2040@5.6.1`, and compiles the sketch with FQBN
 `rp2040:rp2040:seeed_indicator_rp2040` and
 `compiler.cpp.extra_flags="-DUSE_SD_CRC=1"`. The current validation card is
 user-confirmed FAT32 and accepts raw sector reads only when SD command CRC is
@@ -135,13 +135,19 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   When a successful mounted snapshot has already proven the inserted-card
   signature (`detect=low detect_driven=1`), status polling also samples only
   GPIO7. Three consecutive samples that no longer match that proven signature
-  invalidate the cached mount and report `state=no_card note=card_removed`.
+  trigger one bounded read-only `CMD17` transaction for sector zero on the
+  idle shared SPI bus. A complete sector with a valid data token and CRC16
+  rejects the GPIO-only removal as noise and keeps the ready snapshot. Only a
+  failed or corrupt transaction invalidates the cached mount and reports
+  `state=no_card note=card_removed`.
   The bridge retains only that proven detect signature; three consecutive
   matching samples after removal publish
   `state=mount_required note=card_reinserted`, allowing the ESP32 storage
   manager to request a fresh mount without the status poll touching the bus.
-  This bounded runtime-removal check never probes the SD bus, formats, writes,
-  or assumes a detect polarity before a successful mount has established it.
+  This bounded runtime-removal check never formats or writes and never assumes
+  a detect polarity before a successful mount has established it. Routine
+  status remains bus-silent; only a fully debounced removal suspicion performs
+  the single sector read, with 300 ms ready and data-token timeouts.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The

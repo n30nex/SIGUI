@@ -43,6 +43,10 @@ constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
 constexpr uint16_t SD_CMD0_READY_SAMPLE_MS = 10;
 constexpr uint8_t SD_CMD0_RETRIES = 8;
 constexpr uint8_t SD_REMOVAL_DEBOUNCE_SAMPLES = 3;
+constexpr uint16_t SD_LIVENESS_READY_WAIT_MS = 300;
+constexpr uint16_t SD_LIVENESS_TOKEN_WAIT_MS = 300;
+constexpr uint16_t SD_SECTOR_BYTES = 512;
+constexpr uint8_t SD_CMD17_SECTOR0_CRC = 0x55;
 constexpr uint8_t SD_CMD0_RECOVERY_CLOCKS = 16;
 constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;
 constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;
@@ -842,6 +846,18 @@ uint8_t sd_wait_ready(uint32_t timeout_ms) {
     return value;
 }
 
+constexpr uint16_t sd_data_crc_update(uint16_t crc, uint8_t data) {
+    crc ^= static_cast<uint16_t>(data) << 8;
+    for (uint8_t bit = 0; bit < 8U; ++bit) {
+        crc = (crc & 0x8000U) != 0U ?
+                  static_cast<uint16_t>((crc << 1) ^ 0x1021U) :
+                  static_cast<uint16_t>(crc << 1);
+    }
+    return crc;
+}
+static_assert(sd_data_crc_update(0U, 0x31U) == 0x2672U,
+              "SD data CRC16 implementation must remain CRC-CCITT");
+
 uint8_t sd_command(uint8_t command, uint32_t argument, uint8_t crc, uint8_t *extra, size_t extra_len,
                    uint8_t *ready_byte = nullptr, bool ignore_leading_zero = false,
                    bool wait_selected_ready = true,
@@ -1352,6 +1368,66 @@ bool raw_probe_rejected_card(const CardProbe &probe) {
     return !probe.present && (probe.error_code == 3U || probe.error_code == 4U);
 }
 
+bool mounted_card_sector0_responds() {
+    if (!s_sd_mounted) {
+        return false;
+    }
+
+    SPI1.beginTransaction(SPISettings(SD_SPI_HZ, MSBFIRST, SPI_MODE0));
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_spi_transfer(0xFF);
+    digitalWrite(SD_CS_PIN, LOW);
+
+    bool responsive = sd_wait_ready(SD_LIVENESS_READY_WAIT_MS) == 0xFFU;
+    if (responsive) {
+        const uint32_t address = 0U;
+        (void)sd_spi_transfer(0x40U | 17U);
+        (void)sd_spi_transfer(static_cast<uint8_t>(address >> 24));
+        (void)sd_spi_transfer(static_cast<uint8_t>(address >> 16));
+        (void)sd_spi_transfer(static_cast<uint8_t>(address >> 8));
+        (void)sd_spi_transfer(static_cast<uint8_t>(address));
+        (void)sd_spi_transfer(SD_CMD17_SECTOR0_CRC);
+
+        uint8_t response = 0xFFU;
+        for (uint8_t i = 0; i < 64U; ++i) {
+            response = sd_spi_transfer(0xFF);
+            if ((response & 0x80U) == 0U) {
+                break;
+            }
+        }
+        responsive = response == 0U;
+    }
+
+    uint8_t token = 0xFFU;
+    if (responsive) {
+        const uint32_t token_start_ms = millis();
+        do {
+            token = sd_spi_transfer(0xFF);
+            if (token != 0xFFU) {
+                break;
+            }
+        } while (millis() - token_start_ms < SD_LIVENESS_TOKEN_WAIT_MS);
+        responsive = token == 0xFEU;
+    }
+
+    uint16_t computed_crc = 0U;
+    if (responsive) {
+        for (uint16_t i = 0; i < SD_SECTOR_BYTES; ++i) {
+            const uint8_t value = sd_spi_transfer(0xFF);
+            computed_crc = sd_data_crc_update(computed_crc, value);
+        }
+        const uint16_t received_crc =
+            static_cast<uint16_t>(sd_spi_transfer(0xFF)) << 8 |
+            static_cast<uint16_t>(sd_spi_transfer(0xFF));
+        responsive = computed_crc == received_crc;
+    }
+
+    digitalWrite(SD_CS_PIN, HIGH);
+    (void)sd_spi_transfer(0xFF);
+    SPI1.endTransaction();
+    return responsive;
+}
+
 SdSnapshot current_status() {
     if (!s_cached_snapshot_valid) {
         return make_snapshot("mount_required", "mount_not_checked");
@@ -1370,11 +1446,18 @@ SdSnapshot current_status() {
                 ++s_sd_removal_samples;
             }
             if (s_sd_removal_samples >= SD_REMOVAL_DEBOUNCE_SAMPLES) {
-                SdSnapshot removed = make_snapshot("no_card", "card_removed");
-                apply_detect_sample_to_snapshot(removed, detect);
-                s_sd_mounted = false;
-                s_cached_snapshot = removed;
-                s_cached_snapshot_valid = true;
+                /* GPIO7 can briefly lose its proven mechanical-detect
+                 * signature while a mounted card remains fully responsive.
+                 * Confirm card liveness with one bounded read-only sector
+                 * transaction before invalidating the cache; never turn
+                 * detect noise into a false no-card state or failed flush. */
+                if (!mounted_card_sector0_responds()) {
+                    SdSnapshot removed = make_snapshot("no_card", "card_removed");
+                    apply_detect_sample_to_snapshot(removed, detect);
+                    s_sd_mounted = false;
+                    s_cached_snapshot = removed;
+                    s_cached_snapshot_valid = true;
+                }
                 s_sd_removal_samples = 0;
             }
         }

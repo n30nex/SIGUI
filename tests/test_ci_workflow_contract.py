@@ -83,7 +83,8 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "arduino/setup-arduino-cli@v2" in job
     assert "package_rp2040_index.json" in job
-    assert "arduino-cli core install rp2040:rp2040" in job
+    assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
+    assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
     assert "arduino-cli compile" in job
     assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in job
     assert job.count('--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1"') == 3

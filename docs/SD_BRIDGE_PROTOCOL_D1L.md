@@ -56,12 +56,17 @@ cached, the bridge reports `state=mount_required note=mount_not_checked`.
 After `DESKOS_SD_MOUNT` or file operations complete, status returns the cached
 latest SD state. After a successful mounted snapshot has established the
 inserted-card GPIO7 signature as `detect=low detect_driven=1`, status polling
-uses only that detect pin for runtime-removal monitoring. Three consecutive
-nonmatching samples invalidate the cached mount and return
-`state=no_card note=card_removed`. Three consecutive returns to the proven
-signature publish `state=mount_required note=card_reinserted`; the ESP32 can
-then issue a fresh explicit mount. This debounce does not touch the SD bus and
-does not infer a polarity before a successful mount proves the board signature.
+uses only that detect pin for routine runtime-removal monitoring. Three
+consecutive nonmatching samples trigger one bounded, read-only `CMD17` sector
+zero transaction on the idle shared SPI bus. A complete sector with a valid
+data token and CRC16 rejects the GPIO-only signal as noise and preserves the
+ready snapshot; only a failed or corrupt transaction invalidates the cache and
+returns `state=no_card note=card_removed`.
+Three consecutive returns to the proven signature publish
+`state=mount_required note=card_reinserted`; the ESP32 can then issue a fresh
+explicit mount. Routine status is bus-silent; the debounced suspicion path has
+300 ms ready and data-token bounds and never formats or writes. Neither path
+infers a polarity before a successful mount proves the board signature.
 
 ## Mount Request
 
