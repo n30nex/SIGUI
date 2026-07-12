@@ -26,24 +26,61 @@ def test_dm_store_is_bounded_and_retained_blob_store_backed():
     assert 'D1L_RETAINED_DM_MESSAGE_NAMESPACE "d1l_dms"' in blob_store
     assert 'D1L_RETAINED_DM_MESSAGE_SD_DIR "stores/messages/dm"' in blob_store
     assert "D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES" in source
-    assert "D1L_DM_STORE_SCHEMA 2U" in source
+    assert "D1L_DM_STORE_SCHEMA 4U" in source
+    assert "D1L_DM_STORE_SCHEMA_V3 3U" in source
+    assert "D1L_DM_STORE_SCHEMA_V2 2U" in source
     assert "D1L_DM_STORE_SCHEMA_V1 1U" in source
-    assert "load_v1_blob_into_ram" in source
+    assert "convert_v2_blob" in source
+    assert "convert_v1_blob" in source
+    assert "convert_v3_blob" in source
+    assert "s_clear_lineage" in source
+    assert "new_clear_lineage" in source
+    assert "esp_random()" in source
+    assert "s_device_lineage_authoritative" in source
+    assert "clear_lineage" in header
+    assert "bool loaded" in header
+    assert ".loaded = s_loaded" in source
     assert 'D1L_DM_STORE_KEY "threads"' in source
     assert '#include "storage/retained_blob_store.h"' in source
-    assert "d1l_retained_blob_store_read(D1L_DM_STORE_ID" in source
-    assert "d1l_retained_blob_store_read_fallback(D1L_DM_STORE_ID" in source
-    assert "d1l_retained_blob_store_write(D1L_DM_STORE_ID" in source
-    assert "d1l_retained_blob_store_erase(D1L_DM_STORE_ID" in source
-    assert "d1l_retained_blob_store_uses_sd(D1L_DM_STORE_ID)" in source
+    assert "d1l_retained_blob_store_backend_state(D1L_DM_STORE_ID" in source
+    assert "d1l_retained_blob_store_read_sd_primary(" in source
+    assert "d1l_retained_blob_store_read_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_write_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_write(D1L_DM_STORE_ID" not in source
+    assert "d1l_retained_blob_store_erase(D1L_DM_STORE_ID" not in source
+    assert "d1l_retained_blob_store_erase_sd_primary" not in source
+    assert "d1l_retained_blob_store_erase_nvs_fallback" not in source
+    assert "s_last_sd_backend_generation" in source
+    assert "backend_generation_matches" in source
+    assert "reconcile_sd_primary" in source
+    assert "s_sd_reconcile_pending" in source
+    assert "s_sd_primary_dirty" in source
+    assert "s_nvs_fallback_dirty" in source
+    assert "const bool same_revision" in source
+    assert "d1l_dm_store_flush" in header
+    assert "d1l_dm_store_flush_if_due" in header
+    assert "static d1l_store_lock_t s_init_recovery_lock" in source
+    assert "d1l_store_lock_take(&s_init_recovery_lock)" in source
+    assert "persistence_dirty" in header
+    assert "sd_primary_reconcile_pending" in header
+    assert "nvs_fallback_dirty" in header
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert "entry->acked = true" in source
+    assert "path_hash_bytes > 3U" in source
+    assert "path_hops > 63U" in source
+    assert "(uint16_t)path_hash_bytes * path_hops > 64U" in source
+    assert "blob->head != blob->count % D1L_DM_STORE_CAPACITY" in source
+    assert "blob->entries[i].seq <= previous_seq" in source
     assert "skip_newest" in source
     assert "out_total_matches" in source
     assert "d1l_dm_store_copy_thread" in source
     assert "strncmp(entry->contact_fingerprint, contact_fingerprint" in source
-    assert "static d1l_dm_store_blob_t s_blob_scratch" in source
+    assert "static d1l_dm_store_raw_blob_t s_raw_scratch" in source
+    assert "static d1l_dm_persist_snapshot_t s_persist_snapshot" in source
+    assert "static d1l_dm_entry_t s_merge_entries" in source
+    assert "static d1l_dm_entry_t s_overlay_entries" in source
     assert '"mesh/dm_store.c"' in cmake
     assert "d1l_dm_store_init()" in app_main
 

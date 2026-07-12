@@ -186,10 +186,17 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert 'status->dm_store_backend = "nvs"' not in storage_status
     assert 'status->route_store_backend = "nvs"' not in storage_status
     assert 'status->packet_log_backend = "nvs"' not in storage_status
-    assert "d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
+    assert "d1l_retained_blob_store_backend_state(" in packet_log
+    assert "d1l_retained_blob_store_read_sd_primary(" in packet_log
+    assert "d1l_retained_blob_store_read_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in packet_log
+    assert "d1l_retained_blob_store_write_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" in packet_log
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
 
 
 def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes():

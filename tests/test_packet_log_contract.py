@@ -40,13 +40,22 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert '#include "storage/retained_blob_store.h"' in source
-    assert "d1l_retained_blob_store_read" in source
-    assert "d1l_retained_blob_store_read_fallback" in source
-    assert "d1l_retained_blob_store_write_split" in source
-    assert "d1l_retained_blob_store_erase" in source
+    assert "d1l_retained_blob_store_read_sd_primary" in source
+    assert "d1l_retained_blob_store_read_nvs_fallback" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded" in source
+    assert "d1l_retained_blob_store_write_nvs_fallback" in source
+    assert "d1l_retained_blob_store_write_split" not in source
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded" in source
+    assert "d1l_retained_blob_store_erase_nvs_fallback" in source
     assert "d1l_retained_blob_store_uses_sd" in source
     assert "D1L_RETAINED_BLOB_STORE_PACKET_LOG" in source
     assert '"storage/retained_blob_store.c"' in cmake
+    assert '"hal/rp2040_file_reply.c"' in cmake
+    bridge_source = read("main/hal/rp2040_bridge.c")
+    reply_source = read("main/hal/rp2040_file_reply.c")
+    assert "d1l_rp2040_file_reply_parse(" in bridge_source
+    assert "token_len >= key_len + 1U" in reply_source
+    assert "data= is the canonical zero-byte EOF" in reply_source
     assert "static d1l_packet_log_primary_blob_t s_primary_blob_scratch" in source
     assert "static d1l_packet_log_fallback_blob_t s_fallback_blob_scratch" in source
     assert "D1L_PACKET_LOG_HISTORY_PATH_FMT \"stores/packet_log/segments/s%02lu.bin\"" in source
@@ -54,11 +63,14 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "history_record_checksum" in source
     assert "history_record_is_valid" in source
     assert "read_sd_history_entry" in source
-    assert "append_sd_history_locked" in source
-    assert "clear_sd_history_locked" in source
-    assert "d1l_rp2040_bridge_file_append" in source
+    assert "append_sd_history_for_generation" in source
+    assert "clear_sd_history_for_generation" in source
+    assert "d1l_rp2040_bridge_file_append" not in source
     assert "d1l_rp2040_bridge_file_read(path, offset" in source
-    assert "d1l_rp2040_bridge_file_write(path, 0U" in source
+    assert "const bool unwritten_eof = read_result.length == 0U" in source
+    assert "read_result.eof" in source
+    assert "read_result.offset == offset" in source
+    assert "path, offset, (const uint8_t *)&record" in source
     assert "d1l_rp2040_bridge_file_delete" in source
     assert "D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS 750U" in source
     assert "D1L_PACKET_LOG_HISTORY_MAX_CONSECUTIVE_MISSES 4U" in source
@@ -69,6 +81,7 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "sanitize_ascii" in source
     assert "d1l_packet_log_find_by_seq" in header
     assert "d1l_packet_log_flush" in header
+    assert "d1l_packet_log_flush_if_due" in header
     assert "D1L_PACKET_LOG_RAW_PREVIEW_BYTES 32U" in header
     assert "D1L_PACKET_LOG_RAW_HEX_LEN" in header
     assert "raw_hex" in header
@@ -86,7 +99,47 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert "D1L_PACKET_LOG_SCHEMA 3U" in source
     assert "D1L_PACKET_LOG_SCHEMA_V2 2U" in source
     assert "fallback_blob_v2_is_valid" in source
-    assert "persist_store(bool flush_primary)" in source
+    assert "persist_store(bool flush_primary, bool force)" in source
+    assert "reconcile_sd_primary" in source
+    assert "packet_backend_generation_matches" in source
+    assert "s_sd_reconcile_pending" in source
+    assert "s_sd_primary_dirty" in source
+    assert "s_nvs_fallback_dirty" in source
+    assert "s_journal_dirty" in source
+    assert "persistence_revision" in header
+    assert "sd_primary_reconcile_pending" in header
+    assert "nvs_fallback_last_error" in header
+    assert "journal_last_error" in header
+    assert "clear_in_progress" in header
+    assert "bool loaded" in header
+    assert "s_clear_in_progress" in source
+    assert "s_append_clear_lock" in source
+    assert "s_init_recovery_lock" in source
+    assert "ensure_packet_log_initialized" in source
+    assert "entries[i].seq != first_seq + (uint32_t)i" in source
+    assert "!same_revision || still_dirty" in source
+    assert "packet_backend_generation_matches(expected_generation)" in source
+    assert "static d1l_packet_log_primary_blob_t s_sd_primary_blob_scratch EXT_RAM_BSS_ATTR" in source
+    assert "s_merge_entries[D1L_PACKET_LOG_RAM_CAPACITY * 2U] EXT_RAM_BSS_ATTR" in source
+    init_body = source[
+        source.index("esp_err_t d1l_packet_log_init(void)") :
+        source.index("esp_err_t d1l_packet_log_clear(void)")
+    ]
+    assert "d1l_retained_blob_store_erase" not in init_body
+    clear_body = source[
+        source.index("esp_err_t d1l_packet_log_clear(void)") :
+        source.index("bool d1l_packet_log_append(")
+    ]
+    assert clear_body.index("d1l_store_lock_take(&s_persist_io_lock)") < clear_body.index(
+        "packet_backend_state(&backend_state)"
+    )
+    persist_body = source[
+        source.index("static esp_err_t persist_store(bool flush_primary, bool force)\n{") :
+        source.index("esp_err_t d1l_packet_log_init(void)")
+    ]
+    assert persist_body.index("reconcile_sd_primary(") < persist_body.index(
+        "flush_journal_for_generation("
+    )
     assert "s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD" in source
     assert "s_sd_history_records < D1L_PACKET_LOG_SD_CAPACITY" in source
     assert "ESP_ERR_NOT_FOUND" in source
@@ -115,7 +168,8 @@ def test_console_exposes_packet_detail_and_clear():
     assert "packets detail <seq>" in console
     assert "packets raw <seq>" in console
     assert "packets clear" in console
-    assert '\\"persisted\\":true' in console
+    assert "stats->loaded && !stats->persistence_dirty" in console
+    assert '\\"persistence\\":{\\"loaded\\":%s' in console
     assert '\\"raw_hex\\":\\"%s\\"' in console
     assert '\\"sd_history\\":{\\"enabled\\":%s' in console
     assert "stats->sd_history_records" in console

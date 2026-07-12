@@ -3308,12 +3308,37 @@ static void print_packet_entries_json(const char *cmd, const char *direction, co
         printf(",\"filter\":{\"direction\":\"%s\",\"kind\":\"%s\",\"search\":\"%s\"}",
                direction ? direction : "any", kind ? kind : "any", search_text ? search_text : "");
     }
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"reconcile\":{\"pending\":%s,\"count\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"journal\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats->loaded),
+           bool_json(stats->persistence_dirty),
+           (unsigned long long)stats->persistence_revision,
+           (unsigned long)stats->persistence_commit_count,
+           (unsigned long)stats->persistence_fail_count,
+           bool_json(stats->sd_primary_reconcile_pending),
+           (unsigned long)stats->sd_reconcile_count,
+           (unsigned long)stats->sd_reconcile_fail_count,
+           esp_err_to_name(stats->sd_reconcile_last_error),
+           bool_json(stats->sd_history_enabled),
+           (unsigned long)stats->sd_backend_generation,
+           bool_json(stats->sd_primary_dirty),
+           (unsigned long)stats->sd_primary_commit_count,
+           (unsigned long)stats->sd_primary_fail_count,
+           esp_err_to_name(stats->sd_primary_last_error),
+           bool_json(stats->nvs_fallback_dirty),
+           (unsigned long)stats->nvs_fallback_commit_count,
+           (unsigned long)stats->nvs_fallback_fail_count,
+           esp_err_to_name(stats->nvs_fallback_last_error),
+           bool_json(stats->journal_dirty),
+           (unsigned long)stats->journal_commit_count,
+           (unsigned long)stats->journal_fail_count,
+           esp_err_to_name(stats->journal_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_packet_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n",
+           bool_json(stats->loaded && !stats->persistence_dirty));
 }
 
 static bool read_packet_token(const char **cursor, char *dest, size_t dest_size)
@@ -3544,12 +3569,34 @@ static void cmd_messages_public(const char *line)
         printf(",\"search\":");
         print_json_string(search);
     }
+    printf(",\"retained_epoch\":%lu,\"content_revision\":%lu",
+           (unsigned long)stats.epoch,
+           (unsigned long)stats.content_revision);
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"stale_snapshots\":%lu,\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats.loaded),
+           bool_json(stats.persistence_dirty),
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_public_message_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n",
+           bool_json(stats.loaded && !stats.persistence_dirty));
 }
 
 static void cmd_messages_clear(void)
@@ -3637,12 +3684,34 @@ static void cmd_messages_dm(const char *line)
         printf(",\"fingerprint\":\"%s\",\"thread_count\":%u",
                thread_fingerprint, (unsigned)total_matches);
     }
+    printf(",\"retained_epoch\":%lu,\"content_revision\":%lu",
+           (unsigned long)stats.epoch,
+           (unsigned long)stats.content_revision);
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"stale_snapshots\":%lu,\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats.loaded),
+           bool_json(stats.persistence_dirty),
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_dm_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n",
+           bool_json(stats.loaded && !stats.persistence_dirty));
 }
 
 static void cmd_messages_dm_clear(void)
@@ -4926,15 +4995,15 @@ static void handle_line(const char *line)
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
     } else if (strcmp(line, "reboot") == 0) {
-        esp_err_t route_flush_ret = d1l_route_store_worker_force_flush(
+        esp_err_t retained_flush_ret = d1l_route_store_worker_force_flush(
             D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS);
-        if (route_flush_ret != ESP_OK) {
-            err_result("reboot", esp_err_to_name(route_flush_ret),
-                       "retained route flush failed; reboot cancelled");
+        if (retained_flush_ret != ESP_OK) {
+            err_result("reboot", esp_err_to_name(retained_flush_ret),
+                       "retained storage flush failed; reboot cancelled");
             return;
         }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"route_flush\":\"ESP_OK\"}\n");
+        printf(",\"rebooting\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
         fflush(stdout);
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {

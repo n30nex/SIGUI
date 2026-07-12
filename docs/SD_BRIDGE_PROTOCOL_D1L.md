@@ -285,11 +285,13 @@ For compacted stores and map tiles, write chunks to a temporary path, then use
 `rename replace=1` as the commit step. Retained history blobs use:
 `stores/messages/public/public.bin`, `stores/messages/dm/threads.bin`,
 `stores/routes/routes.bin`, and `stores/packet_log/ring.bin`, each committed
-through a same-directory `.tmp` path. Packet history also keeps a bounded
-append-only SD journal in `stores/packet_log/segments/sNN.bin`: 32 segment files
+through a same-directory `.tmp` path. Packet history also keeps a bounded SD
+journal in `stores/packet_log/segments/sNN.bin`: 64 segment files
 with 64 fixed-size records each, for a 4096-record SD window while NVS keeps the
-newest compact fallback rows. The first record in each segment is written with
-`write trunc=1`; later records use `append`. ESP32 keeps an onboard NVS mirror so
+newest compact fallback rows. Records use sequence-derived fixed offsets; a new
+segment cycle starts with `write trunc=1`, and an already matching record is an
+idempotent retry. An unwritten exact-EOF slot is the canonical zero-byte reply
+`len=0 eof=1 data= crc=00000000`. ESP32 keeps an onboard NVS mirror so
 removing or timing out the SD card does not strand message, route, or packet
 history. Do not blindly retry `append` after a timeout unless the higher-level
 record format has its own idempotency key.

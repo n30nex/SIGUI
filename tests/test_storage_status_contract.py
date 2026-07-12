@@ -478,6 +478,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     simulator = read("tools/ui_simulator.py")
     rp2040_header = read("main/hal/rp2040_bridge.h")
     rp2040_source = read("main/hal/rp2040_bridge.c")
+    rp2040_file_reply = read("main/hal/rp2040_file_reply.c")
 
     for field in [
         "storage_sd_state",
@@ -625,7 +626,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "DESKOS_SD_PING" in rp2040_source
     assert "DESKOS_SD_FILE" in rp2040_source
     assert "base64url_encode" in rp2040_source
-    assert "base64url_decode" in rp2040_source
+    assert "base64url_decode" in rp2040_file_reply
     assert "crc32_bytes" in rp2040_source
     assert "validate_relative_path" in rp2040_source
     assert "line_has_prefix" in rp2040_source

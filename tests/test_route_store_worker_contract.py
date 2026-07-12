@@ -19,7 +19,14 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_route_store_worker_start" in header
     assert "d1l_route_store_worker_force_flush" in header
     assert "D1L_ROUTE_STORE_WORKER_INTERVAL_MS 1000U" in worker
+    assert "flush_retained_stores" in worker
+    assert "d1l_message_store_flush_if_due()" in worker
+    assert "d1l_dm_store_flush_if_due()" in worker
+    assert "d1l_packet_log_flush_if_due()" in worker
     assert "d1l_route_store_flush_if_due()" in worker
+    assert "d1l_message_store_flush()" in worker
+    assert "d1l_dm_store_flush()" in worker
+    assert "d1l_packet_log_flush()" in worker
     assert "d1l_route_store_flush()" in worker
     assert "request_id" in worker
     assert "s_result_request_id" in worker
@@ -34,3 +41,5 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_route_store_worker_force_flush(" in console
     assert "D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS" in console
     assert "D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS = 15000U" in console
+    assert "retained storage flush failed; reboot cancelled" in console
+    assert r'\"retained_flush\":\"ESP_OK\"' in console

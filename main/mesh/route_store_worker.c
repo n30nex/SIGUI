@@ -7,6 +7,9 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "mesh/dm_store.h"
+#include "mesh/message_store.h"
+#include "mesh/packet_log.h"
 #include "mesh/route_store.h"
 
 #define D1L_ROUTE_STORE_WORKER_INTERVAL_MS 1000U
@@ -27,6 +30,32 @@ static uint32_t s_next_request_id;
 static uint32_t s_result_request_id;
 static esp_err_t s_result;
 
+static esp_err_t flush_retained_stores(bool force)
+{
+    esp_err_t first_error = ESP_OK;
+    const esp_err_t message_ret = force ? d1l_message_store_flush() :
+                                          d1l_message_store_flush_if_due();
+    if (message_ret != ESP_OK) {
+        first_error = message_ret;
+    }
+    const esp_err_t dm_ret = force ? d1l_dm_store_flush() :
+                                     d1l_dm_store_flush_if_due();
+    if (dm_ret != ESP_OK && first_error == ESP_OK) {
+        first_error = dm_ret;
+    }
+    const esp_err_t packet_ret = force ? d1l_packet_log_flush() :
+                                         d1l_packet_log_flush_if_due();
+    if (packet_ret != ESP_OK && first_error == ESP_OK) {
+        first_error = packet_ret;
+    }
+    const esp_err_t route_ret = force ? d1l_route_store_flush() :
+                                        d1l_route_store_flush_if_due();
+    if (route_ret != ESP_OK && first_error == ESP_OK) {
+        first_error = route_ret;
+    }
+    return first_error;
+}
+
 static void publish_result(uint32_t request_id, esp_err_t result)
 {
     portENTER_CRITICAL(&s_state_mux);
@@ -42,9 +71,9 @@ static void route_store_worker_task(void *arg)
     for (;;) {
         if (xQueueReceive(s_request_queue, &request,
                           pdMS_TO_TICKS(D1L_ROUTE_STORE_WORKER_INTERVAL_MS)) == pdTRUE) {
-            publish_result(request.request_id, d1l_route_store_flush());
+            publish_result(request.request_id, flush_retained_stores(true));
         } else {
-            (void)d1l_route_store_flush_if_due();
+            (void)flush_retained_stores(false);
         }
     }
 }

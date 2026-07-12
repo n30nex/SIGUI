@@ -11,6 +11,7 @@
 
 #define D1L_DM_STORE_CAPACITY 16U
 #define D1L_DM_DIRECTION_LEN 4U
+#define D1L_DM_STORE_PERSIST_RETRY_INTERVAL_MS 5000U
 
 typedef struct {
     uint32_t seq;
@@ -33,12 +34,34 @@ typedef struct {
     uint32_t next_seq;
     uint32_t total_written;
     uint32_t dropped_oldest;
+    uint32_t epoch;
+    uint32_t content_revision;
+    uint64_t clear_lineage;
+    uint32_t persistence_commit_count;
+    uint32_t persistence_fail_count;
+    uint32_t persistence_stale_snapshot_count;
+    uint32_t sd_primary_commit_count;
+    uint32_t sd_primary_fail_count;
+    uint32_t sd_backend_generation;
+    esp_err_t sd_primary_last_error;
+    uint32_t nvs_fallback_commit_count;
+    uint32_t nvs_fallback_fail_count;
+    esp_err_t nvs_fallback_last_error;
+    uint64_t persistence_revision;
     size_t count;
     size_t capacity;
+    bool loaded;
+    bool persistence_dirty;
+    bool sd_primary_required;
+    bool sd_primary_dirty;
+    bool sd_primary_reconcile_pending;
+    bool nvs_fallback_dirty;
 } d1l_dm_store_stats_t;
 
 esp_err_t d1l_dm_store_init(void);
 esp_err_t d1l_dm_store_clear(void);
+esp_err_t d1l_dm_store_flush(void);
+esp_err_t d1l_dm_store_flush_if_due(void);
 esp_err_t d1l_dm_store_append(const char *contact_fingerprint, const char *contact_alias,
                               const char *direction, const char *text, int rssi_dbm,
                               int snr_tenths, uint8_t path_hash_bytes, uint8_t path_hops,

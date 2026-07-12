@@ -43,10 +43,33 @@ typedef struct {
     uint32_t dropped_oldest;
     uint32_t sd_history_records;
     uint32_t sd_history_failed_writes;
+    uint32_t sd_backend_generation;
+    uint32_t persistence_commit_count;
+    uint32_t persistence_fail_count;
+    uint32_t sd_reconcile_count;
+    uint32_t sd_reconcile_fail_count;
+    esp_err_t sd_reconcile_last_error;
+    uint32_t sd_primary_commit_count;
+    uint32_t sd_primary_fail_count;
+    esp_err_t sd_primary_last_error;
+    uint32_t nvs_fallback_commit_count;
+    uint32_t nvs_fallback_fail_count;
+    esp_err_t nvs_fallback_last_error;
+    uint32_t journal_commit_count;
+    uint32_t journal_fail_count;
+    esp_err_t journal_last_error;
+    uint64_t persistence_revision;
     size_t count;
     size_t capacity;
     size_t sd_capacity;
+    bool persistence_dirty;
+    bool sd_primary_dirty;
+    bool sd_primary_reconcile_pending;
+    bool nvs_fallback_dirty;
+    bool journal_dirty;
+    bool clear_in_progress;
     bool sd_history_enabled;
+    bool loaded;
 } d1l_packet_log_stats_t;
 
 esp_err_t d1l_packet_log_init(void);
@@ -57,6 +80,7 @@ bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len);
 esp_err_t d1l_packet_log_flush(void);
+esp_err_t d1l_packet_log_flush_if_due(void);
 d1l_packet_log_stats_t d1l_packet_log_stats(void);
 size_t d1l_packet_log_copy_recent(d1l_packet_log_entry_t *out_entries, size_t max_entries);
 size_t d1l_packet_log_query_page(d1l_packet_log_entry_t *out_entries, size_t max_entries,
