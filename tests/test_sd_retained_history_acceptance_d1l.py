@@ -392,6 +392,77 @@ def test_acceptance_requires_pre_and_post_reboot_readbacks(monkeypatch):
     assert report["formats_sd"] is False
 
 
+def test_acceptance_waits_for_post_reboot_autonomous_sd_mount(monkeypatch):
+    token = "sdToken1"
+    fp = retained_accept.fingerprint_for_token(token)
+    transient = json.loads(READY_STORAGE)
+    transient["manager"]["state"] = "MOUNT"
+    transient["sd"].update(
+        {
+            "state": "mount_pending",
+            "mounted": False,
+            "data_root_ready": False,
+            "file_ops": False,
+            "atomic_rename": False,
+        }
+    )
+    for field in (
+        "message_store_backend",
+        "dm_store_backend",
+        "route_store_backend",
+        "packet_log_backend",
+    ):
+        transient[field] = "nvs"
+    transient_line = json.dumps(transient) + "\n"
+    pre = [
+        READY_STORAGE,
+        '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+        retained_canary_line(token, fp),
+        *retained_readback_lines(token, fp),
+        READY_STORAGE,
+        health_line(1),
+    ]
+    post = [
+        transient_line,
+        READY_STORAGE,
+        *retained_readback_lines(token, fp),
+        health_line(2),
+    ]
+    serials = [
+        FakeSerial(pre),
+        FakeSerial(
+            ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+        ),
+        FakeSerial(post),
+    ]
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: serials.pop(0)
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=2.0,
+        allow_unavailable=False,
+    )
+
+    assert report["ok"] is True
+    assert report["post_reboot_storage_ready_waited"] is True
+    assert report["post_reboot_storage_ready_poll_count"] == 2
+    assert report["storage_after"]["manager"]["state"] == "READY_SD"
+    reboot_index = report["commands"].index("reboot")
+    assert report["commands"][reboot_index + 1 : reboot_index + 3] == [
+        "storage status",
+        "storage status",
+    ]
+
+
 def test_acceptance_reports_and_rejects_public_rf_flag_from_canary(monkeypatch):
     token = "sdToken1"
     fingerprint = retained_accept.fingerprint_for_token(token)

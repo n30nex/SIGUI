@@ -295,6 +295,24 @@ def retained_storage_ready(result: dict | None) -> bool:
     )
 
 
+def wait_for_retained_storage_ready(
+    ser,
+    timeout: float,
+    *,
+    wait_sec: float,
+    poll_interval_sec: float = 1.0,
+) -> tuple[dict, list[dict]]:
+    """Poll the autonomous post-reboot mount without forcing another mount."""
+    results: list[dict] = []
+    deadline = time.monotonic() + max(0.0, wait_sec)
+    while True:
+        latest = send_console_command(ser, "storage status", timeout)
+        results.append(latest)
+        if retained_storage_ready(latest) or time.monotonic() >= deadline:
+            return latest, results
+        time.sleep(max(0.0, poll_interval_sec))
+
+
 def run_command(ser, command: str, timeout: float) -> dict:
     command_timeout = timeout_for_reboot_command(command, timeout)
     if command.startswith("storage retained-canary "):
@@ -384,6 +402,9 @@ def run_acceptance(
     reboot_result: dict | None = None
     reboot_ok = not include_reboot
     post_commands_ran = False
+    post_results: list[dict] = []
+    post_ready_wait_results: list[dict] = []
+    post_readback_results: list[dict] = []
     if include_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             reboot_result = run_command(ser, "reboot", timeout)
@@ -393,11 +414,20 @@ def run_acceptance(
             time.sleep(reboot_settle_sec)
             with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
                 ser.reset_input_buffer()
-                results.extend(run_commands(ser, post_commands, timeout))
+                _, post_ready_wait_results = wait_for_retained_storage_ready(
+                    ser,
+                    timeout,
+                    wait_sec=mount_wait_sec,
+                )
+                post_results.extend(post_ready_wait_results)
+                post_readback_results = run_commands(ser, post_commands[1:], timeout)
+                post_results.extend(post_readback_results)
+                results.extend(post_results)
             post_commands_ran = True
         commands = [*pre_commands, "reboot"]
         if post_commands_ran:
-            commands.extend(post_commands)
+            commands.extend("storage status" for _ in post_ready_wait_results)
+            commands.extend(post_commands[1:])
     else:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
@@ -406,10 +436,11 @@ def run_acceptance(
 
     by_command = {row.get("cmd", ""): row for row in results}
     pre_by_command = {cmd: result for cmd, result in zip(pre_commands, results[: len(pre_commands)])}
-    post_start = len(pre_commands) + (1 if include_reboot else 0)
-    post_by_command = {
-        cmd: result for cmd, result in zip(post_commands, results[post_start: post_start + len(post_commands)])
-    } if post_commands_ran else {}
+    post_by_command = {}
+    if post_commands_ran:
+        if post_ready_wait_results:
+            post_by_command["storage status"] = post_ready_wait_results[-1]
+        post_by_command.update(dict(zip(post_commands[1:], post_readback_results)))
     canary_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
     filecanary_ok = filecanary_result.get("ok") is True
     pre_readbacks_ok = readbacks_pass(pre_by_command, token, fingerprint, retained_result)
@@ -470,6 +501,12 @@ def run_acceptance(
             1 for result in ready_wait_results if result.get("cmd") == "storage status"
         ),
         "mount_attempt": mount_attempt,
+        "post_reboot_storage_ready_waited": len(post_ready_wait_results) > 1,
+        "post_reboot_storage_ready_poll_count": sum(
+            1
+            for result in post_ready_wait_results
+            if result.get("cmd") == "storage status"
+        ),
         "reboot_command_passed": reboot_ok if include_reboot else None,
         "reboot_route_flush": (
             reboot_result.get("route_flush")
