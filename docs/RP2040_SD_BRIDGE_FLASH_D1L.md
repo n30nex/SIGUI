@@ -90,22 +90,37 @@ to be refreshed:
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
 ```
 
-The refresh runner touches only COM12 and COM16, refuses COM8/COM11/COM29,
-flashes the ESP32 image when not skipped, then performs a short RP2040 access
+The refresh runner first binds the host-success marker and release manifest to
+the requested canonical 40-hex commit and explicitly supplied numeric Actions
+run, and verifies both packaged
+and standalone firmware hashes. It touches only COM12 and COM16, refuses
+COM8/COM11/COM29, flashes the exact ESP32 image, then performs a short RP2040 access
 precheck before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks
 whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
 `rp2040 double-reset` bootloader-entry pattern, then tries one `rp2040 reset`,
 and fails closed if no autonomous bootloader path is available. It does not
-format SD, does not send Public RF, and does not require user action. When
-access is available, the runner flashes the official Seeed SD smoke UF2,
-captures its COM16 JSON, restores the production bridge UF2, runs short COM12
-SD preflight and smoke evidence, and regenerates the fail-closed release gate.
+format SD, does not send Public RF, and does not require user action.
+Pre-existing UF2 disks require explicit `--uf2-volume`; automatic selection is
+limited to exactly one newly appeared volume correlated with the commanded D1L
+transition. COM17 and other discovered RP2040-looking ports are reported only
+as read-only inventory; configured COM16 must be present and is the only RP2040
+serial port the runner may touch. When access is available, the runner flashes the official Seeed SD smoke UF2,
+captures its COM16 JSON, and restores the exact production bridge UF2. Raw
+diagnostics then run under a bounded deadline as an isolated maintenance phase,
+but only after a clean `READY_SD` zero-counter preflight. Before any SD canary,
+the runner restores that exact bridge again, reflashes the
+exact ESP32 project image, and requires a fresh `READY_SD` preflight with zero
+retained failure counters or degradation latches. Any diagnostic or clean
+re-entry failure stops before canaries and remains visible to the release gate.
+Any later SD-stage failure also stops subsequent stages, preserves its receipt,
+runs the release audit, and attempts bounded exact bridge/ESP32 recovery.
 Targeted UI corruption and scroll probes are opt-in with `--include-ui-probes`.
 
-For ESP32-side fixes after the RP2040 bridge is already validated, do not use
-`--refresh-rp2040-smoke`. The default autonomous runner reuses the installed
-bridge and copies no RP2040 UF2 files; add `--skip-sd-suite --include-ui-probes`
-for UI-only validation that should flash only the ESP32 artifact on COM12.
+For ESP32-side fixes after the RP2040 bridge is already validated, add
+`--skip-sd-suite --include-ui-probes` for UI-only validation that flashes only
+the ESP32 artifact on COM12. Any run that keeps the SD suite enabled performs
+the mandatory exact bridge pre/post-diagnostic restore boundary;
+`--refresh-rp2040-smoke` additionally enables official Seeed smoke evidence.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under

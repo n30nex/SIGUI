@@ -76,6 +76,11 @@ RP2040_RESTORE_PING_ATTEMPTS = 5
 RP2040_RESTORE_PING_INTERVAL_SECONDS = 3.0
 SD_FILE_CANARY_TIMEOUT_SECONDS = 45
 SD_FILE_CANARY_MOUNT_WAIT_SECONDS = 60
+RAW_DIAG_SETTLE_SECONDS = 20
+RAW_DIAG_POLL_SECONDS = 2
+RAW_DIAG_DEADLINE_SECONDS = 60
+RAW_DIAG_PROCESS_TIMEOUT_SECONDS = 120
+RETAINED_STORE_NAMES = ("messages", "dm", "routes", "packets")
 SD_BOOT_PREPARE_SCENARIOS = (
     "no-card",
     "correct-structure",
@@ -132,11 +137,14 @@ def git_value(root: Path, *args: str) -> str | None:
 
 
 def resolve_commit(root: Path, value: str | None) -> str:
-    if value:
-        return value
-    commit = git_value(root, "rev-parse", "HEAD")
+    commit = value or git_value(root, "rev-parse", "HEAD")
     if not commit:
         raise ValueError("Could not determine commit; pass --commit")
+    commit = commit.strip().lower()
+    if len(commit) != 40 or any(ch not in "0123456789abcdef" for ch in commit):
+        raise ValueError(
+            "Resolved commit must be a canonical 40-hex Git commit SHA"
+        )
     return commit
 
 
@@ -163,9 +171,18 @@ def build_context(args: argparse.Namespace) -> RunContext:
     d1l_port = normalize_port(args.d1l_port)
     rp2040_port = normalize_port(args.rp2040_port)
     enforce_port_guard(d1l_port, rp2040_port)
+    if d1l_port != DEFAULT_D1L_PORT or rp2040_port != DEFAULT_RP2040_PORT:
+        raise ValueError(
+            "Autonomous D1L validation mutations are restricted to "
+            f"{DEFAULT_D1L_PORT} and {DEFAULT_RP2040_PORT}"
+        )
+    if not args.github_run_id or not str(args.github_run_id).isdigit():
+        raise ValueError(
+            "Pass an explicit numeric --github-run-id for Actions provenance"
+        )
     commit = resolve_commit(root, args.commit)
     run_dir = resolve_github_run_dir(root, args.github_run_id, args.github_run_dir)
-    run_id = args.github_run_id or args.github_run_dir_name or run_dir.name.removesuffix("-current")
+    run_id = str(args.github_run_id)
     return RunContext(
         root=root,
         commit=commit,
@@ -200,8 +217,9 @@ def required_artifact_dirs(ctx: RunContext, args: argparse.Namespace) -> dict[st
         "esp32": dirs["esp32"],
         "esp32_build": dirs["esp32_build"],
     }
-    if rp2040_refresh_requested(args):
+    if rp2040_refresh_requested(args) or not args.skip_sd_suite:
         required["bridge"] = dirs["bridge"]
+    if rp2040_refresh_requested(args):
         required["official_smoke"] = dirs["official_smoke"]
     return required
 
@@ -210,8 +228,19 @@ def official_sd_smoke_out(ctx: RunContext) -> Path:
     return ctx.rp2040_hardware_dir / f"rp2040_seeed_official_sd_smoke_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.rp2040_port}.json"
 
 
-def bridge_restore_out(ctx: RunContext) -> Path:
-    return ctx.root / "artifacts" / "rp2040-flash" / f"rp2040-bridge-restore-copy-{ctx.short_commit}-{ctx.rp2040_port}.json"
+def bridge_restore_out(ctx: RunContext, phase: str = "initial") -> Path:
+    phase_suffix = "" if phase == "initial" else f"-{phase}"
+    return ctx.root / "artifacts" / "rp2040-flash" / (
+        f"rp2040-bridge-restore-copy{phase_suffix}-{ctx.short_commit}-{ctx.rp2040_port}.json"
+    )
+
+
+def esp32_flash_out(ctx: RunContext, phase: str = "initial") -> Path:
+    phase_suffix = "" if phase == "initial" else f"_{phase}"
+    return ctx.hardware_dir / (
+        f"esp32_flash{phase_suffix}_{ctx.short_commit}_actions_"
+        f"{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
 
 
 def rp2040_access_precheck_out(ctx: RunContext) -> Path:
@@ -342,6 +371,254 @@ def verify_esp32_flash_inputs(ctx: RunContext) -> dict:
     }
 
 
+def load_unique_json(root: Path, pattern: str, label: str) -> tuple[Path, dict[str, Any]]:
+    matches = sorted(path for path in root.glob(pattern) if path.is_file())
+    if len(matches) != 1:
+        raise FlashGuardError(
+            f"expected exactly one {label} matching {pattern!r}, found {len(matches)}"
+        )
+    path = matches[0]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FlashGuardError(f"invalid {label} {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise FlashGuardError(f"invalid {label} {path}: expected JSON object")
+    return path, payload
+
+
+def require_metadata_match(label: str, actual: Any, expected: Any) -> None:
+    if actual != expected:
+        raise FlashGuardError(
+            f"Actions provenance mismatch for {label}: expected {expected!r}, got {actual!r}"
+        )
+
+
+def verify_manifest_artifact_group(
+    manifest: dict[str, Any],
+    package_root: Path,
+    group_name: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    groups = manifest.get("rp2040_artifacts")
+    if not isinstance(groups, list):
+        raise FlashGuardError("release manifest has no rp2040_artifacts list")
+    matches = [
+        group for group in groups
+        if isinstance(group, dict) and group.get("name") == group_name
+    ]
+    if len(matches) != 1:
+        raise FlashGuardError(
+            f"release manifest must contain exactly one {group_name!r} group"
+        )
+    group = matches[0]
+    group_path = str(group.get("path") or "").replace("\\", "/").rstrip("/")
+    files = group.get("files")
+    if not group_path or not isinstance(files, list) or not files:
+        raise FlashGuardError(f"release manifest group {group_name!r} is incomplete")
+
+    expected: dict[str, dict[str, Any]] = {}
+    prefix = f"{group_path}/"
+    for item in files:
+        if not isinstance(item, dict):
+            raise FlashGuardError(f"release manifest group {group_name!r} has invalid file entry")
+        package_path = str(item.get("path") or "").replace("\\", "/")
+        if not package_path.startswith(prefix):
+            raise FlashGuardError(
+                f"release manifest path {package_path!r} escapes group {group_name!r}"
+            )
+        relative = package_path[len(prefix):]
+        if not relative or relative.startswith("/") or ".." in Path(relative).parts:
+            raise FlashGuardError(f"invalid release manifest artifact path {package_path!r}")
+        if relative in expected:
+            raise FlashGuardError(
+                f"duplicate release manifest artifact path for {group_name!r}: {relative}"
+            )
+        expected[relative] = item
+
+    actual = {
+        path.relative_to(artifact_dir).as_posix(): path
+        for path in artifact_dir.rglob("*")
+        if path.is_file()
+    }
+    if set(actual) != set(expected):
+        raise FlashGuardError(
+            f"Actions provenance file-set mismatch for {group_name}: "
+            f"unlisted={sorted(set(actual) - set(expected))}, "
+            f"missing={sorted(set(expected) - set(actual))}"
+        )
+
+    verified_files: list[dict[str, Any]] = []
+    for relative, path in sorted(actual.items()):
+        item = expected[relative]
+        actual_sha = sha256_file(path).lower()
+        expected_sha = str(item.get("sha256") or "").lower()
+        require_metadata_match(f"{group_name}/{relative} sha256", actual_sha, expected_sha)
+        require_metadata_match(f"{group_name}/{relative} size", path.stat().st_size, item.get("size"))
+        packaged = (package_root / str(item["path"])).resolve()
+        try:
+            packaged.relative_to(package_root.resolve())
+        except ValueError as exc:
+            raise FlashGuardError(
+                f"release package path escapes package root: {item['path']!r}"
+            ) from exc
+        require_path(packaged, f"packaged {group_name}/{relative}")
+        require_metadata_match(
+            f"packaged {group_name}/{relative} sha256",
+            sha256_file(packaged).lower(),
+            expected_sha,
+        )
+        require_metadata_match(
+            f"packaged {group_name}/{relative} size",
+            packaged.stat().st_size,
+            item.get("size"),
+        )
+        verified_files.append(
+            {
+                "path": relative,
+                "size": path.stat().st_size,
+                "sha256": actual_sha.upper(),
+            }
+        )
+    return {
+        "name": group_name,
+        "artifact_dir": str(artifact_dir.resolve()),
+        "files": verified_files,
+    }
+
+
+def verify_actions_artifact_provenance(
+    ctx: RunContext, args: argparse.Namespace
+) -> dict[str, Any]:
+    run_root = ctx.github_run_dir.resolve()
+    marker_path, marker = load_unique_json(
+        run_root,
+        "d1l-host-artifacts/host-checks/d1l_host_checks_success_*.json",
+        "host-checks success marker",
+    )
+    require_metadata_match("host marker artifact_type", marker.get("artifact_type"), "d1l_host_checks_success")
+    require_metadata_match("host marker status", marker.get("status"), "pass")
+    require_metadata_match("host marker passed", marker.get("passed"), True)
+    require_metadata_match("host marker all_prior_steps_completed", marker.get("all_prior_steps_completed"), True)
+    require_metadata_match("host marker job", marker.get("job"), "host-checks")
+    require_metadata_match("host marker commit", marker.get("repository_commit"), ctx.commit)
+    require_metadata_match("host marker workflow run", str(marker.get("workflow_run_id")), ctx.github_run_id)
+
+    manifest_path, manifest = load_unique_json(
+        run_root,
+        "d1l-release-package/d1l-release-*/manifest.json",
+        "D1L release manifest",
+    )
+    git_info = manifest.get("git") if isinstance(manifest.get("git"), dict) else {}
+    workflow = manifest.get("workflow") if isinstance(manifest.get("workflow"), dict) else {}
+    require_metadata_match("release manifest git.commit", git_info.get("commit"), ctx.commit)
+    require_metadata_match("release manifest git.dirty", git_info.get("dirty"), False)
+    require_metadata_match("release manifest workflow.run_id", str(workflow.get("run_id")), ctx.github_run_id)
+    require_metadata_match("release manifest workflow.sha", workflow.get("sha"), ctx.commit)
+    require_metadata_match("release manifest workflow.repository", workflow.get("repository"), "n30nex/SIGUI")
+    marker_attempt = str(marker.get("workflow_run_attempt"))
+    manifest_attempt = str(workflow.get("run_attempt"))
+    if not marker_attempt.isdigit() or not manifest_attempt.isdigit():
+        raise FlashGuardError("Actions provenance has an invalid workflow run attempt")
+    require_metadata_match("workflow run attempt", marker_attempt, manifest_attempt)
+    require_metadata_match("release manifest package", manifest.get("package"), f"d1l-release-{ctx.commit}")
+    require_metadata_match("release manifest directory", manifest_path.parent.name, f"d1l-release-{ctx.commit}")
+
+    flash_entries = manifest.get("flash_files")
+    if not isinstance(flash_entries, list):
+        raise FlashGuardError("release manifest has no flash_files list")
+    expected_roles = {
+        "bootloader": "bootloader/bootloader.bin",
+        "partition-table": "partition_table/partition-table.bin",
+        "app": "meshcore_deskos_d1l.bin",
+    }
+    flash_by_role = {
+        str(item.get("role")): item
+        for item in flash_entries
+        if isinstance(item, dict)
+    }
+    if set(flash_by_role) != set(expected_roles):
+        raise FlashGuardError(
+            f"release manifest flash roles mismatch: expected={sorted(expected_roles)}, "
+            f"actual={sorted(flash_by_role)}"
+        )
+
+    esp32_build = artifact_dirs(ctx)["esp32_build"].resolve()
+    verified_esp32: list[dict[str, Any]] = []
+    for role, expected_source in expected_roles.items():
+        item = flash_by_role[role]
+        require_metadata_match(f"release manifest {role} source", item.get("source"), expected_source)
+        source = (esp32_build / expected_source).resolve()
+        try:
+            source.relative_to(esp32_build)
+        except ValueError as exc:
+            raise FlashGuardError(f"release manifest {role} source escapes ESP32 artifact") from exc
+        require_path(source, f"ESP32 {role} artifact")
+        actual_sha = sha256_file(source).lower()
+        require_metadata_match(f"ESP32 {role} sha256", actual_sha, str(item.get("sha256") or "").lower())
+        require_metadata_match(f"ESP32 {role} size", source.stat().st_size, item.get("size"))
+        packaged = (manifest_path.parent / str(item.get("path") or "")).resolve()
+        try:
+            packaged.relative_to(manifest_path.parent.resolve())
+        except ValueError as exc:
+            raise FlashGuardError(
+                f"release manifest {role} package path escapes release package"
+            ) from exc
+        require_path(packaged, f"packaged ESP32 {role} artifact")
+        require_metadata_match(
+            f"packaged ESP32 {role} sha256",
+            sha256_file(packaged).lower(),
+            actual_sha,
+        )
+        require_metadata_match(
+            f"packaged ESP32 {role} size",
+            packaged.stat().st_size,
+            item.get("size"),
+        )
+        verified_esp32.append(
+            {
+                "role": role,
+                "path": expected_source,
+                "size": source.stat().st_size,
+                "sha256": actual_sha.upper(),
+            }
+        )
+
+    verified_rp2040: list[dict[str, Any]] = []
+    if rp2040_refresh_requested(args) or not args.skip_sd_suite:
+        verified_rp2040.append(
+            verify_manifest_artifact_group(
+                manifest,
+                manifest_path.parent,
+                "rp2040-sd-bridge-firmware",
+                artifact_dirs(ctx)["bridge"].resolve(),
+            )
+        )
+    if rp2040_refresh_requested(args):
+        verified_rp2040.append(
+            verify_manifest_artifact_group(
+                manifest,
+                manifest_path.parent,
+                "rp2040-seeed-official-sd-smoke-firmware",
+                artifact_dirs(ctx)["official_smoke"].resolve(),
+            )
+        )
+
+    return {
+        "ok": True,
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "workflow_run_attempt": marker_attempt,
+        "repository": "n30nex/SIGUI",
+        "host_success_marker": str(marker_path),
+        "host_success_marker_sha256": sha256_file(marker_path).upper(),
+        "release_manifest": str(manifest_path),
+        "release_manifest_sha256": sha256_file(manifest_path).upper(),
+        "esp32_flash_files": verified_esp32,
+        "rp2040_artifact_groups": verified_rp2040,
+    }
+
+
 def command_report(name: str, args: list[str], cwd: Path, timeout: int | None = None) -> dict:
     started_at = utc_now()
     try:
@@ -436,9 +713,9 @@ def write_json(path: Path, payload: dict) -> Path:
     return path
 
 
-def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
+def flash_esp32(ctx: RunContext, *, dry_run: bool, phase: str = "initial") -> dict:
     build_dir = artifact_dirs(ctx)["esp32_build"]
-    out = ctx.hardware_dir / f"esp32_flash_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    out = esp32_flash_out(ctx, phase)
     try:
         artifact_verification = verify_esp32_flash_inputs(ctx)
         cmd = esptool_flash_command(build_dir, ctx.d1l_port, ctx.esp32_flash_baud)
@@ -450,6 +727,7 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
             "port": ctx.d1l_port,
             "commit": ctx.commit,
             "github_actions_run": ctx.github_run_id,
+            "phase": phase,
             "public_rf_tx": False,
             "formats_sd": False,
             "artifact_verification": {"ok": False, "error": str(exc)},
@@ -465,6 +743,7 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
         "port": ctx.d1l_port,
         "commit": ctx.commit,
         "github_actions_run": ctx.github_run_id,
+        "phase": phase,
         "artifact_verification": artifact_verification,
         "public_rf_tx": False,
         "formats_sd": False,
@@ -484,11 +763,15 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
 
 
 def wait_for_uf2_volume(timeout_sec: float, volume: str | None) -> tuple[Path, list[dict]]:
+    if not volume:
+        raise FlashGuardError(
+            "correlated or explicit RP2040 UF2 volume is required; refusing automatic selection"
+        )
     deadline = time.monotonic() + timeout_sec
     last_candidates: list[dict] = []
     while True:
         try:
-            selected, candidates = choose_volume(Path(volume) if volume else None)
+            selected, candidates = choose_volume(Path(volume))
             return selected, candidates
         except FlashGuardError:
             last_candidates = candidate_volumes()
@@ -505,6 +788,64 @@ def uf2_volume_snapshot() -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - host/OS dependent
         return {"available": False, "candidates": [], "error": str(exc)}
     return {"available": bool(candidates), "candidates": candidates}
+
+
+def uf2_candidate_path(candidate: dict[str, Any]) -> str | None:
+    for key in ("path", "drive", "mount_point", "volume"):
+        value = candidate.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def uf2_volume_key(value: str | Path) -> str:
+    text = str(value).strip().strip('"').replace("/", "\\")
+    return text.rstrip("\\").upper()
+
+
+def uf2_volume_keys(snapshot: dict[str, Any]) -> set[str]:
+    keys: set[str] = set()
+    candidates = snapshot.get("candidates")
+    if not isinstance(candidates, list):
+        return keys
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        path = uf2_candidate_path(candidate)
+        if path:
+            keys.add(uf2_volume_key(path))
+    return keys
+
+
+def select_correlated_uf2_volume(
+    initial_keys: set[str],
+    snapshot: dict[str, Any],
+    *,
+    explicit_volume: str | None,
+) -> tuple[str | None, list[str]]:
+    candidates = snapshot.get("candidates")
+    if not isinstance(candidates, list):
+        return None, []
+    available: dict[str, str] = {}
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        path = uf2_candidate_path(candidate)
+        if path:
+            available[uf2_volume_key(path)] = path
+
+    if explicit_volume:
+        selected = available.get(uf2_volume_key(explicit_volume))
+        return selected, [selected] if selected else []
+
+    new_keys = sorted(set(available) - initial_keys)
+    new_paths = [available[key] for key in new_keys]
+    if len(new_paths) > 1:
+        raise FlashGuardError(
+            "multiple UF2 volumes appeared after the commanded RP2040 transition; "
+            "pass --uf2-volume explicitly"
+        )
+    return (new_paths[0] if new_paths else None), new_paths
 
 
 def rp2040_port_snapshot(port: str) -> dict[str, Any]:
@@ -580,6 +921,8 @@ def rp2040_port_discovery(preferred_port: str, d1l_port: str) -> dict[str, Any]:
         "preferred": preferred,
         "candidates": [],
         "skipped": [],
+        "configured_port_required": True,
+        "alternatives_read_only": True,
     }
     if preferred.get("present"):
         report["present"] = True
@@ -614,11 +957,13 @@ def rp2040_port_discovery(preferred_port: str, d1l_port: str) -> dict[str, Any]:
         report["candidates"].append(candidate)
 
     if report["candidates"]:
-        selected = report["candidates"][0]
-        report["present"] = True
-        report["selected_port"] = selected["device"]
-        report["selected_reason"] = "rp2040_usb_descriptor"
-        report["selected"] = selected
+        report["alternative_ports"] = [
+            candidate["device"] for candidate in report["candidates"]
+        ]
+        report["warning"] = (
+            f"configured RP2040 port {normalize_port(preferred_port)} is absent; "
+            "alternatives are inventory-only and will not be selected or touched"
+        )
     return report
 
 
@@ -689,8 +1034,14 @@ def enter_rp2040_bootloader_usb_touch(port: str) -> dict:
     return report
 
 
-def rp2040_double_reset_sweep(ctx: RunContext) -> tuple[list[dict], dict | None]:
+def rp2040_double_reset_sweep(
+    ctx: RunContext,
+    *,
+    initial_volume_keys: set[str] | None = None,
+    explicit_volume: str | None = None,
+) -> tuple[list[dict], dict | None]:
     attempts: list[dict] = []
+    baseline_keys = initial_volume_keys or set()
     for hold_ms, gap_ms, settle_ms in RP2040_DOUBLE_RESET_SWEEP_MS:
         command = f"rp2040 double-reset {hold_ms} {gap_ms} {settle_ms}"
         attempt: dict[str, Any] = {
@@ -703,9 +1054,26 @@ def rp2040_double_reset_sweep(ctx: RunContext) -> tuple[list[dict], dict | None]
         attempt["result"] = send_d1l_console(ctx.d1l_port, ctx.baud, command, timeout)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
         attempt["uf2_volume"] = uf2_volume_snapshot()
+        try:
+            selected_volume, new_volumes = select_correlated_uf2_volume(
+                baseline_keys,
+                attempt["uf2_volume"],
+                explicit_volume=explicit_volume,
+            )
+        except FlashGuardError as exc:
+            attempt["uf2_selection_error"] = str(exc)
+            attempts.append(attempt)
+            return attempts, attempt
+        attempt["new_uf2_volumes"] = new_volumes
+        if selected_volume:
+            attempt["selected_uf2_volume"] = selected_volume
         attempt["rp2040_port"] = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
         attempts.append(attempt)
-        if attempt["uf2_volume"].get("available") or attempt["rp2040_port"].get("present"):
+        if (
+            attempt.get("selected_uf2_volume")
+            or attempt.get("uf2_selection_error")
+            or attempt["rp2040_port"].get("present")
+        ):
             return attempts, attempt
     return attempts, None
 
@@ -724,11 +1092,46 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
     }
     initial_volumes = uf2_volume_snapshot()
     report["uf2_volume_initial"] = initial_volumes
-    if initial_volumes.get("available"):
-        report["ok"] = True
-        report["method"] = "uf2_already_available"
+    if initial_volumes.get("error") and not volume:
+        report["error"] = "uf2_initial_snapshot_failed"
+        report["detail"] = initial_volumes.get("error")
         report["ended_at"] = utc_now()
         return report
+    initial_keys = uf2_volume_keys(initial_volumes)
+    report["uf2_volume_initial_keys"] = sorted(initial_keys)
+
+    def selected_from(snapshot: dict[str, Any], label: str) -> str | None:
+        report[label] = snapshot
+        try:
+            selected, new_volumes = select_correlated_uf2_volume(
+                initial_keys,
+                snapshot,
+                explicit_volume=volume,
+            )
+        except FlashGuardError as exc:
+            report["error"] = "uf2_volume_selection_ambiguous"
+            report["detail"] = str(exc)
+            return None
+        report[f"{label}_new_volumes"] = new_volumes
+        if selected:
+            report["selected_uf2_volume"] = selected
+        return selected
+
+    initial_selected = selected_from(initial_volumes, "uf2_volume_initial_selection")
+    if report.get("error"):
+        report["ended_at"] = utc_now()
+        return report
+    if volume and initial_selected:
+        report["ok"] = True
+        report["method"] = "explicit_uf2_volume"
+        report["ended_at"] = utc_now()
+        return report
+    if initial_keys and not volume:
+        report["preexisting_uf2_volumes"] = sorted(initial_keys)
+        report["preexisting_uf2_warning"] = (
+            "pre-existing UF2 volumes are ineligible for automatic selection; "
+            "pass --uf2-volume to select one explicitly"
+        )
 
     ping = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 ping", 8.0, settle_sec=3.0)
     report["ping"] = ping
@@ -736,13 +1139,20 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         bridge = send_d1l_console(ctx.d1l_port, ctx.baud, "rp2040 bootloader", 8.0)
         report["bridge_bootloader"] = bridge
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
-        report["uf2_volume_after_bridge_command"] = uf2_volume_snapshot()
-        report["ok"] = bridge.get("ok") is True
-        report["method"] = "rp2040_bridge_command"
-        report["ended_at"] = utc_now()
-        if not report["ok"]:
-            report["error"] = "rp2040_bootloader_command_failed"
-        return report
+        bridge_volume = selected_from(
+            uf2_volume_snapshot(), "uf2_volume_after_bridge_command"
+        )
+        if report.get("error"):
+            report["ended_at"] = utc_now()
+            return report
+        if bridge_volume:
+            report["ok"] = True
+            report["method"] = "rp2040_bridge_command"
+            report["ended_at"] = utc_now()
+            return report
+        report["bridge_bootloader_warning"] = (
+            "bridge command did not reveal a correlated UF2 volume"
+        )
 
     port_initial = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     report["rp2040_port_initial"] = port_initial
@@ -751,24 +1161,39 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["selected_rp2040_port"] = selected_port
         report["usb_touch"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
-        report["uf2_volume_after_usb_touch"] = uf2_volume_snapshot()
-        if report["uf2_volume_after_usb_touch"].get("available"):
+        touch_volume = selected_from(
+            uf2_volume_snapshot(), "uf2_volume_after_usb_touch"
+        )
+        if report.get("error"):
+            report["ended_at"] = utc_now()
+            return report
+        if touch_volume:
             report["ok"] = True
             report["method"] = "rp2040_1200_baud_touch"
             report["ended_at"] = utc_now()
             return report
         report["usb_touch_warning"] = "1200_baud_touch_did_not_reveal_uf2"
 
-    sweep, success = rp2040_double_reset_sweep(ctx)
+    sweep, success = rp2040_double_reset_sweep(
+        ctx,
+        initial_volume_keys=initial_keys,
+        explicit_volume=volume,
+    )
     report["double_reset_sweep"] = sweep
     if sweep:
         report["double_reset"] = sweep[0].get("result")
         report["uf2_volume_after_double_reset"] = sweep[-1].get("uf2_volume")
         report["rp2040_port_after_double_reset"] = sweep[-1].get("rp2040_port")
-    if success and success["uf2_volume"].get("available"):
+    if success and success.get("uf2_selection_error"):
+        report["error"] = "uf2_volume_selection_ambiguous"
+        report["detail"] = success["uf2_selection_error"]
+        report["ended_at"] = utc_now()
+        return report
+    if success and success.get("selected_uf2_volume"):
         report["ok"] = True
         report["method"] = "double_reset_sweep_revealed_uf2"
         report["successful_double_reset"] = success
+        report["selected_uf2_volume"] = success["selected_uf2_volume"]
         report["ended_at"] = utc_now()
         return report
     if success and success["rp2040_port"].get("present"):
@@ -776,8 +1201,13 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["selected_rp2040_port"] = selected_port
         report["usb_touch_after_double_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
-        report["uf2_volume_after_double_reset_touch"] = uf2_volume_snapshot()
-        if report["uf2_volume_after_double_reset_touch"].get("available"):
+        touch_volume = selected_from(
+            uf2_volume_snapshot(), "uf2_volume_after_double_reset_touch"
+        )
+        if report.get("error"):
+            report["ended_at"] = utc_now()
+            return report
+        if touch_volume:
             report["ok"] = True
             report["method"] = "double_reset_sweep_then_rp2040_1200_baud_touch"
             report["successful_double_reset"] = success
@@ -796,8 +1226,11 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
     time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
     port_after_reset = rp2040_port_discovery(ctx.rp2040_port, ctx.d1l_port)
     report["rp2040_port_after_reset"] = port_after_reset
-    report["uf2_volume_after_reset"] = uf2_volume_snapshot()
-    if report["uf2_volume_after_reset"].get("available"):
+    reset_volume = selected_from(uf2_volume_snapshot(), "uf2_volume_after_reset")
+    if report.get("error"):
+        report["ended_at"] = utc_now()
+        return report
+    if reset_volume:
         report["ok"] = True
         report["method"] = "reset_revealed_uf2"
     elif port_after_reset.get("present"):
@@ -805,11 +1238,13 @@ def enter_rp2040_bootloader(ctx: RunContext, *, volume: str | None) -> dict:
         report["selected_rp2040_port"] = selected_port
         report["usb_touch_after_reset"] = enter_rp2040_bootloader_usb_touch(selected_port)
         time.sleep(BOOTLOADER_ENTRY_RESCAN_SECONDS)
-        report["uf2_volume_after_reset_touch"] = uf2_volume_snapshot()
-        report["ok"] = report["uf2_volume_after_reset_touch"].get("available") is True
+        touch_volume = selected_from(
+            uf2_volume_snapshot(), "uf2_volume_after_reset_touch"
+        )
+        report["ok"] = touch_volume is not None and not report.get("error")
         report["method"] = "reset_then_rp2040_1200_baud_touch" if report["ok"] else "none"
         if not report["ok"]:
-            report["error"] = "rp2040_bootloader_unavailable_after_usb_touch"
+            report.setdefault("error", "rp2040_bootloader_unavailable_after_usb_touch")
     else:
         report["ok"] = False
         report["method"] = "none"
@@ -823,10 +1258,16 @@ def copy_named_uf2(
     artifact_dir: Path,
     filename: str,
     volume: str | None,
+    selected_volume: str | None = None,
     timeout_sec: float,
 ) -> dict:
     artifact = verify_named_artifact(artifact_dir, filename)
-    target_volume, candidates = wait_for_uf2_volume(timeout_sec, volume)
+    target_spec = selected_volume
+    if not target_spec:
+        raise FlashGuardError(
+            "bootloader entry did not return a correlated UF2 volume"
+        )
+    target_volume, candidates = wait_for_uf2_volume(timeout_sec, target_spec)
     destination = target_volume / filename
     shutil.copyfile(artifact["path"], destination)
     return {
@@ -1062,6 +1503,7 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
             artifact_dir=artifact_dirs(ctx)["official_smoke"],
             filename=OFFICIAL_SMOKE_UF2,
             volume=volume,
+            selected_volume=report["bootloader_entry"].get("selected_uf2_volume"),
             timeout_sec=uf2_timeout,
         )
         time.sleep(2.0)
@@ -1097,8 +1539,9 @@ def run_official_sd_smoke(ctx: RunContext, *, volume: str | None, uf2_timeout: f
     return report
 
 
-def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, dry_run: bool) -> dict:
-    out = bridge_restore_out(ctx)
+def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float,
+                   dry_run: bool, phase: str = "initial") -> dict:
+    out = bridge_restore_out(ctx, phase)
     report: dict[str, Any] = {
         "schema": 1,
         "kind": "rp2040_bridge_restore",
@@ -1106,6 +1549,7 @@ def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, d
         "port": ctx.rp2040_port,
         "commit": ctx.commit,
         "github_actions_run": ctx.github_run_id,
+        "phase": phase,
         "public_rf_tx": False,
         "formats_sd": False,
         "ok": True,
@@ -1125,6 +1569,7 @@ def restore_bridge(ctx: RunContext, *, volume: str | None, uf2_timeout: float, d
             artifact_dir=artifact_dirs(ctx)["bridge"],
             filename=BRIDGE_UF2,
             volume=volume,
+            selected_volume=report["bootloader_entry"].get("selected_uf2_volume"),
             timeout_sec=uf2_timeout,
         )
         time.sleep(2.0)
@@ -1180,8 +1625,16 @@ def run_existing_script(ctx: RunContext, name: str, args: list[str], out: Path, 
     return report
 
 
-def run_preflight(ctx: RunContext, dry_run: bool, *, verify_artifact: bool) -> dict:
-    out = ctx.hardware_dir / f"rp2040_preflight_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+def preflight_out(ctx: RunContext, phase: str = "initial") -> Path:
+    phase_suffix = "" if phase == "initial" else f"_{phase}"
+    return ctx.hardware_dir / (
+        f"rp2040_preflight{phase_suffix}_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+
+
+def run_preflight(ctx: RunContext, dry_run: bool, *, verify_artifact: bool,
+                  phase: str = "initial") -> dict:
+    out = preflight_out(ctx, phase)
     args = [
         str(ctx.root / "scripts" / "rp2040_sd_bridge_preflight_d1l.py"),
         "--port",
@@ -1196,7 +1649,139 @@ def run_preflight(ctx: RunContext, dry_run: bool, *, verify_artifact: bool) -> d
             "--expected-sha256",
             bridge_sha(ctx),
         ])
-    return run_existing_script(ctx, "rp2040_preflight", args, out, timeout=90, dry_run=dry_run)
+    report = run_existing_script(ctx, "rp2040_preflight", args, out, timeout=90, dry_run=dry_run)
+    report["phase"] = phase
+    return report
+
+
+def validate_clean_preflight_payload(payload: dict, ctx: RunContext) -> dict:
+    violations: list[str] = []
+    storage = payload.get("storage_status") if isinstance(payload.get("storage_status"), dict) else {}
+    manager = storage.get("manager") if isinstance(storage.get("manager"), dict) else {}
+    sd = storage.get("sd") if isinstance(storage.get("sd"), dict) else {}
+    retained = storage.get("retained_sd") if isinstance(storage.get("retained_sd"), dict) else {}
+    stores = retained.get("stores") if isinstance(retained.get("stores"), dict) else {}
+
+    required_values = {
+        "artifact.ok": (payload.get("ok"), True),
+        "artifact.ready_for_sd_acceptance": (payload.get("ready_for_sd_acceptance"), True),
+        "artifact.port": (normalize_port(payload.get("port")), ctx.d1l_port),
+        "artifact.commit": (payload.get("commit"), ctx.commit),
+        "storage.ok": (storage.get("ok"), True),
+        "manager.running": (manager.get("running"), True),
+        "manager.state": (manager.get("state"), "READY_SD"),
+        "sd.state": (sd.get("state"), "ready"),
+        "sd.present": (sd.get("present"), True),
+        "sd.presence_stale": (sd.get("presence_stale"), False),
+        "sd.mounted": (sd.get("mounted"), True),
+        "sd.data_root_ready": (sd.get("data_root_ready"), True),
+        "sd.file_ops": (sd.get("file_ops"), True),
+        "sd.status_stale": (sd.get("status_stale"), False),
+        "sd.refresh_failures": (sd.get("refresh_failures"), 0),
+        "sd.last_error": (sd.get("last_error"), "ESP_OK"),
+        "storage.data_backend": (storage.get("data_backend"), "mixed"),
+        "storage.message_store_backend": (storage.get("message_store_backend"), "sd"),
+        "storage.dm_store_backend": (storage.get("dm_store_backend"), "sd"),
+        "storage.route_store_backend": (storage.get("route_store_backend"), "sd"),
+        "storage.packet_log_backend": (storage.get("packet_log_backend"), "sd"),
+        "retained.degraded": (retained.get("degraded"), False),
+        "retained.backup_degraded": (retained.get("backup_degraded"), False),
+    }
+    for label, (actual, expected) in required_values.items():
+        if isinstance(expected, bool):
+            matches = actual is expected
+        elif isinstance(expected, int):
+            matches = isinstance(actual, int) and not isinstance(actual, bool) and actual == expected
+        else:
+            matches = actual == expected
+        if not matches:
+            violations.append(f"{label} expected {expected!r}, got {actual!r}")
+
+    counter_fields = (
+        "sd_read_fail_count",
+        "sd_write_fail_count",
+        "sd_rename_fail_count",
+        "nvs_mirror_fail_count",
+    )
+    for store_name in RETAINED_STORE_NAMES:
+        store = stores.get(store_name) if isinstance(stores.get(store_name), dict) else None
+        if store is None:
+            violations.append(f"retained.stores.{store_name} missing")
+            continue
+        for field in counter_fields:
+            value = store.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value != 0:
+                violations.append(
+                    f"retained.stores.{store_name}.{field} expected 0, got {value!r}"
+                )
+        if store.get("sd_degraded_latched") is not False:
+            violations.append(
+                f"retained.stores.{store_name}.sd_degraded_latched expected False, "
+                f"got {store.get('sd_degraded_latched')!r}"
+            )
+        for field in ("sd_last_error", "nvs_mirror_last_error"):
+            if store.get(field) != "ESP_OK":
+                violations.append(
+                    f"retained.stores.{store_name}.{field} expected 'ESP_OK', got {store.get(field)!r}"
+                )
+
+    return {
+        "ok": not violations,
+        "violations": violations,
+        "manager_state": manager.get("state"),
+        "sd_state": sd.get("state"),
+        "retained_degraded": retained.get("degraded"),
+        "stores_checked": list(RETAINED_STORE_NAMES),
+    }
+
+
+def clean_preflight_gate_out(ctx: RunContext, phase: str) -> Path:
+    return ctx.hardware_dir / (
+        f"{phase}_clean_preflight_gate_{ctx.short_commit}_actions_"
+        f"{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+
+
+def run_clean_preflight_gate(ctx: RunContext, preflight: dict, *, dry_run: bool,
+                             phase: str = "post_diag") -> dict:
+    out = clean_preflight_gate_out(ctx, phase)
+    report: dict[str, Any] = {
+        "schema": 1,
+        "kind": f"{phase}_clean_preflight_gate",
+        "phase": phase,
+        "mode": "dry-run" if dry_run else "hardware",
+        "commit": ctx.commit,
+        "github_actions_run": ctx.github_run_id,
+        "port": ctx.d1l_port,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "preflight_path": preflight.get("path"),
+        "ok": True,
+    }
+    if dry_run:
+        report["planned_requirements"] = {
+            "manager_state": "READY_SD",
+            "retained_store_fail_counts": 0,
+            "retained_store_degraded_latches": False,
+        }
+    elif preflight.get("ok") is not True:
+        report["ok"] = False
+        report["error"] = f"{phase}_preflight_failed"
+    else:
+        try:
+            artifact_path = Path(str(preflight.get("path") or ""))
+            payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            report["ok"] = False
+            report["error"] = f"{phase}_preflight_artifact_unreadable: {exc}"
+        else:
+            report["validation"] = validate_clean_preflight_payload(payload, ctx)
+            report["ok"] = report["validation"].get("ok") is True
+            if not report["ok"]:
+                report["error"] = f"{phase}_preflight_not_clean"
+    write_json(out, report)
+    report["path"] = str(out)
+    return report
 
 
 def run_sd_file_canary(ctx: RunContext, dry_run: bool) -> dict:
@@ -1226,9 +1811,20 @@ def run_sd_raw_diag(ctx: RunContext, dry_run: bool) -> dict:
         "--timeout",
         "10",
         "--diag-settle-sec",
-        "20",
+        str(RAW_DIAG_SETTLE_SECONDS),
+        "--diag-poll-sec",
+        str(RAW_DIAG_POLL_SECONDS),
+        "--diag-deadline-sec",
+        str(RAW_DIAG_DEADLINE_SECONDS),
     ]
-    return run_existing_script(ctx, "sd_raw_diag", args, out, timeout=90, dry_run=dry_run)
+    return run_existing_script(
+        ctx,
+        "sd_raw_diag",
+        args,
+        out,
+        timeout=RAW_DIAG_PROCESS_TIMEOUT_SECONDS,
+        dry_run=dry_run,
+    )
 
 
 def run_sd_boot_prepare_scenario(ctx: RunContext, scenario: str, dry_run: bool) -> dict:
@@ -1580,8 +2176,18 @@ def release_gate_command(ctx: RunContext, out: Path) -> list[str]:
     ]
 
 
-def run_release_gate(ctx: RunContext, dry_run: bool) -> dict:
-    out = ctx.root / "artifacts" / "release-gate" / f"release-gate-audit-{ctx.short_commit}-actions{ctx.github_run_id}-autonomous-hw.json"
+def release_gate_out(ctx: RunContext, phase: str | None = None) -> Path:
+    phase_suffix = f"-{phase}" if phase else ""
+    return ctx.root / "artifacts" / "release-gate" / (
+        f"release-gate-audit-{ctx.short_commit}-actions{ctx.github_run_id}"
+        f"-autonomous-hw{phase_suffix}.json"
+    )
+
+
+def run_release_gate(
+    ctx: RunContext, dry_run: bool, *, phase: str | None = None
+) -> dict:
+    out = release_gate_out(ctx, phase)
     cmd = release_gate_command(ctx, out)
     report = {
         "schema": 1,
@@ -1591,6 +2197,8 @@ def run_release_gate(ctx: RunContext, dry_run: bool) -> dict:
         "path": str(out),
         "ok": True,
     }
+    if phase:
+        report["phase"] = phase
     if not dry_run:
         report["result"] = command_report("release_gate", cmd, ctx.root, timeout=60)
         report["ok"] = report["result"].get("ok") is True and out.exists()
@@ -1622,6 +2230,22 @@ def exception_step(ctx: RunContext, kind: str, exc: Exception, *, out: Path | No
     if out is not None:
         report["path"] = str(out)
         write_json(out, report)
+    return report
+
+
+def phase_exception_step(
+    ctx: RunContext,
+    kind: str,
+    exc: Exception,
+    *,
+    phase: str,
+    out: Path,
+    port: str,
+) -> dict:
+    report = exception_step(ctx, kind, exc, port=port)
+    report["phase"] = phase
+    report["path"] = str(out)
+    write_json(out, report)
     return report
 
 
@@ -1663,6 +2287,19 @@ def verify_inputs(ctx: RunContext, args: argparse.Namespace, *, allow_download: 
             missing = [str(path) for path in dirs.values() if not path.exists()]
             report["missing_after_download"] = missing
             report["ok"] = report["ok"] and not missing
+    if not missing:
+        try:
+            report["provenance"] = verify_actions_artifact_provenance(ctx, args)
+        except Exception as exc:
+            report["provenance"] = {"ok": False, "error": str(exc)}
+            report["ok"] = False
+    elif dry_run and allow_download:
+        report["provenance"] = {
+            "ok": True,
+            "planned": True,
+            "require_commit": ctx.commit,
+            "require_github_actions_run": ctx.github_run_id,
+        }
     return report
 
 
@@ -1670,6 +2307,15 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
     safe_scenarios = list(args.sd_scenarios)
     refresh_rp2040 = rp2040_refresh_requested(args)
     sd_suite = not args.skip_sd_suite
+    bridge_reflash_required = refresh_rp2040 or sd_suite
+    if sd_suite and refresh_rp2040:
+        rp2040_flash_mode = "official_smoke_then_exact_bridge_pre_and_post_diag"
+    elif sd_suite:
+        rp2040_flash_mode = "exact_bridge_pre_and_post_diag"
+    elif refresh_rp2040:
+        rp2040_flash_mode = "refresh_official_smoke_and_restore_bridge"
+    else:
+        rp2040_flash_mode = "use_existing_bridge"
     return {
         "schema": 1,
         "kind": "d1l_autonomous_hardware_validation",
@@ -1682,19 +2328,28 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
         "public_rf_tx": False,
         "formats_sd": False,
         "manual_user_required": False,
-        "rp2040_uf2_flash": refresh_rp2040,
-        "rp2040_flash_mode": "refresh_official_smoke_and_restore_bridge" if refresh_rp2040 else "use_existing_bridge",
+        "rp2040_uf2_flash": bridge_reflash_required,
+        "rp2040_flash_mode": rp2040_flash_mode,
         "sd_suite_enabled": sd_suite,
         "steps": [
             "verify_input_artifacts",
             *(["flash_esp32"] if not args.skip_esp32_flash else []),
-            *(["rp2040_autonomous_access_precheck"] if refresh_rp2040 else []),
+            *(["rp2040_autonomous_access_precheck"] if bridge_reflash_required else []),
             *(["flash_official_rp2040_sd_smoke", "capture_official_rp2040_sd_smoke"] if refresh_rp2040 else []),
             *(["sd_boot_prepare_rp2040_unavailable"] if refresh_rp2040 and not args.skip_rp2040_unavailable_capture else []),
-            *(["restore_rp2040_bridge"] if refresh_rp2040 else []),
+            *(
+                ["restore_exact_rp2040_bridge_pre_diag"]
+                if sd_suite
+                else (["restore_rp2040_bridge"] if refresh_rp2040 else [])
+            ),
             *((
-                "rp2040_bridge_preflight",
+                "rp2040_bridge_preflight_pre_diag",
+                "pre_diag_clean_preflight_gate",
                 "sd_raw_diag",
+                "restore_exact_rp2040_bridge_post_diag",
+                "reflash_exact_esp32_post_diag",
+                "rp2040_bridge_preflight_post_diag",
+                "post_diag_clean_preflight_gate",
                 "sd_file_canary",
                 *(f"sd_boot_prepare_{scenario.replace('-', '_')}" for scenario in safe_scenarios),
                 "sd_map_tile_canary",
@@ -1722,7 +2377,10 @@ def plan_report(ctx: RunContext, args: argparse.Namespace) -> dict:
 
 
 def release_gate_summary(runs: list[dict]) -> dict:
-    gate = next((step for step in runs if step.get("kind") == "release_gate_audit"), {})
+    gate = next(
+        (step for step in reversed(runs) if step.get("kind") == "release_gate_audit"),
+        {},
+    )
     return {
         "path": gate.get("path"),
         "ready_for_public_release": gate.get("ready_for_public_release"),
@@ -1739,7 +2397,8 @@ def attach_release_gate_summary(report: dict, runs: list[dict]) -> dict:
     return summary
 
 
-def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace, runs: list[dict]) -> dict:
+def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace,
+                                  runs: list[dict], *, phase: str) -> dict:
     last_report: dict[str, Any] = {}
     for attempt in range(2):
         try:
@@ -1748,21 +2407,178 @@ def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace, run
                 volume=args.uf2_volume,
                 uf2_timeout=args.uf2_timeout,
                 dry_run=args.dry_run,
+                phase=phase,
             )
         except Exception as exc:
             report = exception_step(
                 ctx,
                 "rp2040_bridge_restore",
                 exc,
-                out=bridge_restore_out(ctx),
+                out=bridge_restore_out(ctx, phase),
                 port=ctx.rp2040_port,
             )
         report["attempt"] = attempt + 1
+        report["phase"] = phase
+        attempt_out = bridge_restore_out(ctx, f"{phase}_attempt_{attempt + 1}")
+        report["path"] = str(attempt_out)
+        write_json(attempt_out, report)
         runs.append(report)
         last_report = report
         if report.get("ok") is True:
             break
     return last_report
+
+
+def release_gate_exception_out(ctx: RunContext, phase: str) -> Path:
+    return ctx.hardware_dir / (
+        f"release_gate_audit_exception_{phase}_{ctx.short_commit}_actions_"
+        f"{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+
+
+def append_release_gate_safely(
+    ctx: RunContext, runs: list[dict], *, dry_run: bool, phase: str
+) -> dict:
+    try:
+        gate = run_release_gate(ctx, dry_run=dry_run, phase=phase)
+    except Exception as exc:
+        gate = exception_step(
+            ctx,
+            "release_gate_audit",
+            exc,
+            out=release_gate_exception_out(ctx, phase),
+            port=ctx.d1l_port,
+        )
+        gate["phase"] = phase
+    runs.append(gate)
+    return gate
+
+
+def failed_stage_exception_out(ctx: RunContext, kind: str) -> Path:
+    return ctx.hardware_dir / (
+        f"{kind}_exception_{ctx.short_commit}_actions_"
+        f"{ctx.github_run_id}_{ctx.d1l_port}.json"
+    )
+
+
+def run_sd_stage_safely(
+    ctx: RunContext, kind: str, stage_runner: Any
+) -> dict:
+    try:
+        return stage_runner()
+    except Exception as exc:
+        return exception_step(
+            ctx,
+            kind,
+            exc,
+            out=failed_stage_exception_out(ctx, kind),
+            port=ctx.d1l_port,
+        )
+
+
+def run_exact_recovery_boundary(ctx: RunContext, args: argparse.Namespace,
+                                runs: list[dict], *, phase: str) -> dict:
+    bridge = run_bridge_restore_with_retry(ctx, args, runs, phase=phase)
+    try:
+        esp32 = flash_esp32(ctx, dry_run=args.dry_run, phase=phase)
+    except Exception as exc:
+        esp32 = phase_exception_step(
+            ctx,
+            "esp32_flash",
+            exc,
+            phase=phase,
+            out=esp32_flash_out(ctx, phase),
+            port=ctx.d1l_port,
+        )
+    runs.append(esp32)
+
+    try:
+        preflight = run_preflight(
+            ctx,
+            dry_run=args.dry_run,
+            verify_artifact=True,
+            phase=phase,
+        )
+    except Exception as exc:
+        preflight = phase_exception_step(
+            ctx,
+            "rp2040_preflight",
+            exc,
+            phase=phase,
+            out=preflight_out(ctx, phase),
+            port=ctx.d1l_port,
+        )
+    runs.append(preflight)
+
+    try:
+        clean_gate = run_clean_preflight_gate(
+            ctx,
+            preflight,
+            dry_run=args.dry_run,
+            phase=phase,
+        )
+    except Exception as exc:
+        clean_gate = phase_exception_step(
+            ctx,
+            f"{phase}_clean_preflight_gate",
+            exc,
+            phase=phase,
+            out=clean_preflight_gate_out(ctx, phase),
+            port=ctx.d1l_port,
+        )
+    runs.append(clean_gate)
+
+    failures: list[str] = []
+    if bridge.get("ok") is not True:
+        failures.append(f"{phase}_bridge_restore_failed")
+    if esp32.get("ok") is not True:
+        failures.append(f"{phase}_esp32_reflash_failed")
+    if preflight.get("ok") is not True:
+        failures.append(f"{phase}_preflight_failed")
+    if clean_gate.get("ok") is not True:
+        failures.append(clean_gate.get("error", f"{phase}_preflight_not_clean"))
+    return {
+        "ok": not failures,
+        "phase": phase,
+        "failures": failures,
+        "error": failures[0] if failures else None,
+        "bridge": bridge,
+        "esp32": esp32,
+        "preflight": preflight,
+        "clean_gate": clean_gate,
+    }
+
+
+def fail_after_sd_stage(report: dict, runs: list[dict], ctx: RunContext,
+                        args: argparse.Namespace, *, error: str) -> dict:
+    append_release_gate_safely(
+        ctx,
+        runs,
+        dry_run=args.dry_run,
+        phase=f"after_{error}",
+    )
+    recovery = run_exact_recovery_boundary(
+        ctx,
+        args,
+        runs,
+        phase=f"recovery_after_{error}",
+    )
+    append_release_gate_safely(
+        ctx,
+        runs,
+        dry_run=args.dry_run,
+        phase=f"after_{error}_post_recovery",
+    )
+    report["error"] = error
+    report["recovery"] = {
+        "ok": recovery["ok"],
+        "phase": recovery["phase"],
+        "error": recovery["error"],
+        "failures": recovery["failures"],
+    }
+    report["ok"] = False
+    attach_release_gate_summary(report, runs)
+    return report
 
 
 def run_validation(args: argparse.Namespace) -> dict:
@@ -1795,7 +2611,9 @@ def run_validation(args: argparse.Namespace) -> dict:
                 return report
 
         refresh_rp2040 = rp2040_refresh_requested(args)
-        if refresh_rp2040:
+        sd_suite = not args.skip_sd_suite
+        bridge_reflash_required = refresh_rp2040 or sd_suite
+        if bridge_reflash_required:
             access_precheck = rp2040_access_precheck(ctx, dry_run=args.dry_run)
             runs.append(access_precheck)
             if access_precheck.get("ok") is not True and not args.dry_run:
@@ -1805,6 +2623,7 @@ def run_validation(args: argparse.Namespace) -> dict:
                 attach_release_gate_summary(report, runs)
                 return report
 
+        if refresh_rp2040:
             try:
                 runs.append(
                     run_official_sd_smoke(
@@ -1827,8 +2646,15 @@ def run_validation(args: argparse.Namespace) -> dict:
                 )
             if not args.skip_rp2040_unavailable_capture:
                 runs.append(run_sd_boot_prepare_scenario(ctx, "rp2040-unavailable", dry_run=args.dry_run))
-            bridge_restore = run_bridge_restore_with_retry(ctx, args, runs)
 
+        if bridge_reflash_required:
+            initial_bridge_phase = "pre_diag" if sd_suite else "post_official_smoke"
+            bridge_restore = run_bridge_restore_with_retry(
+                ctx,
+                args,
+                runs,
+                phase=initial_bridge_phase,
+            )
             if bridge_restore.get("ok") is not True and not args.dry_run:
                 runs.append(run_release_gate(ctx, dry_run=args.dry_run))
                 report["error"] = "bridge_restore_not_verified"
@@ -1836,26 +2662,166 @@ def run_validation(args: argparse.Namespace) -> dict:
                 attach_release_gate_summary(report, runs)
                 return report
 
-        if not args.skip_sd_suite:
-            runs.append(run_preflight(ctx, dry_run=args.dry_run, verify_artifact=refresh_rp2040))
-            runs.append(run_sd_raw_diag(ctx, dry_run=args.dry_run))
-            sd_file_canary = run_sd_file_canary(ctx, dry_run=args.dry_run)
-            runs.append(sd_file_canary)
-            if sd_file_canary.get("ok") is not True and not args.dry_run:
-                runs.append(run_release_gate(ctx, dry_run=args.dry_run))
-                report["error"] = "sd_file_canary_failed"
+        if sd_suite:
+            try:
+                initial_preflight = run_preflight(
+                    ctx,
+                    dry_run=args.dry_run,
+                    verify_artifact=True,
+                    phase="pre_diag",
+                )
+            except Exception as exc:
+                initial_preflight = exception_step(
+                    ctx,
+                    "rp2040_preflight",
+                    exc,
+                    out=preflight_out(ctx, "pre_diag"),
+                    port=ctx.d1l_port,
+                )
+                initial_preflight["phase"] = "pre_diag"
+            runs.append(initial_preflight)
+            pre_diag_gate = run_clean_preflight_gate(
+                ctx,
+                initial_preflight,
+                dry_run=args.dry_run,
+                phase="pre_diag",
+            )
+            runs.append(pre_diag_gate)
+            if pre_diag_gate.get("ok") is not True and not args.dry_run:
+                append_release_gate_safely(
+                    ctx,
+                    runs,
+                    dry_run=args.dry_run,
+                    phase="pre_diag_clean_gate_failed",
+                )
+                report["error"] = pre_diag_gate.get(
+                    "error", "pre_diag_preflight_not_clean"
+                )
                 report["ok"] = False
                 attach_release_gate_summary(report, runs)
                 return report
+
+            raw_diag = run_sd_stage_safely(
+                ctx,
+                "sd_raw_diag",
+                lambda: run_sd_raw_diag(ctx, dry_run=args.dry_run),
+            )
+            runs.append(raw_diag)
+
+            post_diag_recovery = run_exact_recovery_boundary(
+                ctx,
+                args,
+                runs,
+                phase="post_diag",
+            )
+            if raw_diag.get("ok") is not True and not args.dry_run:
+                append_release_gate_safely(
+                    ctx,
+                    runs,
+                    dry_run=args.dry_run,
+                    phase="sd_raw_diag_failed",
+                )
+                report["error"] = "sd_raw_diag_failed"
+                report["recovery"] = {
+                    "ok": post_diag_recovery["ok"],
+                    "phase": post_diag_recovery["phase"],
+                    "error": post_diag_recovery.get("error"),
+                    "failures": post_diag_recovery.get("failures", []),
+                }
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
+            if post_diag_recovery.get("ok") is not True and not args.dry_run:
+                append_release_gate_safely(
+                    ctx,
+                    runs,
+                    dry_run=args.dry_run,
+                    phase="post_diag_recovery_failed",
+                )
+                report["error"] = post_diag_recovery.get(
+                    "error", "post_diag_recovery_failed"
+                )
+                report["recovery"] = {
+                    "ok": False,
+                    "phase": post_diag_recovery["phase"],
+                    "error": post_diag_recovery.get("error"),
+                    "failures": post_diag_recovery.get("failures", []),
+                }
+                report["ok"] = False
+                attach_release_gate_summary(report, runs)
+                return report
+
+            sd_file_canary = run_sd_stage_safely(
+                ctx,
+                "sd_file_canary",
+                lambda: run_sd_file_canary(ctx, dry_run=args.dry_run),
+            )
+            runs.append(sd_file_canary)
+            if sd_file_canary.get("ok") is not True and not args.dry_run:
+                return fail_after_sd_stage(
+                    report, runs, ctx, args, error="sd_file_canary_failed"
+                )
             for scenario in args.sd_scenarios:
-                runs.append(run_sd_boot_prepare_scenario(ctx, scenario, dry_run=args.dry_run))
-            runs.append(run_sd_map_tile_canary(ctx, dry_run=args.dry_run))
-            runs.append(run_sd_export_canary(ctx, dry_run=args.dry_run))
-            runs.append(run_sd_diagnostic_export(ctx, dry_run=args.dry_run))
-            runs.append(run_sd_data_export(ctx, dry_run=args.dry_run))
-            runs.append(run_sd_retained_history(ctx, dry_run=args.dry_run))
-            runs.append(run_sd_reboot_remount(ctx, dry_run=args.dry_run))
-        runs.append(run_smoke(ctx, dry_run=args.dry_run))
+                scenario_kind = f"sd_boot_prepare_{scenario.replace('-', '_')}"
+                scenario_step = run_sd_stage_safely(
+                    ctx,
+                    scenario_kind,
+                    lambda scenario=scenario: run_sd_boot_prepare_scenario(
+                        ctx, scenario, dry_run=args.dry_run
+                    ),
+                )
+                runs.append(scenario_step)
+                if scenario_step.get("ok") is not True and not args.dry_run:
+                    return fail_after_sd_stage(
+                        report,
+                        runs,
+                        ctx,
+                        args,
+                        error=f"sd_boot_prepare_{scenario.replace('-', '_')}_failed",
+                    )
+            later_sd_stages = (
+                ("sd_map_tile_canary_failed", run_sd_map_tile_canary),
+                ("sd_export_canary_failed", run_sd_export_canary),
+                ("sd_diagnostic_export_failed", run_sd_diagnostic_export),
+                ("sd_data_export_failed", run_sd_data_export),
+                ("sd_retained_history_failed", run_sd_retained_history),
+                ("sd_reboot_remount_failed", run_sd_reboot_remount),
+            )
+            for stage_error, stage_runner in later_sd_stages:
+                stage_kind = stage_error.removesuffix("_failed")
+                stage = run_sd_stage_safely(
+                    ctx,
+                    stage_kind,
+                    lambda stage_runner=stage_runner: stage_runner(
+                        ctx, dry_run=args.dry_run
+                    ),
+                )
+                runs.append(stage)
+                if stage.get("ok") is not True and not args.dry_run:
+                    return fail_after_sd_stage(
+                        report, runs, ctx, args, error=stage_error
+                    )
+        smoke = run_sd_stage_safely(
+            ctx,
+            "d1l_smoke",
+            lambda: run_smoke(ctx, dry_run=args.dry_run),
+        )
+        runs.append(smoke)
+        if smoke.get("ok") is not True and not args.dry_run:
+            if sd_suite:
+                return fail_after_sd_stage(
+                    report, runs, ctx, args, error="d1l_smoke_failed"
+                )
+            append_release_gate_safely(
+                ctx,
+                runs,
+                dry_run=args.dry_run,
+                phase="d1l_smoke_failed_no_sd_suite",
+            )
+            report["error"] = "d1l_smoke_failed"
+            report["ok"] = False
+            attach_release_gate_summary(report, runs)
+            return report
         if args.include_ui_probes:
             onboarding = run_onboarding_complete(ctx, dry_run=args.dry_run)
             runs.append(onboarding)
@@ -1882,7 +2848,7 @@ def run_validation(args: argparse.Namespace) -> dict:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
-    parser.add_argument("--github-run-id")
+    parser.add_argument("--github-run-id", required=True)
     parser.add_argument("--github-run-dir")
     parser.add_argument("--github-run-dir-name", help=argparse.SUPPRESS)
     parser.add_argument("--download-artifacts", action="store_true")
@@ -1891,7 +2857,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--rp2040-port", default=os.environ.get("D1L_RP2040_PORT", DEFAULT_RP2040_PORT))
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--esp32-flash-baud", type=int, default=460800)
-    parser.add_argument("--skip-esp32-flash", action="store_true")
+    parser.add_argument(
+        "--skip-esp32-flash",
+        action="store_true",
+        help="Skip ESP32 flashing only for --skip-sd-suite UI validation; the SD suite requires exact pre/post-diag flashes.",
+    )
     parser.add_argument(
         "--refresh-rp2040-smoke",
         action="store_true",
@@ -1900,7 +2870,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--skip-rp2040-official-smoke",
         action="store_true",
-        help="Compatibility flag; RP2040 UF2 flashing is skipped unless --refresh-rp2040-smoke is supplied.",
+        help=(
+            "Skip only the optional official Seeed smoke image; the SD suite still restores the "
+            "exact bridge UF2 before and after raw diagnostics."
+        ),
     )
     parser.add_argument("--skip-rp2040-unavailable-capture", action="store_true")
     parser.add_argument(
@@ -1923,6 +2896,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.refresh_rp2040_smoke and args.skip_rp2040_official_smoke:
         parser.error("--refresh-rp2040-smoke conflicts with --skip-rp2040-official-smoke")
+    if args.skip_esp32_flash and not args.skip_sd_suite:
+        parser.error("--skip-esp32-flash requires --skip-sd-suite because raw SD diagnostics require an exact post-diag reflash boundary")
     if args.ui_rounds <= 0:
         parser.error("--ui-rounds must be positive")
     try:

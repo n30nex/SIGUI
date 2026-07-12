@@ -94,9 +94,94 @@ def test_capture_diag_waits_for_worker_then_reads_safe_console_commands(monkeypa
     assert report["port"] == "COM12"
     assert report["initial_storage_diag"]["raw_line"].endswith("selected_power=pending selected_mode=pending")
     assert report["raw_line"] == RAW_LINE
+    assert report["diag_attempt_count"] == 2
+    assert report["diag_completed"] is True
+    assert report["diag_deadline_exhausted"] is False
     assert report["fields"]["selected_mode"] == "dedicated"
     assert report["storage_status"]["sd"]["state"] == "ready"
     assert report["rp2040_ping"]["file_line_max"] == 512
     assert report["public_rf_tx"] is False
     assert report["formats_sd"] is False
     assert ser.writes == ["storage diag raw\n", "storage diag raw\n", "storage status\n", "rp2040 ping\n"]
+
+
+def test_capture_diag_retries_timeout_until_worker_result_is_complete(monkeypatch):
+    pending = (
+        '{"schema":1,"ok":true,"cmd":"storage diag raw",'
+        '"response_truncated":false,'
+        '"raw_line":"DESKOS_SD_DIAG selected_power=pending selected_mode=pending"}\n'
+    )
+    ser = FakeSerial(
+        [
+            pending,
+            '{"schema":1,"ok":false,"cmd":"storage diag raw","code":"TIMEOUT"}\n',
+            (
+                '{"schema":1,"ok":true,"cmd":"storage diag raw",'
+                f'"response_truncated":false,"raw_line":"{RAW_LINE}"}}\n'
+            ),
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready"}}\n',
+            '{"schema":1,"ok":true,"cmd":"rp2040 ping","protocol_supported":true}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(raw_diag.time, "sleep", lambda _seconds: None)
+
+    report = raw_diag.capture_diag(
+        "COM12",
+        115200,
+        1.0,
+        diag_settle_seconds=0,
+        diag_poll_seconds=0.01,
+        diag_deadline_seconds=5.0,
+    )
+
+    assert report["ok"] is True
+    assert report["diag_attempt_count"] == 3
+    assert [attempt.get("code") for attempt in report["diag_attempts"]] == [None, "TIMEOUT", None]
+    assert ser.writes[:3] == ["storage diag raw\n"] * 3
+
+
+def test_capture_diag_fails_closed_when_pending_worker_exceeds_deadline(monkeypatch):
+    pending = (
+        '{"schema":1,"ok":true,"cmd":"storage diag raw",'
+        '"response_truncated":false,'
+        '"raw_line":"DESKOS_SD_DIAG selected_power=pending selected_mode=pending"}\n'
+    )
+    ser = FakeSerial(
+        [
+            pending,
+            pending,
+            '{"schema":1,"ok":true,"cmd":"storage status","sd":{"state":"ready"}}\n',
+            '{"schema":1,"ok":true,"cmd":"rp2040 ping","protocol_supported":true}\n',
+        ]
+    )
+    clock = {"now": 0.0}
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    def advance(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(raw_diag.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(raw_diag.time, "sleep", advance)
+
+    report = raw_diag.capture_diag(
+        "COM12",
+        115200,
+        0.1,
+        diag_settle_seconds=0.4,
+        diag_poll_seconds=0.6,
+        diag_deadline_seconds=1.0,
+    )
+
+    assert report["ok"] is False
+    assert report["diag_completed"] is False
+    assert report["diag_deadline_exhausted"] is True
+    assert report["diag_attempt_count"] == 2
+    assert report["storage_diag"]["raw_line"].endswith("selected_mode=pending")
