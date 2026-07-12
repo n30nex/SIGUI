@@ -1017,10 +1017,15 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "filecanary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "health_ok": True,
             "reboot_command_passed": True,
             "reboot_route_flush": "ESP_OK",
+            "reboot_storage_manager_quiesced": True,
+            "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
+            "post_reboot_reset_reason": "SW",
+            "reboot_nonce_proven": True,
             "reboot_proven": True,
             "storage_file_gate_ready_before": True,
             "storage_file_gate_ready_after": True,
@@ -1030,7 +1035,12 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "storage_before": ready_storage_status(),
             "storage_after_canary": ready_storage_status(),
             "storage_after": ready_storage_status(),
-            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "storage status", "reboot", "storage status", "health"],
+            "commands": ["health", "reboot", "health"],
+            "results": [
+                {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+                {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
+            ],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -1060,16 +1070,26 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "retained_canary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "health_ok": True,
             "reboot_command_passed": True,
             "reboot_route_flush": "ESP_OK",
+            "reboot_storage_manager_quiesced": True,
+            "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
+            "post_reboot_reset_reason": "SW",
+            "reboot_nonce_proven": True,
             "reboot_proven": True,
             "pre_map_tile_canary_passed": True,
             "post_map_tile_canary_passed": True,
             "storage_before_reboot": ready_storage_status(),
             "storage_after_reboot": ready_storage_status(),
-            "commands": ["storage status", "storage remount", "storage map-tile-canary sd1", "reboot", "storage map-tile-check sd1", "health"],
+            "commands": ["health", "reboot", "health"],
+            "results": [
+                {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+                {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
+            ],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -2285,6 +2305,85 @@ def test_sd_artifact_validators_require_terminal_sequence_integrity(tmp_path: Pa
     assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is True
     assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is True
 
+    expected_boundary = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage status",
+        "ignored_json_count": 1,
+        "ignored_boot_help_seen": True,
+        "ignored_json": [{"cmd": "help", "ok": True}],
+        audit.EXPECTED_REBOOT_BOOT_HELP_FIELD: True,
+    }
+    retained_with_boundary = json.loads(json.dumps(retained))
+    retained_reboot_index = next(
+        index
+        for index, result in enumerate(retained_with_boundary["results"])
+        if result.get("cmd") == "reboot"
+    )
+    retained_with_boundary["results"].insert(
+        retained_reboot_index + 1, expected_boundary
+    )
+    retained_with_boundary["commands"].insert(
+        retained_reboot_index + 1, "storage status"
+    )
+    assert audit.sd_retained_canary_artifact_ok(
+        retained_with_boundary, "COM12"
+    ) is True
+
+    remount_with_boundary = json.loads(json.dumps(remount))
+    remount_reboot_index = next(
+        index
+        for index, result in enumerate(remount_with_boundary["results"])
+        if result.get("cmd") == "reboot"
+    )
+    remount_with_boundary["results"].insert(
+        remount_reboot_index + 1, json.loads(json.dumps(expected_boundary))
+    )
+    remount_with_boundary["commands"].insert(
+        remount_reboot_index + 1, "storage status"
+    )
+    assert audit.sd_reboot_remount_artifact_ok(
+        remount_with_boundary, "COM12"
+    ) is True
+
+    file_canary_with_boundary = json.loads(json.dumps(file_canary))
+    file_canary_with_boundary["results"] = [
+        json.loads(json.dumps(expected_boundary))
+    ]
+    assert audit.sd_file_canary_artifact_ok(
+        file_canary_with_boundary, "COM12"
+    ) is False
+
+    optimistic_wdt = json.loads(json.dumps(retained))
+    optimistic_wdt["results"][-1]["reset_reason"] = "WDT"
+    assert optimistic_wdt["post_reboot_reset_reason"] == "SW"
+    assert optimistic_wdt["reboot_proven"] is True
+    assert audit.sd_retained_canary_artifact_ok(optimistic_wdt, "COM12") is False
+
+    optimistic_pre_health = json.loads(json.dumps(retained))
+    optimistic_pre_health["results"][0]["ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_pre_health, "COM12"
+    ) is False
+
+    optimistic_post_health = json.loads(json.dumps(retained))
+    optimistic_post_health["results"][-1]["ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_post_health, "COM12"
+    ) is False
+
+    optimistic_health_summary = json.loads(json.dumps(retained))
+    optimistic_health_summary["health_ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_health_summary, "COM12"
+    ) is False
+
+    misaligned_transcript = json.loads(json.dumps(retained))
+    misaligned_transcript["commands"].append("storage status")
+    assert audit.sd_retained_canary_artifact_ok(
+        misaligned_transcript, "COM12"
+    ) is False
+
     remount["filecanary_passed"] = False
     assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
     remount["filecanary_passed"] = True
@@ -2307,6 +2406,72 @@ def test_sd_artifact_validators_require_terminal_sequence_integrity(tmp_path: Pa
         {"ok": False, "cmd": "storage status", "code": "SKIPPED_AFTER_TIMEOUT"}
     ]
     assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
+
+
+def test_release_gate_allows_only_immediate_proven_reboot_boot_help_boundary():
+    reboot = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "reboot",
+        "rebooting": True,
+        "storage_manager_quiesced": True,
+        "rp2040_bridge_quiesced": True,
+        "retained_flush": "ESP_OK",
+        "route_flush": "ESP_OK",
+    }
+    storage = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage status",
+        "ignored_json_count": 1,
+        "ignored_boot_help_seen": True,
+        "ignored_json": [{"cmd": "help", "ok": True}],
+        audit.EXPECTED_REBOOT_BOOT_HELP_FIELD: True,
+    }
+    report = {
+        "pre_sequence_complete": True,
+        "post_sequence_complete": True,
+        "reboot_command_passed": True,
+        "reboot_route_flush": "ESP_OK",
+        "reboot_storage_manager_quiesced": True,
+        "reboot_rp2040_bridge_quiesced": True,
+        "reboot_nonce_proven": True,
+        "reboot_proven": True,
+        "post_reboot_reset_reason": "SW",
+        "commands": ["reboot", "storage status"],
+        "results": [reboot, storage],
+    }
+    assert audit.nested_unexpected_console_restart(report) is True
+    assert audit.nested_unexpected_console_restart(
+        report, allow_expected_planned_reboot=True
+    ) is False
+
+    not_immediate = json.loads(json.dumps(report))
+    not_immediate["results"].insert(1, {"ok": True, "cmd": "health"})
+    not_immediate["commands"].insert(1, "health")
+    assert audit.nested_unexpected_console_restart(
+        not_immediate, allow_expected_planned_reboot=True
+    ) is True
+
+    unproven = json.loads(json.dumps(report))
+    unproven["reboot_proven"] = False
+    assert audit.nested_unexpected_console_restart(
+        unproven, allow_expected_planned_reboot=True
+    ) is True
+
+    unmarked = json.loads(json.dumps(report))
+    del unmarked["results"][1][audit.EXPECTED_REBOOT_BOOT_HELP_FIELD]
+    assert audit.nested_unexpected_console_restart(
+        unmarked, allow_expected_planned_reboot=True
+    ) is True
+
+    duplicate = json.loads(json.dumps(report))
+    duplicate_storage = duplicate["results"][1]
+    duplicate_storage["ignored_json_count"] = 2
+    duplicate_storage["ignored_json"].append({"cmd": "help", "ok": True})
+    assert audit.nested_unexpected_console_restart(
+        duplicate, allow_expected_planned_reboot=True
+    ) is True
 
 
 def test_full_soak_gate_fails_closed_on_stack_timeout_rf_or_crash_fields():

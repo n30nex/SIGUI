@@ -36,6 +36,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_reset_bridge" in header
     assert "d1l_storage_manager_pause" in header
     assert "d1l_storage_manager_resume" in header
+    assert "d1l_storage_manager_quiesce_begin" in header
+    assert "d1l_storage_manager_quiesce_end" in header
     assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
     assert "d1l_storage_status_remount_blocking" in header

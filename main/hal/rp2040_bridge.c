@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "hal/indicator_pins.h"
 #include "hal/rp2040_file_reply.h"
@@ -42,6 +43,8 @@ static d1l_rp2040_status_t s_status = {
 static uint16_t s_file_request_id = 1;
 static StaticSemaphore_t s_bridge_mutex_storage;
 static SemaphoreHandle_t s_bridge_mutex;
+static TaskHandle_t s_bridge_quiesce_owner;
+static portMUX_TYPE s_bridge_quiesce_owner_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void ensure_bridge_mutex(void)
 {
@@ -72,6 +75,47 @@ static void give_bridge_lock(void)
     if (s_bridge_mutex != NULL) {
         xSemaphoreGive(s_bridge_mutex);
     }
+}
+
+esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    const bool already_quiesced = s_bridge_quiesce_owner != NULL;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (already_quiesced) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ensure_bridge_mutex();
+    if (!s_bridge_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    if (xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    s_bridge_quiesce_owner = xTaskGetCurrentTaskHandle();
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    return ESP_OK;
+}
+
+void d1l_rp2040_bridge_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (s_bridge_quiesce_owner != current) {
+        portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+        return;
+    }
+    s_bridge_quiesce_owner = NULL;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    give_bridge_lock();
 }
 
 static esp_err_t pulse_rp2040_reset(const d1l_rp2040_pins_t *pins, uint32_t hold_ms)

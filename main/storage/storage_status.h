@@ -81,6 +81,9 @@ esp_err_t d1l_storage_manager_request_remount(void);
 esp_err_t d1l_storage_manager_reset_bridge(void);
 void d1l_storage_manager_pause(uint32_t pause_ms);
 void d1l_storage_manager_resume(void);
+/* Hold the manager sequence across a bounded shutdown/flush operation. */
+esp_err_t d1l_storage_manager_quiesce_begin(uint32_t timeout_ms);
+void d1l_storage_manager_quiesce_end(void);
 void d1l_storage_manager_force_nvs(bool force_nvs);
 esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms);
 esp_err_t d1l_storage_status_mount(uint32_t timeout_ms);

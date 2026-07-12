@@ -1544,12 +1544,116 @@ def nested_terminal_host_timeout(data: dict) -> bool:
     )
 
 
-def nested_unexpected_console_restart(data: dict) -> bool:
+EXPECTED_REBOOT_BOOT_HELP_FIELD = "expected_boot_help_after_reboot"
+
+
+def command_result_transcript_aligned(data: dict) -> bool:
+    commands = data.get("commands")
+    results = data.get("results")
+    if (
+        not isinstance(commands, list)
+        or not isinstance(results, list)
+        or len(commands) != len(results)
+        or not commands
+    ):
+        return False
+    for command, result in zip(commands, results):
+        if not isinstance(command, str) or not isinstance(result, dict):
+            return False
+        result_command = result.get("cmd")
+        if not isinstance(result_command, str) or not result_command:
+            return False
+        if command != result_command and not command.startswith(result_command + " "):
+            return False
+    return True
+
+
+def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
+    """Return the only boot-help dictionaries allowed at a planned reboot.
+
+    The evidence producer may annotate the first successful storage response
+    immediately after its own successful reboot command.  The raw boot marker
+    remains present, but no annotation elsewhere (or without complete reboot
+    proof) is trusted by the release gate.
+    """
+    results = data.get("results")
+    if not isinstance(results, list) or not command_result_transcript_aligned(data):
+        return set()
+    commands = data["commands"]
+    marked = [
+        (index, result)
+        for index, result in enumerate(results)
+        if isinstance(result, dict)
+        and result.get(EXPECTED_REBOOT_BOOT_HELP_FIELD) is True
+    ]
+    if len(marked) != 1:
+        return set()
+    index, result = marked[0]
+    if index == 0 or not isinstance(results[index - 1], dict):
+        return set()
+    reboot = results[index - 1]
+    ignored_count = result.get("ignored_json_count")
+    if not (
+        data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("reboot_command_passed") is True
+        and data.get("reboot_route_flush") == "ESP_OK"
+        and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_rp2040_bridge_quiesced") is True
+        and data.get("reboot_nonce_proven") is True
+        and data.get("reboot_proven") is True
+        and data.get("post_reboot_reset_reason") == "SW"
+        and commands[index - 1] == "reboot"
+        and commands[index] == "storage status"
+        and reboot.get("ok") is True
+        and reboot.get("cmd") == "reboot"
+        and reboot.get("rebooting") is True
+        and reboot.get("storage_manager_quiesced") is True
+        and reboot.get("rp2040_bridge_quiesced") is True
+        and reboot.get("retained_flush") == "ESP_OK"
+        and reboot.get("route_flush") == "ESP_OK"
+        and result.get("ok") is True
+        and result.get("cmd") == "storage status"
+        and result.get("ignored_boot_help_seen") is True
+        and type(ignored_count) is int
+        and ignored_count == 1
+        and result.get("ignored_json") == [{"cmd": "help", "ok": True}]
+        and result.get("code") not in {
+            "TIMEOUT",
+            "UNEXPECTED_RESTART",
+            "SKIPPED_AFTER_TIMEOUT",
+            "SKIPPED_AFTER_UNEXPECTED_RESTART",
+        }
+    ):
+        return set()
+    allowed = {id(result)}
+    allowed.update(
+        id(ignored)
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict) and ignored.get("cmd") == "help"
+    )
+    return allowed
+
+
+def nested_unexpected_console_restart(
+    data: dict, *, allow_expected_planned_reboot: bool = False
+) -> bool:
+    allowed_expected_ids = (
+        expected_reboot_boot_help_dict_ids(data)
+        if allow_expected_planned_reboot
+        else set()
+    )
     for candidate in iter_nested_dicts(data):
+        if EXPECTED_REBOOT_BOOT_HELP_FIELD in candidate:
+            if (
+                candidate.get(EXPECTED_REBOOT_BOOT_HELP_FIELD) is not True
+                or id(candidate) not in allowed_expected_ids
+            ):
+                return True
         if (
             candidate.get("ignored_boot_help_seen") is True
             or candidate.get("cmd") == "help"
-        ):
+        ) and id(candidate) not in allowed_expected_ids:
             return True
         if "ignored_json_count" in candidate:
             count = candidate.get("ignored_json_count")
@@ -1720,10 +1824,42 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
 def reboot_transition_proven(data: dict) -> bool:
     before = data.get("pre_reboot_boot_nonce")
     after = data.get("post_reboot_boot_nonce")
+    results = data.get("results")
+    if not isinstance(results, list) or not command_result_transcript_aligned(data):
+        return False
+    reboot_indices = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, dict)
+        and result.get("cmd") == "reboot"
+        and result.get("ok") is True
+        and result.get("rebooting") is True
+        and result.get("storage_manager_quiesced") is True
+        and result.get("rp2040_bridge_quiesced") is True
+        and result.get("retained_flush") == "ESP_OK"
+        and result.get("route_flush") == "ESP_OK"
+    ]
+    if len(reboot_indices) != 1:
+        return False
+    reboot_index = reboot_indices[0]
+    pre_health = [
+        result
+        for result in results[:reboot_index]
+        if isinstance(result, dict) and result.get("cmd") == "health"
+    ]
+    post_health = [
+        result
+        for result in results[reboot_index + 1 :]
+        if isinstance(result, dict) and result.get("cmd") == "health"
+    ]
     return (
         data.get("reboot_command_passed") is True
         and data.get("reboot_route_flush") == "ESP_OK"
+        and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_rp2040_bridge_quiesced") is True
+        and data.get("reboot_nonce_proven") is True
         and data.get("reboot_proven") is True
+        and data.get("post_reboot_reset_reason") == "SW"
         and isinstance(before, int)
         and not isinstance(before, bool)
         and before != 0
@@ -1731,6 +1867,13 @@ def reboot_transition_proven(data: dict) -> bool:
         and not isinstance(after, bool)
         and after != 0
         and before != after
+        and bool(pre_health)
+        and bool(post_health)
+        and pre_health[-1].get("ok") is True
+        and post_health[-1].get("ok") is True
+        and pre_health[-1].get("boot_nonce") == before
+        and post_health[-1].get("boot_nonce") == after
+        and post_health[-1].get("reset_reason") == "SW"
     )
 
 
@@ -1746,12 +1889,15 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("timed_out_command") is None
         and data.get("unexpected_restart_before_reboot") is False
         and not nested_terminal_host_timeout(data)
-        and not nested_unexpected_console_restart(data)
+        and not nested_unexpected_console_restart(
+            data, allow_expected_planned_reboot=True
+        )
         and data.get("allow_unavailable") is not True
         and data.get("retained_canary_passed") is True
         and data.get("filecanary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
+        and data.get("health_ok") is True
         and data.get("storage_file_gate_ready_before") is True
         and data.get("storage_file_gate_ready_after") is True
         and data.get("retained_history_sd_ready_before") is True
@@ -1777,7 +1923,9 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("timed_out_command") is None
         and data.get("unexpected_restart_before_reboot") is False
         and not nested_terminal_host_timeout(data)
-        and not nested_unexpected_console_restart(data)
+        and not nested_unexpected_console_restart(
+            data, allow_expected_planned_reboot=True
+        )
         and data.get("pre_remount_ready") is True
         and data.get("post_remount_ready") is True
         and data.get("pre_remount_command_passed") is True
@@ -1788,6 +1936,7 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and data.get("retained_canary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
+        and data.get("health_ok") is True
         and data.get("pre_map_tile_canary_passed") is True
         and data.get("post_map_tile_canary_passed") is True
         and reboot_transition_proven(data)

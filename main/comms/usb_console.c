@@ -10,6 +10,7 @@
 #include "esp_err.h"
 #include "esp_random.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -45,9 +46,20 @@
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
-static const uint32_t D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS = 15000U;
+static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
+
+static uint32_t reboot_deadline_remaining_ms(int64_t started_us)
+{
+    const int64_t elapsed_us = esp_timer_get_time() - started_us;
+    const int64_t deadline_us =
+        (int64_t)D1L_REBOOT_QUIESCE_TIMEOUT_MS * 1000LL;
+    if (elapsed_us >= deadline_us) {
+        return 0U;
+    }
+    return (uint32_t)((deadline_us - elapsed_us + 999LL) / 1000LL);
+}
 
 static void trim_line(char *line)
 {
@@ -4998,16 +5010,48 @@ static void handle_line(const char *line)
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
     } else if (strcmp(line, "reboot") == 0) {
-        esp_err_t retained_flush_ret = d1l_route_store_worker_force_flush(
-            D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS);
+        const int64_t reboot_started_us = esp_timer_get_time();
+        uint32_t remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t storage_quiesce_ret =
+            d1l_storage_manager_quiesce_begin(remaining_ms);
+        if (storage_quiesce_ret != ESP_OK) {
+            err_result("reboot", esp_err_to_name(storage_quiesce_ret),
+                       "storage manager quiesce failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t retained_flush_ret = remaining_ms > 0U ?
+            d1l_route_store_worker_force_flush(remaining_ms) : ESP_ERR_TIMEOUT;
         if (retained_flush_ret != ESP_OK) {
+            d1l_storage_manager_quiesce_end();
             err_result("reboot", esp_err_to_name(retained_flush_ret),
                        "retained storage flush failed; reboot cancelled");
             return;
         }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t bridge_quiesce_ret = remaining_ms > 0U ?
+            d1l_rp2040_bridge_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+        if (bridge_quiesce_ret != ESP_OK) {
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(bridge_quiesce_ret),
+                       "RP2040 bridge quiesce failed; reboot cancelled");
+            return;
+        }
+
+        if (reboot_deadline_remaining_ms(reboot_started_us) == 0U) {
+            d1l_rp2040_bridge_quiesce_end();
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(ESP_ERR_TIMEOUT),
+                       "reboot quiesce deadline expired; reboot cancelled");
+            return;
+        }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
+        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
         fflush(stdout);
+        /* Keep both quiesce locks held so no new UART2 SD exchange can begin
+         * while the restart path drains enabled UART FIFOs. */
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");

@@ -875,6 +875,7 @@ def test_soak_stops_after_crashlog_clear_timeout(monkeypatch):
     assert report["aborted_after_timeout"] == "crashlog clear"
     assert report["samples"] == []
     assert report["ok"] is False
+    assert report["commands"] == soak_d1l.SOAK_COMMANDS
 
 
 def test_soak_stops_after_active_command_timeout(monkeypatch):

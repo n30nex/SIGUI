@@ -22,8 +22,13 @@ try:
         timeout_for_reboot_command,
     )
     from sd_retained_history_acceptance_d1l import (
+        EXPECTED_REBOOT_BOOT_HELP_FIELD,
+        expected_reboot_boot_help,
         fingerprint_for_token,
+        mark_expected_reboot_boot_help,
         readbacks_pass,
+        result_has_boot_help,
+        semantic_storage_copy,
         retained_canary_hash,
         retained_canary_metadata,
         retained_storage_ready,
@@ -40,8 +45,13 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         timeout_for_reboot_command,
     )
     from scripts.sd_retained_history_acceptance_d1l import (
+        EXPECTED_REBOOT_BOOT_HELP_FIELD,
+        expected_reboot_boot_help,
         fingerprint_for_token,
+        mark_expected_reboot_boot_help,
         readbacks_pass,
+        result_has_boot_help,
+        semantic_storage_copy,
         retained_canary_hash,
         retained_canary_metadata,
         retained_storage_ready,
@@ -196,11 +206,9 @@ def host_timed_out(result: dict | None) -> bool:
 
 
 def unexpected_console_restart(results: list[dict]) -> bool:
-    return any(result.get("ignored_boot_help_seen") is True for result in results) or any(
-        ignored.get("cmd") == "help"
+    return any(
+        result_has_boot_help(result) and not expected_reboot_boot_help(result)
         for result in results
-        for ignored in (result.get("ignored_json") or [])
-        if isinstance(ignored, dict)
     )
 
 
@@ -226,17 +234,25 @@ def run_command(ser, command: str, timeout: float) -> dict:
         or command.startswith("storage map-tile-")
     ):
         command_timeout = max(timeout, SD_OPERATION_MIN_TIMEOUT_SECONDS)
-    return send_console_command(ser, command, command_timeout)
+    result = send_console_command(ser, command, command_timeout)
+    result.pop(EXPECTED_REBOOT_BOOT_HELP_FIELD, None)
+    return result
 
 
 def run_commands_until_terminal(
-    ser, planned_commands: list[str], timeout: float
+    ser,
+    planned_commands: list[str],
+    timeout: float,
+    *,
+    allow_initial_reboot_boot_help: bool = False,
 ) -> tuple[list[str], list[dict]]:
     commands: list[str] = []
     results: list[dict] = []
     for command in planned_commands:
         commands.append(command)
         result = run_command(ser, command, timeout)
+        if not results and allow_initial_reboot_boot_help:
+            mark_expected_reboot_boot_help(result)
         results.append(result)
         # The console task may still be executing a host-timed-out command.
         # Queuing anything else can shift JSON replies and turn one slow SD
@@ -252,9 +268,15 @@ def run_mount_sequence(
     timeout: float,
     mount_poll_attempts: int,
     mount_poll_interval_sec: float,
+    allow_initial_reboot_boot_help: bool = False,
 ) -> tuple[list[str], list[dict], dict]:
     initial_commands = ["storage status", "storage remount", "storage status"]
-    commands, results = run_commands_until_terminal(ser, initial_commands, timeout)
+    commands, results = run_commands_until_terminal(
+        ser,
+        initial_commands,
+        timeout,
+        allow_initial_reboot_boot_help=allow_initial_reboot_boot_help,
+    )
     storage_after = results[-1] if results else {}
     if not sequence_completed(commands, results, initial_commands):
         return commands, results, storage_after
@@ -376,6 +398,7 @@ def run_acceptance(
                     timeout=timeout,
                     mount_poll_attempts=mount_poll_attempts,
                     mount_poll_interval_sec=mount_poll_interval_sec,
+                    allow_initial_reboot_boot_help=True,
                 )
                 commands.extend(post_mount_commands)
                 results.extend(post_mount_results)
@@ -440,11 +463,11 @@ def run_acceptance(
         pre_by_command, token, fingerprint, retained_result
     )
     pre_health = pre_by_command.get("health", {})
-    reboot_proof_ok = (
-        boot_transition_proven(pre_health, health)
-        if include_reboot
-        else True
+    reboot_nonce_proven = (
+        boot_transition_proven(pre_health, health) if include_reboot else True
     )
+    reboot_reset_reason_ok = health.get("reset_reason") == "SW" if include_reboot else True
+    reboot_proof_ok = reboot_nonce_proven and reboot_reset_reason_ok
     post_readbacks_ok = (
         reboot_proof_ok
         and readbacks_pass(post_by_command, token, fingerprint, retained_result)
@@ -509,8 +532,20 @@ def run_acceptance(
             if include_reboot and isinstance(reboot_result, dict)
             else None
         ),
+        "reboot_storage_manager_quiesced": (
+            reboot_result.get("storage_manager_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
+        "reboot_rp2040_bridge_quiesced": (
+            reboot_result.get("rp2040_bridge_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
         "pre_reboot_boot_nonce": health_boot_nonce(pre_health) if include_reboot else None,
         "post_reboot_boot_nonce": health_boot_nonce(health) if include_reboot else None,
+        "post_reboot_reset_reason": health.get("reset_reason") if include_reboot else None,
+        "reboot_nonce_proven": reboot_nonce_proven if include_reboot else None,
         "reboot_proven": reboot_proof_ok if include_reboot else None,
         "filecanary_passed": filecanary_ok,
         "retained_canary_passed": retained_ok,
@@ -519,8 +554,8 @@ def run_acceptance(
         "pre_map_tile_canary_passed": pre_map_tile_ok,
         "post_map_tile_canary_passed": post_map_tile_ok,
         "health_ok": health_ok,
-        "storage_before_reboot": pre_storage,
-        "storage_after_reboot": post_storage,
+        "storage_before_reboot": semantic_storage_copy(pre_storage),
+        "storage_after_reboot": semantic_storage_copy(post_storage),
         "health": health,
         "results": results,
         "ok": (

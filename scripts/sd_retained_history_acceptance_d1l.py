@@ -47,6 +47,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
 RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
+EXPECTED_REBOOT_BOOT_HELP_FIELD = "expected_boot_help_after_reboot"
 
 
 def retained_canary_hash(token: str) -> int:
@@ -302,12 +303,19 @@ def wait_for_retained_storage_ready(
     *,
     wait_sec: float,
     poll_interval_sec: float = 1.0,
+    allow_initial_reboot_boot_help: bool = False,
 ) -> tuple[dict, list[dict]]:
     """Poll the autonomous post-reboot mount without forcing another mount."""
     results: list[dict] = []
     deadline = time.monotonic() + max(0.0, wait_sec)
     while True:
         latest = send_console_command(ser, "storage status", timeout)
+        # This marker belongs to the host evidence producer, never firmware.
+        # Scrub an untrusted copy before optionally adding it at the one
+        # explicitly planned reboot boundary.
+        latest.pop(EXPECTED_REBOOT_BOOT_HELP_FIELD, None)
+        if not results and allow_initial_reboot_boot_help:
+            mark_expected_reboot_boot_help(latest)
         results.append(latest)
         if (
             latest.get("code") == "TIMEOUT"
@@ -325,7 +333,11 @@ def run_command(ser, command: str, timeout: float) -> dict:
         command_timeout = max(timeout, FILE_CANARY_MIN_TIMEOUT_SECONDS)
     if command.startswith("storage retained-canary "):
         command_timeout = max(timeout, RETAINED_CANARY_MIN_TIMEOUT_SECONDS)
-    return send_console_command(ser, command, command_timeout)
+    result = send_console_command(ser, command, command_timeout)
+    # Reserved host-side evidence metadata must not be accepted from the
+    # device on an arbitrary command response.
+    result.pop(EXPECTED_REBOOT_BOOT_HELP_FIELD, None)
+    return result
 
 
 def run_commands(ser, commands: list[str], timeout: float) -> list[dict]:
@@ -412,12 +424,59 @@ def skipped_after_unexpected_restart(
 
 
 def unexpected_console_restart(results: list[dict]) -> bool:
-    return any(result.get("ignored_boot_help_seen") is True for result in results) or any(
-        ignored.get("cmd") == "help"
+    return any(
+        result_has_boot_help(result) and not expected_reboot_boot_help(result)
         for result in results
+    )
+
+
+def result_has_boot_help(result: dict) -> bool:
+    return result.get("ignored_boot_help_seen") is True or any(
+        ignored.get("cmd") == "help"
         for ignored in (result.get("ignored_json") or [])
         if isinstance(ignored, dict)
     )
+
+
+def expected_reboot_boot_help(result: dict) -> bool:
+    return (
+        result.get(EXPECTED_REBOOT_BOOT_HELP_FIELD) is True
+        and result.get("ok") is True
+        and result.get("cmd") == "storage status"
+        and result.get("ignored_boot_help_seen") is True
+        and type(result.get("ignored_json_count")) is int
+        and result.get("ignored_json_count") == 1
+        and result.get("ignored_json") == [{"cmd": "help", "ok": True}]
+    )
+
+
+def mark_expected_reboot_boot_help(result: dict) -> bool:
+    if (
+        result.get("ok") is not True
+        or result.get("cmd") != "storage status"
+        or result.get("ignored_boot_help_seen") is not True
+        or type(result.get("ignored_json_count")) is not int
+        or result.get("ignored_json_count") != 1
+        or result.get("ignored_json") != [{"cmd": "help", "ok": True}]
+    ):
+        return False
+    result[EXPECTED_REBOOT_BOOT_HELP_FIELD] = True
+    return True
+
+
+def semantic_storage_copy(result: dict | None) -> dict:
+    """Copy storage state without duplicating console transport evidence."""
+    if not isinstance(result, dict):
+        return {}
+    copied = dict(result)
+    for field in (
+        EXPECTED_REBOOT_BOOT_HELP_FIELD,
+        "ignored_json_count",
+        "ignored_json",
+        "ignored_boot_help_seen",
+    ):
+        copied.pop(field, None)
+    return copied
 
 
 def timed_out_command(results: list[dict]) -> str | None:
@@ -520,9 +579,9 @@ def run_acceptance(
             "retained_history_sd_ready_before": retained_storage_ready(storage_before),
             "retained_history_sd_ready_after_canary": False,
             "retained_history_sd_ready_after": False,
-            "storage_before": storage_before,
+            "storage_before": semantic_storage_copy(storage_before),
             "storage_after_canary": {},
-            "storage_after": storage_before,
+            "storage_after": semantic_storage_copy(storage_before),
             "storage_ready_waited": len(ready_wait_results) > 1,
             "storage_ready_poll_count": sum(
                 1 for result in ready_wait_results if result.get("cmd") == "storage status"
@@ -558,6 +617,7 @@ def run_acceptance(
                     ser,
                     timeout,
                     wait_sec=mount_wait_sec,
+                    allow_initial_reboot_boot_help=True,
                 )
                 post_results.extend(post_ready_wait_results)
                 if sequence_completed(post_ready_wait_results):
@@ -608,11 +668,13 @@ def run_acceptance(
     storage_after_canary = pre_by_command.get("storage status", {})
     pre_health = pre_by_command.get("health", {})
     post_health = post_by_command.get("health", {})
-    reboot_proof_ok = (
-        boot_transition_proven(pre_health, post_health)
-        if include_reboot
-        else True
+    reboot_nonce_proven = (
+        boot_transition_proven(pre_health, post_health) if include_reboot else True
     )
+    reboot_reset_reason_ok = (
+        post_health.get("reset_reason") == "SW" if include_reboot else True
+    )
+    reboot_proof_ok = reboot_nonce_proven and reboot_reset_reason_ok
     post_readbacks_ok = (
         reboot_proof_ok and readbacks_pass(post_by_command, token, fingerprint, retained_result)
         if include_reboot
@@ -682,14 +744,28 @@ def run_acceptance(
             if include_reboot and isinstance(reboot_result, dict)
             else None
         ),
+        "reboot_storage_manager_quiesced": (
+            reboot_result.get("storage_manager_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
+        "reboot_rp2040_bridge_quiesced": (
+            reboot_result.get("rp2040_bridge_quiesced")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
         "pre_reboot_boot_nonce": health_boot_nonce(pre_health) if include_reboot else None,
         "post_reboot_boot_nonce": health_boot_nonce(post_health) if include_reboot else None,
+        "post_reboot_reset_reason": (
+            post_health.get("reset_reason") if include_reboot else None
+        ),
+        "reboot_nonce_proven": reboot_nonce_proven if include_reboot else None,
         "reboot_proven": reboot_proof_ok if include_reboot else None,
         "pre_reboot_readbacks_ok": pre_readbacks_ok,
         "post_reboot_readbacks_ok": post_readbacks_ok,
-        "storage_before": storage_before,
-        "storage_after_canary": storage_after_canary,
-        "storage_after": storage_after,
+        "storage_before": semantic_storage_copy(storage_before),
+        "storage_after_canary": semantic_storage_copy(storage_after_canary),
+        "storage_after": semantic_storage_copy(storage_after),
         "health_ok": health_ok,
         "ok": (
             not public_rf_tx

@@ -201,9 +201,9 @@ def readback_lines(token: str) -> list[str]:
     ]
 
 
-def health_line(boot_nonce: int | None = 2) -> str:
+def health_line(boot_nonce: int | None = 2, reset_reason: str = "SW") -> str:
     nonce = f',"boot_nonce":{boot_nonce}' if boot_nonce is not None else ""
-    return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true{nonce}}}\n'
+    return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true,"reset_reason":"{reset_reason}"{nonce}}}\n'
 
 
 def test_storage_ready_requires_fat32_filesystem():
@@ -268,6 +268,57 @@ def test_slow_sd_operations_get_bounded_long_timeouts(monkeypatch):
     ]
 
 
+def test_only_first_post_reboot_mount_command_can_consume_boot_help():
+    ser = FakeSerial(
+        [
+            ready_storage_line(),
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            mount_line(),
+            ready_storage_line(),
+        ]
+    )
+    commands, results = remount_accept.run_commands_until_terminal(
+        ser,
+        ["storage status", "storage remount", "storage status"],
+        1.0,
+        allow_initial_reboot_boot_help=True,
+    )
+
+    assert commands == ["storage status", "storage remount"]
+    assert len(results) == 2
+    assert remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD not in results[0]
+    assert remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD not in results[1]
+    assert remount_accept.unexpected_console_restart(results) is True
+
+
+def test_planned_mount_boundary_rejects_firmware_spoofed_transport_fields():
+    spoofed = json.loads(ready_storage_line())
+    spoofed.update(
+        {
+            "ignored_json_count": 1,
+            "ignored_json": [{"cmd": "help", "ok": True}],
+            "ignored_boot_help_seen": True,
+            remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD: True,
+        }
+    )
+    ser = FakeSerial([json.dumps(spoofed) + "\n"])
+
+    commands, results = remount_accept.run_commands_until_terminal(
+        ser,
+        ["storage status"],
+        1.0,
+        allow_initial_reboot_boot_help=True,
+    )
+
+    assert commands == ["storage status"]
+    assert len(results) == 1
+    assert remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD not in results[0]
+    assert "ignored_json_count" not in results[0]
+    assert "ignored_json" not in results[0]
+    assert "ignored_boot_help_seen" not in results[0]
+    assert remount_accept.unexpected_console_restart(results) is False
+
+
 def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monkeypatch):
     token = "remount1"
     pre = [
@@ -280,8 +331,9 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
+        '{"schema":1,"ok":true,"cmd":"help"}\n',
         ready_storage_line(),
         mount_line(),
         ready_storage_line(),
@@ -330,6 +382,62 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert "storage remount\n" in post_serial.writes
     assert "storage map-tile-check remount1\n" in post_serial.writes
     assert "storage map-tile-check remount1" in report["commands"]
+    expected_boundary = next(
+        result
+        for result in report["results"]
+        if result.get(remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD) is True
+    )
+    assert expected_boundary["cmd"] == "storage status"
+    assert remount_accept.unexpected_console_restart([expected_boundary]) is False
+    assert remount_accept.EXPECTED_REBOOT_BOOT_HELP_FIELD not in report[
+        "storage_after_reboot"
+    ]
+    assert "ignored_boot_help_seen" not in report["storage_after_reboot"]
+
+
+def test_reboot_remount_rejects_watchdog_after_commanded_reboot(monkeypatch):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+        health_line(1),
+    ]
+    reboot = [
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+    ]
+    post = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        *readback_lines(token),
+        map_tile_check_line(token),
+        health_line(2, "WDT"),
+    ]
+    install_fake_serial(
+        monkeypatch,
+        [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)],
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["reboot_nonce_proven"] is True
+    assert report["post_reboot_reset_reason"] == "WDT"
+    assert report["reboot_proven"] is False
+    assert report["ok"] is False
 
 
 def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
@@ -348,7 +456,7 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
         '"route_flush":"ESP_OK"}\n'
     ]
     post = [
@@ -449,7 +557,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         ready_storage_line(),
         mount_line(),
@@ -495,7 +603,7 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         *readback_lines(token),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         bridge_wait_storage_line(),
         mount_line(),
@@ -663,7 +771,7 @@ def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [
         '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'

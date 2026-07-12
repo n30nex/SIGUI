@@ -821,6 +821,7 @@ def run_serial_soak(
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
+        "commands": commands,
         "active_public_text": None,
         "active_dm_fingerprint": (
             active_dm_fingerprint.upper() if active_dm_fingerprint else None

@@ -156,10 +156,12 @@ def test_preflight_host_timeout_stops_filecanary_sequence(monkeypatch):
 
 
 def test_preflight_boot_marker_stops_filecanary_sequence(monkeypatch):
-    status = json.loads(ready_storage_status("READY_SD"))
-    status["ignored_boot_help_seen"] = True
-    status["ignored_json"] = [{"cmd": "noise-5", "ok": True}]
-    ser = FakeSerial([json.dumps(status) + "\n"])
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            ready_storage_status("READY_SD"),
+        ]
+    )
 
     class FakeSerialModule:
         Serial = lambda self, **_kwargs: ser

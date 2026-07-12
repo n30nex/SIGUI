@@ -60,6 +60,17 @@ SMOKE_COMMANDS = [
     "health",
 ]
 
+# These fields describe host-observed console framing. Device JSON must never
+# be able to supply or override them.
+HOST_CONSOLE_EVIDENCE_FIELDS = frozenset(
+    {
+        "ignored_json_count",
+        "ignored_json",
+        "ignored_boot_help_seen",
+        "expected_boot_help_after_reboot",
+    }
+)
+
 REBOOT_MIN_TIMEOUT_SECONDS = 20.0
 
 
@@ -123,6 +134,11 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
             raw = raw_bytes.decode("utf-8", errors="replace")
             parsed = parse_jsonl_line(raw)
             if parsed and parsed.get("cmd") == command:
+                parsed = {
+                    key: value
+                    for key, value in parsed.items()
+                    if key not in HOST_CONSOLE_EVIDENCE_FIELDS
+                }
                 if ignored:
                     parsed = {
                         **parsed,
@@ -221,6 +237,9 @@ def reboot_command_passed(result: dict | None) -> bool:
         isinstance(result, dict)
         and result.get("ok") is True
         and result.get("rebooting") is True
+        and result.get("storage_manager_quiesced") is True
+        and result.get("rp2040_bridge_quiesced") is True
+        and result.get("retained_flush") == "ESP_OK"
         and result.get("route_flush") == "ESP_OK"
     )
 
@@ -238,6 +257,16 @@ def boot_transition_proven(before_health: dict | None, after_health: dict | None
     before = health_boot_nonce(before_health)
     after = health_boot_nonce(after_health)
     return before is not None and after is not None and before != after
+
+
+def software_reboot_transition_proven(
+    before_health: dict | None, after_health: dict | None
+) -> bool:
+    return (
+        boot_transition_proven(before_health, after_health)
+        and isinstance(after_health, dict)
+        and after_health.get("reset_reason") == "SW"
+    )
 
 
 def persistence_settings_snapshot(result: dict | None) -> dict | None:
@@ -395,9 +424,15 @@ def run_persistence_check(ser, timeout: float) -> dict:
             "reboot_attempted": False,
             "reboot_command_passed": False,
             "reboot_route_flush": None,
+            "reboot_storage_manager_quiesced": None,
+            "reboot_rp2040_bridge_quiesced": None,
+            "post_reboot_reset_reason": None,
             "reboot_proven": False,
             "cleanup_reboot_command_passed": False,
             "cleanup_reboot_route_flush": None,
+            "cleanup_reboot_storage_manager_quiesced": None,
+            "cleanup_reboot_rp2040_bridge_quiesced": None,
+            "cleanup_post_reboot_reset_reason": None,
             "cleanup_reboot_proven": False,
             "cancelled_reboot_cleanup_attempted": False,
             "cancelled_reboot_cleanup_ok": False,
@@ -472,7 +507,9 @@ def run_persistence_check(ser, timeout: float) -> dict:
         wait_after_reboot(ser, max(2.5, timeout / 2.0))
         post_reboot_health = wait_for_console_ready(ser, timeout)
         steps.append(post_reboot_health)
-        reboot_proven = boot_transition_proven(pre_reboot_health, post_reboot_health)
+        reboot_proven = software_reboot_transition_proven(
+            pre_reboot_health, post_reboot_health
+        )
 
         after = send_console_command(ser, "settings get", timeout)
         steps.append(after)
@@ -499,7 +536,7 @@ def run_persistence_check(ser, timeout: float) -> dict:
                 wait_after_reboot(ser, max(2.5, timeout / 2.0))
                 cleanup_post_reboot_health = wait_for_console_ready(ser, timeout)
                 steps.append(cleanup_post_reboot_health)
-                cleanup_reboot_proven = boot_transition_proven(
+                cleanup_reboot_proven = software_reboot_transition_proven(
                     cleanup_pre_reboot_health,
                     cleanup_post_reboot_health,
                 )
@@ -564,11 +601,17 @@ def run_persistence_check(ser, timeout: float) -> dict:
         "temporary_path_hash_bytes": test_path_hash,
         "reboot_command_passed": reboot_ok,
         "reboot_route_flush": reboot.get("route_flush"),
+        "reboot_storage_manager_quiesced": reboot.get("storage_manager_quiesced"),
+        "reboot_rp2040_bridge_quiesced": reboot.get("rp2040_bridge_quiesced"),
+        "post_reboot_reset_reason": post_reboot_health.get("reset_reason"),
         "pre_reboot_boot_nonce": health_boot_nonce(pre_reboot_health),
         "post_reboot_boot_nonce": health_boot_nonce(post_reboot_health),
         "reboot_proven": reboot_proven,
         "cleanup_reboot_command_passed": cleanup_reboot_ok,
         "cleanup_reboot_route_flush": cleanup_reboot.get("route_flush"),
+        "cleanup_reboot_storage_manager_quiesced": cleanup_reboot.get("storage_manager_quiesced"),
+        "cleanup_reboot_rp2040_bridge_quiesced": cleanup_reboot.get("rp2040_bridge_quiesced"),
+        "cleanup_post_reboot_reset_reason": cleanup_post_reboot_health.get("reset_reason"),
         "cleanup_pre_reboot_boot_nonce": health_boot_nonce(cleanup_pre_reboot_health),
         "cleanup_post_reboot_boot_nonce": health_boot_nonce(cleanup_post_reboot_health),
         "cleanup_reboot_proven": cleanup_reboot_proven,

@@ -50,6 +50,8 @@ static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_manager_control_lock = portMUX_INITIALIZER_UNLOCKED;
 static StaticSemaphore_t s_manager_sequence_mutex_storage;
 static SemaphoreHandle_t s_manager_sequence_mutex;
+static TaskHandle_t s_manager_quiesce_owner;
+static portMUX_TYPE s_manager_quiesce_owner_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_force_nvs;
 static uint32_t s_manager_initial_ping_timeouts;
 static bool s_manager_bridge_response_seen;
@@ -1106,6 +1108,53 @@ void d1l_storage_manager_resume(void)
     portENTER_CRITICAL(&s_manager_pause_lock);
     s_manager_pause_until_us = 0;
     portEXIT_CRITICAL(&s_manager_pause_lock);
+}
+
+esp_err_t d1l_storage_manager_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    const bool already_quiesced = s_manager_quiesce_owner != NULL;
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    if (already_quiesced) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ensure_manager_sequence_mutex();
+    if (!s_manager_sequence_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const uint32_t pause_ms = timeout_ms > UINT32_MAX - 1000U ?
+                                  UINT32_MAX : timeout_ms + 1000U;
+    d1l_storage_manager_pause(pause_ms);
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    if (xSemaphoreTake(s_manager_sequence_mutex, ticks) != pdTRUE) {
+        d1l_storage_manager_resume();
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    s_manager_quiesce_owner = xTaskGetCurrentTaskHandle();
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    return ESP_OK;
+}
+
+void d1l_storage_manager_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    if (s_manager_quiesce_owner != current) {
+        portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+        return;
+    }
+    s_manager_quiesce_owner = NULL;
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    manager_sequence_give();
+    d1l_storage_manager_resume();
 }
 
 void d1l_storage_manager_force_nvs(bool force_nvs)
