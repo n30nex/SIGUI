@@ -114,6 +114,12 @@ class FakeSerial:
         return False
 
 
+def host_timeout(command: str) -> str:
+    return json.dumps(
+        {"schema": 1, "ok": False, "cmd": command, "code": "TIMEOUT"}
+    ) + "\n"
+
+
 def test_sd_file_canary_dry_run_is_serial_only():
     report = sd_file_canary_d1l.dry_run_report()
 
@@ -129,8 +135,99 @@ def test_sd_file_canary_dry_run_is_serial_only():
         "packets",
         "health",
     ]
+
+
+def test_preflight_host_timeout_stops_filecanary_sequence(monkeypatch):
+    ser = FakeSerial([host_timeout("storage status")])
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = sd_file_canary_d1l.run_canary(
+        "COM12", 115200, 1.0, allow_unavailable=False
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["sequence_completed"] is False
+    assert report["timed_out_command"] == "storage status"
+    assert report["canary"]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["ok"] is False
+
+
+def test_preflight_boot_marker_stops_filecanary_sequence(monkeypatch):
+    status = json.loads(ready_storage_status("READY_SD"))
+    status["ignored_boot_help_seen"] = True
+    status["ignored_json"] = [{"cmd": "noise-5", "ok": True}]
+    ser = FakeSerial([json.dumps(status) + "\n"])
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = sd_file_canary_d1l.run_canary(
+        "COM12", 115200, 1.0, allow_unavailable=False
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["sequence_completed"] is False
+    assert report["unexpected_console_restart"] is True
+    assert report["canary"]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["ok"] is False
+
+
+def test_filecanary_host_timeout_stops_status_packet_health_followups(monkeypatch):
+    ser = FakeSerial(
+        [ready_storage_status("READY_SD"), host_timeout("storage filecanary")]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = sd_file_canary_d1l.run_canary(
+        "COM12", 115200, 1.0, allow_unavailable=False
+    )
+
+    assert ser.writes == ["storage status\n", "storage filecanary\n"]
+    assert report["sequence_completed"] is False
+    assert report["timed_out_command"] == "storage filecanary"
+    assert report["storage_after"]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["packets"]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["health"]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["ok"] is False
     assert not any(command.startswith("mesh send public") for command in report["commands"])
     assert not any("confirm" in command for command in report["commands"])
+
+
+def test_filecanary_uses_long_command_timeout(monkeypatch):
+    ser = FakeSerial(
+        [
+            ready_storage_status("READY_SD"),
+            canary_success(),
+            ready_storage_status("READY_SD"),
+            '{"schema":1,"ok":true,"cmd":"packets","count":0,"persisted":true}\n',
+            '{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true}\n',
+        ]
+    )
+    calls = []
+    original_send = sd_file_canary_d1l.send_console_command
+
+    def recording_send(serial_port, command, timeout):
+        calls.append((command, timeout))
+        return original_send(serial_port, command, timeout)
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(sd_file_canary_d1l, "send_console_command", recording_send)
+    report = sd_file_canary_d1l.run_canary(
+        "COM12", 115200, 1.0, allow_unavailable=False
+    )
+
+    assert report["ok"] is True
+    assert ("storage filecanary", sd_file_canary_d1l.FILE_CANARY_MIN_TIMEOUT_SECONDS) in calls
 
 
 def test_sd_file_canary_allows_pre_flash_unavailable_state(monkeypatch):

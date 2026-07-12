@@ -980,6 +980,9 @@ def write_file_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "sequence_completed": True,
+            "timed_out_command": None,
+            "unexpected_console_restart": False,
             "allow_unavailable": False,
             "canary_passed": True,
             "canary_unavailable_ok": False,
@@ -1005,6 +1008,10 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "pre_sequence_complete": True,
+            "post_sequence_complete": True,
+            "timed_out_command": None,
+            "unexpected_restart_before_reboot": False,
             "allow_unavailable": False,
             "retained_canary_passed": True,
             "filecanary_passed": True,
@@ -1039,12 +1046,17 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "pre_sequence_complete": True,
+            "post_sequence_complete": True,
+            "timed_out_command": None,
+            "unexpected_restart_before_reboot": False,
             "pre_remount_ready": True,
             "post_remount_ready": True,
             "pre_remount_command_passed": True,
             "post_remount_command_passed": True,
             "retained_history_sd_ready_before": True,
             "retained_history_sd_ready_after": True,
+            "filecanary_passed": True,
             "retained_canary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
@@ -2164,28 +2176,252 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert report["p0_failed_count"] == 19
 
 
-def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
+def passing_full_soak_payload() -> dict:
+    interval = 300
+    commands = [
+        "health",
+        "mesh status",
+        "signal",
+        "messages unread",
+        "packets",
+        "crashlog",
+    ]
+    samples = [
+        {
+            "label": "start" if elapsed == 0 else f"sample-{elapsed // interval}",
+            "elapsed_sec": elapsed,
+            "aborted_after_timeout": None,
+            "results": [
+                {
+                    "ok": True,
+                    "cmd": "health",
+                    "boot_nonce": 123456789,
+                    "uptime_ms": 1000 + (elapsed * 1000),
+                    "board_ready": True,
+                    "ui_ready": True,
+                    "retained_task_stack_free_bytes": 5000,
+                },
+                {
+                    "ok": True,
+                    "cmd": "mesh status",
+                    "state": "ready",
+                    "identity_ready": True,
+                    "radio_ready": True,
+                },
+                {"ok": True, "cmd": "signal", "sample_count": 1},
+                {"ok": True, "cmd": "messages unread"},
+                {"ok": True, "cmd": "packets", "count": 0},
+                {"ok": True, "cmd": "crashlog", "entries": []},
+            ],
+        }
+        for elapsed in range(0, 43200 + interval, interval)
+    ]
+    return {
+        "ok": True,
+        "mode": "hardware",
+        "duration_sec": 43200,
+        "sample_interval_sec": interval,
+        "active_public_text": None,
+        "active_command": None,
+        "dm_rf_tx": False,
+        "active_events": [],
+        "setup_events": [],
+        "commands": commands,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "aborted_after_timeout": None,
+        "samples": samples,
+        "summary": {
+            "ok": True,
+            "threshold_failures": [],
+            "command_timeout_seen": False,
+            "unexpected_console_restart_seen": False,
+            "retained_task_stack_free_bytes_floor": 5000,
+            "crashlog_crash_like_count": 0,
+            "board_ready_all": True,
+            "ui_ready_all": True,
+            "mesh_ready_all": True,
+            "uptime_monotonic": True,
+        },
+    }
+
+
+def test_release_gate_audit_accepts_full_soak_when_duration_and_raw_samples_pass(tmp_path: Path):
     write_core_evidence(tmp_path)
     write_json(
         tmp_path / "artifacts" / "soak" / "d1l-12h-soak_68350bf.json",
-        {
-            "ok": True,
-            "mode": "hardware",
-            "duration_sec": 43200,
-            "summary": {
-                "ok": True,
-                "threshold_failures": [],
-                "board_ready_all": True,
-                "ui_ready_all": True,
-                "uptime_monotonic": True,
-            },
-        },
+        passing_full_soak_payload(),
     )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
     assert gates["full_duration_idle_soak"]["ok"] is True
+
+
+def test_sd_artifact_validators_require_terminal_sequence_integrity(tmp_path: Path):
+    write_file_canary_evidence(tmp_path)
+    write_retained_canary_evidence(tmp_path)
+    write_reboot_remount_evidence(tmp_path)
+
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    file_canary = json.loads(
+        (hardware / f"sd_file_canary_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    retained = json.loads(
+        (hardware / f"sd_retained_history_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    remount = json.loads(
+        (hardware / f"sd_reboot_remount_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert audit.sd_file_canary_artifact_ok(file_canary, "COM12") is True
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is True
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is True
+
+    remount["filecanary_passed"] = False
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
+    remount["filecanary_passed"] = True
+
+    file_canary["sequence_completed"] = False
+    file_canary["results"] = [
+        {"ok": False, "cmd": "storage filecanary", "code": "TIMEOUT"}
+    ]
+    assert audit.sd_file_canary_artifact_ok(file_canary, "COM12") is False
+
+    retained["pre_sequence_complete"] = False
+    retained["unexpected_restart_before_reboot"] = True
+    retained["results"] = [
+        {"ok": False, "cmd": "storage retained-canary", "code": "TIMEOUT"}
+    ]
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is False
+
+    remount["post_sequence_complete"] = False
+    remount["results"] = [
+        {"ok": False, "cmd": "storage status", "code": "SKIPPED_AFTER_TIMEOUT"}
+    ]
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
+
+
+def test_full_soak_gate_fails_closed_on_stack_timeout_rf_or_crash_fields():
+    base = passing_full_soak_payload()
+    assert audit.full_soak_ok(base) is True
+
+    missing_stack = json.loads(json.dumps(base))
+    del missing_stack["summary"]["retained_task_stack_free_bytes_floor"]
+    assert audit.full_soak_ok(missing_stack) is False
+
+    low_stack = json.loads(json.dumps(base))
+    low_stack["summary"]["retained_task_stack_free_bytes_floor"] = 4095
+    assert audit.full_soak_ok(low_stack) is False
+
+    timed_out = json.loads(json.dumps(base))
+    timed_out["summary"]["command_timeout_seen"] = True
+    assert audit.full_soak_ok(timed_out) is False
+
+    active_rf = json.loads(json.dumps(base))
+    active_rf["public_rf_tx"] = True
+    assert audit.full_soak_ok(active_rf) is False
+
+    crash = json.loads(json.dumps(base))
+    crash["summary"]["crashlog_crash_like_count"] = 1
+    assert audit.full_soak_ok(crash) is False
+
+
+def test_full_soak_gate_checks_raw_samples_and_rejects_public_commands():
+    missing_raw_stack = passing_full_soak_payload()
+    del missing_raw_stack["samples"][3]["results"][0][
+        "retained_task_stack_free_bytes"
+    ]
+    assert audit.full_soak_ok(missing_raw_stack) is False
+
+    nested_timeout = passing_full_soak_payload()
+    nested_timeout["samples"][3]["results"].append(
+        {"ok": False, "cmd": "mesh status", "code": "TIMEOUT"}
+    )
+    assert audit.full_soak_ok(nested_timeout) is False
+
+    contradictory_public_tx = passing_full_soak_payload()
+    contradictory_public_tx["active_public_text"] = "test"
+    contradictory_public_tx["active_events"] = [
+        {
+            "command": "mesh send public test",
+            "result": {"ok": True, "cmd": "mesh send public"},
+        }
+    ]
+    assert contradictory_public_tx["public_rf_tx"] is False
+    assert audit.full_soak_ok(contradictory_public_tx) is False
+
+    too_few_samples = passing_full_soak_payload()
+    too_few_samples["samples"] = too_few_samples["samples"][:2]
+    assert audit.full_soak_ok(too_few_samples) is False
+
+    short_elapsed = passing_full_soak_payload()
+    short_elapsed["samples"][-1]["elapsed_sec"] = 43199
+    assert audit.full_soak_ok(short_elapsed) is False
+
+    optimistic_summary = passing_full_soak_payload()
+    optimistic_summary["samples"][5]["results"][0][
+        "retained_task_stack_free_bytes"
+    ] = 4999
+    assert audit.full_soak_ok(optimistic_summary) is False
+
+    changed_boot = passing_full_soak_payload()
+    changed_boot["samples"][10]["results"][0]["boot_nonce"] = 987654321
+    assert audit.full_soak_ok(changed_boot) is False
+
+    reset_shaped_uptime = passing_full_soak_payload()
+    reset_shaped_uptime["samples"][1]["results"][0]["uptime_ms"] = 10000
+    assert audit.full_soak_ok(reset_shaped_uptime) is False
+
+    hidden_dm = passing_full_soak_payload()
+    hidden_dm_command = "mesh send dm 0BF0A701D5AE2DB6 hidden_idle_tx"
+    hidden_dm["commands"].append(hidden_dm_command)
+    for sample in hidden_dm["samples"]:
+        sample["results"].append(
+            {"ok": True, "cmd": "mesh send dm", "queued": True}
+        )
+    assert hidden_dm["dm_rf_tx"] is False
+    assert audit.full_soak_ok(hidden_dm) is False
+
+    ignored_boot = passing_full_soak_payload()
+    ignored_boot["samples"][7]["results"][0]["ignored_json"] = [
+        {"cmd": "help", "ok": True}
+    ]
+    assert audit.full_soak_ok(ignored_boot) is False
+
+    truncated_boot_marker = passing_full_soak_payload()
+    truncated_boot_marker["samples"][7]["results"][0][
+        "ignored_boot_help_seen"
+    ] = True
+    truncated_boot_marker["samples"][7]["results"][0]["ignored_json"] = [
+        {"cmd": "noise-5", "ok": True}
+    ]
+    assert audit.full_soak_ok(truncated_boot_marker) is False
+
+    unproven_truncated_tail = passing_full_soak_payload()
+    unproven_result = unproven_truncated_tail["samples"][7]["results"][0]
+    unproven_result["ignored_json_count"] = 7
+    unproven_result["ignored_json"] = [
+        {"cmd": f"noise-{index}", "ok": True} for index in range(5)
+    ]
+    assert "ignored_boot_help_seen" not in unproven_result
+    assert audit.full_soak_ok(unproven_truncated_tail) is False
+
+    proven_non_boot_tail = passing_full_soak_payload()
+    proven_result = proven_non_boot_tail["samples"][7]["results"][0]
+    proven_result["ignored_json_count"] = 7
+    proven_result["ignored_json"] = [
+        {"cmd": f"noise-{index}", "ok": True} for index in range(5)
+    ]
+    proven_result["ignored_boot_help_seen"] = False
+    assert audit.full_soak_ok(proven_non_boot_tail) is True
 
 
 def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):

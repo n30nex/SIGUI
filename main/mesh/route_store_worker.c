@@ -3,6 +3,7 @@
 #include <stdbool.h>
 
 #include "esp_timer.h"
+#include "diagnostics/health_monitor.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -13,7 +14,13 @@
 #include "mesh/route_store.h"
 
 #define D1L_ROUTE_STORE_WORKER_INTERVAL_MS 1000U
-#define D1L_ROUTE_STORE_WORKER_STACK_BYTES 4096U
+/* This worker now owns the deepest Public/DM/packet/route persistence call
+ * chain.  The previous route-only 4 KiB allocation overflowed on hardware as
+ * soon as late-SD packet reconciliation ran.  ESP-IDF specifies task stack
+ * depth and high-water marks in bytes, so keep a production-sized margin and
+ * expose the measured floor through health diagnostics. */
+#define D1L_ROUTE_STORE_WORKER_STACK_BYTES 12288U
+#define D1L_ROUTE_STORE_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)
 #define D1L_ROUTE_STORE_WORKER_QUEUE_LENGTH 2U
 #define D1L_ROUTE_STORE_WORKER_POLL_MS 10U
 
@@ -115,13 +122,15 @@ esp_err_t d1l_route_store_worker_start(void)
     }
     TaskHandle_t created_task = NULL;
     if (xTaskCreate(route_store_worker_task, "route_persist",
-                    D1L_ROUTE_STORE_WORKER_STACK_BYTES, NULL, 3,
+                    D1L_ROUTE_STORE_WORKER_STACK_BYTES, NULL,
+                    D1L_ROUTE_STORE_WORKER_PRIORITY,
                     &created_task) != pdPASS) {
         portENTER_CRITICAL(&s_state_mux);
         s_worker_starting = false;
         portEXIT_CRITICAL(&s_state_mux);
         return ESP_ERR_NO_MEM;
     }
+    d1l_health_monitor_register_retained_task(created_task);
     portENTER_CRITICAL(&s_state_mux);
     s_worker_task = created_task;
     s_worker_starting = false;

@@ -45,7 +45,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
-RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 20.0
+FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
+RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
 
 
 def retained_canary_hash(token: str) -> int:
@@ -308,6 +309,11 @@ def wait_for_retained_storage_ready(
     while True:
         latest = send_console_command(ser, "storage status", timeout)
         results.append(latest)
+        if (
+            latest.get("code") == "TIMEOUT"
+            or unexpected_console_restart([latest])
+        ):
+            return latest, results
         if retained_storage_ready(latest) or time.monotonic() >= deadline:
             return latest, results
         time.sleep(max(0.0, poll_interval_sec))
@@ -315,13 +321,112 @@ def wait_for_retained_storage_ready(
 
 def run_command(ser, command: str, timeout: float) -> dict:
     command_timeout = timeout_for_reboot_command(command, timeout)
+    if command == "storage filecanary":
+        command_timeout = max(timeout, FILE_CANARY_MIN_TIMEOUT_SECONDS)
     if command.startswith("storage retained-canary "):
         command_timeout = max(timeout, RETAINED_CANARY_MIN_TIMEOUT_SECONDS)
     return send_console_command(ser, command, command_timeout)
 
 
 def run_commands(ser, commands: list[str], timeout: float) -> list[dict]:
-    return [run_command(ser, command, timeout) for command in commands]
+    results: list[dict] = []
+    timed_out_command: str | None = None
+    restarted_during_command: str | None = None
+    for command in commands:
+        if timed_out_command is not None:
+            results.append(
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": command,
+                    "code": "SKIPPED_AFTER_TIMEOUT",
+                    "timed_out_command": timed_out_command,
+                }
+            )
+            continue
+        if restarted_during_command is not None:
+            results.append(
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": command,
+                    "code": "SKIPPED_AFTER_UNEXPECTED_RESTART",
+                    "restart_observed_during_command": restarted_during_command,
+                }
+            )
+            continue
+        result = run_command(ser, command, timeout)
+        results.append(result)
+        if result.get("code") == "TIMEOUT":
+            # The console task may still be executing the timed-out command.
+            # Never enqueue another command or reboot into that work: doing so
+            # desynchronizes JSON replies and can turn one slow operation into
+            # a misleading cascade of failures.
+            timed_out_command = command
+        elif unexpected_console_restart([result]):
+            restarted_during_command = command
+    return results
+
+
+def sequence_completed(results: list[dict]) -> bool:
+    return (
+        all(
+            result.get("code")
+            not in {
+                "TIMEOUT",
+                "SKIPPED_AFTER_TIMEOUT",
+                "SKIPPED_AFTER_UNEXPECTED_RESTART",
+            }
+            for result in results
+        )
+        and not unexpected_console_restart(results)
+    )
+
+
+def skipped_after_timeout(commands: list[str], timed_out_command: str) -> list[dict]:
+    return [
+        {
+            "schema": 1,
+            "ok": False,
+            "cmd": command,
+            "code": "SKIPPED_AFTER_TIMEOUT",
+            "timed_out_command": timed_out_command,
+        }
+        for command in commands
+    ]
+
+
+def skipped_after_unexpected_restart(
+    commands: list[str], restart_observed_during_command: str
+) -> list[dict]:
+    return [
+        {
+            "schema": 1,
+            "ok": False,
+            "cmd": command,
+            "code": "SKIPPED_AFTER_UNEXPECTED_RESTART",
+            "restart_observed_during_command": restart_observed_during_command,
+        }
+        for command in commands
+    ]
+
+
+def unexpected_console_restart(results: list[dict]) -> bool:
+    return any(result.get("ignored_boot_help_seen") is True for result in results) or any(
+        ignored.get("cmd") == "help"
+        for result in results
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict)
+    )
+
+
+def timed_out_command(results: list[dict]) -> str | None:
+    for result in results:
+        if result.get("code") == "TIMEOUT":
+            return result.get("cmd") or "unknown command"
+        if result.get("code") == "SKIPPED_AFTER_TIMEOUT":
+            return result.get("timed_out_command") or "unknown command"
+    return None
 
 
 def run_acceptance(
@@ -360,12 +465,37 @@ def run_acceptance(
             allow_unavailable=allow_unavailable,
         )
         results.extend(ready_wait_results)
-        results.extend(run_commands(ser, retained_commands, timeout))
+        preflight_timeout = next(
+            (
+                result.get("cmd", "storage preflight")
+                for result in ready_wait_results
+                if result.get("code") == "TIMEOUT"
+            ),
+            None,
+        )
+        preflight_restart = unexpected_console_restart(ready_wait_results)
+        if preflight_timeout is not None:
+            retained_run_results = skipped_after_timeout(
+                retained_commands, preflight_timeout
+            )
+        elif preflight_restart:
+            retained_run_results = skipped_after_unexpected_restart(
+                retained_commands,
+                ready_wait_results[-1].get("cmd", "storage preflight"),
+            )
+        else:
+            retained_run_results = run_commands(ser, retained_commands, timeout)
+        results.extend(retained_run_results)
 
     retained_start = len(ready_wait_results)
     filecanary_result = results[retained_start]
     retained_result = results[retained_start + 1]
     pre_commands = [row.get("cmd", "") for row in ready_wait_results] + retained_commands
+    pre_sequence_results = [*ready_wait_results, *retained_run_results]
+    pre_sequence_complete = sequence_completed(pre_sequence_results)
+    unexpected_restart_before_reboot = unexpected_console_restart(
+        pre_sequence_results
+    )
     if allow_unavailable and allowed_unavailable(retained_result):
         public_rf_tx, formats_sd = result_safety_flags(results)
         report = {
@@ -379,6 +509,10 @@ def run_acceptance(
             "public_rf_tx": public_rf_tx,
             "formats_sd": formats_sd,
             "allow_unavailable": allow_unavailable,
+            "pre_sequence_complete": pre_sequence_complete,
+            "post_sequence_complete": None,
+            "timed_out_command": timed_out_command(results),
+            "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
             "retained_canary_unavailable_ok": True,
             "filecanary_unavailable_ok": filecanary_unavailable(filecanary_result),
             "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
@@ -394,7 +528,13 @@ def run_acceptance(
                 1 for result in ready_wait_results if result.get("cmd") == "storage status"
             ),
             "mount_attempt": mount_attempt,
-            "ok": not public_rf_tx and not formats_sd,
+            "ok": (
+                not public_rf_tx
+                and not formats_sd
+                and pre_sequence_complete
+                and timed_out_command(results) is None
+                and not unexpected_restart_before_reboot
+            ),
             "results": results,
         }
         return report
@@ -405,7 +545,7 @@ def run_acceptance(
     post_results: list[dict] = []
     post_ready_wait_results: list[dict] = []
     post_readback_results: list[dict] = []
-    if include_reboot:
+    if include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             reboot_result = run_command(ser, "reboot", timeout)
             results.append(reboot_result)
@@ -420,19 +560,40 @@ def run_acceptance(
                     wait_sec=mount_wait_sec,
                 )
                 post_results.extend(post_ready_wait_results)
-                post_readback_results = run_commands(ser, post_commands[1:], timeout)
+                if sequence_completed(post_ready_wait_results):
+                    post_readback_results = run_commands(
+                        ser, post_commands[1:], timeout
+                    )
+                elif unexpected_console_restart(post_ready_wait_results):
+                    post_readback_results = skipped_after_unexpected_restart(
+                        post_commands[1:],
+                        post_ready_wait_results[-1].get("cmd", "storage status"),
+                    )
+                else:
+                    post_timeout_command = next(
+                        result.get("cmd", "storage status")
+                        for result in post_ready_wait_results
+                        if result.get("code") == "TIMEOUT"
+                    )
+                    post_readback_results = skipped_after_timeout(
+                        post_commands[1:], post_timeout_command
+                    )
                 post_results.extend(post_readback_results)
                 results.extend(post_results)
-            post_commands_ran = True
+            post_commands_ran = sequence_completed(post_ready_wait_results)
         commands = [*pre_commands, "reboot"]
         if post_commands_ran:
             commands.extend("storage status" for _ in post_ready_wait_results)
             commands.extend(post_commands[1:])
-    else:
+    elif include_reboot:
+        commands = pre_commands
+    elif pre_sequence_complete and not unexpected_restart_before_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
             results.append(send_console_command(ser, "health", timeout))
         commands = [*pre_commands, "health"]
+    else:
+        commands = pre_commands
 
     by_command = {row.get("cmd", ""): row for row in results}
     pre_by_command = {cmd: result for cmd, result in zip(pre_commands, results[: len(pre_commands)])}
@@ -477,6 +638,10 @@ def run_acceptance(
         else retained_storage_ready(storage_after)
     )
     public_rf_tx, formats_sd = result_safety_flags(results)
+    timeout_command = timed_out_command(results)
+    post_sequence_complete = (
+        sequence_completed(post_results) if include_reboot and post_results else None
+    )
 
     return {
         "schema": 1,
@@ -489,6 +654,10 @@ def run_acceptance(
         "public_rf_tx": public_rf_tx,
         "formats_sd": formats_sd,
         "allow_unavailable": allow_unavailable,
+        "pre_sequence_complete": pre_sequence_complete,
+        "post_sequence_complete": post_sequence_complete,
+        "timed_out_command": timeout_command,
+        "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
         "retained_canary_passed": canary_ok,
         "filecanary_passed": filecanary_ok,
         "storage_file_gate_ready_before": storage_file_gate_ready_before,
@@ -525,6 +694,9 @@ def run_acceptance(
         "ok": (
             not public_rf_tx
             and not formats_sd
+            and pre_sequence_complete
+            and timeout_command is None
+            and not unexpected_restart_before_reboot
             and canary_ok
             and filecanary_ok
             and storage_file_gate_ready_before

@@ -110,6 +110,7 @@ def dry_run_report(expected_firmware_commit: str | None = None) -> dict:
 def read_command_result(ser, command: str, timeout: float) -> dict:
     deadline = time.monotonic() + timeout
     ignored: list[dict] = []
+    ignored_boot_help_seen = False
     original_timeout = getattr(ser, "timeout", None)
     try:
         while time.monotonic() < deadline:
@@ -122,8 +123,18 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
             raw = raw_bytes.decode("utf-8", errors="replace")
             parsed = parse_jsonl_line(raw)
             if parsed and parsed.get("cmd") == command:
+                if ignored:
+                    parsed = {
+                        **parsed,
+                        "ignored_json_count": len(ignored),
+                        "ignored_json": ignored[-5:],
+                        "ignored_boot_help_seen": ignored_boot_help_seen,
+                    }
                 return parsed
             if parsed:
+                ignored_boot_help_seen = (
+                    ignored_boot_help_seen or parsed.get("cmd") == "help"
+                )
                 ignored.append(
                     {
                         "cmd": parsed.get("cmd"),
@@ -140,6 +151,7 @@ def read_command_result(ser, command: str, timeout: float) -> dict:
         "code": "TIMEOUT",
         "ignored_json_count": len(ignored),
         "ignored_json": ignored[-5:],
+        "ignored_boot_help_seen": ignored_boot_help_seen,
     }
 
 

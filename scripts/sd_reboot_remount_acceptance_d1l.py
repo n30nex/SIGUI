@@ -52,7 +52,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 MOUNT_POLL_ATTEMPTS = 10
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
-RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 20.0
+SD_OPERATION_MIN_TIMEOUT_SECONDS = 120.0
+RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
 
 
 def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
@@ -190,6 +191,30 @@ def any_flag(results: list[dict], flag: str) -> bool:
     return any(result.get(flag) is True for result in results)
 
 
+def host_timed_out(result: dict | None) -> bool:
+    return isinstance(result, dict) and result.get("code") == "TIMEOUT"
+
+
+def unexpected_console_restart(results: list[dict]) -> bool:
+    return any(result.get("ignored_boot_help_seen") is True for result in results) or any(
+        ignored.get("cmd") == "help"
+        for result in results
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict)
+    )
+
+
+def sequence_completed(
+    commands: list[str], results: list[dict], expected_commands: list[str]
+) -> bool:
+    return (
+        commands == expected_commands
+        and len(results) == len(expected_commands)
+        and not any(host_timed_out(result) for result in results)
+        and not unexpected_console_restart(results)
+    )
+
+
 def run_command(ser, command: str, timeout: float) -> dict:
     if command.startswith("mesh send public"):
         raise RuntimeError(f"refusing destructive/RF command in SD remount acceptance: {command}")
@@ -200,8 +225,25 @@ def run_command(ser, command: str, timeout: float) -> dict:
         command in {"storage mount", "storage remount", "storage filecanary"}
         or command.startswith("storage map-tile-")
     ):
-        command_timeout = max(timeout, 15.0)
+        command_timeout = max(timeout, SD_OPERATION_MIN_TIMEOUT_SECONDS)
     return send_console_command(ser, command, command_timeout)
+
+
+def run_commands_until_terminal(
+    ser, planned_commands: list[str], timeout: float
+) -> tuple[list[str], list[dict]]:
+    commands: list[str] = []
+    results: list[dict] = []
+    for command in planned_commands:
+        commands.append(command)
+        result = run_command(ser, command, timeout)
+        results.append(result)
+        # The console task may still be executing a host-timed-out command.
+        # Queuing anything else can shift JSON replies and turn one slow SD
+        # operation into a destructive or misleading command sequence.
+        if host_timed_out(result) or unexpected_console_restart([result]):
+            break
+    return commands, results
 
 
 def run_mount_sequence(
@@ -211,13 +253,12 @@ def run_mount_sequence(
     mount_poll_attempts: int,
     mount_poll_interval_sec: float,
 ) -> tuple[list[str], list[dict], dict]:
-    commands = ["storage status", "storage remount", "storage status"]
-    results = [
-        run_command(ser, "storage status", timeout),
-        run_command(ser, "storage remount", timeout),
-        run_command(ser, "storage status", timeout),
-    ]
-    storage_after = results[-1]
+    initial_commands = ["storage status", "storage remount", "storage status"]
+    commands, results = run_commands_until_terminal(ser, initial_commands, timeout)
+    storage_after = results[-1] if results else {}
+    if not sequence_completed(commands, results, initial_commands):
+        return commands, results, storage_after
+
     # A remount can race the boot-time storage manager.  Even if the cached SD
     # fields already look ready, require a later status sample after that busy
     # response before allowing file/map checks to start.
@@ -229,6 +270,8 @@ def run_mount_sequence(
         commands.append("storage status")
         storage_after = run_command(ser, "storage status", timeout)
         results.append(storage_after)
+        if host_timed_out(storage_after) or unexpected_console_restart([storage_after]):
+            break
         require_post_busy_poll = False
     return commands, results, storage_after
 
@@ -252,7 +295,17 @@ def run_acceptance(
     fingerprint = fingerprint_for_token(token)
     results: list[dict] = []
     commands: list[str] = []
+    pre_data_plan = [
+        "storage filecanary",
+        f"storage retained-canary {token}",
+        f"storage map-tile-canary {token}",
+        *retained_readback_commands(token),
+    ]
+    if include_reboot:
+        pre_data_plan.append("health")
 
+    pre_data_commands: list[str] = []
+    pre_data_results: list[dict] = []
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         pre_mount_commands, pre_mount_results, pre_storage = run_mount_sequence(
@@ -263,38 +316,52 @@ def run_acceptance(
         )
         commands.extend(pre_mount_commands)
         results.extend(pre_mount_results)
-        pre_commands = [
-            "storage filecanary",
-            f"storage retained-canary {token}",
-            f"storage map-tile-canary {token}",
-            *retained_readback_commands(token),
-        ]
-        if include_reboot:
-            pre_commands.append("health")
-        for command in pre_commands:
-            commands.append(command)
-            results.append(run_command(ser, command, timeout))
+        pre_mount_complete = (
+            len(pre_mount_commands) >= 3
+            and not any(host_timed_out(result) for result in pre_mount_results)
+            and not unexpected_console_restart(pre_mount_results)
+        )
+        if pre_mount_complete:
+            pre_data_commands, pre_data_results = run_commands_until_terminal(
+                ser, pre_data_plan, timeout
+            )
+            commands.extend(pre_data_commands)
+            results.extend(pre_data_results)
 
-    pre_start = len(pre_mount_commands)
-    pre_by_command = {
-        command: result for command, result in zip(pre_commands, results[pre_start: pre_start + len(pre_commands)])
-    }
+    pre_sequence_complete = pre_mount_complete and sequence_completed(
+        pre_data_commands, pre_data_results, pre_data_plan
+    )
+    pre_results = [*pre_mount_results, *pre_data_results]
+    unexpected_restart_before_reboot = unexpected_console_restart(pre_results)
+    pre_by_command = dict(zip(pre_data_commands, pre_data_results))
+    filecanary_result = pre_by_command.get("storage filecanary", {})
     retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
     pre_map_tile = pre_by_command.get(f"storage map-tile-canary {token}", {})
+    pre_remount_result = next(
+        (result for result in pre_mount_results if result.get("cmd") == "storage remount"),
+        {},
+    )
     pre_remount_busy = any(remount_manager_busy(result) for result in pre_mount_results)
-    pre_remount_command_passed = remount_transition_passed(
-        pre_mount_results[1], pre_storage
+    pre_remount_command_passed = (
+        pre_mount_complete
+        and remount_transition_passed(pre_remount_result, pre_storage)
     )
 
-    post_storage = {}
+    post_storage: dict = {}
     post_by_command: dict[str, dict] = {}
-    post_map_tile = {}
-    health = {}
+    post_map_tile: dict = {}
+    health: dict = {}
+    post_mount_commands: list[str] = []
+    post_mount_results: list[dict] = []
+    post_data_commands: list[str] = []
+    post_data_results: list[dict] = []
     post_remount_busy = False
     post_remount_command_passed = not include_reboot
+    post_sequence_complete = False
     reboot_result: dict | None = None
     reboot_ok = not include_reboot
-    if include_reboot:
+
+    if include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             commands.append("reboot")
             reboot_result = run_command(ser, "reboot", timeout)
@@ -312,32 +379,55 @@ def run_acceptance(
                 )
                 commands.extend(post_mount_commands)
                 results.extend(post_mount_results)
-                post_remount_busy = any(remount_manager_busy(result) for result in post_mount_results)
-                post_remount_command_passed = remount_transition_passed(
-                    post_mount_results[1], post_storage
+                post_mount_complete = (
+                    len(post_mount_commands) >= 3
+                    and not any(host_timed_out(result) for result in post_mount_results)
+                    and not unexpected_console_restart(post_mount_results)
                 )
-                post_commands = [
+                post_remount_busy = any(
+                    remount_manager_busy(result) for result in post_mount_results
+                )
+                post_remount_result = next(
+                    (
+                        result
+                        for result in post_mount_results
+                        if result.get("cmd") == "storage remount"
+                    ),
+                    {},
+                )
+                post_remount_command_passed = (
+                    post_mount_complete
+                    and remount_transition_passed(post_remount_result, post_storage)
+                )
+                post_data_plan = [
                     *retained_readback_commands(token),
                     f"storage map-tile-check {token}",
                     "health",
                 ]
-                post_results = []
-                for command in post_commands:
-                    commands.append(command)
-                    result = run_command(ser, command, timeout)
-                    results.append(result)
-                    post_results.append(result)
-                post_by_command = {
-                    command: result for command, result in zip(post_commands, post_results)
-                }
+                if post_mount_complete:
+                    post_data_commands, post_data_results = run_commands_until_terminal(
+                        ser, post_data_plan, timeout
+                    )
+                    commands.extend(post_data_commands)
+                    results.extend(post_data_results)
+                post_sequence_complete = post_mount_complete and sequence_completed(
+                    post_data_commands, post_data_results, post_data_plan
+                )
+                post_by_command = dict(zip(post_data_commands, post_data_results))
                 post_map_tile = post_by_command.get(f"storage map-tile-check {token}", {})
                 health = post_by_command.get("health", {})
-    else:
+    elif not include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             ser.reset_input_buffer()
-            commands.append("health")
-            health = run_command(ser, "health", timeout)
-            results.append(health)
+            health_commands, health_results = run_commands_until_terminal(
+                ser, ["health"], timeout
+            )
+            commands.extend(health_commands)
+            results.extend(health_results)
+            health = health_results[0] if health_results else {}
+            post_sequence_complete = sequence_completed(
+                health_commands, health_results, ["health"]
+            )
         post_storage = pre_storage
         post_by_command = pre_by_command
         post_map_tile = pre_map_tile
@@ -367,6 +457,7 @@ def run_acceptance(
         if include_reboot
         else storage_ready(post_storage)
     )
+    filecanary_ok = canary_passed(filecanary_result)
     retained_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
     pre_retained_sd_ready = retained_storage_ready(pre_storage)
     post_retained_sd_ready = (
@@ -381,6 +472,14 @@ def run_acceptance(
         else map_tile_write_passed(post_map_tile, token)
     )
     health_ok = health.get("ok") is True
+    timed_out_command = next(
+        (
+            result.get("cmd", "unknown")
+            for result in results
+            if host_timed_out(result)
+        ),
+        None,
+    )
 
     return {
         "schema": 1,
@@ -392,6 +491,10 @@ def run_acceptance(
         "commands": commands,
         "public_rf_tx": public_rf_tx,
         "formats_sd": formats_sd,
+        "pre_sequence_complete": pre_sequence_complete,
+        "post_sequence_complete": post_sequence_complete,
+        "timed_out_command": timed_out_command,
+        "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
         "pre_remount_ready": pre_ready,
         "post_remount_ready": post_ready,
         "pre_remount_manager_busy": pre_remount_busy,
@@ -409,6 +512,7 @@ def run_acceptance(
         "pre_reboot_boot_nonce": health_boot_nonce(pre_health) if include_reboot else None,
         "post_reboot_boot_nonce": health_boot_nonce(health) if include_reboot else None,
         "reboot_proven": reboot_proof_ok if include_reboot else None,
+        "filecanary_passed": filecanary_ok,
         "retained_canary_passed": retained_ok,
         "pre_reboot_readbacks_ok": pre_readbacks_ok,
         "post_reboot_readbacks_ok": post_readbacks_ok,
@@ -422,6 +526,10 @@ def run_acceptance(
         "ok": (
             not public_rf_tx
             and not formats_sd
+            and pre_sequence_complete
+            and post_sequence_complete
+            and timed_out_command is None
+            and not unexpected_restart_before_reboot
             and pre_ready
             and post_ready
             and pre_remount_command_passed
@@ -430,6 +538,7 @@ def run_acceptance(
             and post_retained_sd_ready
             and reboot_ok
             and reboot_proof_ok
+            and filecanary_ok
             and retained_ok
             and pre_readbacks_ok
             and post_readbacks_ok

@@ -80,6 +80,42 @@ def test_parse_jsonl_ignores_logs():
     assert [item["cmd"] for item in parsed] == ["version", "radiohw"]
 
 
+def test_command_result_preserves_ignored_json_before_expected_reply():
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","state":"ready"}\n',
+        ]
+    )
+
+    result = smoke_d1l.read_command_result(ser, "storage status", 1.0)
+
+    assert result["ok"] is True
+    assert result["state"] == "ready"
+    assert result["ignored_json_count"] == 1
+    assert result["ignored_json"] == [{"cmd": "help", "ok": True}]
+    assert result["ignored_boot_help_seen"] is True
+
+
+def test_command_result_keeps_boot_marker_after_ignored_tail_is_truncated():
+    responses = ['{"schema":1,"ok":true,"cmd":"help"}\n']
+    responses.extend(
+        f'{{"schema":1,"ok":true,"cmd":"noise-{index}"}}\n'
+        for index in range(6)
+    )
+    responses.append(
+        '{"schema":1,"ok":true,"cmd":"storage status","state":"ready"}\n'
+    )
+    ser = FakeSerial(responses)
+
+    result = smoke_d1l.read_command_result(ser, "storage status", 1.0)
+
+    assert result["ok"] is True
+    assert result["ignored_json_count"] == 7
+    assert all(row["cmd"] != "help" for row in result["ignored_json"])
+    assert result["ignored_boot_help_seen"] is True
+
+
 def test_dry_run_lists_phase1_commands():
     report = dry_run_report()
     assert report["ok"] is True

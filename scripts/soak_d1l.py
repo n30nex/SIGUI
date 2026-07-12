@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,10 @@ SOAK_COMMANDS = [
 ]
 STORAGE_STATUS_COMMAND = "storage status"
 SD_FILE_CANARY_COMMAND = "storage filecanary"
+SD_FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
+DM_FINGERPRINT_RE = re.compile(r"^[0-9A-Fa-f]{16}$")
+DM_TEXT_MAX_CHARS = 138
+TERMINAL_COMMAND_CODES = {"TIMEOUT", "UNEXPECTED_RESTART"}
 STORAGE_REQUIRED_SD_FIELDS = (
     "state",
     "filesystem",
@@ -96,6 +101,39 @@ def soak_commands(*, sample_storage: bool = False, sd_file_canary: bool = False)
     if sd_file_canary:
         commands.append(SD_FILE_CANARY_COMMAND)
     return commands
+
+
+def active_dm_command(
+    active_public_text: str | None,
+    active_dm_fingerprint: str | None,
+    active_dm_text: str | None,
+) -> str | None:
+    if active_public_text:
+        raise ValueError(
+            "automated Public TX is disabled; use --active-dm-fingerprint and "
+            "--active-dm-text (or the controlled #test channel once configured)"
+        )
+    if active_dm_fingerprint is None and active_dm_text is None:
+        return None
+    if not active_dm_fingerprint or not DM_FINGERPRINT_RE.fullmatch(
+        active_dm_fingerprint
+    ):
+        raise ValueError("active DM requires a 16-hex fingerprint")
+    if not active_dm_text or not active_dm_text.strip():
+        raise ValueError("active DM requires non-empty text")
+    if "\n" in active_dm_text or "\r" in active_dm_text:
+        raise ValueError("active DM text must be a single console line")
+    if len(active_dm_text) > DM_TEXT_MAX_CHARS:
+        raise ValueError(f"active DM text must be at most {DM_TEXT_MAX_CHARS} characters")
+    return f"mesh send dm {active_dm_fingerprint.upper()} {active_dm_text}"
+
+
+def unexpected_console_restart(result: dict) -> bool:
+    return result.get("ignored_boot_help_seen") is True or any(
+        ignored.get("cmd") == "help"
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict)
+    )
 
 
 def sd_status(row: dict) -> dict:
@@ -194,8 +232,20 @@ def send_soak_command(
     terminal_failure_ok: Callable[[dict], bool] | None = None,
 ) -> dict:
     attempts = []
+    command_timeout = (
+        max(timeout, SD_FILE_CANARY_MIN_TIMEOUT_SECONDS)
+        if command == SD_FILE_CANARY_COMMAND
+        else timeout
+    )
     for attempt in range(max(0, retries) + 1):
-        result = send_console_command(ser, command, timeout)
+        result = send_console_command(ser, command, command_timeout)
+        if unexpected_console_restart(result):
+            result = {
+                **result,
+                "ok": False,
+                "code": "UNEXPECTED_RESTART",
+                "unexpected_console_restart": True,
+            }
         attempts.append(result)
         terminal_ok = bool(terminal_failure_ok and terminal_failure_ok(result))
         if result.get("ok") or terminal_ok:
@@ -208,6 +258,11 @@ def send_soak_command(
                 result["recovered_after_retry"] = True
                 result["retry_failures"] = attempts[:-1]
             return result
+        if result.get("code") in TERMINAL_COMMAND_CODES:
+            # Firmware may still be executing this command. Retrying or
+            # queueing another command would shift JSON replies and turn a
+            # single slow operation into invalid soak evidence.
+            break
         if attempt < retries:
             time.sleep(retry_delay_sec)
 
@@ -229,8 +284,12 @@ def collect_sample(
     allow_sd_unavailable: bool = False,
 ) -> dict:
     commands = commands or SOAK_COMMANDS
-    results = [
-        send_soak_command(
+    results: list[dict] = []
+    aborted_after_timeout: str | None = None
+    for command in commands:
+        if aborted_after_timeout is not None:
+            break
+        result = send_soak_command(
             ser,
             command,
             timeout,
@@ -242,11 +301,13 @@ def collect_sample(
                 else False
             ),
         )
-        for command in commands
-    ]
+        results.append(result)
+        if result.get("code") in TERMINAL_COMMAND_CODES:
+            aborted_after_timeout = command
     return {
         "label": label,
         "elapsed_sec": round(elapsed_sec, 3),
+        "aborted_after_timeout": aborted_after_timeout,
         "results": results,
     }
 
@@ -287,12 +348,38 @@ def summarize_soak(
         if not result.get("ok"):
             failures.append(
                 {
-                    "sample": "active_public_tx",
+                    "sample": "active_dm_tx",
                     "elapsed_sec": event.get("elapsed_sec"),
                     "cmd": result.get("cmd"),
                     "code": result.get("code"),
                 }
             )
+
+    observed_results = [
+        result
+        for sample in samples
+        for result in sample.get("results", [])
+    ] + [event.get("result", {}) for event in active_events]
+    host_timeout_seen = any(
+        result.get("code") == "TIMEOUT"
+        or any(
+            retry.get("code") == "TIMEOUT"
+            for retry in (result.get("retry_failures") or [])
+            if isinstance(retry, dict)
+        )
+        for result in observed_results
+    )
+    unexpected_restart_seen = any(
+        result.get("code") == "UNEXPECTED_RESTART"
+        or unexpected_console_restart(result)
+        or any(
+            retry.get("code") == "UNEXPECTED_RESTART"
+            or unexpected_console_restart(retry)
+            for retry in (result.get("retry_failures") or [])
+            if isinstance(retry, dict)
+        )
+        for result in observed_results
+    )
 
     uptime_values = numeric_values(health, "uptime_ms")
     rx_delta = first_last_delta(mesh, "rx_packets")
@@ -303,6 +390,7 @@ def summarize_soak(
 
     current_stack = numeric_values(health, "current_task_stack_free_words")
     ui_stack = numeric_values(health, "ui_task_stack_free_words")
+    retained_stack = numeric_values(health, "retained_task_stack_free_bytes")
     lvgl_used = numeric_values(health, "lvgl_used_pct")
     heap_min = numeric_values(health, "heap_min_free")
     psram_min = numeric_values(health, "psram_min_free")
@@ -383,12 +471,20 @@ def summarize_soak(
         threshold_failures.append("mesh_not_ready")
     if not uptime_monotonic:
         threshold_failures.append("uptime_reset_or_reboot_seen")
+    if host_timeout_seen:
+        threshold_failures.append("command_timeout_seen")
+    if unexpected_restart_seen:
+        threshold_failures.append("unexpected_console_restart_seen")
     if current_stack and min(current_stack) <= 0:
         threshold_failures.append("current_task_stack_watermark_zero")
     if ui_stack and min(ui_stack) <= 0:
         threshold_failures.append("ui_task_stack_watermark_zero")
+    if not health or len(retained_stack) != len(health):
+        threshold_failures.append("retained_task_stack_watermark_missing")
+    elif min(retained_stack) < 4096:
+        threshold_failures.append("retained_task_stack_margin_below_4096_bytes")
     if active_events and not active_tx_ok:
-        threshold_failures.append("active_public_tx_failed")
+        threshold_failures.append("active_dm_tx_failed")
     if crash_like_count > 0:
         threshold_failures.append("crash_like_reset_seen")
     if min_tx_delta > 0 and (tx_delta is None or tx_delta < min_tx_delta):
@@ -427,6 +523,8 @@ def summarize_soak(
         "command_failure_count": len(failures),
         "command_failures": failures,
         "threshold_failures": threshold_failures,
+        "command_timeout_seen": host_timeout_seen,
+        "unexpected_console_restart_seen": unexpected_restart_seen,
         "board_ready_all": board_ready_all,
         "ui_ready_all": ui_ready_all,
         "mesh_ready_all": mesh_ready_all,
@@ -440,6 +538,9 @@ def summarize_soak(
         "psram_min_free_floor": min(psram_min) if psram_min else None,
         "current_task_stack_free_words_floor": min(current_stack) if current_stack else None,
         "ui_task_stack_free_words_floor": min(ui_stack) if ui_stack else None,
+        "retained_task_stack_free_bytes_floor": (
+            min(retained_stack) if retained_stack else None
+        ),
         "lvgl_used_pct_peak": max(lvgl_used) if lvgl_used else None,
         "signal_sample_count_peak": max(signal_samples) if signal_samples else None,
         "crashlog_total_written_delta": crashlog_total_delta,
@@ -506,7 +607,12 @@ def dry_run_report(
     sample_storage: bool = False,
     sd_file_canary: bool = False,
     allow_sd_unavailable: bool = False,
+    active_dm_fingerprint: str | None = None,
+    active_dm_text: str | None = None,
 ) -> dict:
+    active_command = active_dm_command(
+        active_public_text, active_dm_fingerprint, active_dm_text
+    )
     return {
         "schema": 1,
         "mode": "dry-run",
@@ -515,8 +621,14 @@ def dry_run_report(
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
         "commands": soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary),
-        "active_public_text": active_public_text,
-        "public_rf_tx": active_public_text is not None,
+        "active_public_text": None,
+        "active_dm_fingerprint": (
+            active_dm_fingerprint.upper() if active_dm_fingerprint else None
+        ),
+        "active_dm_text": active_dm_text,
+        "active_command": active_command,
+        "dm_rf_tx": active_command is not None,
+        "public_rf_tx": False,
         "formats_sd": False,
         "sample_storage": sample_storage or sd_file_canary,
         "sd_file_canary": sd_file_canary,
@@ -550,18 +662,23 @@ def run_serial_soak(
     sample_storage: bool = False,
     sd_file_canary: bool = False,
     allow_sd_unavailable: bool = False,
+    active_dm_fingerprint: str | None = None,
+    active_dm_text: str | None = None,
 ) -> dict:
     try:
         import serial
     except ImportError as exc:
         raise SystemExit("pyserial is required for hardware soak: python -m pip install pyserial") from exc
 
+    active_command = active_dm_command(
+        active_public_text, active_dm_fingerprint, active_dm_text
+    )
     if duration_sec <= 0:
         raise ValueError("duration_sec must be positive")
     if sample_interval_sec <= 0:
         raise ValueError("sample_interval_sec must be positive")
-    if active_public_text and active_interval_sec <= 0:
-        raise ValueError("active_interval_sec must be positive when active public TX is enabled")
+    if active_command and active_interval_sec <= 0:
+        raise ValueError("active_interval_sec must be positive when active DM TX is enabled")
 
     samples: list[dict] = []
     active_events: list[dict] = []
@@ -584,13 +701,22 @@ def run_serial_soak(
                 }
             )
 
+        fatal_timeout_command = next(
+            (
+                event.get("cmd")
+                for event in setup_events
+                if event.get("result", {}).get("code") in TERMINAL_COMMAND_CODES
+            ),
+            None,
+        )
+
         start = time.monotonic()
         deadline = start + duration_sec
         next_sample = start
-        next_active = start if active_public_text else float("inf")
+        next_active = start if active_command else float("inf")
         sample_index = 0
 
-        while True:
+        while fatal_timeout_command is None:
             now = time.monotonic()
             elapsed = now - start
 
@@ -608,15 +734,18 @@ def run_serial_soak(
                         allow_sd_unavailable,
                     )
                 )
+                if samples[-1].get("aborted_after_timeout"):
+                    fatal_timeout_command = samples[-1]["aborted_after_timeout"]
+                    break
                 sample_index += 1
                 next_sample += sample_interval_sec
 
             now = time.monotonic()
             elapsed = now - start
-            if active_public_text and now >= next_active and now < deadline:
+            if active_command and now >= next_active and now < deadline:
                 result = send_soak_command(
                     ser,
-                    f"mesh send public {active_public_text}",
+                    active_command,
                     timeout,
                     command_retries,
                     retry_delay_sec,
@@ -624,10 +753,15 @@ def run_serial_soak(
                 active_events.append(
                     {
                         "elapsed_sec": round(elapsed, 3),
-                        "text": active_public_text,
+                        "command": active_command,
+                        "fingerprint": active_dm_fingerprint.upper(),
+                        "text": active_dm_text,
                         "result": result,
                     }
                 )
+                if result.get("code") in TERMINAL_COMMAND_CODES:
+                    fatal_timeout_command = result.get("cmd") or "active command"
+                    break
                 next_active += active_interval_sec
 
             if now >= deadline:
@@ -636,9 +770,9 @@ def run_serial_soak(
             sleep_for = min(next_sample, next_active, deadline) - now
             time.sleep(max(0.1, min(sleep_for, 1.0)))
 
-        final_elapsed = time.monotonic() - start
-        samples.append(
-            collect_sample(
+        if fatal_timeout_command is None:
+            final_elapsed = time.monotonic() - start
+            final_sample = collect_sample(
                 ser,
                 timeout,
                 "final",
@@ -648,7 +782,9 @@ def run_serial_soak(
                 commands,
                 allow_sd_unavailable,
             )
-        )
+            samples.append(final_sample)
+            if final_sample.get("aborted_after_timeout"):
+                fatal_timeout_command = final_sample["aborted_after_timeout"]
 
     ended_at = datetime.now(timezone.utc)
     summary = summarize_soak(
@@ -685,8 +821,14 @@ def run_serial_soak(
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
-        "active_public_text": active_public_text,
-        "public_rf_tx": active_public_text is not None,
+        "active_public_text": None,
+        "active_dm_fingerprint": (
+            active_dm_fingerprint.upper() if active_dm_fingerprint else None
+        ),
+        "active_dm_text": active_dm_text,
+        "active_command": active_command,
+        "dm_rf_tx": active_command is not None,
+        "public_rf_tx": False,
         "formats_sd": False,
         "sample_storage": sample_storage or sd_file_canary,
         "sd_file_canary": sd_file_canary,
@@ -698,6 +840,7 @@ def run_serial_soak(
         "clear_crashlog_before_start": clear_crashlog_before_start,
         "command_retries": command_retries,
         "retry_delay_sec": retry_delay_sec,
+        "aborted_after_timeout": fatal_timeout_command,
         "ok": summary["ok"],
         "summary": summary,
         "setup_events": setup_events,
@@ -723,7 +866,13 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=5.0)
     parser.add_argument("--duration-sec", type=float, default=300.0)
     parser.add_argument("--sample-interval-sec", type=float, default=60.0)
-    parser.add_argument("--active-public-text", default=None)
+    parser.add_argument(
+        "--active-public-text",
+        default=None,
+        help="disabled safety compatibility flag; automated Public TX is prohibited",
+    )
+    parser.add_argument("--active-dm-fingerprint", default=None)
+    parser.add_argument("--active-dm-text", default=None)
     parser.add_argument("--active-interval-sec", type=float, default=120.0)
     parser.add_argument("--startup-settle-sec", type=float, default=1.0)
     parser.add_argument("--require-rx-delta", action="store_true")
@@ -738,6 +887,15 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
+
+    try:
+        active_dm_command(
+            args.active_public_text,
+            args.active_dm_fingerprint,
+            args.active_dm_text,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if args.dry_run:
         report = dry_run_report(
@@ -754,6 +912,8 @@ def main() -> int:
             sample_storage=args.sample_storage or args.sd_file_canary,
             sd_file_canary=args.sd_file_canary,
             allow_sd_unavailable=args.allow_sd_unavailable,
+            active_dm_fingerprint=args.active_dm_fingerprint,
+            active_dm_text=args.active_dm_text,
         )
         mode = "dry-run"
     else:
@@ -778,6 +938,8 @@ def main() -> int:
                 sample_storage=args.sample_storage or args.sd_file_canary,
                 sd_file_canary=args.sd_file_canary,
                 allow_sd_unavailable=args.allow_sd_unavailable,
+                active_dm_fingerprint=args.active_dm_fingerprint,
+                active_dm_text=args.active_dm_text,
             )
         except ValueError as exc:
             parser.error(str(exc))

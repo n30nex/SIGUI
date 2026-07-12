@@ -78,7 +78,7 @@ Current D1L bench defaults:
 
 - ESP32 app/console: `COM12`
 - RP2040 USB/CDC/UF2: `COM16`
-- Do not use `COM8`, `COM11`, or `COM29` for D1L validation.
+- Never use `COM8`, `COM11`, or `COM29` as the D1L serial/flash target. `COM11` may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
 - Do not format SD from firmware, scripts, serial commands, or UI.
 - Do not send Public RF during SD validation.
 

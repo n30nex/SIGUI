@@ -293,13 +293,322 @@ def test_retained_canary_gets_targeted_longer_command_timeout(monkeypatch):
     retained_accept.run_command(object(), "reboot", 25.0)
 
     assert calls == [
-        ("storage filecanary", 5.0),
-        ("storage retained-canary sdToken1", 20.0),
+        ("storage filecanary", 120.0),
+        ("storage retained-canary sdToken1", 180.0),
         ("messages public search sdToken1", 5.0),
         ("reboot", 20.0),
         ("health", 5.0),
         ("reboot", 25.0),
     ]
+
+
+def test_command_sequence_stops_after_timeout_without_queueing_more(monkeypatch):
+    calls = []
+
+    def fake_send(_ser, command, timeout):
+        calls.append((command, timeout))
+        return {"schema": 1, "ok": False, "cmd": command, "code": "TIMEOUT"}
+
+    monkeypatch.setattr(retained_accept, "send_console_command", fake_send)
+    results = retained_accept.run_commands(
+        object(),
+        ["storage filecanary", "storage retained-canary token", "health"],
+        5.0,
+    )
+
+    assert calls == [("storage filecanary", 120.0)]
+    assert [row["code"] for row in results] == [
+        "TIMEOUT",
+        "SKIPPED_AFTER_TIMEOUT",
+        "SKIPPED_AFTER_TIMEOUT",
+    ]
+    assert retained_accept.sequence_completed(results) is False
+
+
+def test_ignored_boot_help_marks_unexpected_console_restart():
+    assert retained_accept.unexpected_console_restart(
+        [{"code": "TIMEOUT", "ignored_json": [{"cmd": "help", "ok": True}]}]
+    ) is True
+    assert retained_accept.unexpected_console_restart(
+        [{"ok": True, "cmd": "storage retained-canary"}]
+    ) is False
+    assert retained_accept.unexpected_console_restart(
+        [
+            {
+                "ok": True,
+                "cmd": "storage status",
+                "ignored_boot_help_seen": True,
+                "ignored_json": [{"cmd": "noise-5", "ok": True}],
+            }
+        ]
+    ) is True
+
+
+def test_command_sequence_stops_after_ignored_boot_help(monkeypatch):
+    calls = []
+
+    def fake_run_command(_ser, command, _timeout):
+        calls.append(command)
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": command,
+            "ignored_json_count": 1,
+            "ignored_json": [{"cmd": "help", "ok": True}],
+        }
+
+    monkeypatch.setattr(retained_accept, "run_command", fake_run_command)
+    results = retained_accept.run_commands(
+        object(),
+        ["storage filecanary", "storage retained-canary token", "health"],
+        5.0,
+    )
+
+    assert calls == ["storage filecanary"]
+    assert [row.get("code") for row in results] == [
+        None,
+        "SKIPPED_AFTER_UNEXPECTED_RESTART",
+        "SKIPPED_AFTER_UNEXPECTED_RESTART",
+    ]
+    assert retained_accept.unexpected_console_restart(results) is True
+    assert retained_accept.sequence_completed(results) is False
+
+
+def test_command_sequence_stops_when_boot_help_falls_out_of_ignored_tail():
+    responses = ['{"schema":1,"ok":true,"cmd":"help"}\n']
+    responses.extend(
+        f'{{"schema":1,"ok":true,"cmd":"noise-{index}"}}\n'
+        for index in range(6)
+    )
+    responses.extend(
+        [
+            '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+            '{"schema":1,"ok":true,"cmd":"health"}\n',
+        ]
+    )
+    ser = FakeSerial(responses)
+
+    results = retained_accept.run_commands(
+        ser, ["storage filecanary", "health"], 1.0
+    )
+
+    assert ser.writes == ["storage filecanary\n"]
+    assert results[0]["ignored_json_count"] == 7
+    assert results[0]["ignored_boot_help_seen"] is True
+    assert results[1]["code"] == "SKIPPED_AFTER_UNEXPECTED_RESTART"
+    assert retained_accept.sequence_completed(results) is False
+
+
+def test_preflight_boot_help_stops_before_filecanary_and_reboot(monkeypatch):
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            READY_STORAGE,
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "sdToken1",
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=10.0,
+        allow_unavailable=False,
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["unexpected_restart_before_reboot"] is True
+    assert report["pre_sequence_complete"] is False
+    assert report["reboot_command_passed"] is False
+    assert report["results"][0]["ignored_json"] == [
+        {"cmd": "help", "ok": True}
+    ]
+    assert report["results"][1]["code"] == "SKIPPED_AFTER_UNEXPECTED_RESTART"
+    assert report["ok"] is False
+
+
+def test_allow_unavailable_cannot_pass_after_boot_help(monkeypatch):
+    token = "sdToken1"
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"storage status",'
+            '"sd":{"state":"protocol_pending"}}\n',
+            '{"schema":1,"ok":false,"cmd":"storage filecanary",'
+            '"code":"ESP_ERR_NOT_SUPPORTED","step":"preflight"}\n',
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            '{"schema":1,"ok":false,"cmd":"storage retained-canary",'
+            '"code":"SD_RETAINED_HISTORY_NOT_READY"}\n',
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
+        allow_unavailable=True,
+    )
+
+    assert ser.writes == [
+        "storage status\n",
+        "storage filecanary\n",
+        f"storage retained-canary {token}\n",
+    ]
+    assert report["retained_canary_unavailable_ok"] is True
+    assert report["unexpected_restart_before_reboot"] is True
+    assert report["pre_sequence_complete"] is False
+    assert report["ok"] is False
+
+
+def test_acceptance_does_not_reboot_after_timed_out_pre_sequence(monkeypatch):
+    token = "sdToken1"
+    ser = FakeSerial([READY_STORAGE])
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    calls = []
+
+    def fake_run_command(_ser, command, _timeout):
+        calls.append(command)
+        if command != "storage filecanary":
+            raise AssertionError(f"unexpected command after timeout: {command}")
+        return {
+            "schema": 1,
+            "ok": False,
+            "cmd": command,
+            "code": "TIMEOUT",
+        }
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept, "run_command", fake_run_command)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
+        allow_unavailable=False,
+    )
+
+    assert calls == ["storage filecanary"]
+    assert report["pre_sequence_complete"] is False
+    assert report["reboot_command_passed"] is False
+    assert report["reboot_proven"] is False
+    assert report["ok"] is False
+
+
+def test_preflight_timeout_stops_before_filecanary_and_reboot(monkeypatch):
+    timeout_line = (
+        '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'
+    )
+    ser = FakeSerial([timeout_line])
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "sdToken1",
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=10.0,
+        allow_unavailable=False,
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["pre_sequence_complete"] is False
+    assert report["reboot_command_passed"] is False
+    assert report["results"][1]["code"] == "SKIPPED_AFTER_TIMEOUT"
+    assert report["ok"] is False
+
+
+def test_no_reboot_mode_does_not_send_health_after_presequence_timeout(monkeypatch):
+    timeout_line = (
+        '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'
+    )
+    ser = FakeSerial([timeout_line])
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "sdToken1",
+        include_reboot=False,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=10.0,
+        allow_unavailable=False,
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["pre_sequence_complete"] is False
+    assert report["ok"] is False
+
+
+def test_post_reboot_storage_timeout_stops_before_readbacks(monkeypatch):
+    token = "sdToken1"
+    fp = retained_accept.fingerprint_for_token(token)
+    pre = [
+        READY_STORAGE,
+        '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+        retained_canary_line(token, fp),
+        *retained_readback_lines(token, fp),
+        READY_STORAGE,
+        health_line(1),
+    ]
+    reboot = [
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+        '"route_flush":"ESP_OK"}\n'
+    ]
+    post = [
+        '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'
+    ]
+    serials = [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)]
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: serials.pop(0)
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=10.0,
+        allow_unavailable=False,
+    )
+
+    post_serial = FakeSerial.instances[-1]
+    assert post_serial.writes == ["storage status\n"]
+    assert report["post_reboot_storage_ready_poll_count"] == 1
+    assert report["post_reboot_readbacks_ok"] is False
+    assert report["reboot_proven"] is False
+    assert report["ok"] is False
 
 
 def test_allow_unavailable_accepts_pre_bridge_refusal(monkeypatch):

@@ -2445,6 +2445,7 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"psram_largest_free\":%lu,"
                             "\"current_task_stack_free_words\":%lu,"
                             "\"ui_task_stack_free_words\":%lu,"
+                            "\"retained_task_stack_free_bytes\":%lu,"
                             "\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,"
                             "\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\"},",
                             (unsigned long)h.boot_nonce,
@@ -2462,6 +2463,7 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.psram_largest_free,
                             (unsigned long)h.current_task_stack_free_words,
                             (unsigned long)h.ui_task_stack_free_words,
+                            (unsigned long)h.retained_task_stack_free_bytes,
                             (unsigned long)h.lvgl_free_bytes,
                             (unsigned long)h.lvgl_largest_free_bytes,
                             h.lvgl_used_pct,
@@ -4465,7 +4467,7 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"retained_task_stack_free_bytes\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
            (unsigned long)h.boot_nonce,
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
@@ -4479,6 +4481,7 @@ static void cmd_health(void)
            (unsigned long)h.psram_largest_free,
            (unsigned long)h.current_task_stack_free_words,
            (unsigned long)h.ui_task_stack_free_words,
+           (unsigned long)h.retained_task_stack_free_bytes,
            (unsigned long)h.lvgl_free_bytes,
            (unsigned long)h.lvgl_largest_free_bytes,
            h.lvgl_used_pct, bool_json(h.nvs_ready), esp_err_to_name(h.nvs_error),

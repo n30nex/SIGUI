@@ -18,7 +18,7 @@ python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --dry-run
 python .\scripts\probe_d1l_dm.py --dry-run
 python .\scripts\sd_reboot_remount_acceptance_d1l.py --dry-run --token dryrun
-python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test --active-interval-sec 30 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start
 python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --sample-storage --sd-file-canary --allow-sd-unavailable
 python .\scripts\release_gate_audit_d1l.py --out artifacts\release-gate\d1l-release-gate-audit-local.json
 ```
@@ -60,9 +60,9 @@ Coverage:
   path escape or timestamp overflow.
 - NVS settings contract and default-off Wi-Fi/BLE/observer policy.
 - Phase 5/Phase D connectivity contract: `wifi status`, `wifi scan`, `wifi save <ssid> [password]`, `wifi connect`, `wifi clear`, `wifi on|off`, `ble status`, and `ble on|off` must be machine-readable. `wifi save` must persist SSID/password intent without printing the password, `wifi scan` must return bounded network records only when Wi-Fi is enabled and compiled in, `wifi connect` must never echo the password, `wifi clear` must remove the saved profile and disable Wi-Fi intent, and BLE remains gated until a measured runtime is enabled.
-- Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness.
+- Phase 7 diagnostics contract: `crashlog` must return a bounded persisted reset ring, `crashlog clear` must clear it, and `health` must include heap/PSRAM largest blocks, task stack watermarks, LVGL usage, reset reason, and board/UI readiness. `retained_task_stack_free_bytes` is the ESP-IDF byte high-water mark for the combined Public/DM/packet/route persistence worker; the release soak fails below 4096 bytes after late-SD reconciliation and forced flush.
 - Boot/recovery diagnostics contract: every boot generates one nonzero in-RAM `boot_nonce`; all `health` responses during that boot must retain it and a real reboot must change it. A successful controlled reboot response, every reboot acceptance runner, and the release audit must also require `route_flush="ESP_OK"`; `ok=true` plus `rebooting=true` is not sufficient route-durability evidence. `health` and the boot event must expose `nvs_ready` plus `nvs_error`. `ESP_ERR_NVS_NO_FREE_PAGES`, an unsupported NVS version, or another NVS-init failure must never erase the NVS partition or reboot-loop to make validation pass; firmware preserves the partition, boots in a degraded fail-closed state, and reports the error for recovery.
-- Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. The SD-aware soak must report `public_rf_tx=false` and `formats_sd=false` unless the operator explicitly enables an RF mode through a separate flag.
+- Phase 7 soak harness contract: `scripts/soak_d1l.py` must have a dry-run path, must sample `health`, `mesh status`, `signal`, `messages unread`, `packets`, and `crashlog`, and must summarize uptime monotonicity, readiness, packet deltas, heap/PSRAM deltas, current/UI/retained-worker stack floors, LVGL peak usage, command retries, and crash-like reset entries. With `--sample-storage`, it must also sample `storage status` and summarize SD state/backend stability plus store backend stability. With `--sd-file-canary`, it must also run `storage filecanary`; pre-RP2040-flash `ESP_ERR_NOT_SUPPORTED` preflight refusals are accepted only when `--allow-sd-unavailable` is explicitly set. File-canary gets a bounded 120-second host window; any command timeout or intervening boot marker is terminal for the soak and cannot be retried or followed by another console command. The 12-hour gate independently checks every raw sample, exact allowlisted telemetry commands, a stable nonzero `boot_nonce`, uptime/host-elapsed continuity, the retained-worker floor, and absence of any `mesh send` command. Automated active soak accepts only a validated direct-message fingerprint/text pair (or the dedicated `#test` channel after channel selection exists); every soak must report `public_rf_tx=false` and `formats_sd=false`.
 - Phase 8 release package contract: `scripts/package_release_d1l.py` must emit a normal flash set, app update image, full 8MB image, manifest, SHA256SUMS, README, and explicit-port flash helpers.
 - CI scope contract: `.github/workflows/d1l-ci.yml` must keep ESP32/UI work on the fast default path. The default Actions run builds ESP32 firmware and the release package without rebuilding RP2040 artifacts or running SD/RP2040 host dry-runs; `workflow_dispatch` with `include_sd_bridge=true` or changes under SD/RP2040 paths must opt into the bridge UF2, SD smoke UF2, and SD dry-run checks. Packaging must still wait for the complete host job, whose final step emits the exact-commit/run `d1l_host_checks_success` marker only after every prior host step passes.
 - Supported-SDK policy contract: the ESP32 firmware job must use the exact selected version tag `espressif/idf:v5.5.4`, and the committed component lock must record IDF 5.5.4; `latest`, moving `release-vX.Y`, EOL, missing, unapproved, and stale selections must fail the P0 `supported_sdk_baseline` audit. Passing these configuration checks does not prove lock provenance or qualify v5.5.4 as the production baseline, and the version tag must not be described as content-immutable.
@@ -129,10 +129,13 @@ the issue/PR, and move on to the next blocker.
 
 ```powershell
 $env:D1L_PORT = "COMx"
-python .\scripts\backup_flash_d1l.py --port $env:D1L_PORT --size 8MB
-.\scripts\flash_d1l.ps1 -Port $env:D1L_PORT
+& <checksum-verified-actions-package>\flash_project.ps1 -Port $env:D1L_PORT
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 ```
+
+This release run does not create a flash backup. The backup helper is an
+optional recovery tool for a separately authorized session, not a production
+flash prerequisite.
 
 Issue-specific COM12 proof:
 
@@ -246,15 +249,25 @@ Expected commands:
 
 Hardware success must include a current COM12 `ui_capture_d1l.py` PNG for display pixels with a passing `ui_capture_simulator_diff` against the matching simulator/reference view, a current COM12 `ui_compose_keyboard_capture_d1l.py --targets all` artifact with every release-blocking compose/input keyboard PNG/RGB565 capture, plus manual touch confirmation until touch automation is expanded.
 
+RF automation policy: transmit only through a controlled direct-message peer or
+the dedicated `#test` channel. Any later step that names `mesh send public`
+must first prove that `#test` is the selected channel; until #67 provides that
+selection, use the DM equivalent and do not transmit on the default Public
+channel. COM11 may be used only as the independent bot/radio endpoint, not as
+the D1L serial port.
+
 ## Hardware Soak
 
 Use the soak runner for Phase 7 stability evidence after smoke passes. The runner writes a JSON artifact under `artifacts/soak` unless `--out` is supplied.
 
-Short active RF probe:
+Short active RF probe through a promoted controlled DM peer (for example the
+COM11 bot). Automated traffic must use DM or the dedicated `#test` channel,
+never the default Public channel:
 
 ```powershell
 $env:D1L_PORT = "COMx"
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
+$env:D1L_DM_FINGERPRINT = "<16-hex-controlled-peer>"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-dm-fingerprint $env:D1L_DM_FINGERPRINT --active-dm-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
 ```
 
 Full idle/listening acceptance window:
@@ -264,11 +277,12 @@ $env:D1L_PORT = "COMx"
 python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 43200 --sample-interval-sec 300 --out artifacts\soak\d1l-soak-idle-12h-COMx.json
 ```
 
-Full active messaging acceptance window, assuming the local Public bots are available and respond to `test`:
+Full active messaging acceptance window through that controlled DM peer:
 
 ```powershell
 $env:D1L_PORT = "COMx"
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-interval-sec 60 --active-public-text test --active-interval-sec 120 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start --out artifacts\soak\d1l-soak-active-1h-COMx.json
+$env:D1L_DM_FINGERPRINT = "<16-hex-controlled-peer>"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 3600 --sample-interval-sec 60 --active-dm-fingerprint $env:D1L_DM_FINGERPRINT --active-dm-text test --active-interval-sec 120 --require-rx-delta --min-tx-delta 1 --clear-crashlog-before-start --out artifacts\soak\d1l-soak-active-1h-COMx.json
 ```
 
 Success requires every sampled command to return `ok=true` after bounded retries, no unrecovered command retries, no uptime rollback, `board_ready=true`, `ui_ready=true`, ready mesh state, nonzero task stack watermarks, zero crash-like reset entries, and no required packet delta threshold failures. For active RF probes, `mesh_tx_packet_delta` must increase and `mesh_rx_packet_delta` must increase when `--require-rx-delta` is used.
@@ -303,8 +317,11 @@ Verify:
 
 For Phase 4 Public message-store validation:
 
+This case is dormant until #67 can select and prove the dedicated `#test`
+channel. Do not run it against the default Public channel.
+
 1. Run `messages clear`.
-2. Run `mesh send public test`.
+2. Select `#test`, verify the selected-channel identity, then run `mesh send public test`.
 3. Wait for a local MeshCore bot response.
 4. Verify `messages public` contains at least one TX row and one RX row.
 5. Verify `messages public search test` returns `filtered=true` and only retained rows whose author, direction, or text matches `test`.
@@ -318,7 +335,7 @@ For Phase 4 unread/read-state validation:
 
 1. Run `messages read all`.
 2. Verify `messages unread` reports `public_unread=0`, `dm_unread=0`, and `muted_dm_unread=0`.
-3. Run `mesh send public test`.
+3. Only in the gated `#test` case above, run `mesh send public test`; otherwise use the DM-thread read-state case below.
 4. Wait for a local MeshCore bot response.
 5. Verify `messages public` contains fresh RX rows with seq values greater than the baseline `newest_public_rx_seq`.
 6. Verify `messages unread` reports `public_unread` greater than zero and advances `newest_public_rx_seq`.
@@ -461,9 +478,9 @@ For Phase 4 route-store validation:
 
 1. Run `routes clear`.
 2. Verify `routes` reports `count=0`.
-3. Run `mesh send public test`.
-4. Wait for a local MeshCore bot response.
-5. Verify `routes` contains Public TX and RX rows with route name, direction, path hash bytes, hops, confidence, RSSI/SNR, and payload length. The response must expose `persistence.commit_count`, `coalesced_count`, `fail_count`, `dirty`, `sd_primary.backend_generation`, and `sd_primary.reconcile_pending`; while dirty, top-level `persisted` must be false rather than claiming the newest RAM observation is durable.
+3. Run `mesh send dm <fingerprint> route_store_test` against the controlled peer.
+4. Wait for its DM/ACK response.
+5. Verify `routes` contains DM TX and RX/ACK evidence with route name, direction, path hash bytes, hops, confidence, RSSI/SNR, and payload length. The response must expose `persistence.commit_count`, `coalesced_count`, `fail_count`, `dirty`, `sd_primary.backend_generation`, and `sd_primary.reconcile_pending`; while dirty, top-level `persisted` must be false rather than claiming the newest RAM observation is durable.
 6. Poll `routes` without generating traffic. The first material dirty observation must not write before a full 5-second coalescing floor. After a clean commit, a same-route nonmaterial update must not write early merely because an older attempt completed; it must flush by the 30-second dirty deadline. Allow 35 seconds for polling jitter, then require `dirty=false`, `persisted=true`, and an increased commit count. Repeated hot observations inside the window must increase `coalesced_count` rather than synchronously rewriting storage. Explicit schema migration and a newly available SD reconciliation may run immediately, but a real failed attempt, including a controlled-reboot force flush, must still honor the 5-second retry floor and return the pending backend error without another write until eligible. If SD reads continue to fail, the dirty compact NVS snapshot must still advance while `sd_primary.reconcile_pending=true`, SD write count remains unchanged, and controlled reboot remains cancelled.
 7. Pick a fresh route `seq` and run `routes detail <seq>`.
 8. Verify the detail response matches the selected route row, including target, kind, route, direction, path metadata, signal metadata, and payload length.
@@ -488,8 +505,8 @@ For Phase 6 packet-log validation:
 
 1. Run `packets clear`.
 2. Verify `packets` reports `count=0` and `persisted=true`.
-3. Run `mesh send public test`.
-4. Wait for a local MeshCore bot response or relayed Public echo.
+3. Run `mesh send dm <fingerprint> packet_log_test` against the controlled peer.
+4. Wait for its DM/ACK response.
 5. Verify `packets` contains TX and RX rows with direction, kind, RSSI/SNR, path hash bytes, hops, payload length, and note text.
 6. Pick a fresh packet `seq` and run `packets detail <seq>`.
 7. Verify the detail response matches the selected packet row.
@@ -545,7 +562,7 @@ For Phase 6 signal/room-server/repeater validation:
 1. Run `signal` and verify `sample_count` is nonzero after live RX, `latest.rssi_dbm` is nonzero, and RSSI/SNR values reflect recent packet, route, or heard-node evidence.
 2. Run `roomservers` and verify `total_known` and `entries` reflect signed heard-node adverts whose stored role is `room`.
 3. Run `repeaters` and verify entries are inferred only from nonzero path-hop route or heard-node evidence; Public route rows should not by themselves become repeater candidates.
-4. Run `mesh send public test`, wait for local MeshCore bot replies, and verify D1L packet count increases while the COM11 bot status counters show fresh Public movement.
+4. Run `mesh send dm <fingerprint> mesh_visibility_test`, wait for the controlled peer response, and verify D1L packet count increases while the separate COM11 bot status shows fresh DM/contact movement.
 5. Verify `health` remains `board_ready=true`, `ui_ready=true`, and reports nonzero task stack watermarks after the probe.
 6. For host proof, verify the simulator emits `mesh_roles_sheet`, `mesh_rooms_page`, and `mesh_repeaters_page`; each button target is at least 44x44, source rows stay contained in the list panel, and no Mesh Roles action is RF-capable or destructive.
 7. On exact Actions-built COM12 firmware with retained packet/route data still populated, capture the three read-only aliases `ui scroll-probe mesh_roles`, `ui scroll-probe mesh_rooms`, and `ui scroll-probe mesh_repeaters`. The probe timeout must accommodate rebuilding a full Packet view without timing out, static nested pages must synchronously flush the requested page before reporting completion, and a timed-out request must retain its in-flight owner until its late completion is published so no later request can consume stale evidence. Verify capture metadata reports matching firmware/host CRCs, `public_rf_tx=false`, and `formats_sd=false`.

@@ -80,6 +80,19 @@ REQUIRED_NOTICE_FILES = {
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
 }
 FULL_SOAK_SECONDS = 12 * 60 * 60
+MAX_FULL_SOAK_SAMPLE_INTERVAL_SECONDS = 5 * 60
+REQUIRED_FULL_SOAK_COMMANDS = {
+    "health",
+    "mesh status",
+    "signal",
+    "messages unread",
+    "packets",
+    "crashlog",
+}
+ALLOWED_FULL_SOAK_COMMANDS = REQUIRED_FULL_SOAK_COMMANDS | {
+    "storage status",
+    "storage filecanary",
+}
 REQUIRED_ROUTE_PROBE_CHECKS = {
     "trace_reports_active_probe",
     "probe_queued",
@@ -1518,6 +1531,57 @@ def nested_flag_true(data: dict, *flags: str) -> bool:
     return False
 
 
+def nested_terminal_host_timeout(data: dict) -> bool:
+    return any(
+        candidate.get("code")
+        in {
+            "TIMEOUT",
+            "UNEXPECTED_RESTART",
+            "SKIPPED_AFTER_TIMEOUT",
+            "SKIPPED_AFTER_UNEXPECTED_RESTART",
+        }
+        for candidate in iter_nested_dicts(data)
+    )
+
+
+def nested_unexpected_console_restart(data: dict) -> bool:
+    for candidate in iter_nested_dicts(data):
+        if (
+            candidate.get("ignored_boot_help_seen") is True
+            or candidate.get("cmd") == "help"
+        ):
+            return True
+        if "ignored_json_count" in candidate:
+            count = candidate.get("ignored_json_count")
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                return True
+            if count > 0 and not isinstance(
+                candidate.get("ignored_boot_help_seen"), bool
+            ):
+                # Current evidence producers preserve this boolean even when
+                # the boot marker has fallen out of the last-five JSON tail.
+                # Older/malformed evidence cannot prove that did not happen.
+                return True
+    return False
+
+
+def nested_command_startswith(data: dict, prefix: str) -> bool:
+    normalized = prefix.strip().lower()
+    commands = data.get("commands")
+    if isinstance(commands, list) and any(
+        isinstance(command, str)
+        and command.strip().lower().startswith(normalized)
+        for command in commands
+    ):
+        return True
+    return any(
+        isinstance(candidate.get(field), str)
+        and candidate[field].strip().lower().startswith(normalized)
+        for candidate in iter_nested_dicts(data)
+        for field in ("cmd", "command")
+    )
+
+
 def report_is_no_rf_no_format(data: dict) -> bool:
     return (
         data.get("public_rf_tx") is False
@@ -1638,6 +1702,11 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("sequence_completed") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_console_restart") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
         and data.get("canary_passed") is True
         and data.get("canary_unavailable_ok") is not True
         and data.get("allow_unavailable") is not True
@@ -1672,6 +1741,12 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_restart_before_reboot") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
         and data.get("allow_unavailable") is not True
         and data.get("retained_canary_passed") is True
         and data.get("filecanary_passed") is True
@@ -1697,12 +1772,19 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_restart_before_reboot") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
         and data.get("pre_remount_ready") is True
         and data.get("post_remount_ready") is True
         and data.get("pre_remount_command_passed") is True
         and data.get("post_remount_command_passed") is True
         and data.get("retained_history_sd_ready_before") is True
         and data.get("retained_history_sd_ready_after") is True
+        and data.get("filecanary_passed") is True
         and data.get("retained_canary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
@@ -2596,16 +2678,174 @@ def sd_32gb_matrix_gate(artifact_roots: list[Path], root: Path, commit: str | No
     )
 
 
+def raw_full_soak_evidence(data: dict) -> tuple[bool, int | None]:
+    samples = data.get("samples")
+    commands = data.get("commands")
+    interval = first_number(data.get("sample_interval_sec"))
+    if (
+        not isinstance(samples, list)
+        or not samples
+        or not isinstance(commands, list)
+        or not all(isinstance(command, str) for command in commands)
+        or len(commands) != len(set(commands))
+        or not REQUIRED_FULL_SOAK_COMMANDS.issubset(set(commands))
+        or not set(commands).issubset(ALLOWED_FULL_SOAK_COMMANDS)
+        or interval is None
+        or interval <= 0
+        or interval > MAX_FULL_SOAK_SAMPLE_INTERVAL_SECONDS
+    ):
+        return False, None
+
+    required_samples = int(FULL_SOAK_SECONDS // interval) + 1
+    if len(samples) < required_samples:
+        return False, None
+
+    elapsed_values: list[float] = []
+    uptime_values: list[int] = []
+    boot_nonces: list[int] = []
+    retained_stack_values: list[int] = []
+    for sample in samples:
+        if (
+            not isinstance(sample, dict)
+            or "aborted_after_timeout" not in sample
+            or sample.get("aborted_after_timeout") is not None
+        ):
+            return False, None
+        elapsed = first_number(sample.get("elapsed_sec"))
+        results = sample.get("results")
+        if elapsed is None or not isinstance(results, list):
+            return False, None
+        if (
+            [result.get("cmd") for result in results if isinstance(result, dict)]
+            != commands
+            or len(results) != len(commands)
+            or any(
+                not isinstance(result, dict) or result.get("ok") is not True
+                for result in results
+            )
+        ):
+            return False, None
+        health_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "health"
+        ]
+        if (
+            len(health_rows) != 1
+            or health_rows[0].get("board_ready") is not True
+            or health_rows[0].get("ui_ready") is not True
+        ):
+            return False, None
+        mesh_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "mesh status"
+        ]
+        if (
+            len(mesh_rows) != 1
+            or mesh_rows[0].get("state") != "ready"
+            or mesh_rows[0].get("identity_ready") is not True
+            or mesh_rows[0].get("radio_ready") is not True
+        ):
+            return False, None
+        crashlog_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "crashlog"
+        ]
+        if len(crashlog_rows) != 1 or nested_flag_true(
+            crashlog_rows[0], "crash_like"
+        ):
+            return False, None
+        uptime = int_value(health_rows[0].get("uptime_ms"))
+        boot_nonce = int_value(health_rows[0].get("boot_nonce"))
+        retained_stack = int_value(
+            health_rows[0].get("retained_task_stack_free_bytes")
+        )
+        if (
+            uptime is None
+            or uptime < 0
+            or boot_nonce is None
+            or boot_nonce == 0
+            or retained_stack is None
+            or retained_stack < 4096
+        ):
+            return False, None
+        elapsed_values.append(elapsed)
+        uptime_values.append(uptime)
+        boot_nonces.append(boot_nonce)
+        retained_stack_values.append(retained_stack)
+
+    elapsed_gaps = [
+        later - earlier
+        for earlier, later in zip(elapsed_values, elapsed_values[1:])
+    ]
+    uptime_gaps_seconds = [
+        (later - earlier) / 1000.0
+        for earlier, later in zip(uptime_values, uptime_values[1:])
+    ]
+    timing_ok = (
+        0 <= elapsed_values[0] <= interval
+        and all(
+            0 < gap <= (interval * 1.5) + 5.0
+            for gap in elapsed_gaps
+        )
+        and elapsed_values[-1] >= FULL_SOAK_SECONDS
+        and uptime_values == sorted(uptime_values)
+        and len(set(boot_nonces)) == 1
+        and all(
+            abs(uptime_gap - elapsed_gap)
+            <= max(10.0, elapsed_gap * 0.15)
+            for elapsed_gap, uptime_gap in zip(
+                elapsed_gaps, uptime_gaps_seconds
+            )
+        )
+    )
+    return timing_ok, min(retained_stack_values)
+
+
 def full_soak_ok(data: dict) -> bool:
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    duration = first_number(data.get("duration_sec"))
+    retained_stack_floor = int_value(
+        summary.get("retained_task_stack_free_bytes_floor")
+    )
+    raw_evidence_ok, raw_retained_stack_floor = raw_full_soak_evidence(data)
     return (
         data.get("ok") is True
         and data.get("mode") == "hardware"
-        and float(data.get("duration_sec") or 0) >= FULL_SOAK_SECONDS
+        and duration is not None
+        and duration >= FULL_SOAK_SECONDS
+        and report_is_no_rf_no_format(data)
+        and "active_public_text" in data
+        and data.get("active_public_text") is None
+        and data.get("dm_rf_tx") is False
+        and data.get("active_command") is None
+        and data.get("active_events") == []
+        and isinstance(data.get("setup_events"), list)
+        and all(
+            isinstance(event, dict)
+            and isinstance(event.get("result"), dict)
+            and event["result"].get("ok") is True
+            for event in data["setup_events"]
+        )
+        and not nested_command_startswith(data, "mesh send")
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
+        and "aborted_after_timeout" in data
+        and data.get("aborted_after_timeout") is None
+        and raw_evidence_ok
         and summary.get("ok") is True
         and not summary.get("threshold_failures")
+        and summary.get("command_timeout_seen") is False
+        and summary.get("unexpected_console_restart_seen") is False
+        and retained_stack_floor is not None
+        and retained_stack_floor >= 4096
+        and retained_stack_floor == raw_retained_stack_floor
+        and summary.get("crashlog_crash_like_count") == 0
         and summary.get("board_ready_all") is True
         and summary.get("ui_ready_all") is True
+        and summary.get("mesh_ready_all") is True
         and summary.get("uptime_monotonic") is True
     )
 

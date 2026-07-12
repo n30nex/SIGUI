@@ -241,7 +241,7 @@ def test_dry_run_is_serial_only_and_read_only_after_reboot():
     assert not any("setup confirm" in command for command in report["commands"])
 
 
-def test_reboot_gets_targeted_timeout_without_changing_status_timeout(monkeypatch):
+def test_slow_sd_operations_get_bounded_long_timeouts(monkeypatch):
     calls = []
 
     def fake_send(_ser, command, timeout):
@@ -250,11 +250,19 @@ def test_reboot_gets_targeted_timeout_without_changing_status_timeout(monkeypatc
 
     monkeypatch.setattr(remount_accept, "send_console_command", fake_send)
     remount_accept.run_command(object(), "storage status", 5.0)
+    remount_accept.run_command(object(), "storage remount", 5.0)
+    remount_accept.run_command(object(), "storage filecanary", 5.0)
+    remount_accept.run_command(object(), "storage retained-canary remount1", 5.0)
+    remount_accept.run_command(object(), "storage map-tile-canary remount1", 5.0)
     remount_accept.run_command(object(), "reboot", 5.0)
     remount_accept.run_command(object(), "reboot", 25.0)
 
     assert calls == [
         ("storage status", 5.0),
+        ("storage remount", 120.0),
+        ("storage filecanary", 120.0),
+        ("storage retained-canary remount1", 180.0),
+        ("storage map-tile-canary remount1", 120.0),
         ("reboot", 20.0),
         ("reboot", 25.0),
     ]
@@ -310,6 +318,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert report["post_remount_command_passed"] is True
     assert report["retained_history_sd_ready_before"] is True
     assert report["retained_history_sd_ready_after"] is True
+    assert report["filecanary_passed"] is True
     assert report["retained_canary_passed"] is True
     assert report["pre_reboot_readbacks_ok"] is True
     assert report["post_reboot_readbacks_ok"] is True
@@ -321,6 +330,57 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     assert "storage remount\n" in post_serial.writes
     assert "storage map-tile-check remount1\n" in post_serial.writes
     assert "storage map-tile-check remount1" in report["commands"]
+
+
+def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        (
+            '{"schema":1,"ok":false,"cmd":"storage filecanary",'
+            '"code":"ESP_FAIL","public_rf_tx":false,"formats_sd":false}\n'
+        ),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+        health_line(1),
+    ]
+    reboot = [
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+        '"route_flush":"ESP_OK"}\n'
+    ]
+    post = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        *readback_lines(token),
+        map_tile_check_line(token),
+        health_line(2),
+    ]
+    install_fake_serial(
+        monkeypatch,
+        [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)],
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["filecanary_passed"] is False
+    assert report["retained_canary_passed"] is True
+    assert report["pre_reboot_readbacks_ok"] is True
+    assert report["post_reboot_readbacks_ok"] is True
+    assert report["ok"] is False
 
 
 def test_reboot_flush_failure_cannot_pass_remount_acceptance(monkeypatch):
@@ -524,3 +584,115 @@ def test_generic_remount_error_cannot_pass_with_cached_ready_status(monkeypatch)
     assert remount_accept.storage_ready(storage_after) is True
     assert remount_accept.remount_manager_busy(results[1]) is False
     assert remount_accept.remount_transition_passed(results[1], storage_after) is False
+
+
+def test_pre_mount_timeout_stops_before_remount_canaries_and_reboot(monkeypatch):
+    ser = FakeSerial(
+        ['{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n']
+    )
+    install_fake_serial(monkeypatch, [ser])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "remount1",
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert ser.writes == ["storage status\n"]
+    assert report["commands"] == ["storage status"]
+    assert report["pre_sequence_complete"] is False
+    assert report["post_sequence_complete"] is False
+    assert report["timed_out_command"] == "storage status"
+    assert report["reboot_command_passed"] is False
+    assert report["ok"] is False
+
+
+@pytest.mark.parametrize("include_reboot", [True, False])
+def test_pre_canary_timeout_stops_before_later_commands(monkeypatch, include_reboot):
+    ser = FakeSerial(
+        [
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            '{"schema":1,"ok":false,"cmd":"storage filecanary","code":"TIMEOUT"}\n',
+        ]
+    )
+    install_fake_serial(monkeypatch, [ser])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        "remount1",
+        include_reboot=include_reboot,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert ser.writes == [
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage filecanary\n",
+    ]
+    assert report["pre_sequence_complete"] is False
+    assert report["post_sequence_complete"] is False
+    assert report["timed_out_command"] == "storage filecanary"
+    assert "storage retained-canary remount1" not in report["commands"]
+    assert "health" not in report["commands"]
+    assert "reboot" not in report["commands"]
+    assert report["ok"] is False
+
+
+def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        retained_canary_line(token),
+        map_tile_canary_line(token),
+        *readback_lines(token),
+        health_line(1),
+    ]
+    reboot = [
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n'
+    ]
+    post = [
+        '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'
+    ]
+    post_serial = FakeSerial(post)
+    install_fake_serial(
+        monkeypatch,
+        [FakeSerial(pre), FakeSerial(reboot), post_serial],
+    )
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert post_serial.writes == ["storage status\n"]
+    assert report["pre_sequence_complete"] is True
+    assert report["post_sequence_complete"] is False
+    assert report["timed_out_command"] == "storage status"
+    assert f"messages public search {token}" not in report["commands"][
+        report["commands"].index("reboot") + 1 :
+    ]
+    assert f"storage map-tile-check {token}" not in report["commands"]
+    assert report["post_reboot_readbacks_ok"] is False
+    assert report["ok"] is False

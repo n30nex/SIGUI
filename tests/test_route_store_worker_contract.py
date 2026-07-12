@@ -19,6 +19,9 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_route_store_worker_start" in header
     assert "d1l_route_store_worker_force_flush" in header
     assert "D1L_ROUTE_STORE_WORKER_INTERVAL_MS 1000U" in worker
+    assert "D1L_ROUTE_STORE_WORKER_STACK_BYTES 12288U" in worker
+    assert "D1L_ROUTE_STORE_WORKER_PRIORITY (tskIDLE_PRIORITY + 1U)" in worker
+    assert "d1l_health_monitor_register_retained_task(created_task)" in worker
     assert "flush_retained_stores" in worker
     assert "d1l_message_store_flush_if_due()" in worker
     assert "d1l_dm_store_flush_if_due()" in worker
