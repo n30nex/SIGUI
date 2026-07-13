@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 ORACLE_ROOT = ROOT / "tests" / "meshcore_oracle"
 MANIFEST = ORACLE_ROOT / "manifest.json"
+COVERAGE_MANIFEST = ORACLE_ROOT / "coverage_manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = "pinned_upstream_packet_advert_route_ack_and_trace_source_frames"
 
@@ -37,7 +38,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 5
+    assert manifest["corpus_version"] == 6
     assert manifest["abi_version"] == 1
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -165,6 +166,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert pending["expected_ack_hash_and_ack_path"]["blocked_by"] == (
         "external_unpinned_sha_aes_and_mesh_session_fixtures"
     )
+    assert pending["dm_encrypt_decrypt"]["blocked_by"] == (
+        "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
+    )
     assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
         "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
     )
@@ -174,12 +178,156 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
         "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
     )
+    assert pending["route_selection_and_forwarding"]["blocked_by"] == (
+        "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
+    )
+    assert pending["login_request_response_admin"]["blocked_by"] == (
+        "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
+    )
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
         **manifest["oracle_sources"],
     }.items():
         assert canonical_lf_sha256(ROOT / relative) == expected
+
+
+def test_oracle_coverage_manifest_accounts_for_every_required_surface():
+    wire_manifest = conformance.load_manifest()
+    oracle_manifest = conformance.load_oracle_manifest()
+    coverage = conformance.load_oracle_coverage_manifest(
+        oracle_manifest, wire_manifest
+    )
+    summary = conformance.summarize_oracle_coverage(coverage, oracle_manifest)
+
+    assert coverage == json.loads(COVERAGE_MANIFEST.read_text(encoding="utf-8"))
+    assert summary["validated"] is True
+    assert summary["wp04_closure_eligible"] is False
+    assert summary["closure_ready"] is False
+    assert summary["unsupported_closure_rejected"] is True
+    assert summary["required_surface_count"] == 9
+    assert summary["implemented_surface_count"] == 1
+    assert summary["partial_surface_count"] == 3
+    assert summary["blocked_surface_count"] == 5
+    assert summary["local_packet_type_count"] == 6
+    assert summary["wire_vector_covered_packet_type_count"] == 6
+    assert summary["unknown_packet_type_policy"] == "fail_closed"
+    assert len(summary["blocker_receipts"]) == 9
+    assert len(summary["unresolved_capabilities"]) == 9
+    assert len(summary["local_packet_types"]) == 6
+
+
+@pytest.mark.parametrize(
+    ("declaration", "error"),
+    [
+        (
+            "#define D1L_MESHCORE_PAYLOAD_UNREVIEWED 0x0BU",
+            "local packet type changed without a coverage vector",
+        ),
+        (
+            "#define D1L_MESHCORE_PAYLOAD_UNREVIEWED 0x0BU // unreviewed",
+            "local MeshCore packet type value syntax is unsupported",
+        ),
+        (
+            "#define D1L_MESHCORE_PAYLOAD_UNREVIEWED (0x0BU)",
+            "local MeshCore packet type value syntax is unsupported",
+        ),
+        (
+            "#define D1L_MESHCORE_PAYLOAD_VER_UNREVIEWED 0x0BU",
+            "local packet type changed without a coverage vector",
+        ),
+    ],
+)
+def test_local_packet_type_addition_without_vector_fails_closed(
+    tmp_path, declaration, error
+):
+    wire_manifest = conformance.load_manifest()
+    oracle_manifest = conformance.load_oracle_manifest()
+    header = ROOT / "main" / "mesh" / "meshcore_wire.h"
+    changed_header = tmp_path / "meshcore_wire.h"
+    changed_header.write_text(
+        header.read_text(encoding="utf-8")
+        + f"\n{declaration}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        conformance.GateFailure,
+        match=error,
+    ):
+        conformance.load_oracle_coverage_manifest(
+            oracle_manifest,
+            wire_manifest,
+            packet_type_source=changed_header,
+        )
+
+
+def test_duplicate_local_packet_type_code_fails_closed(tmp_path):
+    wire_manifest = conformance.load_manifest()
+    oracle_manifest = conformance.load_oracle_manifest()
+    header = ROOT / "main" / "mesh" / "meshcore_wire.h"
+    changed_header = tmp_path / "meshcore_wire.h"
+    changed_header.write_text(
+        header.read_text(encoding="utf-8")
+        + "\n#define D1L_MESHCORE_PAYLOAD_UNREVIEWED 0x0AU\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        conformance.GateFailure,
+        match="local MeshCore packet type codes must be unique",
+    ):
+        conformance.load_oracle_coverage_manifest(
+            oracle_manifest,
+            wire_manifest,
+            packet_type_source=changed_header,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error"),
+    [
+        ("missing_surface", "oracle required-surface mapping drifted"),
+        ("unknown_capability", "oracle required-surface mapping drifted"),
+        ("valid_surface_swap", "oracle required-surface mapping drifted"),
+        (
+            "valid_packet_swap",
+            "local packet type semantic coverage mapping drifted",
+        ),
+    ],
+)
+def test_oracle_coverage_registry_mutations_fail_closed(tmp_path, mutation, error):
+    wire_manifest = conformance.load_manifest()
+    oracle_manifest = conformance.load_oracle_manifest()
+    coverage = json.loads(COVERAGE_MANIFEST.read_text(encoding="utf-8"))
+    if mutation == "missing_surface":
+        coverage["required_surfaces"].pop()
+    elif mutation == "unknown_capability":
+        coverage["required_surfaces"][0]["capabilities"].append(
+            "unreviewed_capability"
+        )
+    elif mutation == "valid_surface_swap":
+        public_capabilities = coverage["required_surfaces"][1]["capabilities"]
+        dm_capabilities = coverage["required_surfaces"][2]["capabilities"]
+        coverage["required_surfaces"][1]["capabilities"] = dm_capabilities
+        coverage["required_surfaces"][2]["capabilities"] = public_capabilities
+    else:
+        packet_types = coverage["local_packet_type_policy"]["packet_types"]
+        text_capabilities = packet_types[0]["semantic_capabilities"]
+        group_capabilities = packet_types[3]["semantic_capabilities"]
+        packet_types[0]["semantic_capabilities"] = group_capabilities
+        packet_types[3]["semantic_capabilities"] = text_capabilities
+    changed_coverage = tmp_path / "coverage_manifest.json"
+    changed_coverage.write_text(
+        json.dumps(coverage, indent=2) + "\n", encoding="utf-8"
+    )
+
+    with pytest.raises(conformance.GateFailure, match=error):
+        conformance.load_oracle_coverage_manifest(
+            oracle_manifest,
+            wire_manifest,
+            coverage_manifest_path=changed_coverage,
+        )
 
 
 def test_oracle_c_abi_wraps_only_pinned_upstream_protocol_helpers():
@@ -263,6 +411,11 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["coverage_boundary"] == BOUNDARY
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
+    assert artifact["wp04_acceptance_ready"] is False
+    assert artifact["corpus_version"] == 6
+    assert artifact["coverage_policy"]["validated"] is True
+    assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
+    assert artifact["coverage_policy"]["local_packet_type_count"] == 6
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None

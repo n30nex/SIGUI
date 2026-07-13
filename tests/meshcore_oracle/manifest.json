@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_version": 5,
+  "corpus_version": 6,
   "abi_version": 1,
   "coverage_boundary": "pinned_upstream_packet_advert_route_ack_and_trace_source_frames",
   "wp04_closure_eligible": false,
@@ -23,6 +23,7 @@
   },
   "oracle_sources": {
     "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
+    "tests/meshcore_oracle/coverage_manifest.json": "ef7cd72bb9d784906616522420c52c33adede3418c12c86ba3dd855822e80d2d",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "a764c5c18650c17b58d6888dddf4f8026fd363bc67687de0c33f36c98863878b",
     "tests/meshcore_oracle/meshcore_oracle.h": "6b21e09c861cadfec6fe8aa852cb53b690b5cbe46e7f1bb405af9a340f0870cf",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "f68dfb9c23e16905b0601bd922441cef1e62e361eee47474c3cfb06507fc8e8a",
@@ -148,7 +149,8 @@
     {
       "id": "dm_encrypt_decrypt",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
     },
     {
       "id": "expected_ack_hash_and_ack_path",
@@ -165,7 +167,8 @@
     {
       "id": "route_selection_and_forwarding",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     },
     {
       "id": "path_return_route_codes",
@@ -182,7 +185,8 @@
     {
       "id": "login_request_response_admin",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
     }
   ],
   "production_boundary": {

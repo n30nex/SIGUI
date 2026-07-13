@@ -37,6 +37,9 @@ ADVERT_DATA_SOURCE = (
     / "AdvertDataHelpers.cpp"
 )
 ORACLE_MANIFEST_PATH = ROOT / "tests" / "meshcore_oracle" / "manifest.json"
+ORACLE_COVERAGE_MANIFEST_PATH = (
+    ROOT / "tests" / "meshcore_oracle" / "coverage_manifest.json"
+)
 ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
 ORACLE_VECTORS_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
@@ -44,7 +47,7 @@ ORACLE_VECTORS_PATH = (
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 5
+ORACLE_CORPUS_VERSION = 6
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_route_ack_and_trace_source_frames"
 )
@@ -164,7 +167,14 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "owner": "unassigned",
         "blocked_by": "external_unpinned_aes_sha_and_channel_fixture",
     },
-    {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "dm_encrypt_decrypt",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": (
+            "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
+        ),
+    },
     {
         "id": "expected_ack_hash_and_ack_path",
         "status": "pending",
@@ -183,6 +193,9 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "id": "route_selection_and_forwarding",
         "status": "pending",
         "owner": "unassigned",
+        "blocked_by": (
+            "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
+        ),
     },
     {
         "id": "path_return_route_codes",
@@ -204,6 +217,118 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "id": "login_request_response_admin",
         "status": "pending",
         "owner": "unassigned",
+        "blocked_by": (
+            "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
+        ),
+    },
+]
+EXPECTED_ORACLE_REQUIRED_SURFACES = [
+    {
+        "id": "identity_signed_adverts",
+        "status": "partial",
+        "capabilities": ["advert_data_fields", "identity_signed_advert"],
+    },
+    {
+        "id": "public_group_packets",
+        "status": "blocked",
+        "capabilities": ["public_group_packets"],
+    },
+    {
+        "id": "dm_encrypt_decrypt",
+        "status": "blocked",
+        "capabilities": ["dm_encrypt_decrypt"],
+    },
+    {
+        "id": "expected_ack",
+        "status": "blocked",
+        "capabilities": ["expected_ack_hash_and_ack_path"],
+    },
+    {
+        "id": "ack_multi_ack_ack_path",
+        "status": "partial",
+        "capabilities": ["ack_frames", "expected_ack_hash_and_ack_path"],
+    },
+    {
+        "id": "direct_flood_headers",
+        "status": "implemented",
+        "capabilities": ["direct_flood_headers"],
+    },
+    {
+        "id": "path_return_route_codes",
+        "status": "blocked",
+        "capabilities": ["path_return_route_codes"],
+    },
+    {
+        "id": "trace_path_discovery",
+        "status": "partial",
+        "capabilities": [
+            "trace_source_frames",
+            "trace_forwarding_and_path_discovery",
+        ],
+    },
+    {
+        "id": "login_request_response_admin",
+        "status": "blocked",
+        "capabilities": ["login_request_response_admin"],
+    },
+]
+EXPECTED_ORACLE_CROSS_CUTTING_CAPABILITIES = [
+    {"id": "packet_envelope", "status": "implemented"},
+    {"id": "ack_dispatch_correlation_and_delivery", "status": "blocked"},
+    {"id": "route_selection_and_forwarding", "status": "blocked"},
+]
+EXPECTED_ORACLE_PACKET_TYPES = [
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_TEXT",
+        "code": 2,
+        "wire_vector": "TXT",
+        "wire_vector_covered": True,
+        "semantic_capabilities": ["dm_encrypt_decrypt"],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_ACK",
+        "code": 3,
+        "wire_vector": "ACK",
+        "wire_vector_covered": True,
+        "semantic_capabilities": [
+            "ack_frames",
+            "expected_ack_hash_and_ack_path",
+            "ack_dispatch_correlation_and_delivery",
+        ],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_ADVERT",
+        "code": 4,
+        "wire_vector": "ADVERT",
+        "wire_vector_covered": True,
+        "semantic_capabilities": ["advert_data_fields", "identity_signed_advert"],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_GROUP_TEXT",
+        "code": 5,
+        "wire_vector": "GRP_TXT",
+        "wire_vector_covered": True,
+        "semantic_capabilities": ["public_group_packets"],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_PATH",
+        "code": 8,
+        "wire_vector": "PATH",
+        "wire_vector_covered": True,
+        "semantic_capabilities": [
+            "expected_ack_hash_and_ack_path",
+            "path_return_route_codes",
+        ],
+    },
+    {
+        "symbol": "D1L_MESHCORE_PAYLOAD_MULTIPART",
+        "code": 10,
+        "wire_vector": "MULTIPART",
+        "wire_vector_covered": True,
+        "semantic_capabilities": [
+            "ack_frames",
+            "ack_dispatch_correlation_and_delivery",
+        ],
     },
 ]
 EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
@@ -320,7 +445,7 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("coverage_boundary") != ORACLE_COVERAGE_BOUNDARY:
         raise GateFailure("oracle coverage boundary drifted")
     if manifest.get("wp04_closure_eligible") is not False:
-        raise GateFailure("first oracle slice must not claim WP-04 closure")
+        raise GateFailure("oracle manifest must not claim WP-04 closure")
     upstream = manifest.get("upstream")
     if not isinstance(upstream, dict) or upstream.get("commit") != EXPECTED_UPSTREAM["commit"]:
         raise GateFailure("oracle upstream commit does not match the pinned MeshCore pin")
@@ -416,6 +541,7 @@ def load_oracle_manifest() -> dict[str, Any]:
     oracle_sources = manifest.get("oracle_sources")
     if not isinstance(oracle_sources, dict) or set(oracle_sources) != {
         "tests/meshcore_conformance/stubs/SHA256.h",
+        "tests/meshcore_oracle/coverage_manifest.json",
         "tests/meshcore_oracle/meshcore_oracle.cpp",
         "tests/meshcore_oracle/meshcore_oracle.h",
         "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
@@ -424,6 +550,239 @@ def load_oracle_manifest() -> dict[str, Any]:
     }:
         raise GateFailure("oracle source allowlist drifted")
     return manifest
+
+
+def parse_local_packet_types(
+    path: Path,
+    excluded_symbols: Sequence[str] = ("D1L_MESHCORE_PAYLOAD_VER_1",),
+) -> dict[str, int]:
+    try:
+        source = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GateFailure(f"cannot read local MeshCore packet type source: {exc}") from exc
+    prefix = "D1L_MESHCORE_PAYLOAD_"
+    pattern = re.compile(
+        rf"^\s*#\s*define\s+({prefix}[A-Za-z0-9_]+)\b(.*)$",
+        re.MULTILINE,
+    )
+    excluded = set(excluded_symbols)
+    declarations = pattern.findall(source)
+    symbols = [symbol for symbol, _encoded in declarations]
+    if len(set(symbols)) != len(symbols):
+        raise GateFailure("local MeshCore packet type symbols must be unique")
+    if not excluded.issubset({symbol for symbol, _encoded in declarations}):
+        raise GateFailure("local MeshCore packet type exclusions drifted")
+    packet_types: dict[str, int] = {}
+    for symbol, encoded in declarations:
+        if symbol in excluded:
+            continue
+        if not re.fullmatch(rf"{prefix}[A-Z0-9_]+", symbol):
+            raise GateFailure("local MeshCore packet type symbol syntax is unsupported")
+        value = re.fullmatch(
+            r"\s*(0[xX][0-9A-Fa-f]+|[0-9]+)[uU]?\s*", encoded
+        )
+        if value is None:
+            raise GateFailure("local MeshCore packet type value syntax is unsupported")
+        code = int(value.group(1), 0)
+        if code < 0 or code > 0x0F:
+            raise GateFailure("local MeshCore packet type code is outside the 4-bit range")
+        packet_types[symbol] = code
+    if not packet_types:
+        raise GateFailure("local MeshCore packet type registry is empty")
+    if len(set(packet_types.values())) != len(packet_types):
+        raise GateFailure("local MeshCore packet type codes must be unique")
+    return packet_types
+
+
+def load_oracle_coverage_manifest(
+    oracle_manifest: dict[str, Any],
+    wire_manifest: dict[str, Any],
+    *,
+    packet_type_source: Path | None = None,
+    coverage_manifest_path: Path = ORACLE_COVERAGE_MANIFEST_PATH,
+) -> dict[str, Any]:
+    try:
+        coverage = json.loads(coverage_manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GateFailure(f"cannot read MeshCore oracle coverage manifest: {exc}") from exc
+    if coverage.get("schema_version") != 1:
+        raise GateFailure("oracle coverage manifest schema version drifted")
+    if coverage.get("work_package") != "WP-04":
+        raise GateFailure("oracle coverage manifest work package drifted")
+    if coverage.get("coverage_boundary") != ORACLE_COVERAGE_BOUNDARY:
+        raise GateFailure("oracle coverage manifest boundary drifted")
+    if coverage.get("upstream_commit") != EXPECTED_UPSTREAM["commit"]:
+        raise GateFailure("oracle coverage manifest upstream pin drifted")
+    if coverage.get("oracle_corpus_version") != ORACLE_CORPUS_VERSION:
+        raise GateFailure("oracle coverage manifest corpus version drifted")
+    if coverage.get("oracle_abi_version") != ORACLE_ABI_VERSION:
+        raise GateFailure("oracle coverage manifest ABI version drifted")
+    if coverage.get("wp04_closure_eligible") is not False:
+        raise GateFailure("oracle coverage manifest must reject WP-04 closure")
+    if coverage.get("closure_ready") is not False:
+        raise GateFailure("oracle coverage manifest must remain fail closed")
+
+    capabilities = oracle_manifest["capabilities"]
+    capability_by_id = {entry["id"]: entry for entry in capabilities}
+    if len(capability_by_id) != len(capabilities):
+        raise GateFailure("oracle capability IDs must be unique")
+
+    surfaces = coverage.get("required_surfaces")
+    if surfaces != EXPECTED_ORACLE_REQUIRED_SURFACES:
+        raise GateFailure("oracle required-surface mapping drifted")
+    referenced_capabilities: set[str] = set()
+    for surface in surfaces:
+        surface_capabilities = surface.get("capabilities")
+        if (
+            not isinstance(surface_capabilities, list)
+            or not surface_capabilities
+            or len(set(surface_capabilities)) != len(surface_capabilities)
+            or any(item not in capability_by_id for item in surface_capabilities)
+        ):
+            raise GateFailure(f"oracle surface capability mapping is invalid: {surface.get('id')}")
+        statuses = {
+            capability_by_id[item]["status"] for item in surface_capabilities
+        }
+        expected_status = (
+            "implemented"
+            if statuses == {"implemented"}
+            else "blocked"
+            if statuses == {"pending"}
+            else "partial"
+        )
+        if surface.get("status") != expected_status:
+            raise GateFailure(f"oracle surface status is not derived: {surface['id']}")
+        referenced_capabilities.update(surface_capabilities)
+
+    cross_cutting = coverage.get("cross_cutting_capabilities")
+    if cross_cutting != EXPECTED_ORACLE_CROSS_CUTTING_CAPABILITIES:
+        raise GateFailure("oracle cross-cutting capability mapping drifted")
+    for entry in cross_cutting:
+        capability_id = entry["id"]
+        capability = capability_by_id.get(capability_id)
+        if capability is None:
+            raise GateFailure(f"unknown cross-cutting capability: {capability_id}")
+        expected_status = (
+            "implemented" if capability["status"] == "implemented" else "blocked"
+        )
+        if entry.get("status") != expected_status:
+            raise GateFailure(f"cross-cutting capability status drifted: {capability_id}")
+        referenced_capabilities.add(capability_id)
+    if referenced_capabilities != set(capability_by_id):
+        raise GateFailure("coverage manifest does not account for every oracle capability")
+
+    pending = {
+        item["id"]: item
+        for item in capabilities
+        if item.get("status") == "pending"
+    }
+    if any(not isinstance(item.get("blocked_by"), str) for item in pending.values()):
+        raise GateFailure("every pending oracle capability requires an exact blocker receipt")
+    if coverage.get("unresolved_capabilities") != list(pending):
+        raise GateFailure("oracle unresolved capability registry drifted")
+
+    packet_policy = coverage.get("local_packet_type_policy")
+    if not isinstance(packet_policy, dict):
+        raise GateFailure("local packet type policy is missing")
+    if (
+        packet_policy.get("source") != "main/mesh/meshcore_wire.h"
+        or packet_policy.get("declaration_prefix") != "D1L_MESHCORE_PAYLOAD_"
+        or packet_policy.get("excluded_symbols")
+        != ["D1L_MESHCORE_PAYLOAD_VER_1"]
+        or packet_policy.get("unknown_packet_type_policy") != "fail_closed"
+        or packet_policy.get("require_wire_vector") is not True
+    ):
+        raise GateFailure("local packet type policy is not fail closed")
+    packet_types = packet_policy.get("packet_types")
+    if packet_types != EXPECTED_ORACLE_PACKET_TYPES:
+        raise GateFailure("local packet type semantic coverage mapping drifted")
+    declared = parse_local_packet_types(
+        packet_type_source or ROOT / packet_policy["source"],
+        packet_policy["excluded_symbols"],
+    )
+    covered: dict[str, int] = {}
+    vector_codes: dict[str, int] = {}
+    for entry in packet_types:
+        symbol = entry.get("symbol")
+        code = entry.get("code")
+        vector = entry.get("wire_vector")
+        semantic_capabilities = entry.get("semantic_capabilities")
+        if (
+            not isinstance(symbol, str)
+            or not isinstance(code, int)
+            or not isinstance(vector, str)
+            or entry.get("wire_vector_covered") is not True
+            or not isinstance(semantic_capabilities, list)
+            or not semantic_capabilities
+            or any(item not in capability_by_id for item in semantic_capabilities)
+        ):
+            raise GateFailure("local packet type coverage entry is invalid")
+        if symbol in covered or vector in vector_codes:
+            raise GateFailure("local packet type coverage entries must be unique")
+        covered[symbol] = code
+        vector_codes[vector] = code
+    if covered != declared:
+        raise GateFailure("local packet type changed without a coverage vector")
+    wire_vectors = {
+        item["name"]: item["code"]
+        for item in wire_manifest["vector_matrix"]["payload_types"]
+    }
+    if vector_codes != wire_vectors:
+        raise GateFailure("local packet type coverage does not match the wire vector matrix")
+
+    update_policy = coverage.get("submodule_update_policy")
+    if update_policy != {
+        "reviewed_upstream_commit": EXPECTED_UPSTREAM["commit"],
+        "reviewed_corpus_version": ORACLE_CORPUS_VERSION,
+        "requires_vector_review": True,
+        "requires_corpus_version_increment": True,
+        "unreviewed_update_policy": "fail_closed",
+    }:
+        raise GateFailure("MeshCore submodule vector-review policy drifted")
+    return coverage
+
+
+def summarize_oracle_coverage(
+    coverage: dict[str, Any], oracle_manifest: dict[str, Any]
+) -> dict[str, Any]:
+    statuses = [item["status"] for item in coverage["required_surfaces"]]
+    pending = [
+        item for item in oracle_manifest["capabilities"] if item["status"] == "pending"
+    ]
+    return {
+        "path": str(ORACLE_COVERAGE_MANIFEST_PATH.relative_to(ROOT)).replace(
+            "\\", "/"
+        ),
+        "sha256": sha256_lf_text_file(ORACLE_COVERAGE_MANIFEST_PATH),
+        "validated": True,
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "unsupported_closure_rejected": True,
+        "required_surface_count": len(statuses),
+        "implemented_surface_count": statuses.count("implemented"),
+        "partial_surface_count": statuses.count("partial"),
+        "blocked_surface_count": statuses.count("blocked"),
+        "local_packet_type_count": len(
+            coverage["local_packet_type_policy"]["packet_types"]
+        ),
+        "wire_vector_covered_packet_type_count": len(
+            coverage["local_packet_type_policy"]["packet_types"]
+        ),
+        "unknown_packet_type_policy": "fail_closed",
+        "required_surfaces": coverage["required_surfaces"],
+        "cross_cutting_capabilities": coverage["cross_cutting_capabilities"],
+        "unresolved_capabilities": coverage["unresolved_capabilities"],
+        "blocker_receipts": [
+            {
+                "capability": item["id"],
+                "status": "open",
+                "blocked_by": item["blocked_by"],
+            }
+            for item in pending
+        ],
+        "local_packet_types": coverage["local_packet_type_policy"]["packet_types"],
+        "submodule_update_policy": coverage["submodule_update_policy"],
+    }
 
 
 def verify_oracle_sources(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -788,6 +1147,7 @@ def completed_fuzz_runs(stderr: str, requested: int) -> int | None:
 def base_report(
     manifest: dict[str, Any],
     oracle_manifest: dict[str, Any],
+    oracle_coverage: dict[str, Any],
     args: argparse.Namespace,
 ) -> dict[str, Any]:
     return {
@@ -838,6 +1198,9 @@ def base_report(
                 "upstream_commit": oracle_manifest["upstream"]["commit"],
             },
             "capabilities": oracle_manifest["capabilities"],
+            "coverage_policy": summarize_oracle_coverage(
+                oracle_coverage, oracle_manifest
+            ),
             "source_verification": None,
             "result": None,
             "artifact_path": None,
@@ -886,6 +1249,8 @@ def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
         "abi_version": ORACLE_ABI_VERSION,
         "wp04_closure_eligible": False,
         "closure_ready": False,
+        "wp04_acceptance_ready": False,
+        "coverage_policy": oracle["coverage_policy"],
         "repository_commit": (report.get("source_verification") or {}).get(
             "repository_commit"
         ),
@@ -906,7 +1271,8 @@ def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
 def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     manifest = load_manifest()
     oracle_manifest = load_oracle_manifest()
-    report = base_report(manifest, oracle_manifest, args)
+    oracle_coverage = load_oracle_coverage_manifest(oracle_manifest, manifest)
+    report = base_report(manifest, oracle_manifest, oracle_coverage, args)
     try:
         if args.dry_run and os.environ.get("D1L_MESHCORE_CONFORMANCE_CI") == "1":
             raise GateFailure("dry-run is forbidden in GitHub Actions")

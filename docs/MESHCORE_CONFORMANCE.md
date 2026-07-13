@@ -35,7 +35,7 @@ cryptographic oracles because they do not implement production cryptography.
 
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 1 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
-`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 5 static
+`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 6 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -64,6 +64,23 @@ emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
 report.
 
+`tests/meshcore_oracle/coverage_manifest.json` is the machine-readable WP-04
+boundary receipt. It accounts for all nine roadmap surfaces, every oracle
+capability, the current unresolved capability IDs, and the reviewed
+upstream-commit/corpus-version pair. The main oracle manifest pins this policy
+file by canonical-LF SHA-256. The conformance runner derives all numeric
+`D1L_MESHCORE_PAYLOAD_*` declarations from `main/mesh/meshcore_wire.h` (while
+explicitly excluding the `D1L_MESHCORE_PAYLOAD_VER_1` version constant) and
+requires exact equality with both the policy registry and the six-type wire
+vector matrix. Consequently a new local payload type, a duplicate code, a
+missing roadmap surface, or an unknown capability fails before compilation.
+Envelope-vector coverage remains distinct from semantic coverage: the current
+six local types all have envelope vectors, while the policy reports one fully
+implemented roadmap surface, three partial surfaces, and five blocked surfaces.
+The exact packet registry and blocker receipts are copied into
+`meshcore_oracle_manifest_<full-commit>.json`; `wp04_acceptance_ready` and
+`closure_ready` remain false.
+
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is `pinned_upstream_packet_advert_route_ack_and_trace_source_frames`; the advert
 vectors cover only canonical application fields, not a complete signed Mesh
@@ -90,6 +107,14 @@ clock fixtures. Those stages require deterministic radio, RNG, RTC,
 millisecond-clock, packet manager, mesh-table, contact, and channel fixtures;
 they must extend the versioned manifest instead of silently widening what this
 artifact claims.
+
+The three previously implicit gaps now have explicit fail-closed receipts.
+DM encrypt/decrypt requires the unpinned AES, SHA, and Ed25519 implementations
+plus identity and mesh-session fixtures. Route selection/forwarding requires a
+deterministic dispatcher, packet manager, mesh tables, radio, RNG, and clocks.
+Login/request/response/admin requires the same production crypto boundary plus
+identity and deterministic admin-session fixtures. These receipts describe
+missing oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
 
