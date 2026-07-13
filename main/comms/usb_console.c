@@ -9,6 +9,7 @@
 
 #include "esp_err.h"
 #include "esp_random.h"
+#include "esp_rom_sys.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -50,8 +51,8 @@ static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
 static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
 /* The default ESP-IDF console writes directly to UART0 without installing the
  * UART driver. Give the final reboot receipt enough bounded wire time before
- * esp_restart_noos arms its one-second RTC watchdog and waits for enabled
- * UARTs. The receipt is ~200 bytes (under 18 ms at 115200 baud). */
+ * the already-quiesced system reset. The receipt is under 300 bytes (under
+ * 27 ms at 115200 baud). */
 static const uint32_t D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U;
 static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
 
@@ -5129,15 +5130,27 @@ static void handle_line(const char *line)
                        "reboot deadline lacks console drain headroom; reboot cancelled");
             return;
         }
+        esp_err_t connectivity_prepare_ret = d1l_connectivity_prepare_reboot();
+        if (connectivity_prepare_ret != ESP_OK) {
+            d1l_rp2040_bridge_quiesce_end();
+            d1l_route_store_worker_quiesce_end();
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(connectivity_prepare_ret),
+                       "connectivity prepare failed; reboot cancelled");
+            return;
+        }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\",\"console_drain_grace_ms\":%lu}\n",
+        printf(",\"rebooting\":true,\"reset_scope\":\"system\",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"connectivity_prepare\":\"ESP_OK\",\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\",\"console_drain_grace_ms\":%lu}\n",
                (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
         fflush(stdout);
         vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS));
         /* Keep all three quiesce locks held so neither retained persistence nor
          * a new UART2 SD exchange can begin while the bounded console grace
-         * drains UART0 and restart drains the final UART hardware state. */
-        esp_restart();
+         * drains UART0. A full ROM system reset avoids carrying esp_restart's
+         * one-second RTC watchdog into the next boot. */
+        esp_rom_software_reset_system();
+        for (;;) {
+        }
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");
     } else {

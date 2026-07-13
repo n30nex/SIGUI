@@ -312,6 +312,8 @@ def reboot_cycle() -> dict:
         "ok": True,
         "post_reboot_reset_reason": "SW",
         "reboot_proven": True,
+        "reset_scope": "system",
+        "connectivity_prepare": "ESP_OK",
         "storage_manager_quiesced": True,
         "retained_worker_quiesced": True,
         "rp2040_bridge_quiesced": True,

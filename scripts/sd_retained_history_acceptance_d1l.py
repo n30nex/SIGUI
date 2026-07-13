@@ -920,6 +920,16 @@ def run_acceptance(
             if result.get("cmd") == "storage status"
         ),
         "reboot_command_passed": reboot_ok if include_reboot else None,
+        "reboot_reset_scope": (
+            reboot_result.get("reset_scope")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
+        "reboot_connectivity_prepare": (
+            reboot_result.get("connectivity_prepare")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
         "reboot_route_flush": (
             reboot_result.get("route_flush")
             if include_reboot and isinstance(reboot_result, dict)

@@ -47,6 +47,7 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "D1L_REBOOT_RESTART_MARGIN_MS = 100U" in console
     assert "retained storage flush failed; reboot cancelled" in console
     assert r'\"retained_flush\":\"ESP_OK\"' in console
+    assert '#include "esp_rom_sys.h"' in console
 
 
 def test_reboot_quiesces_storage_and_uart_under_one_deadline():
@@ -137,17 +138,20 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     assert reboot.index("d1l_rp2040_bridge_quiesce_begin") < reboot.index(
         "remaining_ms <= D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS +"
     ) < reboot.index(
+        "d1l_connectivity_prepare_reboot()"
+    ) < reboot.index(
         "ok_begin(\"reboot\")"
     ) < reboot.index(
         "fflush(stdout)"
     ) < reboot.index(
         "vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS))"
     ) < reboot.index(
-        "esp_restart()"
+        "esp_rom_software_reset_system()"
     )
-    assert reboot.count("d1l_storage_manager_quiesce_end()") == 4
-    assert reboot.count("d1l_route_store_worker_quiesce_end()") == 2
-    assert reboot.count("d1l_rp2040_bridge_quiesce_end()") == 1
+    assert "esp_restart()" not in reboot
+    assert reboot.count("d1l_storage_manager_quiesce_end()") == 5
+    assert reboot.count("d1l_route_store_worker_quiesce_end()") == 3
+    assert reboot.count("d1l_rp2040_bridge_quiesce_end()") == 2
     final_deadline = reboot.index("reboot deadline lacks console drain headroom")
     assert reboot.rfind("d1l_rp2040_bridge_quiesce_end()", 0, final_deadline) < reboot.rfind(
         "d1l_route_store_worker_quiesce_end()", 0, final_deadline
@@ -165,6 +169,16 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     assert r'\"retained_worker_quiesced\":true' in reboot
     assert r'\"rp2040_bridge_quiesced\":true' in reboot
     assert r'\"console_drain_grace_ms\":%lu' in reboot
+    assert r'\"reset_scope\":\"system\"' in reboot
+    assert r'\"connectivity_prepare\":\"ESP_OK\"' in reboot
+    connectivity_failure = reboot.index("connectivity prepare failed")
+    assert reboot.rfind(
+        "d1l_rp2040_bridge_quiesce_end()", 0, connectivity_failure
+    ) < reboot.rfind(
+        "d1l_route_store_worker_quiesce_end()", 0, connectivity_failure
+    ) < reboot.rfind(
+        "d1l_storage_manager_quiesce_end()", 0, connectivity_failure
+    )
 
 
 def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reordering():

@@ -350,6 +350,26 @@ static void fill_status(d1l_connectivity_status_t *out_status)
     out_status->coexistence_policy = "offline_first_one_companion_radio";
 }
 
+esp_err_t d1l_connectivity_prepare_reboot(void)
+{
+#ifdef CONFIG_ESP_WIFI_ENABLED
+    /* esp_restart() normally replays the default Wi-Fi shutdown handler. The
+     * controlled ROM system-reset path bypasses shutdown handlers, so mirror
+     * that handler without changing the persisted Wi-Fi setting or profile. */
+    if (s_wifi_initialized) {
+        esp_err_t ret = esp_wifi_stop();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+#endif
+    s_wifi_started = false;
+    s_wifi_connected = false;
+    s_wifi_connecting = false;
+    s_wifi_ip[0] = '\0';
+    return ESP_OK;
+}
+
 esp_err_t d1l_connectivity_init(void)
 {
     d1l_settings_t settings = *d1l_settings_current();

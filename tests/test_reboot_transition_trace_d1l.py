@@ -16,6 +16,7 @@ class FakeSerial:
         reset_reason="SW",
         raw_reset_line=_DEFAULT_RESET_LINE,
         extra_boot_lines=(),
+        reset_scope="system",
     ):
         self.port = None
         self.timeout = 0.1
@@ -28,10 +29,11 @@ class FakeSerial:
             raw_reset_line = (
                 b"rst:0x7 (TG0WDT_SYS_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n"
                 if reset_reason == "WDT"
-                else b"rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n"
+                else b"rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n"
             )
         self.raw_reset_line = raw_reset_line
         self.extra_boot_lines = list(extra_boot_lines)
+        self.reset_scope = reset_scope
         self.pending = []
         self.writes = []
 
@@ -99,9 +101,12 @@ class FakeSerial:
                 "storage_manager_quiesced": True,
                 "retained_worker_quiesced": True,
                 "rp2040_bridge_quiesced": True,
+                "connectivity_prepare": "ESP_OK",
                 "retained_flush": "ESP_OK",
                 "route_flush": "ESP_OK",
             }
+            if self.reset_scope is not None:
+                result["reset_scope"] = self.reset_scope
             self.rebooted = True
             boot_lines = [b"ESP-ROM:esp32s3-20210327\r\n"]
             if self.raw_reset_line is not None:
@@ -124,11 +129,13 @@ class FakeSerialModule:
         reset_reason="SW",
         raw_reset_line=_DEFAULT_RESET_LINE,
         extra_boot_lines=(),
+        reset_scope="system",
     ):
         self.instance = FakeSerial(
             reset_reason=reset_reason,
             raw_reset_line=raw_reset_line,
             extra_boot_lines=extra_boot_lines,
+            reset_scope=reset_scope,
         )
         self.open_count = 0
 
@@ -224,8 +231,94 @@ def test_trace_keeps_one_handle_open_and_proves_one_sw_reboot(tmp_path):
     ] is True
     assert report["checks"]["raw_transition_complete"] is True
     assert report["checks"]["raw_reset_reason_sw"] is True
+    assert report["checks"]["reset_scope_system"] is True
     assert report["transition"]["transition_marker_counts"][
         "sw_reset_banner"
+    ] == 1
+
+
+def test_trace_accepts_system_software_reset_pair(tmp_path):
+    report = trace.run_trace(
+        args(tmp_path),
+        serial_module=FakeSerialModule(
+            raw_reset_line=(
+                b"rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n"
+            )
+        ),
+    )
+
+    assert report["ok"] is True
+    assert report["classification"] == "single_sw_transition"
+    assert report["checks"]["raw_reset_reason_sw"] is True
+    assert report["transition"]["reset_events"][0]["code"] == 0x03
+    assert report["transition"]["reset_events"][0]["reason"] == "RTC_SW_SYS_RST"
+    assert report["transition"]["reset_events"][0]["reset_scope"] == "system"
+
+
+@pytest.mark.parametrize(
+    ("reset_scope", "raw_reset_line", "classification"),
+    (
+        (
+            None,
+            b"rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+            "reboot_ack_failed",
+        ),
+        (
+            "cpu",
+            b"rst:0x3 (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+            "reboot_ack_failed",
+        ),
+        (
+            "system",
+            b"rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+            "reset_scope_mismatch",
+        ),
+        (
+            "cpu",
+            b"rst:0xc (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+            "reboot_ack_failed",
+        ),
+    ),
+)
+def test_trace_requires_declared_and_raw_system_reset_scope(
+    tmp_path, reset_scope, raw_reset_line, classification
+):
+    report = trace.run_trace(
+        args(tmp_path),
+        serial_module=FakeSerialModule(
+            reset_scope=reset_scope,
+            raw_reset_line=raw_reset_line,
+        ),
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == classification
+    assert report["checks"]["raw_reset_reason_sw"] is True
+    assert report["checks"]["reset_scope_system"] is False
+
+
+@pytest.mark.parametrize(
+    "raw_reset_line",
+    (
+        b"rst:0x3 (RTC_SW_CPU_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+        b"rst:0xc (RTC_SW_SYS_RST),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+        b"rst:0x3 (SW_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+        b"rst:0xc (SW_CPU_RESET),boot:0x8 (SPI_FAST_FLASH_BOOT)\r\n",
+    ),
+)
+def test_trace_rejects_mismatched_software_reset_code_reason_pairs(
+    tmp_path, raw_reset_line
+):
+    report = trace.run_trace(
+        args(tmp_path),
+        serial_module=FakeSerialModule(raw_reset_line=raw_reset_line),
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "raw_reset_banner_mismatch"
+    assert report["checks"]["raw_reset_reason_sw"] is False
+    assert report["transition"]["transition_marker_counts"][
+        "non_sw_reset_banner"
     ] == 1
 
 

@@ -56,7 +56,7 @@ def persistence_responses(
         '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":3}\n',
         settings_response("D1L Smoke Persist", 3),
         health_response(11),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
         health_response(first_post_nonce, first_post_reset_reason),
         settings_response("D1L Smoke Persist", 3),
         wifi_status_response(),
@@ -64,7 +64,7 @@ def persistence_responses(
         '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":2}\n',
         settings_response("Krab Desk", 2),
         health_response(first_post_nonce),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
         health_response(cleanup_post_nonce, cleanup_post_reset_reason),
         settings_response("Krab Desk", 2),
         wifi_status_response(cleanup_ssid),
@@ -460,18 +460,27 @@ def test_reboot_timeout_floor_does_not_change_other_commands():
     assert smoke_d1l.timeout_for_reboot_command("health", 5.0) == 5.0
 
 
-def test_reboot_command_requires_quiesced_successful_retained_flush():
-    assert smoke_d1l.reboot_command_passed(
-        {
-            "ok": True,
-            "rebooting": True,
-            "storage_manager_quiesced": True,
-            "retained_worker_quiesced": True,
-            "rp2040_bridge_quiesced": True,
-            "retained_flush": "ESP_OK",
-            "route_flush": "ESP_OK",
-        }
-    ) is True
+def test_reboot_command_requires_system_reset_and_all_quiesce_receipts():
+    valid = {
+        "ok": True,
+        "rebooting": True,
+        "reset_scope": "system",
+        "storage_manager_quiesced": True,
+        "retained_worker_quiesced": True,
+        "rp2040_bridge_quiesced": True,
+        "connectivity_prepare": "ESP_OK",
+        "retained_flush": "ESP_OK",
+        "route_flush": "ESP_OK",
+    }
+    assert smoke_d1l.reboot_command_passed(valid) is True
+    for field in ("reset_scope", "connectivity_prepare"):
+        missing = dict(valid)
+        del missing[field]
+        assert smoke_d1l.reboot_command_passed(missing) is False
+    cpu_reset = dict(valid, reset_scope="cpu")
+    assert smoke_d1l.reboot_command_passed(cpu_reset) is False
+    connectivity_failure = dict(valid, connectivity_prepare="ESP_FAIL")
+    assert smoke_d1l.reboot_command_passed(connectivity_failure) is False
     assert smoke_d1l.reboot_command_passed(
         {
             "ok": True,

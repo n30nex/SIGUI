@@ -22,6 +22,7 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "d1l_connectivity_set_ble_enabled" in header
     assert "d1l_connectivity_save_wifi_profile" in header
     assert "d1l_connectivity_clear_wifi_profile" in header
+    assert "d1l_connectivity_prepare_reboot" in header
     assert "wifi_profile_saved" in header
     assert "wifi_password_saved" in header
     assert "wifi_ssid" in header
@@ -65,6 +66,21 @@ def test_connectivity_manager_keeps_companion_radios_default_off_and_persistent(
     assert "CONFIG_BT_ENABLED=n" in defaults
     assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y" in defaults
     assert "CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y" in defaults
+
+    reset = source[
+        source.index("esp_err_t d1l_connectivity_prepare_reboot"):
+        source.index("esp_err_t d1l_connectivity_init")
+    ]
+    assert "if (s_wifi_initialized)" in reset
+    assert "esp_wifi_stop()" in reset
+    assert "return ret" in reset
+    assert "s_wifi_started = false" in reset
+    assert "s_wifi_connected = false" in reset
+    assert "s_wifi_connecting = false" in reset
+    assert "s_wifi_ip[0] = '\\0'" in reset
+    assert "return ESP_OK" in reset
+    assert "d1l_settings" not in reset
+    assert "esp_wifi_deinit" not in reset
 
     connect = source[
         source.index("esp_err_t d1l_connectivity_wifi_connect"):

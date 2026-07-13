@@ -52,7 +52,10 @@ def test_retained_store_diagnostics_report_target_truth_and_reboot_is_combined()
     )
     assert "d1l_route_store_worker_force_flush" in reboot
     assert "retained storage flush failed; reboot cancelled" in reboot
-    assert reboot.index("d1l_route_store_worker_force_flush") < reboot.index("esp_restart()")
+    assert reboot.index("d1l_route_store_worker_force_flush") < reboot.index(
+        "esp_rom_software_reset_system()"
+    )
+    assert "esp_restart()" not in reboot
     assert r'\"retained_flush\":\"ESP_OK\"' in reboot
     assert reboot.index("d1l_storage_manager_quiesce_begin") < reboot.index(
         "d1l_route_store_worker_force_flush"

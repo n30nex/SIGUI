@@ -51,7 +51,10 @@ SERIAL_LINE_LIMIT_BYTES = 16384
 IGNORED_JSON_LIMIT = 8
 BOOT_EVENT_LIMIT = 16
 TRANSITION_PHASES = frozenset({"transition", "post"})
-SW_RESET_REASONS = frozenset({"RTC_SW_CPU_RST", "SW_CPU_RESET"})
+SW_RESET_SCOPES = {
+    (0x03, "RTC_SW_SYS_RST"): "system",
+    (0x0C, "RTC_SW_CPU_RST"): "cpu",
+}
 
 ROM_BANNER_RE = re.compile(r"(?:ESP-ROM:|^ets\s)", re.IGNORECASE)
 RESET_BANNER_RE = re.compile(r"(?:^|\s)rst:0x[0-9a-f]+", re.IGNORECASE)
@@ -187,13 +190,15 @@ class TraceRecorder:
                         **self._event_base(phase),
                         "code": None,
                         "reason": None,
+                        "reset_scope": None,
                         "is_sw": False,
                         "is_wdt": False,
                     }
                 else:
                     code = int(cause.group("code"), 16)
                     reason = cause.group("reason").strip().upper()
-                    is_sw = code == 0xC and reason in SW_RESET_REASONS
+                    reset_scope = SW_RESET_SCOPES.get((code, reason))
+                    is_sw = reset_scope is not None
                     is_wdt = "WDT" in reason
                     marker = "sw_reset_banner" if is_sw else "non_sw_reset_banner"
                     self.transition_marker_counts[marker] += 1
@@ -203,6 +208,7 @@ class TraceRecorder:
                         **self._event_base(phase),
                         "code": code,
                         "reason": reason,
+                        "reset_scope": reset_scope,
                         "is_sw": is_sw,
                         "is_wdt": is_wdt,
                     }
@@ -511,6 +517,22 @@ def classify_report(report: dict) -> None:
         and transition_marker_counts.get("non_sw_reset_banner") == 0
         and transition_marker_counts.get("unparsed_reset_banner") == 0
     )
+    reset_events = transition.get("reset_events")
+    raw_reset_scope = None
+    if (
+        isinstance(reset_events, list)
+        and len(reset_events) == 1
+        and isinstance(reset_events[0], dict)
+        and reset_events[0].get("is_sw") is True
+    ):
+        raw_reset_scope = reset_events[0].get("reset_scope")
+    reboot = report.get("reboot")
+    declared_reset_scope = (
+        reboot.get("reset_scope") if isinstance(reboot, dict) else None
+    )
+    reset_scope_system = (
+        declared_reset_scope == "system" and raw_reset_scope == "system"
+    )
     dropped_lines_by_phase = transition.get("raw_lines_dropped_by_phase")
     if not isinstance(dropped_lines_by_phase, dict):
         dropped_lines_by_phase = {}
@@ -549,6 +571,9 @@ def classify_report(report: dict) -> None:
         "raw_crash_marker_seen": raw_crash_marker_seen,
         "raw_wdt_reset_seen": raw_wdt_reset_seen,
         "raw_reset_reason_sw": raw_reset_reason_sw,
+        "declared_reset_scope": declared_reset_scope,
+        "raw_reset_scope": raw_reset_scope,
+        "reset_scope_system": reset_scope_system,
         "raw_transition_complete": raw_transition_complete,
         "transition_lines_dropped": transition_lines_dropped,
         "transition_chars_dropped": transition_chars_dropped,
@@ -575,6 +600,8 @@ def classify_report(report: dict) -> None:
         classification = "raw_reset_banner_mismatch"
     elif raw_crash_marker_seen:
         classification = "raw_reset_banner_mismatch"
+    elif not reset_scope_system:
+        classification = "reset_scope_mismatch"
     elif not nonce_changed:
         classification = "boot_nonce_not_changed"
     elif not crash.get("ok"):

@@ -649,6 +649,8 @@ def _derive_reboot_cycle(
         and source.get("unexpected_restart_before_reboot") is False
         and source.get("pre_reboot_gate_passed") is True
         and source.get("reboot_attempted") is True
+        and source.get("reboot_reset_scope") == "system"
+        and source.get("reboot_connectivity_prepare") == "ESP_OK"
         and source.get("public_rf_tx") is False
         and source.get("formats_sd") is False
         and not _nested_true(source, {"public_rf_tx", "formats_sd", "format_performed"})
@@ -782,9 +784,11 @@ def _derive_reboot_cycle(
     if not (
         reboot_result.get("ok") is True
         and reboot_result.get("rebooting") is True
+        and reboot_result.get("reset_scope") == "system"
         and reboot_result.get("storage_manager_quiesced") is True
         and reboot_result.get("retained_worker_quiesced") is True
         and reboot_result.get("rp2040_bridge_quiesced") is True
+        and reboot_result.get("connectivity_prepare") == "ESP_OK"
         and reboot_result.get("retained_flush") == "ESP_OK"
         and reboot_result.get("route_flush") == "ESP_OK"
     ):
@@ -794,6 +798,8 @@ def _derive_reboot_cycle(
         "ok": True,
         "post_reboot_reset_reason": "SW",
         "reboot_proven": True,
+        "reset_scope": "system",
+        "connectivity_prepare": "ESP_OK",
         "storage_manager_quiesced": True,
         "retained_worker_quiesced": True,
         "rp2040_bridge_quiesced": True,

@@ -237,9 +237,11 @@ def reboot_command_passed(result: dict | None) -> bool:
         isinstance(result, dict)
         and result.get("ok") is True
         and result.get("rebooting") is True
+        and result.get("reset_scope") == "system"
         and result.get("storage_manager_quiesced") is True
         and result.get("retained_worker_quiesced") is True
         and result.get("rp2040_bridge_quiesced") is True
+        and result.get("connectivity_prepare") == "ESP_OK"
         and result.get("retained_flush") == "ESP_OK"
         and result.get("route_flush") == "ESP_OK"
     )
@@ -424,12 +426,16 @@ def run_persistence_check(ser, timeout: float) -> dict:
             "mutation_started": False,
             "reboot_attempted": False,
             "reboot_command_passed": False,
+            "reboot_reset_scope": None,
+            "reboot_connectivity_prepare": None,
             "reboot_route_flush": None,
             "reboot_storage_manager_quiesced": None,
             "reboot_rp2040_bridge_quiesced": None,
             "post_reboot_reset_reason": None,
             "reboot_proven": False,
             "cleanup_reboot_command_passed": False,
+            "cleanup_reboot_reset_scope": None,
+            "cleanup_reboot_connectivity_prepare": None,
             "cleanup_reboot_route_flush": None,
             "cleanup_reboot_storage_manager_quiesced": None,
             "cleanup_reboot_rp2040_bridge_quiesced": None,
@@ -601,6 +607,8 @@ def run_persistence_check(ser, timeout: float) -> dict:
         "temporary_node_name": test_name,
         "temporary_path_hash_bytes": test_path_hash,
         "reboot_command_passed": reboot_ok,
+        "reboot_reset_scope": reboot.get("reset_scope"),
+        "reboot_connectivity_prepare": reboot.get("connectivity_prepare"),
         "reboot_route_flush": reboot.get("route_flush"),
         "reboot_storage_manager_quiesced": reboot.get("storage_manager_quiesced"),
         "reboot_rp2040_bridge_quiesced": reboot.get("rp2040_bridge_quiesced"),
@@ -609,6 +617,8 @@ def run_persistence_check(ser, timeout: float) -> dict:
         "post_reboot_boot_nonce": health_boot_nonce(post_reboot_health),
         "reboot_proven": reboot_proven,
         "cleanup_reboot_command_passed": cleanup_reboot_ok,
+        "cleanup_reboot_reset_scope": cleanup_reboot.get("reset_scope"),
+        "cleanup_reboot_connectivity_prepare": cleanup_reboot.get("connectivity_prepare"),
         "cleanup_reboot_route_flush": cleanup_reboot.get("route_flush"),
         "cleanup_reboot_storage_manager_quiesced": cleanup_reboot.get("storage_manager_quiesced"),
         "cleanup_reboot_rp2040_bridge_quiesced": cleanup_reboot.get("rp2040_bridge_quiesced"),

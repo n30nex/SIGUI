@@ -1633,6 +1633,8 @@ def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
         data.get("pre_sequence_complete") is True
         and data.get("post_sequence_complete") is True
         and data.get("reboot_command_passed") is True
+        and data.get("reboot_reset_scope") == "system"
+        and data.get("reboot_connectivity_prepare") == "ESP_OK"
         and data.get("reboot_route_flush") == "ESP_OK"
         and data.get("reboot_storage_manager_quiesced") is True
         and data.get("reboot_retained_worker_quiesced") is True
@@ -1645,9 +1647,11 @@ def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
         and reboot.get("ok") is True
         and reboot.get("cmd") == "reboot"
         and reboot.get("rebooting") is True
+        and reboot.get("reset_scope") == "system"
         and reboot.get("storage_manager_quiesced") is True
         and reboot.get("retained_worker_quiesced") is True
         and reboot.get("rp2040_bridge_quiesced") is True
+        and reboot.get("connectivity_prepare") == "ESP_OK"
         and reboot.get("retained_flush") == "ESP_OK"
         and reboot.get("route_flush") == "ESP_OK"
         and result.get("ok") is True
@@ -1872,9 +1876,11 @@ def reboot_transition_proven(data: dict) -> bool:
         and result.get("cmd") == "reboot"
         and result.get("ok") is True
         and result.get("rebooting") is True
+        and result.get("reset_scope") == "system"
         and result.get("storage_manager_quiesced") is True
         and result.get("retained_worker_quiesced") is True
         and result.get("rp2040_bridge_quiesced") is True
+        and result.get("connectivity_prepare") == "ESP_OK"
         and result.get("retained_flush") == "ESP_OK"
         and result.get("route_flush") == "ESP_OK"
     ]
@@ -1893,6 +1899,8 @@ def reboot_transition_proven(data: dict) -> bool:
     ]
     return (
         data.get("reboot_command_passed") is True
+        and data.get("reboot_reset_scope") == "system"
+        and data.get("reboot_connectivity_prepare") == "ESP_OK"
         and data.get("reboot_route_flush") == "ESP_OK"
         and data.get("reboot_storage_manager_quiesced") is True
         and data.get("reboot_retained_worker_quiesced") is True
@@ -2560,6 +2568,8 @@ def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
             "pre_reboot_readbacks_ok": data.get("pre_reboot_readbacks_ok") if data else None,
             "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_reset_scope": data.get("reboot_reset_scope") if data else None,
+            "reboot_connectivity_prepare": data.get("reboot_connectivity_prepare") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
             "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
@@ -2605,6 +2615,8 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
             "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_reset_scope": data.get("reboot_reset_scope") if data else None,
+            "reboot_connectivity_prepare": data.get("reboot_connectivity_prepare") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
             "reboot_retained_flush": data.get("reboot_retained_flush") if data else None,
             "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,

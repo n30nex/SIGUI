@@ -586,7 +586,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
         ready_storage_line(),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         '{"schema":1,"ok":true,"cmd":"help"}\n',
         ready_storage_line(),
@@ -672,7 +672,7 @@ def test_reboot_remount_rejects_watchdog_after_commanded_reboot(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [
         ready_storage_line(),
@@ -719,7 +719,7 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK",'
         '"route_flush":"ESP_OK"}\n'
     ]
     post = [
@@ -783,9 +783,9 @@ def test_failed_retained_canary_keeps_read_diagnostics_and_skips_reboot(
     pre_serial = FakeSerial(pre)
     reboot_serial = FakeSerial(
         [
-            '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+            '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system",'
             '"storage_manager_quiesced":true,"retained_worker_quiesced":true,'
-            '"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
+            '"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK",'
             '"route_flush":"ESP_OK"}\n'
         ]
     )
@@ -894,7 +894,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         ready_storage_line(),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         ready_storage_line(),
         mount_line(),
@@ -941,7 +941,7 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         ready_storage_line(),
         health_line(1),
     ]
-    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
     post = [
         bridge_wait_storage_line(),
         mount_line(),
@@ -1169,7 +1169,7 @@ def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
         health_line(1),
     ]
     reboot = [
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n'
     ]
     post = [
         '{"schema":1,"ok":false,"cmd":"storage status","code":"TIMEOUT"}\n'

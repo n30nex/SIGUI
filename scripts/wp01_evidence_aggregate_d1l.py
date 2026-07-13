@@ -587,6 +587,8 @@ def _reboot_cycle_ok(cycle: object) -> bool:
         isinstance(cycle, dict)
         and cycle.get("ok") is True
         and cycle.get("post_reboot_reset_reason") == "SW"
+        and cycle.get("reset_scope") == "system"
+        and cycle.get("connectivity_prepare") == "ESP_OK"
         and all(cycle.get(field) is True for field in REBOOT_CYCLE_TRUE_FIELDS)
         and cycle.get("retained_flush") == "ESP_OK"
         and cycle.get("route_flush") == "ESP_OK"
