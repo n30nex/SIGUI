@@ -3,7 +3,7 @@ generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 570a94ad6ead0941f7acb7d9c9812c63df869e33
+  merged_baseline: 12d5470eca45ef6e86b6e15cf1822716e563a78e
   integrated_candidate: 092293f2311a24c9899bc9bf343ab014c4ba0411
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
@@ -23,14 +23,40 @@ project:
     push_checksum_entries_verified: 37
     pr_checksum_manifests_verified: 8
     pr_checksum_entries_verified: 73
+  pr64_merge:
+    head: 15f2a9ed99541fa059445ff3d1b06a40b4c42bee
+    pr_merge_test_commit: 82b086baf534dade4407fb62210a3cb5218e8986
+    merge_commit: 12d5470eca45ef6e86b6e15cf1822716e563a78e
+    push_run: 29289247092
+    push_status: success
+    push_checksum_manifests_verified: 2
+    push_checksum_entries_verified: 36
+    pr_run: 29289250956
+    pr_status: success
+    pr_checksum_manifests_verified: 8
+    pr_checksum_entries_verified: 75
+    pr_root_manifest_sha256: 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379
   live_main_artifact_integrity:
-    run: 29286754864
-    host_tests_passed: 423
-    status: failed_closed
+    run: 29289683188
+    status: success
+    host_tests_passed: 582
+    checksum_contract_tests_passed: 24
     manifests_total: 8
-    manifests_verified: 7
-    release_manifest_sha256: 2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1
-    failure: top release manifest omits three nested RP2040 SHA256SUMS.txt files
+    manifests_verified: 8
+    checksum_entries_verified: 75
+    firmware_manifest_sha256: 536641dd0845b99dca6093474759e2e0a3a0312f02623f260d6bb7f88c1bc6c1
+    release_manifest_sha256: 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed
+    application_sha256: e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a
+    full_flash_sha256: 785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed.
+    previous_failed_receipt:
+      commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
+      run: 29286754864
+      host_tests_passed: 423
+      manifests_total: 8
+      manifests_verified: 7
+      release_manifest_sha256: 2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1
+      failure: top release manifest omitted three nested RP2040 SHA256SUMS.txt files
   integrated_candidate_actions:
     push_run: 29272708844
     pr_run: 29272709642
@@ -57,9 +83,14 @@ project:
       full_host_tests_passed: 787
       focused_tests_passed: 302
       evidence_scope: local_only
+  latest_pr80_integration:
+    commit_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
+    absorbed_main: 12d5470eca45ef6e86b6e15cf1822716e563a78e
+    focused_tests_passed: 489
+    tests_skipped: 3
+    full_tests_passed: null
+    evidence_scope: local_focused_green_docs_only_full_not_rerun
   active_pr_stack:
-  - 62
-  - 64
   - 80
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
@@ -224,13 +255,33 @@ work_packages:
       merge_commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       actions_push_run: 29286375559
       actions_pr_run: 29286378383
-  open_receipts:
-  - BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713
-  artifact_integrity_fix: PR64 must include nested RP2040 checksum manifests in root release coverage and prove downloaded recursive verification.
+    pr64:
+      head: 15f2a9ed99541fa059445ff3d1b06a40b4c42bee
+      pr_merge_test_commit: 82b086baf534dade4407fb62210a3cb5218e8986
+      merge_commit: 12d5470eca45ef6e86b6e15cf1822716e563a78e
+      actions_push_run: 29289247092
+      actions_push_checksum_manifests_verified: 2
+      actions_push_checksum_entries_verified: 36
+      actions_pr_run: 29289250956
+      actions_pr_checksum_manifests_verified: 8
+      actions_pr_checksum_entries_verified: 75
+      actions_pr_root_manifest_sha256: 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379
+      merged_main_actions_run: 29289683188
+      merged_main_host_tests_passed: 582
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 8
+      merged_main_checksum_entries_verified: 75
+      merged_main_root_manifest_sha256: 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed
+  closed_receipts:
+  - id: BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713
+    status: closed
+    resolution: PR64 branch and merged-main downloaded artifacts recursively strict-pass complete root and nested checksum coverage.
+  artifact_integrity_fix: verified on PR64 push, PR merge-test, and exact merged main
   local_rehearsals:
-    pr64: c5886de1e2988b2097034183d5e39bb3aec88344
-    pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
-  evidence_scope: PR62 is merged and exact-verified. PR64/PR80 rehearsal commits are not remote exact checks or physical proof and must absorb current main before push.
+    predecessor_pr64: c5886de1e2988b2097034183d5e39bb3aec88344
+    predecessor_pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
+    current_pr80_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
+  evidence_scope: PR62 and PR64 are merged and exact-verified. PR80 has absorbed exact main locally and passed 489 focused tests with 3 skips; its refreshed remote exact-head Actions, downloaded checksums, merge, and final integration baseline remain open.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
