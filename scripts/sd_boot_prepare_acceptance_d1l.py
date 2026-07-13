@@ -53,6 +53,7 @@ RETAINED_STORE_COUNTER_FIELDS = (
     "nvs_mirror_fail_count",
 )
 REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS = 75.0
+MANAGER_TRANSITIONAL_STATES = {"BRIDGE_WAIT", "PING", "STATUS", "MOUNT"}
 
 
 def command_plan(scenario: str) -> list[str]:
@@ -108,6 +109,66 @@ def sd_status(result: dict | None) -> dict:
 def sd_state(result: dict | None) -> str | None:
     state = sd_status(result).get("state")
     return state if isinstance(state, str) else None
+
+
+def manager_status(result: dict | None) -> dict:
+    if not isinstance(result, dict):
+        return {}
+    manager = result.get("manager")
+    return manager if isinstance(manager, dict) else {}
+
+
+def remount_manager_busy(result: dict | None) -> bool:
+    manager = manager_status(result)
+    return (
+        isinstance(result, dict)
+        and result.get("cmd") == "storage remount"
+        and result.get("ok") is False
+        and result.get("code") == "ESP_ERR_INVALID_STATE"
+        and manager.get("running") is True
+    )
+
+
+def remount_passed(result: dict | None) -> bool:
+    return (
+        isinstance(result, dict)
+        and result.get("cmd") == "storage remount"
+        and result.get("ok") is True
+        and result.get("retained_worker_quiesce_acquired") is True
+    )
+
+
+def manager_attempt(result: dict | None) -> int | None:
+    attempt = manager_status(result).get("attempt")
+    return attempt if type(attempt) is int and attempt >= 0 else None
+
+
+def manager_progressed_from_busy(
+    busy_result: dict | None, status_result: dict | None
+) -> bool:
+    busy_attempt = manager_attempt(busy_result)
+    status_attempt = manager_attempt(status_result)
+    if busy_attempt is not None and status_attempt is not None:
+        return status_attempt > busy_attempt
+    manager = manager_status(status_result)
+    return (
+        manager.get("running") is False
+        or manager.get("state") in MANAGER_TRANSITIONAL_STATES
+    )
+
+
+def remount_retry_status_fresh(result: dict | None) -> bool:
+    manager = manager_status(result)
+    return (
+        isinstance(result, dict)
+        and result.get("cmd") == "storage status"
+        and result.get("ok") is True
+        and manager.get("running") is True
+        and manager.get("state") == "READY_SD"
+        and storage_status_fresh(result)
+        and storage_file_gate_ready(result)
+        and retained_store_gate_ready(result)
+    )
 
 
 def _number_at_least(value, minimum: int) -> bool:
@@ -403,15 +464,55 @@ def run_acceptance(
         storage_setup = None
         filecanary = None
         storage_remount = None
+        storage_remount_attempts: list[dict] = []
+        storage_remount_busy_statuses: list[dict] = []
+        storage_remount_manager_progress_observed = False
+        remount_ok = scenario == "rp2040-unavailable"
 
         if scenario != "rp2040-unavailable":
             storage_remount = run_command(ser, "storage remount")
-            remount_passed = (
-                isinstance(storage_remount, dict)
-                and storage_remount.get("ok") is True
-                and storage_remount.get("retained_worker_quiesce_acquired") is True
-            )
-            if remount_passed:
+            storage_remount_attempts.append(storage_remount)
+            remount_ok = remount_passed(storage_remount)
+
+            # Only the explicit manager-busy receipt is retryable. Poll at
+            # least once for a fresh manager-owned status, then issue exactly
+            # one remount retry. Every other failed or incomplete receipt stops
+            # before another storage operation.
+            if not remount_ok and remount_manager_busy(storage_remount):
+                busy_poll_attempts = max(1, mount_poll_attempts)
+                retry_status = None
+                for attempt in range(busy_poll_attempts):
+                    if attempt > 0:
+                        time.sleep(mount_poll_interval_sec)
+                    retry_status = run_command(ser, "storage status")
+                    storage_remount_busy_statuses.append(retry_status)
+                    storage_after = retry_status
+                    storage_remount_manager_progress_observed = (
+                        storage_remount_manager_progress_observed
+                        or manager_progressed_from_busy(
+                            storage_remount_attempts[0], retry_status
+                        )
+                    )
+                    if (
+                        storage_remount_manager_progress_observed
+                        and remount_retry_status_fresh(retry_status)
+                    ):
+                        break
+                    if (
+                        not isinstance(retry_status, dict)
+                        or retry_status.get("cmd") != "storage status"
+                        or retry_status.get("ok") is not True
+                    ):
+                        break
+                if (
+                    storage_remount_manager_progress_observed
+                    and remount_retry_status_fresh(retry_status)
+                ):
+                    storage_remount = run_command(ser, "storage remount")
+                    storage_remount_attempts.append(storage_remount)
+                    remount_ok = remount_passed(storage_remount)
+
+            if remount_ok:
                 storage_after = run_command(ser, "storage status")
                 for _attempt in range(mount_poll_attempts):
                     if storage_converged_for_scenario(scenario, storage_after):
@@ -426,7 +527,7 @@ def run_acceptance(
 
         health = (
             run_command(ser, "health")
-            if scenario == "rp2040-unavailable" or storage_remount is None or remount_passed
+            if scenario == "rp2040-unavailable" or storage_remount is None or remount_ok
             else None
         )
 
@@ -494,6 +595,11 @@ def run_acceptance(
         "ok": scenario_ok and commands_safe,
         "initial_storage": initial_storage,
         "storage_remount": storage_remount,
+        "storage_remount_attempts": storage_remount_attempts,
+        "storage_remount_busy_statuses": storage_remount_busy_statuses,
+        "storage_remount_manager_progress_observed": (
+            storage_remount_manager_progress_observed
+        ),
         "storage_after": storage_after,
         "storage_setup": storage_setup,
         "format_result": None,

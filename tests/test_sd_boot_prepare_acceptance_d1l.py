@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import sd_boot_prepare_acceptance_d1l as boot_accept
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,9 +57,10 @@ def clean_retained_health_json() -> str:
     )
 
 
-def ready_storage_line() -> str:
+def ready_storage_line(*, attempt: int = 1) -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
+        f'"manager":{{"running":true,"state":"READY_SD","attempt":{attempt}}},'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"rp2040_protocol_supported":true,'
         '"file_ops":true,"atomic_rename":true,'
@@ -125,6 +128,16 @@ def storage_mount_line(state: str = "ready", *, quiesced: bool = True) -> str:
         f'"retained_worker_quiesce_acquired":{str(quiesced).lower()},'
         f'"sd":{{"state":"{state}","rp2040_protocol_supported":true}},'
         f'"public_rf_tx":false,"formats_sd":false}}\n'
+    )
+
+
+def storage_remount_busy_line(*, attempt: int = 4) -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"storage remount",'
+        '"code":"ESP_ERR_INVALID_STATE",'
+        '"retained_worker_quiesce_acquired":false,'
+        f'"manager":{{"running":true,"state":"READY_SD","attempt":{attempt}}},'
+        '"public_rf_tx":false,"formats_sd":false}\n'
     )
 
 
@@ -225,6 +238,31 @@ def test_retained_store_gate_rejects_every_degraded_counter_error_and_latch():
         assert boot_accept.retained_store_gate_ready(payload) is False
 
 
+def test_manager_progress_requires_later_attempt_or_fallback_transition():
+    busy = json.loads(storage_remount_busy_line(attempt=4))
+    assert (
+        boot_accept.manager_progressed_from_busy(
+            busy, json.loads(ready_storage_line(attempt=4))
+        )
+        is False
+    )
+    assert (
+        boot_accept.manager_progressed_from_busy(
+            busy, json.loads(ready_storage_line(attempt=5))
+        )
+        is True
+    )
+
+    busy["manager"].pop("attempt")
+    same_ready = json.loads(ready_storage_line())
+    same_ready["manager"].pop("attempt")
+    assert boot_accept.manager_progressed_from_busy(busy, same_ready) is False
+    same_ready["manager"]["state"] = "STATUS"
+    assert boot_accept.manager_progressed_from_busy(busy, same_ready) is True
+    same_ready["manager"] = {"running": False, "state": "READY_SD"}
+    assert boot_accept.manager_progressed_from_busy(busy, same_ready) is True
+
+
 def test_correct_structure_requires_ready_storage_and_file_canary(monkeypatch):
     ser = FakeSerial(
         [
@@ -317,6 +355,142 @@ def test_boot_acceptance_stops_immediately_after_failed_remount(monkeypatch):
     assert report["classification"] == "storage_remount_failed"
     assert ser.writes == [
         "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+    ]
+
+
+def test_boot_acceptance_retries_explicit_manager_busy_once_after_fresh_status(
+    monkeypatch,
+):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_remount_busy_line(),
+            ready_storage_line(attempt=4),
+            ready_storage_line(attempt=5),
+            storage_mount_line(),
+            ready_storage_line(),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+        mount_poll_attempts=2,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is True
+    assert report["classification"] == "ready_sd_file_gate"
+    assert report["retained_worker_quiesce_acquired"] is True
+    assert report["storage_remount"]["ok"] is True
+    assert len(report["storage_remount_attempts"]) == 2
+    assert report["storage_remount_attempts"][0]["code"] == "ESP_ERR_INVALID_STATE"
+    assert report["storage_remount_attempts"][1]["retained_worker_quiesce_acquired"] is True
+    assert len(report["storage_remount_busy_statuses"]) == 2
+    assert report["storage_remount_manager_progress_observed"] is True
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+        "storage filecanary\n",
+        "health\n",
+    ]
+
+
+def test_boot_acceptance_does_not_retry_same_attempt_ready_status(monkeypatch):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(attempt=4),
+            storage_remount_busy_line(attempt=4),
+            ready_storage_line(attempt=4),
+            storage_mount_line(),
+            ready_storage_line(attempt=5),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == "storage_remount_failed"
+    assert report["storage_remount_manager_progress_observed"] is False
+    assert len(report["storage_remount_attempts"]) == 1
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
+        "storage status\n",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("retry_line", "classification"),
+    [
+        (
+            '{"schema":1,"ok":false,"cmd":"storage remount","code":"ESP_FAIL"}\n',
+            "storage_remount_failed",
+        ),
+        (storage_mount_line(quiesced=False), "retained_worker_not_quiesced"),
+    ],
+)
+def test_boot_acceptance_busy_retry_failure_stops_before_later_storage_ops(
+    monkeypatch, retry_line, classification
+):
+    ser = FakeSerial(
+        [
+            rp2040_ping_line(),
+            ready_storage_line(),
+            storage_remount_busy_line(),
+            ready_storage_line(attempt=5),
+            retry_line,
+            ready_storage_line(),
+            filecanary_success_line(),
+            health_line(),
+        ]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="correct-structure",
+        mount_poll_attempts=2,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["classification"] == classification
+    assert report["filecanary"] is None
+    assert report["storage_setup"] is None
+    assert report["health"] is None
+    assert len(report["storage_remount_attempts"]) == 2
+    assert ser.writes == [
+        "rp2040 ping\n",
+        "storage status\n",
+        "storage remount\n",
         "storage status\n",
         "storage remount\n",
     ]
