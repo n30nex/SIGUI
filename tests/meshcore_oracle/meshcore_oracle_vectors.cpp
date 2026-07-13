@@ -3,6 +3,7 @@
 #include "AES.h"
 #include "Packet.h"
 #include "SHA256.h"
+#include "Utils.h"
 #include "ed_25519.h"
 #include "mesh/ed25519_canonical.h"
 
@@ -30,6 +31,8 @@ constexpr std::size_t kPointValidationInvalidVectors = 7U;
 constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
 constexpr std::size_t kGroupRoundtripVectors = 4U;
 constexpr std::size_t kGroupInvalidVectors = 21U;
+constexpr std::size_t kDmRoundtripVectors = 258U;
+constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -1075,6 +1078,433 @@ int main()
         public_secret.data(), rejected_plaintext.data(), 15U,
         &rejected_plaintext_len);
 
+    constexpr uint8_t dm_destination_hash = 0xA1U;
+    constexpr uint8_t dm_source_hash = 0xB2U;
+    const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
+    const std::array<uint8_t, 20U> expected_attempt_zero_payload = {
+        0xA1U, 0xB2U, 0x44U, 0xE4U, 0x29U, 0x8FU, 0xDCU,
+        0x7DU, 0xA6U, 0x2CU, 0x81U, 0xABU, 0x4EU, 0x54U,
+        0xC6U, 0x7DU, 0x6BU, 0xFFU, 0xE7U, 0x3EU};
+    const std::array<uint8_t, 20U> expected_attempt_255_payload = {
+        0xA1U, 0xB2U, 0xD8U, 0xBDU, 0x8BU, 0x6CU, 0x9BU,
+        0x9DU, 0x88U, 0xEAU, 0x57U, 0x12U, 0x65U, 0xB1U,
+        0xF0U, 0x89U, 0x17U, 0xA3U, 0x67U, 0x4FU};
+    const std::array<uint8_t, 32U> expected_dm_matrix_sha256 = {
+        0x65U, 0xF8U, 0x44U, 0xF4U, 0x2BU, 0x01U, 0xF8U, 0x80U,
+        0x58U, 0x55U, 0x62U, 0x84U, 0x9FU, 0x4BU, 0xADU, 0x51U,
+        0x1FU, 0x6AU, 0x0AU, 0xFAU, 0x59U, 0x90U, 0x86U, 0xBEU,
+        0xF9U, 0x42U, 0x95U, 0x58U, 0x66U, 0x59U, 0x06U, 0xE1U};
+    const std::array<uint8_t, 32U> expected_max_normal_dm_sha256 = {
+        0xA3U, 0xB9U, 0x61U, 0xD2U, 0xEBU, 0xE7U, 0x11U, 0xBAU,
+        0xB9U, 0x35U, 0x4AU, 0x63U, 0x75U, 0xF7U, 0x14U, 0x2EU,
+        0xE5U, 0x20U, 0x4BU, 0x6DU, 0xCAU, 0x65U, 0x80U, 0x74U,
+        0xA1U, 0xEFU, 0x67U, 0xB7U, 0x65U, 0x02U, 0x40U, 0xE7U};
+    const std::array<uint8_t, 32U> expected_max_extended_dm_sha256 = {
+        0x26U, 0xC5U, 0xD0U, 0x36U, 0xE5U, 0x2FU, 0xDDU, 0x54U,
+        0xC3U, 0x19U, 0x80U, 0xF3U, 0x7EU, 0xB6U, 0x6CU, 0x5CU,
+        0x08U, 0x82U, 0x33U, 0x71U, 0x09U, 0x47U, 0x20U, 0x52U,
+        0x5AU, 0x30U, 0x45U, 0xA3U, 0x54U, 0x4DU, 0x3DU, 0xF2U};
+
+    auto verify_dm_roundtrip =
+        [&failures, &full_secret](
+            const char *name, uint32_t timestamp, uint8_t attempt,
+            const uint8_t *text, std::size_t text_len, bool flood,
+            const uint8_t *expected_payload, std::size_t expected_payload_len,
+            const std::array<uint8_t, 32U> *expected_payload_sha,
+            SHA256 *matrix_sha) {
+            d1l_meshcore_oracle_packet_t packet{};
+            if (!d1l_meshcore_oracle_create_dm_packet(
+                    dm_destination_hash, dm_source_hash, full_secret.data(),
+                    timestamp, attempt, text, text_len, &packet) ||
+                packet.header !=
+                    static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) ||
+                (expected_payload != nullptr &&
+                 (packet.payload_len != expected_payload_len ||
+                  std::memcmp(packet.payload, expected_payload,
+                              expected_payload_len) != 0))) {
+                failures.push_back(std::string(name) +
+                                   " DM create vector changed");
+                return;
+            }
+            if (expected_payload_sha != nullptr) {
+                std::array<uint8_t, 32U> digest{};
+                SHA256 payload_sha;
+                payload_sha.update(packet.payload, packet.payload_len);
+                payload_sha.finalize(digest.data(), digest.size());
+                if (digest != *expected_payload_sha) {
+                    failures.push_back(std::string(name) +
+                                       " DM payload digest changed");
+                    return;
+                }
+            }
+            if (matrix_sha != nullptr) {
+                matrix_sha->update(packet.payload, packet.payload_len);
+            }
+
+            uint8_t priority = 0xA5U;
+            const bool routed =
+                flood ? d1l_meshcore_oracle_prepare_flood(
+                            &packet, 1U, 0U, nullptr, &priority)
+                      : d1l_meshcore_oracle_prepare_direct(
+                            &packet, nullptr, 0U, &priority);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!routed || priority != (flood ? 1U : 0U) ||
+                !d1l_meshcore_oracle_packet_encode(
+                    &packet, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded)) {
+                failures.push_back(std::string(name) +
+                                   " DM wire roundtrip failed");
+                return;
+            }
+
+            uint32_t parsed_timestamp = 0U;
+            uint8_t parsed_attempt = 0U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+                parsed_text{};
+            size_t parsed_text_len = 0U;
+            if (!d1l_meshcore_oracle_parse_dm_packet(
+                    &decoded, dm_destination_hash, dm_source_hash,
+                    full_secret.data(), &parsed_timestamp, &parsed_attempt,
+                    parsed_text.data(), parsed_text.size(), &parsed_text_len) ||
+                parsed_timestamp != timestamp || parsed_attempt != attempt ||
+                parsed_text_len != text_len ||
+                (text_len > 0U &&
+                 std::memcmp(parsed_text.data(), text, text_len) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " DM parse vector changed");
+            }
+        };
+
+    SHA256 dm_matrix_sha;
+    for (unsigned int attempt_value = 0U; attempt_value <= 0xFFU;
+         ++attempt_value) {
+        const uint8_t attempt = static_cast<uint8_t>(attempt_value);
+        const uint32_t timestamp = 0x12345678U + attempt_value;
+        const uint8_t *text = short_dm_text.data();
+        const size_t text_len = attempt == 0U ? 0U : short_dm_text.size();
+        const uint8_t *expected_payload = nullptr;
+        size_t expected_payload_len = 0U;
+        if (attempt == 0U) {
+            expected_payload = expected_attempt_zero_payload.data();
+            expected_payload_len = expected_attempt_zero_payload.size();
+        } else if (attempt == 0xFFU) {
+            expected_payload = expected_attempt_255_payload.data();
+            expected_payload_len = expected_attempt_255_payload.size();
+        }
+        verify_dm_roundtrip("attempt matrix", timestamp, attempt, text,
+                            text_len, (attempt & 1U) != 0U, expected_payload,
+                            expected_payload_len, nullptr, &dm_matrix_sha);
+    }
+    std::array<uint8_t, 32U> dm_matrix_digest{};
+    dm_matrix_sha.finalize(dm_matrix_digest.data(), dm_matrix_digest.size());
+    if (dm_matrix_digest != expected_dm_matrix_sha256) {
+        failures.push_back("DM attempt 0-255 matrix digest changed");
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+        maximum_normal_dm_text{};
+    for (size_t index = 0U; index < maximum_normal_dm_text.size(); ++index) {
+        maximum_normal_dm_text[index] =
+            static_cast<uint8_t>('A' + (index % 26U));
+    }
+    verify_dm_roundtrip(
+        "maximum normal text", 0x89ABCDEFU, 3U,
+        maximum_normal_dm_text.data(), maximum_normal_dm_text.size(), false,
+        nullptr, 0U, &expected_max_normal_dm_sha256, nullptr);
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES>
+        maximum_extended_dm_text{};
+    for (size_t index = 0U; index < maximum_extended_dm_text.size(); ++index) {
+        maximum_extended_dm_text[index] =
+            static_cast<uint8_t>('a' + (index % 26U));
+    }
+    verify_dm_roundtrip(
+        "maximum extended text", 0x10203040U, 0xFFU,
+        maximum_extended_dm_text.data(), maximum_extended_dm_text.size(), true,
+        nullptr, 0U, &expected_max_extended_dm_sha256, nullptr);
+
+    d1l_meshcore_oracle_packet_t valid_dm{};
+    if (!d1l_meshcore_oracle_create_dm_packet(
+            dm_destination_hash, dm_source_hash, full_secret.data(),
+            0x55667788U, 3U, short_dm_text.data(), short_dm_text.size(),
+            &valid_dm)) {
+        failures.push_back("DM negative-vector fixture creation failed");
+    }
+    auto expect_dm_create_reject =
+        [&failures, &valid_dm](const char *name, const uint8_t *secret,
+                               uint8_t attempt, const uint8_t *text,
+                               size_t text_len,
+                               d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_dm;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_dm_packet(
+                    dm_destination_hash, dm_source_hash, secret, 0x55667788U,
+                    attempt, text, text_len, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " DM create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_dm{};
+    expect_dm_create_reject("null DM secret", nullptr, 0U,
+                            short_dm_text.data(), short_dm_text.size(),
+                            &rejected_dm);
+    expect_dm_create_reject("null DM text", full_secret.data(), 0U, nullptr,
+                            0U, &rejected_dm);
+    const std::array<uint8_t, 3U> embedded_null_dm_text = {'a', 0U, 'b'};
+    expect_dm_create_reject(
+        "embedded NUL DM text", full_secret.data(), 0U,
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        &rejected_dm);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES + 1U>
+        oversized_normal_dm_text{};
+    oversized_normal_dm_text.fill('n');
+    expect_dm_create_reject(
+        "oversized normal DM text", full_secret.data(), 3U,
+        oversized_normal_dm_text.data(), oversized_normal_dm_text.size(),
+        &rejected_dm);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 1U>
+        oversized_extended_dm_text{};
+    oversized_extended_dm_text.fill('e');
+    expect_dm_create_reject(
+        "oversized extended DM text", full_secret.data(), 4U,
+        oversized_extended_dm_text.data(), oversized_extended_dm_text.size(),
+        &rejected_dm);
+    expect_dm_create_reject("null DM output", full_secret.data(), 0U,
+                            short_dm_text.data(), short_dm_text.size(), nullptr);
+
+    auto expect_dm_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, uint8_t source_hash,
+                    const uint8_t *secret, uint32_t *timestamp,
+                    uint8_t *attempt, uint8_t *text, size_t text_capacity,
+                    size_t *text_len) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+                text_sentinel{};
+            text_sentinel.fill(0xD7U);
+            if (timestamp != nullptr) {
+                *timestamp = 0xAAAAAAAAU;
+            }
+            if (attempt != nullptr) {
+                *attempt = 0xCCU;
+            }
+            if (text != nullptr) {
+                std::memcpy(text, text_sentinel.data(), text_capacity);
+            }
+            if (text_len != nullptr) {
+                *text_len = 0xBEEFU;
+            }
+            if (d1l_meshcore_oracle_parse_dm_packet(
+                    packet, destination_hash, source_hash, secret, timestamp,
+                    attempt, text, text_capacity, text_len) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (attempt != nullptr && *attempt != 0xCCU) ||
+                (text != nullptr &&
+                 std::memcmp(text, text_sentinel.data(), text_capacity) != 0) ||
+                (text_len != nullptr && *text_len != 0xBEEFU)) {
+                failures.push_back(std::string(name) +
+                                   " DM parse reject changed output");
+            }
+        };
+    auto make_raw_dm_packet =
+        [&full_secret](const uint8_t *plaintext,
+                       size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT);
+            packet.payload[0] = dm_destination_hash;
+            packet.payload[1] = dm_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+
+    uint32_t rejected_dm_timestamp = 0U;
+    uint8_t rejected_dm_attempt = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+        rejected_dm_text{};
+    size_t rejected_dm_text_len = 0U;
+    expect_dm_parse_reject(
+        "null DM packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM parse secret", &valid_dm, dm_destination_hash, dm_source_hash,
+        nullptr, &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM timestamp", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), nullptr, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM attempt", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, nullptr,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM text output", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        nullptr, rejected_dm_text.size(), &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM text length", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(), nullptr);
+
+    d1l_meshcore_oracle_packet_t malformed_dm = valid_dm;
+    malformed_dm.header |= 0x40U;
+    expect_dm_parse_reject(
+        "future-version DM", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
+    expect_dm_parse_reject(
+        "non-DM payload type", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload_len = 19U;
+    expect_dm_parse_reject(
+        "truncated DM payload", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[malformed_dm.payload_len++] = 0U;
+    expect_dm_parse_reject(
+        "non-block DM ciphertext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM destination hash", &valid_dm,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM source hash", &valid_dm, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(),
+        &rejected_dm_timestamp, &rejected_dm_attempt, rejected_dm_text.data(),
+        rejected_dm_text.size(), &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM secret", &valid_dm, dm_destination_hash, dm_source_hash,
+        public_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[2] ^= 0x01U;
+    expect_dm_parse_reject(
+        "tampered DM MAC", &malformed_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[4] ^= 0x01U;
+    expect_dm_parse_reject(
+        "tampered DM ciphertext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+
+    std::array<uint8_t, 16U> malformed_dm_plaintext{};
+    malformed_dm_plaintext[4] = 0x04U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "unsupported DM text type", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill('x');
+    malformed_dm_plaintext[4] = 0U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "missing DM terminator", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 5U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "mismatched extended DM attempt", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 1U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "nonzero normal DM padding", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 4U;
+    malformed_dm_plaintext[8] = 1U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "nonzero extended DM padding", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+
+    std::array<uint8_t, 5U + D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES + 2U>
+        overlong_normal_dm_plaintext{};
+    overlong_normal_dm_plaintext.fill('n');
+    overlong_normal_dm_plaintext[4] = 0U;
+    overlong_normal_dm_plaintext.back() = 0U;
+    malformed_dm = make_raw_dm_packet(overlong_normal_dm_plaintext.data(),
+                                      overlong_normal_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "overlong normal DM plaintext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    std::array<uint8_t,
+               5U + D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 3U>
+        overlong_extended_dm_plaintext{};
+    overlong_extended_dm_plaintext.fill('e');
+    overlong_extended_dm_plaintext[4] = 0U;
+    overlong_extended_dm_plaintext[overlong_extended_dm_plaintext.size() - 2U] =
+        0U;
+    overlong_extended_dm_plaintext.back() = 4U;
+    malformed_dm = make_raw_dm_packet(overlong_extended_dm_plaintext.data(),
+                                      overlong_extended_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "overlong extended DM plaintext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "undersized DM text output", &valid_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), 1U,
+        &rejected_dm_text_len);
+
     auto check_prepared_packet =
         [&failures](const char *name,
                     const d1l_meshcore_oracle_packet_t &actual,
@@ -1785,7 +2215,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -1793,6 +2223,7 @@ int main()
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
                   kGroupRoundtripVectors +
+                  kDmRoundtripVectors +
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
@@ -1803,6 +2234,7 @@ int main()
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
                   kGroupInvalidVectors +
+                  kDmInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
@@ -1812,6 +2244,7 @@ int main()
                   kPointValidationValidVectors +
                   kPointValidationInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
+                  kDmRoundtripVectors + kDmInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1824,6 +2257,7 @@ int main()
                   kPointValidationInvalidVectors +
                   kCryptoAdapterKatValidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
+                  kDmRoundtripVectors + kDmInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1868,6 +2302,12 @@ int main()
               << (kGroupRoundtripVectors + kGroupInvalidVectors)
               << ",\"total\":"
               << (kGroupRoundtripVectors + kGroupInvalidVectors) << "}"
+              << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
+              << kDmRoundtripVectors << ",\"invalid\":"
+              << kDmInvalidVectors << ",\"semantic\":"
+              << (kDmRoundtripVectors + kDmInvalidVectors)
+              << ",\"total\":"
+              << (kDmRoundtripVectors + kDmInvalidVectors) << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -1891,6 +2331,7 @@ int main()
               << ",\"signed_advert_verification\":true"
               << ",\"ed25519_point_validation\":true"
               << ",\"public_group_packets\":true"
+              << ",\"dm_encrypt_decrypt\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"

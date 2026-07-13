@@ -24,10 +24,15 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES 9U
 #define D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES 63U
 #define D1L_MESHCORE_ORACLE_GROUP_HASH_BYTES 1U
-#define D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES 32U
+#define D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES 32U
+#define D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES \
+    D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES
 #define D1L_MESHCORE_ORACLE_GROUP_MAC_BYTES 2U
 #define D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES 16U
 #define D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES 168U
+#define D1L_MESHCORE_ORACLE_DM_HASH_BYTES 1U
+#define D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES 160U
+#define D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES 158U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -148,6 +153,39 @@ bool d1l_meshcore_oracle_parse_group_packet(
     uint8_t *out_plaintext,
     size_t plaintext_capacity,
     size_t *out_plaintext_len);
+
+/*
+ * Canonical BaseChatMesh plain-DM framing with a caller-supplied shared
+ * secret and one-byte destination/source hashes. Creation covers the pinned
+ * timestamp, low two attempt bits, and attempt>3 trailing full-attempt layout,
+ * then delegates AES/HMAC to mesh::Utils. Parsing authenticates before
+ * returning fields and accepts only the canonical zero padding produced by
+ * that layout. Empty text is valid; embedded NUL text is not.
+ *
+ * These functions do not derive an Ed25519 shared secret, search contacts,
+ * dispatch messages, derive/send/correlate ACKs, select a route, update
+ * retained state, or claim RF delivery.
+ */
+bool d1l_meshcore_oracle_create_dm_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t timestamp,
+    uint8_t attempt,
+    const uint8_t *text,
+    size_t text_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_dm_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t *out_timestamp,
+    uint8_t *out_attempt,
+    uint8_t *out_text,
+    size_t text_capacity,
+    size_t *out_text_len);
 
 /*
  * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp

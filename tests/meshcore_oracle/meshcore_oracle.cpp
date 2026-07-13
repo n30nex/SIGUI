@@ -4,6 +4,7 @@
 #include "Utils.h"
 #include "ed_25519.h"
 #include "helpers/AdvertDataHelpers.h"
+#include "helpers/BaseChatMesh.h"
 #include "mesh/advert_data.h"
 #include "mesh/ed25519_canonical.h"
 
@@ -36,6 +37,8 @@ static_assert(D1L_MESHCORE_ORACLE_GROUP_HASH_BYTES == PATH_HASH_SIZE,
               "Pinned MeshCore group hash width changed");
 static_assert(D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES == PUB_KEY_SIZE,
               "Pinned MeshCore group secret width changed");
+static_assert(D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES == PUB_KEY_SIZE,
+              "Pinned MeshCore shared-secret width changed");
 static_assert(D1L_MESHCORE_ORACLE_GROUP_MAC_BYTES == CIPHER_MAC_SIZE,
               "Pinned MeshCore group MAC width changed");
 static_assert(D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES == CIPHER_BLOCK_SIZE,
@@ -43,6 +46,13 @@ static_assert(D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES == CIPHER_BLOCK_SIZE,
 static_assert(D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES ==
                   MAX_GROUP_DATA_LENGTH + 3U,
               "Pinned MeshCore group-data plaintext limit changed");
+static_assert(D1L_MESHCORE_ORACLE_DM_HASH_BYTES == PATH_HASH_SIZE,
+              "Pinned MeshCore DM hash width changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES == MAX_TEXT_LEN,
+              "Pinned BaseChatMesh DM text limit changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 2U ==
+                  D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES,
+              "Pinned BaseChatMesh extended-attempt text limit changed");
 static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
               "Pinned MeshCore NONE advert type changed");
 static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
@@ -499,6 +509,150 @@ extern "C" bool d1l_meshcore_oracle_parse_group_packet(
     }
     std::memcpy(out_plaintext, plaintext.data(), encrypted_len);
     *out_plaintext_len = encrypted_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_dm_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t timestamp,
+    uint8_t attempt,
+    const uint8_t *text,
+    size_t text_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    const size_t maximum_text_len =
+        attempt > 3U ? D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES
+                     : D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES;
+    if (secret == nullptr || text == nullptr || text_len > maximum_text_len ||
+        out_packet == nullptr) {
+        return false;
+    }
+    for (size_t index = 0U; index < text_len; ++index) {
+        if (text[index] == 0U) {
+            return false;
+        }
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES + 7U>
+        plaintext{};
+    size_t plaintext_len = 0U;
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 8U);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 16U);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 24U);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(attempt & 3U);
+    if (text_len > 0U) {
+        std::memcpy(&plaintext[plaintext_len], text, text_len);
+        plaintext_len += text_len;
+    }
+    if (attempt > 3U) {
+        plaintext[plaintext_len++] = 0U;
+        plaintext[plaintext_len++] = attempt;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT);
+    result.payload[0] = destination_hash;
+    result.payload[1] = source_hash;
+    const int encrypted_len = mesh::Utils::encryptThenMAC(
+        secret, &result.payload[2], plaintext.data(),
+        static_cast<int>(plaintext_len));
+    if (encrypted_len <= 0 ||
+        static_cast<size_t>(encrypted_len) + 2U >
+            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    result.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_dm_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t *out_timestamp,
+    uint8_t *out_attempt,
+    uint8_t *out_text,
+    size_t text_capacity,
+    size_t *out_text_len)
+{
+    if (packet == nullptr || secret == nullptr || out_timestamp == nullptr ||
+        out_attempt == nullptr || out_text == nullptr ||
+        out_text_len == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_TXT_MSG ||
+        upstream.payload_len <
+            2U + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE ||
+        upstream.payload[0] != destination_hash ||
+        upstream.payload[1] != source_hash) {
+        return false;
+    }
+    const size_t encrypted_len =
+        upstream.payload_len - 2U - CIPHER_MAC_SIZE;
+    if ((encrypted_len % CIPHER_BLOCK_SIZE) != 0U) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> plaintext{};
+    const int decoded_len = mesh::Utils::MACThenDecrypt(
+        secret, plaintext.data(), &upstream.payload[2],
+        upstream.payload_len - 2U);
+    if (decoded_len <= 5 || static_cast<size_t>(decoded_len) != encrypted_len ||
+        (plaintext[4] >> 2U) != TXT_TYPE_PLAIN) {
+        return false;
+    }
+
+    const size_t plaintext_size = static_cast<size_t>(decoded_len);
+    size_t text_end = 5U;
+    while (text_end < plaintext_size && plaintext[text_end] != 0U) {
+        ++text_end;
+    }
+    if (text_end == plaintext_size) {
+        return false;
+    }
+    const size_t text_len = text_end - 5U;
+    const uint8_t low_attempt = static_cast<uint8_t>(plaintext[4] & 3U);
+    const uint8_t extended_attempt =
+        text_end + 1U < plaintext_size ? plaintext[text_end + 1U] : 0U;
+    const bool has_extended_attempt = extended_attempt > 3U;
+    uint8_t attempt = low_attempt;
+    size_t padding_start = text_end;
+    if (has_extended_attempt) {
+        if ((extended_attempt & 3U) != low_attempt ||
+            text_len > D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES) {
+            return false;
+        }
+        attempt = extended_attempt;
+        padding_start = text_end + 2U;
+    } else if (text_len > D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES) {
+        return false;
+    }
+    for (size_t index = padding_start; index < plaintext_size; ++index) {
+        if (plaintext[index] != 0U) {
+            return false;
+        }
+    }
+    if (text_len > text_capacity) {
+        return false;
+    }
+
+    if (text_len > 0U) {
+        std::memcpy(out_text, &plaintext[5], text_len);
+    }
+    *out_timestamp = static_cast<uint32_t>(plaintext[0]) |
+                     (static_cast<uint32_t>(plaintext[1]) << 8U) |
+                     (static_cast<uint32_t>(plaintext[2]) << 16U) |
+                     (static_cast<uint32_t>(plaintext[3]) << 24U);
+    *out_attempt = attempt;
+    *out_text_len = text_len;
     return true;
 }
 

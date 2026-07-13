@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "work_package": "WP-04",
-  "coverage_boundary": "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification",
   "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-  "oracle_corpus_version": 9,
+  "oracle_corpus_version": 10,
   "oracle_abi_version": 2,
   "wp04_closure_eligible": false,
   "closure_ready": false,
@@ -27,7 +27,7 @@
     },
     {
       "id": "dm_encrypt_decrypt",
-      "status": "blocked",
+      "status": "implemented",
       "capabilities": [
         "dm_encrypt_decrypt"
       ]
@@ -93,7 +93,6 @@
   ],
   "unresolved_capabilities": [
     "identity_signed_advert",
-    "dm_encrypt_decrypt",
     "expected_ack_hash_and_ack_path",
     "ack_dispatch_correlation_and_delivery",
     "route_selection_and_forwarding",
@@ -175,7 +174,7 @@
   },
   "submodule_update_policy": {
     "reviewed_upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-    "reviewed_corpus_version": 9,
+    "reviewed_corpus_version": 10,
     "requires_vector_review": true,
     "requires_corpus_version_increment": true,
     "unreviewed_update_policy": "fail_closed"

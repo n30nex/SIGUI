@@ -74,9 +74,9 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 9
+ORACLE_CORPUS_VERSION = 10
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -257,11 +257,33 @@ EXPECTED_ORACLE_CAPABILITIES = [
     },
     {
         "id": "dm_encrypt_decrypt",
-        "status": "pending",
-        "owner": "unassigned",
-        "blocked_by": (
-            "pinned_ed25519_key_exchange_identity_and_deterministic_dm_session_fixtures"
+        "status": "implemented",
+        "owner": "pinned_mesh_datagram_basechat_layout_vendored_aes_host_sha",
+        "semantic": True,
+        "scope": (
+            "plain_dm_create_authenticated_parse_with_caller_supplied_hashes_and_"
+            "shared_secret_no_key_exchange_dispatch_ack_delivery_or_retained_state"
         ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-DM-CRYPTO-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+                "third_party/MeshCore/src/helpers/BaseChatMesh.h",
+            ],
+            "attempt_matrix": "0_through_255",
+            "golden_vectors": (
+                "attempt_0_and_255_exact_payloads_plus_attempt_matrix_and_"
+                "maximum_payload_sha256_digests"
+            ),
+            "vectors": {
+                "roundtrip": 258,
+                "invalid": 29,
+            },
+        },
     },
     {
         "id": "expected_ack_hash_and_ack_path",
@@ -330,7 +352,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     },
     {
         "id": "dm_encrypt_decrypt",
-        "status": "blocked",
+        "status": "implemented",
         "capabilities": ["dm_encrypt_decrypt"],
     },
     {
@@ -610,11 +632,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 30,
+        "roundtrip": 288,
         "valid": 11,
-        "invalid": 104,
-        "semantic": 129,
-        "total": 145,
+        "invalid": 133,
+        "semantic": 416,
+        "total": 432,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -657,6 +679,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 25,
             "total": 25,
         },
+        "dm_encrypt_decrypt": {
+            "roundtrip": 258,
+            "invalid": 29,
+            "semantic": 287,
+            "total": 287,
+        },
         "direct_flood_headers": {
             "roundtrip": 7,
             "invalid": 10,
@@ -687,6 +715,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("group_crypto_available") is not True
         or interface.get("group_crypto_scope")
         != "aes128_ecb_zero_padding_truncated_hmac_sha256_and_basechatmesh_setchannel_hash_only"
+        or interface.get("dm_crypto_available") is not True
+        or interface.get("dm_crypto_scope")
+        != "basechatmesh_plain_text_layout_and_mesh_datagram_crypto_with_caller_supplied_hashes_and_shared_secret_only"
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
         != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
@@ -729,12 +760,21 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; "
                 "FIPS 197 AES-128 cipher example"
             ),
+            "dm_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "dm_plain_text_layout": (
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+            ),
+            "dm_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+            "dm_independent_golden": (
+                "attempt 0 and 255 exact payloads; attempt matrix and maximum "
+                "payload SHA-256 digests"
+            ),
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_and_public_group_vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_public_group_and_dm_attempt_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -764,6 +804,13 @@ def load_oracle_manifest() -> dict[str, Any]:
         "utils_aes128_ecb_zero_pad_and_two_byte_hmac_sha256"
     ):
         raise GateFailure("oracle public-group vector provenance drifted")
+    if determinism.get("dm_recipe") != (
+        "basechatmesh_timestamp_low_attempt_text_optional_full_attempt_then_"
+        "mesh_hash_prefix_and_utils_aes128_hmac"
+    ):
+        raise GateFailure("oracle DM vector provenance drifted")
+    if determinism.get("dm_attempt_matrix") != "0_through_255":
+        raise GateFailure("oracle DM attempt matrix drifted")
     required_fixtures = determinism.get(
         "future_fixtures_required"
     )
@@ -1512,6 +1559,7 @@ def base_report(
             "packet_semantics_covered": False,
             "crypto_oracle_available": False,
             "public_group_crypto_oracle_available": True,
+            "dm_crypto_oracle_available": True,
         },
         "requested": {
             "commit": args.commit,
@@ -1685,6 +1733,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "signed_advert_verification": True,
                     "ed25519_point_validation": True,
                     "public_group_packets": True,
+                    "dm_encrypt_decrypt": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 9,
+  "corpus_version": 10,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -52,10 +52,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "7144bd6def15a725391ebd31da79400d1600722604dbeb314e02bc5f68104b22",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "6021f923ea4b4c6bdfc8f120bfade1e2d7450eb9e9ed7e9aea0d77b56401073b",
-    "tests/meshcore_oracle/meshcore_oracle.h": "62b82ff031f3ab69ab38f2bd1d9dc3f7b1af198762c68de8b23d97fe0c4e876b",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "e391163ed7c1e62d472ef768b5b1a52fd7c4792c934d47a633620b7b8d94db84",
+    "tests/meshcore_oracle/coverage_manifest.json": "95e868561d65dbb0fc1717b7af6d76f5f42919e3878373821bb7de1397a1af69",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "3bc8ba73d32cf02de145f3c50c9239035dda3b5dd1f6caf2d4ea41dc535469d7",
+    "tests/meshcore_oracle/meshcore_oracle.h": "8ae6303fce75cb2b25f755c20eabb7251fb6b81ee31c1b880eaa133c938905d2",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "e45ecc88b52081d434948e2e0a2a3253e2ec611e1f4c7e1345ae6669a943df7e",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -75,6 +75,8 @@
     "crypto_available": false,
     "group_crypto_available": true,
     "group_crypto_scope": "aes128_ecb_zero_padding_truncated_hmac_sha256_and_basechatmesh_setchannel_hash_only",
+    "dm_crypto_available": true,
+    "dm_crypto_scope": "basechatmesh_plain_text_layout_and_mesh_datagram_crypto_with_caller_supplied_hashes_and_shared_secret_only",
     "signed_advert_ed25519_available": true,
     "signed_advert_scope": "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch",
     "canonical_advert_data": true,
@@ -96,17 +98,23 @@
       "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
       "public_group_aes": "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
       "public_group_sha_hmac": "tests/meshcore_oracle/stubs/SHA256.h",
-      "public_group_independent_kats": "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; FIPS 197 AES-128 cipher example"
+      "public_group_independent_kats": "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; FIPS 197 AES-128 cipher example",
+      "dm_datagram": "third_party/MeshCore/src/Mesh.cpp",
+      "dm_plain_text_layout": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+      "dm_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+      "dm_independent_golden": "attempt 0 and 255 exact payloads; attempt matrix and maximum payload SHA-256 digests"
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_and_public_group_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_public_group_and_dm_attempt_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
     "public_group_recipe": "basechatmesh_setchannel_padded16_or_full32_secret_sha256_hash_then_utils_aes128_ecb_zero_pad_and_two_byte_hmac_sha256",
+    "dm_recipe": "basechatmesh_timestamp_low_attempt_text_optional_full_attempt_then_mesh_hash_prefix_and_utils_aes128_hmac",
+    "dm_attempt_matrix": "0_through_255",
     "future_fixtures_required": [
       "mock_radio",
       "deterministic_rng",
@@ -119,11 +127,11 @@
     ]
   },
   "vectors": {
-    "roundtrip": 30,
+    "roundtrip": 288,
     "valid": 11,
-    "invalid": 104,
-    "semantic": 129,
-    "total": 145,
+    "invalid": 133,
+    "semantic": 416,
+    "total": 432,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -165,6 +173,12 @@
       "invalid": 21,
       "semantic": 25,
       "total": 25
+    },
+    "dm_encrypt_decrypt": {
+      "roundtrip": 258,
+      "invalid": 29,
+      "semantic": 287,
+      "total": 287
     },
     "direct_flood_headers": {
       "roundtrip": 7,
@@ -285,9 +299,27 @@
     },
     {
       "id": "dm_encrypt_decrypt",
-      "status": "pending",
-      "owner": "unassigned",
-      "blocked_by": "pinned_ed25519_key_exchange_identity_and_deterministic_dm_session_fixtures"
+      "status": "implemented",
+      "owner": "pinned_mesh_datagram_basechat_layout_vendored_aes_host_sha",
+      "semantic": true,
+      "scope": "plain_dm_create_authenticated_parse_with_caller_supplied_hashes_and_shared_secret_no_key_exchange_dispatch_ack_delivery_or_retained_state",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-DM-CRYPTO-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Utils.cpp",
+          "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+          "third_party/MeshCore/src/helpers/BaseChatMesh.h"
+        ],
+        "attempt_matrix": "0_through_255",
+        "golden_vectors": "attempt_0_and_255_exact_payloads_plus_attempt_matrix_and_maximum_payload_sha256_digests",
+        "vectors": {
+          "roundtrip": 258,
+          "invalid": 29
+        }
+      }
     },
     {
       "id": "expected_ack_hash_and_ack_path",
@@ -331,6 +363,7 @@
       "packet envelope encode/decode through mesh::Packet",
       "canonical advert app-data fields through AdvertDataBuilder and AdvertDataParser",
       "public-group AES-128 ECB encryption, zero padding, two-byte HMAC-SHA-256, and authenticated parsing through mesh::Utils with deterministic host crypto adapters",
+      "plain-DM AES-128/HMAC creation and authenticated parsing through mesh::Utils with caller-supplied one-byte hashes and shared secret",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -338,7 +371,8 @@
       "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp",
       "simple and multipart ACK payload framing from Mesh.cpp",
       "source TRACE prefix, direct-route payload path and priority framing from Mesh.cpp",
-      "BaseChatMesh setChannel padded-16-secret versus full-32-secret channel-hash selection from BaseChatMesh.cpp"
+      "BaseChatMesh setChannel padded-16-secret versus full-32-secret channel-hash selection from BaseChatMesh.cpp",
+      "BaseChatMesh plain-DM timestamp, attempt 0 through 255, text, and extended-attempt layout from BaseChatMesh.cpp"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",
