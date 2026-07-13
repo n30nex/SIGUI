@@ -4,6 +4,8 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from scripts import package_release_d1l
 from scripts.verify_checksums import verify_sha256_manifest
 
@@ -120,7 +122,7 @@ def write_fake_config(root: Path) -> None:
     )
 
 
-def write_fake_rp2040_artifacts(root: Path) -> Path:
+def write_fake_rp2040_artifacts(root: Path, *, include_manifests: bool = True) -> Path:
     artifacts = root / "artifacts" / "rp2040-release-inputs"
     for name, payload in {
         "rp2040-sd-bridge-firmware": b"BRIDGE",
@@ -131,10 +133,11 @@ def write_fake_rp2040_artifacts(root: Path) -> Path:
         artifact_dir.mkdir(parents=True)
         uf2 = artifact_dir / f"{name}.uf2"
         uf2.write_bytes(payload)
-        (artifact_dir / "SHA256SUMS.txt").write_text(
-            f"{package_release_d1l.sha256_file(uf2)}  ./{uf2.name}\n",
-            encoding="ascii",
-        )
+        if include_manifests:
+            (artifact_dir / "SHA256SUMS.txt").write_text(
+                f"{package_release_d1l.sha256_file(uf2)}  ./{uf2.name}\n",
+                encoding="ascii",
+            )
     return artifacts
 
 
@@ -327,6 +330,107 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
         assert "future" in str(exc) or "supported range" in str(exc)
     else:
         raise AssertionError("out-of-range MeshCore evidence was accepted")
+
+
+def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path):
+    build = tmp_path / "build"
+    out = tmp_path / "artifacts" / "release"
+    write_fake_build(build)
+    rp2040_artifacts = write_fake_rp2040_artifacts(
+        tmp_path, include_manifests=False
+    )
+
+    with pytest.raises(
+        ValueError, match="must contain exactly one valid root SHA256SUMS.txt"
+    ):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=out,
+            package_name="missing-rp2040-manifests",
+            full_size=0x20000,
+            rp2040_artifact_root=rp2040_artifacts,
+        )
+
+    invalid_root = tmp_path / "invalid"
+    invalid_artifacts = write_fake_rp2040_artifacts(invalid_root)
+    invalid_manifest = (
+        invalid_artifacts / package_release_d1l.RP2040_ARTIFACT_NAMES[0]
+        / "SHA256SUMS.txt"
+    )
+    invalid_manifest.write_text("not a valid checksum row\n", encoding="ascii")
+    with pytest.raises(
+        ValueError, match="must contain exactly one valid root SHA256SUMS.txt"
+    ):
+        package_release_d1l.create_release_package(
+            root=invalid_root,
+            build_dir=build,
+            out_dir=out,
+            package_name="invalid-rp2040-manifest",
+            full_size=0x20000,
+            rp2040_artifact_root=invalid_artifacts,
+        )
+
+
+def test_copy_rp2040_artifacts_rejects_linked_source_directory(tmp_path):
+    artifacts = write_fake_rp2040_artifacts(tmp_path)
+    artifact_name = package_release_d1l.RP2040_ARTIFACT_NAMES[0]
+    source = artifacts / artifact_name
+    outside = tmp_path / "outside-rp2040-source"
+    source.rename(outside)
+    try:
+        os.symlink(outside, source, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"directory symlinks unavailable: {exc}")
+
+    package_dir = tmp_path / "package"
+    package_dir.mkdir()
+    with pytest.raises(ValueError, match="real direct child"):
+        package_release_d1l.copy_rp2040_artifacts(artifacts, package_dir)
+
+
+def test_copy_rp2040_artifacts_rejects_reparse_source_directory(
+    tmp_path, monkeypatch
+):
+    artifacts = write_fake_rp2040_artifacts(tmp_path)
+    source = artifacts / package_release_d1l.RP2040_ARTIFACT_NAMES[0]
+    original = package_release_d1l.is_link_or_reparse
+    monkeypatch.setattr(
+        package_release_d1l,
+        "is_link_or_reparse",
+        lambda path: path == source or original(path),
+    )
+
+    package_dir = tmp_path / "package"
+    package_dir.mkdir()
+    with pytest.raises(ValueError, match="real direct child"):
+        package_release_d1l.copy_rp2040_artifacts(artifacts, package_dir)
+
+
+def test_copy_rp2040_artifacts_rechecks_complete_destination_tree(
+    tmp_path, monkeypatch
+):
+    artifacts = write_fake_rp2040_artifacts(tmp_path)
+    package_dir = tmp_path / "package"
+    package_dir.mkdir()
+    original_copytree = package_release_d1l.shutil.copytree
+    injected = False
+
+    def copytree_with_uncovered_manifest(source, destination):
+        nonlocal injected
+        result = original_copytree(source, destination)
+        if not injected:
+            injected = True
+            nested = Path(destination) / "unexpected"
+            nested.mkdir()
+            (nested / "SHA256SUMS.txt").write_text(
+                f"{'0' * 64}  ./missing.bin\n", encoding="ascii"
+            )
+        return result
+
+    monkeypatch.setattr(package_release_d1l.shutil, "copytree", copytree_with_uncovered_manifest)
+    with pytest.raises(ValueError, match="verification changed after copy"):
+        package_release_d1l.copy_rp2040_artifacts(artifacts, package_dir)
 
 
 def test_generated_flash_scripts_require_explicit_port(tmp_path):

@@ -14,6 +14,11 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+try:
+    from verify_checksums import is_link_or_reparse, verify_checksum_tree
+except ModuleNotFoundError:
+    from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
+
 
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
@@ -450,7 +455,10 @@ def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
 def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list[dict]:
     if artifact_root is None:
         return []
-    artifact_root = artifact_root.resolve()
+    try:
+        artifact_root = artifact_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}") from None
     if not artifact_root.is_dir():
         raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}")
 
@@ -462,8 +470,36 @@ def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list
     rp2040_dir = package_dir / "rp2040"
     for artifact_name in RP2040_ARTIFACT_NAMES:
         source_dir = artifact_root / artifact_name
+        try:
+            source_resolved = source_dir.resolve(strict=True)
+            source_resolved.relative_to(artifact_root)
+        except (OSError, RuntimeError, ValueError):
+            raise ValueError(
+                f"{artifact_name} source directory must be a real direct child "
+                "of the RP2040 artifact root"
+            ) from None
+        if (
+            is_link_or_reparse(source_dir)
+            or not source_dir.is_dir()
+            or source_resolved != source_dir
+        ):
+            raise ValueError(
+                f"{artifact_name} source directory must be a real direct child "
+                "of the RP2040 artifact root"
+            )
+
+        source_manifests = sorted(source_dir.rglob("SHA256SUMS.txt"))
+        source_manifest = source_dir / "SHA256SUMS.txt"
+        if source_manifests != [source_manifest] or not verify_checksum_tree(source_dir):
+            raise ValueError(
+                f"{artifact_name} must contain exactly one valid root SHA256SUMS.txt"
+            )
         dest_dir = rp2040_dir / artifact_name
         shutil.copytree(source_dir, dest_dir)
+        dest_manifests = sorted(dest_dir.rglob("SHA256SUMS.txt"))
+        dest_manifest = dest_dir / "SHA256SUMS.txt"
+        if dest_manifests != [dest_manifest] or not verify_checksum_tree(dest_dir):
+            raise ValueError(f"{artifact_name} checksum verification changed after copy")
         files = []
         uf2_files = []
         for path in sorted(dest_dir.rglob("*")):
