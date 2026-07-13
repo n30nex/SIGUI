@@ -115,6 +115,17 @@ def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
     assert not any("WP-02" in error and "dependency WP-01" in error for error in errors)
 
 
+def test_banked_wp01_status_describes_wp02_as_unlocked():
+    ledger = ledger_copy()
+    bank_wp01_proof(ledger)
+    package(ledger, "WP-02")["status"] = "in_progress"
+
+    rendered = render_status(ledger)
+
+    assert "`WP-02` is unlocked" in rendered
+    assert "`WP-02` remains blocked" not in rendered
+
+
 def test_hardware_green_requires_proof_banked():
     ledger = ledger_copy()
     item = bank_wp01_proof(ledger)

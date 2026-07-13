@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACK_DIR = ROOT / "docs" / "completion"
 MANIFEST = PACK_DIR / "SHA256SUMS.txt"
+ATTRIBUTES = ROOT / ".gitattributes"
 ROW_RE = re.compile(r"^([0-9a-f]{64})  ([^/\\]+)$")
 
 
@@ -34,3 +35,11 @@ def test_completion_pack_manifest_is_complete_and_current() -> None:
     assert {
         name: sha256(PACK_DIR / name) for name in sorted(parsed)
     } == parsed
+
+
+def test_completion_pack_checkout_bytes_are_pinned_to_lf() -> None:
+    policy = ATTRIBUTES.read_text(encoding="ascii").splitlines()
+
+    assert "docs/completion/*.md text eol=lf" in policy
+    assert "docs/completion/*.yaml text eol=lf" in policy
+    assert "docs/completion/SHA256SUMS.txt text eol=lf" in policy

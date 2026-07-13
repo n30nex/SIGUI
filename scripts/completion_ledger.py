@@ -432,6 +432,15 @@ def render_status(ledger: dict) -> str:
         actions = wp01.get("verification", {}).get("actions", {})
         checksums = wp01.get("verification", {}).get("checksums", {})
         physical = wp01.get("verification", {}).get("physical", {})
+        wp02_dependency_note = (
+            "`WP-02` is unlocked because WP-01 reached `hardware_green` with "
+            "`proof_banked=true`. PR #80 is still merged by WP-02 itself; WP-01 "
+            "is not marked `merged` early."
+            if dependency_satisfied(wp01)
+            else "`WP-02` remains blocked until WP-01 reaches `hardware_green` with "
+            "`proof_banked=true`. That proof satisfies WP-02's dependency even though "
+            "PR #80 is merged by WP-02 itself; WP-01 is not marked `merged` early."
+        )
         lines.extend(
             [
                 "",
@@ -470,9 +479,7 @@ def render_status(ledger: dict) -> str:
                 "- Merge state: **%s**"
                 % ("merged" if wp01.get("implementation_merged") else "not merged"),
                 "",
-                "`WP-02` remains blocked until WP-01 reaches `hardware_green` with "
-                "`proof_banked=true`. That proof satisfies WP-02's dependency even though "
-                "PR #80 is merged by WP-02 itself; WP-01 is not marked `merged` early.",
+                wp02_dependency_note,
             ]
         )
 
