@@ -36,6 +36,8 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES 4U
 #define D1L_MESHCORE_ORACLE_DM_ACK_BYTES 6U
 #define D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES 64U
+#define D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES 161U
+#define D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES 4U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -254,6 +256,70 @@ bool d1l_meshcore_oracle_parse_dm_ack_path_packet(
     size_t return_path_capacity,
     size_t *out_return_path_bytes,
     uint8_t out_ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES]);
+
+/*
+ * General deterministic Mesh::createPathReturn framing. The caller supplies
+ * the one-byte peer hashes and already-derived shared secret because identity
+ * and key exchange remain outside this ABI. The extra form copies the full
+ * upstream extra-type byte on creation; parsing returns its low nibble exactly
+ * as Mesh::onRecvPacket does. expected_extra_len disambiguates application
+ * data from AES zero padding, which the wire format does not encode.
+ *
+ * The unique form reproduces createPathReturn's no-extra branch with the four
+ * RNG bytes supplied by the caller. Both constructors return a pre-route PATH
+ * packet. Applying prepare_flood, prepare_direct, or prepare_zero_hop pins the
+ * caller-selected direct/flood and transport-code header semantics only.
+ *
+ * These functions do not derive identities or secrets, consume RNG, select or
+ * store a route, dispatch a PATH, update a contact, schedule/forward a packet,
+ * or claim RF behavior.
+ */
+bool d1l_meshcore_oracle_create_path_return_extra_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    uint8_t extra_type,
+    const uint8_t *extra,
+    size_t extra_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_create_path_return_unique_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    const uint8_t uniqueness[D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES],
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_path_return_extra_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    size_t expected_extra_len,
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t *out_extra_type,
+    uint8_t *out_extra,
+    size_t extra_capacity,
+    size_t *out_extra_len);
+
+bool d1l_meshcore_oracle_parse_path_return_unique_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t out_uniqueness
+        [D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES]);
 
 /*
  * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp

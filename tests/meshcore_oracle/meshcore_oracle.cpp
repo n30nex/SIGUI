@@ -59,6 +59,11 @@ static_assert(D1L_MESHCORE_ORACLE_DM_ACK_BYTES == 6U,
               "Pinned BaseChatMesh plain-DM ACK width changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES == MAX_PATH_SIZE,
               "Pinned MeshCore maximum return-path width changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES + 5U ==
+                  MAX_PACKET_PAYLOAD - 2U - CIPHER_BLOCK_SIZE,
+              "Pinned MeshCore path-return extra limit changed");
+static_assert(D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES == 4U,
+              "Pinned MeshCore path-return uniqueness width changed");
 static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
               "Pinned MeshCore NONE advert type changed");
 static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
@@ -79,6 +84,147 @@ static_assert(ADV_NAME_MASK == D1L_MESHCORE_ADVERT_NAME_MASK,
               "Pinned MeshCore advert name flag changed");
 
 namespace {
+
+constexpr size_t kMaxCombinedPath =
+    MAX_PACKET_PAYLOAD - 2U - CIPHER_BLOCK_SIZE;
+
+bool packet_to_upstream(const d1l_meshcore_oracle_packet_t *packet,
+                        mesh::Packet *upstream);
+
+bool create_path_return_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t *secret,
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    uint8_t raw_extra_type,
+    const uint8_t *extra,
+    size_t extra_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (secret == nullptr || extra == nullptr || extra_len == 0U ||
+        out_packet == nullptr ||
+        !mesh::Packet::isValidPathLen(encoded_return_path_len)) {
+        return false;
+    }
+    const size_t hash_size = (encoded_return_path_len >> 6U) + 1U;
+    const size_t hash_count = encoded_return_path_len & 63U;
+    const size_t path_bytes = hash_size * hash_count;
+    if ((path_bytes > 0U && return_path == nullptr) ||
+        path_bytes > D1L_MESHCORE_ORACLE_MAX_PATH_BYTES ||
+        extra_len > kMaxCombinedPath - 5U - path_bytes) {
+        return false;
+    }
+
+    std::array<uint8_t, MAX_PACKET_PAYLOAD> plaintext{};
+    size_t plaintext_len = 0U;
+    plaintext[plaintext_len++] = encoded_return_path_len;
+    if (path_bytes > 0U) {
+        std::memcpy(&plaintext[plaintext_len], return_path, path_bytes);
+        plaintext_len += path_bytes;
+    }
+    plaintext[plaintext_len++] = raw_extra_type;
+    std::memcpy(&plaintext[plaintext_len], extra, extra_len);
+    plaintext_len += extra_len;
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT);
+    result.payload[0] = destination_hash;
+    result.payload[1] = source_hash;
+    const int encrypted_len = mesh::Utils::encryptThenMAC(
+        secret, &result.payload[2], plaintext.data(),
+        static_cast<int>(plaintext_len));
+    if (encrypted_len <= 0 ||
+        static_cast<size_t>(encrypted_len) + 2U >
+            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    result.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+    *out_packet = result;
+    return true;
+}
+
+bool parse_path_return_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t *secret,
+    uint8_t expected_raw_extra_type,
+    bool require_raw_extra_type,
+    size_t expected_extra_len,
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t *out_extra_type,
+    uint8_t *out_extra,
+    size_t extra_capacity,
+    size_t *out_extra_len)
+{
+    if (packet == nullptr || secret == nullptr || expected_extra_len == 0U ||
+        expected_extra_len >
+            D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES ||
+        out_encoded_return_path_len == nullptr || out_return_path == nullptr ||
+        out_return_path_bytes == nullptr || out_extra_type == nullptr ||
+        out_extra == nullptr || out_extra_len == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_PATH ||
+        upstream.payload_len < 2U + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE ||
+        upstream.payload[0] != destination_hash ||
+        upstream.payload[1] != source_hash) {
+        return false;
+    }
+    const size_t encrypted_len =
+        upstream.payload_len - 2U - CIPHER_MAC_SIZE;
+    if ((encrypted_len % CIPHER_BLOCK_SIZE) != 0U) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> plaintext{};
+    const int decoded_len = mesh::Utils::MACThenDecrypt(
+        secret, plaintext.data(), &upstream.payload[2],
+        upstream.payload_len - 2U);
+    if (decoded_len <= 0 || static_cast<size_t>(decoded_len) != encrypted_len) {
+        return false;
+    }
+
+    const uint8_t encoded_path_len = plaintext[0];
+    if (!mesh::Packet::isValidPathLen(encoded_path_len)) {
+        return false;
+    }
+    const size_t hash_size = (encoded_path_len >> 6U) + 1U;
+    const size_t hash_count = encoded_path_len & 63U;
+    const size_t path_bytes = hash_size * hash_count;
+    const size_t extra_type_index = 1U + path_bytes;
+    const size_t logical_len = extra_type_index + 1U + expected_extra_len;
+    const size_t plaintext_size = static_cast<size_t>(decoded_len);
+    if (logical_len > plaintext_size || path_bytes > return_path_capacity ||
+        expected_extra_len > extra_capacity ||
+        (require_raw_extra_type &&
+         plaintext[extra_type_index] != expected_raw_extra_type)) {
+        return false;
+    }
+    for (size_t index = logical_len; index < plaintext_size; ++index) {
+        if (plaintext[index] != 0U) {
+            return false;
+        }
+    }
+
+    if (path_bytes > 0U) {
+        std::memcpy(out_return_path, &plaintext[1], path_bytes);
+    }
+    std::memcpy(out_extra, &plaintext[extra_type_index + 1U],
+                expected_extra_len);
+    *out_encoded_return_path_len = encoded_path_len;
+    *out_return_path_bytes = path_bytes;
+    *out_extra_type = plaintext[extra_type_index] & 0x0FU;
+    *out_extra_len = expected_extra_len;
+    return true;
+}
 
 bool has_transport_codes(uint8_t header)
 {
@@ -749,47 +895,10 @@ extern "C" bool d1l_meshcore_oracle_create_dm_ack_path_packet(
     const uint8_t ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES],
     d1l_meshcore_oracle_packet_t *out_packet)
 {
-    if (secret == nullptr || ack == nullptr || out_packet == nullptr ||
-        !mesh::Packet::isValidPathLen(encoded_return_path_len)) {
-        return false;
-    }
-    const size_t hash_size = (encoded_return_path_len >> 6U) + 1U;
-    const size_t hash_count = encoded_return_path_len & 63U;
-    const size_t path_bytes = hash_size * hash_count;
-    if ((path_bytes > 0U && return_path == nullptr) ||
-        path_bytes > D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES) {
-        return false;
-    }
-
-    std::array<uint8_t, 1U + D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES + 1U +
-                            D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
-        plaintext{};
-    size_t plaintext_len = 0U;
-    plaintext[plaintext_len++] = encoded_return_path_len;
-    if (path_bytes > 0U) {
-        std::memcpy(&plaintext[plaintext_len], return_path, path_bytes);
-        plaintext_len += path_bytes;
-    }
-    plaintext[plaintext_len++] = PAYLOAD_TYPE_ACK;
-    std::memcpy(&plaintext[plaintext_len], ack,
-                D1L_MESHCORE_ORACLE_DM_ACK_BYTES);
-    plaintext_len += D1L_MESHCORE_ORACLE_DM_ACK_BYTES;
-
-    d1l_meshcore_oracle_packet_t result{};
-    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT);
-    result.payload[0] = destination_hash;
-    result.payload[1] = source_hash;
-    const int encrypted_len = mesh::Utils::encryptThenMAC(
-        secret, &result.payload[2], plaintext.data(),
-        static_cast<int>(plaintext_len));
-    if (encrypted_len <= 0 ||
-        static_cast<size_t>(encrypted_len) + 2U >
-            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
-        return false;
-    }
-    result.payload_len = static_cast<uint16_t>(encrypted_len + 2);
-    *out_packet = result;
-    return true;
+    return d1l_meshcore_oracle_create_path_return_extra_packet(
+        destination_hash, source_hash, secret, encoded_return_path_len,
+        return_path, PAYLOAD_TYPE_ACK, ack,
+        D1L_MESHCORE_ORACLE_DM_ACK_BYTES, out_packet);
 }
 
 extern "C" bool d1l_meshcore_oracle_parse_dm_ack_path_packet(
@@ -803,64 +912,115 @@ extern "C" bool d1l_meshcore_oracle_parse_dm_ack_path_packet(
     size_t *out_return_path_bytes,
     uint8_t out_ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES])
 {
-    if (packet == nullptr || secret == nullptr ||
+    if (out_ack == nullptr) {
+        return false;
+    }
+    uint8_t extra_type = 0U;
+    size_t extra_len = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> ack{};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES> path{};
+    uint8_t encoded_path_len = 0U;
+    size_t path_bytes = 0U;
+    if (!d1l_meshcore_oracle_parse_path_return_extra_packet(
+            packet, destination_hash, source_hash, secret,
+            D1L_MESHCORE_ORACLE_DM_ACK_BYTES, &encoded_path_len, path.data(),
+            return_path_capacity, &path_bytes, &extra_type, ack.data(),
+            ack.size(), &extra_len) ||
+        extra_type != PAYLOAD_TYPE_ACK ||
+        extra_len != D1L_MESHCORE_ORACLE_DM_ACK_BYTES ||
         out_encoded_return_path_len == nullptr || out_return_path == nullptr ||
-        out_return_path_bytes == nullptr || out_ack == nullptr) {
+        out_return_path_bytes == nullptr) {
         return false;
     }
-    mesh::Packet upstream;
-    if (!packet_to_upstream(packet, &upstream) ||
-        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
-        upstream.getPayloadType() != PAYLOAD_TYPE_PATH ||
-        upstream.payload_len < 2U + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE ||
-        upstream.payload[0] != destination_hash ||
-        upstream.payload[1] != source_hash) {
-        return false;
-    }
-    const size_t encrypted_len =
-        upstream.payload_len - 2U - CIPHER_MAC_SIZE;
-    if ((encrypted_len % CIPHER_BLOCK_SIZE) != 0U) {
-        return false;
-    }
-
-    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> plaintext{};
-    const int decoded_len = mesh::Utils::MACThenDecrypt(
-        secret, plaintext.data(), &upstream.payload[2],
-        upstream.payload_len - 2U);
-    if (decoded_len <= 0 || static_cast<size_t>(decoded_len) != encrypted_len) {
-        return false;
-    }
-
-    const uint8_t encoded_path_len = plaintext[0];
-    if (!mesh::Packet::isValidPathLen(encoded_path_len)) {
-        return false;
-    }
-    const size_t hash_size = (encoded_path_len >> 6U) + 1U;
-    const size_t hash_count = encoded_path_len & 63U;
-    const size_t path_bytes = hash_size * hash_count;
-    const size_t extra_type_index = 1U + path_bytes;
-    const size_t logical_len =
-        extra_type_index + 1U + D1L_MESHCORE_ORACLE_DM_ACK_BYTES;
-    const size_t plaintext_size = static_cast<size_t>(decoded_len);
-    if (logical_len > plaintext_size ||
-        plaintext[extra_type_index] != PAYLOAD_TYPE_ACK ||
-        path_bytes > return_path_capacity) {
-        return false;
-    }
-    for (size_t index = logical_len; index < plaintext_size; ++index) {
-        if (plaintext[index] != 0U) {
-            return false;
-        }
-    }
-
     if (path_bytes > 0U) {
-        std::memcpy(out_return_path, &plaintext[1], path_bytes);
+        std::memcpy(out_return_path, path.data(), path_bytes);
     }
-    std::memcpy(out_ack, &plaintext[extra_type_index + 1U],
-                D1L_MESHCORE_ORACLE_DM_ACK_BYTES);
+    std::memcpy(out_ack, ack.data(), ack.size());
     *out_encoded_return_path_len = encoded_path_len;
     *out_return_path_bytes = path_bytes;
     return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_path_return_extra_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    uint8_t extra_type,
+    const uint8_t *extra,
+    size_t extra_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    return create_path_return_packet(
+        destination_hash, source_hash, secret, encoded_return_path_len,
+        return_path, extra_type, extra, extra_len, out_packet);
+}
+
+extern "C" bool d1l_meshcore_oracle_create_path_return_unique_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    const uint8_t uniqueness
+        [D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES],
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    return create_path_return_packet(
+        destination_hash, source_hash, secret, encoded_return_path_len,
+        return_path, 0xFFU, uniqueness,
+        D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES, out_packet);
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_path_return_extra_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    size_t expected_extra_len,
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t *out_extra_type,
+    uint8_t *out_extra,
+    size_t extra_capacity,
+    size_t *out_extra_len)
+{
+    return parse_path_return_packet(
+        packet, destination_hash, source_hash, secret, 0U, false,
+        expected_extra_len, out_encoded_return_path_len, out_return_path,
+        return_path_capacity, out_return_path_bytes, out_extra_type, out_extra,
+        extra_capacity, out_extra_len);
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_path_return_unique_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t out_uniqueness
+        [D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES])
+{
+    if (out_uniqueness == nullptr) {
+        return false;
+    }
+    uint8_t extra_type = 0U;
+    size_t extra_len = 0U;
+    return parse_path_return_packet(
+               packet, destination_hash, source_hash, secret, 0xFFU, true,
+               D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES,
+               out_encoded_return_path_len, out_return_path,
+               return_path_capacity, out_return_path_bytes, &extra_type,
+               out_uniqueness,
+               D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES, &extra_len) &&
+           extra_type == 0x0FU &&
+           extra_len == D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES;
 }
 
 extern "C" bool d1l_meshcore_oracle_prepare_flood(

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 11,
+  "corpus_version": 12,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_strict_signed_advert_verification",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -52,10 +52,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "b4bee3c66d93eca8b4c39ef90e42f77a31708a631028fb52f27ecd2cc70f3e8d",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "bef02e9ce8414ec8b616994db8d763f4a8d4133fae332fc56503ad6a81e757fc",
-    "tests/meshcore_oracle/meshcore_oracle.h": "45a7ad88b900d0368b1ffa8b2bdf4d9caa286b2a33c8252736cca5c206a35f3f",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "a020f5a0eb7e4c5d320eda611bcc6a4981963e5be45110494f6738fdae4c203a",
+    "tests/meshcore_oracle/coverage_manifest.json": "4b9cca389cefb6afc58b7800905cf5d00c9bb10718c64e6dbcfdc0b63da412c8",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "f076bc4d1a555d7d9b4c2da2fc68745b6fc045f1be5645459a484699aafa078e",
+    "tests/meshcore_oracle/meshcore_oracle.h": "66b066774fe8e2c3178428f5308209f3e5a573d03a3f0672085c6390087ce86f",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "d177e26f565f2c92ecc3ea82cae7b412645c85f755c8da31822113659cc45e18",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -79,6 +79,8 @@
     "dm_crypto_scope": "basechatmesh_plain_text_layout_and_mesh_datagram_crypto_with_caller_supplied_hashes_and_shared_secret_only",
     "expected_ack_path_available": true,
     "expected_ack_path_scope": "plain_dm_expected_hash_all_lengths_defined_ack_bodies_and_authenticated_ack_path_with_caller_supplied_identity_hash_secret_and_rng_inputs_only",
+    "path_return_route_codes_available": true,
+    "path_return_route_codes_scope": "general_authenticated_path_return_extra_and_no_extra_uniqueness_framing_with_caller_supplied_hash_secret_rng_and_route_inputs_only_no_route_selection_dispatch_forwarding_or_rf",
     "signed_advert_ed25519_available": true,
     "signed_advert_scope": "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch",
     "canonical_advert_data": true,
@@ -108,11 +110,15 @@
       "expected_ack_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
       "ack_path_datagram": "third_party/MeshCore/src/Mesh.cpp",
       "ack_path_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
-      "ack_path_independent_golden": "four exact ACK bodies; exact-block expected hash; zero-path exact payload; four-path payload matrix SHA-256"
+      "ack_path_independent_golden": "four exact ACK bodies; exact-block expected hash; zero-path exact payload; four-path payload matrix SHA-256",
+      "path_return_datagram": "third_party/MeshCore/src/Mesh.cpp",
+      "path_return_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+      "path_return_route_codes": "third_party/MeshCore/src/Mesh.cpp",
+      "path_return_independent_golden": "zero-path exact payload; general extra and no-extra uniqueness matrix SHA-256; direct flood and transport-code route matrix"
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_public_group_dm_and_ack_path_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_public_group_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
@@ -130,6 +136,14 @@
       "two_byte",
       "three_byte"
     ],
+    "path_return_recipe": "mesh_createpathreturn_general_extra_or_caller_rng_uniqueness_then_utils_aes128_hmac",
+    "path_return_encodings": [
+      "zero",
+      "one_byte",
+      "two_byte_maximum",
+      "three_byte_maximum"
+    ],
+    "path_return_route_matrix": "flood_transport_flood_direct_zero_hop_and_transport_zero_hop",
     "undefined_full_ack_body_boundary": "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only",
     "future_fixtures_required": [
       "mock_radio",
@@ -143,11 +157,11 @@
     ]
   },
   "vectors": {
-    "roundtrip": 302,
+    "roundtrip": 308,
     "valid": 20,
-    "invalid": 168,
-    "semantic": 474,
-    "total": 490,
+    "invalid": 203,
+    "semantic": 515,
+    "total": 531,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -202,6 +216,12 @@
       "invalid": 35,
       "semantic": 48,
       "total": 48
+    },
+    "path_return_route_codes": {
+      "roundtrip": 6,
+      "invalid": 35,
+      "semantic": 41,
+      "total": 41
     },
     "direct_flood_headers": {
       "roundtrip": 7,
@@ -388,9 +408,38 @@
     },
     {
       "id": "path_return_route_codes",
-      "status": "pending",
-      "owner": "unassigned",
-      "blocked_by": "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
+      "status": "implemented",
+      "owner": "pinned_mesh_path_return_utils_and_route_golden_vectors",
+      "semantic": true,
+      "scope": "general_authenticated_path_return_extra_and_no_extra_uniqueness_framing_with_caller_supplied_hash_secret_rng_and_route_inputs_no_identity_derivation_route_selection_dispatch_forwarding_contact_mutation_scheduling_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-PATH-RETURN-ROUTE-CODES-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Utils.cpp",
+          "third_party/MeshCore/src/Packet.cpp"
+        ],
+        "return_path_encodings": [
+          "zero",
+          "one_byte",
+          "two_byte_maximum",
+          "three_byte_maximum"
+        ],
+        "route_matrix": [
+          "flood",
+          "transport_flood",
+          "direct",
+          "zero_hop",
+          "transport_zero_hop"
+        ],
+        "golden_vectors": "zero_path_exact_payload_general_extra_and_no_extra_uniqueness_matrix_sha256_and_route_code_matrix",
+        "vectors": {
+          "roundtrip": 6,
+          "invalid": 35
+        }
+      }
     },
     {
       "id": "trace_forwarding_and_path_discovery",
@@ -412,6 +461,7 @@
       "public-group AES-128 ECB encryption, zero padding, two-byte HMAC-SHA-256, and authenticated parsing through mesh::Utils with deterministic host crypto adapters",
       "plain-DM AES-128/HMAC creation and authenticated parsing through mesh::Utils with caller-supplied one-byte hashes and shared secret",
       "plain-DM expected-ACK derivation and authenticated ACK+PATH creation/parsing with caller-supplied identity, hash, secret, and RNG inputs",
+      "general Mesh path-return creation/parsing with caller-supplied hashes, shared secret, extras or RNG uniqueness bytes, and explicit route-code preparation",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -421,7 +471,8 @@
       "source TRACE prefix, direct-route payload path and priority framing from Mesh.cpp",
       "BaseChatMesh setChannel padded-16-secret versus full-32-secret channel-hash selection from BaseChatMesh.cpp",
       "BaseChatMesh plain-DM timestamp, attempt 0 through 255, text, exact-block termination, and extended-attempt layout from BaseChatMesh.cpp",
-      "BaseChatMesh expected-ACK hash/body and Mesh ACK+PATH encrypted return-path layout without dispatch, correlation, route selection, or delivery state"
+      "BaseChatMesh expected-ACK hash/body and Mesh ACK+PATH encrypted return-path layout without dispatch, correlation, route selection, or delivery state",
+      "Mesh general PATH-return extra/no-extra encrypted layout and caller-selected direct/flood transport-code preparation without identity derivation, route selection, dispatch, forwarding, scheduling, or RF"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

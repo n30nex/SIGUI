@@ -18,7 +18,8 @@ MANIFEST = ORACLE_ROOT / "manifest.json"
 COVERAGE_MANIFEST = ORACLE_ROOT / "coverage_manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = (
-    "pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
+    "route_codes_ack_trace_and_strict_signed_advert_verification"
 )
 
 
@@ -40,7 +41,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 11
+    assert manifest["corpus_version"] == 12
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -72,6 +73,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "plain_dm_expected_hash_all_lengths_defined_ack_bodies_and_"
             "authenticated_ack_path_with_caller_supplied_identity_hash_"
             "secret_and_rng_inputs_only"
+        ),
+        "path_return_route_codes_available": True,
+        "path_return_route_codes_scope": (
+            "general_authenticated_path_return_extra_and_no_extra_uniqueness_"
+            "framing_with_caller_supplied_hash_secret_rng_and_route_inputs_"
+            "only_no_route_selection_dispatch_forwarding_or_rf"
         ),
         "signed_advert_ed25519_available": True,
         "signed_advert_scope": (
@@ -135,6 +142,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
                 "four exact ACK bodies; exact-block expected hash; zero-path "
                 "exact payload; four-path payload matrix SHA-256"
             ),
+            "path_return_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "path_return_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+            "path_return_route_codes": "third_party/MeshCore/src/Mesh.cpp",
+            "path_return_independent_golden": (
+                "zero-path exact payload; general extra and no-extra uniqueness "
+                "matrix SHA-256; direct flood and transport-code route matrix"
+            ),
         },
     }
     assert manifest["determinism"]["signed_advert_seed_hex"] == (
@@ -180,15 +194,28 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "two_byte",
         "three_byte",
     ]
+    assert manifest["determinism"]["path_return_recipe"] == (
+        "mesh_createpathreturn_general_extra_or_caller_rng_uniqueness_then_"
+        "utils_aes128_hmac"
+    )
+    assert manifest["determinism"]["path_return_encodings"] == [
+        "zero",
+        "one_byte",
+        "two_byte_maximum",
+        "three_byte_maximum",
+    ]
+    assert manifest["determinism"]["path_return_route_matrix"] == (
+        "flood_transport_flood_direct_zero_hop_and_transport_zero_hop"
+    )
     assert manifest["determinism"]["undefined_full_ack_body_boundary"] == (
         "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only"
     )
     assert manifest["vectors"] == {
-        "roundtrip": 302,
+        "roundtrip": 308,
         "valid": 20,
-        "invalid": 168,
-        "semantic": 474,
-        "total": 490,
+        "invalid": 203,
+        "semantic": 515,
+        "total": 531,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -243,6 +270,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 35,
             "semantic": 48,
             "total": 48,
+        },
+        "path_return_route_codes": {
+            "roundtrip": 6,
+            "invalid": 35,
+            "semantic": 41,
+            "total": 41,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -396,6 +429,33 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "normal_dm_5_plus_text_len_exact_aes_block_has_deterministic_"
         "expected_hash_but_uninitialized_full_ack_body_byte"
     )
+    path_return = manifest["capabilities"][13]
+    assert path_return["id"] == "path_return_route_codes"
+    assert path_return["status"] == "implemented"
+    assert path_return["owner"] == (
+        "pinned_mesh_path_return_utils_and_route_golden_vectors"
+    )
+    assert path_return["semantic"] is True
+    assert path_return["implementation_receipt"]["id"] == (
+        "RCPT-WP04-PATH-RETURN-ROUTE-CODES-20260713"
+    )
+    assert path_return["implementation_receipt"]["return_path_encodings"] == [
+        "zero",
+        "one_byte",
+        "two_byte_maximum",
+        "three_byte_maximum",
+    ]
+    assert path_return["implementation_receipt"]["route_matrix"] == [
+        "flood",
+        "transport_flood",
+        "direct",
+        "zero_hop",
+        "transport_zero_hop",
+    ]
+    assert path_return["implementation_receipt"]["vectors"] == {
+        "roundtrip": 6,
+        "invalid": 35,
+    }
     assert all(
         capability["status"] == "pending"
         for capability in manifest["capabilities"][7:]
@@ -404,6 +464,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "public_group_packets",
             "dm_encrypt_decrypt",
             "expected_ack_hash_and_ack_path",
+            "path_return_route_codes",
         }
     )
     assert [
@@ -426,9 +487,6 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     }
     assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
         "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
-    )
-    assert pending["path_return_route_codes"]["blocked_by"] == (
-        "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
     )
     assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
         "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
@@ -463,14 +521,14 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert summary["closure_ready"] is False
     assert summary["unsupported_closure_rejected"] is True
     assert summary["required_surface_count"] == 9
-    assert summary["implemented_surface_count"] == 5
+    assert summary["implemented_surface_count"] == 6
     assert summary["partial_surface_count"] == 2
-    assert summary["blocked_surface_count"] == 2
+    assert summary["blocked_surface_count"] == 1
     assert summary["local_packet_type_count"] == 6
     assert summary["wire_vector_covered_packet_type_count"] == 6
     assert summary["unknown_packet_type_policy"] == "fail_closed"
-    assert len(summary["blocker_receipts"]) == 6
-    assert len(summary["unresolved_capabilities"]) == 6
+    assert len(summary["blocker_receipts"]) == 5
+    assert len(summary["unresolved_capabilities"]) == 5
     assert len(summary["local_packet_types"]) == 6
     identity_receipt = next(
         item
@@ -629,6 +687,11 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert "d1l_meshcore_oracle_create_dm_ack_path_packet" in header
     assert "d1l_meshcore_oracle_parse_dm_ack_path_packet" in header
     assert "D1L_MESHCORE_ORACLE_DM_ACK_BYTES" in header
+    assert "d1l_meshcore_oracle_create_path_return_extra_packet" in header
+    assert "d1l_meshcore_oracle_create_path_return_unique_packet" in header
+    assert "d1l_meshcore_oracle_parse_path_return_extra_packet" in header
+    assert "d1l_meshcore_oracle_parse_path_return_unique_packet" in header
+    assert "D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES" in header
     assert "ed25519_verify" in adapter
     assert '#include "mesh/ed25519_canonical.h"' in adapter
     assert '#include "mesh/ed25519_canonical.h"' in service
@@ -753,14 +816,14 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 11
+    assert artifact["corpus_version"] == 12
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None
-    assert len(artifact["pending_capabilities"]) == 6
+    assert len(artifact["pending_capabilities"]) == 5
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
@@ -768,6 +831,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert "public_group_packets" not in artifact["pending_capabilities"]
     assert "dm_encrypt_decrypt" not in artifact["pending_capabilities"]
     assert "expected_ack_hash_and_ack_path" not in artifact["pending_capabilities"]
+    assert "path_return_route_codes" not in artifact["pending_capabilities"]
     assert "direct_flood_headers" not in artifact["pending_capabilities"]
     assert "ack_frames" not in artifact["pending_capabilities"]
     assert "trace_source_frames" not in artifact["pending_capabilities"]
@@ -915,11 +979,11 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 2,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 302,
+            "roundtrip": 308,
             "valid": 20,
-            "invalid": 168,
-            "semantic": 474,
-            "total": 490,
+            "invalid": 203,
+            "semantic": 515,
+            "total": 531,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -975,6 +1039,12 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 48,
                 "total": 48,
             },
+            "path_return_route_codes": {
+                "roundtrip": 6,
+                "invalid": 35,
+                "semantic": 41,
+                "total": 41,
+            },
             "direct_flood_headers": {
                 "roundtrip": 7,
                 "invalid": 10,
@@ -1002,6 +1072,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "public_group_packets": True,
             "dm_encrypt_decrypt": True,
             "expected_ack_hash_and_ack_path": True,
+            "path_return_route_codes": True,
             "direct_flood_headers": True,
             "ack_frames": True,
             "trace_source_frames": True,

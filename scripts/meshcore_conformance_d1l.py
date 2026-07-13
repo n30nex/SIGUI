@@ -74,9 +74,10 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 11
+ORACLE_CORPUS_VERSION = 12
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
+    "route_codes_ack_trace_and_strict_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -339,11 +340,43 @@ EXPECTED_ORACLE_CAPABILITIES = [
     },
     {
         "id": "path_return_route_codes",
-        "status": "pending",
-        "owner": "unassigned",
-        "blocked_by": (
-            "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
+        "status": "implemented",
+        "owner": "pinned_mesh_path_return_utils_and_route_golden_vectors",
+        "semantic": True,
+        "scope": (
+            "general_authenticated_path_return_extra_and_no_extra_uniqueness_"
+            "framing_with_caller_supplied_hash_secret_rng_and_route_inputs_no_"
+            "identity_derivation_route_selection_dispatch_forwarding_contact_"
+            "mutation_scheduling_or_rf"
         ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-PATH-RETURN-ROUTE-CODES-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+                "third_party/MeshCore/src/Packet.cpp",
+            ],
+            "return_path_encodings": [
+                "zero",
+                "one_byte",
+                "two_byte_maximum",
+                "three_byte_maximum",
+            ],
+            "route_matrix": [
+                "flood",
+                "transport_flood",
+                "direct",
+                "zero_hop",
+                "transport_zero_hop",
+            ],
+            "golden_vectors": (
+                "zero_path_exact_payload_general_extra_and_no_extra_uniqueness_"
+                "matrix_sha256_and_route_code_matrix"
+            ),
+            "vectors": {"roundtrip": 6, "invalid": 35},
+        },
     },
     {
         "id": "trace_forwarding_and_path_discovery",
@@ -400,7 +433,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     },
     {
         "id": "path_return_route_codes",
-        "status": "blocked",
+        "status": "implemented",
         "capabilities": ["path_return_route_codes"],
     },
     {
@@ -660,11 +693,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 302,
+        "roundtrip": 308,
         "valid": 20,
-        "invalid": 168,
-        "semantic": 474,
-        "total": 490,
+        "invalid": 203,
+        "semantic": 515,
+        "total": 531,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -720,6 +753,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 48,
             "total": 48,
         },
+        "path_return_route_codes": {
+            "roundtrip": 6,
+            "invalid": 35,
+            "semantic": 41,
+            "total": 41,
+        },
         "direct_flood_headers": {
             "roundtrip": 7,
             "invalid": 10,
@@ -756,6 +795,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("expected_ack_path_available") is not True
         or interface.get("expected_ack_path_scope")
         != "plain_dm_expected_hash_all_lengths_defined_ack_bodies_and_authenticated_ack_path_with_caller_supplied_identity_hash_secret_and_rng_inputs_only"
+        or interface.get("path_return_route_codes_available") is not True
+        or interface.get("path_return_route_codes_scope")
+        != "general_authenticated_path_return_extra_and_no_extra_uniqueness_framing_with_caller_supplied_hash_secret_rng_and_route_inputs_only_no_route_selection_dispatch_forwarding_or_rf"
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
         != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
@@ -816,12 +858,20 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "four exact ACK bodies; exact-block expected hash; zero-path "
                 "exact payload; four-path payload matrix SHA-256"
             ),
+            "path_return_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "path_return_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+            "path_return_route_codes": "third_party/MeshCore/src/Mesh.cpp",
+            "path_return_independent_golden": (
+                "zero-path exact payload; general extra and no-extra uniqueness "
+                "matrix SHA-256; direct flood and transport-code route matrix"
+            ),
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_public_group_dm_and_ack_path_vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_public_group_dm_ack_path_and_general_path_return_"
+        "vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -878,6 +928,22 @@ def load_oracle_manifest() -> dict[str, Any]:
         "three_byte",
     ]:
         raise GateFailure("oracle ACK+PATH encoding matrix drifted")
+    if determinism.get("path_return_recipe") != (
+        "mesh_createpathreturn_general_extra_or_caller_rng_uniqueness_then_"
+        "utils_aes128_hmac"
+    ):
+        raise GateFailure("oracle PATH-return provenance drifted")
+    if determinism.get("path_return_encodings") != [
+        "zero",
+        "one_byte",
+        "two_byte_maximum",
+        "three_byte_maximum",
+    ]:
+        raise GateFailure("oracle PATH-return encoding matrix drifted")
+    if determinism.get("path_return_route_matrix") != (
+        "flood_transport_flood_direct_zero_hop_and_transport_zero_hop"
+    ):
+        raise GateFailure("oracle PATH-return route matrix drifted")
     if determinism.get("undefined_full_ack_body_boundary") != (
         "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only"
     ):
@@ -1632,6 +1698,7 @@ def base_report(
             "public_group_crypto_oracle_available": True,
             "dm_crypto_oracle_available": True,
             "expected_ack_path_oracle_available": True,
+            "path_return_route_codes_oracle_available": True,
         },
         "requested": {
             "commit": args.commit,

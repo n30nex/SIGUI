@@ -37,6 +37,8 @@ constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
 constexpr std::size_t kExpectedAckValidVectors = 9U;
 constexpr std::size_t kExpectedAckPathRoundtripVectors = 4U;
 constexpr std::size_t kExpectedAckInvalidVectors = 35U;
+constexpr std::size_t kPathReturnRoundtripVectors = 6U;
+constexpr std::size_t kPathReturnInvalidVectors = 35U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -2036,6 +2038,497 @@ int main()
                                    " route packet did not round trip");
             }
         };
+
+    struct PathReturnInput {
+        uint8_t encoded_path_len;
+        std::vector<uint8_t> path;
+        uint8_t extra_type;
+        std::vector<uint8_t> extra;
+        bool unique;
+    };
+    std::vector<uint8_t> maximum_path_return_two_byte_path(
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES);
+    std::vector<uint8_t> maximum_path_return_three_byte_path(63U);
+    std::vector<uint8_t> maximum_two_byte_path_extra(97U);
+    std::vector<uint8_t> maximum_three_byte_path_extra(98U);
+    for (size_t index = 0U;
+         index < maximum_path_return_two_byte_path.size(); ++index) {
+        maximum_path_return_two_byte_path[index] =
+            static_cast<uint8_t>(0x31U + index);
+    }
+    for (size_t index = 0U;
+         index < maximum_path_return_three_byte_path.size(); ++index) {
+        maximum_path_return_three_byte_path[index] =
+            static_cast<uint8_t>(0xE0U - index);
+    }
+    for (size_t index = 0U; index < maximum_two_byte_path_extra.size();
+         ++index) {
+        maximum_two_byte_path_extra[index] =
+            static_cast<uint8_t>(index ^ 0xA5U);
+    }
+    for (size_t index = 0U; index < maximum_three_byte_path_extra.size();
+         ++index) {
+        maximum_three_byte_path_extra[index] =
+            static_cast<uint8_t>(index * 3U + 1U);
+    }
+    const std::array<PathReturnInput, kPathReturnRoundtripVectors>
+        path_return_inputs = {{
+            {0x00U, {}, PAYLOAD_TYPE_RESPONSE,
+             {0xDEU, 0xADU, 0xBEU, 0xEFU}, false},
+            {0x04U, {0x10U, 0x20U, 0x30U, 0x40U}, 0xF3U,
+             {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U}, false},
+            {0x60U, maximum_path_return_two_byte_path, PAYLOAD_TYPE_RESPONSE,
+             maximum_two_byte_path_extra, false},
+            {0x95U, maximum_path_return_three_byte_path, PAYLOAD_TYPE_REQ,
+             maximum_three_byte_path_extra, false},
+            {0x00U, {}, 0xFFU, {0x01U, 0x23U, 0x45U, 0x67U}, true},
+            {0x95U, maximum_path_return_three_byte_path, 0xFFU,
+             {0x89U, 0xABU, 0xCDU, 0xEFU}, true},
+        }};
+    const std::array<uint8_t, 20U> expected_zero_path_return_payload = {
+        0xA1U, 0xB2U, 0x51U, 0xA7U, 0xB0U, 0x2DU, 0xC6U,
+        0x3AU, 0x41U, 0x9FU, 0x32U, 0xE2U, 0x20U, 0x0FU,
+        0xD2U, 0xE2U, 0x6AU, 0x28U, 0xD8U, 0xA9U};
+    const std::array<uint8_t, 32U> expected_path_return_matrix_sha256 = {
+        0x30U, 0xF7U, 0xDBU, 0xBEU, 0xA8U, 0x5AU, 0x3CU, 0x22U,
+        0x1EU, 0x79U, 0xE1U, 0x27U, 0x7AU, 0xEFU, 0x30U, 0x13U,
+        0x66U, 0x3DU, 0xB5U, 0xBFU, 0xBAU, 0xB9U, 0x85U, 0x51U,
+        0x05U, 0x26U, 0xFAU, 0x71U, 0x95U, 0x6AU, 0xB4U, 0xF6U};
+    const uint16_t path_return_transport_codes[2] = {0xCAFEU, 0xBABEU};
+    const std::array<uint8_t, 2U> path_return_direct_route = {0x71U, 0x72U};
+    SHA256 path_return_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_path_return_extra{};
+    d1l_meshcore_oracle_packet_t valid_path_return_unique{};
+    for (size_t index = 0U; index < path_return_inputs.size(); ++index) {
+        const PathReturnInput &input = path_return_inputs[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const bool created = input.unique
+                                 ? d1l_meshcore_oracle_create_path_return_unique_packet(
+                                       dm_destination_hash, dm_source_hash,
+                                       full_secret.data(), input.encoded_path_len,
+                                       input.path.empty() ? nullptr
+                                                          : input.path.data(),
+                                       input.extra.data(), &packet)
+                                 : d1l_meshcore_oracle_create_path_return_extra_packet(
+                                       dm_destination_hash, dm_source_hash,
+                                       full_secret.data(), input.encoded_path_len,
+                                       input.path.empty() ? nullptr
+                                                          : input.path.data(),
+                                       input.extra_type, input.extra.data(),
+                                       input.extra.size(), &packet);
+        if (!created ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) ||
+            (index == 0U &&
+             (packet.payload_len != expected_zero_path_return_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_zero_path_return_payload.data(),
+                          expected_zero_path_return_payload.size()) != 0))) {
+            failures.push_back("PATH-return create vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+        path_return_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 0U) {
+            valid_path_return_extra = packet;
+        } else if (index == 4U) {
+            valid_path_return_unique = packet;
+        }
+
+        uint8_t path_priority = 0xA5U;
+        bool route_ok = false;
+        if (index == 0U) {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 1U, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_FLOOD &&
+                       packet.path_len == 0x00U && path_priority == 2U;
+        } else if (index == 1U) {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 2U, 1U, path_return_transport_codes,
+                &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) ==
+                           ROUTE_TYPE_TRANSPORT_FLOOD &&
+                       packet.path_len == 0x40U && path_priority == 2U &&
+                       packet.transport_codes[0] ==
+                           path_return_transport_codes[0] &&
+                       packet.transport_codes[1] ==
+                           path_return_transport_codes[1];
+        } else if (index == 2U) {
+            route_ok = d1l_meshcore_oracle_prepare_direct(
+                &packet, path_return_direct_route.data(), 0x02U,
+                &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT &&
+                       packet.path_len == 0x02U && path_priority == 1U &&
+                       std::memcmp(packet.path,
+                                   path_return_direct_route.data(),
+                                   path_return_direct_route.size()) == 0;
+        } else if (index == 3U) {
+            route_ok = d1l_meshcore_oracle_prepare_zero_hop(
+                &packet, 1U, path_return_transport_codes, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) ==
+                           ROUTE_TYPE_TRANSPORT_DIRECT &&
+                       packet.path_len == 0U && path_priority == 0U &&
+                       packet.transport_codes[0] ==
+                           path_return_transport_codes[0] &&
+                       packet.transport_codes[1] ==
+                           path_return_transport_codes[1];
+        } else if (index == 4U) {
+            route_ok = d1l_meshcore_oracle_prepare_zero_hop(
+                &packet, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT &&
+                       packet.path_len == 0U && path_priority == 0U;
+        } else {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 3U, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_FLOOD &&
+                       packet.path_len == 0x80U && path_priority == 2U;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!route_ok ||
+            !d1l_meshcore_oracle_packet_encode(
+                &packet, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len, &decoded) ||
+            !packets_equal(packet, decoded)) {
+            failures.push_back("PATH-return route-code vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint8_t parsed_encoded_path_len = 0xFFU;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES> parsed_path{};
+        size_t parsed_path_bytes = 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES>
+            parsed_extra{};
+        uint8_t parsed_extra_type = 0xAAU;
+        size_t parsed_extra_len = 0U;
+        bool parsed = false;
+        if (input.unique) {
+            parsed = d1l_meshcore_oracle_parse_path_return_unique_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), &parsed_encoded_path_len,
+                parsed_path.data(), parsed_path.size(), &parsed_path_bytes,
+                parsed_extra.data());
+            parsed_extra_len =
+                D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES;
+            parsed_extra_type = 0x0FU;
+        } else {
+            parsed = d1l_meshcore_oracle_parse_path_return_extra_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), input.extra.size(),
+                &parsed_encoded_path_len, parsed_path.data(),
+                parsed_path.size(), &parsed_path_bytes, &parsed_extra_type,
+                parsed_extra.data(), parsed_extra.size(), &parsed_extra_len);
+        }
+        if (!parsed || parsed_encoded_path_len != input.encoded_path_len ||
+            parsed_path_bytes != input.path.size() ||
+            (!input.path.empty() &&
+             std::memcmp(parsed_path.data(), input.path.data(),
+                         input.path.size()) != 0) ||
+            parsed_extra_type != (input.extra_type & 0x0FU) ||
+            parsed_extra_len != input.extra.size() ||
+            std::memcmp(parsed_extra.data(), input.extra.data(),
+                        input.extra.size()) != 0) {
+            failures.push_back("PATH-return parse vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 32U> path_return_matrix_digest{};
+    path_return_matrix_sha.finalize(path_return_matrix_digest.data(),
+                                    path_return_matrix_digest.size());
+    if (path_return_matrix_digest != expected_path_return_matrix_sha256) {
+        failures.push_back("PATH-return matrix digest changed");
+    }
+
+    auto expect_path_return_extra_create_reject =
+        [&failures, &valid_path_return_extra](
+            const char *name, const uint8_t *secret, uint8_t path_len,
+            const uint8_t *path, const uint8_t *extra, size_t extra_len,
+            d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_path_return_extra;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_path_return_extra_packet(
+                    dm_destination_hash, dm_source_hash, secret, path_len, path,
+                    PAYLOAD_TYPE_RESPONSE, extra, extra_len, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return extra create reject changed output");
+            }
+        };
+    std::vector<uint8_t> oversized_path_return_extra(
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES + 1U, 0x5AU);
+    d1l_meshcore_oracle_packet_t rejected_path_return{};
+    const std::array<uint8_t, 1U> general_one_byte_extra = {0x24U};
+    expect_path_return_extra_create_reject(
+        "null secret", nullptr, 0U, nullptr, general_one_byte_extra.data(),
+        general_one_byte_extra.size(), &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "reserved path length", full_secret.data(), 0xC0U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "missing path", full_secret.data(), 0x01U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "missing extra", full_secret.data(), 0U, nullptr, nullptr, 1U,
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "empty extra", full_secret.data(), 0U, nullptr,
+        general_one_byte_extra.data(), 0U, &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "oversized extra", full_secret.data(), 0U, nullptr,
+        oversized_path_return_extra.data(), oversized_path_return_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "null output", full_secret.data(), 0U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(), nullptr);
+
+    auto expect_path_return_unique_create_reject =
+        [&failures, &valid_path_return_unique](
+            const char *name, const uint8_t *secret, uint8_t path_len,
+            const uint8_t *path, const uint8_t *uniqueness,
+            d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_path_return_unique;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_path_return_unique_packet(
+                    dm_destination_hash, dm_source_hash, secret, path_len, path,
+                    uniqueness, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return unique create reject changed output");
+            }
+        };
+    const auto &valid_uniqueness = path_return_inputs[4].extra;
+    expect_path_return_unique_create_reject(
+        "null unique secret", nullptr, 0U, nullptr, valid_uniqueness.data(),
+        &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "reserved unique path length", full_secret.data(), 0xC0U, nullptr,
+        valid_uniqueness.data(), &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "missing unique path", full_secret.data(), 0x01U, nullptr,
+        valid_uniqueness.data(), &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "null uniqueness", full_secret.data(), 0U, nullptr, nullptr,
+        &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "null unique output", full_secret.data(), 0U, nullptr,
+        valid_uniqueness.data(), nullptr);
+
+    auto expect_path_return_extra_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, uint8_t source_hash,
+                    const uint8_t *secret, size_t expected_extra_len,
+                    size_t path_capacity, size_t extra_capacity,
+                    bool null_encoded_path, bool null_extra_type) {
+            uint8_t encoded_path_len = 0xAAU;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES> path{};
+            path.fill(0xB5U);
+            size_t path_bytes = 0xBEEFU;
+            uint8_t extra_type = 0xCCU;
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES>
+                extra{};
+            extra.fill(0xD6U);
+            size_t extra_len = 0xCAFEU;
+            const auto path_before = path;
+            const auto extra_before = extra;
+            if (d1l_meshcore_oracle_parse_path_return_extra_packet(
+                    packet, destination_hash, source_hash, secret,
+                    expected_extra_len,
+                    null_encoded_path ? nullptr : &encoded_path_len,
+                    path.data(), path_capacity, &path_bytes,
+                    null_extra_type ? nullptr : &extra_type, extra.data(),
+                    extra_capacity, &extra_len) ||
+                encoded_path_len != 0xAAU || path != path_before ||
+                path_bytes != 0xBEEFU || extra_type != 0xCCU ||
+                extra != extra_before || extra_len != 0xCAFEU) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return extra parse reject changed output");
+            }
+        };
+    expect_path_return_extra_parse_reject(
+        "null packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "null parse secret", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, nullptr, 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "zero expected extra", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 0U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "oversized expected extra", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES + 1U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong destination", &valid_path_return_extra,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong source", &valid_path_return_extra, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong secret", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, public_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    d1l_meshcore_oracle_packet_t malformed_path_return =
+        valid_path_return_extra;
+    malformed_path_return.header |= 0x40U;
+    expect_path_return_extra_parse_reject(
+        "future version", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT);
+    expect_path_return_extra_parse_reject(
+        "wrong packet type", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload_len -= 1U;
+    expect_path_return_extra_parse_reject(
+        "truncated packet", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[malformed_path_return.payload_len++] = 0U;
+    expect_path_return_extra_parse_reject(
+        "non-block packet", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[2] ^= 1U;
+    expect_path_return_extra_parse_reject(
+        "tampered MAC", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[4] ^= 1U;
+    expect_path_return_extra_parse_reject(
+        "tampered ciphertext", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "short expected extra", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 3U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "undersized path output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_DM_ACK_BYTES, 3U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "undersized extra output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES, 3U, false, false);
+    expect_path_return_extra_parse_reject(
+        "null encoded path output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, true, false);
+    expect_path_return_extra_parse_reject(
+        "null extra type output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, true);
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES>
+        rejected_unique_path{};
+    rejected_unique_path.fill(0xA7U);
+    uint8_t rejected_unique_path_len = 0xAAU;
+    size_t rejected_unique_path_bytes = 0xBEEFU;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES>
+        rejected_uniqueness{};
+    rejected_uniqueness.fill(0xC8U);
+    const auto rejected_unique_path_before = rejected_unique_path;
+    const auto rejected_uniqueness_before = rejected_uniqueness;
+    auto expect_path_return_unique_parse_reject =
+        [&](const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t *uniqueness) {
+            rejected_unique_path = rejected_unique_path_before;
+            rejected_unique_path_len = 0xAAU;
+            rejected_unique_path_bytes = 0xBEEFU;
+            rejected_uniqueness = rejected_uniqueness_before;
+            if (d1l_meshcore_oracle_parse_path_return_unique_packet(
+                    packet, dm_destination_hash, dm_source_hash,
+                    full_secret.data(), &rejected_unique_path_len,
+                    rejected_unique_path.data(), rejected_unique_path.size(),
+                    &rejected_unique_path_bytes, uniqueness) ||
+                rejected_unique_path != rejected_unique_path_before ||
+                rejected_unique_path_len != 0xAAU ||
+                rejected_unique_path_bytes != 0xBEEFU ||
+                rejected_uniqueness != rejected_uniqueness_before) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return unique parse reject changed output");
+            }
+        };
+    expect_path_return_unique_parse_reject(
+        "wrong unique marker", &valid_path_return_extra,
+        rejected_uniqueness.data());
+    expect_path_return_unique_parse_reject(
+        "null unique output", &valid_path_return_unique, nullptr);
+    std::array<uint8_t, 16U> malformed_unique_plaintext{};
+    malformed_unique_plaintext[0] = 0xC0U;
+    malformed_unique_plaintext[1] = 0xFFU;
+    std::memcpy(&malformed_unique_plaintext[2], valid_uniqueness.data(),
+                valid_uniqueness.size());
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "reserved embedded unique path", &malformed_path_return,
+        rejected_uniqueness.data());
+    malformed_unique_plaintext.fill(0U);
+    malformed_unique_plaintext[0] = 0x3FU;
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "short embedded unique path", &malformed_path_return,
+        rejected_uniqueness.data());
+    malformed_unique_plaintext.fill(0U);
+    malformed_unique_plaintext[1] = 0xFFU;
+    std::memcpy(&malformed_unique_plaintext[2], valid_uniqueness.data(),
+                valid_uniqueness.size());
+    malformed_unique_plaintext[6] = 1U;
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "noncanonical unique padding", &malformed_path_return,
+        rejected_uniqueness.data());
+
     uint8_t priority = 0xA5U;
     d1l_meshcore_oracle_packet_t route_packet =
         make_route_packet(PAYLOAD_TYPE_TXT_MSG);
@@ -2723,7 +3216,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_strict_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -2733,6 +3226,7 @@ int main()
                   kGroupRoundtripVectors +
                   kDmRoundtripVectors +
                   kExpectedAckPathRoundtripVectors +
+                  kPathReturnRoundtripVectors +
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
@@ -2746,6 +3240,7 @@ int main()
                   kGroupInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
+                  kPathReturnInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
@@ -2759,6 +3254,8 @@ int main()
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
                   kExpectedAckInvalidVectors +
+                  kPathReturnRoundtripVectors +
+                  kPathReturnInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -2775,6 +3272,8 @@ int main()
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
                   kExpectedAckInvalidVectors +
+                  kPathReturnRoundtripVectors +
+                  kPathReturnInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -2835,6 +3334,13 @@ int main()
               << (kExpectedAckPathRoundtripVectors +
                   kExpectedAckValidVectors + kExpectedAckInvalidVectors)
               << "}"
+              << ",\"path_return_route_codes\":{\"roundtrip\":"
+              << kPathReturnRoundtripVectors << ",\"invalid\":"
+              << kPathReturnInvalidVectors << ",\"semantic\":"
+              << (kPathReturnRoundtripVectors + kPathReturnInvalidVectors)
+              << ",\"total\":"
+              << (kPathReturnRoundtripVectors + kPathReturnInvalidVectors)
+              << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -2860,6 +3366,7 @@ int main()
               << ",\"public_group_packets\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
+              << ",\"path_return_route_codes\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"
