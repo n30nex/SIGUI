@@ -15,6 +15,10 @@ from tests.wp01_source_fixtures import (
     write_reboot_source,
     write_storage_active_soak_source,
 )
+from tests.test_sd_remove_reinsert_acceptance_d1l import (
+    COMMIT as REMOVE_FIXTURE_COMMIT,
+    valid_report as valid_remove_reinsert_report,
+)
 
 
 COMMIT = "ad0aa5bda21435846f6e7fcdde8fd87a85c5da5c"
@@ -653,6 +657,29 @@ def write_inputs(root: Path) -> tuple[dict[str, Path], Path, Path]:
     inserted_path = root / f"sd_inserted_stability_{COMMIT[:7]}.json"
     inserted_path.write_text(json.dumps(inserted), encoding="utf-8")
     paths["sd_inserted_stability"] = inserted_path
+
+    remove_source_payload = json.loads(
+        json.dumps(valid_remove_reinsert_report()).replace(
+            REMOVE_FIXTURE_COMMIT, COMMIT
+        )
+    )
+    remove_source_payload["commit"] = COMMIT
+    remove_source_payload["git"]["dirty_entries"] = []
+    remove_source = root / "sources" / "remove-reinsert.json"
+    remove_source.write_text(json.dumps(remove_source_payload), encoding="utf-8")
+    remove = wp01_sources.build_sd_remove_reinsert_artifact(
+        remove_source,
+        provenance_path,
+        root=root,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert remove["ok"] is True, remove.get("failures")
+    remove_path = root / f"sd_remove_reinsert_{COMMIT[:7]}.json"
+    remove_path.write_text(json.dumps(remove), encoding="utf-8")
+    paths["sd_remove_reinsert"] = remove_path
 
     reboot_sources = []
     for index in range(5):

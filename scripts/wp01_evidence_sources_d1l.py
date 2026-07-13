@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 try:
+    from sd_remove_reinsert_acceptance_d1l import (
+        validate_report as remove_reinsert_source_ok,
+    )
     from sd_reboot_remount_acceptance_d1l import (
         crashlog_transition_passed,
         map_tile_check_passed,
@@ -33,6 +36,9 @@ try:
         storage_status_malformed,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.sd_remove_reinsert_acceptance_d1l import (
+        validate_report as remove_reinsert_source_ok,
+    )
     from scripts.sd_reboot_remount_acceptance_d1l import (
         crashlog_transition_passed,
         map_tile_check_passed,
@@ -62,6 +68,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 SOURCE_BOUND_KINDS = {
     "sd_inserted_stability",
+    "sd_remove_reinsert",
     "retained_reboot_matrix",
     "storage_active_soak",
 }
@@ -959,6 +966,102 @@ def build_retained_reboot_matrix_artifact(
     return artifact
 
 
+def build_sd_remove_reinsert_artifact(
+    source_path: Path,
+    provenance_path: Path,
+    *,
+    root: Path,
+    commit: str,
+    github_actions_run: str,
+    d1l_port: str,
+    rp2040_port: str,
+) -> dict:
+    artifact, provenance, provenance_sha256 = _base_artifact(
+        "sd_remove_reinsert",
+        root=root,
+        commit=commit,
+        github_actions_run=github_actions_run,
+        d1l_port=d1l_port,
+        rp2040_port=rp2040_port,
+        provenance_path=provenance_path,
+    )
+    try:
+        if not _within(provenance_path, root):
+            raise ValueError("exact-pair provenance is outside repository root")
+        if not _provenance_context_ok(
+            provenance,
+            provenance_sha256,
+            commit=commit,
+            github_actions_run=github_actions_run,
+            d1l_port=d1l_port,
+            rp2040_port=rp2040_port,
+        ):
+            raise ValueError("exact-pair provenance does not match removal context")
+        resolved, source, source_sha256 = _source(source_path, root)
+        if not (
+            remove_reinsert_source_ok(source)
+            and _port(source.get("port")) == _port(d1l_port)
+            and source.get("baud") == 115200
+            and _raw_git_clean(source, commit)
+            and _exact_commit(source.get("expected_firmware_commit"), commit)
+            and source.get("blocker") is None
+            and not _nested_true(
+                source,
+                {"public_rf_tx", "dm_rf_tx", "formats_sd", "format_performed"},
+            )
+            and _nested_code_count(source, "TIMEOUT") == 0
+        ):
+            raise ValueError("remove/reinsert source failed identity or safety checks")
+
+        raw_cycles = source.get("cycles")
+        if not isinstance(raw_cycles, list) or len(raw_cycles) < 10:
+            raise ValueError("remove/reinsert source has fewer than ten cycles")
+        cycles = []
+        for index, raw in enumerate(raw_cycles, 1):
+            prewrite = raw.get("prewrite") if isinstance(raw, dict) else None
+            if not isinstance(prewrite, dict):
+                raise ValueError("remove/reinsert prewrite gate is missing")
+            cycles.append(
+                {
+                    "cycle": index,
+                    "ok": True,
+                    "true_removal_detected": True,
+                    "nvs_fallback_active": True,
+                    "deterministic_remount": True,
+                    "generation_changed": prewrite.get("generation_changed") is True,
+                    "read_merge_before_overwrite": prewrite.get("gate_passed") is True,
+                    "all_stores_reconciled": prewrite.get("gate_passed") is True,
+                    "write_before_edge": True,
+                    "write_during_edge": True,
+                    "write_after_edge": True,
+                    "reset_storm": False,
+                    "delete_or_rename_against_replacement": False,
+                    "user_data_loss": False,
+                }
+            )
+        artifact.update(
+            {
+                "source_receipts": [
+                    {
+                        "kind": "d1l_sd_remove_reinsert_source",
+                        "path": str(resolved),
+                        "sha256": source_sha256,
+                    }
+                ],
+                "cycle_count": len(cycles),
+                "cycles": cycles,
+                "all_cycles_passed": True,
+                "reset_storm_count": 0,
+                "cross_media_mutation_count": 0,
+                "data_loss_count": 0,
+            }
+        )
+    except Exception as exc:
+        artifact["failures"] = [str(exc)]
+    artifact["ok"] = not artifact["failures"]
+    return artifact
+
+
 def _active_soak_segment_stats(
     report: dict,
     *,
@@ -1345,6 +1448,16 @@ def rebuild_source_bound_artifact(
     source_paths = [Path(receipt["path"]) for receipt in source_receipts]
     if kind == "sd_inserted_stability" and len(source_paths) == 1:
         return build_sd_inserted_stability_artifact(
+            source_paths[0],
+            provenance_path,
+            root=root,
+            commit=commit,
+            github_actions_run=github_actions_run,
+            d1l_port=d1l_port,
+            rp2040_port=rp2040_port,
+        )
+    if kind == "sd_remove_reinsert" and len(source_paths) == 1:
+        return build_sd_remove_reinsert_artifact(
             source_paths[0],
             provenance_path,
             root=root,

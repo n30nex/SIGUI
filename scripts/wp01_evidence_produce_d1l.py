@@ -11,12 +11,14 @@ try:
     from wp01_evidence_sources_d1l import (
         build_retained_reboot_matrix_artifact,
         build_sd_inserted_stability_artifact,
+        build_sd_remove_reinsert_artifact,
         build_storage_active_soak_artifact,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.wp01_evidence_sources_d1l import (
         build_retained_reboot_matrix_artifact,
         build_sd_inserted_stability_artifact,
+        build_sd_remove_reinsert_artifact,
         build_storage_active_soak_artifact,
     )
 
@@ -28,6 +30,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         required=True,
         choices=(
             "sd_inserted_stability",
+            "sd_remove_reinsert",
             "retained_reboot_matrix",
             "storage_active_soak",
         ),
@@ -63,6 +66,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         default_name = (
             f"sd_inserted_stability_{args.commit[:7]}_"
+            f"{args.d1l_port.upper()}_{args.rp2040_port.upper()}.json"
+        )
+    elif args.kind == "sd_remove_reinsert":
+        if len(sources) != 1:
+            raise SystemExit("sd_remove_reinsert requires exactly one --source")
+        report = build_sd_remove_reinsert_artifact(
+            sources[0], provenance_path, **common
+        )
+        default_name = (
+            f"sd_remove_reinsert_{args.commit[:7]}_"
             f"{args.d1l_port.upper()}_{args.rp2040_port.upper()}.json"
         )
     elif args.kind == "retained_reboot_matrix":

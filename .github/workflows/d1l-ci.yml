@@ -97,6 +97,9 @@ jobs:
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run
 
+      - name: SD remove reinsert acceptance dry run
+        run: python ./scripts/sd_remove_reinsert_acceptance_d1l.py --expected-firmware-commit ${{ github.sha }} --dry-run --strict-evidence --out artifacts/host/sd-remove-reinsert-strict-dryrun.json
+
       - name: SD map tile canary dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run

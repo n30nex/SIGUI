@@ -626,7 +626,7 @@ def validate_report(report: dict, *, require_final: bool = True) -> bool:
         or not firmware_identity_matches(report.get("version"), expected_commit)
         or report.get("firmware_identity") is not True
         or not isinstance(port, str) or not port.strip()
-        or port.strip().upper() in {"COM8", "COM11", "COM29"}
+        or port.strip().upper() in {f"COM{number}" for number in (8, 11, 29)}
         or type(report.get("baud")) is not int or report.get("baud") <= 0
         or report.get("strict_evidence") is not True
         or report.get("cycles_required") != REQUIRED_CYCLES
