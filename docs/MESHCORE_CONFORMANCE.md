@@ -33,9 +33,9 @@ cryptographic oracles because they do not implement production cryptography.
 
 ## WP-04 Oracle ABI Foundation
 
-`tests/meshcore_oracle/meshcore_oracle.h` defines version 1 of a narrow C ABI
+`tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
-`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 6 static
+`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 7 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -60,7 +60,22 @@ contract, zero-to-63 one-byte route hashes appended to the payload, direct
 route, zero outer path, priority five, fixed little-endian bytes on the
 supported targets, and reject-without-output-mutation behavior. TRACE creation
 is likewise pre-route and is never encoded before direct preparation. The job
-emits
+also compiles the real C Ed25519 verifier vendored at the pinned MeshCore
+gitlink. Three fixed production-layout signed-advert vectors cover empty,
+named, and maximum-size app data; one independent RFC 8032 empty-message
+known-answer vector checks the verifier directly. Ten signed-advert rejects
+cover null or oversized input, changed public key, timestamp, app data or
+signature, and a signature whose scalar is increased by the Ed25519 group
+order. The separate verifier KAT accounts for one valid and three negative or
+canonicality-regression cases; it is not counted as an advert semantic vector
+or as a round trip. The production receive path and oracle share a strict
+`S < L` guard before the pinned verifier, closing the verifier's otherwise
+malleable `S + L` acceptance. Valid vectors run repeatedly under ASan and
+UBSan. Seed bytes `00` through `1f` regenerate the keypair and all three fixed
+signatures on every vector run. The source hashes pin the verifier's transitive
+C headers and sources, the keypair/signer recipe, `advert_data.h`, the shared
+canonical-S guard, and the D1L CMake/service binding. No crypto mock or
+invented stub is used. The job emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
 report.
 
@@ -82,12 +97,17 @@ The exact packet registry and blocker receipts are copied into
 `closure_ready` remain false.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
-is `pinned_upstream_packet_advert_route_ack_and_trace_source_frames`; the advert
-vectors cover only canonical application fields, not a complete signed Mesh
-advert. The pinned repository does not vendor the production
-`Ed25519::verify` implementation used by `Identity.cpp`, and signed advert
-dispatch remains inside `Mesh`, so `identity_signed_advert` stays pending with
-that blocker recorded in the manifest. The route-header capability likewise
+is
+`pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification`.
+The new `signed_advert_verification` capability proves only D1L's bounded
+message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
+vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
+separate external `Ed25519::verify` implementation that is not pinned in this
+repository, and signed-advert dispatch, replay/timestamp policy, contact
+mutation, and duplicate suppression remain inside `Mesh`. Therefore
+`identity_signed_advert` stays pending with its exact existing blocker receipt;
+the new primitive must not be cited as upstream Identity parity or dispatch
+closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public and DM semantics,
 production encryption/decryption, expected-ACK hash derivation, encrypted
@@ -163,7 +183,9 @@ the temporary build directory.
 
 This bounded gate makes no claim about:
 
-- encryption, decryption, MACs, signatures, keys, channel secrets, or identity;
+- encryption, decryption, MACs, signing/key generation, channel secrets, or
+  full identity semantics. Only the bounded D1L signed-advert message layout
+  and pinned C Ed25519 verification primitive described above are covered;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
   traffic. Simple/multipart ACK and initial flags-zero TRACE payload framing
   are covered, but expected hash derivation, encrypted ACK+PATH handling, TRACE

@@ -44,12 +44,28 @@ ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
 ORACLE_VECTORS_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
 )
+ED25519_ROOT = ROOT / "third_party" / "MeshCore" / "lib" / "ed25519"
+ED25519_VERIFY_SOURCES = [
+    ED25519_ROOT / "fe.c",
+    ED25519_ROOT / "ge.c",
+    ED25519_ROOT / "sc.c",
+    ED25519_ROOT / "sha512.c",
+    ED25519_ROOT / "verify.c",
+]
+ED25519_VECTOR_PROVENANCE_SOURCES = [
+    ED25519_ROOT / "keypair.c",
+    ED25519_ROOT / "sign.c",
+]
+ED25519_ORACLE_SOURCES = [
+    *ED25519_VERIFY_SOURCES,
+    *ED25519_VECTOR_PROVENANCE_SOURCES,
+]
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
-ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 6
+ORACLE_ABI_VERSION = 2
+ORACLE_CORPUS_VERSION = 7
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_route_ack_and_trace_source_frames"
+    "pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -135,6 +151,13 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "semantic": True,
     },
     {
+        "id": "signed_advert_verification",
+        "status": "implemented",
+        "owner": "pinned_d1l_production_ed25519",
+        "semantic": True,
+        "scope": "message_layout_and_signature_verification_only_no_mesh_dispatch",
+    },
+    {
         "id": "direct_flood_headers",
         "status": "implemented",
         "owner": "pinned_source_golden_vectors",
@@ -160,6 +183,9 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
+        "blocked_scope": (
+            "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics"
+        ),
     },
     {
         "id": "public_group_packets",
@@ -226,7 +252,11 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
         "id": "identity_signed_adverts",
         "status": "partial",
-        "capabilities": ["advert_data_fields", "identity_signed_advert"],
+        "capabilities": [
+            "advert_data_fields",
+            "signed_advert_verification",
+            "identity_signed_advert",
+        ],
     },
     {
         "id": "public_group_packets",
@@ -301,7 +331,11 @@ EXPECTED_ORACLE_PACKET_TYPES = [
         "code": 4,
         "wire_vector": "ADVERT",
         "wire_vector_covered": True,
-        "semantic_capabilities": ["advert_data_fields", "identity_signed_advert"],
+        "semantic_capabilities": [
+            "advert_data_fields",
+            "signed_advert_verification",
+            "identity_signed_advert",
+        ],
     },
     {
         "symbol": "D1L_MESHCORE_PAYLOAD_GROUP_TEXT",
@@ -342,6 +376,27 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/src/Utils.h",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.h",
+    "third_party/MeshCore/lib/ed25519/ed_25519.h",
+    "third_party/MeshCore/lib/ed25519/fe.c",
+    "third_party/MeshCore/lib/ed25519/fe.h",
+    "third_party/MeshCore/lib/ed25519/fixedint.h",
+    "third_party/MeshCore/lib/ed25519/ge.c",
+    "third_party/MeshCore/lib/ed25519/ge.h",
+    "third_party/MeshCore/lib/ed25519/keypair.c",
+    "third_party/MeshCore/lib/ed25519/license.txt",
+    "third_party/MeshCore/lib/ed25519/precomp_data.h",
+    "third_party/MeshCore/lib/ed25519/sc.c",
+    "third_party/MeshCore/lib/ed25519/sc.h",
+    "third_party/MeshCore/lib/ed25519/sha512.c",
+    "third_party/MeshCore/lib/ed25519/sha512.h",
+    "third_party/MeshCore/lib/ed25519/sign.c",
+    "third_party/MeshCore/lib/ed25519/verify.c",
+}
+EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
+    "main/CMakeLists.txt",
+    "main/mesh/advert_data.h",
+    "main/mesh/ed25519_canonical.h",
+    "main/mesh/meshcore_service.c",
 }
 
 
@@ -463,13 +518,21 @@ def load_oracle_manifest() -> dict[str, Any]:
     for relative, digest in expected_upstream_sources.items():
         if upstream_sources.get(relative) != digest:
             raise GateFailure(f"oracle core upstream source pin drifted: {relative}")
+    production_binding_sources = manifest.get("production_binding_sources")
+    if (
+        not isinstance(production_binding_sources, dict)
+        or set(production_binding_sources)
+        != EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS
+    ):
+        raise GateFailure("oracle production-binding source allowlist drifted")
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 26,
-        "invalid": 62,
-        "semantic": 79,
-        "total": 88,
+        "valid": 4,
+        "invalid": 75,
+        "semantic": 92,
+        "total": 105,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -481,6 +544,18 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 11,
             "semantic": 15,
             "total": 15,
+        },
+        "signed_advert_verification": {
+            "valid": 3,
+            "invalid": 10,
+            "semantic": 13,
+            "total": 13,
+        },
+        "ed25519_verifier_kat": {
+            "valid": 1,
+            "invalid": 3,
+            "semantic": 0,
+            "total": 4,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -509,6 +584,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         != ["mesh::Packet", "AdvertDataBuilder", "AdvertDataParser"]
         or interface.get("reject_preserves_output") is not True
         or interface.get("crypto_available") is not False
+        or interface.get("signed_advert_ed25519_available") is not True
+        or interface.get("signed_advert_scope")
+        != "d1l_production_message_layout_and_ed25519_verification_only_no_mesh_dispatch"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -521,10 +599,44 @@ def load_oracle_manifest() -> dict[str, Any]:
             "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
             "ack_frames": "third_party/MeshCore/src/Mesh.cpp",
             "trace_source_frames": "third_party/MeshCore/src/Mesh.cpp",
+            "signed_advert_message_layout": "third_party/MeshCore/src/Mesh.cpp",
+            "signed_advert_fixed_seed_keypair": (
+                "third_party/MeshCore/lib/ed25519/keypair.c"
+            ),
+            "signed_advert_fixed_seed_signer": (
+                "third_party/MeshCore/lib/ed25519/sign.c"
+            ),
+            "signed_advert_verifier": (
+                "third_party/MeshCore/lib/ed25519/verify.c"
+            ),
+            "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
-    required_fixtures = manifest.get("determinism", {}).get(
+    determinism = manifest.get("determinism", {})
+    if determinism.get("current_vectors") != (
+        "fixed_bytes_and_fixed_ed25519_vectors_no_runtime_rng_or_clock"
+    ):
+        raise GateFailure("oracle deterministic vector source drifted")
+    if determinism.get("signed_advert_seed_hex") != (
+        "000102030405060708090a0b0c0d0e0f"
+        "101112131415161718191a1b1c1d1e1f"
+    ):
+        raise GateFailure("oracle signed-advert seed provenance drifted")
+    if determinism.get("signed_advert_generation_recipe") != (
+        "ed25519_create_keypair_seed_then_ed25519_sign_"
+        "public_key_timestamp_wire_bytes_app_data"
+    ):
+        raise GateFailure("oracle signed-advert generation recipe drifted")
+    if determinism.get("independent_verifier_kat") != (
+        "RFC 8032 section 7.1 TEST 1 empty message"
+    ):
+        raise GateFailure("oracle independent verifier KAT provenance drifted")
+    if determinism.get("canonical_s_regression") != (
+        "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L"
+    ):
+        raise GateFailure("oracle canonical-S regression provenance drifted")
+    required_fixtures = determinism.get(
         "future_fixtures_required"
     )
     if required_fixtures != [
@@ -790,6 +902,7 @@ def verify_oracle_sources(manifest: dict[str, Any]) -> dict[str, Any]:
     files: dict[str, Any] = {}
     expected_sources = {
         **manifest["upstream"]["sources"],
+        **manifest["production_binding_sources"],
         **manifest["oracle_sources"],
     }
     root = ROOT.resolve()
@@ -920,7 +1033,7 @@ def verify_sources(manifest: dict[str, Any], expected_commit: str | None) -> dic
 def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[str]]:
     common_sanitizers = "-fsanitize=address,undefined"
     fuzzer_compile_sanitizers = "-fsanitize=fuzzer-no-link,address,undefined"
-    return [
+    commands = [
         [
             cc,
             "-std=c11",
@@ -1015,9 +1128,13 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-I",
             str(ORACLE_ADAPTER_PATH.parent),
             "-I",
+            str(ROOT / "main"),
+            "-I",
             str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
             "-I",
             str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
+            "-I",
+            str(ED25519_ROOT),
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
             "-c",
@@ -1037,6 +1154,10 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-Werror",
             "-I",
             str(ORACLE_ADAPTER_PATH.parent),
+            "-I",
+            str(ROOT / "main"),
+            "-I",
+            str(ED25519_ROOT),
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
             "-c",
@@ -1051,6 +1172,10 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             str(Path(build_dir) / "meshcore_advert_data.o"),
             str(Path(build_dir) / "meshcore_oracle_adapter.o"),
             str(Path(build_dir) / "meshcore_oracle_vectors.o"),
+            *[
+                str(Path(build_dir) / f"meshcore_ed25519_{source.stem}.o")
+                for source in ED25519_ORACLE_SOURCES
+            ],
             "-o",
             str(Path(build_dir) / "meshcore_oracle_vectors"),
         ],
@@ -1097,6 +1222,27 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             str(Path(build_dir) / "meshcore_wire_fuzz"),
         ],
     ]
+    ed25519_commands = [
+        [
+            cc,
+            "-std=c11",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ED25519_ROOT),
+            "-c",
+            str(source),
+            "-o",
+            str(Path(build_dir) / f"meshcore_ed25519_{source.stem}.o"),
+        ]
+        for source in ED25519_ORACLE_SOURCES
+    ]
+    return commands[:5] + ed25519_commands + commands[5:]
 
 
 def compiler_identity(compiler: str) -> str:
@@ -1344,6 +1490,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 != {
                     "packet_envelope": True,
                     "advert_data_fields": True,
+                    "signed_advert_verification": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

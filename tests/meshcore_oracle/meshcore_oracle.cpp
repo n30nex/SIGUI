@@ -1,7 +1,10 @@
 #include "meshcore_oracle.h"
 
 #include "Packet.h"
+#include "ed_25519.h"
 #include "helpers/AdvertDataHelpers.h"
+#include "mesh/advert_data.h"
+#include "mesh/ed25519_canonical.h"
 
 #include <array>
 #include <cstring>
@@ -14,7 +17,14 @@ static_assert(MAX_TRANS_UNIT == D1L_MESHCORE_ORACLE_MAX_RAW_BYTES,
               "Pinned MeshCore MTU changed");
 static_assert(MAX_ADVERT_DATA_SIZE ==
                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES,
-              "Pinned MeshCore advert-data limit changed");
+               "Pinned MeshCore advert-data limit changed");
+static_assert(D1L_ADVERT_DATA_MAX_LEN ==
+                  D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES,
+              "D1L production advert-data limit changed");
+static_assert(PUB_KEY_SIZE == D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES,
+              "Pinned MeshCore public-key width changed");
+static_assert(SIGNATURE_SIZE == D1L_MESHCORE_ORACLE_SIGNATURE_BYTES,
+              "Pinned MeshCore signature width changed");
 static_assert(D1L_MESHCORE_ORACLE_MIN_ACK_BYTES == sizeof(uint32_t),
               "Pinned MeshCore ACK CRC width changed");
 static_assert(D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES == 9U,
@@ -355,6 +365,39 @@ extern "C" bool d1l_meshcore_oracle_advert_data_encode(
     std::memcpy(dest, encoded.data(), encoded_len);
     *out_len = encoded_len;
     return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_verify_signed_advert(
+    const uint8_t public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t timestamp[D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+    const uint8_t signature[D1L_MESHCORE_ORACLE_SIGNATURE_BYTES],
+    const uint8_t *app_data,
+    size_t app_data_len)
+{
+    if (public_key == nullptr || timestamp == nullptr || signature == nullptr ||
+        app_data_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES ||
+        (app_data_len > 0U && app_data == nullptr) ||
+        !d1l_ed25519_signature_s_is_canonical(signature)) {
+        return false;
+    }
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+        message{};
+    size_t message_len = 0U;
+    std::memcpy(message.data(), public_key,
+                D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
+    message_len += D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+    std::memcpy(&message[message_len], timestamp,
+                D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES);
+    message_len += D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES;
+    if (app_data_len > 0U) {
+        std::memcpy(&message[message_len], app_data, app_data_len);
+        message_len += app_data_len;
+    }
+    return ed25519_verify(signature, message.data(), message_len, public_key) ==
+           1;
 }
 
 extern "C" bool d1l_meshcore_oracle_prepare_flood(

@@ -1,6 +1,8 @@
 #include "meshcore_oracle.h"
 
 #include "Packet.h"
+#include "ed_25519.h"
+#include "mesh/ed25519_canonical.h"
 
 #include <array>
 #include <cstdint>
@@ -15,6 +17,11 @@ constexpr std::size_t kPacketRoundtripVectors = 4U;
 constexpr std::size_t kPacketInvalidVectors = 5U;
 constexpr std::size_t kAdvertRoundtripVectors = 4U;
 constexpr std::size_t kAdvertInvalidVectors = 11U;
+constexpr std::size_t kSignedAdvertProductionVectors = 3U;
+constexpr std::size_t kSignedAdvertValidVectors = 3U;
+constexpr std::size_t kSignedAdvertInvalidVectors = 10U;
+constexpr std::size_t kVerifierKatValidVectors = 1U;
+constexpr std::size_t kVerifierKatInvalidVectors = 3U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -48,6 +55,100 @@ struct AckVector {
     uint8_t remaining;
     bool multipart;
 };
+
+struct SignedAdvertVector {
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES> timestamp;
+    std::vector<uint8_t> app_data;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES> signature;
+};
+
+struct SignedAdvertMessage {
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+        bytes{};
+    std::size_t length = 0U;
+};
+
+constexpr std::array<uint8_t, 32U> kSignedAdvertSeed = {
+    0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+    0x08U, 0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU,
+    0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U,
+    0x18U, 0x19U, 0x1AU, 0x1BU, 0x1CU, 0x1DU, 0x1EU, 0x1FU};
+
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+    kSignedAdvertPublicKey = {
+        0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U,
+        0x67U, 0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU,
+        0x1DU, 0xDCU, 0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U};
+
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+    kRfc8032PublicKey = {
+        0xD7U, 0x5AU, 0x98U, 0x01U, 0x82U, 0xB1U, 0x0AU, 0xB7U,
+        0xD5U, 0x4BU, 0xFEU, 0xD3U, 0xC9U, 0x64U, 0x07U, 0x3AU,
+        0x0EU, 0xE1U, 0x72U, 0xF3U, 0xDAU, 0xA6U, 0x23U, 0x25U,
+        0xAFU, 0x02U, 0x1AU, 0x68U, 0xF7U, 0x07U, 0x51U, 0x1AU};
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+    kRfc8032EmptyMessageSignature = {
+        0xE5U, 0x56U, 0x43U, 0x00U, 0xC3U, 0x60U, 0xACU, 0x72U,
+        0x90U, 0x86U, 0xE2U, 0xCCU, 0x80U, 0x6EU, 0x82U, 0x8AU,
+        0x84U, 0x87U, 0x7FU, 0x1EU, 0xB8U, 0xE5U, 0xD9U, 0x74U,
+        0xD8U, 0x73U, 0xE0U, 0x65U, 0x22U, 0x49U, 0x01U, 0x55U,
+        0x5FU, 0xB8U, 0x82U, 0x15U, 0x90U, 0xA3U, 0x3BU, 0xACU,
+        0xC6U, 0x1EU, 0x39U, 0x70U, 0x1CU, 0xF9U, 0xB4U, 0x6BU,
+        0xD2U, 0x5BU, 0xF5U, 0xF0U, 0x59U, 0x5BU, 0xBEU, 0x24U,
+        0x65U, 0x51U, 0x41U, 0x43U, 0x8EU, 0x7AU, 0x10U, 0x0BU};
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+    kRfc8032EmptyMessageSignaturePlusOrder = {
+        0xE5U, 0x56U, 0x43U, 0x00U, 0xC3U, 0x60U, 0xACU, 0x72U,
+        0x90U, 0x86U, 0xE2U, 0xCCU, 0x80U, 0x6EU, 0x82U, 0x8AU,
+        0x84U, 0x87U, 0x7FU, 0x1EU, 0xB8U, 0xE5U, 0xD9U, 0x74U,
+        0xD8U, 0x73U, 0xE0U, 0x65U, 0x22U, 0x49U, 0x01U, 0x55U,
+        0x4CU, 0x8CU, 0x78U, 0x72U, 0xAAU, 0x06U, 0x4EU, 0x04U,
+        0x9DU, 0xBBU, 0x30U, 0x13U, 0xFBU, 0xF2U, 0x93U, 0x80U,
+        0xD2U, 0x5BU, 0xF5U, 0xF0U, 0x59U, 0x5BU, 0xBEU, 0x24U,
+        0x65U, 0x51U, 0x41U, 0x43U, 0x8EU, 0x7AU, 0x10U, 0x1BU};
+
+SignedAdvertMessage make_signed_advert_message(
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> &public_key,
+    const SignedAdvertVector &vector)
+{
+    SignedAdvertMessage message{};
+    std::memcpy(message.bytes.data(), public_key.data(), public_key.size());
+    message.length += public_key.size();
+    std::memcpy(&message.bytes[message.length], vector.timestamp.data(),
+                vector.timestamp.size());
+    message.length += vector.timestamp.size();
+    if (!vector.app_data.empty()) {
+        std::memcpy(&message.bytes[message.length], vector.app_data.data(),
+                    vector.app_data.size());
+        message.length += vector.app_data.size();
+    }
+    return message;
+}
+
+std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+signature_plus_group_order(
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES> &signature)
+{
+    constexpr std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> group_order = {
+        0xEDU, 0xD3U, 0xF5U, 0x5CU, 0x1AU, 0x63U, 0x12U, 0x58U,
+        0xD6U, 0x9CU, 0xF7U, 0xA2U, 0xDEU, 0xF9U, 0xDEU, 0x14U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x10U};
+    auto result = signature;
+    unsigned int carry = 0U;
+    for (std::size_t index = 0; index < group_order.size(); ++index) {
+        const unsigned int sum =
+            static_cast<unsigned int>(result[32U + index]) +
+            static_cast<unsigned int>(group_order[index]) + carry;
+        result[32U + index] = static_cast<uint8_t>(sum & 0xFFU);
+        carry = sum >> 8U;
+    }
+    return result;
+}
 
 struct TraceVector {
     uint32_t tag;
@@ -399,6 +500,177 @@ int main()
                                 D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
     invalid_advert = make_advert(advert_vectors[1]);
     expect_advert_encode_reject("undersized destination", invalid_advert, 5U);
+
+    const std::array<SignedAdvertVector, kSignedAdvertProductionVectors>
+        signed_advert_vectors = {{
+            {{0x00U, 0x00U, 0x00U, 0x00U}, {},
+              {0x60U, 0xB4U, 0x4AU, 0x2DU, 0xD6U, 0x91U, 0xC6U, 0xEFU,
+               0xF0U, 0xE2U, 0x6DU, 0xF8U, 0x30U, 0xA8U, 0x90U, 0xE2U,
+               0xB4U, 0x3DU, 0xCDU, 0x9FU, 0x75U, 0xE0U, 0xA0U, 0x7BU,
+               0x51U, 0xECU, 0xE1U, 0x69U, 0x8EU, 0xB6U, 0x07U, 0x4DU,
+               0xB0U, 0x49U, 0x1EU, 0x57U, 0xB5U, 0x1FU, 0xFEU, 0xD4U,
+               0x24U, 0x2DU, 0x77U, 0x03U, 0x0FU, 0x40U, 0xE7U, 0xDFU,
+               0x07U, 0x59U, 0x33U, 0xF0U, 0xA8U, 0x98U, 0x38U, 0x13U,
+               0x17U, 0xC8U, 0x9CU, 0x56U, 0x99U, 0x0FU, 0xE3U, 0x00U}},
+            {{0x78U, 0x56U, 0x34U, 0x12U},
+             {0x81U, 'o', 'r', 'a', 'c', 'l', 'e'},
+             {0x1FU, 0xB3U, 0x44U, 0x55U, 0x10U, 0xADU, 0x9DU, 0xAEU,
+              0x26U, 0x30U, 0x64U, 0x27U, 0x43U, 0x47U, 0x78U, 0xEDU,
+              0x55U, 0x45U, 0x99U, 0x06U, 0x83U, 0x46U, 0x15U, 0x52U,
+              0x20U, 0x0AU, 0xE5U, 0xBDU, 0x09U, 0x9DU, 0xACU, 0x88U,
+              0x6DU, 0x8DU, 0x61U, 0xB3U, 0x2CU, 0x45U, 0x7DU, 0x7CU,
+              0xCBU, 0x2FU, 0x56U, 0x24U, 0x35U, 0x0BU, 0x81U, 0x4DU,
+              0x47U, 0xEAU, 0xC6U, 0x06U, 0xAFU, 0x77U, 0xAAU, 0x97U,
+              0x63U, 0xB9U, 0xEBU, 0x90U, 0x34U, 0x97U, 0x73U, 0x0AU}},
+            {{0xEFU, 0xBEU, 0xADU, 0xDEU},
+             {0x81U, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+              'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u',
+              'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'},
+             {0x34U, 0xD8U, 0xCDU, 0xE6U, 0x24U, 0x0DU, 0xD7U, 0xFEU,
+              0x87U, 0xFBU, 0x71U, 0xBBU, 0x33U, 0x9FU, 0x6BU, 0x11U,
+              0x70U, 0x6DU, 0x09U, 0xE0U, 0x83U, 0x5AU, 0x0FU, 0x71U,
+              0x1CU, 0xFBU, 0xA2U, 0xBCU, 0x2EU, 0x3CU, 0xCFU, 0x17U,
+              0xEFU, 0xA6U, 0x26U, 0xABU, 0x89U, 0x4AU, 0xD0U, 0xF9U,
+              0x78U, 0x2FU, 0x19U, 0x71U, 0x28U, 0x07U, 0x3EU, 0xEDU,
+              0x3BU, 0x6BU, 0x77U, 0xBBU, 0x75U, 0xADU, 0x1EU, 0xB6U,
+              0x5BU, 0xC4U, 0xC0U, 0x67U, 0x59U, 0x1FU, 0xB1U, 0x04U}},
+        }};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+        regenerated_public_key{};
+    std::array<uint8_t, 64U> regenerated_private_key{};
+    ed25519_create_keypair(regenerated_public_key.data(),
+                           regenerated_private_key.data(),
+                           kSignedAdvertSeed.data());
+    if (regenerated_public_key != kSignedAdvertPublicKey) {
+        failures.push_back("fixed-seed signed advert public key changed");
+    }
+    for (std::size_t index = 0; index < signed_advert_vectors.size(); ++index) {
+        const SignedAdvertVector &vector = signed_advert_vectors[index];
+        const SignedAdvertMessage message =
+            make_signed_advert_message(kSignedAdvertPublicKey, vector);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+            regenerated_signature{};
+        ed25519_sign(regenerated_signature.data(), message.bytes.data(),
+                     message.length, regenerated_public_key.data(),
+                     regenerated_private_key.data());
+        if (regenerated_signature != vector.signature) {
+            failures.push_back("fixed-seed signed advert signature changed vector " +
+                               std::to_string(index));
+        }
+        const uint8_t *app_data =
+            vector.app_data.empty() ? nullptr : vector.app_data.data();
+        for (std::size_t repetition = 0; repetition < 64U; ++repetition) {
+            if (!d1l_meshcore_oracle_verify_signed_advert(
+                    kSignedAdvertPublicKey.data(), vector.timestamp.data(),
+                    vector.signature.data(), app_data, vector.app_data.size())) {
+                failures.push_back("signed advert verification changed vector " +
+                                   std::to_string(index));
+                break;
+            }
+        }
+    }
+    const uint8_t empty_message = 0U;
+    if (!d1l_ed25519_signature_s_is_canonical(
+            kRfc8032EmptyMessageSignature.data())) {
+        failures.push_back("canonical RFC 8032 signature rejected by S guard");
+    }
+    for (std::size_t repetition = 0; repetition < 64U; ++repetition) {
+        if (ed25519_verify(kRfc8032EmptyMessageSignature.data(), &empty_message,
+                          0U, kRfc8032PublicKey.data()) != 1) {
+            failures.push_back("RFC 8032 empty-message vector rejected");
+            break;
+        }
+    }
+    auto tampered_rfc_signature = kRfc8032EmptyMessageSignature;
+    tampered_rfc_signature[0] ^= 0x01U;
+    if (ed25519_verify(tampered_rfc_signature.data(), &empty_message, 0U,
+                       kRfc8032PublicKey.data()) != 0) {
+        failures.push_back("tampered RFC 8032 signature accepted");
+    }
+    auto high_bit_rfc_signature = kRfc8032EmptyMessageSignature;
+    high_bit_rfc_signature[63] |= 0xE0U;
+    if (ed25519_verify(high_bit_rfc_signature.data(), &empty_message, 0U,
+                       kRfc8032PublicKey.data()) != 0) {
+        failures.push_back("high-bit RFC 8032 signature accepted");
+    }
+    if (ed25519_verify(kRfc8032EmptyMessageSignaturePlusOrder.data(),
+                       &empty_message, 0U, kRfc8032PublicKey.data()) != 1 ||
+        d1l_ed25519_signature_s_is_canonical(
+            kRfc8032EmptyMessageSignaturePlusOrder.data())) {
+        failures.push_back(
+            "RFC 8032 S+L regression did not exercise the canonical-S guard");
+    }
+
+    auto expect_signed_advert_reject =
+        [&failures](const char *name, const uint8_t *public_key,
+                    const uint8_t *timestamp, const uint8_t *signature,
+                    const uint8_t *app_data, size_t app_data_len) {
+            if (d1l_meshcore_oracle_verify_signed_advert(
+                    public_key, timestamp, signature, app_data, app_data_len)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert accepted");
+            }
+        };
+    const SignedAdvertVector &signed_advert = signed_advert_vectors[1];
+    expect_signed_advert_reject(
+        "null public key", nullptr, signed_advert.timestamp.data(),
+        signed_advert.signature.data(), signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null timestamp", kSignedAdvertPublicKey.data(), nullptr,
+        signed_advert.signature.data(), signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), nullptr, signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(), nullptr,
+        1U);
+    expect_signed_advert_reject(
+        "oversized app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U);
+    auto tampered_signature = signed_advert.signature;
+    tampered_signature[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), tampered_signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_public_key = kSignedAdvertPublicKey;
+    tampered_public_key[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered public key", tampered_public_key.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_timestamp = signed_advert.timestamp;
+    tampered_timestamp[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered timestamp", kSignedAdvertPublicKey.data(),
+        tampered_timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_app_data = signed_advert.app_data;
+    tampered_app_data[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        tampered_app_data.data(), tampered_app_data.size());
+    const auto malleable_signature =
+        signature_plus_group_order(signed_advert.signature);
+    const SignedAdvertMessage malleable_message =
+        make_signed_advert_message(kSignedAdvertPublicKey, signed_advert);
+    if (ed25519_verify(malleable_signature.data(), malleable_message.bytes.data(),
+                       malleable_message.length,
+                       kSignedAdvertPublicKey.data()) != 1) {
+        failures.push_back(
+            "production S+L regression no longer exercises the pinned verifier");
+    }
+    expect_signed_advert_reject(
+        "noncanonical S+L signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), malleable_signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
 
     auto check_prepared_packet =
         [&failures](const char *name,
@@ -1110,7 +1382,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_route_ack_and_trace_source_frames\""
+                 "\"pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -1119,18 +1391,25 @@ int main()
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
+              << ",\"valid\":"
+              << (kSignedAdvertValidVectors + kVerifierKatValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
+                  kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertValidVectors +
+                  kSignedAdvertInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
               << ",\"total\":"
               << (kPacketRoundtripVectors + kPacketInvalidVectors +
                   kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertValidVectors + kSignedAdvertInvalidVectors +
+                  kVerifierKatValidVectors + kVerifierKatInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1144,6 +1423,18 @@ int main()
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors)
               << ",\"total\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors) << "}"
+              << ",\"signed_advert_verification\":{\"valid\":"
+              << kSignedAdvertValidVectors << ",\"invalid\":"
+              << kSignedAdvertInvalidVectors << ",\"semantic\":"
+              << (kSignedAdvertValidVectors + kSignedAdvertInvalidVectors)
+              << ",\"total\":"
+              << (kSignedAdvertValidVectors + kSignedAdvertInvalidVectors)
+              << "}"
+              << ",\"ed25519_verifier_kat\":{\"valid\":"
+              << kVerifierKatValidVectors << ",\"invalid\":"
+              << kVerifierKatInvalidVectors << ",\"semantic\":0,\"total\":"
+              << (kVerifierKatValidVectors + kVerifierKatInvalidVectors)
+              << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -1164,6 +1455,7 @@ int main()
               << (kTraceRoundtripVectors + kTraceInvalidVectors) << "}}"
               << ",\"capabilities\":{\"packet_envelope\":true"
               << ",\"advert_data_fields\":true"
+              << ",\"signed_advert_verification\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"

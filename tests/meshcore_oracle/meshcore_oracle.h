@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define D1L_MESHCORE_ORACLE_ABI_VERSION 1U
+#define D1L_MESHCORE_ORACLE_ABI_VERSION 2U
 #define D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT \
     "e8d3c53ba1ea863937081cd0caad759b832f3028"
 
@@ -17,6 +17,9 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_RAW_BYTES 255U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
+#define D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES 32U
+#define D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES 4U
+#define D1L_MESHCORE_ORACLE_SIGNATURE_BYTES 64U
 #define D1L_MESHCORE_ORACLE_MIN_ACK_BYTES 4U
 #define D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES 9U
 #define D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES 63U
@@ -89,6 +92,22 @@ bool d1l_meshcore_oracle_advert_data_encode(
     uint8_t *dest,
     size_t dest_capacity,
     size_t *out_len);
+
+/*
+ * Production signed-advert verifier used by D1L. The signed message is the
+ * pinned Mesh::createAdvert layout: public key, four timestamp bytes exactly
+ * as carried on wire, then zero-to-32 advert app-data bytes. Verification uses
+ * the real Ed25519 C implementation pinned inside the MeshCore gitlink after
+ * applying the same strict canonical-S guard as the D1L production receive
+ * path. It does not claim Mesh dispatch, replay/timestamp policy, contact
+ * mutation, or duplicate suppression.
+ */
+bool d1l_meshcore_oracle_verify_signed_advert(
+    const uint8_t public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t timestamp[D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+    const uint8_t signature[D1L_MESHCORE_ORACLE_SIGNATURE_BYTES],
+    const uint8_t *app_data,
+    size_t app_data_len);
 
 /*
  * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp

@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
   "work_package": "WP-04",
-  "coverage_boundary": "pinned_upstream_packet_advert_route_ack_and_trace_source_frames",
+  "coverage_boundary": "pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification",
   "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-  "oracle_corpus_version": 6,
-  "oracle_abi_version": 1,
+  "oracle_corpus_version": 7,
+  "oracle_abi_version": 2,
   "wp04_closure_eligible": false,
   "closure_ready": false,
   "required_surfaces": [
@@ -13,6 +13,7 @@
       "status": "partial",
       "capabilities": [
         "advert_data_fields",
+        "signed_advert_verification",
         "identity_signed_advert"
       ]
     },
@@ -136,6 +137,7 @@
         "wire_vector_covered": true,
         "semantic_capabilities": [
           "advert_data_fields",
+          "signed_advert_verification",
           "identity_signed_advert"
         ]
       },
@@ -172,7 +174,7 @@
   },
   "submodule_update_policy": {
     "reviewed_upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
-    "reviewed_corpus_version": 6,
+    "reviewed_corpus_version": 7,
     "requires_vector_review": true,
     "requires_corpus_version_increment": true,
     "unreviewed_update_policy": "fail_closed"
