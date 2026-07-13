@@ -4,15 +4,17 @@ This is the active production roadmap. The release definition and blocker analys
 
 Release status: `scripts/release_gate_audit_d1l.py` must report `ready_for_public_release=true` for the exact release commit. Until then the firmware is not ready to tag, regardless of older green evidence or individually passing branches.
 
+Execution checkpoint: WP-00 is merged on `main` at `157c9670eb43a0119280f1e8119d9584b06dcfbf`; exact-main Actions run `29208908642` and the downloaded completion-ledger receipt are green. [COMPLETION_LEDGER.yaml](COMPLETION_LEDGER.yaml) remains the machine-readable execution source, with [COMPLETION_STATUS.md](COMPLETION_STATUS.md) as its generated view. This does not advance WP-01, which remains `in_progress`, `proof_banked=false`, and unmerged.
+
 ## Frozen 1.0 Product Contract
 
 DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that a normal user can operate without a serial console.
 
 - Core release workflows are persistent identity and adverts, Public messaging, direct messaging with truthful delivery state, contacts, channels, route discovery/fallback, real trace/path diagnostics, radio settings, retained state, and recovery.
 - The 1.0 target is multi-channel. A single hard-coded Public channel is not full 1.0; narrowing that scope requires an explicit product decision, matching UI removal, and release-note language rather than a silent waiver.
-- Map ships in 1.0. It uses built-in OpenStreetMap Standard, a user-set location, visible current-view-only 3x3 downloads at one zoom, SD cache/reuse, visible attribution, and no provider/key/source editor, background download, area download, or device-side SD formatting.
-- Rooms and Repeaters remain read-only observed/inferred inspectors for 1.0. Management/login controls stay absent until their protocol flows are implemented and accepted.
-- BLE companion, GPS, OTA, and server administration are not release claims. Each must remain visibly experimental with safe failure behavior or be absent/disabled in the release UI until complete and release-tested.
+- PR #62 supplies the bounded current-view Map foundation. Full live Map provider/cache/fetch/render/cancel/revisit qualification remains WP-19 and is not closed by landing this stack.
+- Rooms and Repeaters remain read-only observed/inferred inspectors until authenticated administration is implemented. WP-18 authenticated compatible repeater/room administration remains mandatory for Stable Core; unsupported or unauthenticated actions stay absent.
+- BLE companion, GPS, and OTA are not current release claims. Each must remain visibly experimental with safe failure behavior or be absent/disabled in the release UI until complete and release-tested.
 - Every enabled action must complete end to end or return an honest, actionable error. A working-looking dead end is a release defect.
 - Persisted invalid settings, missing radio/RP2040, failed Wi-Fi, no/bad SD media, and upgrade state must never cause a permanent boot loop.
 
@@ -122,13 +124,9 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 
 ## Immediate Work Queue
 
-1. Commit and publish this KRAB audit integration on the active Map/Wi-Fi branch.
-2. Stack the ESP-IDF 5.5.4 migration on that branch, resolve docs/config/workflow conflicts without losing either safety set, and run the full host/release suite.
-3. Validate the combined commit in Actions and inspect the exact dependency lock, effective config, firmware/package checksums, and release-gate inputs.
-4. Flash the exact combined artifact to COM12 and repeat the quick boot/Wi-Fi/radio/SD/health/reboot checks.
-5. Complete the still-open physical Map entry, bounded fetch, rendered-detail, cancellation, SD-cache revisit, and reboot-reuse proof.
-6. Reconcile GitHub labels and split the audit-only protocol/durability workstreams into issue-sized P0 trackers before implementing Stage 3.
-7. Execute Stages 3-7 in order; do not return to cosmetic-only UI refactoring while a protocol or safety boundary remains open.
+1. Close WP-01 by isolating raw diagnostics in a maintenance boot, resetting/reflashing the exact `07322ed` artifacts, proving a clean zero-counter `READY_SD` preflight, and rerunning only the exact retained/reboot/inserted/remove-reinsert/soak gate.
+2. Land and normalize PRs #62, #64, and #80 through WP-02 without treating stack landing as WP-19 Map closure.
+3. Continue through the completion-ledger dependency graph; WP-18 authenticated administration remains mandatory and WP-19 retains full live Map lifecycle qualification.
 
 ## Evidence Already Banked, Not Final Qualification
 

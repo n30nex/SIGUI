@@ -1,0 +1,587 @@
+schema_version: 1
+generated_at: '2026-07-12'
+project:
+  name: SIGUI / MeshCore DeskOS D1L
+  repository: n30nex/SIGUI
+  merged_baseline: 5b5dfaa0592347497df1a2f77f572c6d49933c6a
+  integrated_candidate: 07322ed4c700866106ecca6c31ff70ea3a3d4ede
+  active_pr_stack:
+  - 62
+  - 64
+  - 80
+  pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
+  esp_idf: 5.5.4
+  target: seeed-sensecap-indicator-d1l
+mission:
+  stable_core: Ship a truthful, durable, non-forwarding standalone MeshCore desk client.
+  full_feature: Continue through BLE, terminal, notifications/emoji, and signed update/recovery.
+  stop_condition: All applicable full-feature gates green on one exact tagged commit.
+constraints:
+- Firmware builds only in GitHub Actions.
+- Flash only checksum-verified Actions artifacts.
+- Never use COM8, COM11, or COM29.
+- Require explicit D1L_PORT, RP2040_PORT, and MESH_PEER_PORT.
+- Never format SD on-device; user prepares FAT32 media.
+- 'No Public RF outside approved #test use; targeted DMs only for normal RF proof.'
+- Minimize hardware/RF retests to issue-specific gates.
+- D1L remains a non-forwarding client.
+- 'Canada/USA default radio profile: 910.525 MHz, BW 62.5 kHz, SF7, CR5, 20 dBm, TCXO NONE.'
+- Message input maximum 138 UTF-8 bytes unless pinned upstream proves lower.
+- Hide or label unavailable features; no no-op controls.
+- Preserve identity, settings, retained history, and SD data.
+- Evidence must match exact source SHA, run, artifact checksum, ports, and peer.
+states:
+- blocked
+- open
+- in_progress
+- host_green
+- actions_green
+- hardware_green
+- merged
+- released
+release_gates:
+- id: G0
+  name: repository_lineage
+  depends_on: []
+  status: open
+- id: G1
+  name: reproducible_build
+  depends_on:
+  - G0
+  status: open
+- id: G2
+  name: platform_boot
+  depends_on:
+  - G1
+  status: open
+- id: G3
+  name: storage_durability
+  depends_on:
+  - G2
+  status: open
+- id: G4
+  name: meshcore_conformance
+  depends_on:
+  - G1
+  status: open
+- id: G5
+  name: messaging_routing
+  depends_on:
+  - G4
+  status: open
+- id: G6
+  name: ui_safety_workflows
+  depends_on:
+  - G2
+  - G5
+  status: open
+- id: G7
+  name: connectivity_map_ble
+  depends_on:
+  - G2
+  - G3
+  - G6
+  status: open
+- id: G8
+  name: admin_security_update
+  depends_on:
+  - G4
+  - G7
+  status: open
+- id: G9
+  name: soak_field_readiness
+  depends_on:
+  - G3
+  - G5
+  - G6
+  - G7
+  - G8
+  status: open
+- id: G10
+  name: exact_tag
+  depends_on:
+  - G9
+  status: open
+work_packages:
+- id: WP-00
+  title: Live completion ledger
+  lane: release
+  depends_on: []
+  tracks:
+  - coordination
+  status: merged
+  required_artifacts:
+  - completion_ledger_validation_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-01
+  title: 'Close PR #80 exact-pair storage/reboot gate'
+  lane: platform-storage
+  depends_on: []
+  tracks:
+  - 69
+  - 78
+  status: in_progress
+  required_artifacts:
+  - sd_inserted_stability_<sha>_<d1l>_<rp2040>.json
+  - sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json
+  - retained_reboot_matrix_<sha>_<d1l>.json
+  - storage_active_soak_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-02
+  title: Land and normalize PR stack
+  lane: integration
+  depends_on:
+  - WP-01
+  tracks:
+  - 62
+  - 64
+  - 80
+  - 63
+  - 78
+  status: blocked
+  required_artifacts:
+  - integration_baseline_<main-sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-03
+  title: Immutable CI and release inputs
+  lane: release-security
+  depends_on:
+  - WP-02
+  tracks:
+  - 17
+  - 71
+  status: blocked
+  required_artifacts:
+  - build_inputs_<sha>.json
+  - sbom_<sha>.spdx.json
+  - provenance_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-04
+  title: MeshCore boundary and upstream oracle
+  lane: protocol
+  depends_on:
+  - WP-02
+  tracks:
+  - 65
+  status: blocked
+  required_artifacts:
+  - meshcore_oracle_manifest_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-05
+  title: Semantic conformance and fuzzing
+  lane: protocol-qa
+  depends_on:
+  - WP-04
+  tracks:
+  - 65
+  status: blocked
+  required_artifacts:
+  - meshcore_conformance_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-06
+  title: Single-owner Mesh runtime
+  lane: runtime
+  depends_on:
+  - WP-02
+  - WP-04
+  tracks:
+  - 6
+  - 16
+  - 69
+  status: blocked
+  required_artifacts:
+  - mesh_runtime_ownership_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-07
+  title: Truthful DM ACK/retry/delivery
+  lane: protocol
+  depends_on:
+  - WP-05
+  - WP-06
+  tracks:
+  - 66
+  - 7
+  status: blocked
+  required_artifacts:
+  - dm_session_acceptance_<sha>_<d1l>_<peer>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-08
+  title: Canonical contacts/heard nodes/QR lifecycle
+  lane: protocol-application
+  depends_on:
+  - WP-05
+  - WP-06
+  tracks:
+  - 67
+  - 20
+  - 75
+  status: blocked
+  required_artifacts:
+  - contact_lifecycle_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-09
+  title: Multi-channel model and messaging
+  lane: protocol-application
+  depends_on:
+  - WP-05
+  - WP-06
+  - WP-08
+  tracks:
+  - 67
+  - 20
+  - 74
+  status: blocked
+  required_artifacts:
+  - channel_acceptance_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-10
+  title: Real PATH/direct fallback/trace
+  lane: protocol
+  depends_on:
+  - WP-05
+  - WP-07
+  - WP-08
+  tracks:
+  - 68
+  - 19
+  - 7
+  status: blocked
+  required_artifacts:
+  - route_trace_acceptance_<sha>_<d1l>_<peer>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-11
+  title: Retained durability/schema/reset/power loss
+  lane: storage
+  depends_on:
+  - WP-01
+  - WP-02
+  - WP-06
+  tracks:
+  - 69
+  - 4
+  - 78
+  status: blocked
+  required_artifacts:
+  - retained_invariants_<sha>.json
+  - retained_powerloss_<sha>.json
+  - nvs_write_amplification_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-12
+  title: Truthful time service
+  lane: platform
+  depends_on:
+  - WP-02
+  - WP-11
+  tracks:
+  - 69
+  status: blocked
+  required_artifacts:
+  - time_service_acceptance_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-13
+  title: Wi-Fi reconnect/credentials/safe mode
+  lane: connectivity
+  depends_on:
+  - WP-02
+  - WP-06
+  - WP-12
+  tracks:
+  - 13
+  - 63
+  status: blocked
+  required_artifacts:
+  - wifi_resilience_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-14
+  title: UI ownership and modular extraction
+  lane: ui
+  depends_on:
+  - WP-06
+  tracks:
+  - 6
+  - 16
+  - 76
+  status: blocked
+  required_artifacts:
+  - ui_runtime_safety_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-15
+  title: Finish Messages UX
+  lane: ui
+  depends_on:
+  - WP-07
+  - WP-09
+  - WP-14
+  tracks:
+  - 74
+  - 66
+  - 67
+  status: blocked
+  required_artifacts:
+  - messages_ui_acceptance_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-16
+  title: Finish Nodes/Network/roles/Map pins
+  lane: ui-application
+  depends_on:
+  - WP-08
+  - WP-10
+  - WP-14
+  tracks:
+  - 73
+  - 75
+  - 68
+  - 70
+  status: blocked
+  required_artifacts:
+  - network_map_nodes_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-17
+  title: Packets/diagnostics/Terminal
+  lane: diagnostics-ui
+  depends_on:
+  - WP-06
+  - WP-11
+  - WP-14
+  tracks:
+  - 18
+  - 19
+  - 76
+  status: blocked
+  required_artifacts:
+  - diagnostics_terminal_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-18
+  title: Authenticated repeater/room administration
+  lane: protocol-security-ui
+  depends_on:
+  - WP-05
+  - WP-08
+  - WP-10
+  - WP-12
+  - WP-14
+  tracks:
+  - 77
+  status: blocked
+  required_artifacts:
+  - admin_session_acceptance_<sha>_<d1l>_<peer>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-19
+  title: Map provider/cache lifecycle
+  lane: map-connectivity
+  depends_on:
+  - WP-01
+  - WP-13
+  - WP-14
+  - WP-16
+  tracks:
+  - 12
+  - 14
+  - 73
+  status: blocked
+  required_artifacts:
+  - map_live_acceptance_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-20
+  title: BLE companion transport
+  lane: connectivity-protocol
+  depends_on:
+  - WP-03
+  - WP-06
+  - WP-07
+  - WP-09
+  - WP-13
+  tracks:
+  - new-ble
+  status: blocked
+  required_artifacts:
+  - ble_companion_acceptance_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-21
+  title: Notifications/emoji/accessibility/polish
+  lane: ui
+  depends_on:
+  - WP-14
+  - WP-15
+  tracks:
+  - 74
+  - 76
+  - new-ux
+  status: blocked
+  required_artifacts:
+  - ui_polish_acceptance_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-22
+  title: Signed SD/OTA update and recovery
+  lane: update-security
+  depends_on:
+  - WP-03
+  - WP-11
+  - WP-12
+  - WP-17
+  tracks:
+  - 21
+  - 71
+  - new-partition-migration
+  status: blocked
+  required_artifacts:
+  - partition_update_decision_<sha>.md
+  - update_powerloss_acceptance_<sha>_<d1l>.json
+  - upgrade_matrix_<sha>_<d1l>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-23
+  title: Observer/MQTT and companion-location decision
+  lane: connectivity-privacy
+  depends_on:
+  - WP-13
+  - WP-20
+  tracks:
+  - new-product-decision
+  status: blocked
+  required_artifacts:
+  - observer_location_decision_<sha>.md
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+- id: WP-24
+  title: Final release qualification
+  lane: release
+  depends_on:
+  - WP-00
+  - WP-03
+  - WP-05
+  - WP-07
+  - WP-08
+  - WP-09
+  - WP-10
+  - WP-11
+  - WP-12
+  - WP-13
+  - WP-14
+  - WP-15
+  - WP-16
+  - WP-17
+  - WP-18
+  - WP-19
+  tracks:
+  - 4
+  - 7
+  - 8
+  - 11
+  - 17
+  - 23
+  - 63
+  - 69
+  - 71
+  - 78
+  status: blocked
+  required_artifacts:
+  - release_gate_<sha>.json
+  - release_validation_report_<sha>.md
+  - release_evidence_index_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+  profile_additional_dependencies:
+    stable_core: []
+    full_feature:
+    - WP-20
+    - WP-21
+    - WP-22
+    - WP-23
+- id: WP-25
+  title: Tag/publish/post-release control
+  lane: release
+  depends_on:
+  - WP-24
+  tracks:
+  - release
+  status: blocked
+  required_artifacts:
+  - published_release_<version>_<sha>.json
+  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+  profile_behavior: Run once for Stable Core and again for Full Feature; each publication requires its own exact-SHA WP-24
+    evidence.
+current_priority:
+- WP-01
+- WP-02
+- WP-00
+- WP-03
+- WP-04
+- WP-06
+- WP-05
+- WP-07
+forbidden_port_policy:
+  forbidden:
+  - COM8
+  - COM11
+  - COM29
+  required_environment:
+  - D1L_PORT
+  - RP2040_PORT
+  - MESH_PEER_PORT
+  default_peer_port: null
+  fail_closed: true
+hardware_economy:
+  docs_tests_only: no hardware
+  ui_only: simulator plus one batched physical checkpoint
+  storage_rp2040: focused SD/reboot mini-gate
+  wifi_map: focused network/map mini-gate
+  protocol_radio: host conformance first, then one targeted RF gate
+  final_rc: full matrix
+release_targets:
+  stable_core:
+    suggested_version: v1.0.0
+    must_include:
+    - WP-00
+    - WP-01
+    - WP-02
+    - WP-03
+    - WP-04
+    - WP-05
+    - WP-06
+    - WP-07
+    - WP-08
+    - WP-09
+    - WP-10
+    - WP-11
+    - WP-12
+    - WP-13
+    - WP-14
+    - WP-15
+    - WP-16
+    - WP-17
+    - WP-18
+    - WP-19
+    - WP-24
+    - WP-25
+    may_hide_until_full_feature:
+    - WP-20
+    - WP-21
+    - WP-22
+    - WP-23
+  full_feature:
+    suggested_version: v1.1.0
+    must_include:
+    - WP-00
+    - WP-01
+    - WP-02
+    - WP-03
+    - WP-04
+    - WP-05
+    - WP-06
+    - WP-07
+    - WP-08
+    - WP-09
+    - WP-10
+    - WP-11
+    - WP-12
+    - WP-13
+    - WP-14
+    - WP-15
+    - WP-16
+    - WP-17
+    - WP-18
+    - WP-19
+    - WP-20
+    - WP-21
+    - WP-22
+    - WP-23
+    - WP-24
+    - WP-25
