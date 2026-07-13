@@ -426,8 +426,8 @@ back. The final synthetic tile is intentionally left present for inspection.
 This proves the nested cache directory and atomic commit path without Public RF
 or formatting.
 
-The serial `storage map-policy` command is read-only. It reports the first
-offline Map page policy, the production cache path template
+The serial `storage map-policy` command is read-only. It reports the built-in
+current-view Map policy, the production cache path template
 `map/tiles/z{z}/x{x}/y{y}.tile`, the current `map_tile_backend`, and
 `download_supported=false`/`live_network_download=false`. It does not request
 network tiles, send Public RF, or format the card.
@@ -444,4 +444,4 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcri
 - Users must supply FAT32 SD cards prepared on a computer.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; retained-store SD read/write/rename failures are counted per store, NVS mirror failures are counted separately, and `storage status` / the storage UI must show `SD degraded; using internal fallback` after a real SD failure latches. Diagnostic exports can use chunked SD commits under `exports/diagnostics`; sampled user-data exports can use chunked SD commits under `exports/data`; the map tile cache can use `map/tiles/` through `storage map-tile-canary`, serial `storage map-tile-download`, and the touch Map Tiles provider sheet. Serial network tile validation remains bounded to explicit user action, requires connected Wi-Fi, ready SD cache, an allowed non-public-OSM HTTPS provider template, visible attribution, and no Public RF or format action. Touch live downloads remain unavailable as `tile_render_pending` until tile rendering proof exists; hardware proof remains pending.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; retained-store SD write/read/rename failures are counted separately from NVS mirror failures, and the UI must show `SD degraded; using internal fallback` after a real SD failure latches. Diagnostic and sampled-data exports use their existing bounded paths. `storage map-tile-canary` is a synthetic storage-only check: it never performs network I/O and is not live-map acceptance. The production Map has a built-in OpenStreetMap Standard source and no arbitrary URL/template command. Network fetch is allowed only while the actual Map is visible, for at most its visible current-view 3x3 at one zoom, with cache/reuse and `(c) OpenStreetMap contributors`; background and area download are forbidden.

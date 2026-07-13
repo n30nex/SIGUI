@@ -26,7 +26,7 @@
 #define D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY
 #define D1L_HOME_MESSAGE_PREVIEW 5U
 #define D1L_HOME_REPEATER_PREVIEW 3U
-#define D1L_MAP_TILE_RENDER_SUPPORTED false
+#define D1L_MAP_TILE_RENDER_SUPPORTED true
 #define D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false
 
 typedef struct {
@@ -110,7 +110,6 @@ typedef struct {
     bool map_tile_render_supported;
     bool map_tile_sideload_supported;
     bool map_location_set;
-    bool map_tile_provider_saved;
     int32_t map_lat_e7;
     int32_t map_lon_e7;
     uint8_t map_tile_zoom;
@@ -144,8 +143,6 @@ typedef struct {
     char node_name[32];
     char wifi_ssid[D1L_WIFI_SSID_LEN];
     char wifi_ip[16];
-    char map_tile_url_template[D1L_MAP_TILE_PROVIDER_TEMPLATE_LEN];
-    char map_tile_attribution[D1L_MAP_TILE_PROVIDER_ATTRIBUTION_LEN];
     char identity_fingerprint[17];
     const char *reset_reason;
     const char *mesh_state;
@@ -256,11 +253,6 @@ esp_err_t d1l_app_model_mark_dm_thread_read(const char *fingerprint);
 esp_err_t d1l_app_model_request_advert(bool flood);
 esp_err_t d1l_app_model_set_map_location(int32_t lat_e7, int32_t lon_e7);
 esp_err_t d1l_app_model_clear_map_location(void);
-esp_err_t d1l_app_model_save_map_tile_provider(const char *url_template,
-                                               const char *attribution,
-                                               uint8_t zoom);
-esp_err_t d1l_app_model_clear_map_tile_provider(void);
-esp_err_t d1l_app_model_download_center_map_tile(d1l_map_tile_download_result_t *out_result);
 esp_err_t d1l_app_model_set_wifi_enabled(bool enabled);
 esp_err_t d1l_app_model_wifi_scan(d1l_wifi_scan_result_t *out_result);
 esp_err_t d1l_app_model_wifi_connect(void);

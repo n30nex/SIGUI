@@ -8,11 +8,11 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `3e712916a05931fd10998f51d7f616e506daeeb4` |
+| Live merged `main` | `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
 | Active PR stack | #62 → #64 → #80 |
-| Candidate distance from live `main` | 61 commits ahead, 3 behind before WP-02 reconciliation |
-| Proof-ledger PR | #83; pre-update remote head observed at `185b07100e55445bdf0d61a238de2d6e6df2cea0`; final pushed head belongs to the PR/merge receipt |
+| Candidate distance from live `main` | 61 commits ahead, 8 behind before WP-02 reconciliation |
+| Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
 | Candidate host suite | 773 passing tests in exact Actions host job |
@@ -22,11 +22,11 @@
 
 ## Live post-audit reconciliation
 
-- Live `main` is `3e712916a05931fd10998f51d7f616e506daeeb4`; WP-00 is merged.
+- Live `main` is `c3f9106ea9b88c491889cd8dea9ad883a0d72180`; PR #83 merged the WP-01 proof ledger. Exact-main Actions `29285852443` passed 388 host tests, and both downloaded checksum manifests / all 35 entries verify.
 - WP-01 is `hardware_green` with `proof_banked=true` on exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`, but `implementation_merged=false` until WP-02 lands PR #80.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
 - The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
-- WP-02 is `in_progress`. PR #83 banks the proof and completion state. Its exact pushed head and Actions runs are recorded in the PR/merge receipt and then folded into the next exact-main ledger refresh, rather than attempting to embed a commit's own hash in its contents.
+- WP-02 is `in_progress`. PR #83 banked the proof and completion state at head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as exact main `c3f9106ea9b88c491889cd8dea9ad883a0d72180`.
 
 ### WP-01 canonical exact-source receipts
 
@@ -48,7 +48,7 @@ This proof closes only WP-01's narrow source gate. The exact integrated/frozen c
 - Base: `main`
 - Purpose: bounded built-in current-view Map and UI hierarchy
 - Large cross-cutting change; must land first.
-- Local-only reconciliation rehearsal `7648611c412e7f4658f5d14b43ba530744d96160` passed 423 full / 80 focused host tests. It is not remote exact Actions or hardware proof and must absorb the final PR #83/main result before push.
+- Local-only reconciliation rehearsal `7648611c412e7f4658f5d14b43ba530744d96160` passed 423 full / 80 focused host tests. The active local merge now absorbs exact main `c3f9106ea9b88c491889cd8dea9ad883a0d72180`; fresh final host and remote exact-head validation remain required before PR #62 merges.
 
 ### PR #64
 

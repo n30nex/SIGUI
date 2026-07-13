@@ -358,14 +358,16 @@ void d1l_ui_settings_render(lv_obj_t *parent,
             : (snapshot->storage_setup_required
                 ? "Needs setup"
                 : (snapshot->storage_sd_present ? "Detected" : "Internal storage")));
-    const char *map_status = snapshot->map_tile_cache_ready
-        ? "Ready"
-        : ((snapshot->map_tile_download_supported || snapshot->map_tile_sideload_supported)
-            ? "Not set up"
-            : "Unavailable");
+    const char *map_status = !snapshot->map_location_set
+        ? "Set location"
+        : (!snapshot->wifi_connected
+            ? "Needs Wi-Fi"
+            : (!snapshot->map_tile_cache_ready
+                ? "Needs SD"
+                : (snapshot->map_tile_render_supported ? "Ready" : "Loading")));
     const char *storage_category_summary = storage_needs_attention
         ? "SD needs attention"
-        : "SD card and offline maps";
+        : "SD card and map";
 
     const settings_menu_item_t tools[] = {
         {"Packets", packet_status, 0x93C5FD, D1L_UI_SETTINGS_ACTION_PACKETS, false},
@@ -388,7 +390,7 @@ void d1l_ui_settings_render(lv_obj_t *parent,
          storage_needs_attention ? 0xF87171 :
             (storage_ready ? 0x5EEAD4 : 0xF4F7FB),
          D1L_UI_SETTINGS_ACTION_STORAGE, storage_needs_attention},
-        {"Offline Maps", map_status,
+        {"Map options", map_status,
          snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0xF4F7FB,
          D1L_UI_SETTINGS_ACTION_MAP_TILES, false},
     };

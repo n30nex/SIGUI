@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "nvs.h"
 
@@ -58,14 +59,14 @@ typedef struct {
     d1l_node_entry_t entries[D1L_NODE_NVS_FALLBACK_CAPACITY];
 } d1l_node_store_blob_t;
 
-static d1l_node_entry_t s_entries[D1L_NODE_STORE_CAPACITY];
+static d1l_node_entry_t s_entries[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
 static bool s_loaded;
 static d1l_node_store_blob_t s_blob_scratch;
-static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY];
+static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)

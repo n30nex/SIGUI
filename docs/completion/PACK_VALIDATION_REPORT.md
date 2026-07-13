@@ -2,11 +2,11 @@
 
 **Validated:** 2026-07-13 17:03 EDT
 
-**Live `main`:** `3e712916a05931fd10998f51d7f616e506daeeb4`
+**Live `main`:** `c3f9106ea9b88c491889cd8dea9ad883a0d72180`
 
 **WP-01 exact source:** `092293f2311a24c9899bc9bf343ab014c4ba0411`
 
-**Proof-ledger PR:** #83; remote head observed before this final proof update was `185b07100e55445bdf0d61a238de2d6e6df2cea0`. The exact pushed proof head and its Actions receipts belong to the PR/merge receipt and the next merged-main ledger refresh, avoiding an impossible self-referential commit hash in this document.
+**Proof-ledger PR:** #83 merged head `a2da533310c7b2e6898439684922b9cd86896b59` as main commit `c3f9106ea9b88c491889cd8dea9ad883a0d72180`. Exact-main Actions `29285852443` passed 388 host tests; two downloaded checksum manifests and all 35 entries verify.
 
 ## Refreshed execution state
 

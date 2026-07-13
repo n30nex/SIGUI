@@ -3,10 +3,16 @@ generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 3e712916a05931fd10998f51d7f616e506daeeb4
+  merged_baseline: c3f9106ea9b88c491889cd8dea9ad883a0d72180
   integrated_candidate: 092293f2311a24c9899bc9bf343ab014c4ba0411
   proof_ledger_pr: 83
-  proof_ledger_head_observed_before_final_update: 185b07100e55445bdf0d61a238de2d6e6df2cea0
+  proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
+  proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
+  proof_ledger_main_actions:
+    run: 29285852443
+    host_tests_passed: 388
+    checksum_manifests_verified: 2
+    checksum_entries_verified: 35
   integrated_candidate_actions:
     push_run: 29272708844
     pr_run: 29272709642

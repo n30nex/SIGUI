@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-13T21:03:11Z",
+  "snapshot_at": "2026-07-13T21:23:00Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,16 +12,21 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "3e712916a05931fd10998f51d7f616e506daeeb4",
-      "actions_run": "29209377356",
+      "commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
+      "actions_run": "29285852443",
       "actions_status": "success",
-      "note": "WP-00 live completion ledger and its merge receipt are merged through PR #82; the implementation stack is not."
+      "host_tests_passed": 388,
+      "checksum_manifests_verified": 2,
+      "checksum_entries_verified": 35,
+      "firmware_manifest_sha256": "fd13f6fbabde7415fa29e9d95ccbca8cbc49168208a1e27e54f32e6fdf9d2312",
+      "release_manifest_sha256": "dc3d046eec5825ab434b2923818cfda5d2ea246085bd169a16451f59feaad369",
+      "note": "PR #83 merged the exact WP-01 proof ledger. WP-02 is active; the implementation stack is not yet merged."
     },
     "working_branch": {
-      "name": "codex/wp01-proof-ledger",
-      "base_commit": "3e712916a05931fd10998f51d7f616e506daeeb4",
-      "pull_request": 83,
-      "merged_pull_request": 82
+      "name": "codex/d1l-ui-map-hierarchy",
+      "base_commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
+      "pull_request": 62,
+      "merged_pull_request": 83
     },
     "audit_snapshot": {
       "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
@@ -51,7 +56,9 @@
       "local_resolution_commit": "7648611c412e7f4658f5d14b43ba530744d96160",
       "local_resolution_tests": 423,
       "local_resolution_focused_tests": 80,
-      "local_resolution_scope": "pre_final_local_only"
+      "local_resolution_scope": "pre_final_local_only",
+      "absorbed_main_commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
+      "absorbed_main_actions_run": "29285852443"
     },
     {
       "number": 64,
@@ -83,26 +90,12 @@
       "local_resolution_tests": 787,
       "local_resolution_focused_tests": 302,
       "local_resolution_scope": "pre_final_local_only"
-    },
-    {
-      "number": 83,
-      "title": "docs(completion): refresh the live execution ledger",
-      "base": "main",
-      "head": "codex/wp01-proof-ledger",
-      "head_commit": "185b07100e55445bdf0d61a238de2d6e6df2cea0",
-      "state": "open",
-      "draft": true,
-      "checks": "success",
-      "mergeable": true,
-      "actions_push_run": "29282893370",
-      "actions_pull_request_run": "29282896161",
-      "snapshot_scope": "pre_final_wp01_proof_update"
     }
   ],
   "reconciliation": [
     {
-      "conflict": "The audited main SHA predates the merged completion-program documents.",
-      "resolution": "Use live main 3e712916a05931fd10998f51d7f616e506daeeb4 after merged PR #82 and exact-main Actions run 29209377356; retain the audited SHA only as history."
+      "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
+      "resolution": "Use live main c3f9106ea9b88c491889cd8dea9ad883a0d72180 after merged PR #83 and exact-main Actions run 29285852443; retain the audited SHA only as history."
     },
     {
       "conflict": "PR #80 text says its fresh workflows are queued.",

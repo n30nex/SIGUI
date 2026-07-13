@@ -32,7 +32,9 @@ def test_storage_probe_surfaces_are_canonical_settings_destinations():
         assert "screen = D1L_UI_SCREEN_SETTINGS;" in branch
 
     assert '\\"storage_probe_surfaces\\":[\\"storage\\",\\"storage_card\\",\\"storage_data\\"]' in console
-    assert 'SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card"}' in probe
+    assert 'SCROLL_MOVEMENT_OPTIONAL = {"home", "storage", "storage_card", *MAP_READ_ONLY_SURFACES}' in probe
+    for surface in ("home", "storage", "storage_card"):
+        assert f'"{surface}"' in probe
     assert '"storage_data": {"tab": "settings", "label": "Data locations"}' in probe
 
 
@@ -268,7 +270,7 @@ def test_storage_simulator_declares_matching_safe_pages_and_scroll_contract():
         assert f'"{action}"' in simulator
 
 
-def test_release_docs_close_pr60_but_keep_storage_hardware_proof_open():
+def test_release_docs_record_pr61_storage_proof_and_keep_map_hardware_proof_open():
     docs = "\n".join(
         read(path)
         for path in (
@@ -290,6 +292,16 @@ def test_release_docs_close_pr60_but_keep_storage_hardware_proof_open():
         "5C41EE08",
     ):
         assert evidence in docs
-    assert "Storage hierarchy is the newest host-only page slice" in docs
-    assert "pending exact Actions/COM12 proof" in docs
-    assert "Storage hardware-proven" not in docs
+    for evidence in (
+        "PR #61",
+        "4d9f384",
+        "29081187314",
+        "29081214738",
+        "9878ADFB",
+        "77726394",
+        "42619B0E",
+    ):
+        assert evidence in docs
+    assert "Map hierarchy" in docs
+    assert "exact Actions/COM12" in docs
+    assert "Map hardware-proven" not in docs

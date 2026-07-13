@@ -4,6 +4,24 @@ This project builds on open hardware/software work from upstream firmware projec
 
 MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must include the top-level `LICENSE` file with these attribution and notice documents.
 
+## OpenStreetMap
+
+- Map data and Standard tiles: OpenStreetMap contributors.
+- Required attribution: `© OpenStreetMap contributors`.
+- On-device attribution: `(c) OpenStreetMap contributors`. The display font lacks the copyright glyph, so the UI uses the ASCII `(c)` form while preserving the contributor wording.
+- Copyright and attribution terms: https://www.openstreetmap.org/copyright
+- Data license: Open Database License 1.0, https://opendatacommons.org/licenses/odbl/1-0/
+- Tile service policy: https://operations.osmfoundation.org/policies/tiles/
+- Product use: OpenStreetMap Standard is the built-in map source. Requests are limited to the visible current-view 3x3 at one zoom while the actual Map is visible; cache revisits are reused, and background or area download is not provided.
+- No endorsement: OpenStreetMap and the OpenStreetMap Foundation do not endorse this project.
+
+## LodePNG
+
+- Project: LodePNG
+- Upstream: https://lodev.org/lodepng/
+- License: permissive LodePNG license; the complete notice remains in LVGL's bundled LodePNG source.
+- Use in this project: `main/map/map_png_decoder.c` builds that bundled source as a private decode-only PNG decoder for map tiles.
+
 ## Seeed SenseCAP Indicator
 
 - Project: Seeed SenseCAP Indicator ESP32 SDK and examples

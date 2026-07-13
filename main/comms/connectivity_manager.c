@@ -9,7 +9,9 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_netif_ip_addr.h"
+#include "esp_system.h"
 #include "esp_wifi.h"
+#include "esp_wifi_default.h"
 #endif
 
 static bool s_wifi_started;
@@ -20,8 +22,9 @@ static char s_wifi_last_error[32] = "none";
 
 #ifdef CONFIG_ESP_WIFI_ENABLED
 static bool s_wifi_initialized;
-static bool s_wifi_handlers_registered;
 static esp_netif_t *s_wifi_sta_netif;
+static esp_event_handler_instance_t s_wifi_event_instance;
+static esp_event_handler_instance_t s_ip_event_instance;
 #endif
 
 static bool build_wifi_enabled(void)
@@ -131,6 +134,75 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
+static void stop_wifi_runtime(void)
+{
+    if (s_wifi_event_instance) {
+        (void)esp_event_handler_instance_unregister(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, s_wifi_event_instance);
+        s_wifi_event_instance = NULL;
+    }
+    if (s_ip_event_instance) {
+        (void)esp_event_handler_instance_unregister(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, s_ip_event_instance);
+        s_ip_event_instance = NULL;
+    }
+    if (s_wifi_started) {
+        (void)esp_wifi_disconnect();
+    }
+    if (s_wifi_initialized) {
+        (void)esp_wifi_stop();
+        (void)esp_wifi_deinit();
+    }
+    if (s_wifi_sta_netif) {
+        esp_netif_destroy_default_wifi(s_wifi_sta_netif);
+        s_wifi_sta_netif = NULL;
+    }
+    s_wifi_started = false;
+    s_wifi_initialized = false;
+    s_wifi_connected = false;
+    s_wifi_connecting = false;
+    s_wifi_ip[0] = '\0';
+}
+
+static esp_err_t fail_closed_wifi_runtime(esp_err_t failure, const char *reason)
+{
+    char original_reason[sizeof(s_wifi_last_error)];
+    snprintf(original_reason, sizeof(original_reason), "%s",
+             reason ? reason : esp_err_to_name(failure));
+
+    stop_wifi_runtime();
+
+    const d1l_settings_t *current = d1l_settings_current();
+    if (current->wifi_enabled) {
+        d1l_settings_t safe_settings = *current;
+        safe_settings.wifi_enabled = false;
+        esp_err_t rollback_ret = d1l_settings_save(&safe_settings);
+        if (rollback_ret != ESP_OK) {
+            set_wifi_last_error("rollback_save_failed");
+            return rollback_ret;
+        }
+    }
+
+    set_wifi_last_error(original_reason);
+    return failure;
+}
+
+static const char *wifi_boot_recovery_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+        return "boot_recovery_panic";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+        return "boot_recovery_wdt";
+    case ESP_RST_BROWNOUT:
+        return "boot_recovery_brownout";
+    default:
+        return NULL;
+    }
+}
+
 static esp_err_t ensure_wifi_started(void)
 {
     if (!build_wifi_enabled()) {
@@ -140,81 +212,67 @@ static esp_err_t ensure_wifi_started(void)
     if (!s_wifi_initialized) {
         esp_err_t ret = ok_if_invalid_state(esp_netif_init());
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
         ret = ok_if_invalid_state(esp_event_loop_create_default());
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
         if (!s_wifi_sta_netif) {
-            s_wifi_sta_netif = esp_netif_create_default_wifi_sta();
+            esp_netif_config_t netif_config = ESP_NETIF_DEFAULT_WIFI_STA();
+            s_wifi_sta_netif = esp_netif_new(&netif_config);
             if (!s_wifi_sta_netif) {
-                set_wifi_last_error("sta_netif_failed");
-                return ESP_FAIL;
+                return fail_closed_wifi_runtime(ESP_FAIL, "sta_netif_failed");
+            }
+            ret = esp_netif_attach_wifi_station(s_wifi_sta_netif);
+            if (ret != ESP_OK) {
+                return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
+            }
+            ret = esp_wifi_set_default_wifi_sta_handlers();
+            if (ret != ESP_OK) {
+                return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
             }
         }
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ret = esp_wifi_init(&cfg);
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
+        s_wifi_initialized = true;
         ret = esp_wifi_set_storage(WIFI_STORAGE_RAM);
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
         ret = esp_wifi_set_mode(WIFI_MODE_STA);
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
-        s_wifi_initialized = true;
     }
-    if (!s_wifi_handlers_registered) {
-        esp_err_t ret = esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                                   wifi_event_handler, NULL);
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+    if (!s_wifi_event_instance) {
+        esp_err_t ret = esp_event_handler_instance_register(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL,
+            &s_wifi_event_instance);
+        if (ret != ESP_OK) {
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
-        ret = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                         wifi_event_handler, NULL);
-        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+    }
+    if (!s_ip_event_instance) {
+        esp_err_t ret = esp_event_handler_instance_register(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL,
+            &s_ip_event_instance);
+        if (ret != ESP_OK) {
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
-        s_wifi_handlers_registered = true;
     }
     if (!s_wifi_started) {
         esp_err_t ret = esp_wifi_start();
         if (ret != ESP_OK) {
-            set_wifi_last_error(esp_err_to_name(ret));
-            return ret;
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
         }
         s_wifi_started = true;
         set_wifi_last_error("none");
     }
     return ESP_OK;
-}
-
-static void stop_wifi_runtime(void)
-{
-    if (!s_wifi_started) {
-        s_wifi_connected = false;
-        s_wifi_connecting = false;
-        s_wifi_ip[0] = '\0';
-        return;
-    }
-    (void)esp_wifi_disconnect();
-    (void)esp_wifi_stop();
-    s_wifi_started = false;
-    s_wifi_connected = false;
-    s_wifi_connecting = false;
-    s_wifi_ip[0] = '\0';
-    set_wifi_last_error("none");
 }
 
 static void copy_scan_record(d1l_wifi_scan_ap_t *dest, const wifi_ap_record_t *src)
@@ -305,6 +363,18 @@ esp_err_t d1l_connectivity_init(void)
 #ifdef CONFIG_ESP_WIFI_ENABLED
     const d1l_settings_t *current = d1l_settings_current();
     if (current->wifi_enabled && current->wifi_profile_saved) {
+        const char *recovery_reason = wifi_boot_recovery_reason();
+        if (recovery_reason) {
+            d1l_settings_t safe_settings = *current;
+            safe_settings.wifi_enabled = false;
+            esp_err_t ret = d1l_settings_save(&safe_settings);
+            if (ret != ESP_OK) {
+                set_wifi_last_error("boot_recovery_save_failed");
+                return ret;
+            }
+            set_wifi_last_error(recovery_reason);
+            return ESP_OK;
+        }
         return d1l_connectivity_wifi_connect();
     }
 #endif
@@ -422,19 +492,23 @@ esp_err_t d1l_connectivity_wifi_connect(void)
     config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     config.sta.pmf_cfg.capable = true;
     config.sta.pmf_cfg.required = false;
+    if (s_wifi_connected || s_wifi_connecting) {
+        ret = esp_wifi_disconnect();
+        if (ret != ESP_OK && ret != ESP_ERR_WIFI_NOT_CONNECT) {
+            return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
+        }
+        s_wifi_connected = false;
+        s_wifi_connecting = false;
+        s_wifi_ip[0] = '\0';
+    }
     ret = esp_wifi_set_config(WIFI_IF_STA, &config);
     if (ret != ESP_OK) {
-        set_wifi_last_error(esp_err_to_name(ret));
-        return ret;
-    }
-    if (s_wifi_connected) {
-        (void)esp_wifi_disconnect();
+        return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
     }
     ret = esp_wifi_connect();
     if (ret != ESP_OK) {
         s_wifi_connecting = false;
-        set_wifi_last_error(esp_err_to_name(ret));
-        return ret;
+        return fail_closed_wifi_runtime(ret, esp_err_to_name(ret));
     }
     s_wifi_connecting = true;
     set_wifi_last_error("none");
@@ -466,25 +540,39 @@ esp_err_t d1l_connectivity_set_wifi_enabled(bool enabled)
         return ESP_ERR_NOT_SUPPORTED;
     }
     d1l_settings_t settings = *d1l_settings_current();
-    settings.wifi_enabled = enabled;
-    if (enabled) {
-        settings.ble_companion_enabled = false;
-    }
-    esp_err_t ret = d1l_settings_save(&settings);
-    if (ret != ESP_OK) {
-        return ret;
-    }
+    esp_err_t ret;
     if (!enabled) {
+        settings.wifi_enabled = false;
+        ret = d1l_settings_save(&settings);
+        if (ret != ESP_OK) {
+            return ret;
+        }
 #ifdef CONFIG_ESP_WIFI_ENABLED
         stop_wifi_runtime();
 #endif
+        set_wifi_last_error("none");
         return ESP_OK;
     }
+
+    settings.ble_companion_enabled = false;
 #ifdef CONFIG_ESP_WIFI_ENABLED
     ret = ensure_wifi_started();
     if (ret != ESP_OK) {
         return ret;
     }
+#endif
+
+    settings.wifi_enabled = true;
+    ret = d1l_settings_save(&settings);
+    if (ret != ESP_OK) {
+#ifdef CONFIG_ESP_WIFI_ENABLED
+        stop_wifi_runtime();
+#endif
+        set_wifi_last_error(esp_err_to_name(ret));
+        return ret;
+    }
+
+#ifdef CONFIG_ESP_WIFI_ENABLED
     if (settings.wifi_profile_saved) {
         ret = d1l_connectivity_wifi_connect();
         if (ret != ESP_OK) {

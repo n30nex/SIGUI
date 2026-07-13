@@ -346,7 +346,8 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "storage map-policy" in console
     assert "storage filecanary" in console
     assert "storage map-tile-canary <token>" in console
-    assert "storage map-tile-download <z> <x> <y> <url-template> <attribution>" in console
+    assert "map tiles status" in console
+    assert "storage map-tile-download" not in console
     assert "bool_json(download_supported)" in console
     assert "bool_json(live_network_download)" in console
     assert "storage export-canary <token>" in console
@@ -360,7 +361,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert 'strcmp(line, "storage setup")' in console
     assert 'strcmp(line, "storage filecanary")' in console
     assert 'strncmp(line, "storage map-tile-canary "' in console
-    assert 'strncmp(line, "storage map-tile-download "' in console
+    assert 'strcmp(line, "map tiles status")' in console
     assert 'strncmp(line, "storage export-canary "' in console
     assert "will_format" in console
     assert "no_device_format" in console
@@ -450,11 +451,12 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "D1L_MAP_TILE_DOWNLOAD_STATE" in console
     assert "D1L_MAP_TILE_DOWNLOAD_REQUIRES" in console
     assert "D1L_MAP_TILE_PROVIDER_POLICY" in console
-    assert "D1L_MAP_TILE_PROVIDER_ATTRIBUTION" in console
+    assert "D1L_MAP_TILE_ATTRIBUTION" in console
     assert "download_supported = connectivity.wifi_build_enabled && cache_ready" in console
     assert "live_network_download = download_supported && connectivity.wifi_connected" in console
-    assert "cmd_storage_map_tile_download" in console
-    assert "d1l_map_tile_store_download(" in console
+    assert "cmd_map_tiles_status" in console
+    assert "d1l_map_view_service_status(&status)" in console
+    assert "cmd_storage_map_tile_download" not in console
     assert '\\"public_rf_tx\\":false,\\"formats_sd\\":false' in console
 
 
@@ -642,17 +644,23 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
 
     assert "D1L_MAP_TILE_CANARY_TOKEN_MAX 31U" in store_header
     assert "D1L_MAP_TILE_ZOOM_MAX 18U" in store_header
-    assert 'D1L_MAP_TILE_CACHE_POLICY "sd_offline_cache_when_ready"' in store_header
-    assert 'D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/z{z}/x{x}/y{y}.tile"' in store_header
-    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "tile_render_pending"' in store_header
-    assert "tile rendering proof" in store_header
+    assert 'D1L_MAP_TILE_CACHE_POLICY "persistent_current_view_cache_min_7_days"' in store_header
+    assert 'D1L_MAP_TILE_CACHE_PATH_TEMPLATE "map/tiles/openstreetmap/z{z}/x{x}/y{y}.png"' in store_header
+    assert 'D1L_MAP_TILE_DOWNLOAD_STATE "current_view_only"' in store_header
     assert "D1L_MAP_TILE_URL_TEMPLATE_MAX 192U" in store_header
     assert "D1L_MAP_TILE_ATTRIBUTION_MAX 64U" in store_header
     assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES" in store_header
-    assert 'D1L_MAP_TILE_PROVIDER_POLICY "provider_config_required_no_public_osm_bulk"' in store_header
-    assert "d1l_map_tile_provider_template_allowed" in store_header
-    assert "d1l_map_tile_attribution_valid" in store_header
-    assert "d1l_map_tile_store_download" in store_header
+    assert 'D1L_MAP_TILE_SOURCE_ID "openstreetmap-standard"' in store_header
+    assert 'D1L_MAP_TILE_SOURCE_URL_TEMPLATE "https://tile.openstreetmap.org/{z}/{x}/{y}.png"' in store_header
+    assert 'D1L_MAP_TILE_USER_AGENT "MeshCore-DeskOS-D1L/1.0 (+https://github.com/n30nex/SIGUI)"' in store_header
+    assert 'D1L_MAP_TILE_ATTRIBUTION "\\xC2\\xA9 OpenStreetMap contributors"' in store_header
+    assert "D1L_MAP_TILE_MIN_CACHE_DAYS 7U" in store_header
+    assert "D1L_MAP_TILE_DOWNLOAD_MAX_BYTES (196U * 1024U)" in store_header
+    assert "d1l_map_tile_provider_template_allowed" not in store_header
+    assert "d1l_map_tile_attribution_valid" not in store_header
+    assert "d1l_map_tile_store_download" not in store_header
+    assert "d1l_map_tile_store_read" in store_header
+    assert "d1l_map_tile_store_fetch" in store_header
     assert "d1l_map_tile_store_token_valid" in store_header
     assert "d1l_map_tile_store_sd_ready" in store_header
     assert "d1l_map_tile_store_coord_valid" in store_header
@@ -660,12 +668,7 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_map_tile_store_write_canary" in store_header
     assert "d1l_map_tile_store_check_canary" in store_header
     assert "z > D1L_MAP_TILE_ZOOM_MAX" in store_source
-    assert 'strncmp(url_template, "https://", strlen("https://")) != 0' in store_source
-    assert 'strstr(url_template, "{z}")' in store_source
-    assert 'strstr(url_template, "{x}")' in store_source
-    assert 'strstr(url_template, "{y}")' in store_source
-    assert 'contains_case_insensitive(url_template, "tile.openstreetmap.org")' in store_source
-    assert 'contains_case_insensitive(url_template, "openstreetmap.org")' in store_source
+    assert "build_tile_url(D1L_MAP_TILE_SOURCE_URL_TEMPLATE" in store_source
     assert '#include "esp_http_client.h"' in store_source
     assert '#include "esp_crt_bundle.h"' in store_source
     assert ".crt_bundle_attach = esp_crt_bundle_attach" in store_source
@@ -680,7 +683,8 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "3000U" not in store_source
     assert "D1L_MAP_TILE_USER_AGENT" in store_source
     assert "map/tiles/attribution.json" in store_source
-    assert '"map/tiles/z%u/x%lu/y%lu.tile"' in store_source
+    assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.png"' in store_source
+    assert '"map/tiles/openstreetmap/z%u/x%lu/y%lu.tmp"' in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tmp" in store_source
     assert "map/tiles/z%u/x%lu/y%lu-%s.tile" in store_source
     assert "map_tile_cache_canary" in store_source
@@ -691,15 +695,16 @@ def test_storage_map_tile_canary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "D1L_RP2040_SD_" + "FORMAT_CONFIRMATION" not in store_source
     assert "cmd_storage_map_tile_canary" in console
     assert "cmd_storage_map_tile_check" in console
-    assert "cmd_storage_map_tile_download" in console
+    assert "cmd_storage_map_tile_download" not in console
+    assert "cmd_map_tiles_status" in console
     assert "cmd_storage_map_policy" in console
     assert "storage map-policy" in console
     assert "map_tile_policy" in console
     assert "d1l_map_tile_store_path(0U, 0U, 0U" in console
     assert "storage map-tile-canary <token>" in console
     assert "storage map-tile-check <token>" in console
-    assert "storage map-tile-download <z> <x> <y> <url-template> <attribution>" in console
-    assert "d1l_map_tile_store_download" in console
+    assert "storage map-tile-download" not in console
+    assert "d1l_map_view_service_status(&status)" in console
     assert "d1l_map_tile_store_write_canary" in console
     assert "d1l_map_tile_store_check_canary" in console
     assert "Map tile SD cache canary committed" in console
