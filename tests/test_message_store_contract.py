@@ -18,21 +18,49 @@ def test_public_message_store_is_bounded_and_retained_blob_store_backed():
     assert "D1L_MESSAGE_STORE_CAPACITY 16U" in header
     assert "D1L_MESSAGE_MAX_CHARS 138U" in header
     assert "D1L_MESSAGE_TEXT_LEN (D1L_MESSAGE_MAX_CHARS + 1U)" in header
-    assert "D1L_MESSAGE_STORE_SCHEMA 2U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA 4U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA_V3 3U" in source
+    assert "D1L_MESSAGE_STORE_SCHEMA_V2 2U" in source
     assert "D1L_MESSAGE_STORE_SCHEMA_V1 1U" in source
-    assert "load_v1_blob_into_ram" in source
+    assert "convert_v2_blob" in source
+    assert "convert_v1_blob" in source
+    assert "convert_v3_blob" in source
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_NAMESPACE "d1l_messages"' in blob_store
     assert 'D1L_RETAINED_PUBLIC_MESSAGE_SD_DIR "stores/messages/public"' in blob_store
     assert "D1L_MESSAGE_STORE_ID D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert '#include "storage/retained_blob_store.h"' in source
-    assert "d1l_retained_blob_store_read(D1L_MESSAGE_STORE_ID" in source
-    assert "d1l_retained_blob_store_read_fallback(D1L_MESSAGE_STORE_ID" in source
-    assert "d1l_retained_blob_store_write(D1L_MESSAGE_STORE_ID" in source
-    assert "d1l_retained_blob_store_erase(D1L_MESSAGE_STORE_ID" in source
-    assert "d1l_retained_blob_store_uses_sd(D1L_MESSAGE_STORE_ID)" in source
+    assert "d1l_retained_blob_store_backend_state(D1L_MESSAGE_STORE_ID" in source
+    assert "d1l_retained_blob_store_read_sd_primary(" in source
+    assert "d1l_retained_blob_store_read_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in source
+    assert "d1l_retained_blob_store_write_nvs_fallback(" in source
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" not in source
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" not in source
+    assert "s_epoch" in source
+    assert "s_content_revision" in source
+    assert "s_clear_lineage" in source
+    assert "new_clear_lineage" in source
+    assert "esp_random()" in source
+    assert "s_device_lineage_authoritative" in source
+    assert "clear_lineage" in header
+    assert "bool loaded" in header
+    assert ".loaded = s_loaded" in source
+    assert "sd_backend_generation_matches" in source
+    assert "reconcile_sd_primary" in source
+    assert "s_sd_reconcile_pending" in source
+    assert "s_sd_primary_dirty" in source
+    assert "s_nvs_fallback_dirty" in source
+    assert "s_persistence_stale_snapshot_count" in source
+    assert "esp_err_t d1l_message_store_flush(void)" in source
+    assert "esp_err_t d1l_message_store_flush_if_due(void)" in source
+    assert "static d1l_store_lock_t s_init_recovery_lock" in source
+    assert "static esp_err_t ensure_store_initialized(void)" in source
+    assert "d1l_store_lock_take(&s_init_recovery_lock)" in source
+    assert "d1l_retained_blob_store_write(D1L_MESSAGE_STORE_ID" not in source
     assert "nvs_get_blob" not in source
     assert "nvs_set_blob" not in source
     assert "static d1l_message_store_blob_t s_blob_scratch" in source
+    assert "d1l_message_entry_t incoming[D1L_MESSAGE_STORE_CAPACITY]" not in source
     assert "d1l_message_store_copy_recent" in source
     assert "d1l_message_store_query_page" in header
     assert "d1l_message_store_query" in header

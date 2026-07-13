@@ -9,8 +9,10 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 #include "hal/indicator_pins.h"
+#include "hal/rp2040_file_reply.h"
 #include "hal/rp2040_sd_reply.h"
 #include "tca9535.h"
 
@@ -41,6 +43,8 @@ static d1l_rp2040_status_t s_status = {
 static uint16_t s_file_request_id = 1;
 static StaticSemaphore_t s_bridge_mutex_storage;
 static SemaphoreHandle_t s_bridge_mutex;
+static TaskHandle_t s_bridge_quiesce_owner;
+static portMUX_TYPE s_bridge_quiesce_owner_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void ensure_bridge_mutex(void)
 {
@@ -71,6 +75,79 @@ static void give_bridge_lock(void)
     if (s_bridge_mutex != NULL) {
         xSemaphoreGive(s_bridge_mutex);
     }
+}
+
+static TickType_t bridge_quiesce_remaining_ticks(int64_t started_us,
+                                                  uint32_t timeout_ms)
+{
+    const int64_t elapsed_us = esp_timer_get_time() - started_us;
+    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
+    if (elapsed_us >= timeout_us) {
+        return 0;
+    }
+    const uint32_t remaining_ms =
+        (uint32_t)((timeout_us - elapsed_us + 999LL) / 1000LL);
+    TickType_t ticks = pdMS_TO_TICKS(remaining_ms);
+    return ticks == 0U ? 1U : ticks;
+}
+
+esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t started_us = esp_timer_get_time();
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    const bool already_quiesced = s_bridge_quiesce_owner != NULL;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (already_quiesced) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ensure_bridge_mutex();
+    if (!s_bridge_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    TickType_t ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
+    if (ticks == 0U || xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    /* esp_restart_noos waits for every enabled UART without an application
+     * timeout. Prove TX idle while this lock excludes all new bridge writes. */
+    const uart_port_t uart_port = (uart_port_t)s_status.uart_port;
+    if (uart_is_driver_installed(uart_port)) {
+        ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
+        if (ticks == 0U) {
+            give_bridge_lock();
+            return ESP_ERR_TIMEOUT;
+        }
+        const esp_err_t tx_idle_ret = uart_wait_tx_done(uart_port, ticks);
+        if (tx_idle_ret != ESP_OK) {
+            give_bridge_lock();
+            return tx_idle_ret;
+        }
+    }
+    if (bridge_quiesce_remaining_ticks(started_us, timeout_ms) == 0U) {
+        give_bridge_lock();
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    s_bridge_quiesce_owner = xTaskGetCurrentTaskHandle();
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    return ESP_OK;
+}
+
+void d1l_rp2040_bridge_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
+    if (s_bridge_quiesce_owner != current) {
+        portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+        return;
+    }
+    s_bridge_quiesce_owner = NULL;
+    portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
+    give_bridge_lock();
 }
 
 static esp_err_t pulse_rp2040_reset(const d1l_rp2040_pins_t *pins, uint32_t hold_ms)
@@ -169,32 +246,6 @@ static bool parse_u32_token(const char *line, const char *key, uint32_t *out_val
             return false;
         }
         parsed = parsed * 10U + digit;
-    }
-    *out_value = parsed;
-    return true;
-}
-
-static bool parse_hex_u32_token(const char *line, const char *key, uint32_t *out_value)
-{
-    const char *value = NULL;
-    size_t value_len = 0;
-    if (!out_value || !token_value_span(line, key, &value, &value_len) || value_len != 8U) {
-        return false;
-    }
-    uint32_t parsed = 0;
-    for (size_t i = 0; i < value_len; ++i) {
-        char c = value[i];
-        uint32_t digit = 0;
-        if (c >= '0' && c <= '9') {
-            digit = (uint32_t)(c - '0');
-        } else if (c >= 'A' && c <= 'F') {
-            digit = (uint32_t)(c - 'A' + 10);
-        } else if (c >= 'a' && c <= 'f') {
-            digit = (uint32_t)(c - 'a' + 10);
-        } else {
-            return false;
-        }
-        parsed = (parsed << 4) | digit;
     }
     *out_value = parsed;
     return true;
@@ -322,36 +373,6 @@ static void copy_limited_text(char *dest, size_t dest_size, const char *src)
     dest[copy_len] = '\0';
 }
 
-static esp_err_t map_file_error(const char *err)
-{
-    if (!err || err[0] == '\0') {
-        return ESP_FAIL;
-    }
-    if (strcmp(err, "no_card") == 0 || strcmp(err, "not_found") == 0) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (strcmp(err, "not_ready") == 0 || strcmp(err, "exists") == 0 ||
-        strcmp(err, "is_dir") == 0) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (strcmp(err, "bad_path") == 0 || strcmp(err, "bad_request") == 0 ||
-        strcmp(err, "bad_value") == 0 || strcmp(err, "decode_failed") == 0 ||
-        strcmp(err, "crc_mismatch") == 0) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    if (strcmp(err, "range") == 0 || strcmp(err, "too_large") == 0 ||
-        strcmp(err, "line_too_long") == 0) {
-        return ESP_ERR_INVALID_SIZE;
-    }
-    if (strcmp(err, "unsupported_op") == 0) {
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-    if (strcmp(err, "timeout") == 0) {
-        return ESP_ERR_TIMEOUT;
-    }
-    return ESP_FAIL;
-}
-
 static bool is_path_char(char c)
 {
     return (c >= 'A' && c <= 'Z') ||
@@ -444,58 +465,6 @@ static bool base64url_encode(const uint8_t *data, size_t len, char *out, size_t 
     }
     out[used] = '\0';
     return used == encoded_len;
-}
-
-static int base64url_value(char c)
-{
-    if (c >= 'A' && c <= 'Z') {
-        return c - 'A';
-    }
-    if (c >= 'a' && c <= 'z') {
-        return c - 'a' + 26;
-    }
-    if (c >= '0' && c <= '9') {
-        return c - '0' + 52;
-    }
-    if (c == '-') {
-        return 62;
-    }
-    if (c == '_') {
-        return 63;
-    }
-    return -1;
-}
-
-static bool base64url_decode(const char *input, uint8_t *out, size_t out_size,
-                             size_t *out_len)
-{
-    if (!input || !out || !out_len) {
-        return false;
-    }
-    const size_t input_len = strlen(input);
-    if ((input_len % 4U) == 1U) {
-        return false;
-    }
-    uint32_t value = 0;
-    int value_bits = -8;
-    size_t used = 0;
-    for (size_t i = 0; i < input_len; ++i) {
-        const int part = base64url_value(input[i]);
-        if (part < 0) {
-            return false;
-        }
-        value = (value << 6) | (uint32_t)part;
-        value_bits += 6;
-        if (value_bits >= 0) {
-            if (used >= out_size) {
-                return false;
-            }
-            out[used++] = (uint8_t)((value >> value_bits) & 0xFFU);
-            value_bits -= 8;
-        }
-    }
-    *out_len = used;
-    return true;
 }
 
 static bool encode_path(const char *path, char *encoded, size_t encoded_size)
@@ -766,84 +735,6 @@ static uint16_t next_file_request_id(void)
     return id;
 }
 
-static esp_err_t parse_file_line(const char *line, uint16_t expected_id,
-                                 const char *expected_op, uint8_t *out_data,
-                                 size_t out_data_size,
-                                 d1l_rp2040_file_result_t *result)
-{
-    if (!line || !expected_op || !result || !line_has_prefix(line, D1L_RP2040_FILE_PREFIX)) {
-        return ESP_FAIL;
-    }
-
-    init_file_result(result, ESP_OK);
-    result->protocol_supported = true;
-    uint32_t version = 0;
-    uint32_t request_id = 0;
-    if (!parse_u32_token(line, "v", &version) ||
-        version != D1L_RP2040_FILE_PROTOCOL_VERSION ||
-        !parse_u32_token(line, "id", &request_id) ||
-        request_id != expected_id ||
-        !parse_bool_token(line, "ok", &result->ok)) {
-        result->last_error = ESP_FAIL;
-        snprintf(result->err, sizeof(result->err), "bad_response");
-        snprintf(result->note, sizeof(result->note), "bad_response");
-        return ESP_FAIL;
-    }
-    result->request_id = (uint16_t)request_id;
-    parse_word_token(line, "op", result->op, sizeof(result->op));
-    parse_word_token(line, "err", result->err, sizeof(result->err));
-    parse_word_token(line, "note", result->note, sizeof(result->note));
-    if (strcmp(result->op, expected_op) != 0) {
-        result->last_error = ESP_FAIL;
-        snprintf(result->err, sizeof(result->err), "op_mismatch");
-        snprintf(result->note, sizeof(result->note), "op_mismatch");
-        return ESP_FAIL;
-    }
-    if (!result->ok) {
-        result->last_error = map_file_error(result->err);
-        return result->last_error;
-    }
-
-    if (strcmp(expected_op, "stat") == 0) {
-        bool exists = false;
-        (void)parse_bool_token(line, "exists", &exists);
-        result->exists = exists;
-        char kind[8] = {0};
-        parse_word_token(line, "kind", kind, sizeof(kind));
-        result->is_directory = (strcmp(kind, "dir") == 0);
-        (void)parse_u32_token(line, "size", &result->size);
-    } else if (strcmp(expected_op, "read") == 0) {
-        (void)parse_u32_token(line, "off", &result->offset);
-        (void)parse_u32_token(line, "len", &result->length);
-        (void)parse_bool_token(line, "eof", &result->eof);
-        if (result->length > out_data_size || result->length > D1L_RP2040_FILE_CHUNK_MAX ||
-            !out_data) {
-            result->last_error = ESP_ERR_INVALID_SIZE;
-            return result->last_error;
-        }
-        char encoded[D1L_RP2040_DATA64_MAX + 1U];
-        if (!copy_token_value(line, "data", encoded, sizeof(encoded)) ||
-            !parse_hex_u32_token(line, "crc", &result->crc32)) {
-            result->last_error = ESP_FAIL;
-            return result->last_error;
-        }
-        size_t decoded_len = 0;
-        if (!base64url_decode(encoded, out_data, out_data_size, &decoded_len) ||
-            decoded_len != result->length ||
-            crc32_bytes(out_data, decoded_len) != result->crc32) {
-            result->last_error = ESP_FAIL;
-            return result->last_error;
-        }
-    } else if (strcmp(expected_op, "write") == 0 || strcmp(expected_op, "append") == 0) {
-        (void)parse_u32_token(line, "off", &result->offset);
-        (void)parse_u32_token(line, "len", &result->length);
-        (void)parse_u32_token(line, "size", &result->size);
-    }
-
-    result->last_error = ESP_OK;
-    return ESP_OK;
-}
-
 static esp_err_t send_file_command(const char *command, size_t command_len,
                                    uint16_t request_id, const char *expected_op,
                                    uint8_t *out_data, size_t out_data_size,
@@ -871,7 +762,8 @@ static esp_err_t send_file_command(const char *command, size_t command_len,
                  ret == ESP_ERR_TIMEOUT ? "timeout" : "query_failed");
         return ret;
     }
-    ret = parse_file_line(line, request_id, expected_op, out_data, out_data_size, out_result);
+    ret = d1l_rp2040_file_reply_parse(
+        line, request_id, expected_op, out_data, out_data_size, out_result);
     out_result->response_truncated = truncated;
     return ret;
 }
@@ -1383,8 +1275,11 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path,
         init_file_result(out_result, ESP_ERR_INVALID_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
-    return send_file_command(command, (size_t)command_len, request_id, "read",
-                             out_data, max_len, out_result, timeout_ms);
+    const esp_err_t ret = send_file_command(
+        command, (size_t)command_len, request_id, "read",
+        out_data, max_len, out_result, timeout_ms);
+    return ret == ESP_OK ? d1l_rp2040_file_reply_bind_read(
+                              out_result, offset, max_len) : ret;
 }
 
 esp_err_t d1l_rp2040_bridge_file_write(const char *path,
@@ -1420,8 +1315,11 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path,
         init_file_result(out_result, ESP_ERR_INVALID_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
-    return send_file_command(command, (size_t)command_len, request_id, "write",
-                             NULL, 0, out_result, timeout_ms);
+    const esp_err_t ret = send_file_command(
+        command, (size_t)command_len, request_id, "write",
+        NULL, 0, out_result, timeout_ms);
+    return ret == ESP_OK ? d1l_rp2040_file_reply_bind_write(
+                              out_result, offset, len) : ret;
 }
 
 esp_err_t d1l_rp2040_bridge_file_append(const char *path,
@@ -1454,8 +1352,11 @@ esp_err_t d1l_rp2040_bridge_file_append(const char *path,
         init_file_result(out_result, ESP_ERR_INVALID_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
-    return send_file_command(command, (size_t)command_len, request_id, "append",
-                             NULL, 0, out_result, timeout_ms);
+    const esp_err_t ret = send_file_command(
+        command, (size_t)command_len, request_id, "append",
+        NULL, 0, out_result, timeout_ms);
+    return ret == ESP_OK ? d1l_rp2040_file_reply_bind_append(
+                              out_result, len) : ret;
 }
 
 esp_err_t d1l_rp2040_bridge_file_delete(const char *path,

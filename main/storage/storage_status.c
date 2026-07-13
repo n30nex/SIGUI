@@ -11,6 +11,7 @@
 #include "freertos/task.h"
 
 #include "hal/rp2040_bridge.h"
+#include "mesh/route_store_worker.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/retained_blob_store.h"
@@ -27,6 +28,7 @@
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS 8U
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS 500U
 #define D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U
+#define D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS 250U
 
 typedef enum {
     D1L_STORAGE_MANAGER_BRIDGE_WAIT,
@@ -50,6 +52,8 @@ static portMUX_TYPE s_manager_pause_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_manager_control_lock = portMUX_INITIALIZER_UNLOCKED;
 static StaticSemaphore_t s_manager_sequence_mutex_storage;
 static SemaphoreHandle_t s_manager_sequence_mutex;
+static TaskHandle_t s_manager_quiesce_owner;
+static portMUX_TYPE s_manager_quiesce_owner_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool s_force_nvs;
 static uint32_t s_manager_initial_ping_timeouts;
 static bool s_manager_bridge_response_seen;
@@ -135,11 +139,23 @@ static void ensure_manager_sequence_mutex(void)
     }
 }
 
-static bool manager_sequence_try_take(void)
+static esp_err_t manager_sequence_take(uint32_t timeout_ms)
 {
     ensure_manager_sequence_mutex();
-    return s_manager_sequence_mutex &&
-           xSemaphoreTake(s_manager_sequence_mutex, 0) == pdTRUE;
+    if (!s_manager_sequence_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (timeout_ms > 0U && ticks == 0U) {
+        ticks = 1U;
+    }
+    return xSemaphoreTake(s_manager_sequence_mutex, ticks) == pdTRUE ?
+        ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static bool manager_sequence_try_take(void)
+{
+    return manager_sequence_take(0U) == ESP_OK;
 }
 
 static void manager_sequence_give(void)
@@ -325,6 +341,12 @@ static void set_store_backends(d1l_storage_status_t *status)
         "sd_diagnostic_exports_ready" : "serial";
     status->data_enabled = any_retained_sd;
     refresh_retained_sd_health(status);
+}
+
+static void pause_retained_sd_backend_for_manager_failure(void)
+{
+    d1l_retained_blob_store_note_sd_backend(false, false, false, 0U, 0U, 0U);
+    set_store_backends(&s_status);
 }
 
 static void set_default_actions(d1l_storage_status_t *status)
@@ -578,6 +600,28 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     }
 }
 
+static void invalidate_stale_bridge_operational_state(void)
+{
+    /* Preserve last-confirmed capacity, filesystem, and probe diagnostics,
+     * but never expose cached protocol or file capabilities after the bounded
+     * reconnect grace expires. Presence remains a last-confirmed diagnostic;
+     * it is explicitly marked stale instead of being reported as removal. */
+    s_status.rp2040_sd_protocol_supported = false;
+    s_status.sd_presence_stale = s_status.sd_present;
+    s_status.sd_mounted = false;
+    s_status.sd_data_root_ready = false;
+    s_status.sd_needs_fat32 = false;
+    s_status.setup_required = false;
+    s_status.setup_supported = false;
+    s_status.file_ops_supported = false;
+    s_status.atomic_rename_supported = false;
+    s_status.file_line_max = 0U;
+    s_status.file_chunk_max = 0U;
+    s_status.path_max = 0U;
+    s_status.sd_state = s_status.rp2040_bridge_ready ?
+                        "protocol_pending" : "rp2040_unavailable";
+}
+
 static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
 {
     s_status.bridge_status_refresh_failures =
@@ -586,16 +630,18 @@ static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
     s_status.bridge_status_stale =
         d1l_storage_status_policy_is_stale(
             s_status.bridge_status_refresh_failures);
-    if (!d1l_storage_status_policy_allows_cached_io(
-            s_status.bridge_status_refresh_failures)) {
+    const bool allows_cached_io =
+        d1l_storage_status_policy_allows_cached_io(
+            s_status.bridge_status_refresh_failures);
+    if (!allows_cached_io) {
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
+        invalidate_stale_bridge_operational_state();
     }
     s_status.response_truncated = response_truncated;
     s_status.last_error = ret;
     s_status.setup_action = "wait_for_storage_reconnect";
-    s_status.note = d1l_storage_status_policy_allows_cached_io(
-                        s_status.bridge_status_refresh_failures) ?
+    s_status.note = allows_cached_io ?
         "Storage status is reconnecting; the last confirmed SD state remains active during a bounded grace period" :
         "Storage status did not recover; SD file access is paused and onboard fallback remains active until a valid status reply";
 }
@@ -709,16 +755,37 @@ esp_err_t d1l_storage_status_refresh(uint32_t timeout_ms)
     return ret;
 }
 
-static esp_err_t poll_mount_pending(void)
+static uint32_t storage_deadline_remaining_ms(int64_t deadline_us)
+{
+    const int64_t remaining_us = deadline_us - esp_timer_get_time();
+    if (remaining_us <= 0) {
+        return 0U;
+    }
+    return (uint32_t)((remaining_us + 999LL) / 1000LL);
+}
+
+static esp_err_t poll_mount_pending_until(int64_t deadline_us)
 {
     esp_err_t last_ret = ESP_OK;
     for (uint32_t attempt = 0; attempt < D1L_STORAGE_BOOT_POLL_ATTEMPTS; ++attempt) {
         if (strcmp(s_status.sd_state, "mount_pending") != 0) {
             break;
         }
-        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_BOOT_POLL_INTERVAL_MS));
-        esp_err_t poll_ret =
-            d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS);
+        uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t delay_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_INTERVAL_MS ?
+            remaining_ms : D1L_STORAGE_BOOT_POLL_INTERVAL_MS;
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+
+        remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t poll_timeout_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_BOOT_POLL_TIMEOUT_MS;
+        esp_err_t poll_ret = d1l_storage_status_refresh(poll_timeout_ms);
         if (poll_ret != ESP_OK && poll_ret != ESP_ERR_TIMEOUT) {
             return poll_ret;
         }
@@ -729,6 +796,15 @@ static esp_err_t poll_mount_pending(void)
         return ESP_OK;
     }
     return last_ret;
+}
+
+static esp_err_t poll_mount_pending(void)
+{
+    const uint32_t attempt_budget_ms =
+        D1L_STORAGE_BOOT_POLL_INTERVAL_MS + D1L_STORAGE_BOOT_POLL_TIMEOUT_MS;
+    const int64_t deadline_us = esp_timer_get_time() +
+        ((int64_t)D1L_STORAGE_BOOT_POLL_ATTEMPTS * attempt_budget_ms * 1000LL);
+    return poll_mount_pending_until(deadline_us);
 }
 
 static bool remount_timeout_needs_bridge_reset(void)
@@ -756,13 +832,18 @@ static bool request_bridge_reset_remount_recovery(void)
     return true;
 }
 
-static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
+static esp_err_t reset_bridge_and_remount_blocking(int64_t deadline_us)
 {
     if (!manager_control_begin_manual_reset()) {
         return ESP_ERR_INVALID_STATE;
     }
     set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);
 
+    const uint32_t reset_duration_ms = D1L_STORAGE_MANAGER_RESET_HOLD_MS +
+                                       D1L_STORAGE_MANAGER_RESET_SETTLE_MS;
+    if (storage_deadline_remaining_ms(deadline_us) <= reset_duration_ms) {
+        return ESP_ERR_TIMEOUT;
+    }
     esp_err_t ret =
         d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS,
                                 D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
@@ -771,19 +852,37 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     if (ret != ESP_OK) {
         return ret;
     }
+    if (storage_deadline_remaining_ms(deadline_us) == 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
 
     set_manager_state(D1L_STORAGE_MANAGER_PING);
     for (uint32_t attempt = 0; attempt < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS;
          ++attempt) {
+        uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+        if (remaining_ms == 0U) {
+            return ESP_ERR_TIMEOUT;
+        }
+        const uint32_t ping_timeout_ms =
+            remaining_ms < D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS;
         d1l_rp2040_ping_t ping = {0};
-        ret = d1l_rp2040_bridge_ping(&ping,
-                                      D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+        ret = d1l_rp2040_bridge_ping(&ping, ping_timeout_ms);
         if (ret == ESP_OK) {
             d1l_storage_status_note_valid_bridge_response();
             break;
         }
         d1l_storage_status_note_rp2040(ret);
-        vTaskDelay(pdMS_TO_TICKS(D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS));
+        if (attempt + 1U < D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS) {
+            remaining_ms = storage_deadline_remaining_ms(deadline_us);
+            if (remaining_ms == 0U) {
+                return ESP_ERR_TIMEOUT;
+            }
+            const uint32_t delay_ms =
+                remaining_ms < D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS ?
+                remaining_ms : D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS;
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        }
     }
     if (ret != ESP_OK) {
         return ret;
@@ -791,9 +890,13 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     d1l_storage_status_note_rp2040(ESP_OK);
 
     set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
-    ret = storage_status_mount(timeout_ms, true);
+    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    if (remaining_ms == 0U) {
+        return ESP_ERR_TIMEOUT;
+    }
+    ret = storage_status_mount(remaining_ms, true);
     if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-        esp_err_t poll_ret = poll_mount_pending();
+        esp_err_t poll_ret = poll_mount_pending_until(deadline_us);
         if (poll_ret != ESP_OK && ret == ESP_OK) {
             ret = poll_ret;
         }
@@ -801,7 +904,8 @@ static esp_err_t reset_bridge_and_remount_blocking(uint32_t timeout_ms)
     return ret;
 }
 
-static void classify_storage_manager_state(esp_err_t ret)
+static void classify_storage_manager_state(
+    esp_err_t ret, bool retained_backend_paused_for_failure)
 {
     const bool force_nvs = manager_force_nvs_enabled();
     s_status.force_nvs = force_nvs;
@@ -814,6 +918,17 @@ static void classify_storage_manager_state(esp_err_t ret)
     if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
         set_manager_state(D1L_STORAGE_MANAGER_ERROR_BACKOFF);
         s_status.manager_backoff_ms = D1L_STORAGE_MANAGER_BACKOFF_MS;
+        return;
+    }
+
+    /* Cached card fields are useful diagnostics but cannot prove a safe
+     * retained-store handoff after a failed manager exchange. The local
+     * pause receipt covers the first timeout even when the global stale
+     * threshold has not yet been reached; do not mutate that truthful flag. */
+    if ((retained_backend_paused_for_failure && ret == ESP_ERR_TIMEOUT) ||
+        s_status.bridge_status_stale) {
+        set_manager_state(D1L_STORAGE_MANAGER_STATUS);
+        s_status.manager_backoff_ms = 0;
         return;
     }
 
@@ -875,7 +990,7 @@ static void storage_manager_run_once_owned(void)
                                     D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
         d1l_storage_status_note_rp2040(reset_ret);
         if (reset_ret != ESP_OK) {
-            classify_storage_manager_state(reset_ret);
+            classify_storage_manager_state(reset_ret, false);
             return;
         }
         auto_reset_performed = true;
@@ -899,7 +1014,7 @@ static void storage_manager_run_once_owned(void)
                                     D1L_STORAGE_MANAGER_RESET_SETTLE_MS);
         d1l_storage_status_note_rp2040(reset_ret);
         if (reset_ret != ESP_OK) {
-            classify_storage_manager_state(reset_ret);
+            classify_storage_manager_state(reset_ret, false);
             return;
         }
         manager_control_satisfy_reset();
@@ -924,7 +1039,8 @@ static void storage_manager_run_once_owned(void)
                 return;
             }
             note_rp2040_exchange_failure(ret, false);
-            classify_storage_manager_state(ret);
+            pause_retained_sd_backend_for_manager_failure();
+            classify_storage_manager_state(ret, true);
             return;
         }
         d1l_storage_status_note_valid_bridge_response();
@@ -967,7 +1083,11 @@ static void storage_manager_run_once_owned(void)
         }
     }
 
-    classify_storage_manager_state(ret);
+    const bool retained_backend_paused_for_failure = ret != ESP_OK;
+    if (retained_backend_paused_for_failure) {
+        pause_retained_sd_backend_for_manager_failure();
+    }
+    classify_storage_manager_state(ret, retained_backend_paused_for_failure);
 }
 
 static void storage_manager_run_once(void)
@@ -975,8 +1095,30 @@ static void storage_manager_run_once(void)
     if (!manager_sequence_try_take()) {
         return;
     }
+
+    /* Match the serial remount lock order. No background status/mount/reset
+     * exchange may race Public/DM/packet/route reconciliation on the same
+     * RP2040 bridge. Routine polling waits for the current worker pass instead
+     * of cancelling it: packet-primary reads can exceed the two-second manager
+     * cadence, so preempting every pass would restart reconciliation forever
+     * and prevent the route store later in the pass from running. Urgent serial
+     * remount/reboot paths retain the preemptive quiesce API. */
+    const esp_err_t retained_quiesce_ret =
+        d1l_route_store_worker_quiesce_wait_begin(
+            D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS);
+    if (retained_quiesce_ret != ESP_OK) {
+        s_status.last_error = retained_quiesce_ret;
+        s_status.manager_backoff_ms = 0;
+        s_status.setup_action = "wait_for_retained_worker";
+        s_status.note =
+            "Storage manager is waiting for retained persistence to quiesce before bridge access";
+        set_manager_state(D1L_STORAGE_MANAGER_STATUS);
+        manager_sequence_give();
+        return;
+    }
     storage_manager_run_once_owned();
     manager_control_finish_reset_recovery();
+    d1l_route_store_worker_quiesce_end();
     manager_sequence_give();
 }
 
@@ -1108,6 +1250,53 @@ void d1l_storage_manager_resume(void)
     portEXIT_CRITICAL(&s_manager_pause_lock);
 }
 
+esp_err_t d1l_storage_manager_quiesce_begin(uint32_t timeout_ms)
+{
+    if (timeout_ms == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    const bool already_quiesced = s_manager_quiesce_owner != NULL;
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    if (already_quiesced) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ensure_manager_sequence_mutex();
+    if (!s_manager_sequence_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    const uint32_t pause_ms = timeout_ms > UINT32_MAX - 1000U ?
+                                  UINT32_MAX : timeout_ms + 1000U;
+    d1l_storage_manager_pause(pause_ms);
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (ticks == 0) {
+        ticks = 1;
+    }
+    if (xSemaphoreTake(s_manager_sequence_mutex, ticks) != pdTRUE) {
+        d1l_storage_manager_resume();
+        return ESP_ERR_TIMEOUT;
+    }
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    s_manager_quiesce_owner = xTaskGetCurrentTaskHandle();
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    return ESP_OK;
+}
+
+void d1l_storage_manager_quiesce_end(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    portENTER_CRITICAL(&s_manager_quiesce_owner_lock);
+    if (s_manager_quiesce_owner != current) {
+        portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+        return;
+    }
+    s_manager_quiesce_owner = NULL;
+    portEXIT_CRITICAL(&s_manager_quiesce_owner_lock);
+    manager_sequence_give();
+    d1l_storage_manager_resume();
+}
+
 void d1l_storage_manager_force_nvs(bool force_nvs)
 {
     portENTER_CRITICAL(&s_manager_control_lock);
@@ -1162,11 +1351,21 @@ esp_err_t d1l_storage_status_mount(uint32_t timeout_ms)
     return storage_status_mount(timeout_ms, false);
 }
 
-esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
+esp_err_t d1l_storage_status_remount_blocking(
+    uint32_t timeout_ms, bool *out_retained_worker_quiesce_acquired)
 {
+    if (out_retained_worker_quiesce_acquired) {
+        *out_retained_worker_quiesce_acquired = false;
+    }
     if (!s_status.initialized) {
         (void)d1l_storage_status_init();
     }
+    if (timeout_ms == 0U) {
+        s_status.last_error = ESP_ERR_INVALID_ARG;
+        return ESP_ERR_INVALID_ARG;
+    }
+    const int64_t deadline_us = esp_timer_get_time() +
+                                ((int64_t)timeout_ms * 1000LL);
 
     if (!s_status.rp2040_bridge_required) {
         s_status.last_error = ESP_ERR_NOT_SUPPORTED;
@@ -1174,11 +1373,27 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
     }
 
     /* The serial blocking path and background manager share one high-level
-     * owner. A command racing an active manager recovery reports busy instead
-     * of starting a second reset/remount sequence. */
-    if (!manager_sequence_try_take()) {
-        s_status.last_error = ESP_ERR_INVALID_STATE;
-        return ESP_ERR_INVALID_STATE;
+     * owner. Wait within the command's existing absolute deadline so a
+     * periodic manager cycle cannot make an otherwise healthy remount fail
+     * merely because it owns the sequence at that instant. */
+    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    const esp_err_t manager_sequence_ret = remaining_ms > 0U ?
+        manager_sequence_take(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (manager_sequence_ret != ESP_OK) {
+        s_status.last_error = manager_sequence_ret;
+        return manager_sequence_ret;
+    }
+
+    remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    const esp_err_t retained_quiesce_ret = remaining_ms > 0U ?
+        d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (retained_quiesce_ret != ESP_OK) {
+        s_status.last_error = retained_quiesce_ret;
+        manager_sequence_give();
+        return retained_quiesce_ret;
+    }
+    if (out_retained_worker_quiesce_acquired) {
+        *out_retained_worker_quiesce_acquired = true;
     }
 
     portENTER_CRITICAL(&s_manager_control_lock);
@@ -1191,19 +1406,22 @@ esp_err_t d1l_storage_status_remount_blocking(uint32_t timeout_ms)
     d1l_storage_status_note_rp2040(ESP_OK);
 
     set_manager_state(D1L_STORAGE_MANAGER_MOUNT);
-    esp_err_t ret = storage_status_mount(timeout_ms, true);
+    remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    esp_err_t ret = remaining_ms > 0U ?
+        storage_status_mount(remaining_ms, true) : ESP_ERR_TIMEOUT;
     if (ret == ESP_OK || ret == ESP_ERR_TIMEOUT) {
-        esp_err_t poll_ret = poll_mount_pending();
+        esp_err_t poll_ret = poll_mount_pending_until(deadline_us);
         if (poll_ret != ESP_OK && ret == ESP_OK) {
             ret = poll_ret;
         }
     }
     if (ret == ESP_ERR_TIMEOUT && remount_timeout_needs_bridge_reset()) {
-        ret = reset_bridge_and_remount_blocking(timeout_ms);
+        ret = reset_bridge_and_remount_blocking(deadline_us);
     }
 
-    classify_storage_manager_state(ret);
+    classify_storage_manager_state(ret, false);
     manager_control_finish_reset_recovery();
+    d1l_route_store_worker_quiesce_end();
     manager_sequence_give();
     return ret;
 }

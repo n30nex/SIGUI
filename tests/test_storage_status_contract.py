@@ -13,6 +13,7 @@ def read(rel: str) -> str:
 def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     header = read("main/storage/storage_status.h")
     source = read("main/storage/storage_status.c")
+    console = read("main/comms/usb_console.c")
     cmake = read("main/CMakeLists.txt")
     app_main = read("main/app_main.c")
     sdkconfig = read("sdkconfig.defaults")
@@ -36,6 +37,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_storage_manager_reset_bridge" in header
     assert "d1l_storage_manager_pause" in header
     assert "d1l_storage_manager_resume" in header
+    assert "d1l_storage_manager_quiesce_begin" in header
+    assert "d1l_storage_manager_quiesce_end" in header
     assert "d1l_storage_manager_force_nvs" in header
     assert "d1l_storage_status_refresh" in header
     assert "d1l_storage_status_remount_blocking" in header
@@ -168,7 +171,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_BOOT_POLL_ATTEMPTS" in source
     assert "#define D1L_STORAGE_BOOT_POLL_ATTEMPTS 40U" in source
     assert "#define D1L_STORAGE_BOOT_POLL_TIMEOUT_MS 500U" in source
-    assert "d1l_storage_status_refresh(D1L_STORAGE_BOOT_POLL_TIMEOUT_MS)" in source
+    assert "poll_timeout_ms = remaining_ms < D1L_STORAGE_BOOT_POLL_TIMEOUT_MS" in source
+    assert "d1l_storage_status_refresh(poll_timeout_ms)" in source
     assert 'strcmp(s_status.sd_state, "mount_pending")' in source
     assert "poll_mount_pending()" in boot_prepare
     assert "d1l_storage_format_sd_confirmed" not in boot_prepare
@@ -187,27 +191,50 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
         "void d1l_storage_status", 1
     )[0]
+    assert "#define D1L_STORAGE_REMOUNT_TIMEOUT_MS 60000U" in header
+    assert "D1L_STORAGE_REMOUNT_TIMEOUT_MS" in console
+    assert "const int64_t deadline_us = esp_timer_get_time()" in remount_body
+    assert "storage_deadline_remaining_ms(deadline_us)" in remount_body
     assert "d1l_storage_status_note_rp2040(ESP_OK)" in remount_body
-    assert "storage_status_mount(timeout_ms, true)" in remount_body
+    assert "d1l_route_store_worker_quiesce_begin(remaining_ms)" in remount_body
+    assert "storage_status_mount(remaining_ms, true)" in remount_body
+    assert "poll_mount_pending_until(deadline_us)" in remount_body
     assert "remount_timeout_needs_bridge_reset()" in remount_body
-    assert "reset_bridge_and_remount_blocking(timeout_ms)" in remount_body
-    assert "manager_sequence_try_take()" in remount_body
-    assert "ESP_ERR_INVALID_STATE" in remount_body
+    assert "reset_bridge_and_remount_blocking(deadline_us)" in remount_body
+    assert "manager_sequence_take(remaining_ms)" in remount_body
+    assert "manager_sequence_ret != ESP_OK" in remount_body
+    assert "return manager_sequence_ret" in remount_body
+    assert "ESP_ERR_TIMEOUT" in remount_body
     assert "manager_sequence_give()" in remount_body
     assert "request_bridge_reset_remount_recovery()" not in remount_body
     assert "d1l_storage_manager_start()" not in remount_body
-    assert "classify_storage_manager_state(ret)" in remount_body
+    assert "classify_storage_manager_state(ret, false)" in remount_body
     assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
     assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
+    sequence_take = source.split(
+        "static esp_err_t manager_sequence_take", 1
+    )[1].split("static bool manager_sequence_try_take", 1)[0]
+    assert "pdMS_TO_TICKS(timeout_ms)" in sequence_take
+    assert "xSemaphoreTake(s_manager_sequence_mutex, ticks)" in sequence_take
+    assert "ESP_ERR_TIMEOUT" in sequence_take
+    sequence_failure = remount_body.split(
+        "if (manager_sequence_ret != ESP_OK)", 1
+    )[1].split("remaining_ms = storage_deadline_remaining_ms", 1)[0]
+    assert "d1l_route_store_worker_quiesce_begin" not in sequence_failure
+    assert "storage_status_mount" not in sequence_failure
+    assert "return manager_sequence_ret" in sequence_failure
     sync_recovery_body = source.split("static esp_err_t reset_bridge_and_remount_blocking", 1)[1].split(
         "static void classify_storage_manager_state", 1
     )[0]
+    assert "storage_deadline_remaining_ms(deadline_us)" in sync_recovery_body
+    assert "reset_duration_ms" in sync_recovery_body
     assert "d1l_rp2040_bridge_reset(D1L_STORAGE_MANAGER_RESET_HOLD_MS" in sync_recovery_body
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in sync_recovery_body
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in sync_recovery_body
     assert "d1l_rp2040_bridge_ping(&ping," in sync_recovery_body
-    assert "storage_status_mount(timeout_ms, true)" in sync_recovery_body
-    assert "poll_mount_pending()" in sync_recovery_body
+    assert "d1l_rp2040_bridge_ping(&ping, ping_timeout_ms)" in sync_recovery_body
+    assert "storage_status_mount(remaining_ms, true)" in sync_recovery_body
+    assert "poll_mount_pending_until(deadline_us)" in sync_recovery_body
     manager_run_body = source.split("static void storage_manager_run_once", 1)[1].split(
         "static uint32_t storage_manager_pause_delay_ms", 1
     )[0]
@@ -344,9 +371,58 @@ def test_storage_manager_performs_one_bounded_initial_bridge_recovery_without_re
         "static uint32_t storage_manager_pause_delay_ms", 1
     )[0]
     assert "manager_sequence_try_take()" in manager_wrapper
+    assert "D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS 250U" in source
+    assert "d1l_route_store_worker_quiesce_wait_begin(" in manager_wrapper
+    assert "d1l_route_store_worker_quiesce_begin(" not in manager_wrapper
     assert "storage_manager_run_once_owned();" in manager_wrapper
     assert "manager_control_finish_reset_recovery();" in manager_wrapper
+    assert "d1l_route_store_worker_quiesce_end();" in manager_wrapper
     assert "manager_sequence_give();" in manager_wrapper
+    assert manager_wrapper.index("manager_sequence_try_take()") < manager_wrapper.index(
+        "d1l_route_store_worker_quiesce_wait_begin("
+    ) < manager_wrapper.index("storage_manager_run_once_owned();")
+    assert manager_wrapper.index("storage_manager_run_once_owned();") < manager_wrapper.index(
+        "d1l_route_store_worker_quiesce_end();"
+    ) < manager_wrapper.rindex("manager_sequence_give();")
+
+
+def test_background_manager_pauses_retained_sd_and_stays_transitional_on_stale_status():
+    source = read("main/storage/storage_status.c")
+    pause_backend = source.split(
+        "static void pause_retained_sd_backend_for_manager_failure", 1
+    )[1].split("static void set_default_actions", 1)[0]
+    classify = source.split(
+        "static void classify_storage_manager_state", 1
+    )[1].split("static void storage_manager_run_once_owned", 1)[0]
+    manager = source.split(
+        "static void storage_manager_run_once_owned", 1
+    )[1].split("static void storage_manager_run_once(void)", 1)[0]
+
+    assert "d1l_retained_blob_store_note_sd_backend(false, false, false" in pause_backend
+    assert "set_store_backends(&s_status);" in pause_backend
+    assert "retained_backend_paused_for_failure" in classify
+    non_timeout_error = classify.index("if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT)")
+    timeout_or_stale = classify.index(
+        "if ((retained_backend_paused_for_failure && ret == ESP_ERR_TIMEOUT)"
+    )
+    cached_ready = classify.index("if (storage_sd_ready_for_files())")
+    assert non_timeout_error < timeout_or_stale < cached_ready
+    stale_branch = classify[timeout_or_stale:cached_ready]
+    assert "set_manager_state(D1L_STORAGE_MANAGER_STATUS);" in stale_branch
+    assert "D1L_STORAGE_MANAGER_READY_SD" not in stale_branch
+    assert manager.count("pause_retained_sd_backend_for_manager_failure();") == 2
+    ping_failure = manager.split("note_rp2040_exchange_failure(ret, false);", 1)[1].split(
+        "return;", 1
+    )[0]
+    assert "pause_retained_sd_backend_for_manager_failure();" in ping_failure
+    final_failure = manager.split(
+        "const bool retained_backend_paused_for_failure = ret != ESP_OK;", 1
+    )[1].split(
+        "classify_storage_manager_state(ret, retained_backend_paused_for_failure);", 1
+    )[0]
+    assert "pause_retained_sd_backend_for_manager_failure();" in final_failure
+    assert "if (retained_backend_paused_for_failure)" in final_failure
+    assert "classify_storage_manager_state(ret, true);" in ping_failure
 
 
 def test_storage_status_preserves_last_confirmed_card_across_transient_bridge_failures():
@@ -393,6 +469,52 @@ def test_storage_status_preserves_last_confirmed_card_across_transient_bridge_fa
     assert "d1l_retained_blob_store_note_sd_backend(false" in source
     assert "d1l_storage_status_policy_allows_cached_io" in map_store
     assert "d1l_storage_status_policy_allows_cached_io" in export_store
+
+
+def test_stale_bridge_expiry_invalidates_operational_state_without_erasing_diagnostics():
+    source = read("main/storage/storage_status.c")
+    invalidate = source.split(
+        "static void invalidate_stale_bridge_operational_state", 1
+    )[1].split("static void note_rp2040_exchange_failure", 1)[0]
+    failure = source.split(
+        "static void note_rp2040_exchange_failure", 1
+    )[1].split("static void apply_rp2040_sd_exchange_result", 1)[0]
+
+    assert "const bool allows_cached_io" in failure
+    expired = failure.split("if (!allows_cached_io)", 1)[1].split(
+        "s_status.response_truncated", 1
+    )[0]
+    assert "d1l_retained_blob_store_note_sd_backend(false" in expired
+    assert "set_store_backends(&s_status);" in expired
+    assert "invalidate_stale_bridge_operational_state();" in expired
+
+    for field in (
+        "rp2040_sd_protocol_supported",
+        "sd_mounted",
+        "sd_data_root_ready",
+        "setup_supported",
+        "file_ops_supported",
+        "atomic_rename_supported",
+        "file_line_max",
+        "file_chunk_max",
+        "path_max",
+    ):
+        assert f"s_status.{field}" in invalidate
+    assert "s_status.sd_presence_stale = s_status.sd_present;" in invalidate
+    assert '"protocol_pending" : "rp2040_unavailable"' in invalidate
+    for diagnostic in (
+        "capacity_kb",
+        "free_kb",
+        "sd_filesystem",
+        "sd_probe_error",
+        "sd_probe_data",
+        "sd_mount_error",
+        "sd_mount_data",
+        "sd_probe_power",
+        "sd_probe_mode",
+    ):
+        assert diagnostic not in invalidate
+    assert 's_status.setup_action = "wait_for_storage_reconnect";' in failure
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
@@ -478,6 +600,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     simulator = read("tools/ui_simulator.py")
     rp2040_header = read("main/hal/rp2040_bridge.h")
     rp2040_source = read("main/hal/rp2040_bridge.c")
+    rp2040_file_reply = read("main/hal/rp2040_file_reply.c")
 
     for field in [
         "storage_sd_state",
@@ -522,7 +645,9 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "d1l_storage_status_refresh(" not in setup_body
     assert "d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
     assert "d1l_storage_status_mount(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
-    assert "d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS)" in console
+    assert "d1l_storage_status_remount_blocking(" in console
+    assert "&retained_worker_quiesce_acquired" in console
+    assert r'\"retained_worker_quiesce_acquired\":%s' in console
     assert "d1l_storage_manager_reset_bridge" in console
     assert "d1l_storage_manager_force_nvs" in console
     assert '\\"manager\\":{\\"running\\":%s' in console
@@ -625,7 +750,7 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert "DESKOS_SD_PING" in rp2040_source
     assert "DESKOS_SD_FILE" in rp2040_source
     assert "base64url_encode" in rp2040_source
-    assert "base64url_decode" in rp2040_source
+    assert "base64url_decode" in rp2040_file_reply
     assert "crc32_bytes" in rp2040_source
     assert "validate_relative_path" in rp2040_source
     assert "line_has_prefix" in rp2040_source
@@ -721,7 +846,42 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_dm_store_append" in console
     assert "d1l_route_store_upsert_observation" in console
     assert "d1l_packet_log_append_raw" in console
+    assert "d1l_packet_log_append_raw_checked" in console
+    assert "d1l_packet_log_append_raw_checked" in read("main/mesh/packet_log.h")
     assert "storage retained-canary <token>" in console
+    retained_canary_body = console.split(
+        "static void cmd_storage_retained_canary", 1
+    )[1].split("static void cmd_storage_setup", 1)[0]
+    assert "ret = d1l_packet_log_append_raw_checked(" in retained_canary_body
+    assert "strlen(text), &packet_seq)" in retained_canary_body
+    assert "const uint32_t packet_seq = d1l_packet_log_stats().next_seq" not in retained_canary_body
+    assert "esp_err_to_name(ret)" in retained_canary_body
+    assert retained_canary_body.index(
+        "d1l_storage_manager_quiesce_begin"
+    ) < retained_canary_body.index(
+        "d1l_route_store_worker_quiesce_begin"
+    ) < retained_canary_body.index(
+        "d1l_storage_status_refresh"
+    ) < retained_canary_body.index(
+        "d1l_message_store_append_public"
+    ) < retained_canary_body.index(
+        "d1l_dm_store_append"
+    ) < retained_canary_body.index(
+        "d1l_route_store_upsert_observation"
+    ) < retained_canary_body.index(
+        "d1l_packet_log_append_raw"
+    )
+    assert retained_canary_body.count("d1l_route_store_worker_quiesce_end()") == 7
+    assert retained_canary_body.count("d1l_storage_manager_quiesce_end()") == 8
+    assert retained_canary_body.rindex(
+        "d1l_route_store_worker_quiesce_end()"
+    ) < retained_canary_body.rindex(
+        "d1l_storage_manager_quiesce_end()"
+    ) < retained_canary_body.index(
+        'ok_begin("storage retained-canary")'
+    )
+    assert '\\"storage_manager_quiesced\\":true' in retained_canary_body
+    assert '\\"retained_worker_quiesced\\":true' in retained_canary_body
     assert "cmd_storage_setup" in console
     assert "storage filecanary" in runner
     assert "mesh send public" not in runner

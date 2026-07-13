@@ -20,6 +20,7 @@ idf_component_register(
         "hal/indicator_board.c"
         "hal/indicator_pins.c"
         "hal/rp2040_bridge.c"
+        "hal/rp2040_file_reply.c"
         "hal/rp2040_sd_reply.c"
         "hal/sx1262_indicator.c"
         "map/map_math.c"

@@ -372,9 +372,12 @@ def test_rp2040_bridge_runtime_removal_is_debounced_and_non_destructive():
     sketch = SKETCH.read_text(encoding="utf-8")
 
     assert "constexpr uint8_t SD_REMOVAL_DEBOUNCE_SAMPLES = 3;" in sketch
+    assert "constexpr uint16_t SD_LIVENESS_READY_WAIT_MS = 300;" in sketch
+    assert "constexpr uint16_t SD_LIVENESS_TOKEN_WAIT_MS = 300;" in sketch
     assert "detect_sample_confirms_inserted" in sketch
     assert "snapshot_detect_confirms_inserted" in sketch
     assert "s_sd_detect_inserted_signature_proven" in sketch
+    assert "mounted_card_sector0_responds" in sketch
     assert 'make_snapshot("no_card", "card_removed")' in sketch
     assert 'make_snapshot("mount_required", "card_reinserted")' in sketch
 
@@ -390,7 +393,36 @@ def test_rp2040_bridge_runtime_removal_is_debounced_and_non_destructive():
     assert status_body.index("detect_sample_confirms_inserted") < status_body.index(
         'make_snapshot("no_card", "card_removed")'
     )
+    assert status_body.index("mounted_card_sector0_responds()") < status_body.index(
+        'make_snapshot("no_card", "card_removed")'
+    )
+    liveness_body = sketch.split("bool mounted_card_sector0_responds()", 1)[1].split(
+        "SdSnapshot current_status()", 1
+    )[0]
+    assert "SPI1.beginTransaction(SPISettings(SD_SPI_HZ" in liveness_body
+    assert "sd_wait_ready(SD_LIVENESS_READY_WAIT_MS)" in liveness_body
+    assert "0x40U | 17U" in liveness_body
+    assert "SD_CMD17_SECTOR0_CRC = 0x55" in sketch
+    assert "sd_spi_transfer(SD_CMD17_SECTOR0_CRC)" in liveness_body
+    assert "millis() - token_start_ms < SD_LIVENESS_TOKEN_WAIT_MS" in liveness_body
+    assert "token == 0xFEU" in liveness_body
+    assert "i < SD_SECTOR_BYTES" in liveness_body
+    assert "sd_data_crc_update(computed_crc, value)" in liveness_body
+    assert "computed_crc == received_crc" in liveness_body
+    assert '"SD data CRC16 implementation must remain CRC-CCITT"' in sketch
+    assert "SPI1.endTransaction()" in liveness_body
+    assert "SD.open" not in liveness_body
+    assert "SD.begin" not in liveness_body
+    assert "SD.remove" not in liveness_body
+    assert "SD.rename" not in liveness_body
+    assert "SD.end" not in liveness_body
+    assert "SD.mkdir" not in liveness_body
+    assert "FILE_WRITE" not in liveness_body
     assert "s_sd_mounted = false" in status_body
+    confirmation_body = status_body.split(
+        "if (!mounted_card_sector0_responds())", 1
+    )[1].split("s_sd_removal_samples = 0;", 1)[0]
+    assert "s_sd_mounted = false" in confirmation_body
     assert "SD.end" not in status_body
     assert "SPI1.end" not in status_body
     assert "format" not in status_body.lower()
@@ -407,6 +439,13 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "if (rx.drop_until_newline)" in sketch
     assert "poll_stream(Serial1, Serial1, bridge_rx)" in sketch
     assert "poll_stream(Serial, Serial, usb_rx)" in sketch
+    assert "#ifndef NO_USB\nLineRx usb_rx = {{0}, 0, false};\n#endif" in sketch
+    assert "#ifndef NO_USB\n    Serial.begin(115200);\n#endif" in sketch
+    assert (
+        '#ifndef NO_USB\n    Serial.println("DeskOS RP2040 SD bridge ready");\n#endif'
+        in sketch
+    )
+    assert "#ifndef NO_USB\n    poll_stream(Serial, Serial, usb_rx);\n#endif" in sketch
     assert "void setup1()" in sketch
     assert "void loop1()" in sketch
     loop_body = sketch.split("void loop()", 1)[1].split("void setup1()", 1)[0]
@@ -610,7 +649,9 @@ def test_rp2040_docs_mark_ci_build_and_store_migration_pending():
     readme = README.read_text(encoding="utf-8")
 
     assert "GitHub Actions" in readme
-    assert "rp2040:rp2040:seeed_indicator_rp2040" in readme
+    assert "rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb" in readme
+    assert "1200-baud" in readme
+    assert "COM16" in readme
     assert "Do not use the Windows host for firmware compilation" in readme
     assert "Retained Public message history, DM history, route history, and packet history" in readme
     assert "keeps onboard NVS mirrors for these retained" in readme

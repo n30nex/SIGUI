@@ -880,19 +880,55 @@ def boot_prepare_payload(
         "format_allowed": False,
         "commands_safe": True,
         "scenario_passed": True,
+        "scenario_prerequisite": {"satisfied": True},
         "classification": classification,
         "storage_file_gate_ready": storage_file_gate_ready,
         "retained_store_gate_ready": retained_store_gate_ready,
         "filecanary_passed": filecanary_passed,
+        "retained_worker_quiesce_acquired": (
+            None if scenario == "rp2040-unavailable" else True
+        ),
+        "storage_remount": (
+            None
+            if scenario == "rp2040-unavailable"
+            else {
+                "schema": 1,
+                "ok": True,
+                "cmd": "storage remount",
+                "retained_worker_quiesce_acquired": True,
+            }
+        ),
         "ok": True,
         "storage_after": storage_after or {},
         "storage_setup": storage_setup,
         "health": {"ok": True},
-        "commands": ["rp2040 ping", "storage status", "storage remount", "storage status", "health"],
+        "commands": (
+            ["rp2040 ping", "storage status", "health"]
+            if scenario == "rp2040-unavailable"
+            else ["rp2040 ping", "storage status", "storage remount", "storage status", "health"]
+        ),
     }
     if commit:
         payload["firmware_commit"] = commit
     return payload
+
+
+def unavailable_storage_status() -> dict:
+    return {
+        "ok": True,
+        "cmd": "storage status",
+        "data_enabled": False,
+        "data_backend": "nvs",
+        "stores": {"messages": "nvs", "dm": "nvs", "routes": "nvs", "packets": "nvs"},
+        "sd": {
+            "state": "rp2040_unavailable",
+            "rp2040_protocol_supported": False,
+            "mounted": False,
+            "data_root_ready": False,
+            "file_ops": False,
+            "atomic_rename": False,
+        },
+    }
 
 
 def write_boot_prepare_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
@@ -962,7 +998,7 @@ def write_boot_prepare_evidence(root: Path, commit: str = COMMIT, metadata_commi
             "rp2040-unavailable",
             "bridge_unavailable_fallback",
             commit=target_commit,
-            storage_after={"ok": True, "sd": {"state": "rp2040_unavailable"}},
+            storage_after=unavailable_storage_status(),
         ),
     }
     for scenario, payload in scenarios.items():
@@ -980,6 +1016,9 @@ def write_file_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "sequence_completed": True,
+            "timed_out_command": None,
+            "unexpected_console_restart": False,
             "allow_unavailable": False,
             "canary_passed": True,
             "canary_unavailable_ok": False,
@@ -1005,15 +1044,27 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "pre_sequence_complete": True,
+            "post_sequence_complete": True,
+            "timed_out_command": None,
+            "unexpected_restart_before_reboot": False,
             "allow_unavailable": False,
             "retained_canary_passed": True,
             "filecanary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "health_ok": True,
             "reboot_command_passed": True,
+            "reboot_reset_scope": "system",
+            "reboot_connectivity_prepare": "ESP_OK",
             "reboot_route_flush": "ESP_OK",
+            "reboot_storage_manager_quiesced": True,
+            "reboot_retained_worker_quiesced": True,
+            "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
+            "post_reboot_reset_reason": "SW",
+            "reboot_nonce_proven": True,
             "reboot_proven": True,
             "storage_file_gate_ready_before": True,
             "storage_file_gate_ready_after": True,
@@ -1023,41 +1074,230 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "storage_before": ready_storage_status(),
             "storage_after_canary": ready_storage_status(),
             "storage_after": ready_storage_status(),
-            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "storage status", "reboot", "storage status", "health"],
+            "commands": ["health", "reboot", "health"],
+            "results": [
+                {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+                {"ok": True, "cmd": "reboot", "rebooting": True, "reset_scope": "system", "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "connectivity_prepare": "ESP_OK", "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+                {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
+            ],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
 
 
 def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    token = "remount1"
+    persistence_commands = audit.persistence_readback_commands(token)
+    message_persistence = {
+        "loaded": True,
+        "dirty": False,
+        "failures": 0,
+        "sd": {
+            "required": True,
+            "dirty": False,
+            "reconcile_pending": False,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+        "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+    }
+    clean_storage = ready_storage_status()
+    for store in clean_storage["retained_sd"]["stores"].values():
+        store.update(
+            {
+                "sd_read_fail_count": 0,
+                "sd_write_fail_count": 0,
+                "sd_rename_fail_count": 0,
+                "nvs_mirror_fail_count": 0,
+                "sd_last_error": "ESP_OK",
+                "sd_degraded_latched": False,
+            }
+        )
+    persistence_results = [
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages public",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages dm",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes",
+            "persisted": True,
+            "persistence": {
+                "dirty": False,
+                "fail_count": 0,
+                "clear_failure_latched": False,
+                "clear_fail_count": 0,
+                "clear_last_error": "ESP_OK",
+                "sd_primary": {
+                    "required": True,
+                    "dirty": False,
+                    "reconcile_pending": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs_fallback": {
+                    "dirty": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "packets search",
+            "persisted": True,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "failures": 0,
+                "reconcile": {
+                    "pending": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "sd": {
+                    "required": True,
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+                "journal": {
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        clean_storage,
+    ]
+    crashlog_before = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 10,
+        "entries": [{"seq": 10, "reset_reason": "SW", "crash_like": False}],
+    }
+    crashlog_after = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 11,
+        "entries": [
+            {"seq": 10, "reset_reason": "SW", "crash_like": False},
+            {"seq": 11, "reset_reason": "SW", "crash_like": False},
+        ],
+    }
+    version = {"schema": 1, "ok": True, "cmd": "version", "build_commit": commit}
+    commands = [
+        "version",
+        "crashlog",
+        "health",
+        *persistence_commands,
+        "reboot",
+        "health",
+        "version",
+        "crashlog",
+        *persistence_commands,
+    ]
+    results = [
+        version,
+        crashlog_before,
+        {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+        *[json.loads(json.dumps(value)) for value in persistence_results],
+        {"ok": True, "cmd": "reboot", "rebooting": True, "reset_scope": "system", "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "connectivity_prepare": "ESP_OK", "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+        {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
+        json.loads(json.dumps(version)),
+        crashlog_after,
+        *persistence_results,
+    ]
+    pre_persistence = dict(zip(persistence_commands, persistence_results))
+    post_persistence = dict(zip(persistence_commands, persistence_results))
     write_json(
         root / "artifacts" / "hardware" / "com12" / f"sd_reboot_remount_{commit[:7]}.json",
         {
             "schema": 1,
             "mode": "hardware",
             "port": "COM12",
+            "token": token,
+            "expected_firmware_commit": commit,
+            "pre_device_build_commit": commit,
+            "device_build_commit": commit,
+            "firmware_identity_required": True,
+            "pre_firmware_identity_ok": True,
+            "post_firmware_identity_ok": True,
+            "firmware_identity_ok": True,
+            "persistence_clean_required": True,
+            "pre_reboot_persistence_checked": True,
+            "pre_reboot_persistence_clean": True,
+            "pre_reboot_pending_dirty": False,
+            "pre_reboot_persistence_poll_attempts_used": 1,
+            "pre_reboot_persistence": pre_persistence,
+            "post_reboot_persistence_checked": True,
+            "post_reboot_persistence_clean": True,
+            "post_reboot_pending_dirty": False,
+            "persistence_poll_attempts_used": 1,
+            "post_reboot_persistence": post_persistence,
+            "crashlog_transition_required": True,
+            "crashlog_transition_ok": True,
+            "crashlog_before_reboot": crashlog_before,
+            "crashlog_after_reboot": crashlog_after,
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
+            "pre_sequence_complete": True,
+            "post_sequence_complete": True,
+            "timed_out_command": None,
+            "unexpected_restart_before_reboot": False,
+            "pre_reboot_gate_passed": True,
+            "reboot_attempted": True,
+            "reboot_skipped_reason": None,
             "pre_remount_ready": True,
             "post_remount_ready": True,
             "pre_remount_command_passed": True,
             "post_remount_command_passed": True,
+            "pre_remount_manager_busy": False,
+            "post_remount_manager_busy": False,
+            "pre_remount_retained_worker_quiesce_acquired": True,
+            "post_remount_retained_worker_quiesce_acquired": True,
             "retained_history_sd_ready_before": True,
             "retained_history_sd_ready_after": True,
+            "filecanary_passed": True,
             "retained_canary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "health_ok": True,
             "reboot_command_passed": True,
+            "reboot_reset_scope": "system",
+            "reboot_connectivity_prepare": "ESP_OK",
+            "reboot_retained_flush": "ESP_OK",
             "reboot_route_flush": "ESP_OK",
+            "reboot_storage_manager_quiesced": True,
+            "reboot_retained_worker_quiesced": True,
+            "reboot_rp2040_bridge_quiesced": True,
             "pre_reboot_boot_nonce": 111,
             "post_reboot_boot_nonce": 222,
+            "post_reboot_reset_reason": "SW",
+            "reboot_nonce_proven": True,
             "reboot_proven": True,
             "pre_map_tile_canary_passed": True,
             "post_map_tile_canary_passed": True,
             "storage_before_reboot": ready_storage_status(),
             "storage_after_reboot": ready_storage_status(),
-            "commands": ["storage status", "storage remount", "storage map-tile-canary sd1", "reboot", "storage map-tile-check sd1", "health"],
+            "commands": commands,
+            "results": results,
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -1746,7 +1986,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 19
+    assert report["p0_failed_count"] == 20
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -1779,7 +2019,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -1869,7 +2109,7 @@ def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
     assert gates["sd_filecanary_independent"]["details"]["retained_history_sd_ready_before"] is False
     assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 4
+    assert report["p0_failed_count"] == 5
 
 
 def test_release_gate_audit_rejects_stale_sd_status_even_when_cached_ready_fields_pass(tmp_path: Path):
@@ -2061,6 +2301,220 @@ def test_release_gate_audit_rejects_failed_remount_summary(tmp_path: Path):
     assert gate["details"]["post_remount_command_passed"] is False
 
 
+def test_release_gate_requires_retained_worker_quiesce_receipts(tmp_path: Path):
+    write_retained_canary_evidence(tmp_path)
+    write_reboot_remount_evidence(tmp_path)
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    retained = json.loads(
+        (hardware / f"sd_retained_history_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    remount = json.loads(
+        (hardware / f"sd_reboot_remount_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is True
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is True
+
+    missing_summary = json.loads(json.dumps(retained))
+    missing_summary.pop("reboot_retained_worker_quiesced")
+    assert audit.sd_retained_canary_artifact_ok(missing_summary, "COM12") is False
+
+    missing_raw = json.loads(json.dumps(retained))
+    reboot = next(row for row in missing_raw["results"] if row.get("cmd") == "reboot")
+    reboot.pop("retained_worker_quiesced")
+    assert audit.sd_retained_canary_artifact_ok(missing_raw, "COM12") is False
+
+    missing_remount_receipt = json.loads(json.dumps(remount))
+    missing_remount_receipt.pop("pre_remount_retained_worker_quiesce_acquired")
+    assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
+    missing_remount_receipt["pre_remount_manager_busy"] = True
+    assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
+
+
+def test_reboot_remount_gate_recomputes_identity_persistence_and_crashlog(tmp_path: Path):
+    write_reboot_remount_evidence(tmp_path)
+    path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_reboot_remount_{COMMIT[:7]}.json"
+    )
+    valid = json.loads(path.read_text(encoding="utf-8"))
+    assert audit.sd_reboot_remount_artifact_ok(valid, "COM12", COMMIT) is True
+
+    for required_field in ("pre_reboot_gate_passed", "reboot_attempted"):
+        missing_receipt = json.loads(json.dumps(valid))
+        missing_receipt.pop(required_field)
+        assert audit.sd_reboot_remount_artifact_ok(
+            missing_receipt, "COM12", COMMIT
+        ) is False
+
+    for count_field in (
+        "pre_reboot_persistence_poll_attempts_used",
+        "persistence_poll_attempts_used",
+    ):
+        forged_count = json.loads(json.dumps(valid))
+        forged_count[count_field] = 999
+        assert audit.sd_reboot_remount_artifact_ok(
+            forged_count, "COM12", COMMIT
+        ) is False
+
+    partial_pre_poll = json.loads(json.dumps(valid))
+    pre_health_index = partial_pre_poll["commands"].index("health")
+    partial_pre_poll["commands"].insert(pre_health_index + 1, "routes")
+    partial_pre_poll["results"].insert(
+        pre_health_index + 1,
+        json.loads(json.dumps(partial_pre_poll["pre_reboot_persistence"]["routes"])),
+    )
+    assert audit.command_result_transcript_aligned(partial_pre_poll) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        partial_pre_poll, "COM12", COMMIT
+    ) is False
+
+    optimistic_pre_dirty = json.loads(json.dumps(valid))
+    reboot_index = optimistic_pre_dirty["commands"].index("reboot")
+    pre_dm = [
+        row
+        for row in optimistic_pre_dirty["results"][:reboot_index]
+        if row.get("cmd") == "messages dm"
+    ][-1]
+    pre_dm["persistence"]["sd"]["reconcile_pending"] = True
+    pre_dm["persisted"] = False
+    assert optimistic_pre_dirty["pre_reboot_persistence_clean"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_pre_dirty, "COM12", COMMIT
+    ) is False
+
+    optimistic_dirty = json.loads(json.dumps(valid))
+    dm = [
+        row
+        for row in optimistic_dirty["results"]
+        if row.get("cmd") == "messages dm"
+    ][-1]
+    dm["persistence"]["sd"]["reconcile_pending"] = True
+    dm["persisted"] = False
+    assert optimistic_dirty["post_reboot_persistence_clean"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_dirty, "COM12", COMMIT
+    ) is False
+
+    optimistic_sha = json.loads(json.dumps(valid))
+    versions = [
+        row for row in optimistic_sha["results"] if row.get("cmd") == "version"
+    ]
+    versions[-1]["build_commit"] = STALE_COMMIT
+    assert optimistic_sha["firmware_identity_ok"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_sha, "COM12", COMMIT
+    ) is False
+
+    optimistic_crashlog = json.loads(json.dumps(valid))
+    crashlogs = [
+        row
+        for row in optimistic_crashlog["results"]
+        if row.get("cmd") == "crashlog"
+    ]
+    crashlogs[-1]["entries"][-1]["crash_like"] = True
+    crashlogs[-1]["entries"][-1]["reset_reason"] = "WDT"
+    assert optimistic_crashlog["crashlog_transition_ok"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_crashlog, "COM12", COMMIT
+    ) is False
+
+    misplaced_version = json.loads(json.dumps(valid))
+    reboot_index = misplaced_version["commands"].index("reboot")
+    version_indices = [
+        index
+        for index, command in enumerate(misplaced_version["commands"])
+        if command == "version"
+    ]
+    post_version_index = version_indices[-1]
+    moved_command = misplaced_version["commands"].pop(post_version_index)
+    moved_result = misplaced_version["results"].pop(post_version_index)
+    misplaced_version["commands"].insert(reboot_index, moved_command)
+    misplaced_version["results"].insert(reboot_index, moved_result)
+    assert audit.command_result_transcript_aligned(misplaced_version) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        misplaced_version, "COM12", COMMIT
+    ) is False
+
+    misplaced_crashlog = json.loads(json.dumps(valid))
+    reboot_index = misplaced_crashlog["commands"].index("reboot")
+    crashlog_indices = [
+        index
+        for index, command in enumerate(misplaced_crashlog["commands"])
+        if command == "crashlog"
+    ]
+    post_crashlog_index = crashlog_indices[-1]
+    moved_command = misplaced_crashlog["commands"].pop(post_crashlog_index)
+    moved_result = misplaced_crashlog["results"].pop(post_crashlog_index)
+    misplaced_crashlog["commands"].insert(reboot_index, moved_command)
+    misplaced_crashlog["results"].insert(reboot_index, moved_result)
+    assert audit.command_result_transcript_aligned(misplaced_crashlog) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        misplaced_crashlog, "COM12", COMMIT
+    ) is False
+
+    partial_final_poll = json.loads(json.dumps(valid))
+    first_poll_command = audit.persistence_readback_commands("remount1")[0]
+    partial_final_poll["commands"].append(first_poll_command)
+    partial_final_poll["results"].append(
+        json.loads(
+            json.dumps(partial_final_poll["post_reboot_persistence"][first_poll_command])
+        )
+    )
+    assert audit.command_result_transcript_aligned(partial_final_poll) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        partial_final_poll, "COM12", COMMIT
+    ) is False
+
+
+def test_boot_prepare_gate_requires_remount_worker_receipt_except_bridge_unavailable():
+    payload = boot_prepare_payload(
+        "correct-structure",
+        "ready_sd_file_gate",
+        storage_after=ready_storage_status(),
+        storage_file_gate_ready=True,
+        retained_store_gate_ready=True,
+        filecanary_passed=True,
+    )
+    assert audit.sd_boot_prepare_artifact_ok(
+        payload, "correct-structure", "COM12"
+    ) is True
+
+    missing_top_level = json.loads(json.dumps(payload))
+    missing_top_level.pop("retained_worker_quiesce_acquired")
+    assert audit.sd_boot_prepare_artifact_ok(
+        missing_top_level, "correct-structure", "COM12"
+    ) is False
+
+    false_raw = json.loads(json.dumps(payload))
+    false_raw["storage_remount"]["retained_worker_quiesce_acquired"] = False
+    assert audit.sd_boot_prepare_artifact_ok(
+        false_raw, "correct-structure", "COM12"
+    ) is False
+
+    unavailable = boot_prepare_payload(
+        "rp2040-unavailable",
+        "bridge_unavailable_fallback",
+        storage_after=unavailable_storage_status(),
+    )
+    assert unavailable["storage_remount"] is None
+    assert audit.sd_boot_prepare_artifact_ok(
+        unavailable, "rp2040-unavailable", "COM12"
+    ) is True
+
+    unsafe_backend = json.loads(json.dumps(unavailable))
+    unsafe_backend["storage_after"]["stores"]["packets"] = "sd"
+    assert audit.sd_boot_prepare_artifact_ok(
+        unsafe_backend, "rp2040-unavailable", "COM12"
+    ) is False
+
+
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
     write_core_evidence(tmp_path)
     hardware = tmp_path / "artifacts" / "hardware" / "com12"
@@ -2161,31 +2615,406 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 19
+    assert report["p0_failed_count"] == 20
 
 
-def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
+def passing_full_soak_payload() -> dict:
+    interval = 300
+    commands = [
+        "health",
+        "mesh status",
+        "signal",
+        "messages unread",
+        "packets",
+        "crashlog",
+    ]
+    samples = [
+        {
+            "label": "start" if elapsed == 0 else f"sample-{elapsed // interval}",
+            "elapsed_sec": elapsed,
+            "aborted_after_timeout": None,
+            "results": [
+                {
+                    "ok": True,
+                    "cmd": "health",
+                    "boot_nonce": 123456789,
+                    "uptime_ms": 1000 + (elapsed * 1000),
+                    "board_ready": True,
+                    "ui_ready": True,
+                    "retained_task_stack_free_bytes": 5000,
+                },
+                {
+                    "ok": True,
+                    "cmd": "mesh status",
+                    "state": "ready",
+                    "identity_ready": True,
+                    "radio_ready": True,
+                },
+                {"ok": True, "cmd": "signal", "sample_count": 1},
+                {"ok": True, "cmd": "messages unread"},
+                {"ok": True, "cmd": "packets", "count": 0},
+                {"ok": True, "cmd": "crashlog", "entries": []},
+            ],
+        }
+        for elapsed in range(0, 43200 + interval, interval)
+    ]
+    return {
+        "ok": True,
+        "mode": "hardware",
+        "duration_sec": 43200,
+        "sample_interval_sec": interval,
+        "active_public_text": None,
+        "active_command": None,
+        "dm_rf_tx": False,
+        "active_events": [],
+        "setup_events": [],
+        "commands": commands,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "aborted_after_timeout": None,
+        "samples": samples,
+        "summary": {
+            "ok": True,
+            "threshold_failures": [],
+            "command_timeout_seen": False,
+            "unexpected_console_restart_seen": False,
+            "retained_task_stack_free_bytes_floor": 5000,
+            "crashlog_crash_like_count": 0,
+            "board_ready_all": True,
+            "ui_ready_all": True,
+            "mesh_ready_all": True,
+            "uptime_monotonic": True,
+        },
+    }
+
+
+def test_release_gate_audit_accepts_full_soak_when_duration_and_raw_samples_pass(tmp_path: Path):
     write_core_evidence(tmp_path)
     write_json(
         tmp_path / "artifacts" / "soak" / "d1l-12h-soak_68350bf.json",
-        {
-            "ok": True,
-            "mode": "hardware",
-            "duration_sec": 43200,
-            "summary": {
-                "ok": True,
-                "threshold_failures": [],
-                "board_ready_all": True,
-                "ui_ready_all": True,
-                "uptime_monotonic": True,
-            },
-        },
+        passing_full_soak_payload(),
     )
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
     assert gates["full_duration_idle_soak"]["ok"] is True
+
+
+def test_sd_artifact_validators_require_terminal_sequence_integrity(tmp_path: Path):
+    write_file_canary_evidence(tmp_path)
+    write_retained_canary_evidence(tmp_path)
+    write_reboot_remount_evidence(tmp_path)
+
+    hardware = tmp_path / "artifacts" / "hardware" / "com12"
+    file_canary = json.loads(
+        (hardware / f"sd_file_canary_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    retained = json.loads(
+        (hardware / f"sd_retained_history_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    remount = json.loads(
+        (hardware / f"sd_reboot_remount_{COMMIT[:7]}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert audit.sd_file_canary_artifact_ok(file_canary, "COM12") is True
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is True
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is True
+
+    expected_boundary = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage status",
+        "ignored_json_count": 1,
+        "ignored_boot_help_seen": True,
+        "ignored_json": [{"cmd": "help", "ok": True}],
+        audit.EXPECTED_REBOOT_BOOT_HELP_FIELD: True,
+    }
+    retained_with_boundary = json.loads(json.dumps(retained))
+    retained_reboot_index = next(
+        index
+        for index, result in enumerate(retained_with_boundary["results"])
+        if result.get("cmd") == "reboot"
+    )
+    retained_with_boundary["results"].insert(
+        retained_reboot_index + 1, expected_boundary
+    )
+    retained_with_boundary["commands"].insert(
+        retained_reboot_index + 1, "storage status"
+    )
+    assert audit.sd_retained_canary_artifact_ok(
+        retained_with_boundary, "COM12"
+    ) is True
+
+    remount_with_boundary = json.loads(json.dumps(remount))
+    remount_reboot_index = next(
+        index
+        for index, result in enumerate(remount_with_boundary["results"])
+        if result.get("cmd") == "reboot"
+    )
+    remount_with_boundary["results"].insert(
+        remount_reboot_index + 1, json.loads(json.dumps(expected_boundary))
+    )
+    remount_with_boundary["commands"].insert(
+        remount_reboot_index + 1, "storage status"
+    )
+    assert audit.sd_reboot_remount_artifact_ok(
+        remount_with_boundary, "COM12"
+    ) is True
+
+    file_canary_with_boundary = json.loads(json.dumps(file_canary))
+    file_canary_with_boundary["results"] = [
+        json.loads(json.dumps(expected_boundary))
+    ]
+    assert audit.sd_file_canary_artifact_ok(
+        file_canary_with_boundary, "COM12"
+    ) is False
+
+    optimistic_wdt = json.loads(json.dumps(retained))
+    optimistic_wdt["results"][-1]["reset_reason"] = "WDT"
+    assert optimistic_wdt["post_reboot_reset_reason"] == "SW"
+    assert optimistic_wdt["reboot_proven"] is True
+    assert audit.sd_retained_canary_artifact_ok(optimistic_wdt, "COM12") is False
+
+    optimistic_pre_health = json.loads(json.dumps(retained))
+    optimistic_pre_health["results"][0]["ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_pre_health, "COM12"
+    ) is False
+
+    optimistic_post_health = json.loads(json.dumps(retained))
+    optimistic_post_health["results"][-1]["ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_post_health, "COM12"
+    ) is False
+
+    optimistic_health_summary = json.loads(json.dumps(retained))
+    optimistic_health_summary["health_ok"] = False
+    assert audit.sd_retained_canary_artifact_ok(
+        optimistic_health_summary, "COM12"
+    ) is False
+
+    misaligned_transcript = json.loads(json.dumps(retained))
+    misaligned_transcript["commands"].append("storage status")
+    assert audit.sd_retained_canary_artifact_ok(
+        misaligned_transcript, "COM12"
+    ) is False
+
+    remount["filecanary_passed"] = False
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
+    remount["filecanary_passed"] = True
+
+    file_canary["sequence_completed"] = False
+    file_canary["results"] = [
+        {"ok": False, "cmd": "storage filecanary", "code": "TIMEOUT"}
+    ]
+    assert audit.sd_file_canary_artifact_ok(file_canary, "COM12") is False
+
+    retained["pre_sequence_complete"] = False
+    retained["unexpected_restart_before_reboot"] = True
+    retained["results"] = [
+        {"ok": False, "cmd": "storage retained-canary", "code": "TIMEOUT"}
+    ]
+    assert audit.sd_retained_canary_artifact_ok(retained, "COM12") is False
+
+    remount["post_sequence_complete"] = False
+    remount["results"] = [
+        {"ok": False, "cmd": "storage status", "code": "SKIPPED_AFTER_TIMEOUT"}
+    ]
+    assert audit.sd_reboot_remount_artifact_ok(remount, "COM12") is False
+
+
+def test_release_gate_allows_only_immediate_proven_reboot_boot_help_boundary():
+    reboot = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "reboot",
+        "rebooting": True,
+        "reset_scope": "system",
+        "storage_manager_quiesced": True,
+        "retained_worker_quiesced": True,
+        "rp2040_bridge_quiesced": True,
+        "connectivity_prepare": "ESP_OK",
+        "retained_flush": "ESP_OK",
+        "route_flush": "ESP_OK",
+    }
+    storage = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "storage status",
+        "ignored_json_count": 1,
+        "ignored_boot_help_seen": True,
+        "ignored_json": [{"cmd": "help", "ok": True}],
+        audit.EXPECTED_REBOOT_BOOT_HELP_FIELD: True,
+    }
+    report = {
+        "pre_sequence_complete": True,
+        "post_sequence_complete": True,
+        "reboot_command_passed": True,
+        "reboot_reset_scope": "system",
+        "reboot_connectivity_prepare": "ESP_OK",
+        "reboot_route_flush": "ESP_OK",
+        "reboot_storage_manager_quiesced": True,
+        "reboot_retained_worker_quiesced": True,
+        "reboot_rp2040_bridge_quiesced": True,
+        "reboot_nonce_proven": True,
+        "reboot_proven": True,
+        "post_reboot_reset_reason": "SW",
+        "commands": ["reboot", "storage status"],
+        "results": [reboot, storage],
+    }
+    assert audit.nested_unexpected_console_restart(report) is True
+    assert audit.nested_unexpected_console_restart(
+        report, allow_expected_planned_reboot=True
+    ) is False
+
+    not_immediate = json.loads(json.dumps(report))
+    not_immediate["results"].insert(1, {"ok": True, "cmd": "health"})
+    not_immediate["commands"].insert(1, "health")
+    assert audit.nested_unexpected_console_restart(
+        not_immediate, allow_expected_planned_reboot=True
+    ) is True
+
+    unproven = json.loads(json.dumps(report))
+    unproven["reboot_proven"] = False
+    assert audit.nested_unexpected_console_restart(
+        unproven, allow_expected_planned_reboot=True
+    ) is True
+
+    unmarked = json.loads(json.dumps(report))
+    del unmarked["results"][1][audit.EXPECTED_REBOOT_BOOT_HELP_FIELD]
+    assert audit.nested_unexpected_console_restart(
+        unmarked, allow_expected_planned_reboot=True
+    ) is True
+
+    duplicate = json.loads(json.dumps(report))
+    duplicate_storage = duplicate["results"][1]
+    duplicate_storage["ignored_json_count"] = 2
+    duplicate_storage["ignored_json"].append({"cmd": "help", "ok": True})
+    assert audit.nested_unexpected_console_restart(
+        duplicate, allow_expected_planned_reboot=True
+    ) is True
+
+
+def test_full_soak_gate_fails_closed_on_stack_timeout_rf_or_crash_fields():
+    base = passing_full_soak_payload()
+    assert audit.full_soak_ok(base) is True
+
+    missing_stack = json.loads(json.dumps(base))
+    del missing_stack["summary"]["retained_task_stack_free_bytes_floor"]
+    assert audit.full_soak_ok(missing_stack) is False
+
+    low_stack = json.loads(json.dumps(base))
+    low_stack["summary"]["retained_task_stack_free_bytes_floor"] = 4095
+    assert audit.full_soak_ok(low_stack) is False
+
+    timed_out = json.loads(json.dumps(base))
+    timed_out["summary"]["command_timeout_seen"] = True
+    assert audit.full_soak_ok(timed_out) is False
+
+    active_rf = json.loads(json.dumps(base))
+    active_rf["public_rf_tx"] = True
+    assert audit.full_soak_ok(active_rf) is False
+
+    crash = json.loads(json.dumps(base))
+    crash["summary"]["crashlog_crash_like_count"] = 1
+    assert audit.full_soak_ok(crash) is False
+
+
+def test_full_soak_gate_checks_raw_samples_and_rejects_public_commands():
+    missing_raw_stack = passing_full_soak_payload()
+    del missing_raw_stack["samples"][3]["results"][0][
+        "retained_task_stack_free_bytes"
+    ]
+    assert audit.full_soak_ok(missing_raw_stack) is False
+
+    nested_timeout = passing_full_soak_payload()
+    nested_timeout["samples"][3]["results"].append(
+        {"ok": False, "cmd": "mesh status", "code": "TIMEOUT"}
+    )
+    assert audit.full_soak_ok(nested_timeout) is False
+
+    contradictory_public_tx = passing_full_soak_payload()
+    contradictory_public_tx["active_public_text"] = "test"
+    contradictory_public_tx["active_events"] = [
+        {
+            "command": "mesh send public test",
+            "result": {"ok": True, "cmd": "mesh send public"},
+        }
+    ]
+    assert contradictory_public_tx["public_rf_tx"] is False
+    assert audit.full_soak_ok(contradictory_public_tx) is False
+
+    too_few_samples = passing_full_soak_payload()
+    too_few_samples["samples"] = too_few_samples["samples"][:2]
+    assert audit.full_soak_ok(too_few_samples) is False
+
+    short_elapsed = passing_full_soak_payload()
+    short_elapsed["samples"][-1]["elapsed_sec"] = 43199
+    assert audit.full_soak_ok(short_elapsed) is False
+
+    optimistic_summary = passing_full_soak_payload()
+    optimistic_summary["samples"][5]["results"][0][
+        "retained_task_stack_free_bytes"
+    ] = 4999
+    assert audit.full_soak_ok(optimistic_summary) is False
+
+    changed_boot = passing_full_soak_payload()
+    changed_boot["samples"][10]["results"][0]["boot_nonce"] = 987654321
+    assert audit.full_soak_ok(changed_boot) is False
+
+    reset_shaped_uptime = passing_full_soak_payload()
+    reset_shaped_uptime["samples"][1]["results"][0]["uptime_ms"] = 10000
+    assert audit.full_soak_ok(reset_shaped_uptime) is False
+
+    hidden_dm = passing_full_soak_payload()
+    hidden_dm_command = "mesh send dm 0BF0A701D5AE2DB6 hidden_idle_tx"
+    hidden_dm["commands"].append(hidden_dm_command)
+    for sample in hidden_dm["samples"]:
+        sample["results"].append(
+            {"ok": True, "cmd": "mesh send dm", "queued": True}
+        )
+    assert hidden_dm["dm_rf_tx"] is False
+    assert audit.full_soak_ok(hidden_dm) is False
+
+    ignored_boot = passing_full_soak_payload()
+    ignored_boot["samples"][7]["results"][0]["ignored_json"] = [
+        {"cmd": "help", "ok": True}
+    ]
+    assert audit.full_soak_ok(ignored_boot) is False
+
+    truncated_boot_marker = passing_full_soak_payload()
+    truncated_boot_marker["samples"][7]["results"][0][
+        "ignored_boot_help_seen"
+    ] = True
+    truncated_boot_marker["samples"][7]["results"][0]["ignored_json"] = [
+        {"cmd": "noise-5", "ok": True}
+    ]
+    assert audit.full_soak_ok(truncated_boot_marker) is False
+
+    unproven_truncated_tail = passing_full_soak_payload()
+    unproven_result = unproven_truncated_tail["samples"][7]["results"][0]
+    unproven_result["ignored_json_count"] = 7
+    unproven_result["ignored_json"] = [
+        {"cmd": f"noise-{index}", "ok": True} for index in range(5)
+    ]
+    assert "ignored_boot_help_seen" not in unproven_result
+    assert audit.full_soak_ok(unproven_truncated_tail) is False
+
+    proven_non_boot_tail = passing_full_soak_payload()
+    proven_result = proven_non_boot_tail["samples"][7]["results"][0]
+    proven_result["ignored_json_count"] = 7
+    proven_result["ignored_json"] = [
+        {"cmd": f"noise-{index}", "ok": True} for index in range(5)
+    ]
+    proven_result["ignored_boot_help_seen"] = False
+    assert audit.full_soak_ok(proven_non_boot_tail) is True
 
 
 def test_release_gate_audit_ignores_stale_hardware_artifacts(tmp_path: Path):

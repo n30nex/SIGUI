@@ -23,6 +23,7 @@ typedef struct {
     uint32_t psram_largest_free;
     uint32_t current_task_stack_free_words;
     uint32_t ui_task_stack_free_words;
+    uint32_t retained_task_stack_free_bytes;
     uint32_t lvgl_free_bytes;
     uint32_t lvgl_largest_free_bytes;
     uint8_t lvgl_used_pct;
@@ -35,6 +36,7 @@ const char *d1l_health_reset_reason_name(int reason);
 void d1l_health_monitor_init(esp_err_t nvs_status);
 uint32_t d1l_health_monitor_boot_nonce(void);
 void d1l_health_monitor_register_ui_task(TaskHandle_t task);
+void d1l_health_monitor_register_retained_task(TaskHandle_t task);
 void d1l_health_monitor_set_lvgl_ready(bool ready);
 void d1l_health_monitor_sample_lvgl(void);
 d1l_health_snapshot_t d1l_health_snapshot(void);

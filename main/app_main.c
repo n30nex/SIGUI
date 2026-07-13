@@ -104,14 +104,14 @@ void app_main(void)
     if (route_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store load failed: %s", esp_err_to_name(route_store_ret));
     }
-    esp_err_t route_worker_ret = d1l_route_store_worker_start();
-    if (route_worker_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route persistence worker start failed: %s",
-                 esp_err_to_name(route_worker_ret));
-    }
     esp_err_t packet_log_ret = d1l_packet_log_init();
     if (packet_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
+    }
+    esp_err_t route_worker_ret = d1l_route_store_worker_start();
+    if (route_worker_ret != ESP_OK) {
+        ESP_LOGW(TAG, "retained persistence worker start failed: %s",
+                 esp_err_to_name(route_worker_ret));
     }
     esp_err_t storage_manager_ret = d1l_storage_manager_start();
     if (storage_manager_ret != ESP_OK) {

@@ -22,9 +22,9 @@ class FakeSerial:
         self.reset_count += 1
 
 
-def health_response(boot_nonce: int | None) -> str:
+def health_response(boot_nonce: int | None, reset_reason: str = "SW") -> str:
     nonce = f',"boot_nonce":{boot_nonce}' if boot_nonce is not None else ""
-    return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true{nonce}}}\n'
+    return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true,"reset_reason":"{reset_reason}"{nonce}}}\n'
 
 
 def settings_response(name: str, path_hash: int) -> str:
@@ -46,6 +46,8 @@ def persistence_responses(
     first_post_nonce: int | None = 22,
     cleanup_post_nonce: int | None = 33,
     cleanup_ssid: str = "Toddmas2.4",
+    first_post_reset_reason: str = "SW",
+    cleanup_post_reset_reason: str = "SW",
 ) -> list[str]:
     return [
         settings_response("Krab Desk", 2),
@@ -54,16 +56,16 @@ def persistence_responses(
         '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":3}\n',
         settings_response("D1L Smoke Persist", 3),
         health_response(11),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n',
-        health_response(first_post_nonce),
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        health_response(first_post_nonce, first_post_reset_reason),
         settings_response("D1L Smoke Persist", 3),
         wifi_status_response(),
         '{"schema":1,"ok":true,"cmd":"settings set name","node_name":"Krab Desk"}\n',
         '{"schema":1,"ok":true,"cmd":"settings set pathhash","path_hash_bytes":2}\n',
         settings_response("Krab Desk", 2),
         health_response(first_post_nonce),
-        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"route_flush":"ESP_OK"}\n',
-        health_response(cleanup_post_nonce),
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n',
+        health_response(cleanup_post_nonce, cleanup_post_reset_reason),
         settings_response("Krab Desk", 2),
         wifi_status_response(cleanup_ssid),
     ]
@@ -78,6 +80,57 @@ def test_parse_jsonl_ignores_logs():
     ]
     parsed = parse_jsonl(lines)
     assert [item["cmd"] for item in parsed] == ["version", "radiohw"]
+
+
+def test_command_result_preserves_ignored_json_before_expected_reply():
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            '{"schema":1,"ok":true,"cmd":"storage status","state":"ready"}\n',
+        ]
+    )
+
+    result = smoke_d1l.read_command_result(ser, "storage status", 1.0)
+
+    assert result["ok"] is True
+    assert result["state"] == "ready"
+    assert result["ignored_json_count"] == 1
+    assert result["ignored_json"] == [{"cmd": "help", "ok": True}]
+    assert result["ignored_boot_help_seen"] is True
+
+
+def test_command_result_keeps_boot_marker_after_ignored_tail_is_truncated():
+    responses = ['{"schema":1,"ok":true,"cmd":"help"}\n']
+    responses.extend(
+        f'{{"schema":1,"ok":true,"cmd":"noise-{index}"}}\n'
+        for index in range(6)
+    )
+    responses.append(
+        '{"schema":1,"ok":true,"cmd":"storage status","state":"ready"}\n'
+    )
+    ser = FakeSerial(responses)
+
+    result = smoke_d1l.read_command_result(ser, "storage status", 1.0)
+
+    assert result["ok"] is True
+    assert result["ignored_json_count"] == 7
+    assert all(row["cmd"] != "help" for row in result["ignored_json"])
+    assert result["ignored_boot_help_seen"] is True
+
+
+def test_command_result_strips_firmware_spoofed_host_console_evidence():
+    ser = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"storage status",'
+            '"ignored_json_count":1,"ignored_json":[{"cmd":"help","ok":true}],'
+            '"ignored_boot_help_seen":true,"expected_boot_help_after_reboot":true}\n'
+        ]
+    )
+
+    result = smoke_d1l.read_command_result(ser, "storage status", 1.0)
+
+    assert result["ok"] is True
+    assert not smoke_d1l.HOST_CONSOLE_EVIDENCE_FIELDS.intersection(result)
 
 
 def test_dry_run_lists_phase1_commands():
@@ -154,11 +207,13 @@ def test_persistence_check_reboots_and_restores_original_fields(monkeypatch):
     assert report["reboot_command_passed"] is True
     assert report["reboot_route_flush"] == "ESP_OK"
     assert report["reboot_proven"] is True
+    assert report["post_reboot_reset_reason"] == "SW"
     assert report["pre_reboot_boot_nonce"] == 11
     assert report["post_reboot_boot_nonce"] == 22
     assert report["cleanup_reboot_command_passed"] is True
     assert report["cleanup_reboot_route_flush"] == "ESP_OK"
     assert report["cleanup_reboot_proven"] is True
+    assert report["cleanup_post_reboot_reset_reason"] == "SW"
     assert report["cleanup_pre_reboot_boot_nonce"] == 22
     assert report["cleanup_post_reboot_boot_nonce"] == 33
     assert report["settings_snapshot_valid"] is True
@@ -253,6 +308,19 @@ def test_successful_reboot_requires_changed_valid_boot_nonce(monkeypatch, post_n
     assert report["ok"] is False
 
 
+def test_successful_reboot_rejects_watchdog_reset(monkeypatch):
+    monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
+    ser = FakeSerial(persistence_responses(first_post_reset_reason="WDT"))
+
+    report = smoke_d1l.run_persistence_check(ser, timeout=1)
+
+    assert report["reboot_command_passed"] is True
+    assert report["post_reboot_reset_reason"] == "WDT"
+    assert report["reboot_proven"] is False
+    assert report["after_reboot_ok"] is False
+    assert report["ok"] is False
+
+
 @pytest.mark.parametrize("cleanup_post_nonce", [22, None])
 def test_cleanup_reboot_requires_changed_valid_boot_nonce(monkeypatch, cleanup_post_nonce):
     monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
@@ -262,6 +330,20 @@ def test_cleanup_reboot_requires_changed_valid_boot_nonce(monkeypatch, cleanup_p
 
     assert report["reboot_proven"] is True
     assert report["cleanup_reboot_command_passed"] is True
+    assert report["cleanup_reboot_proven"] is False
+    assert report["cleanup_ok"] is False
+    assert report["ok"] is False
+
+
+def test_cleanup_reboot_rejects_watchdog_reset(monkeypatch):
+    monkeypatch.setattr(smoke_d1l.time, "sleep", lambda _seconds: None)
+    ser = FakeSerial(persistence_responses(cleanup_post_reset_reason="WDT"))
+
+    report = smoke_d1l.run_persistence_check(ser, timeout=1)
+
+    assert report["reboot_proven"] is True
+    assert report["cleanup_reboot_command_passed"] is True
+    assert report["cleanup_post_reboot_reset_reason"] == "WDT"
     assert report["cleanup_reboot_proven"] is False
     assert report["cleanup_ok"] is False
     assert report["ok"] is False
@@ -378,14 +460,37 @@ def test_reboot_timeout_floor_does_not_change_other_commands():
     assert smoke_d1l.timeout_for_reboot_command("health", 5.0) == 5.0
 
 
-def test_reboot_command_requires_successful_route_flush():
+def test_reboot_command_requires_system_reset_and_all_quiesce_receipts():
+    valid = {
+        "ok": True,
+        "rebooting": True,
+        "reset_scope": "system",
+        "storage_manager_quiesced": True,
+        "retained_worker_quiesced": True,
+        "rp2040_bridge_quiesced": True,
+        "connectivity_prepare": "ESP_OK",
+        "retained_flush": "ESP_OK",
+        "route_flush": "ESP_OK",
+    }
+    assert smoke_d1l.reboot_command_passed(valid) is True
+    for field in ("reset_scope", "connectivity_prepare"):
+        missing = dict(valid)
+        del missing[field]
+        assert smoke_d1l.reboot_command_passed(missing) is False
+    cpu_reset = dict(valid, reset_scope="cpu")
+    assert smoke_d1l.reboot_command_passed(cpu_reset) is False
+    connectivity_failure = dict(valid, connectivity_prepare="ESP_FAIL")
+    assert smoke_d1l.reboot_command_passed(connectivity_failure) is False
     assert smoke_d1l.reboot_command_passed(
         {
             "ok": True,
             "rebooting": True,
+            "storage_manager_quiesced": True,
+            "rp2040_bridge_quiesced": True,
+            "retained_flush": "ESP_OK",
             "route_flush": "ESP_OK",
         }
-    ) is True
+    ) is False
     assert smoke_d1l.reboot_command_passed(
         {
             "ok": True,

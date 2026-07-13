@@ -45,9 +45,9 @@ plain ASCII rather than Seeed's sensor `PacketSerial` framing.
 ## Build
 
 Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
-adds the `earlephilhower/arduino-pico` board package URL, installs
-`rp2040:rp2040`, and compiles the sketch with FQBN
-`rp2040:rp2040:seeed_indicator_rp2040` and
+adds the `earlephilhower/arduino-pico` board package URL, installs pinned
+`rp2040:rp2040@5.6.1`, and compiles the production sketch with FQBN
+`rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb` and
 `compiler.cpp.extra_flags="-DUSE_SD_CRC=1"`. The current validation card is
 user-confirmed FAT32 and accepts raw sector reads only when SD command CRC is
 valid, so the bridge stays close to Seeed's documented SD pin/power path while
@@ -55,6 +55,25 @@ using Arduino-Pico's second-port SD support,
 Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and the Arduino-Pico
 maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.
+
+The production bridge deliberately selects Arduino-Pico's `No USB` stack. Its
+only production control/data path is the 115200-baud ESP32 UART, including the
+explicit `DESKOS_SD_BOOTLOADER` command. This prevents an unrelated Windows
+serial poll from using Arduino-Pico's standard 1200-baud/DTR USB-CDC trigger to
+put the RP2040 into UF2 mode and mount an Explorer drive while the bridge is
+idle. After a production bridge flash, COM16 is therefore expected to disappear;
+prove bridge health through the ESP32 console on COM12. The two isolated SD
+smoke sketches retain the normal USB stack because their bounded evidence is
+captured directly on COM16 before the production bridge is restored.
+
+Arduino-Pico 5.6.1 bundles SdFat commit
+`cda057318bec196183d4cc92b01bc1dd64bbfb02`, whose unused RP2040 PIO-SD source
+hardcodes serial debug on even when this bridge uses SPI1. A no-USB link therefore
+has no `Serial` object for that dead debug path. The Actions job fail-closed
+checks the exact pinned source marker, changes only `USE_DEBUG_MODE` from `1` to
+`0`, verifies the replacement, and packages
+`sdfat-no-usb-patch.json` with the before/after SHA-256 values. The production
+sketch and its SD protocol are not patched by this step.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 The CI job also emits `rp2040-sd-smoke-firmware`, a non-production isolation
@@ -135,13 +154,19 @@ See `docs/RP2040_SD_BRIDGE_FLASH_D1L.md` for the full flash/proof runbook.
   When a successful mounted snapshot has already proven the inserted-card
   signature (`detect=low detect_driven=1`), status polling also samples only
   GPIO7. Three consecutive samples that no longer match that proven signature
-  invalidate the cached mount and report `state=no_card note=card_removed`.
+  trigger one bounded read-only `CMD17` transaction for sector zero on the
+  idle shared SPI bus. A complete sector with a valid data token and CRC16
+  rejects the GPIO-only removal as noise and keeps the ready snapshot. Only a
+  failed or corrupt transaction invalidates the cached mount and reports
+  `state=no_card note=card_removed`.
   The bridge retains only that proven detect signature; three consecutive
   matching samples after removal publish
   `state=mount_required note=card_reinserted`, allowing the ESP32 storage
   manager to request a fresh mount without the status poll touching the bus.
-  This bounded runtime-removal check never probes the SD bus, formats, writes,
-  or assumes a detect polarity before a successful mount has established it.
+  This bounded runtime-removal check never formats or writes and never assumes
+  a detect polarity before a successful mount has established it. Routine
+  status remains bus-silent; only a fully debounced removal suspicion performs
+  the single sector read, with 300 ms ready and data-token timeouts.
 - `DESKOS_SD_MOUNT` is the deliberate SD-touch request used by `storage mount`.
   It runs on the protocol-handling core because the Arduino `SD`/`SDFS`
   filesystem stack can wedge when invoked from the RP2040 core1 worker. The

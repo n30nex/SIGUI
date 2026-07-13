@@ -25,6 +25,10 @@ typedef struct {
     uint8_t reset_expander_pin;
 } d1l_rp2040_status_t;
 
+/* Exclusively hold the UART bridge during a bounded system restart. */
+esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms);
+void d1l_rp2040_bridge_quiesce_end(void);
+
 typedef struct {
     bool bridge_ready;
     bool protocol_supported;

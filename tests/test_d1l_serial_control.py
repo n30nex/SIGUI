@@ -12,6 +12,7 @@ D1L_CONSOLE_SCRIPTS = (
     "guided_sd_install_d1l.py",
     "probe_d1l_dm.py",
     "prepare_retained_nvs_upgrade_d1l.py",
+    "reboot_transition_trace_d1l.py",
     "rf_full_acceptance_d1l.py",
     "rp2040_raw_diag_capture_d1l.py",
     "rp2040_sd_bridge_preflight_d1l.py",

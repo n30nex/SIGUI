@@ -51,6 +51,7 @@ typedef struct {
 } d1l_connectivity_status_t;
 
 esp_err_t d1l_connectivity_init(void);
+esp_err_t d1l_connectivity_prepare_reboot(void);
 void d1l_connectivity_status(d1l_connectivity_status_t *out_status);
 esp_err_t d1l_connectivity_wifi_scan(d1l_wifi_scan_result_t *out_result);
 esp_err_t d1l_connectivity_wifi_connect(void);

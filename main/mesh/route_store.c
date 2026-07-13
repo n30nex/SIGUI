@@ -400,6 +400,10 @@ static esp_err_t persist_route_snapshot(bool force)
         const esp_err_t reconcile_ret = reconcile_sd_primary(
             now_ms, sd_backend_generation);
         if (reconcile_ret != ESP_OK) {
+            if (reconcile_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return reconcile_ret;
+            }
             /* SD remains fail-closed, but a dirty compact fallback is an
              * independent durability target. Snapshot it after the failed
              * read so live observations still advance NVS without permitting
@@ -476,6 +480,10 @@ static esp_err_t persist_route_snapshot(bool force)
             D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_V2_KEY,
             &s_persist_snapshot.primary, sizeof(s_persist_snapshot.primary),
             sd_backend_generation);
+        if (sd_ret == ESP_ERR_NOT_FINISHED) {
+            d1l_store_lock_give(&s_persist_io_lock);
+            return sd_ret;
+        }
     }
     if (s_persist_snapshot.nvs_attempt) {
         nvs_ret = write_nvs_fallback_with_legacy_reclaim(
@@ -832,6 +840,9 @@ static esp_err_t reconcile_sd_primary(uint32_t now_ms,
     esp_err_t full_ret = d1l_retained_blob_store_read_sd_primary(
         D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_V2_KEY,
         &s_blob_scratch, &full_len);
+    if (full_ret == ESP_ERR_NOT_FINISHED) {
+        return full_ret;
+    }
     bool primary_is_v2 = false;
     bool primary_found = false;
 
@@ -846,6 +857,9 @@ static esp_err_t reconcile_sd_primary(uint32_t now_ms,
             const esp_err_t legacy_ret = d1l_retained_blob_store_read_sd_primary(
                 D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_LEGACY_KEY,
                 &s_legacy_sd_blob_scratch, &legacy_len);
+            if (legacy_ret == ESP_ERR_NOT_FINISHED) {
+                return legacy_ret;
+            }
             if (legacy_ret == ESP_OK) {
                 if (!legacy_blob_is_valid(&s_legacy_sd_blob_scratch, legacy_len)) {
                     return note_sd_reconcile_failure(ESP_ERR_INVALID_STATE, now_ms);
@@ -867,6 +881,9 @@ static esp_err_t reconcile_sd_primary(uint32_t now_ms,
         const esp_err_t legacy_ret = d1l_retained_blob_store_read_sd_primary(
             D1L_ROUTE_STORE_ID, D1L_ROUTE_STORE_LEGACY_KEY,
             &s_legacy_sd_blob_scratch, &legacy_len);
+        if (legacy_ret == ESP_ERR_NOT_FINISHED) {
+            return legacy_ret;
+        }
         if (legacy_ret == ESP_OK) {
             if (!legacy_blob_is_valid(&s_legacy_sd_blob_scratch, legacy_len)) {
                 return note_sd_reconcile_failure(ESP_ERR_INVALID_STATE, now_ms);

@@ -7,6 +7,7 @@
 #include "lvgl.h"
 
 static TaskHandle_t s_ui_task;
+static TaskHandle_t s_retained_task;
 static bool s_lvgl_ready;
 static uint32_t s_boot_nonce;
 static bool s_nvs_ready;
@@ -64,6 +65,11 @@ void d1l_health_monitor_register_ui_task(TaskHandle_t task)
     s_ui_task = task;
 }
 
+void d1l_health_monitor_register_retained_task(TaskHandle_t task)
+{
+    s_retained_task = task;
+}
+
 void d1l_health_monitor_set_lvgl_ready(bool ready)
 {
     s_lvgl_ready = ready;
@@ -113,6 +119,8 @@ d1l_health_snapshot_t d1l_health_snapshot(void)
         .psram_largest_free = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
         .current_task_stack_free_words = (uint32_t)uxTaskGetStackHighWaterMark(NULL),
         .ui_task_stack_free_words = s_ui_task ? (uint32_t)uxTaskGetStackHighWaterMark(s_ui_task) : 0U,
+        .retained_task_stack_free_bytes = s_retained_task ?
+            (uint32_t)uxTaskGetStackHighWaterMark(s_retained_task) : 0U,
         .nvs_ready = s_nvs_ready,
         .nvs_error = s_nvs_error,
         .reset_reason = d1l_health_reset_reason_name(esp_reset_reason()),

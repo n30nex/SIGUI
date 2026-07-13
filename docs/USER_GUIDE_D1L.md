@@ -37,7 +37,7 @@ $env:D1L_PORT = "COMx"
 .\flash_project.ps1 -Port $env:D1L_PORT
 ```
 
-Do not use COM8, COM11, or COM29 for D1L flashing/testing unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L.
+Never use COM8, COM11, or COM29 as the D1L serial/flash target unless the operator explicitly reassigns the hardware. In the current validation setup, use COM12 for the D1L; COM11 may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
 
 The full 8MB image is for factory/recovery workflows and can overwrite persisted settings, contacts, messages, and logs. It requires typed confirmation:
 
@@ -55,10 +55,13 @@ $env:D1L_PORT = "COMx"
 python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 ```
 
-For a short active stability probe with local Public bots that respond to `test`:
+For a short active stability probe, use a promoted controlled peer such as the
+COM11 bot. Automated probes use direct messages and never the default Public
+channel; `#test` may be used once channel selection is available:
 
 ```powershell
-python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-public-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
+$env:D1L_DM_FINGERPRINT = "<16-hex-controlled-peer>"
+python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-interval-sec 45 --active-dm-fingerprint $env:D1L_DM_FINGERPRINT --active-dm-text test --active-interval-sec 60 --require-rx-delta --min-tx-delta 1
 ```
 
 ## Useful Serial Commands
@@ -70,7 +73,7 @@ python .\scripts\soak_d1l.py --port $env:D1L_PORT --duration-sec 180 --sample-in
 - `health`
 - `crashlog`
 - `mesh status`
-- `mesh send public test`
+- `mesh send public test` (manual `#test`-channel validation only; automated probes use DM)
 - `radio get`
 - `radio set preset uscan`
 - `radio set txpower 20`

@@ -67,9 +67,15 @@ acceptance runners to prove storage-manager convergence.
 The preflight command is non-destructive. It verifies the RP2040 artifact when
 provided, lists UF2 bootloader volumes, queries only the selected D1L serial
 port with `rp2040 status`, `rp2040 ping`, safe `storage status`, explicit
-`storage mount`, conditional safe-status polling if a build reports `state="mount_pending"`,
+`storage mount`, bounded safe-status polling while SD reports
+`state="mount_pending"` or the manager reports `BRIDGE_WAIT`, `PING`, `STATUS`,
+or `MOUNT`,
 optional `storage diag`, and `health`,
-and reports the next safe action as JSON. `rp2040 ping` must report
+and reports the next safe action as JSON. Acceptance requires both the fresh
+FAT32 file-operation gate and `manager.state="READY_SD"`; exhausted manager
+transitions set top-level `ok=false`, return nonzero, and remain fail-closed with
+separate total/mount/manager poll counts plus exhaustion fields, even if the
+serial commands themselves succeeded. `rp2040 ping` must report
 `sd_touched=false`; `storage mount` and `storage diag` are non-formatting and
 may be unavailable on older bridge firmware. If preflight reports
 `state="rp2040_protocol_pending"` or `state="sd_card_not_present_diag_pending"`
@@ -90,22 +96,46 @@ to be refreshed:
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
 ```
 
-The refresh runner touches only COM12 and COM16, refuses COM8/COM11/COM29,
-flashes the ESP32 image when not skipped, then performs a short RP2040 access
-precheck before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks
-whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
+The refresh runner first binds the host-success marker and release manifest to
+the requested canonical 40-hex commit and explicitly supplied numeric Actions
+run, and verifies both packaged and standalone firmware hashes. It touches only
+COM12 and, during intentional smoke/UF2 maintenance, COM16; it refuses
+COM8/COM11/COM29, flashes the exact ESP32 image, then performs a short RP2040
+access precheck before any RP2040 UF2 copy. The production bridge is built with
+`usbstack=nousb`, so COM16 is expected to be absent while it runs and a
+background 1200-baud serial poll cannot reopen UF2. The precheck lists UF2
+volumes, checks whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
 `rp2040 double-reset` bootloader-entry pattern, then tries one `rp2040 reset`,
-and fails closed if no autonomous bootloader path is available. It does not
-format SD, does not send Public RF, and does not require user action. When
-access is available, the runner flashes the official Seeed SD smoke UF2,
-captures its COM16 JSON, restores the production bridge UF2, runs short COM12
-SD preflight and smoke evidence, and regenerates the fail-closed release gate.
+and fails closed if no autonomous bootloader path is available. An absent COM16
+is accepted only when the COM12 bridge protocol and explicit bootloader command
+are available. It does not
+format SD, does not send Public RF, and does not require user action.
+Pre-existing UF2 disks require explicit `--uf2-volume`; automatic selection is
+limited to exactly one newly appeared volume correlated with the commanded D1L
+transition. COM17 and other discovered RP2040-looking ports are reported only
+as read-only inventory; configured COM16 is the only RP2040 serial port the
+runner may touch when USB smoke or maintenance firmware is active. It is not
+required while the production no-USB bridge answers through COM12. When access
+is available, the runner flashes the official Seeed SD smoke UF2,
+captures its COM16 JSON, restores the exact production bridge UF2, and performs
+a second checksum-verified, non-erasing exact ESP32 flash. That fresh ESP32 boot
+is a required boundary because the intentional bridge-unavailable smoke window
+can latch retained-store I/O failures; failure stops before preflight. Raw
+diagnostics then run under a bounded deadline as an isolated maintenance phase,
+but only after a clean `READY_SD` zero-counter preflight. Before any SD canary,
+the runner restores that exact bridge again, reflashes the
+exact ESP32 project image, and requires a fresh `READY_SD` preflight with zero
+retained failure counters or degradation latches. Any diagnostic or clean
+re-entry failure stops before canaries and remains visible to the release gate.
+Any later SD-stage failure also stops subsequent stages, preserves its receipt,
+runs the release audit, and attempts bounded exact bridge/ESP32 recovery.
 Targeted UI corruption and scroll probes are opt-in with `--include-ui-probes`.
 
-For ESP32-side fixes after the RP2040 bridge is already validated, do not use
-`--refresh-rp2040-smoke`. The default autonomous runner reuses the installed
-bridge and copies no RP2040 UF2 files; add `--skip-sd-suite --include-ui-probes`
-for UI-only validation that should flash only the ESP32 artifact on COM12.
+For ESP32-side fixes after the RP2040 bridge is already validated, add
+`--skip-sd-suite --include-ui-probes` for UI-only validation that flashes only
+the ESP32 artifact on COM12. Any run that keeps the SD suite enabled performs
+the mandatory exact bridge pre/post-diagnostic restore boundary;
+`--refresh-rp2040-smoke` additionally enables official Seeed smoke evidence.
 
 For the SD hardware proof, first flash the verified
 `rp2040-seeed-official-sd-smoke-firmware` UF2, capture the emitted JSON under
@@ -142,7 +172,9 @@ before capture starts, it must still archive the same COM16 smoke path as an
    python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>: --expected-sha256 <sha256> --copy --out artifacts\rp2040-flash\rp2040-sd-bridge-uf2-copy.json
    ```
 
-6. Wait for the volume to disconnect/reboot, then power-cycle the D1L if needed.
+6. Wait for the volume to disconnect/reboot. The production bridge intentionally
+   does not enumerate COM16; verify `rp2040 ping` through COM12 instead. Power-cycle
+   the D1L only if that UART proof does not recover.
 
 Do not use `flash_d1l.ps1`, `flash_project.ps1`, or `esptool` for this RP2040
 step; those are ESP32-S3 paths.

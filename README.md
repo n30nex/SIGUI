@@ -77,8 +77,9 @@ hardware proof.
 Current D1L bench defaults:
 
 - ESP32 app/console: `COM12`
-- RP2040 USB/CDC/UF2: `COM16`
-- Do not use `COM8`, `COM11`, or `COM29` for D1L validation.
+- RP2040 smoke/UF2 maintenance: `COM16`; the production bridge intentionally
+  exposes no USB CDC port and is controlled through the ESP32 console on `COM12`.
+- Never use `COM8`, `COM11`, or `COM29` as the D1L serial/flash target. `COM11` may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
 - Do not format SD from firmware, scripts, serial commands, or UI.
 - Do not send Public RF during SD validation.
 
@@ -112,18 +113,29 @@ Bundled COM12 UI sweep, not the default for every UI issue:
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --skip-sd-suite --include-ui-probes
 ```
 
-Only use the RP2040 refresh path when the bridge firmware, official SD smoke, or
-SD electrical evidence actually changed or needs to be re-proven:
+Use the bundled SD suite only for an SD/RP2040 slice or final release sweep:
 
 ```powershell
 python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --github-run-dir artifacts\github\<run-id>-current --commit <sha> --refresh-rp2040-smoke
 ```
 
-That refresh path captures official RP2040 SD smoke, the RP2040-unavailable
-fallback window, bridge restore, preflight, raw diag,
-file/export/map/retained/reboot canaries, smoke, and the final release-gate
-audit. For SD-only refreshes where the ESP32 app is already flashed from the
-matching Actions artifact, add `--skip-esp32-flash`.
+Every bundled SD run binds the downloaded host-success marker, release manifest,
+packaged files, and standalone firmware hashes to the requested full commit and
+explicitly supplied numeric Actions run before any flash; the resolved commit
+must be a canonical 40-hex SHA. A pre-existing UF2 disk is never selected
+automatically; pass `--uf2-volume` to authorize it explicitly. COM16 is the only
+RP2040 serial port the runner may mutate during smoke/maintenance; other
+discovered ports are read-only inventory. The production bridge intentionally
+has no USB CDC port, so absent COM16 is accepted only when COM12 proves the
+bridge protocol and its explicit `rp2040 bootloader` path. The raw electrical
+diagnostic is an isolated, bounded maintenance phase gated by a fresh clean
+`READY_SD` preflight both before entry and after exact bridge/ESP32 recovery.
+Any failed diagnostic, later SD stage, or post-SD smoke preserves its receipt,
+runs a post-recovery release audit, attempts bounded exact-artifact recovery,
+and stops subsequent canaries and UI probes.
+`--refresh-rp2040-smoke` additionally captures official RP2040 SD smoke and the
+RP2040-unavailable fallback window. `--skip-esp32-flash` is valid only together
+with `--skip-sd-suite` for an ESP32/UI-only run.
 
 Guided SD install, only when autonomous RP2040 access is not available:
 

@@ -18,6 +18,38 @@ try:
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
+try:
+    from sd_reboot_remount_acceptance_d1l import (
+        crashlog_transition_passed,
+        persistence_readback_commands,
+        persistence_snapshot_clean,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.sd_reboot_remount_acceptance_d1l import (
+        crashlog_transition_passed,
+        persistence_readback_commands,
+        persistence_snapshot_clean,
+    )
+
+try:
+    from wp01_evidence_aggregate_d1l import (
+        WP01_ARTIFACT_KINDS,
+        WP01_ARTIFACT_PATTERNS,
+        WP01_PROVENANCE_PATTERN,
+        wp01_aggregate_artifact_ok,
+        wp01_artifact_ok,
+        wp01_provenance_receipt_ok,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.wp01_evidence_aggregate_d1l import (
+        WP01_ARTIFACT_KINDS,
+        WP01_ARTIFACT_PATTERNS,
+        WP01_PROVENANCE_PATTERN,
+        wp01_aggregate_artifact_ok,
+        wp01_artifact_ok,
+        wp01_provenance_receipt_ok,
+    )
+
 
 RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
 SUPPORTED_ESP_IDF_IMAGE = "espressif/idf:v5.5.4"
@@ -80,6 +112,19 @@ REQUIRED_NOTICE_FILES = {
     "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md",
 }
 FULL_SOAK_SECONDS = 12 * 60 * 60
+MAX_FULL_SOAK_SAMPLE_INTERVAL_SECONDS = 5 * 60
+REQUIRED_FULL_SOAK_COMMANDS = {
+    "health",
+    "mesh status",
+    "signal",
+    "messages unread",
+    "packets",
+    "crashlog",
+}
+ALLOWED_FULL_SOAK_COMMANDS = REQUIRED_FULL_SOAK_COMMANDS | {
+    "storage status",
+    "storage filecanary",
+}
 REQUIRED_ROUTE_PROBE_CHECKS = {
     "trace_reports_active_probe",
     "probe_queued",
@@ -210,6 +255,10 @@ def default_hardware_dir() -> str:
 
 def default_rp2040_hardware_dir() -> str:
     return str(Path("artifacts") / "hardware" / default_rp2040_port().lower())
+
+
+def default_wp01_dir() -> str:
+    return str(Path("artifacts") / "hardware" / "wp01")
 
 
 @dataclass
@@ -1518,6 +1567,167 @@ def nested_flag_true(data: dict, *flags: str) -> bool:
     return False
 
 
+def nested_terminal_host_timeout(data: dict) -> bool:
+    return any(
+        candidate.get("code")
+        in {
+            "TIMEOUT",
+            "UNEXPECTED_RESTART",
+            "SKIPPED_AFTER_TIMEOUT",
+            "SKIPPED_AFTER_UNEXPECTED_RESTART",
+        }
+        for candidate in iter_nested_dicts(data)
+    )
+
+
+EXPECTED_REBOOT_BOOT_HELP_FIELD = "expected_boot_help_after_reboot"
+
+
+def command_result_transcript_aligned(data: dict) -> bool:
+    commands = data.get("commands")
+    results = data.get("results")
+    if (
+        not isinstance(commands, list)
+        or not isinstance(results, list)
+        or len(commands) != len(results)
+        or not commands
+    ):
+        return False
+    for command, result in zip(commands, results):
+        if not isinstance(command, str) or not isinstance(result, dict):
+            return False
+        result_command = result.get("cmd")
+        if not isinstance(result_command, str) or not result_command:
+            return False
+        if command != result_command and not command.startswith(result_command + " "):
+            return False
+    return True
+
+
+def expected_reboot_boot_help_dict_ids(data: dict) -> set[int]:
+    """Return the only boot-help dictionaries allowed at a planned reboot.
+
+    The evidence producer may annotate the first successful storage response
+    immediately after its own successful reboot command.  The raw boot marker
+    remains present, but no annotation elsewhere (or without complete reboot
+    proof) is trusted by the release gate.
+    """
+    results = data.get("results")
+    if not isinstance(results, list) or not command_result_transcript_aligned(data):
+        return set()
+    commands = data["commands"]
+    marked = [
+        (index, result)
+        for index, result in enumerate(results)
+        if isinstance(result, dict)
+        and result.get(EXPECTED_REBOOT_BOOT_HELP_FIELD) is True
+    ]
+    if len(marked) != 1:
+        return set()
+    index, result = marked[0]
+    if index == 0 or not isinstance(results[index - 1], dict):
+        return set()
+    reboot = results[index - 1]
+    ignored_count = result.get("ignored_json_count")
+    if not (
+        data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("reboot_command_passed") is True
+        and data.get("reboot_reset_scope") == "system"
+        and data.get("reboot_connectivity_prepare") == "ESP_OK"
+        and data.get("reboot_route_flush") == "ESP_OK"
+        and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_retained_worker_quiesced") is True
+        and data.get("reboot_rp2040_bridge_quiesced") is True
+        and data.get("reboot_nonce_proven") is True
+        and data.get("reboot_proven") is True
+        and data.get("post_reboot_reset_reason") == "SW"
+        and commands[index - 1] == "reboot"
+        and commands[index] == "storage status"
+        and reboot.get("ok") is True
+        and reboot.get("cmd") == "reboot"
+        and reboot.get("rebooting") is True
+        and reboot.get("reset_scope") == "system"
+        and reboot.get("storage_manager_quiesced") is True
+        and reboot.get("retained_worker_quiesced") is True
+        and reboot.get("rp2040_bridge_quiesced") is True
+        and reboot.get("connectivity_prepare") == "ESP_OK"
+        and reboot.get("retained_flush") == "ESP_OK"
+        and reboot.get("route_flush") == "ESP_OK"
+        and result.get("ok") is True
+        and result.get("cmd") == "storage status"
+        and result.get("ignored_boot_help_seen") is True
+        and type(ignored_count) is int
+        and ignored_count == 1
+        and result.get("ignored_json") == [{"cmd": "help", "ok": True}]
+        and result.get("code") not in {
+            "TIMEOUT",
+            "UNEXPECTED_RESTART",
+            "SKIPPED_AFTER_TIMEOUT",
+            "SKIPPED_AFTER_UNEXPECTED_RESTART",
+        }
+    ):
+        return set()
+    allowed = {id(result)}
+    allowed.update(
+        id(ignored)
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict) and ignored.get("cmd") == "help"
+    )
+    return allowed
+
+
+def nested_unexpected_console_restart(
+    data: dict, *, allow_expected_planned_reboot: bool = False
+) -> bool:
+    allowed_expected_ids = (
+        expected_reboot_boot_help_dict_ids(data)
+        if allow_expected_planned_reboot
+        else set()
+    )
+    for candidate in iter_nested_dicts(data):
+        if EXPECTED_REBOOT_BOOT_HELP_FIELD in candidate:
+            if (
+                candidate.get(EXPECTED_REBOOT_BOOT_HELP_FIELD) is not True
+                or id(candidate) not in allowed_expected_ids
+            ):
+                return True
+        if (
+            candidate.get("ignored_boot_help_seen") is True
+            or candidate.get("cmd") == "help"
+        ) and id(candidate) not in allowed_expected_ids:
+            return True
+        if "ignored_json_count" in candidate:
+            count = candidate.get("ignored_json_count")
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                return True
+            if count > 0 and not isinstance(
+                candidate.get("ignored_boot_help_seen"), bool
+            ):
+                # Current evidence producers preserve this boolean even when
+                # the boot marker has fallen out of the last-five JSON tail.
+                # Older/malformed evidence cannot prove that did not happen.
+                return True
+    return False
+
+
+def nested_command_startswith(data: dict, prefix: str) -> bool:
+    normalized = prefix.strip().lower()
+    commands = data.get("commands")
+    if isinstance(commands, list) and any(
+        isinstance(command, str)
+        and command.strip().lower().startswith(normalized)
+        for command in commands
+    ):
+        return True
+    return any(
+        isinstance(candidate.get(field), str)
+        and candidate[field].strip().lower().startswith(normalized)
+        for candidate in iter_nested_dicts(data)
+        for field in ("cmd", "command")
+    )
+
+
 def report_is_no_rf_no_format(data: dict) -> bool:
     return (
         data.get("public_rf_tx") is False
@@ -1638,6 +1848,11 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("sequence_completed") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_console_restart") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
         and data.get("canary_passed") is True
         and data.get("canary_unavailable_ok") is not True
         and data.get("allow_unavailable") is not True
@@ -1651,10 +1866,48 @@ def sd_file_canary_artifact_ok(data: dict, expected_port: str) -> bool:
 def reboot_transition_proven(data: dict) -> bool:
     before = data.get("pre_reboot_boot_nonce")
     after = data.get("post_reboot_boot_nonce")
+    results = data.get("results")
+    if not isinstance(results, list) or not command_result_transcript_aligned(data):
+        return False
+    reboot_indices = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, dict)
+        and result.get("cmd") == "reboot"
+        and result.get("ok") is True
+        and result.get("rebooting") is True
+        and result.get("reset_scope") == "system"
+        and result.get("storage_manager_quiesced") is True
+        and result.get("retained_worker_quiesced") is True
+        and result.get("rp2040_bridge_quiesced") is True
+        and result.get("connectivity_prepare") == "ESP_OK"
+        and result.get("retained_flush") == "ESP_OK"
+        and result.get("route_flush") == "ESP_OK"
+    ]
+    if len(reboot_indices) != 1:
+        return False
+    reboot_index = reboot_indices[0]
+    pre_health = [
+        result
+        for result in results[:reboot_index]
+        if isinstance(result, dict) and result.get("cmd") == "health"
+    ]
+    post_health = [
+        result
+        for result in results[reboot_index + 1 :]
+        if isinstance(result, dict) and result.get("cmd") == "health"
+    ]
     return (
         data.get("reboot_command_passed") is True
+        and data.get("reboot_reset_scope") == "system"
+        and data.get("reboot_connectivity_prepare") == "ESP_OK"
         and data.get("reboot_route_flush") == "ESP_OK"
+        and data.get("reboot_storage_manager_quiesced") is True
+        and data.get("reboot_retained_worker_quiesced") is True
+        and data.get("reboot_rp2040_bridge_quiesced") is True
+        and data.get("reboot_nonce_proven") is True
         and data.get("reboot_proven") is True
+        and data.get("post_reboot_reset_reason") == "SW"
         and isinstance(before, int)
         and not isinstance(before, bool)
         and before != 0
@@ -1662,6 +1915,13 @@ def reboot_transition_proven(data: dict) -> bool:
         and not isinstance(after, bool)
         and after != 0
         and before != after
+        and bool(pre_health)
+        and bool(post_health)
+        and pre_health[-1].get("ok") is True
+        and post_health[-1].get("ok") is True
+        and pre_health[-1].get("boot_nonce") == before
+        and post_health[-1].get("boot_nonce") == after
+        and post_health[-1].get("reset_reason") == "SW"
     )
 
 
@@ -1672,11 +1932,20 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_restart_before_reboot") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(
+            data, allow_expected_planned_reboot=True
+        )
         and data.get("allow_unavailable") is not True
         and data.get("retained_canary_passed") is True
         and data.get("filecanary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
+        and data.get("health_ok") is True
         and data.get("storage_file_gate_ready_before") is True
         and data.get("storage_file_gate_ready_after") is True
         and data.get("retained_history_sd_ready_before") is True
@@ -1690,22 +1959,168 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
     )
 
 
-def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
+def strict_reboot_remount_evidence_ok(
+    data: dict, expected_commit: str | None
+) -> bool:
+    commit = expected_commit or data.get("expected_firmware_commit")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-fA-F]{40}", commit) is None:
+        return False
+    if not command_result_transcript_aligned(data):
+        return False
+    commands = data["commands"]
+    results = data["results"]
+    reboot_indices = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, dict) and result.get("cmd") == "reboot"
+    ]
+    if len(reboot_indices) != 1:
+        return False
+    reboot_index = reboot_indices[0]
+    pre_commands = commands[:reboot_index]
+    pre_results = results[:reboot_index]
+    post_commands = commands[reboot_index + 1 :]
+    post_results = results[reboot_index + 1 :]
+    pre_versions = [
+        result
+        for result in pre_results
+        if isinstance(result, dict) and result.get("cmd") == "version"
+    ]
+    post_versions = [
+        result
+        for result in post_results
+        if isinstance(result, dict) and result.get("cmd") == "version"
+    ]
+    pre_crashlogs = [
+        result
+        for result in pre_results
+        if isinstance(result, dict) and result.get("cmd") == "crashlog"
+    ]
+    post_crashlogs = [
+        result
+        for result in post_results
+        if isinstance(result, dict) and result.get("cmd") == "crashlog"
+    ]
+    if not all(
+        len(rows) == 1
+        for rows in (pre_versions, post_versions, pre_crashlogs, post_crashlogs)
+    ):
+        return False
+    version_results = [pre_versions[0], post_versions[0]]
+    crashlog_results = [pre_crashlogs[0], post_crashlogs[0]]
+    if not all(
+        result.get("ok") is True
+        and exact_full_commit(result.get("build_commit"), commit)
+        for result in version_results
+    ):
+        return False
+    token = data.get("token")
+    if not isinstance(token, str) or not token:
+        return False
+    persistence_plan = persistence_readback_commands(token)
+    pre_health_indices = [
+        index for index, command in enumerate(pre_commands) if command == "health"
+    ]
+    post_version_indices = [
+        index for index, command in enumerate(post_commands) if command == "version"
+    ]
+    post_crashlog_indices = [
+        index for index, command in enumerate(post_commands) if command == "crashlog"
+    ]
+    if (
+        len(pre_health_indices) != 1
+        or len(post_version_indices) != 1
+        or len(post_crashlog_indices) != 1
+        or post_crashlog_indices[0] != post_version_indices[0] + 1
+    ):
+        return False
+    pre_persistence_tail = pre_commands[pre_health_indices[0] + 1 :]
+    post_persistence_tail = post_commands[post_crashlog_indices[0] + 1 :]
+    if not all(
+        len(tail) >= len(persistence_plan)
+        and len(tail) % len(persistence_plan) == 0
+        and all(
+            tail[index : index + len(persistence_plan)] == persistence_plan
+            for index in range(0, len(tail), len(persistence_plan))
+        )
+        for tail in (pre_persistence_tail, post_persistence_tail)
+    ):
+        return False
+    pre_poll_cohorts = len(pre_persistence_tail) // len(persistence_plan)
+    post_poll_cohorts = len(post_persistence_tail) // len(persistence_plan)
+    final_pre_persistence = dict(
+        zip(persistence_plan, pre_results[-len(persistence_plan) :])
+    )
+    final_persistence = dict(
+        zip(persistence_plan, results[-len(persistence_plan) :])
+    )
+    return (
+        exact_full_commit(data.get("expected_firmware_commit"), commit)
+        and exact_full_commit(data.get("pre_device_build_commit"), commit)
+        and exact_full_commit(data.get("device_build_commit"), commit)
+        and data.get("firmware_identity_required") is True
+        and data.get("pre_firmware_identity_ok") is True
+        and data.get("post_firmware_identity_ok") is True
+        and data.get("firmware_identity_ok") is True
+        and data.get("persistence_clean_required") is True
+        and data.get("pre_reboot_persistence_checked") is True
+        and data.get("pre_reboot_persistence_clean") is True
+        and data.get("pre_reboot_pending_dirty") is False
+        and type(data.get("pre_reboot_persistence_poll_attempts_used")) is int
+        and data.get("pre_reboot_persistence_poll_attempts_used") == pre_poll_cohorts
+        and set(final_pre_persistence) == set(persistence_plan)
+        and persistence_snapshot_clean(final_pre_persistence, token)
+        and data.get("pre_reboot_persistence") == final_pre_persistence
+        and data.get("pre_reboot_gate_passed") is True
+        and data.get("reboot_attempted") is True
+        and data.get("reboot_skipped_reason") is None
+        and data.get("post_reboot_persistence_checked") is True
+        and data.get("post_reboot_persistence_clean") is True
+        and data.get("post_reboot_pending_dirty") is False
+        and type(data.get("persistence_poll_attempts_used")) is int
+        and data.get("persistence_poll_attempts_used") == post_poll_cohorts
+        and set(final_persistence) == set(persistence_plan)
+        and persistence_snapshot_clean(final_persistence, token)
+        and data.get("post_reboot_persistence") == final_persistence
+        and data.get("crashlog_transition_required") is True
+        and data.get("crashlog_transition_ok") is True
+        and data.get("crashlog_before_reboot") == crashlog_results[0]
+        and data.get("crashlog_after_reboot") == crashlog_results[1]
+        and crashlog_transition_passed(crashlog_results[0], crashlog_results[1])
+        and data.get("reboot_retained_flush") == "ESP_OK"
+    )
+
+
+def sd_reboot_remount_artifact_ok(
+    data: dict, expected_port: str, expected_commit: str | None = None
+) -> bool:
     return (
         data.get("mode") == "hardware"
         and exact_port_ok(data, expected_port)
         and report_is_no_rf_no_format(data)
         and not unsafe_sd_commands(data)
         and data.get("ok") is True
+        and data.get("pre_sequence_complete") is True
+        and data.get("post_sequence_complete") is True
+        and data.get("timed_out_command") is None
+        and data.get("unexpected_restart_before_reboot") is False
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(
+            data, allow_expected_planned_reboot=True
+        )
         and data.get("pre_remount_ready") is True
         and data.get("post_remount_ready") is True
         and data.get("pre_remount_command_passed") is True
         and data.get("post_remount_command_passed") is True
+        and data.get("pre_remount_retained_worker_quiesce_acquired") is True
+        and data.get("post_remount_retained_worker_quiesce_acquired") is True
         and data.get("retained_history_sd_ready_before") is True
         and data.get("retained_history_sd_ready_after") is True
+        and data.get("filecanary_passed") is True
         and data.get("retained_canary_passed") is True
         and data.get("pre_reboot_readbacks_ok") is True
         and data.get("post_reboot_readbacks_ok") is True
+        and data.get("health_ok") is True
         and data.get("pre_map_tile_canary_passed") is True
         and data.get("post_map_tile_canary_passed") is True
         and reboot_transition_proven(data)
@@ -1714,6 +2129,7 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and storage_status_fresh_status(data.get("storage_before_reboot"))
         and storage_status_fresh_status(data.get("storage_after_reboot"))
         and "reboot" in (data.get("commands") or [])
+        and strict_reboot_remount_evidence_ok(data, expected_commit)
     )
 
 
@@ -1839,6 +2255,17 @@ def raw_diag_complete(data: dict, expected_port: str) -> bool:
 def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -> bool:
     classification = data.get("classification")
     storage_after = data.get("storage_after") if isinstance(data.get("storage_after"), dict) else {}
+    storage_remount = (
+        data.get("storage_remount")
+        if isinstance(data.get("storage_remount"), dict)
+        else {}
+    )
+    remount_receipt_ok = scenario == "rp2040-unavailable" or (
+        data.get("retained_worker_quiesce_acquired") is True
+        and storage_remount.get("ok") is True
+        and storage_remount.get("cmd") == "storage remount"
+        and storage_remount.get("retained_worker_quiesce_acquired") is True
+    )
     file_gate_ok = storage_file_gate_ready_status(storage_after)
     format_policy_ok = (
         scenario not in {"unformatted", "existing-data"}
@@ -1852,6 +2279,28 @@ def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -
         format_policy_ok = format_policy_ok and storage_setup_no_format_policy(
             data.get("storage_setup") if isinstance(data.get("storage_setup"), dict) else None
         )
+    if scenario == "rp2040-unavailable":
+        sd = storage_after.get("sd") if isinstance(storage_after.get("sd"), dict) else {}
+        stores = storage_after.get("stores") if isinstance(storage_after.get("stores"), dict) else {}
+        prerequisite = (
+            data.get("scenario_prerequisite")
+            if isinstance(data.get("scenario_prerequisite"), dict)
+            else {}
+        )
+        format_policy_ok = format_policy_ok and (
+            prerequisite.get("satisfied") is True
+            and sd.get("state") in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}
+            and sd.get("rp2040_protocol_supported") is False
+            and sd.get("mounted") is False
+            and sd.get("data_root_ready") is False
+            and sd.get("file_ops") is False
+            and sd.get("atomic_rename") is False
+            and storage_after.get("data_enabled") is False
+            and storage_after.get("data_backend") == "nvs"
+            and all(stores.get(name) == "nvs" for name in ("messages", "dm", "routes", "packets"))
+            and data.get("storage_file_gate_ready") is False
+            and data.get("retained_store_gate_ready") is False
+        )
     return (
         data.get("mode") == "hardware"
         and exact_port_ok(data, expected_port)
@@ -1861,6 +2310,7 @@ def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -
         and data.get("commands_safe") is True
         and not unsafe_sd_commands(data)
         and classification in SD_BOOT_PREPARE_EXPECTED_CLASSIFICATIONS[scenario]
+        and remount_receipt_ok
         and format_policy_ok
     )
 
@@ -2163,7 +2613,10 @@ def sd_retained_canary_gate(artifact_roots: list[Path], root: Path, commit: str 
             "pre_reboot_readbacks_ok": data.get("pre_reboot_readbacks_ok") if data else None,
             "post_reboot_readbacks_ok": data.get("post_reboot_readbacks_ok") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_reset_scope": data.get("reboot_reset_scope") if data else None,
+            "reboot_connectivity_prepare": data.get("reboot_connectivity_prepare") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
@@ -2180,7 +2633,11 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
         "reboot_remount_*.json",
     )
     data = read_json(remount)
-    ok = bool(remount and data and sd_reboot_remount_artifact_ok(data, expected_port))
+    ok = bool(
+        remount
+        and data
+        and sd_reboot_remount_artifact_ok(data, expected_port, commit)
+    )
     return GateResult(
         "sd_reboot_remount_passed",
         "P0",
@@ -2198,16 +2655,139 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "post_remount_ready": data.get("post_remount_ready") if data else None,
             "pre_remount_command_passed": data.get("pre_remount_command_passed") if data else None,
             "post_remount_command_passed": data.get("post_remount_command_passed") if data else None,
+            "pre_remount_retained_worker_quiesce_acquired": data.get("pre_remount_retained_worker_quiesce_acquired") if data else None,
+            "post_remount_retained_worker_quiesce_acquired": data.get("post_remount_retained_worker_quiesce_acquired") if data else None,
             "retained_history_sd_ready_before": data.get("retained_history_sd_ready_before") if data else None,
             "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
+            "reboot_reset_scope": data.get("reboot_reset_scope") if data else None,
+            "reboot_connectivity_prepare": data.get("reboot_connectivity_prepare") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "reboot_retained_flush": data.get("reboot_retained_flush") if data else None,
+            "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
+            "firmware_identity_ok": data.get("firmware_identity_ok") if data else None,
+            "pre_reboot_persistence_checked": data.get("pre_reboot_persistence_checked") if data else None,
+            "pre_reboot_persistence_clean": data.get("pre_reboot_persistence_clean") if data else None,
+            "pre_reboot_pending_dirty": data.get("pre_reboot_pending_dirty") if data else None,
+            "post_reboot_persistence_clean": data.get("post_reboot_persistence_clean") if data else None,
+            "post_reboot_pending_dirty": data.get("post_reboot_pending_dirty") if data else None,
+            "crashlog_transition_ok": data.get("crashlog_transition_ok") if data else None,
             "pre_map_tile_canary_passed": data.get("pre_map_tile_canary_passed") if data else None,
             "post_map_tile_canary_passed": data.get("post_map_tile_canary_passed") if data else None,
         },
+    )
+
+
+def wp01_evidence_gate(
+    wp01_dir: Path,
+    root: Path,
+    github_run_dir: Path | None,
+    commit: str | None,
+    github_run_id: str | None,
+    d1l_port: str,
+    rp2040_port: str,
+) -> GateResult:
+    paths: dict[str, Path | None] = {}
+    checks: dict[str, bool] = {}
+    hashes: dict[str, str] = {}
+    details: dict[str, Any] = {}
+    provenance_path = newest_commit_json(wp01_dir, commit, WP01_PROVENANCE_PATTERN)
+    provenance = read_json(provenance_path)
+    provenance_sha256 = sha256_file(provenance_path) if provenance_path else None
+    provenance_ok = bool(
+        provenance_path
+        and provenance_sha256
+        and github_run_dir
+        and commit
+        and github_run_id
+        and wp01_provenance_receipt_ok(
+            provenance,
+            commit,
+            github_run_id,
+            d1l_port,
+            rp2040_port,
+            root=root,
+            github_run_dir=github_run_dir,
+        )
+    )
+    details["provenance_receipt"] = {
+        "path_found": bool(provenance_path),
+        "artifact_ok": provenance_ok,
+        "path": rel(provenance_path, root) if provenance_path else None,
+        "sha256": provenance_sha256,
+    }
+
+    for kind in WP01_ARTIFACT_KINDS:
+        path = newest_commit_json(wp01_dir, commit, WP01_ARTIFACT_PATTERNS[kind])
+        data = read_json(path)
+        valid = bool(
+            path
+            and commit
+            and github_run_id
+            and wp01_artifact_ok(
+                data,
+                kind,
+                commit,
+                github_run_id,
+                d1l_port,
+                rp2040_port,
+                provenance if provenance_ok else None,
+                provenance_sha256 if provenance_ok else None,
+                root,
+            )
+        )
+        paths[kind] = path
+        checks[kind] = valid
+        if path:
+            hashes[kind] = sha256_file(path)
+        details[kind] = {
+            "path_found": bool(path),
+            "artifact_ok": valid,
+            "path": rel(path, root) if path else None,
+        }
+
+    aggregate = newest_commit_json(wp01_dir, commit, "wp01_acceptance_*.json")
+    aggregate_data = read_json(aggregate)
+    aggregate_ok = bool(
+        aggregate
+        and commit
+        and github_run_id
+        and all(checks.values())
+        and wp01_aggregate_artifact_ok(
+            aggregate_data,
+            commit,
+            github_run_id,
+            d1l_port,
+            rp2040_port,
+            hashes,
+            provenance_sha256,
+            provenance if provenance_ok else None,
+        )
+    )
+    details["aggregate"] = {
+        "path_found": bool(aggregate),
+        "artifact_ok": aggregate_ok,
+        "path": rel(aggregate, root) if aggregate else None,
+    }
+    ok = provenance_ok and all(checks.values()) and aggregate_ok
+    evidence = [rel(path, root) for path in paths.values() if path]
+    if provenance_path:
+        evidence.insert(0, rel(provenance_path, root))
+    if aggregate:
+        evidence.append(rel(aggregate, root))
+    return GateResult(
+        "wp01_exact_pair_storage_reboot",
+        "P0",
+        ok,
+        "WP-01 exact-pair storage, reboot, removal, and soak qualification",
+        evidence,
+        "All four exact-commit WP-01 physical artifacts and their hash-bound aggregate pass."
+        if ok
+        else "WP-01 remains open; one or more exact-commit physical artifacts or the hash-bound aggregate is missing or invalid.",
+        details,
     )
 
 
@@ -2420,6 +3000,17 @@ def sd_boot_prepare_gate(artifact_roots: list[Path], root: Path, commit: str | N
             "mode": data.get("mode") if data else None,
             "port": data.get("port") if data else None,
             "classification": data.get("classification") if data else None,
+            "retained_worker_quiesce_acquired": data.get("retained_worker_quiesce_acquired") if data else None,
+            "storage_remount_ok": (
+                data.get("storage_remount", {}).get("ok")
+                if data and isinstance(data.get("storage_remount"), dict)
+                else None
+            ),
+            "storage_remount_retained_worker_quiesce_acquired": (
+                data.get("storage_remount", {}).get("retained_worker_quiesce_acquired")
+                if data and isinstance(data.get("storage_remount"), dict)
+                else None
+            ),
             "formats_sd": data.get("formats_sd") if data else None,
             "public_rf_tx": data.get("public_rf_tx") if data else None,
         }
@@ -2596,16 +3187,174 @@ def sd_32gb_matrix_gate(artifact_roots: list[Path], root: Path, commit: str | No
     )
 
 
+def raw_full_soak_evidence(data: dict) -> tuple[bool, int | None]:
+    samples = data.get("samples")
+    commands = data.get("commands")
+    interval = first_number(data.get("sample_interval_sec"))
+    if (
+        not isinstance(samples, list)
+        or not samples
+        or not isinstance(commands, list)
+        or not all(isinstance(command, str) for command in commands)
+        or len(commands) != len(set(commands))
+        or not REQUIRED_FULL_SOAK_COMMANDS.issubset(set(commands))
+        or not set(commands).issubset(ALLOWED_FULL_SOAK_COMMANDS)
+        or interval is None
+        or interval <= 0
+        or interval > MAX_FULL_SOAK_SAMPLE_INTERVAL_SECONDS
+    ):
+        return False, None
+
+    required_samples = int(FULL_SOAK_SECONDS // interval) + 1
+    if len(samples) < required_samples:
+        return False, None
+
+    elapsed_values: list[float] = []
+    uptime_values: list[int] = []
+    boot_nonces: list[int] = []
+    retained_stack_values: list[int] = []
+    for sample in samples:
+        if (
+            not isinstance(sample, dict)
+            or "aborted_after_timeout" not in sample
+            or sample.get("aborted_after_timeout") is not None
+        ):
+            return False, None
+        elapsed = first_number(sample.get("elapsed_sec"))
+        results = sample.get("results")
+        if elapsed is None or not isinstance(results, list):
+            return False, None
+        if (
+            [result.get("cmd") for result in results if isinstance(result, dict)]
+            != commands
+            or len(results) != len(commands)
+            or any(
+                not isinstance(result, dict) or result.get("ok") is not True
+                for result in results
+            )
+        ):
+            return False, None
+        health_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "health"
+        ]
+        if (
+            len(health_rows) != 1
+            or health_rows[0].get("board_ready") is not True
+            or health_rows[0].get("ui_ready") is not True
+        ):
+            return False, None
+        mesh_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "mesh status"
+        ]
+        if (
+            len(mesh_rows) != 1
+            or mesh_rows[0].get("state") != "ready"
+            or mesh_rows[0].get("identity_ready") is not True
+            or mesh_rows[0].get("radio_ready") is not True
+        ):
+            return False, None
+        crashlog_rows = [
+            result
+            for result in results
+            if isinstance(result, dict) and result.get("cmd") == "crashlog"
+        ]
+        if len(crashlog_rows) != 1 or nested_flag_true(
+            crashlog_rows[0], "crash_like"
+        ):
+            return False, None
+        uptime = int_value(health_rows[0].get("uptime_ms"))
+        boot_nonce = int_value(health_rows[0].get("boot_nonce"))
+        retained_stack = int_value(
+            health_rows[0].get("retained_task_stack_free_bytes")
+        )
+        if (
+            uptime is None
+            or uptime < 0
+            or boot_nonce is None
+            or boot_nonce == 0
+            or retained_stack is None
+            or retained_stack < 4096
+        ):
+            return False, None
+        elapsed_values.append(elapsed)
+        uptime_values.append(uptime)
+        boot_nonces.append(boot_nonce)
+        retained_stack_values.append(retained_stack)
+
+    elapsed_gaps = [
+        later - earlier
+        for earlier, later in zip(elapsed_values, elapsed_values[1:])
+    ]
+    uptime_gaps_seconds = [
+        (later - earlier) / 1000.0
+        for earlier, later in zip(uptime_values, uptime_values[1:])
+    ]
+    timing_ok = (
+        0 <= elapsed_values[0] <= interval
+        and all(
+            0 < gap <= (interval * 1.5) + 5.0
+            for gap in elapsed_gaps
+        )
+        and elapsed_values[-1] >= FULL_SOAK_SECONDS
+        and uptime_values == sorted(uptime_values)
+        and len(set(boot_nonces)) == 1
+        and all(
+            abs(uptime_gap - elapsed_gap)
+            <= max(10.0, elapsed_gap * 0.15)
+            for elapsed_gap, uptime_gap in zip(
+                elapsed_gaps, uptime_gaps_seconds
+            )
+        )
+    )
+    return timing_ok, min(retained_stack_values)
+
+
 def full_soak_ok(data: dict) -> bool:
     summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
+    duration = first_number(data.get("duration_sec"))
+    retained_stack_floor = int_value(
+        summary.get("retained_task_stack_free_bytes_floor")
+    )
+    raw_evidence_ok, raw_retained_stack_floor = raw_full_soak_evidence(data)
     return (
         data.get("ok") is True
         and data.get("mode") == "hardware"
-        and float(data.get("duration_sec") or 0) >= FULL_SOAK_SECONDS
+        and duration is not None
+        and duration >= FULL_SOAK_SECONDS
+        and report_is_no_rf_no_format(data)
+        and "active_public_text" in data
+        and data.get("active_public_text") is None
+        and data.get("dm_rf_tx") is False
+        and data.get("active_command") is None
+        and data.get("active_events") == []
+        and isinstance(data.get("setup_events"), list)
+        and all(
+            isinstance(event, dict)
+            and isinstance(event.get("result"), dict)
+            and event["result"].get("ok") is True
+            for event in data["setup_events"]
+        )
+        and not nested_command_startswith(data, "mesh send")
+        and not nested_terminal_host_timeout(data)
+        and not nested_unexpected_console_restart(data)
+        and "aborted_after_timeout" in data
+        and data.get("aborted_after_timeout") is None
+        and raw_evidence_ok
         and summary.get("ok") is True
         and not summary.get("threshold_failures")
+        and summary.get("command_timeout_seen") is False
+        and summary.get("unexpected_console_restart_seen") is False
+        and retained_stack_floor is not None
+        and retained_stack_floor >= 4096
+        and retained_stack_floor == raw_retained_stack_floor
+        and summary.get("crashlog_crash_like_count") == 0
         and summary.get("board_ready_all") is True
         and summary.get("ui_ready_all") is True
+        and summary.get("mesh_ready_all") is True
         and summary.get("uptime_monotonic") is True
     )
 
@@ -2812,6 +3561,12 @@ def build_audit(args: argparse.Namespace) -> dict:
     hardware_dir = Path(args.hardware_dir).resolve()
     rp2040_hardware_dir = Path(args.rp2040_hardware_dir).resolve()
     soak_dir = Path(args.soak_dir).resolve()
+    wp01_dir_arg = Path(args.wp01_dir)
+    wp01_dir = (
+        wp01_dir_arg.resolve()
+        if wp01_dir_arg.is_absolute()
+        else (root / wp01_dir_arg).resolve()
+    )
     gates: list[GateResult] = []
     smoke_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "smoke")
     ui_corruption_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-corruption-probe")
@@ -2969,6 +3724,17 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
     gates.append(sd_reboot_remount_gate(reboot_remount_roots, root, args.commit, args.d1l_port))
+    gates.append(
+        wp01_evidence_gate(
+            wp01_dir,
+            root,
+            github_run_dir,
+            args.commit,
+            args.github_run_id,
+            args.d1l_port,
+            args.rp2040_port,
+        )
+    )
     gates.append(sd_map_tile_canary_gate(map_tile_roots, root, args.commit, args.d1l_port))
     gates.append(sd_export_canary_gate(export_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_diagnostic_export_gate(diagnostic_export_roots, root, args.commit, args.d1l_port))
@@ -2993,6 +3759,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         "github_run_dir": str(github_run_dir) if github_run_dir else None,
         "commit": args.commit,
         "hardware_dir": str(hardware_dir),
+        "wp01_dir": str(wp01_dir),
         "rp2040_port": args.rp2040_port,
         "rp2040_hardware_dir": str(rp2040_hardware_dir),
         "ready_for_public_release": not p0_failed,
@@ -3013,6 +3780,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--meshbot-port", default=default_meshbot_port())
     parser.add_argument("--hardware-dir", default=default_hardware_dir())
     parser.add_argument("--rp2040-hardware-dir", default=default_rp2040_hardware_dir())
+    parser.add_argument("--wp01-dir", default=default_wp01_dir())
     parser.add_argument("--soak-dir", default="artifacts/soak")
     parser.add_argument("--out")
     parser.add_argument("--fail-on-open-p0", action="store_true")
