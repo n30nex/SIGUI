@@ -87,10 +87,32 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     )[1].split("static esp_err_t pulse_rp2040_reset", 1)[0]
     assert "return ESP_ERR_INVALID_ARG" in bridge_quiesce
     assert "return ESP_ERR_INVALID_STATE" in bridge_quiesce
+    assert "const int64_t started_us = esp_timer_get_time();" in bridge_quiesce
     assert "xSemaphoreTake(s_bridge_mutex, ticks)" in bridge_quiesce
+    assert "uart_is_driver_installed(uart_port)" in bridge_quiesce
+    assert "uart_wait_tx_done(uart_port, ticks)" in bridge_quiesce
     assert "D1L_RP2040_BRIDGE_LOCK_GRACE_MS" not in bridge_quiesce
     assert bridge_quiesce.index("xSemaphoreTake(s_bridge_mutex, ticks)") < bridge_quiesce.index(
+        "uart_wait_tx_done(uart_port, ticks)"
+    ) < bridge_quiesce.index(
         "s_bridge_quiesce_owner = xTaskGetCurrentTaskHandle()"
+    )
+    assert bridge_quiesce.count(
+        "bridge_quiesce_remaining_ticks(started_us, timeout_ms)"
+    ) == 3
+    tx_idle_failure = bridge_quiesce.split(
+        "if (tx_idle_ret != ESP_OK)", 1
+    )[1].split(
+        "if (bridge_quiesce_remaining_ticks", 1
+    )[0]
+    assert tx_idle_failure.index("give_bridge_lock()") < tx_idle_failure.index(
+        "return tx_idle_ret"
+    )
+    final_deadline_failure = bridge_quiesce.split(
+        "if (bridge_quiesce_remaining_ticks(started_us, timeout_ms) == 0U)", 1
+    )[1].split("portENTER_CRITICAL", 1)[0]
+    assert final_deadline_failure.index("give_bridge_lock()") < final_deadline_failure.index(
+        "return ESP_ERR_TIMEOUT"
     )
     assert "s_bridge_quiesce_owner != current" in bridge_quiesce_end
     assert bridge_quiesce_end.index("s_bridge_quiesce_owner = NULL") < bridge_quiesce_end.index(

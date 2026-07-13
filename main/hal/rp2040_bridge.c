@@ -77,11 +77,26 @@ static void give_bridge_lock(void)
     }
 }
 
+static TickType_t bridge_quiesce_remaining_ticks(int64_t started_us,
+                                                  uint32_t timeout_ms)
+{
+    const int64_t elapsed_us = esp_timer_get_time() - started_us;
+    const int64_t timeout_us = (int64_t)timeout_ms * 1000LL;
+    if (elapsed_us >= timeout_us) {
+        return 0;
+    }
+    const uint32_t remaining_ms =
+        (uint32_t)((timeout_us - elapsed_us + 999LL) / 1000LL);
+    TickType_t ticks = pdMS_TO_TICKS(remaining_ms);
+    return ticks == 0U ? 1U : ticks;
+}
+
 esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
 {
     if (timeout_ms == 0U) {
         return ESP_ERR_INVALID_ARG;
     }
+    const int64_t started_us = esp_timer_get_time();
     portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
     const bool already_quiesced = s_bridge_quiesce_owner != NULL;
     portEXIT_CRITICAL(&s_bridge_quiesce_owner_lock);
@@ -92,11 +107,28 @@ esp_err_t d1l_rp2040_bridge_quiesce_begin(uint32_t timeout_ms)
     if (!s_bridge_mutex) {
         return ESP_ERR_NO_MEM;
     }
-    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
-    if (ticks == 0) {
-        ticks = 1;
+    TickType_t ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
+    if (ticks == 0U || xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
     }
-    if (xSemaphoreTake(s_bridge_mutex, ticks) != pdTRUE) {
+
+    /* esp_restart_noos waits for every enabled UART without an application
+     * timeout. Prove TX idle while this lock excludes all new bridge writes. */
+    const uart_port_t uart_port = (uart_port_t)s_status.uart_port;
+    if (uart_is_driver_installed(uart_port)) {
+        ticks = bridge_quiesce_remaining_ticks(started_us, timeout_ms);
+        if (ticks == 0U) {
+            give_bridge_lock();
+            return ESP_ERR_TIMEOUT;
+        }
+        const esp_err_t tx_idle_ret = uart_wait_tx_done(uart_port, ticks);
+        if (tx_idle_ret != ESP_OK) {
+            give_bridge_lock();
+            return tx_idle_ret;
+        }
+    }
+    if (bridge_quiesce_remaining_ticks(started_us, timeout_ms) == 0U) {
+        give_bridge_lock();
         return ESP_ERR_TIMEOUT;
     }
     portENTER_CRITICAL(&s_bridge_quiesce_owner_lock);
