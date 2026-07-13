@@ -224,6 +224,48 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install rp2040:rp2040@5.6.1
 
+      - name: Disable unused SdFat PIO SDIO serial debug
+        shell: bash
+        run: |
+          mkdir -p artifacts/rp2040-sd-bridge
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          source = (
+              Path.home()
+              / ".arduino15/packages/rp2040/hardware/rp2040/5.6.1"
+              / "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp"
+          )
+          before = source.read_bytes()
+          old = b"#define USE_DEBUG_MODE 1"
+          new = b"#define USE_DEBUG_MODE 0"
+          if before.count(old) != 1 or before.count(new) != 0:
+              raise SystemExit(
+                  "pinned SdFat PioSdio debug marker mismatch; refusing dependency patch"
+              )
+          after = before.replace(old, new)
+          source.write_bytes(after)
+          verified = source.read_bytes()
+          if verified != after or verified.count(old) != 0 or verified.count(new) != 1:
+              raise SystemExit("SdFat PioSdio no-serial patch verification failed")
+          receipt = {
+              "schema": 1,
+              "kind": "arduino_pico_sdfat_no_usb_patch",
+              "arduino_pico_version": "5.6.1",
+              "upstream_sdfat_commit": "cda057318bec196183d4cc92b01bc1dd64bbfb02",
+              "source": "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp",
+              "change": "USE_DEBUG_MODE=1 -> USE_DEBUG_MODE=0",
+              "reason": "production_no_usb_build_has_no_Serial_and_bridge_uses_SPI1_not_PIO_SDIO",
+              "before_sha256": hashlib.sha256(before).hexdigest(),
+              "after_sha256": hashlib.sha256(after).hexdigest(),
+          }
+          Path("artifacts/rp2040-sd-bridge/sdfat-no-usb-patch.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="ascii"
+          )
+          PY
+
       - name: Build RP2040 SD bridge
         shell: bash
         run: |

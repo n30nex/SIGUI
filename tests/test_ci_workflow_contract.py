@@ -86,6 +86,9 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
     assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
     assert "arduino-cli compile" in job
+    patch_step = job.split(
+        "- name: Disable unused SdFat PIO SDIO serial debug", 1
+    )[1].split("- name: Build RP2040 SD bridge", 1)[0]
     bridge_build = job.split("- name: Build RP2040 SD bridge", 1)[1].split(
         "- name: Verify RP2040 checksums", 1
     )[0]
@@ -99,6 +102,16 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
         "--fqbn rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb"
         in bridge_build
     )
+    assert ".arduino15/packages/rp2040/hardware/rp2040/5.6.1" in patch_step
+    assert "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp" in patch_step
+    assert 'old = b"#define USE_DEBUG_MODE 1"' in patch_step
+    assert 'new = b"#define USE_DEBUG_MODE 0"' in patch_step
+    assert "before.count(old) != 1 or before.count(new) != 0" in patch_step
+    assert "verified.count(old) != 0 or verified.count(new) != 1" in patch_step
+    assert "cda057318bec196183d4cc92b01bc1dd64bbfb02" in patch_step
+    assert "before_sha256" in patch_step
+    assert "after_sha256" in patch_step
+    assert "sdfat-no-usb-patch.json" in patch_step
     assert ":usbstack=nousb" not in seeed_smoke_build
     assert ":usbstack=nousb" not in official_smoke_build
     assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in seeed_smoke_build

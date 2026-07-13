@@ -66,6 +66,15 @@ prove bridge health through the ESP32 console on COM12. The two isolated SD
 smoke sketches retain the normal USB stack because their bounded evidence is
 captured directly on COM16 before the production bridge is restored.
 
+Arduino-Pico 5.6.1 bundles SdFat commit
+`cda057318bec196183d4cc92b01bc1dd64bbfb02`, whose unused RP2040 PIO-SD source
+hardcodes serial debug on even when this bridge uses SPI1. A no-USB link therefore
+has no `Serial` object for that dead debug path. The Actions job fail-closed
+checks the exact pinned source marker, changes only `USE_DEBUG_MODE` from `1` to
+`0`, verifies the replacement, and packages
+`sdfat-no-usb-patch.json` with the before/after SHA-256 values. The production
+sketch and its SD protocol are not patched by this step.
+
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 The CI job also emits `rp2040-sd-smoke-firmware`, a non-production isolation
 sketch that runs only Seeed's published MicroSD init shape and reports
