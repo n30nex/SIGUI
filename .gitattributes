@@ -1,0 +1,3 @@
+docs/completion/*.md text eol=lf
+docs/completion/*.yaml text eol=lf
+docs/completion/SHA256SUMS.txt text eol=lf

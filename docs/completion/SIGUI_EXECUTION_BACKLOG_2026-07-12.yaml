@@ -1,10 +1,38 @@
 schema_version: 1
-generated_at: '2026-07-12'
+generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 5b5dfaa0592347497df1a2f77f572c6d49933c6a
-  integrated_candidate: 07322ed4c700866106ecca6c31ff70ea3a3d4ede
+  merged_baseline: 3e712916a05931fd10998f51d7f616e506daeeb4
+  integrated_candidate: 092293f2311a24c9899bc9bf343ab014c4ba0411
+  proof_ledger_pr: 83
+  proof_ledger_head_observed_before_final_update: 185b07100e55445bdf0d61a238de2d6e6df2cea0
+  integrated_candidate_actions:
+    push_run: 29272708844
+    pr_run: 29272709642
+    host_tests_passed: 773
+    checksum_manifests: 8
+    checksum_entries_verified: 78
+  release_audit:
+    ready_for_public_release: false
+    remaining_p0_failures: 15
+    failures_overall_including_p1: 16
+  local_merge_rehearsals:
+    pr62:
+      commit: 7648611c412e7f4658f5d14b43ba530744d96160
+      full_host_tests_passed: 423
+      focused_tests_passed: 80
+      evidence_scope: local_only
+    pr64:
+      commit: c5886de1e2988b2097034183d5e39bb3aec88344
+      full_host_tests_passed: 575
+      focused_tests_passed: 128
+      evidence_scope: local_only
+    pr80:
+      commit: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
+      full_host_tests_passed: 787
+      focused_tests_passed: 302
+      evidence_scope: local_only
   active_pr_stack:
   - 62
   - 64
@@ -120,27 +148,57 @@ work_packages:
   tracks:
   - 69
   - 78
-  status: in_progress
+  status: hardware_green
+  proof_banked: true
+  implementation_merged: false
   required_artifacts:
   - sd_inserted_stability_<sha>_<d1l>_<rp2040>.json
   - sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json
   - retained_reboot_matrix_<sha>_<d1l>.json
-  - storage_active_soak_<sha>_<d1l>.json
-  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+  - storage_active_soak_<sha>_<d1l>_<rp2040>.json
+  - wp01_acceptance_<sha>_<d1l>_<rp2040>.json
+  accepted_evidence:
+    source_commit: 092293f2311a24c9899bc9bf343ab014c4ba0411
+    actions_push_run: 29272708844
+    actions_pr_run: 29272709642
+    host_tests_passed: 773
+    checksum_manifests: 8
+    checksum_entries_verified: 78
+    provenance_sha256: 2decf8ad60b73e71bbb09b489adba8fd827856a8daf00c376c5a9ba5354e451e
+    inserted_stability_sha256: a038ee7ca371c4ee404493c721a343ef54e7bbd55b08273c8dc833d9d0203aef
+    removal_reinsert_sha256: 3a3882038fec2497529d281f3c2b9b7468c1e62dcca7962ca3b9492125f0fad1
+    removal_reinsert_cycles_passed: 10
+    reboot_matrix_sha256: db6cab3020bfa8ef575bd6a59c61d1277a8e72e1e73eb987248817199797a986
+    reboot_cycles_passed: 5
+    active_soak_sha256: caf19395d0e1a175f6fa13c2550bc8693297661756bf339ba4acec63da2699b9
+    active_soak_duration_sec: 7207.089
+    active_soak_segments_passed: 6
+    retained_worker_stack_floor_bytes: 7976
+    aggregate_sha256: 994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277
+    public_rf_tx: false
+    formats_sd: false
+  remaining_scope: Implementation merge is owned by WP-02; broader final SD/card/Seeed/electrical/power-loss/boot/12-hour qualification remains open.
+  closure_rule: Exact source implementation, Actions, checksums, inserted/removal/reboot/active-soak evidence, docs, and ledger proof are banked; implementation merge remains false until WP-02 lands PR #80.
 - id: WP-02
   title: Land and normalize PR stack
   lane: integration
   depends_on:
   - WP-01
+  dependency_gate: proof_banked
   tracks:
   - 62
   - 64
   - 80
   - 63
   - 78
-  status: blocked
+  status: in_progress
   required_artifacts:
   - integration_baseline_<main-sha>.json
+  local_rehearsals:
+    pr62: 7648611c412e7f4658f5d14b43ba530744d96160
+    pr64: c5886de1e2988b2097034183d5e39bb3aec88344
+    pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
+  evidence_scope: Local rehearsal commits are not remote exact checks or physical proof and must absorb final proof-ledger/main before push.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
@@ -499,14 +557,14 @@ work_packages:
   profile_behavior: Run once for Stable Core and again for Full Feature; each publication requires its own exact-SHA WP-24
     evidence.
 current_priority:
-- WP-01
 - WP-02
-- WP-00
+- WP-01
 - WP-03
 - WP-04
 - WP-06
 - WP-05
 - WP-07
+- WP-00
 forbidden_port_policy:
   forbidden:
   - COM8
