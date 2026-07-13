@@ -415,7 +415,7 @@ jobs:
       - name: Verify firmware and release checksums
         run: |
           python scripts/verify_checksums.py artifacts/firmware
-          python scripts/verify_checksums.py artifacts/release
+          python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"
 
       - uses: actions/upload-artifact@v7
         with:
