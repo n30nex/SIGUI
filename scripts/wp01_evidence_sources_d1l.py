@@ -60,10 +60,15 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
-SOURCE_BOUND_KINDS = {"sd_inserted_stability", "retained_reboot_matrix"}
+SOURCE_BOUND_KINDS = {
+    "sd_inserted_stability",
+    "retained_reboot_matrix",
+    "storage_active_soak",
+}
 RETAINED_STACK_MIN_BYTES = 4096
 INSERTED_STABILITY_MIN_SECONDS = 300.0
 REBOOT_MIN_CYCLES = 5
+STORAGE_ACTIVE_SOAK_MIN_SECONDS = 2 * 60 * 60
 
 
 def read_json(path: Path) -> dict:
@@ -177,6 +182,7 @@ def _base_artifact(
         "github_actions_run": str(github_actions_run),
         "ports": {"d1l": _port(d1l_port), "rp2040": _port(rp2040_port)},
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
         "provenance": provenance,
         "provenance_receipt_sha256": provenance_sha256,
@@ -953,6 +959,364 @@ def build_retained_reboot_matrix_artifact(
     return artifact
 
 
+def _active_soak_segment_stats(
+    report: dict,
+    *,
+    commit: str,
+    d1l_port: str,
+) -> dict:
+    commands = soak_commands(sample_storage=True, sd_file_canary=True)
+    samples = report.get("samples")
+    summary = report.get("summary")
+    version = report.get("version_preflight")
+    if not (
+        report.get("schema") == 1
+        and report.get("mode") == "hardware"
+        and report.get("ok") is True
+        and _port(report.get("port")) == _port(d1l_port)
+        and report.get("baud") == 115200
+        and _raw_git_clean(report, commit)
+        and _exact_commit(report.get("expected_firmware_commit"), commit)
+        and _exact_commit(report.get("device_build_commit"), commit)
+        and report.get("firmware_identity_required") is True
+        and report.get("firmware_identity_ok") is True
+        and report.get("preflight_failure") is None
+        and report.get("preflight_commands") == ["version"]
+        and isinstance(version, dict)
+        and version.get("ok") is True
+        and version.get("cmd") == "version"
+        and _exact_commit(version.get("build_commit"), commit)
+        and report.get("commands") == commands
+        and report.get("sample_storage") is True
+        and report.get("sd_file_canary") is True
+        and report.get("allow_sd_unavailable") is False
+        and report.get("active_command") is None
+        and report.get("active_events") == []
+        and report.get("command_retries") == 0
+        and report.get("dm_rf_tx") is False
+        and report.get("public_rf_tx") is False
+        and report.get("formats_sd") is False
+        and report.get("aborted_after_timeout") is None
+        and isinstance(summary, dict)
+        and summary.get("ok") is True
+        and summary.get("command_failure_count") == 0
+        and summary.get("command_failures") == []
+        and summary.get("threshold_failures") == []
+        and summary.get("command_timeout_seen") is False
+        and summary.get("unexpected_console_restart_seen") is False
+        and summary.get("command_retry_count") == 0
+        and summary.get("command_recovered_after_retry_count") == 0
+        and summary.get("command_retry_failure_count") == 0
+        and isinstance(samples, list)
+        and len(samples) >= 2
+        and not _nested_true(report, {"public_rf_tx", "dm_rf_tx", "formats_sd", "format_performed"})
+        and _nested_code_count(report, "TIMEOUT") == 0
+    ):
+        raise ValueError("storage-active soak segment failed identity or safety checks")
+
+    elapsed = [_number(sample.get("elapsed_sec")) for sample in samples]
+    if (
+        any(value is None for value in elapsed)
+        or not 0.0 <= elapsed[0] <= 5.0
+        or any(
+            current <= previous
+            for previous, current in zip(elapsed, elapsed[1:])
+            if previous is not None and current is not None
+        )
+        or samples[0].get("label") != "start"
+        or samples[-1].get("label") != "final"
+    ):
+        raise ValueError("storage-active soak segment elapsed times are malformed")
+
+    health_rows: list[dict] = []
+    storage_rows: list[dict] = []
+    packet_rows: list[dict] = []
+    crash_rows: list[dict] = []
+    for sample in samples:
+        results = sample.get("results")
+        if not (
+            sample.get("aborted_after_timeout") is None
+            and isinstance(results, list)
+            and len(results) == len(commands)
+            and [row.get("cmd") for row in results if isinstance(row, dict)] == commands
+            and all(
+                isinstance(row, dict)
+                and row.get("schema") == 1
+                and row.get("ok") is True
+                and row.get("recovered_after_retry") is not True
+                and row.get("retry_failures") in (None, [])
+                for row in results
+            )
+        ):
+            raise ValueError("storage-active soak segment command cohort failed")
+        health = _sample_result(sample, "health")
+        storage = _sample_result(sample, "storage status")
+        packet = _sample_result(sample, "packets")
+        crash = _sample_result(sample, "crashlog")
+        filecanary = _sample_result(sample, "storage filecanary")
+        if not all(isinstance(row, dict) for row in (health, storage, packet, crash)):
+            raise ValueError("storage-active soak sample is incomplete")
+        if not isinstance(filecanary, dict) or not sd_filecanary_passed(filecanary):
+            raise ValueError("storage-active soak SD file canary failed")
+        if not storage_ready(storage) or not file_ops_ready(storage):
+            raise ValueError("storage-active soak sample is not READY_SD")
+        if _retained_status_has_failures(storage) or _packet_status_has_failures(packet):
+            raise ValueError("storage-active soak retained persistence failed")
+        health_rows.append(health)
+        storage_rows.append(storage)
+        packet_rows.append(packet)
+        crash_rows.append(crash)
+
+    boot_nonces = [_integer(row.get("boot_nonce"), minimum=1) for row in health_rows]
+    uptimes = [_integer(row.get("uptime_ms")) for row in health_rows]
+    stacks = [_integer(row.get("retained_task_stack_free_bytes")) for row in health_rows]
+    crash_totals = [_integer(row.get("total_written")) for row in crash_rows]
+    if (
+        any(value is None for value in boot_nonces + uptimes + stacks + crash_totals)
+        or len(set(boot_nonces)) != 1
+        or any(current < previous for previous, current in zip(uptimes, uptimes[1:]))
+        or min(value for value in stacks if value is not None) < RETAINED_STACK_MIN_BYTES
+        or len(set(crash_totals)) != 1
+        or _new_crash_entries(samples)
+    ):
+        raise ValueError("storage-active soak segment reset, crash, or stack boundary failed")
+
+    generations: list[int] = []
+    for packet in packet_rows:
+        persistence = packet.get("persistence")
+        sd = persistence.get("sd") if isinstance(persistence, dict) else None
+        generation = _integer(sd.get("generation")) if isinstance(sd, dict) else None
+        if generation is None:
+            raise ValueError("storage-active soak packet generation is missing")
+        generations.append(generation)
+    false_no_card_count = sum(
+        sd_status(row).get("state") == "no_card"
+        or sd_status(row).get("present") is False
+        or sd_status(row).get("mounted") is False
+        for row in storage_rows
+    )
+    generation_change_count = sum(
+        current != previous for previous, current in zip(generations, generations[1:])
+    )
+    if false_no_card_count or generation_change_count:
+        raise ValueError("storage-active soak segment observed a media-state change")
+    return {
+        "duration_sec": round(elapsed[-1] - elapsed[0], 3),
+        "sample_count": len(samples),
+        "status_poll_count": len(storage_rows),
+        "boot_nonce": boot_nonces[0],
+        "crashlog_total": crash_totals[0],
+        "retained_task_stack_free_bytes_floor": min(
+            value for value in stacks if value is not None
+        ),
+        "packet_generations": generations,
+        "false_no_card_count": false_no_card_count,
+        "retained_failure_count": 0,
+        "command_retry_count": 0,
+        "final_ready_sd": True,
+    }
+
+
+def _active_soak_canary_safety(report: dict, token: str) -> bool:
+    transcript = _command_result_transcript(report)
+    if transcript is None:
+        return False
+    rows = [
+        result
+        for command, result in transcript
+        if command == f"storage retained-canary {token}"
+    ]
+    return bool(
+        len(rows) == 1
+        and report.get("dm_rf_tx") is False
+        and rows[0].get("public_rf_tx") is False
+        and rows[0].get("dm_rf_tx") is False
+        and rows[0].get("formats_sd") is False
+    )
+
+
+def build_storage_active_soak_artifact(
+    source_path: Path,
+    provenance_path: Path,
+    *,
+    root: Path,
+    commit: str,
+    github_actions_run: str,
+    d1l_port: str,
+    rp2040_port: str,
+) -> dict:
+    artifact, provenance, provenance_sha256 = _base_artifact(
+        "storage_active_soak",
+        root=root,
+        commit=commit,
+        github_actions_run=github_actions_run,
+        d1l_port=d1l_port,
+        rp2040_port=rp2040_port,
+        provenance_path=provenance_path,
+    )
+    segments: list[dict] = []
+    cycles: list[dict] = []
+    try:
+        if not _within(provenance_path, root):
+            raise ValueError("exact-pair provenance is outside repository root")
+        if not _provenance_context_ok(
+            provenance,
+            provenance_sha256,
+            commit=commit,
+            github_actions_run=github_actions_run,
+            d1l_port=d1l_port,
+            rp2040_port=rp2040_port,
+        ):
+            raise ValueError("exact-pair provenance does not match storage-active context")
+        resolved, source, source_sha256 = _source(source_path, root)
+        events = source.get("events")
+        segment_count = _integer(source.get("segment_count"), minimum=2)
+        if not (
+            source.get("schema") == 1
+            and source.get("kind") == "d1l_storage_active_soak_source"
+            and source.get("mode") == "hardware"
+            and source.get("ok") is True
+            and _port(source.get("port")) == _port(d1l_port)
+            and source.get("baud") == 115200
+            and _raw_git_clean(source, commit)
+            and _exact_commit(source.get("expected_firmware_commit"), commit)
+            and segment_count is not None
+            and source.get("failure") is None
+            and source.get("public_rf_tx") is False
+            and source.get("dm_rf_tx") is False
+            and source.get("formats_sd") is False
+            and isinstance(events, list)
+            and len(events) == segment_count * 2 - 1
+            and source.get("event_topology")
+            == ["segment" if index % 2 == 0 else "reboot" for index in range(len(events))]
+            and not _nested_true(source, {"public_rf_tx", "dm_rf_tx", "formats_sd", "format_performed"})
+            and _nested_code_count(source, "TIMEOUT") == 0
+        ):
+            raise ValueError("storage-active source failed context or safety checks")
+
+        reboot_tokens: list[str] = []
+        packet_generations: list[int] = []
+        for event_index, event in enumerate(events):
+            if not isinstance(event, dict) or not isinstance(event.get("report"), dict):
+                raise ValueError("storage-active source event is malformed")
+            expected_kind = "segment" if event_index % 2 == 0 else "reboot"
+            expected_index = event_index // 2 + 1
+            if event.get("kind") != expected_kind or event.get("index") != expected_index:
+                raise ValueError("storage-active source event topology is inconsistent")
+            report = event["report"]
+            if expected_kind == "segment":
+                stats = _active_soak_segment_stats(
+                    report, commit=commit, d1l_port=d1l_port
+                )
+                stats.update({"index": expected_index, "ok": True})
+                segments.append(stats)
+                packet_generations.extend(stats["packet_generations"])
+                continue
+
+            token = event.get("token")
+            if not isinstance(token, str) or not token or token in reboot_tokens:
+                raise ValueError("storage-active reboot token is missing or duplicated")
+            if event.get("canary_safety_explicit") is not True:
+                raise ValueError("storage-active reboot lacks an explicit canary safety receipt")
+            cycle, derived_token, before, after, crash_before, crash_after = _derive_reboot_cycle(
+                report, commit=commit, d1l_port=d1l_port
+            )
+            if token != derived_token or not _active_soak_canary_safety(report, token):
+                raise ValueError("storage-active retained canary is unsafe or inconsistent")
+            cycle.update({"index": expected_index, "token": token})
+            cycles.append(cycle)
+            reboot_tokens.append(token)
+            previous_segment = segments[-1]
+            if (
+                previous_segment["boot_nonce"] != before
+                or previous_segment["crashlog_total"] != crash_before
+            ):
+                raise ValueError("storage-active pre-reboot segment boundary is discontinuous")
+            cycle["pre_reboot_boot_nonce"] = before
+            cycle["post_reboot_boot_nonce"] = after
+            cycle["crashlog_total_before"] = crash_before
+            cycle["crashlog_total_after"] = crash_after
+
+        if len(segments) != segment_count or len(cycles) != segment_count - 1:
+            raise ValueError("storage-active source did not complete every segment and reboot")
+        for index, cycle in enumerate(cycles):
+            following = segments[index + 1]
+            if (
+                following["boot_nonce"] != cycle["post_reboot_boot_nonce"]
+                or following["crashlog_total"] != cycle["crashlog_total_after"]
+            ):
+                raise ValueError("storage-active post-reboot segment boundary is discontinuous")
+
+        duration_sec = round(sum(segment["duration_sec"] for segment in segments), 3)
+        generation_change_count = sum(
+            current != previous
+            for previous, current in zip(packet_generations, packet_generations[1:])
+        )
+        stack_floor = min(
+            [segment["retained_task_stack_free_bytes_floor"] for segment in segments]
+            + [cycle["retained_task_stack_free_bytes"] for cycle in cycles]
+        )
+        reboot_count = len(cycles)
+        if (
+            duration_sec < STORAGE_ACTIVE_SOAK_MIN_SECONDS
+            or generation_change_count != 0
+            or reboot_count < 1
+            or stack_floor < RETAINED_STACK_MIN_BYTES
+        ):
+            raise ValueError("storage-active source did not satisfy canonical thresholds")
+        artifact.update(
+            {
+                "source_receipts": [
+                    {
+                        "kind": "d1l_storage_active_soak_source",
+                        "path": str(resolved),
+                        "sha256": source_sha256,
+                    }
+                ],
+                "duration_sec": duration_sec,
+                "segment_count": len(segments),
+                "segments": segments,
+                "sample_count": sum(segment["sample_count"] for segment in segments),
+                "status_poll_count": sum(
+                    segment["status_poll_count"] for segment in segments
+                ),
+                "storage_active": True,
+                "dirty_event_counts": {
+                    name: reboot_count for name in ("public", "dm", "routes", "packets")
+                },
+                "controlled_reboot_count": reboot_count,
+                "controlled_reboots": cycles,
+                "all_segments_passed": True,
+                "all_controlled_reboots_passed": True,
+                "final_ready_sd": segments[-1]["final_ready_sd"],
+                "retained_task_stack_free_bytes_floor": stack_floor,
+                "false_no_card_count": sum(
+                    segment["false_no_card_count"] for segment in segments
+                ),
+                "unintended_backend_generation_count": generation_change_count,
+                "retained_failure_count": sum(
+                    segment["retained_failure_count"] for segment in segments
+                ),
+                "command_retry_count": sum(
+                    segment["command_retry_count"] for segment in segments
+                ),
+                "unexpected_reset_count": 0,
+                "wdt_count": sum(cycle["wdt"] is True for cycle in cycles),
+                "panic_count": sum(cycle["panic"] is True for cycle in cycles),
+                "brownout_count": sum(cycle["brownout"] is True for cycle in cycles),
+                "terminal_timeout_count": 0,
+            }
+        )
+    except Exception as exc:
+        artifact["failures"] = [str(exc)]
+        artifact.setdefault("segment_count", len(segments))
+        artifact.setdefault("segments", segments)
+        artifact.setdefault("controlled_reboot_count", len(cycles))
+        artifact.setdefault("controlled_reboots", cycles)
+    artifact["ok"] = not artifact["failures"]
+    return artifact
+
+
 def rebuild_source_bound_artifact(
     data: dict,
     *,
@@ -992,6 +1356,16 @@ def rebuild_source_bound_artifact(
     if kind == "retained_reboot_matrix":
         return build_retained_reboot_matrix_artifact(
             source_paths,
+            provenance_path,
+            root=root,
+            commit=commit,
+            github_actions_run=github_actions_run,
+            d1l_port=d1l_port,
+            rp2040_port=rp2040_port,
+        )
+    if kind == "storage_active_soak" and len(source_paths) == 1:
+        return build_storage_active_soak_artifact(
+            source_paths[0],
             provenance_path,
             root=root,
             commit=commit,

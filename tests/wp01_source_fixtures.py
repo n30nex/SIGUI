@@ -278,6 +278,7 @@ def write_reboot_source(
         "packet_seq": 104,
         "backends": {name: "sd" for name in ("messages", "dm", "routes", "packets")},
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
     }
     persistence = {
@@ -448,6 +449,7 @@ def write_reboot_source(
         "reboot_proven": True,
         "health_ok": True,
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
         "commands": commands,
         "results": results,
@@ -549,6 +551,175 @@ def write_inserted_soak(path: Path, *, commit: str) -> Path:
             "unexpected_console_restart_seen": False,
         },
         "samples": samples,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(report), encoding="utf-8")
+    return path
+
+
+def storage_active_segment(
+    *, commit: str, boot_nonce: int, crash_total: int, duration_sec: float = 1800.0
+) -> dict:
+    commands = [
+        "health",
+        "mesh status",
+        "signal",
+        "messages unread",
+        "packets",
+        "crashlog",
+        "storage status",
+        "storage filecanary",
+    ]
+    crashlog = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "count": 1,
+        "total_written": crash_total,
+        "entries": [
+            {"seq": crash_total, "reset_reason": "SW", "crash_like": False}
+        ],
+    }
+    samples = []
+    for index, elapsed in enumerate((0.0, duration_sec)):
+        samples.append(
+            {
+                "label": "start" if index == 0 else "final",
+                "elapsed_sec": elapsed,
+                "aborted_after_timeout": None,
+                "results": [
+                    {
+                        "schema": 1,
+                        "ok": True,
+                        "cmd": "health",
+                        "boot_nonce": boot_nonce,
+                        "uptime_ms": 1000 + int(elapsed * 1000),
+                        "retained_task_stack_free_bytes": 8192,
+                    },
+                    {"schema": 1, "ok": True, "cmd": "mesh status"},
+                    {"schema": 1, "ok": True, "cmd": "signal"},
+                    {"schema": 1, "ok": True, "cmd": "messages unread"},
+                    {
+                        "schema": 1,
+                        "ok": True,
+                        "cmd": "packets",
+                        "persistence": packet_persistence(),
+                    },
+                    json.loads(json.dumps(crashlog)),
+                    clean_storage_status(),
+                    {
+                        "schema": 1,
+                        "ok": True,
+                        "cmd": "storage filecanary",
+                        "rename_replace": True,
+                        "read_final": True,
+                        "delete_final": True,
+                        "stat_deleted": True,
+                    },
+                ],
+            }
+        )
+    version = {"schema": 1, "ok": True, "cmd": "version", "build_commit": commit}
+    return {
+        "schema": 1,
+        "mode": "hardware",
+        "ok": True,
+        "port": "COM12",
+        "baud": 115200,
+        "commit": commit,
+        "git": {"commit": commit, "dirty": False, "dirty_entries": []},
+        "preflight_commands": ["version"],
+        "expected_firmware_commit": commit,
+        "device_build_commit": commit,
+        "firmware_identity_required": True,
+        "firmware_identity_ok": True,
+        "version_preflight": version,
+        "preflight_failure": None,
+        "duration_sec": duration_sec,
+        "sample_interval_sec": duration_sec,
+        "commands": commands,
+        "sample_storage": True,
+        "sd_file_canary": True,
+        "allow_sd_unavailable": False,
+        "active_command": None,
+        "active_events": [],
+        "command_retries": 0,
+        "dm_rf_tx": False,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "aborted_after_timeout": None,
+        "summary": {
+            "ok": True,
+            "command_failure_count": 0,
+            "command_failures": [],
+            "threshold_failures": [],
+            "command_timeout_seen": False,
+            "unexpected_console_restart_seen": False,
+            "command_retry_count": 0,
+            "command_recovered_after_retry_count": 0,
+            "command_retry_failure_count": 0,
+        },
+        "samples": samples,
+    }
+
+
+def write_storage_active_soak_source(
+    path: Path, *, commit: str, segment_count: int = 4
+) -> Path:
+    events = []
+    for index in range(1, segment_count + 1):
+        events.append(
+            {
+                "kind": "segment",
+                "index": index,
+                "report": storage_active_segment(
+                    commit=commit,
+                    boot_nonce=99 + index,
+                    crash_total=19 + index,
+                ),
+            }
+        )
+        if index == segment_count:
+            continue
+        reboot_path = path.parent / f"active-reboot-{index}.json"
+        write_reboot_source(
+            reboot_path,
+            commit=commit,
+            token=f"active{index}",
+            before_nonce=99 + index,
+            after_nonce=100 + index,
+            crash_total=19 + index,
+        )
+        reboot = json.loads(reboot_path.read_text(encoding="utf-8"))
+        events.append(
+            {
+                "kind": "reboot",
+                "index": index,
+                "token": f"active{index}",
+                "canary_safety_explicit": True,
+                "report": reboot,
+            }
+        )
+    report = {
+        "schema": 1,
+        "kind": "d1l_storage_active_soak_source",
+        "mode": "hardware",
+        "ok": True,
+        "port": "COM12",
+        "baud": 115200,
+        "commit": commit,
+        "git": {"commit": commit, "dirty": False, "dirty_entries": []},
+        "expected_firmware_commit": commit,
+        "segment_count": segment_count,
+        "segment_duration_sec": 1800.0,
+        "scheduled_segment_duration_sec": segment_count * 1800.0,
+        "sample_interval_sec": 1800.0,
+        "event_topology": [event["kind"] for event in events],
+        "events": events,
+        "public_rf_tx": False,
+        "dm_rf_tx": False,
+        "formats_sd": False,
+        "failure": None,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report), encoding="utf-8")

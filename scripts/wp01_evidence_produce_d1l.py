@@ -11,11 +11,13 @@ try:
     from wp01_evidence_sources_d1l import (
         build_retained_reboot_matrix_artifact,
         build_sd_inserted_stability_artifact,
+        build_storage_active_soak_artifact,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.wp01_evidence_sources_d1l import (
         build_retained_reboot_matrix_artifact,
         build_sd_inserted_stability_artifact,
+        build_storage_active_soak_artifact,
     )
 
 
@@ -24,7 +26,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--kind",
         required=True,
-        choices=("sd_inserted_stability", "retained_reboot_matrix"),
+        choices=(
+            "sd_inserted_stability",
+            "retained_reboot_matrix",
+            "storage_active_soak",
+        ),
     )
     parser.add_argument("--root", default=".")
     parser.add_argument("--commit", required=True)
@@ -59,13 +65,23 @@ def main(argv: list[str] | None = None) -> int:
             f"sd_inserted_stability_{args.commit[:7]}_"
             f"{args.d1l_port.upper()}_{args.rp2040_port.upper()}.json"
         )
-    else:
+    elif args.kind == "retained_reboot_matrix":
         report = build_retained_reboot_matrix_artifact(
             sources, provenance_path, **common
         )
         default_name = (
             f"retained_reboot_matrix_{args.commit[:7]}_"
             f"{args.d1l_port.upper()}.json"
+        )
+    else:
+        if len(sources) != 1:
+            raise SystemExit("storage_active_soak requires exactly one --source")
+        report = build_storage_active_soak_artifact(
+            sources[0], provenance_path, **common
+        )
+        default_name = (
+            f"storage_active_soak_{args.commit[:7]}_"
+            f"{args.d1l_port.upper()}_{args.rp2040_port.upper()}.json"
         )
     out = (
         Path(args.out).resolve()

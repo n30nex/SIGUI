@@ -505,6 +505,7 @@ def _common_artifact_ok(
         and _port(ports.get("d1l")) == normalized_d1l
         and _port(ports.get("rp2040")) == normalized_rp2040
         and data.get("public_rf_tx") is False
+        and data.get("dm_rf_tx") is False
         and data.get("formats_sd") is False
         and isinstance(data.get("provenance"), dict)
         and isinstance(data.get("provenance_receipt_sha256"), str)
@@ -618,18 +619,31 @@ def _retained_reboot_matrix_ok(data: dict) -> bool:
 
 def _storage_active_soak_ok(data: dict) -> bool:
     dirty_events = data.get("dirty_event_counts")
+    segments = data.get("segments")
+    segment_count = data.get("segment_count")
     reboots = data.get("controlled_reboots")
     reboot_count = data.get("controlled_reboot_count")
     return (
         _duration(data.get("duration_sec"), minimum=WP01_STORAGE_ACTIVE_SOAK_MIN_SECONDS)
         and _count(data.get("sample_count"), minimum=2)
+        and isinstance(segments, list)
+        and _count(segment_count, minimum=2)
+        and len(segments) == segment_count
+        and all(isinstance(segment, dict) and segment.get("ok") is True for segment in segments)
+        and data.get("status_poll_count") == data.get("sample_count")
         and data.get("storage_active") is True
         and isinstance(dirty_events, dict)
-        and all(_count(dirty_events.get(name), minimum=1) for name in ("public", "dm", "routes", "packets"))
+        and all(
+            dirty_events.get(name) == reboot_count
+            for name in ("public", "dm", "routes", "packets")
+        )
         and isinstance(reboots, list)
         and _count(reboot_count, minimum=1)
+        and reboot_count == segment_count - 1
         and len(reboots) == reboot_count
         and all(_reboot_cycle_ok(reboot) for reboot in reboots)
+        and data.get("all_segments_passed") is True
+        and data.get("all_controlled_reboots_passed") is True
         and data.get("final_ready_sd") is True
         and _count(
             data.get("retained_task_stack_free_bytes_floor"),
@@ -640,6 +654,8 @@ def _storage_active_soak_ok(data: dict) -> bool:
             "false_no_card_count",
             "unintended_backend_generation_count",
             "retained_failure_count",
+            "command_retry_count",
+            "unexpected_reset_count",
         )
     )
 
@@ -743,6 +759,7 @@ def wp01_aggregate_artifact_ok(
         and _port(ports.get("d1l")) == _port(d1l_port)
         and _port(ports.get("rp2040")) == _port(rp2040_port)
         and data.get("public_rf_tx") is False
+        and data.get("dm_rf_tx") is False
         and data.get("formats_sd") is False
         and data.get("failures") == []
         and isinstance(artifacts, dict)
@@ -853,6 +870,7 @@ def build_aggregate(
         "github_actions_run": str(github_actions_run),
         "ports": {"d1l": _port(d1l_port), "rp2040": _port(rp2040_port)},
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
         "checks": checks,
         "artifacts": entries,

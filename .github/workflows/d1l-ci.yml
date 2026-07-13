@@ -86,6 +86,9 @@ jobs:
       - name: Soak dry run
         run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test
 
+      - name: WP-01 storage-active soak dry run
+        run: python ./scripts/storage_active_soak_d1l.py --dry-run --expected-firmware-commit ${{ github.sha }}
+
       - name: SD file canary dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_file_canary_d1l.py --dry-run

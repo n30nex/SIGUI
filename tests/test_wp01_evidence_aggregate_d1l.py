@@ -10,7 +10,11 @@ from scripts import autonomous_hardware_validate_d1l as runner
 from scripts import wp01_evidence_aggregate_d1l as wp01
 from scripts import wp01_evidence_produce_d1l as wp01_produce
 from scripts import wp01_evidence_sources_d1l as wp01_sources
-from tests.wp01_source_fixtures import write_inserted_soak, write_reboot_source
+from tests.wp01_source_fixtures import (
+    write_inserted_soak,
+    write_reboot_source,
+    write_storage_active_soak_source,
+)
 
 
 COMMIT = "ad0aa5bda21435846f6e7fcdde8fd87a85c5da5c"
@@ -254,6 +258,7 @@ def write_hardware_validation_report(
         "github_actions_run": RUN_ID,
         "ports": {"d1l": "COM12", "rp2040": "COM16"},
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
         "runs": runs,
     }
@@ -297,6 +302,7 @@ def common(
         "github_actions_run": RUN_ID,
         "ports": {"d1l": "COM12", "rp2040": "COM16"},
         "public_rf_tx": False,
+        "dm_rf_tx": False,
         "formats_sd": False,
         "provenance": copy.deepcopy(provenance or {}),
         "provenance_receipt_sha256": provenance_sha256,
@@ -377,16 +383,23 @@ def payloads(
     soak = {
         **common("storage_active_soak", provenance_sha256, provenance),
         "duration_sec": 7200,
-        "sample_count": 121,
+        "segment_count": 3,
+        "segments": [{"ok": True}, {"ok": True}, {"ok": True}],
+        "sample_count": 6,
+        "status_poll_count": 6,
         "storage_active": True,
         "dirty_event_counts": {"public": 2, "dm": 2, "routes": 2, "packets": 2},
         "controlled_reboot_count": 2,
         "controlled_reboots": [reboot_cycle(), reboot_cycle()],
+        "all_segments_passed": True,
+        "all_controlled_reboots_passed": True,
         "final_ready_sd": True,
         "retained_task_stack_free_bytes_floor": 8192,
         "false_no_card_count": 0,
         "unintended_backend_generation_count": 0,
         "retained_failure_count": 0,
+        "command_retry_count": 0,
+        "unexpected_reset_count": 0,
     }
     return {
         "sd_inserted_stability": inserted,
@@ -666,6 +679,23 @@ def write_inputs(root: Path) -> tuple[dict[str, Path], Path, Path]:
     reboot_path = root / f"retained_reboot_matrix_{COMMIT[:7]}.json"
     reboot_path.write_text(json.dumps(reboots), encoding="utf-8")
     paths["retained_reboot_matrix"] = reboot_path
+
+    active_source = write_storage_active_soak_source(
+        root / "sources" / "storage-active-soak.json", commit=COMMIT
+    )
+    active = wp01_sources.build_storage_active_soak_artifact(
+        active_source,
+        provenance_path,
+        root=root,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert active["ok"] is True, active.get("failures")
+    active_path = root / f"storage_active_soak_{COMMIT[:7]}.json"
+    active_path.write_text(json.dumps(active), encoding="utf-8")
+    paths["storage_active_soak"] = active_path
     return paths, provenance_path, run_dir
 
 
@@ -918,11 +948,46 @@ def test_source_bound_reboot_matrix_rejects_forged_poll_attempt_counts(
         first_source.write_text(original, encoding="utf-8")
 
 
-def test_source_bound_producer_cli_rebuilds_both_canonical_artifacts(
+def test_source_bound_storage_active_soak_rejects_missing_canary_safety(
+    tmp_path: Path,
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(paths["storage_active_soak"].read_text(encoding="utf-8"))
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    reboot = next(event for event in source["events"] if event["kind"] == "reboot")
+    canary = next(
+        result
+        for result in reboot["report"]["results"]
+        if result.get("cmd") == "storage retained-canary"
+    )
+    canary.pop("dm_rf_tx")
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_storage_active_soak_artifact(
+        source_path,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+    assert rebuilt["failures"] == [
+        "storage-active retained canary is unsafe or inconsistent"
+    ]
+
+
+def test_source_bound_producer_cli_rebuilds_all_canonical_artifacts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):
     paths, provenance_path, _ = write_inputs(tmp_path)
-    for kind in ("sd_inserted_stability", "retained_reboot_matrix"):
+    for kind in (
+        "sd_inserted_stability",
+        "retained_reboot_matrix",
+        "storage_active_soak",
+    ):
         canonical = json.loads(paths[kind].read_text(encoding="utf-8"))
         out = tmp_path / "produced" / f"{kind}.json"
         argv = [
@@ -953,6 +1018,7 @@ def test_source_bound_producer_cli_rebuilds_both_canonical_artifacts(
     assert [summary["kind"] for summary in summaries] == [
         "sd_inserted_stability",
         "retained_reboot_matrix",
+        "storage_active_soak",
     ]
     assert all(summary["ok"] is True for summary in summaries)
 
