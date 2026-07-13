@@ -74,9 +74,9 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 10
+ORACLE_CORPUS_VERSION = 11
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -277,21 +277,49 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "attempt_matrix": "0_through_255",
             "golden_vectors": (
                 "attempt_0_and_255_exact_payloads_plus_attempt_matrix_and_"
-                "maximum_payload_sha256_digests"
+                "maximum_and_exact_block_payload_sha256_digests"
             ),
             "vectors": {
-                "roundtrip": 258,
+                "roundtrip": 268,
                 "invalid": 29,
             },
         },
     },
     {
         "id": "expected_ack_hash_and_ack_path",
-        "status": "pending",
-        "owner": "unassigned",
-        "blocked_by": (
-            "deterministic_identity_expected_ack_and_ack_path_mesh_session_fixtures"
+        "status": "implemented",
+        "owner": "pinned_basechat_ack_hash_mesh_ack_path_vendored_crypto",
+        "semantic": True,
+        "scope": (
+            "plain_dm_expected_hash_all_lengths_defined_ack_bodies_and_"
+            "authenticated_ack_path_with_caller_supplied_public_key_hashes_"
+            "secret_and_rng_byte_no_dispatch_correlation_delivery_state_"
+            "route_selection_or_rf"
         ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-EXPECTED-ACK-PATH-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+            ],
+            "return_path_encodings": ["zero", "one_byte", "two_byte", "three_byte"],
+            "golden_vectors": (
+                "four_exact_ack_bodies_one_exact_block_ack_hash_zero_path_"
+                "exact_payload_and_four_path_payload_matrix_sha256"
+            ),
+            "undefined_upstream_boundary": (
+                "normal_dm_5_plus_text_len_exact_aes_block_has_deterministic_"
+                "expected_hash_but_uninitialized_full_ack_body_byte"
+            ),
+            "vectors": {
+                "roundtrip": 4,
+                "valid": 9,
+                "invalid": 35,
+            },
+        },
     },
     {
         "id": "ack_dispatch_correlation_and_delivery",
@@ -357,12 +385,12 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     },
     {
         "id": "expected_ack",
-        "status": "blocked",
+        "status": "implemented",
         "capabilities": ["expected_ack_hash_and_ack_path"],
     },
     {
         "id": "ack_multi_ack_ack_path",
-        "status": "partial",
+        "status": "implemented",
         "capabilities": ["ack_frames", "expected_ack_hash_and_ack_path"],
     },
     {
@@ -632,11 +660,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 288,
-        "valid": 11,
-        "invalid": 133,
-        "semantic": 416,
-        "total": 432,
+        "roundtrip": 302,
+        "valid": 20,
+        "invalid": 168,
+        "semantic": 474,
+        "total": 490,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -680,10 +708,17 @@ def load_oracle_manifest() -> dict[str, Any]:
             "total": 25,
         },
         "dm_encrypt_decrypt": {
-            "roundtrip": 258,
+            "roundtrip": 268,
             "invalid": 29,
-            "semantic": 287,
-            "total": 287,
+            "semantic": 297,
+            "total": 297,
+        },
+        "expected_ack_hash_and_ack_path": {
+            "roundtrip": 4,
+            "valid": 9,
+            "invalid": 35,
+            "semantic": 48,
+            "total": 48,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -718,6 +753,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("dm_crypto_available") is not True
         or interface.get("dm_crypto_scope")
         != "basechatmesh_plain_text_layout_and_mesh_datagram_crypto_with_caller_supplied_hashes_and_shared_secret_only"
+        or interface.get("expected_ack_path_available") is not True
+        or interface.get("expected_ack_path_scope")
+        != "plain_dm_expected_hash_all_lengths_defined_ack_bodies_and_authenticated_ack_path_with_caller_supplied_identity_hash_secret_and_rng_inputs_only"
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
         != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
@@ -767,14 +805,23 @@ def load_oracle_manifest() -> dict[str, Any]:
             "dm_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
             "dm_independent_golden": (
                 "attempt 0 and 255 exact payloads; attempt matrix and maximum "
-                "payload SHA-256 digests"
+                "plus exact-block payload SHA-256 digests"
+            ),
+            "expected_ack_hash": (
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+            ),
+            "ack_path_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "ack_path_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+            "ack_path_independent_golden": (
+                "four exact ACK bodies; exact-block expected hash; zero-path "
+                "exact payload; four-path payload matrix SHA-256"
             ),
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_public_group_and_dm_attempt_vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_public_group_dm_and_ack_path_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -811,6 +858,30 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle DM vector provenance drifted")
     if determinism.get("dm_attempt_matrix") != "0_through_255":
         raise GateFailure("oracle DM attempt matrix drifted")
+    if determinism.get("dm_exact_block_matrix") != (
+        "normal_text_lengths_11_through_155_step_16"
+    ):
+        raise GateFailure("oracle exact-block DM matrix drifted")
+    if determinism.get("expected_ack_recipe") != (
+        "basechatmesh_timestamp_low_attempt_text_sender_public_key_sha256_"
+        "truncated4_plus_optional_full_attempt_and_caller_rng_byte"
+    ):
+        raise GateFailure("oracle expected-ACK provenance drifted")
+    if determinism.get("ack_path_recipe") != (
+        "mesh_path_return_encoded_path_ack_extra_then_utils_aes128_hmac"
+    ):
+        raise GateFailure("oracle ACK+PATH provenance drifted")
+    if determinism.get("ack_path_encodings") != [
+        "zero",
+        "one_byte",
+        "two_byte",
+        "three_byte",
+    ]:
+        raise GateFailure("oracle ACK+PATH encoding matrix drifted")
+    if determinism.get("undefined_full_ack_body_boundary") != (
+        "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only"
+    ):
+        raise GateFailure("oracle ACK boundary receipt drifted")
     required_fixtures = determinism.get(
         "future_fixtures_required"
     )
@@ -1560,6 +1631,7 @@ def base_report(
             "crypto_oracle_available": False,
             "public_group_crypto_oracle_available": True,
             "dm_crypto_oracle_available": True,
+            "expected_ack_path_oracle_available": True,
         },
         "requested": {
             "commit": args.commit,
@@ -1734,6 +1806,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "ed25519_point_validation": True,
                     "public_group_packets": True,
                     "dm_encrypt_decrypt": True,
+                    "expected_ack_hash_and_ack_path": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

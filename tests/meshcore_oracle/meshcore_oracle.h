@@ -33,6 +33,9 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_DM_HASH_BYTES 1U
 #define D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES 160U
 #define D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES 158U
+#define D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES 4U
+#define D1L_MESHCORE_ORACLE_DM_ACK_BYTES 6U
+#define D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES 64U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -159,8 +162,9 @@ bool d1l_meshcore_oracle_parse_group_packet(
  * secret and one-byte destination/source hashes. Creation covers the pinned
  * timestamp, low two attempt bits, and attempt>3 trailing full-attempt layout,
  * then delegates AES/HMAC to mesh::Utils. Parsing authenticates before
- * returning fields and accepts only the canonical zero padding produced by
- * that layout. Empty text is valid; embedded NUL text is not.
+ * returning fields and accepts exact-block plaintext or only the canonical
+ * zero padding produced by that layout. Empty text is valid; embedded NUL text
+ * is not.
  *
  * These functions do not derive an Ed25519 shared secret, search contacts,
  * dispatch messages, derive/send/correlate ACKs, select a route, update
@@ -186,6 +190,70 @@ bool d1l_meshcore_oracle_parse_dm_packet(
     uint8_t *out_text,
     size_t text_capacity,
     size_t *out_text_len);
+
+/*
+ * Derives the four-byte BaseChatMesh plain-DM expected ACK hash for every
+ * canonical text length.
+ */
+bool d1l_meshcore_oracle_dm_expected_ack_hash(
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    uint32_t timestamp,
+    uint8_t attempt,
+    const uint8_t *text,
+    size_t text_len,
+    uint8_t out_expected_ack[D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES]);
+
+/*
+ * Builds the complete six-byte ACK body emitted by the pinned receive path.
+ * The caller supplies the final uniqueness byte that upstream obtains from
+ * its RNG. Bytes four and five are respectively the optional extended attempt
+ * (zero for attempts 0..3) and that uniqueness byte. Normal messages for which
+ * 5 + text_len is an exact AES-block multiple are rejected here: upstream
+ * derives the four-byte expected hash deterministically but reads the ACK
+ * body's fifth byte beyond its initialized decrypted/terminator bytes.
+ */
+bool d1l_meshcore_oracle_dm_expected_ack(
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    uint32_t timestamp,
+    uint8_t attempt,
+    const uint8_t *text,
+    size_t text_len,
+    uint8_t uniqueness_byte,
+    uint8_t out_ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES]);
+
+/*
+ * Canonical Mesh::createPathReturn framing for a plain-DM ACK extra. The
+ * encoded return-path length uses Packet's two-bit hash-size / six-bit count
+ * representation; source/destination hashes, the shared secret, ACK bytes,
+ * and RNG-derived uniqueness byte are all caller-supplied. Parsing
+ * authenticates before returning fields and accepts only the exact six-byte
+ * ACK extra plus canonical zero padding. The separate expected-hash API still
+ * covers normal messages whose full six-byte upstream ACK body is undefined at
+ * an exact cipher-block boundary.
+ *
+ * These functions do not derive identities or shared secrets, consume RNG,
+ * select/store a route, dispatch/correlate an ACK, update delivery state, send
+ * a packet, or claim RF behavior.
+ */
+bool d1l_meshcore_oracle_create_dm_ack_path_packet(
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t encoded_return_path_len,
+    const uint8_t *return_path,
+    const uint8_t ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES],
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_dm_ack_path_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t *out_encoded_return_path_len,
+    uint8_t *out_return_path,
+    size_t return_path_capacity,
+    size_t *out_return_path_bytes,
+    uint8_t out_ack[D1L_MESHCORE_ORACLE_DM_ACK_BYTES]);
 
 /*
  * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp

@@ -31,8 +31,12 @@ constexpr std::size_t kPointValidationInvalidVectors = 7U;
 constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
 constexpr std::size_t kGroupRoundtripVectors = 4U;
 constexpr std::size_t kGroupInvalidVectors = 21U;
-constexpr std::size_t kDmRoundtripVectors = 258U;
+constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
+constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
+constexpr std::size_t kExpectedAckValidVectors = 9U;
+constexpr std::size_t kExpectedAckPathRoundtripVectors = 4U;
+constexpr std::size_t kExpectedAckInvalidVectors = 35U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -1226,6 +1230,32 @@ int main()
         maximum_extended_dm_text.data(), maximum_extended_dm_text.size(), true,
         nullptr, 0U, &expected_max_extended_dm_sha256, nullptr);
 
+    const std::array<uint8_t, 32U> expected_aligned_dm_matrix_sha256 = {
+        0x48U, 0xE6U, 0x08U, 0x10U, 0x6CU, 0x57U, 0x89U, 0x95U,
+        0x00U, 0x81U, 0xE3U, 0x1BU, 0x15U, 0x0FU, 0x27U, 0xF6U,
+        0x7DU, 0xD9U, 0xD3U, 0x3FU, 0x5BU, 0x4CU, 0xAEU, 0x8EU,
+        0xF1U, 0x18U, 0x50U, 0x2FU, 0x0AU, 0x77U, 0x7EU, 0x38U};
+    SHA256 aligned_dm_matrix_sha;
+    for (size_t block_count = 1U; block_count <= 10U; ++block_count) {
+        std::vector<uint8_t> aligned_text(block_count * 16U - 5U);
+        for (size_t index = 0U; index < aligned_text.size(); ++index) {
+            aligned_text[index] = static_cast<uint8_t>(
+                'A' + ((index + block_count) % 26U));
+        }
+        verify_dm_roundtrip(
+            "exact-block normal text",
+            static_cast<uint32_t>(0xA0B0C000U + block_count),
+            static_cast<uint8_t>(block_count & 3U), aligned_text.data(),
+            aligned_text.size(), false, nullptr, 0U, nullptr,
+            &aligned_dm_matrix_sha);
+    }
+    std::array<uint8_t, 32U> aligned_dm_matrix_digest{};
+    aligned_dm_matrix_sha.finalize(aligned_dm_matrix_digest.data(),
+                                   aligned_dm_matrix_digest.size());
+    if (aligned_dm_matrix_digest != expected_aligned_dm_matrix_sha256) {
+        failures.push_back("exact-block normal DM matrix digest changed");
+    }
+
     d1l_meshcore_oracle_packet_t valid_dm{};
     if (!d1l_meshcore_oracle_create_dm_packet(
             dm_destination_hash, dm_source_hash, full_secret.data(),
@@ -1431,12 +1461,14 @@ int main()
         dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
         &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
         &rejected_dm_text_len);
-    malformed_dm_plaintext.fill('x');
-    malformed_dm_plaintext[4] = 0U;
-    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
-                                      malformed_dm_plaintext.size());
+    std::array<uint8_t, 176U> unterminated_overlong_dm_plaintext{};
+    unterminated_overlong_dm_plaintext.fill('x');
+    unterminated_overlong_dm_plaintext[4] = 0U;
+    malformed_dm = make_raw_dm_packet(
+        unterminated_overlong_dm_plaintext.data(),
+        unterminated_overlong_dm_plaintext.size());
     expect_dm_parse_reject(
-        "missing DM terminator", &malformed_dm, dm_destination_hash,
+        "unterminated overlong DM", &malformed_dm, dm_destination_hash,
         dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
         &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
         &rejected_dm_text_len);
@@ -1504,6 +1536,482 @@ int main()
         dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
         &rejected_dm_attempt, rejected_dm_text.data(), 1U,
         &rejected_dm_text_len);
+
+    const std::array<std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>,
+                     kExpectedAckDefinedBodyVectors>
+        expected_dm_acks = {{
+            {0xC9U, 0xD9U, 0xF2U, 0x07U, 0x00U, 0x11U},
+            {0x4EU, 0xD9U, 0x51U, 0x6BU, 0x00U, 0x22U},
+            {0x21U, 0x3FU, 0xBDU, 0x0CU, 0x04U, 0x33U},
+            {0x8FU, 0xE7U, 0xCDU, 0x95U, 0xFFU, 0x44U},
+        }};
+    struct ExpectedAckInput {
+        uint32_t timestamp;
+        uint8_t attempt;
+        const uint8_t *text;
+        size_t text_len;
+        uint8_t uniqueness_byte;
+    };
+    const std::array<ExpectedAckInput, kExpectedAckDefinedBodyVectors>
+        expected_ack_inputs = {{
+            {0x01020304U, 0U, short_dm_text.data(), 0U, 0x11U},
+            {0x89ABCDEFU, 3U, maximum_normal_dm_text.data(),
+             maximum_normal_dm_text.size(), 0x22U},
+            {0x10203040U, 4U, short_dm_text.data(), short_dm_text.size(),
+             0x33U},
+            {0x55667788U, 0xFFU, maximum_extended_dm_text.data(),
+             maximum_extended_dm_text.size(), 0x44U},
+        }};
+    for (size_t index = 0U; index < expected_ack_inputs.size(); ++index) {
+        const ExpectedAckInput &input = expected_ack_inputs[index];
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+            expected_hash{};
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> ack{};
+        if (!d1l_meshcore_oracle_dm_expected_ack_hash(
+                kSignedAdvertPublicKey.data(), input.timestamp, input.attempt,
+                input.text, input.text_len, expected_hash.data()) ||
+            std::memcmp(expected_hash.data(), expected_dm_acks[index].data(),
+                        expected_hash.size()) != 0 ||
+            !d1l_meshcore_oracle_dm_expected_ack(
+                kSignedAdvertPublicKey.data(), input.timestamp, input.attempt,
+                input.text, input.text_len, input.uniqueness_byte,
+                ack.data()) ||
+            ack != expected_dm_acks[index]) {
+            failures.push_back("expected DM ACK vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 11U> aligned_expected_ack_text{};
+    for (size_t index = 0U; index < aligned_expected_ack_text.size(); ++index) {
+        aligned_expected_ack_text[index] =
+            static_cast<uint8_t>('A' + ((index + 1U) % 26U));
+    }
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        expected_aligned_ack_hash = {0x9BU, 0xECU, 0x2EU, 0x94U};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        aligned_ack_hash{};
+    if (!d1l_meshcore_oracle_dm_expected_ack_hash(
+            kSignedAdvertPublicKey.data(), 0xA0B0C001U, 1U,
+            aligned_expected_ack_text.data(), aligned_expected_ack_text.size(),
+            aligned_ack_hash.data()) ||
+        aligned_ack_hash != expected_aligned_ack_hash) {
+        failures.push_back("exact-block expected ACK hash vector changed");
+    }
+
+    auto expect_expected_ack_hash_reject =
+        [&failures](const char *name, const uint8_t *sender_public_key,
+                    const uint8_t *text, size_t text_len, uint8_t *output) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+                sentinel{};
+            sentinel.fill(0xC2U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_dm_expected_ack_hash(
+                    sender_public_key, 0x01020304U, 0U, text, text_len,
+                    output) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), sentinel.size()) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " expected ACK hash reject changed output");
+            }
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        rejected_expected_ack_hash{};
+    expect_expected_ack_hash_reject(
+        "null expected ACK hash sender", nullptr, short_dm_text.data(),
+        short_dm_text.size(), rejected_expected_ack_hash.data());
+    expect_expected_ack_hash_reject(
+        "embedded NUL expected ACK hash", kSignedAdvertPublicKey.data(),
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        rejected_expected_ack_hash.data());
+    expect_expected_ack_hash_reject(
+        "null expected ACK hash output", kSignedAdvertPublicKey.data(),
+        short_dm_text.data(), short_dm_text.size(), nullptr);
+
+    auto expect_expected_ack_reject =
+        [&failures](
+            const char *name, const uint8_t *sender_public_key,
+            uint8_t attempt, const uint8_t *text, size_t text_len,
+            uint8_t *output) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> sentinel{};
+            sentinel.fill(0xD3U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_dm_expected_ack(
+                    sender_public_key, 0x01020304U, attempt, text, text_len,
+                    0x55U, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), sentinel.size()) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " expected ACK reject changed output");
+            }
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+        rejected_expected_ack{};
+    expect_expected_ack_reject(
+        "null sender public key", nullptr, 0U, short_dm_text.data(),
+        short_dm_text.size(), rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "null expected ACK text", kSignedAdvertPublicKey.data(), 0U, nullptr,
+        0U, rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "embedded NUL expected ACK text", kSignedAdvertPublicKey.data(), 0U,
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "oversized normal expected ACK text", kSignedAdvertPublicKey.data(),
+        3U, oversized_normal_dm_text.data(), oversized_normal_dm_text.size(),
+        rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "oversized extended expected ACK text", kSignedAdvertPublicKey.data(),
+        4U, oversized_extended_dm_text.data(),
+        oversized_extended_dm_text.size(), rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "null expected ACK output", kSignedAdvertPublicKey.data(), 0U,
+        short_dm_text.data(), short_dm_text.size(), nullptr);
+    expect_expected_ack_reject(
+        "undefined exact-block ACK body", kSignedAdvertPublicKey.data(), 1U,
+        aligned_expected_ack_text.data(), aligned_expected_ack_text.size(),
+        rejected_expected_ack.data());
+
+    struct AckPathInput {
+        uint8_t encoded_path_len;
+        std::vector<uint8_t> path;
+    };
+    std::vector<uint8_t> maximum_two_byte_ack_path(
+        D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES);
+    for (size_t index = 0U; index < maximum_two_byte_ack_path.size(); ++index) {
+        maximum_two_byte_ack_path[index] =
+            static_cast<uint8_t>(index ^ 0x5AU);
+    }
+    std::vector<uint8_t> maximum_three_byte_ack_path(63U);
+    for (size_t index = 0U; index < maximum_three_byte_ack_path.size();
+         ++index) {
+        maximum_three_byte_ack_path[index] =
+            static_cast<uint8_t>(0x80U + index);
+    }
+    const std::array<AckPathInput, kExpectedAckPathRoundtripVectors>
+        ack_path_inputs = {{
+            {0x00U, {}},
+            {0x04U, {0x10U, 0x20U, 0x30U, 0x40U}},
+            {0x60U, maximum_two_byte_ack_path},
+            {0x95U, maximum_three_byte_ack_path},
+        }};
+    const std::array<uint8_t, 20U> expected_zero_ack_path_payload = {
+        0xA1U, 0xB2U, 0x13U, 0x4FU, 0xEFU, 0xC0U, 0xFCU,
+        0xA6U, 0x37U, 0x09U, 0x1BU, 0x78U, 0x9CU, 0x1AU,
+        0x3AU, 0xB7U, 0x50U, 0x3CU, 0xBFU, 0xD3U};
+    const std::array<uint8_t, 32U> expected_ack_path_matrix_sha256 = {
+        0xFCU, 0x1DU, 0x2DU, 0xF3U, 0xFCU, 0x38U, 0x75U, 0xC8U,
+        0x0DU, 0xFAU, 0x57U, 0x6FU, 0x0CU, 0x43U, 0xA7U, 0xE8U,
+        0xD1U, 0x68U, 0x83U, 0x0FU, 0x69U, 0x01U, 0x69U, 0xE1U,
+        0x33U, 0x9AU, 0x77U, 0xB9U, 0xBFU, 0xE8U, 0xB1U, 0xADU};
+    SHA256 ack_path_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_ack_path{};
+    for (size_t index = 0U; index < ack_path_inputs.size(); ++index) {
+        const AckPathInput &input = ack_path_inputs[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_dm_ack_path_packet(
+                dm_destination_hash, dm_source_hash, full_secret.data(),
+                input.encoded_path_len,
+                input.path.empty() ? nullptr : input.path.data(),
+                expected_dm_acks[index].data(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) ||
+            (index == 0U &&
+             (packet.payload_len != expected_zero_ack_path_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_zero_ack_path_payload.data(),
+                          expected_zero_ack_path_payload.size()) != 0))) {
+            failures.push_back("DM ACK+PATH create vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+        ack_path_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 1U) {
+            valid_ack_path = packet;
+        }
+
+        uint8_t priority = 0xA5U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!d1l_meshcore_oracle_prepare_flood(
+                &packet, 1U, 0U, nullptr, &priority) || priority != 2U ||
+            !d1l_meshcore_oracle_packet_encode(
+                &packet, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                               &decoded)) {
+            failures.push_back("DM ACK+PATH wire roundtrip failed " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint8_t parsed_encoded_path_len = 0xFFU;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+            parsed_path{};
+        size_t parsed_path_bytes = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> parsed_ack{};
+        if (!d1l_meshcore_oracle_parse_dm_ack_path_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), &parsed_encoded_path_len,
+                parsed_path.data(), parsed_path.size(), &parsed_path_bytes,
+                parsed_ack.data()) ||
+            parsed_encoded_path_len != input.encoded_path_len ||
+            parsed_path_bytes != input.path.size() ||
+            (!input.path.empty() &&
+             std::memcmp(parsed_path.data(), input.path.data(),
+                         input.path.size()) != 0) ||
+            parsed_ack != expected_dm_acks[index]) {
+            failures.push_back("DM ACK+PATH parse vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 32U> ack_path_matrix_digest{};
+    ack_path_matrix_sha.finalize(ack_path_matrix_digest.data(),
+                                 ack_path_matrix_digest.size());
+    if (ack_path_matrix_digest != expected_ack_path_matrix_sha256) {
+        failures.push_back("DM ACK+PATH matrix digest changed");
+    }
+
+    auto expect_ack_path_create_reject =
+        [&failures, &valid_ack_path](
+            const char *name, const uint8_t *secret,
+            uint8_t encoded_path_len, const uint8_t *path,
+            const uint8_t *ack, d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_ack_path;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_dm_ack_path_packet(
+                    dm_destination_hash, dm_source_hash, secret,
+                    encoded_path_len, path, ack, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " ACK+PATH create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_ack_path{};
+    const std::array<uint8_t, 1U> one_byte_path = {0x42U};
+    expect_ack_path_create_reject(
+        "null ACK+PATH secret", nullptr, 0U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "reserved ACK+PATH hash size", full_secret.data(), 0xC0U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null nonempty ACK+PATH", full_secret.data(), 0x01U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null ACK+PATH ACK", full_secret.data(), 0x01U,
+        one_byte_path.data(), nullptr, &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null ACK+PATH output", full_secret.data(), 0x01U,
+        one_byte_path.data(), expected_dm_acks[0].data(), nullptr);
+
+    auto expect_ack_path_parse_reject =
+        [&failures](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t destination_hash, uint8_t source_hash,
+            const uint8_t *secret, uint8_t *encoded_path_len,
+            uint8_t *path, size_t path_capacity, size_t *path_bytes,
+            uint8_t *ack) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+                path_sentinel{};
+            path_sentinel.fill(0xD5U);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+                ack_sentinel{};
+            ack_sentinel.fill(0xE6U);
+            if (encoded_path_len != nullptr) {
+                *encoded_path_len = 0xAAU;
+            }
+            if (path != nullptr) {
+                std::memcpy(path, path_sentinel.data(), path_capacity);
+            }
+            if (path_bytes != nullptr) {
+                *path_bytes = 0xBEEFU;
+            }
+            if (ack != nullptr) {
+                std::memcpy(ack, ack_sentinel.data(), ack_sentinel.size());
+            }
+            if (d1l_meshcore_oracle_parse_dm_ack_path_packet(
+                    packet, destination_hash, source_hash, secret,
+                    encoded_path_len, path, path_capacity, path_bytes, ack) ||
+                (encoded_path_len != nullptr && *encoded_path_len != 0xAAU) ||
+                (path != nullptr &&
+                 std::memcmp(path, path_sentinel.data(), path_capacity) != 0) ||
+                (path_bytes != nullptr && *path_bytes != 0xBEEFU) ||
+                (ack != nullptr &&
+                 std::memcmp(ack, ack_sentinel.data(), ack_sentinel.size()) !=
+                     0)) {
+                failures.push_back(std::string(name) +
+                                   " ACK+PATH parse reject changed output");
+            }
+        };
+    uint8_t rejected_ack_path_encoded_len = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+        rejected_ack_path_bytes{};
+    size_t rejected_ack_path_byte_len = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+        rejected_ack_path_ack{};
+    expect_ack_path_parse_reject(
+        "null ACK+PATH packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH parse secret", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, nullptr, &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null encoded ACK+PATH length", &valid_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(), nullptr,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH path output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        nullptr, rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH byte length", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        nullptr, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH ACK output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, nullptr);
+
+    d1l_meshcore_oracle_packet_t malformed_ack_path = valid_ack_path;
+    malformed_ack_path.header |= 0x40U;
+    expect_ack_path_parse_reject(
+        "future-version ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT);
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH type", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload_len -= 1U;
+    expect_ack_path_parse_reject(
+        "truncated ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[malformed_ack_path.payload_len++] = 0U;
+    expect_ack_path_parse_reject(
+        "non-block ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH destination", &valid_ack_path,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH source", &valid_ack_path, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH secret", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, public_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[2] ^= 0x01U;
+    expect_ack_path_parse_reject(
+        "tampered ACK+PATH MAC", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[4] ^= 0x01U;
+    expect_ack_path_parse_reject(
+        "tampered ACK+PATH ciphertext", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+
+    auto make_raw_ack_path_packet =
+        [&full_secret](const uint8_t *plaintext, size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT);
+            packet.payload[0] = dm_destination_hash;
+            packet.payload[1] = dm_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    std::array<uint8_t, 16U> malformed_ack_path_plaintext{};
+    malformed_ack_path_plaintext[0] = 0xC0U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "reserved embedded ACK+PATH hash size", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[0] = 0x3FU;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "short embedded ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[1] = 0x02U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "wrong embedded ACK+PATH extra type", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[1] = PAYLOAD_TYPE_ACK;
+    malformed_ack_path_plaintext[8] = 0x01U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "noncanonical ACK+PATH padding", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "undersized ACK+PATH output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), 3U, &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
 
     auto check_prepared_packet =
         [&failures](const char *name,
@@ -2215,7 +2723,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -2224,17 +2732,20 @@ int main()
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
                   kGroupRoundtripVectors +
                   kDmRoundtripVectors +
+                  kExpectedAckPathRoundtripVectors +
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
               << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
-                  kPointValidationValidVectors + kCryptoAdapterKatValidVectors)
+                  kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
+                  kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
                   kGroupInvalidVectors +
                   kDmInvalidVectors +
+                  kExpectedAckInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
@@ -2245,6 +2756,9 @@ int main()
                   kPointValidationInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
+                  kExpectedAckValidVectors +
+                  kExpectedAckPathRoundtripVectors +
+                  kExpectedAckInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -2258,6 +2772,9 @@ int main()
                   kCryptoAdapterKatValidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
+                  kExpectedAckValidVectors +
+                  kExpectedAckPathRoundtripVectors +
+                  kExpectedAckInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -2308,6 +2825,16 @@ int main()
               << (kDmRoundtripVectors + kDmInvalidVectors)
               << ",\"total\":"
               << (kDmRoundtripVectors + kDmInvalidVectors) << "}"
+              << ",\"expected_ack_hash_and_ack_path\":{\"roundtrip\":"
+              << kExpectedAckPathRoundtripVectors << ",\"valid\":"
+              << kExpectedAckValidVectors << ",\"invalid\":"
+              << kExpectedAckInvalidVectors << ",\"semantic\":"
+              << (kExpectedAckPathRoundtripVectors +
+                  kExpectedAckValidVectors + kExpectedAckInvalidVectors)
+              << ",\"total\":"
+              << (kExpectedAckPathRoundtripVectors +
+                  kExpectedAckValidVectors + kExpectedAckInvalidVectors)
+              << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -2332,6 +2859,7 @@ int main()
               << ",\"ed25519_point_validation\":true"
               << ",\"public_group_packets\":true"
               << ",\"dm_encrypt_decrypt\":true"
+              << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"

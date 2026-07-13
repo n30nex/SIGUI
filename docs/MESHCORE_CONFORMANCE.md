@@ -39,7 +39,7 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
-public-group and plain-DM operations from `mesh::Utils`. Its version 10 static
+public-group, plain-DM, and DM ACK+PATH operations. Its version 11 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -93,10 +93,12 @@ rejected input. These group vectors are packet creation/parsing proof only;
 they do not execute Mesh dispatch, delivery, retained history, or radio paths.
 The separate `addChannel` path's explicit decoded key length is not inferred by
 this ABI.
-The DM capability adds 258 authenticated round trips: every attempt value from
-0 through 255 plus the normal 160-byte and extended-attempt 158-byte text
-boundaries. Exact payload bytes pin attempts 0 and 255; aggregate and maximum
-payload SHA-256 digests pin the rest of the matrix. Twenty-nine rejects cover
+The DM capability adds 268 authenticated round trips: every attempt value from
+0 through 255, the normal 160-byte and extended-attempt 158-byte text
+boundaries, and all ten normal text lengths from 11 through 155 whose complete
+plaintext is an exact AES-block multiple. Exact payload bytes pin attempts 0
+and 255; aggregate, maximum, and exact-block payload SHA-256 digests pin the
+rest of the matrix. Twenty-nine rejects cover
 null inputs, embedded NUL text, both size limits, future/wrong packet types,
 truncation, non-block ciphertext, wrong hashes or secret, MAC/ciphertext
 tampering, unsupported text flags, missing terminators, malformed extended
@@ -104,6 +106,24 @@ attempts, noncanonical padding, overlong authenticated plaintext, and output
 preservation. The C ABI takes one-byte source/destination hashes and a
 caller-supplied 32-byte shared secret. It does not claim Ed25519 key exchange,
 contact lookup, dispatch, ACK behavior, retained state, or delivery.
+The expected-ACK capability adds five exact four-byte expected-hash vectors,
+including an exact-block normal DM, plus four exact six-byte ACK bodies covering
+empty, maximum normal, short extended, and maximum extended DM inputs. Four
+authenticated ACK+PATH round trips cover zero-, one-, two-, and three-byte
+path-hash encodings, with an exact zero-path payload and an aggregate payload
+SHA-256 digest. Thirty-five rejects cover derivation/create/parse nulls, text
+limits and embedded NULs, invalid path encodings, missing path data,
+future/wrong packet types, length errors, wrong hashes or secret, MAC/ciphertext
+tampering, malformed authenticated path bodies, noncanonical padding, and
+output preservation. The caller supplies the sender public key, one-byte
+source/destination hashes, shared secret, and RNG uniqueness byte. This proves
+the bounded expected hash/body and encrypted return-path layout, not Identity,
+RNG consumption, route selection, dispatch, ACK correlation, delivery state,
+or RF behavior. For a normal DM where `5 + text_len` is exactly divisible by
+16, upstream still defines the four-byte expected hash but reads the complete
+ACK body's fifth byte beyond initialized decrypted/terminator bytes. The oracle
+therefore proves the hash and rejects any deterministic full-body claim for
+that boundary.
 Seed bytes `00` through `1f` regenerate the keypair and all three fixed
 signatures on every vector run. The source hashes pin the verifier's transitive
 C headers and sources, the keypair/signer recipe, `advert_data.h`, the shared
@@ -125,15 +145,15 @@ requires exact equality with both the policy registry and the six-type wire
 vector matrix. Consequently a new local payload type, a duplicate code, a
 missing roadmap surface, or an unknown capability fails before compilation.
 Envelope-vector coverage remains distinct from semantic coverage: the current
-six local types all have envelope vectors, while the policy reports three fully
-implemented roadmap surfaces, three partial surfaces, and three blocked surfaces.
+six local types all have envelope vectors, while the policy reports five fully
+implemented roadmap surfaces, two partial surfaces, and two blocked surfaces.
 The exact packet registry and blocker receipts are copied into
 `meshcore_oracle_manifest_<full-commit>.json`; `wp04_acceptance_ready` and
 `closure_ready` remain false.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_route_ack_trace_and_strict_signed_advert_verification`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_route_ack_trace_and_strict_signed_advert_verification`.
 The new `signed_advert_verification` capability proves only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
@@ -149,18 +169,18 @@ the new primitive must not be cited as upstream Identity parity or dispatch
 closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
-session state, expected-ACK hash derivation, encrypted
-ACK+PATH handling, ACK correlation/delivery state, PATH-return behavior, TRACE
-forwarding/path discovery, and login/admin flows also remain pending, so both
-`wp04_closure_eligible` and `closure_ready` remain false. The expected-ACK and
-ACK+PATH remainder is explicitly blocked by missing deterministic identity,
-shared-secret, and mesh-session fixtures; the now source-pinned SHA/AES
-adapters remove the primitive-availability blocker but do not themselves prove
-ACK+PATH semantics. ACK framing must not be cited as evidence for those
-semantics. ACK dispatch, correlation, and delivery state remain a separate
+session state, ACK correlation/delivery state, general PATH-return behavior,
+TRACE forwarding/path discovery, and login/admin flows also remain pending, so
+both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
+derivation and the ACK-specific encrypted PATH body are now deterministic with
+caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
+be cited as dispatch, correlation, route-selection, or delivery proof. ACK
+dispatch, correlation, and delivery state remain a separate
 pending capability blocked on deterministic Mesh dispatch, packet-manager,
 table, and clock fixtures. Path-return creation is separately blocked by
-deterministic RNG, identity/shared-secret, and mesh-session fixtures.
+deterministic RNG, identity/shared-secret, and mesh-session fixtures for its
+general no-extra/route-code behavior; the ACK-extra form is covered only within
+the caller-input boundary above.
 TRACE framing does not authenticate `auth_code` or prove discovery; forwarding
 still requires identity matching, duplicate tables, radio SNR, scheduling, and
 clock fixtures. Those stages require deterministic radio, RNG, RTC,
@@ -226,16 +246,16 @@ This bounded gate makes no claim about:
 - encryption, decryption, MACs, signing/key generation, channel secrets, or
   full identity semantics beyond the bounded exceptions described above. The
   oracle covers public-group and caller-secret plain-DM AES/HMAC creation and
-  authenticated parsing plus the D1L signed-advert message layout and pinned C
+  authenticated parsing, expected-ACK derivation, ACK-specific encrypted PATH
+  creation/parsing, and the D1L signed-advert message layout and pinned C
   Ed25519 verifier; it does not cover key exchange/management, DM sessions,
-  dispatch, ACK delivery, or retained state;
+  dispatch, ACK correlation/delivery, or retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
   traffic. Public-group payload creation/parsing, plain-DM layout/crypto,
-  simple/multipart ACK framing, and initial flags-zero TRACE payload framing
-  are covered, but delivery,
-  expected hash derivation, encrypted ACK+PATH handling, TRACE
-  forwarding/SNR/path discovery, correlation, and remaining Dispatcher
-  behavior are not;
+  simple/multipart ACK framing, expected-ACK/ACK-specific PATH layout, and
+  initial flags-zero TRACE payload framing are covered, but delivery, general
+  PATH-return route-code behavior, TRACE forwarding/SNR/path discovery,
+  correlation, and remaining Dispatcher behavior are not;
 - ACK timing, retry/delivery state, duplicate or replay control, packet
   lifetime, route selection/fallback, or self-message behavior;
 - persisted/retained state, schema migration, reboot recovery, or write
