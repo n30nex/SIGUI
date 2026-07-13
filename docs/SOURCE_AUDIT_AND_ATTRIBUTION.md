@@ -1,6 +1,6 @@
 # Source Audit and Attribution
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
 
@@ -16,8 +16,8 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
 - MeshCore upstream: https://github.com/meshcore-dev/MeshCore
   - License: MIT-style `license.txt` in the upstream repo, with bundled third-party notices.
   - Pinned gitlink reviewed for the issue #65 wire-envelope slice: `e8d3c53ba1ea863937081cd0caad759b832f3028`.
-  - Use: protocol reference plus the exact structural packet-envelope oracle for the first issue #65 CI slice. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
-  - Conformance boundary: only the pinned packet-envelope implementation is an oracle in this slice. The upstream native-test AES/SHA mocks are not production cryptography and are excluded as cryptographic evidence. A passing `wire_envelope_only` comparison makes no semantic, crypto, retained-state, real-peer, full-conformance, or release claim.
+  - Use: protocol reference plus the exact structural packet-envelope oracle and bounded advert/route/ACK/TRACE golden-vector target for issue #65. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
+  - Conformance boundary: the packet-envelope result remains `wire_envelope_only`; the separately versioned WP-04 oracle also pins advert fields, strict signed-advert verification, route preparation, ACK framing, and source TRACE framing. The strict advert verifier uses the vendored C Ed25519 implementation with production canonical-scalar, canonical-point, and low-order-point checks. The upstream native-test AES/SHA mocks are not production cryptography and are excluded. Neither result proves full Mesh dispatch, retained state, real-peer interop, full conformance, or release readiness.
   - Risk: Upstream is Arduino/PlatformIO oriented in many paths; ESP-IDF integration may need an adapter layer rather than direct reuse. Optional web stack dependencies must be reviewed before Wi-Fi management is added.
 
 ## Reference Repositories

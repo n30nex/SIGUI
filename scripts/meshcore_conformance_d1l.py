@@ -63,9 +63,9 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 7
+ORACLE_CORPUS_VERSION = 8
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification"
+    "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -158,6 +158,13 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "scope": "message_layout_and_signature_verification_only_no_mesh_dispatch",
     },
     {
+        "id": "ed25519_point_validation",
+        "status": "implemented",
+        "owner": "pinned_d1l_production_ed25519",
+        "semantic": True,
+        "scope": "canonical_encoding_and_low_order_rejection_for_advert_public_key_and_signature_r",
+    },
+    {
         "id": "direct_flood_headers",
         "status": "implemented",
         "owner": "pinned_source_golden_vectors",
@@ -186,6 +193,25 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "blocked_scope": (
             "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics"
         ),
+        "blocker_receipt": {
+            "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
+            "status": "open",
+            "observed_at": "2026-07-13",
+            "pinned_sources": {
+                "third_party/MeshCore/src/Identity.cpp": (
+                    "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0"
+                ),
+                "third_party/MeshCore/src/Dispatcher.cpp": (
+                    "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e"
+                ),
+            },
+            "missing_inputs": [
+                "Identity.cpp delegates verification to Ed25519.h, which is absent from the pinned MeshCore gitlink",
+                "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures",
+            ],
+            "blocks_execution": False,
+            "unblocked_slice": "ed25519_point_validation",
+        },
     },
     {
         "id": "public_group_packets",
@@ -255,6 +281,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
         "capabilities": [
             "advert_data_fields",
             "signed_advert_verification",
+            "ed25519_point_validation",
             "identity_signed_advert",
         ],
     },
@@ -334,6 +361,7 @@ EXPECTED_ORACLE_PACKET_TYPES = [
         "semantic_capabilities": [
             "advert_data_fields",
             "signed_advert_verification",
+            "ed25519_point_validation",
             "identity_signed_advert",
         ],
     },
@@ -366,7 +394,9 @@ EXPECTED_ORACLE_PACKET_TYPES = [
     },
 ]
 EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
+    "third_party/MeshCore/src/Dispatcher.cpp",
     "third_party/MeshCore/src/Dispatcher.h",
+    "third_party/MeshCore/src/Identity.cpp",
     "third_party/MeshCore/src/Identity.h",
     "third_party/MeshCore/src/Mesh.h",
     "third_party/MeshCore/src/Mesh.cpp",
@@ -529,10 +559,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 26,
-        "valid": 4,
-        "invalid": 75,
-        "semantic": 92,
-        "total": 105,
+        "valid": 8,
+        "invalid": 83,
+        "semantic": 104,
+        "total": 117,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -547,15 +577,21 @@ def load_oracle_manifest() -> dict[str, Any]:
         },
         "signed_advert_verification": {
             "valid": 3,
-            "invalid": 10,
-            "semantic": 13,
-            "total": 13,
+            "invalid": 11,
+            "semantic": 14,
+            "total": 14,
         },
         "ed25519_verifier_kat": {
             "valid": 1,
             "invalid": 3,
             "semantic": 0,
             "total": 4,
+        },
+        "ed25519_point_validation": {
+            "valid": 4,
+            "invalid": 7,
+            "semantic": 11,
+            "total": 11,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -586,7 +622,7 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("crypto_available") is not False
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
-        != "d1l_production_message_layout_and_ed25519_verification_only_no_mesh_dispatch"
+        != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -608,6 +644,9 @@ def load_oracle_manifest() -> dict[str, Any]:
             ),
             "signed_advert_verifier": (
                 "third_party/MeshCore/lib/ed25519/verify.c"
+            ),
+            "signed_advert_point_decoder": (
+                "third_party/MeshCore/lib/ed25519/ge.c"
             ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
         }
@@ -636,6 +675,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L"
     ):
         raise GateFailure("oracle canonical-S regression provenance drifted")
+    if determinism.get("identity_point_forgery_regression") != (
+        "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation"
+    ):
+        raise GateFailure("oracle identity-point regression provenance drifted")
     required_fixtures = determinism.get(
         "future_fixtures_required"
     )
@@ -889,6 +932,11 @@ def summarize_oracle_coverage(
                 "capability": item["id"],
                 "status": "open",
                 "blocked_by": item["blocked_by"],
+                **(
+                    {"receipt": item["blocker_receipt"]}
+                    if "blocker_receipt" in item
+                    else {}
+                ),
             }
             for item in pending
         ],
@@ -1491,6 +1539,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "packet_envelope": True,
                     "advert_data_fields": True,
                     "signed_advert_verification": True,
+                    "ed25519_point_validation": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

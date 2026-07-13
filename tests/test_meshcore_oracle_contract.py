@@ -18,7 +18,7 @@ MANIFEST = ORACLE_ROOT / "manifest.json"
 COVERAGE_MANIFEST = ORACLE_ROOT / "coverage_manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = (
-    "pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification"
+    "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification"
 )
 
 
@@ -40,7 +40,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 7
+    assert manifest["corpus_version"] == 8
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -58,7 +58,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "crypto_available": False,
         "signed_advert_ed25519_available": True,
         "signed_advert_scope": (
-            "d1l_production_message_layout_and_ed25519_verification_only_no_mesh_dispatch"
+            "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
         ),
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
@@ -80,6 +80,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "signed_advert_verifier": (
                 "third_party/MeshCore/lib/ed25519/verify.c"
             ),
+            "signed_advert_point_decoder": (
+                "third_party/MeshCore/lib/ed25519/ge.c"
+            ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
         },
     }
@@ -97,12 +100,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert manifest["determinism"]["canonical_s_regression"] == (
         "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L"
     )
+    assert manifest["determinism"]["identity_point_forgery_regression"] == (
+        "identity public key plus identity R and zero S accepted by the pinned "
+        "verifier before strict point validation"
+    )
     assert manifest["vectors"] == {
         "roundtrip": 26,
-        "valid": 4,
-        "invalid": 75,
-        "semantic": 92,
-        "total": 105,
+        "valid": 8,
+        "invalid": 83,
+        "semantic": 104,
+        "total": 117,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -117,15 +124,21 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         },
         "signed_advert_verification": {
             "valid": 3,
-            "invalid": 10,
-            "semantic": 13,
-            "total": 13,
+            "invalid": 11,
+            "semantic": 14,
+            "total": 14,
         },
         "ed25519_verifier_kat": {
             "valid": 1,
             "invalid": 3,
             "semantic": 0,
             "total": 4,
+        },
+        "ed25519_point_validation": {
+            "valid": 4,
+            "invalid": 7,
+            "semantic": 11,
+            "total": 11,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -166,27 +179,37 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "scope": "message_layout_and_signature_verification_only_no_mesh_dispatch",
     }
     assert manifest["capabilities"][3] == {
+        "id": "ed25519_point_validation",
+        "status": "implemented",
+        "owner": "pinned_d1l_production_ed25519",
+        "semantic": True,
+        "scope": (
+            "canonical_encoding_and_low_order_rejection_for_advert_"
+            "public_key_and_signature_r"
+        ),
+    }
+    assert manifest["capabilities"][4] == {
         "id": "direct_flood_headers",
         "status": "implemented",
         "owner": "pinned_source_golden_vectors",
         "semantic": True,
         "scope": "non_trace_direct_flood_and_zero_hop_headers",
     }
-    assert manifest["capabilities"][4] == {
+    assert manifest["capabilities"][5] == {
         "id": "ack_frames",
         "status": "implemented",
         "owner": "pinned_source_golden_vectors",
         "semantic": True,
         "scope": "simple_and_multipart_payload_framing_only",
     }
-    assert manifest["capabilities"][5] == {
+    assert manifest["capabilities"][6] == {
         "id": "trace_source_frames",
         "status": "implemented",
         "owner": "pinned_source_golden_vectors",
         "semantic": True,
         "scope": "initial_outbound_direct_flags_zero_trace_framing_only",
     }
-    assert manifest["capabilities"][6] == {
+    assert manifest["capabilities"][7] == {
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
@@ -194,13 +217,32 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "blocked_scope": (
             "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics"
         ),
+        "blocker_receipt": {
+            "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
+            "status": "open",
+            "observed_at": "2026-07-13",
+            "pinned_sources": {
+                "third_party/MeshCore/src/Identity.cpp": (
+                    "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0"
+                ),
+                "third_party/MeshCore/src/Dispatcher.cpp": (
+                    "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e"
+                ),
+            },
+            "missing_inputs": [
+                "Identity.cpp delegates verification to Ed25519.h, which is absent from the pinned MeshCore gitlink",
+                "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures",
+            ],
+            "blocks_execution": False,
+            "unblocked_slice": "ed25519_point_validation",
+        },
     }
     assert all(
         capability["status"] == "pending"
-        for capability in manifest["capabilities"][6:]
+        for capability in manifest["capabilities"][7:]
     )
     assert [
-        capability["id"] for capability in manifest["capabilities"][6:]
+        capability["id"] for capability in manifest["capabilities"][7:]
     ] == [
         "identity_signed_advert",
         "public_group_packets",
@@ -270,6 +312,14 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert len(summary["blocker_receipts"]) == 9
     assert len(summary["unresolved_capabilities"]) == 9
     assert len(summary["local_packet_types"]) == 6
+    identity_receipt = next(
+        item
+        for item in summary["blocker_receipts"]
+        if item["capability"] == "identity_signed_advert"
+    )["receipt"]
+    assert identity_receipt["id"] == "BLK-WP04-IDENTITY-DISPATCH-20260713"
+    assert identity_receipt["blocks_execution"] is False
+    assert identity_receipt["unblocked_slice"] == "ed25519_point_validation"
 
 
 @pytest.mark.parametrize(
@@ -413,6 +463,13 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert '#include "mesh/ed25519_canonical.h"' in service
     assert "d1l_ed25519_signature_s_is_canonical(signature)" in adapter
     assert "d1l_ed25519_signature_s_is_canonical(signature)" in service
+    assert "d1l_ed25519_encoded_point_is_strict(public_key)" in adapter
+    assert "d1l_ed25519_encoded_point_is_strict(pub_key)" in service
+    assert "d1l_ed25519_encoded_point_is_strict(signature)" in adapter
+    assert "d1l_ed25519_encoded_point_is_strict(signature)" in service
+    assert "ge_frombytes_negate_vartime" in canonical_guard
+    assert "ge_p3_dbl" in canonical_guard
+    assert "multiplied_by_cofactor" in canonical_guard
     assert adapter.index("d1l_ed25519_signature_s_is_canonical(signature)") < (
         adapter.index("ed25519_verify(signature")
     )
@@ -501,7 +558,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 7
+    assert artifact["corpus_version"] == 8
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
@@ -512,6 +569,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
+    assert "ed25519_point_validation" not in artifact["pending_capabilities"]
     assert "direct_flood_headers" not in artifact["pending_capabilities"]
     assert "ack_frames" not in artifact["pending_capabilities"]
     assert "trace_source_frames" not in artifact["pending_capabilities"]
@@ -545,6 +603,8 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "-Werror",
             "-I",
             str(ROOT / "main"),
+            "-I",
+            str(conformance.ED25519_ROOT),
             "-x",
             "c",
             "-fsyntax-only",
@@ -635,10 +695,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
             "roundtrip": 26,
-            "valid": 4,
-            "invalid": 75,
-            "semantic": 92,
-            "total": 105,
+            "valid": 8,
+            "invalid": 83,
+            "semantic": 104,
+            "total": 117,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -653,15 +713,21 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             },
             "signed_advert_verification": {
                 "valid": 3,
-                "invalid": 10,
-                "semantic": 13,
-                "total": 13,
+                "invalid": 11,
+                "semantic": 14,
+                "total": 14,
             },
             "ed25519_verifier_kat": {
                 "valid": 1,
                 "invalid": 3,
                 "semantic": 0,
                 "total": 4,
+            },
+            "ed25519_point_validation": {
+                "valid": 4,
+                "invalid": 7,
+                "semantic": 11,
+                "total": 11,
             },
             "direct_flood_headers": {
                 "roundtrip": 7,
@@ -686,6 +752,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "packet_envelope": True,
             "advert_data_fields": True,
             "signed_advert_verification": True,
+            "ed25519_point_validation": True,
             "direct_flood_headers": True,
             "ack_frames": True,
             "trace_source_frames": True,

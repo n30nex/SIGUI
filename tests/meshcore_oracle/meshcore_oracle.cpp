@@ -377,6 +377,8 @@ extern "C" bool d1l_meshcore_oracle_verify_signed_advert(
     if (public_key == nullptr || timestamp == nullptr || signature == nullptr ||
         app_data_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES ||
         (app_data_len > 0U && app_data == nullptr) ||
+        !d1l_ed25519_encoded_point_is_strict(public_key) ||
+        !d1l_ed25519_encoded_point_is_strict(signature) ||
         !d1l_ed25519_signature_s_is_canonical(signature)) {
         return false;
     }

@@ -19,9 +19,11 @@ constexpr std::size_t kAdvertRoundtripVectors = 4U;
 constexpr std::size_t kAdvertInvalidVectors = 11U;
 constexpr std::size_t kSignedAdvertProductionVectors = 3U;
 constexpr std::size_t kSignedAdvertValidVectors = 3U;
-constexpr std::size_t kSignedAdvertInvalidVectors = 10U;
+constexpr std::size_t kSignedAdvertInvalidVectors = 11U;
 constexpr std::size_t kVerifierKatValidVectors = 1U;
 constexpr std::size_t kVerifierKatInvalidVectors = 3U;
+constexpr std::size_t kPointValidationValidVectors = 4U;
+constexpr std::size_t kPointValidationInvalidVectors = 7U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -601,6 +603,46 @@ int main()
             "RFC 8032 S+L regression did not exercise the canonical-S guard");
     }
 
+    auto expect_strict_point =
+        [&failures](const char *name, const uint8_t *point, bool expected) {
+            if (d1l_ed25519_encoded_point_is_strict(point) != expected) {
+                failures.push_back(std::string(name) +
+                                   " strict point validation mismatch");
+            }
+        };
+    expect_strict_point("fixed-seed public key",
+                        kSignedAdvertPublicKey.data(), true);
+    expect_strict_point("RFC 8032 public key", kRfc8032PublicKey.data(), true);
+    expect_strict_point("fixed-seed signature R",
+                        signed_advert_vectors[1].signature.data(), true);
+    expect_strict_point("RFC 8032 signature R",
+                        kRfc8032EmptyMessageSignature.data(), true);
+
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> identity_point{};
+    identity_point[0] = 0x01U;
+    auto negative_zero_identity = identity_point;
+    negative_zero_identity[31] = 0x80U;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> zero_point{};
+    auto signed_zero_point = zero_point;
+    signed_zero_point[31] = 0x80U;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> minus_one_point{};
+    minus_one_point.fill(0xFFU);
+    minus_one_point[0] = 0xECU;
+    minus_one_point[31] = 0x7FU;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> noncanonical_y{};
+    noncanonical_y.fill(0xFFU);
+    noncanonical_y[0] = 0xEDU;
+    noncanonical_y[31] = 0x7FU;
+    expect_strict_point("null point", nullptr, false);
+    expect_strict_point("identity point", identity_point.data(), false);
+    expect_strict_point("negative-zero identity point",
+                        negative_zero_identity.data(), false);
+    expect_strict_point("zero point", zero_point.data(), false);
+    expect_strict_point("signed zero point", signed_zero_point.data(), false);
+    expect_strict_point("minus-one point", minus_one_point.data(), false);
+    expect_strict_point("noncanonical field encoding",
+                        noncanonical_y.data(), false);
+
     auto expect_signed_advert_reject =
         [&failures](const char *name, const uint8_t *public_key,
                     const uint8_t *timestamp, const uint8_t *signature,
@@ -612,6 +654,22 @@ int main()
             }
         };
     const SignedAdvertVector &signed_advert = signed_advert_vectors[1];
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+        identity_forgery{};
+    identity_forgery[0] = 0x01U;
+    const SignedAdvertMessage identity_forgery_message =
+        make_signed_advert_message(identity_point, signed_advert);
+    if (ed25519_verify(identity_forgery.data(),
+                       identity_forgery_message.bytes.data(),
+                       identity_forgery_message.length,
+                       identity_point.data()) != 1) {
+        failures.push_back(
+            "identity-point forgery no longer exercises the pinned verifier");
+    }
+    expect_signed_advert_reject(
+        "identity-point forgery", identity_point.data(),
+        signed_advert.timestamp.data(), identity_forgery.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
     expect_signed_advert_reject(
         "null public key", nullptr, signed_advert.timestamp.data(),
         signed_advert.signature.data(), signed_advert.app_data.data(),
@@ -1382,7 +1440,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -1392,16 +1450,20 @@ int main()
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
-              << (kSignedAdvertValidVectors + kVerifierKatValidVectors)
+              << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
+                  kPointValidationValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
+                  kPointValidationInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
                   kSignedAdvertValidVectors +
                   kSignedAdvertInvalidVectors +
+                  kPointValidationValidVectors +
+                  kPointValidationInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1410,6 +1472,8 @@ int main()
                   kAdvertRoundtripVectors + kAdvertInvalidVectors +
                   kSignedAdvertValidVectors + kSignedAdvertInvalidVectors +
                   kVerifierKatValidVectors + kVerifierKatInvalidVectors +
+                  kPointValidationValidVectors +
+                  kPointValidationInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1435,6 +1499,15 @@ int main()
               << kVerifierKatInvalidVectors << ",\"semantic\":0,\"total\":"
               << (kVerifierKatValidVectors + kVerifierKatInvalidVectors)
               << "}"
+              << ",\"ed25519_point_validation\":{\"valid\":"
+              << kPointValidationValidVectors << ",\"invalid\":"
+              << kPointValidationInvalidVectors << ",\"semantic\":"
+              << (kPointValidationValidVectors +
+                  kPointValidationInvalidVectors)
+              << ",\"total\":"
+              << (kPointValidationValidVectors +
+                  kPointValidationInvalidVectors)
+              << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -1456,6 +1529,7 @@ int main()
               << ",\"capabilities\":{\"packet_envelope\":true"
               << ",\"advert_data_fields\":true"
               << ",\"signed_advert_verification\":true"
+              << ",\"ed25519_point_validation\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"

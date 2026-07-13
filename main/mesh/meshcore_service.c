@@ -984,6 +984,8 @@ static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *times
                                     size_t app_data_len)
 {
     if (!pub_key || !timestamp || !signature || app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA ||
+        !d1l_ed25519_encoded_point_is_strict(pub_key) ||
+        !d1l_ed25519_encoded_point_is_strict(signature) ||
         !d1l_ed25519_signature_s_is_canonical(signature)) {
         return false;
     }

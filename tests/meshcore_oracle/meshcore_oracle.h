@@ -98,9 +98,9 @@ bool d1l_meshcore_oracle_advert_data_encode(
  * pinned Mesh::createAdvert layout: public key, four timestamp bytes exactly
  * as carried on wire, then zero-to-32 advert app-data bytes. Verification uses
  * the real Ed25519 C implementation pinned inside the MeshCore gitlink after
- * applying the same strict canonical-S guard as the D1L production receive
- * path. It does not claim Mesh dispatch, replay/timestamp policy, contact
- * mutation, or duplicate suppression.
+ * applying the same canonical-S, canonical-point, and low-order-point guards
+ * as the D1L production receive path. It does not claim Mesh dispatch,
+ * replay/timestamp policy, contact mutation, or duplicate suppression.
  */
 bool d1l_meshcore_oracle_verify_signed_advert(
     const uint8_t public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],

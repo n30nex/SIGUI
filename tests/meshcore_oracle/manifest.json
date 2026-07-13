@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
-  "corpus_version": 7,
+  "corpus_version": 8,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_route_ack_trace_and_signed_advert_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
     "commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "sources": {
+      "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e",
       "third_party/MeshCore/src/Dispatcher.h": "70eef11430c3aebb86e4e329978744bf20e8138ac27053045ad11aa7fc2a47bf",
+      "third_party/MeshCore/src/Identity.cpp": "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0",
       "third_party/MeshCore/src/Identity.h": "d5ec3c37606c636776571419282d845f2bcc1f3996b271eb4141558eaf0a15fc",
       "third_party/MeshCore/src/Mesh.cpp": "e39aa2ca27cc4d6b1d19c43aeccb5915098aeb5b6a5fc9be98d9fa557a54fd7e",
       "third_party/MeshCore/src/Mesh.h": "98c1f1a2261f30fbc619dcc0209adc4e79e65a063bc807d3c01c654ccf997714",
@@ -39,15 +41,15 @@
   "production_binding_sources": {
     "main/CMakeLists.txt": "1c3a00daf7ad5ea14e76a13b4e37be3ff53e2f69c374e898f598da2f727fdc3a",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
-    "main/mesh/ed25519_canonical.h": "307fe587a2a316dc9e4502abde2e2023c395c0fb1e49982805906e5144300fbf",
-    "main/mesh/meshcore_service.c": "3d9aca0640565018c50eeaafdc41ab31018b19a3fc87487a1aaa48543ed5c82c"
+    "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
+    "main/mesh/meshcore_service.c": "b5b2c0cb6a3a316d0d83f61b5c113b6db5cce8583e33b769b652f2e42c20b303"
   },
   "oracle_sources": {
     "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
-    "tests/meshcore_oracle/coverage_manifest.json": "6a2a6270e73634f71109488758db9a47584ad23b359c8d129f16694ecff878aa",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "6fb2f7294b68814126bdbce4198b7ed5fb9994fb738ad01ebaa3e4926494a86e",
-    "tests/meshcore_oracle/meshcore_oracle.h": "29712fb7e3dd4840ff4ddb18802766927effcb08135baa2cb22f537238a8a98a",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "92a99b4ef5942cdf081f1f687be08be7ee924ddd3e32ab814223a9c94780f4bb",
+    "tests/meshcore_oracle/coverage_manifest.json": "1299645b9d2047cfc86039f548ddd56e83b3b16440c9d2bf9487395fee80e028",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "af4443310e607cfcda33e6c34f1cccce49687f0ad010723b8dfe07a863756a20",
+    "tests/meshcore_oracle/meshcore_oracle.h": "aee96eb5b451f58c7de5798dba19b1f4fbc94f24fab1013fc17507b0665ab039",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "c6019a1fb7603ef8768cf27e59414e405c649162ee145b271b5d219097b47ee4",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/Stream.h": "2232859dc0f15bfe02267eaa405c3da8d525c32d008b96401daffbd3f4d9ea90"
   },
@@ -63,7 +65,7 @@
     "reject_preserves_output": true,
     "crypto_available": false,
     "signed_advert_ed25519_available": true,
-    "signed_advert_scope": "d1l_production_message_layout_and_ed25519_verification_only_no_mesh_dispatch",
+    "signed_advert_scope": "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch",
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
     "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -76,6 +78,7 @@
       "signed_advert_fixed_seed_keypair": "third_party/MeshCore/lib/ed25519/keypair.c",
       "signed_advert_fixed_seed_signer": "third_party/MeshCore/lib/ed25519/sign.c",
       "signed_advert_verifier": "third_party/MeshCore/lib/ed25519/verify.c",
+      "signed_advert_point_decoder": "third_party/MeshCore/lib/ed25519/ge.c",
       "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1"
     }
   },
@@ -85,6 +88,7 @@
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
+    "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
     "future_fixtures_required": [
       "mock_radio",
       "deterministic_rng",
@@ -98,10 +102,10 @@
   },
   "vectors": {
     "roundtrip": 26,
-    "valid": 4,
-    "invalid": 75,
-    "semantic": 92,
-    "total": 105,
+    "valid": 8,
+    "invalid": 83,
+    "semantic": 104,
+    "total": 117,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -116,15 +120,21 @@
     },
     "signed_advert_verification": {
       "valid": 3,
-      "invalid": 10,
-      "semantic": 13,
-      "total": 13
+      "invalid": 11,
+      "semantic": 14,
+      "total": 14
     },
     "ed25519_verifier_kat": {
       "valid": 1,
       "invalid": 3,
       "semantic": 0,
       "total": 4
+    },
+    "ed25519_point_validation": {
+      "valid": 4,
+      "invalid": 7,
+      "semantic": 11,
+      "total": 11
     },
     "direct_flood_headers": {
       "roundtrip": 7,
@@ -166,6 +176,13 @@
       "scope": "message_layout_and_signature_verification_only_no_mesh_dispatch"
     },
     {
+      "id": "ed25519_point_validation",
+      "status": "implemented",
+      "owner": "pinned_d1l_production_ed25519",
+      "semantic": true,
+      "scope": "canonical_encoding_and_low_order_rejection_for_advert_public_key_and_signature_r"
+    },
+    {
       "id": "direct_flood_headers",
       "status": "implemented",
       "owner": "pinned_source_golden_vectors",
@@ -191,7 +208,22 @@
       "status": "pending",
       "owner": "unassigned",
       "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
-      "blocked_scope": "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics"
+      "blocked_scope": "upstream_identity_verifier_parity_and_mesh_dispatch_replay_contact_semantics",
+      "blocker_receipt": {
+        "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
+        "status": "open",
+        "observed_at": "2026-07-13",
+        "pinned_sources": {
+          "third_party/MeshCore/src/Identity.cpp": "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0",
+          "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e"
+        },
+        "missing_inputs": [
+          "Identity.cpp delegates verification to Ed25519.h, which is absent from the pinned MeshCore gitlink",
+          "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures"
+        ],
+        "blocks_execution": false,
+        "unblocked_slice": "ed25519_point_validation"
+      }
     },
     {
       "id": "public_group_packets",
@@ -246,7 +278,8 @@
     "direct_upstream_reuse": [
       "packet envelope encode/decode through mesh::Packet",
       "canonical advert app-data fields through AdvertDataBuilder and AdvertDataParser",
-      "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation"
+      "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
+      "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
     "pinned_source_golden_vectors": [
       "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp",
