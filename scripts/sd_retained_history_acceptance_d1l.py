@@ -306,10 +306,10 @@ def retained_storage_ready(result: dict | None) -> bool:
     )
 
 
-def retained_storage_clean(result: dict | None) -> bool:
-    if not retained_storage_ready(result):
+def retained_storage_backends_clean(result: dict | None) -> bool:
+    if not isinstance(result, dict) or not retained_history_backends_ready(result):
         return False
-    retained = result.get("retained_sd") if isinstance(result, dict) else None
+    retained = result.get("retained_sd")
     stores = retained.get("stores") if isinstance(retained, dict) else None
     if not isinstance(stores, dict):
         return False
@@ -327,6 +327,23 @@ def retained_storage_clean(result: dict | None) -> bool:
         if store.get("sd_degraded_latched") is not False:
             return False
     return True
+
+
+def retained_storage_waiting_for_worker(result: dict | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    manager = result.get("manager")
+    return (
+        retained_storage_backends_clean(result)
+        and isinstance(manager, dict)
+        and manager.get("running") is True
+        and manager.get("state") == "STATUS"
+        and result.get("setup_action") == "wait_for_retained_worker"
+    )
+
+
+def retained_storage_clean(result: dict | None) -> bool:
+    return retained_storage_ready(result) and retained_storage_backends_clean(result)
 
 
 def semantic_reboot_skip_reason(
@@ -370,7 +387,7 @@ def wait_for_retained_storage_ready(
     poll_interval_sec: float = 1.0,
     allow_initial_reboot_boot_help: bool = False,
 ) -> tuple[dict, list[dict]]:
-    """Poll the autonomous post-reboot mount without forcing another mount."""
+    """Poll autonomous manager recovery to READY_SD without forcing a mount."""
     results: list[dict] = []
     deadline = time.monotonic() + max(0.0, wait_sec)
     while True:
@@ -618,6 +635,7 @@ def run_acceptance(
         retained_commands.append("health")
     post_commands = ["storage status", *retained_readback_commands(token), "health"]
     results: list[dict] = []
+    post_canary_ready_wait_results: list[dict] = []
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         storage_before, ready_wait_results, mount_attempt = wait_for_storage_ready(
@@ -652,6 +670,49 @@ def run_acceptance(
                 timeout=timeout,
                 include_health=include_reboot,
             )
+            retained_command = f"storage retained-canary {token}"
+            retained_canary_result = next(
+                (
+                    result
+                    for command, result in zip(
+                        retained_run_commands, retained_run_results
+                    )
+                    if command == retained_command
+                ),
+                {},
+            )
+            storage_after_canary_initial = next(
+                (
+                    result
+                    for command, result in reversed(
+                        list(zip(retained_run_commands, retained_run_results))
+                    )
+                    if command == "storage status"
+                ),
+                {},
+            )
+            # The retained canary releases the worker immediately before the
+            # autonomous manager's next pass. That pass can truthfully report
+            # STATUS/wait_for_retained_worker for one cadence while all cached
+            # SD fields remain healthy. Reuse the bounded, fail-closed READY_SD
+            # poll already required after reboot; never force a mount or accept
+            # the transient state itself as evidence.
+            if (
+                sequence_completed(retained_run_results)
+                and retained_canary_result.get("ok") is True
+                and retained_storage_waiting_for_worker(
+                    storage_after_canary_initial
+                )
+            ):
+                _, post_canary_ready_wait_results = wait_for_retained_storage_ready(
+                    ser,
+                    timeout,
+                    wait_sec=mount_wait_sec,
+                )
+                retained_run_commands.extend(
+                    "storage status" for _ in post_canary_ready_wait_results
+                )
+                retained_run_results.extend(post_canary_ready_wait_results)
         results.extend(retained_run_results)
 
     if preflight_timeout is not None or preflight_restart:
@@ -756,6 +817,8 @@ def run_acceptance(
             "storage_ready_poll_count": sum(
                 1 for result in ready_wait_results if result.get("cmd") == "storage status"
             ),
+            "post_canary_storage_ready_waited": False,
+            "post_canary_storage_ready_poll_count": 0,
             "mount_attempt": mount_attempt,
             "ok": (
                 not public_rf_tx
@@ -911,6 +974,14 @@ def run_acceptance(
         "storage_ready_waited": len(ready_wait_results) > 1,
         "storage_ready_poll_count": sum(
             1 for result in ready_wait_results if result.get("cmd") == "storage status"
+        ),
+        "post_canary_storage_ready_waited": bool(
+            post_canary_ready_wait_results
+        ),
+        "post_canary_storage_ready_poll_count": sum(
+            1
+            for result in post_canary_ready_wait_results
+            if result.get("cmd") == "storage status"
         ),
         "mount_attempt": mount_attempt,
         "post_reboot_storage_ready_waited": len(post_ready_wait_results) > 1,

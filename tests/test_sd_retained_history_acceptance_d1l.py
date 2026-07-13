@@ -1069,6 +1069,125 @@ def test_acceptance_waits_for_post_reboot_autonomous_sd_mount(monkeypatch):
     ]
 
 
+def test_acceptance_waits_for_post_canary_retained_worker_then_reboots(monkeypatch):
+    token = "sdToken1"
+    fp = retained_accept.fingerprint_for_token(token)
+    waiting = json.loads(READY_STORAGE)
+    waiting["manager"]["state"] = "STATUS"
+    waiting["sd"]["last_error"] = "ESP_ERR_TIMEOUT"
+    waiting["setup_action"] = "wait_for_retained_worker"
+    waiting_line = json.dumps(waiting) + "\n"
+    pre_serial = FakeSerial(
+        [
+            READY_STORAGE,
+            '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+            retained_canary_line(token, fp),
+            *retained_readback_lines(token, fp),
+            waiting_line,
+            health_line(1),
+            waiting_line,
+            READY_STORAGE,
+        ]
+    )
+    reboot_serial = FakeSerial(
+        ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"reset_scope":"system","storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
+    )
+    post_serial = FakeSerial(
+        [READY_STORAGE, *retained_readback_lines(token, fp), health_line(2)]
+    )
+    serials = [pre_serial, reboot_serial, post_serial]
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: serials.pop(0)
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=2.0,
+        allow_unavailable=False,
+    )
+
+    assert report["ok"] is True
+    assert report["post_canary_storage_ready_waited"] is True
+    assert report["post_canary_storage_ready_poll_count"] == 2
+    assert report["storage_after_canary"]["manager"]["state"] == "READY_SD"
+    assert report["retained_history_sd_clean_after_canary"] is True
+    assert report["pre_reboot_gate_passed"] is True
+    assert report["reboot_attempted"] is True
+    assert pre_serial.writes[-4:] == [
+        "storage status\n",
+        "health\n",
+        "storage status\n",
+        "storage status\n",
+    ]
+
+
+def test_acceptance_rejects_post_canary_worker_wait_that_never_recovers(
+    monkeypatch,
+):
+    token = "sdToken1"
+    fp = retained_accept.fingerprint_for_token(token)
+    waiting = json.loads(READY_STORAGE)
+    waiting["manager"]["state"] = "STATUS"
+    waiting["sd"]["last_error"] = "ESP_ERR_TIMEOUT"
+    waiting["setup_action"] = "wait_for_retained_worker"
+    waiting_line = json.dumps(waiting) + "\n"
+    pre_serial = FakeSerial(
+        [
+            READY_STORAGE,
+            '{"schema":1,"ok":true,"cmd":"storage filecanary"}\n',
+            retained_canary_line(token, fp),
+            *retained_readback_lines(token, fp),
+            waiting_line,
+            health_line(1),
+            waiting_line,
+        ]
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: pre_serial
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(retained_accept.time, "sleep", lambda _seconds: None)
+    report = retained_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_wait_sec=0.0,
+        allow_unavailable=False,
+    )
+
+    assert report["ok"] is False
+    assert report["post_canary_storage_ready_waited"] is True
+    assert report["post_canary_storage_ready_poll_count"] == 1
+    assert report["retained_history_sd_clean_after_canary"] is False
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "post_canary_retained_storage_not_clean"
+    assert "reboot\n" not in pre_serial.writes
+
+
+def test_post_canary_worker_wait_retry_requires_clean_retained_backends():
+    waiting = json.loads(READY_STORAGE)
+    waiting["manager"]["state"] = "STATUS"
+    waiting["sd"]["last_error"] = "ESP_ERR_TIMEOUT"
+    waiting["setup_action"] = "wait_for_retained_worker"
+
+    assert retained_accept.retained_storage_waiting_for_worker(waiting) is True
+
+    waiting["retained_sd"]["stores"]["messages"]["sd_write_fail_count"] = 1
+    assert retained_accept.retained_storage_waiting_for_worker(waiting) is False
+
+
 def test_acceptance_reports_and_rejects_public_rf_flag_from_canary(monkeypatch):
     token = "sdToken1"
     fingerprint = retained_accept.fingerprint_for_token(token)
