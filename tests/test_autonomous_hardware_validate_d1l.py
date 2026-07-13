@@ -142,6 +142,63 @@ def write_flasher_args(build: Path) -> None:
     (artifact_root / "SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
 
 
+def test_console_summary_is_bounded_and_points_to_full_report(tmp_path):
+    out = tmp_path / "full-report.json"
+    report = {
+        "schema": 1,
+        "kind": "d1l_autonomous_hardware_validation",
+        "ok": False,
+        "mode": "hardware",
+        "commit": COMMIT,
+        "github_actions_run": "29234278626",
+        "error": "sd_reboot_remount_failed",
+        "recovery": {"ok": True, "details": "x" * 100_000},
+        "ready_for_public_release": False,
+        "runs": [{"output": "large-step-output" * 10_000}],
+    }
+
+    summary = runner.console_summary(report, out)
+    encoded = json.dumps(summary)
+
+    assert len(encoded) < 1024
+    assert "large-step-output" not in encoded
+    assert summary == {
+        "schema": 1,
+        "kind": "d1l_autonomous_hardware_validation_summary",
+        "ok": False,
+        "mode": "hardware",
+        "commit": COMMIT,
+        "github_actions_run": "29234278626",
+        "completed_steps": 1,
+        "report": str(out),
+        "error": "sd_reboot_remount_failed",
+        "recovery_ok": True,
+        "ready_for_public_release": False,
+    }
+
+
+def test_console_summary_bounds_untrusted_text_and_missing_runs():
+    summary = runner.console_summary(
+        {
+            "ok": False,
+            "mode": "m" * 5000,
+            "commit": "c" * 5000,
+            "github_actions_run": "r" * 5000,
+            "error": "e" * 5000,
+            "runs": None,
+        },
+        Path("p" * 5000),
+    )
+
+    assert len(json.dumps(summary)) < 1024
+    assert summary["completed_steps"] == 0
+    assert summary["mode"].endswith("...")
+    assert summary["commit"].endswith("...")
+    assert summary["github_actions_run"].endswith("...")
+    assert summary["error"].endswith("...")
+    assert summary["report"].endswith("...")
+
+
 def write_actions_provenance_fixture(
     run_dir: Path,
     *,

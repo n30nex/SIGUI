@@ -43,6 +43,8 @@ def test_route_persistence_has_a_dedicated_bounded_worker():
     assert "d1l_route_store_flush_if_due()" not in service
     assert "d1l_route_store_worker_force_flush(" in console
     assert "D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U" in console
+    assert "D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U" in console
+    assert "D1L_REBOOT_RESTART_MARGIN_MS = 100U" in console
     assert "retained storage flush failed; reboot cancelled" in console
     assert r'\"retained_flush\":\"ESP_OK\"' in console
 
@@ -133,18 +135,20 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
         "d1l_rp2040_bridge_quiesce_begin"
     )
     assert reboot.index("d1l_rp2040_bridge_quiesce_begin") < reboot.index(
-        "reboot_deadline_remaining_ms(reboot_started_us) == 0U"
+        "remaining_ms <= D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS +"
     ) < reboot.index(
         "ok_begin(\"reboot\")"
     ) < reboot.index(
         "fflush(stdout)"
+    ) < reboot.index(
+        "vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS))"
     ) < reboot.index(
         "esp_restart()"
     )
     assert reboot.count("d1l_storage_manager_quiesce_end()") == 4
     assert reboot.count("d1l_route_store_worker_quiesce_end()") == 2
     assert reboot.count("d1l_rp2040_bridge_quiesce_end()") == 1
-    final_deadline = reboot.index("reboot quiesce deadline expired")
+    final_deadline = reboot.index("reboot deadline lacks console drain headroom")
     assert reboot.rfind("d1l_rp2040_bridge_quiesce_end()", 0, final_deadline) < reboot.rfind(
         "d1l_route_store_worker_quiesce_end()", 0, final_deadline
     ) < reboot.rfind(
@@ -160,6 +164,7 @@ def test_reboot_quiesces_storage_and_uart_under_one_deadline():
     assert r'\"storage_manager_quiesced\":true' in reboot
     assert r'\"retained_worker_quiesced\":true' in reboot
     assert r'\"rp2040_bridge_quiesced\":true' in reboot
+    assert r'\"console_drain_grace_ms\":%lu' in reboot
 
 
 def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reordering():

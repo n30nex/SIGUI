@@ -48,6 +48,12 @@ static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
 static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
 static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
+/* The default ESP-IDF console writes directly to UART0 without installing the
+ * UART driver. Give the final reboot receipt enough bounded wire time before
+ * esp_restart_noos arms its one-second RTC watchdog and waits for enabled
+ * UARTs. The receipt is ~200 bytes (under 18 ms at 115200 baud). */
+static const uint32_t D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U;
+static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -5113,19 +5119,24 @@ static void handle_line(const char *line)
             return;
         }
 
-        if (reboot_deadline_remaining_ms(reboot_started_us) == 0U) {
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        if (remaining_ms <= D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS +
+                            D1L_REBOOT_RESTART_MARGIN_MS) {
             d1l_rp2040_bridge_quiesce_end();
             d1l_route_store_worker_quiesce_end();
             d1l_storage_manager_quiesce_end();
             err_result("reboot", esp_err_to_name(ESP_ERR_TIMEOUT),
-                       "reboot quiesce deadline expired; reboot cancelled");
+                       "reboot deadline lacks console drain headroom; reboot cancelled");
             return;
         }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\"}\n");
+        printf(",\"rebooting\":true,\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\",\"console_drain_grace_ms\":%lu}\n",
+               (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
         fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS));
         /* Keep all three quiesce locks held so neither retained persistence nor
-         * a new UART2 SD exchange can begin while restart drains UART FIFOs. */
+         * a new UART2 SD exchange can begin while the bounded console grace
+         * drains UART0 and restart drains the final UART hardware state. */
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");

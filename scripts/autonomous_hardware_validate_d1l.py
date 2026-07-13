@@ -2966,6 +2966,41 @@ def parse_sd_scenarios(value: str) -> tuple[str, ...]:
     return scenarios
 
 
+def bounded_summary_text(value: object, max_chars: int) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3] + "..."
+
+
+def console_summary(report: dict, out: Path) -> dict:
+    """Return a bounded completion receipt while the full report stays on disk."""
+    runs = report.get("runs")
+    summary = {
+        "schema": 1,
+        "kind": "d1l_autonomous_hardware_validation_summary",
+        "ok": report.get("ok") is True,
+        "mode": bounded_summary_text(report.get("mode"), 32),
+        "commit": bounded_summary_text(report.get("commit"), 40),
+        "github_actions_run": bounded_summary_text(
+            report.get("github_actions_run"), 32
+        ),
+        "completed_steps": len(runs) if isinstance(runs, list) else 0,
+        "report": bounded_summary_text(out, 384),
+    }
+    if report.get("error"):
+        summary["error"] = bounded_summary_text(report["error"], 160)
+    if isinstance(report.get("recovery"), dict):
+        summary["recovery_ok"] = report["recovery"].get("ok") is True
+    if report.get("ready_for_public_release") is not None:
+        summary["ready_for_public_release"] = (
+            report.get("ready_for_public_release") is True
+        )
+    return summary
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
     try:
@@ -2979,7 +3014,7 @@ def main(argv: list[str] | None = None) -> int:
     if not out.is_absolute():
         out = ctx.root / out
     write_json(out, report)
-    print(json.dumps(report))
+    print(json.dumps(console_summary(report, out), separators=(",", ":")))
     return 0 if report.get("ok") else 1
 
 
