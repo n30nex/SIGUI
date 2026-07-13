@@ -74,6 +74,9 @@ jobs:
       - name: Host tests
         run: python -m pytest tests -q
 
+      - name: Validate completion ledger
+        run: python ./scripts/completion_ledger.py validate --check-generated
+
       - name: Smoke dry run
         run: python ./scripts/smoke_d1l.py --dry-run
 

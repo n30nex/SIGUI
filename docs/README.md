@@ -5,6 +5,8 @@ This folder contains only active release-facing documentation. Historical phase 
 ## Start Here
 
 - [Project README](../README.md): public overview, feature matrix, screenshots, hardware route.
+- [Completion status](COMPLETION_STATUS.md): concise generated view of live work-package, blocker, and release-gate state.
+- [Completion ledger](COMPLETION_LEDGER.yaml): machine-readable source used to generate and validate completion status.
 - [Roadmap](ROADMAP.md): current release blockers and work queue.
 - [KRAB'S THOUGHTS release audit](KRABSTHOUGHTS.MD): detailed 1.0 product definition, P0.1-P0.20 blocker rationale, and acceptance criteria incorporated into the roadmap.
 - [Release checklist](RELEASE_CHECKLIST.md): evidence required before tagging.

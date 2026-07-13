@@ -1,0 +1,840 @@
+{
+  "schema_version": 1,
+  "snapshot_at": "2026-07-12T21:07:19Z",
+  "project": "SIGUI / MeshCore DeskOS D1L",
+  "release_posture": "not_ready_to_tag",
+  "source_documents": [
+    "docs/completion/SIGUI_CODEX_5_6_ULTRA_GOAL_PROMPT.md",
+    "docs/completion/SIGUI_MASTER_COMPLETION_ROADMAP_2026-07-12.md",
+    "docs/completion/SIGUI_EXECUTION_BACKLOG_2026-07-12.yaml",
+    "docs/completion/SIGUI_AUDIT_EVIDENCE_INDEX_2026-07-12.md"
+  ],
+  "repository": {
+    "name": "n30nex/SIGUI",
+    "main": {
+      "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "actions_run": "29208908642",
+      "actions_status": "success",
+      "note": "WP-00 live completion ledger is merged through PR #81; the implementation stack is not."
+    },
+    "working_branch": {
+      "name": "codex/wp00-postmerge-ledger",
+      "base_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "pull_request": 82,
+      "merged_pull_request": 81
+    },
+    "audit_snapshot": {
+      "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
+      "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
+    },
+    "integrated_candidate": {
+      "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "branch": "codex/d1l-retained-merge",
+      "actions_push_run": "29200803879",
+      "actions_pull_request_run": "29200804762"
+    },
+    "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+    "selected_esp_idf": "5.5.4",
+    "main_pre_stack_esp_idf": "5.1.x"
+  },
+  "active_pull_requests": [
+    {
+      "number": 62,
+      "title": "Map: built-in bounded OpenStreetMap current view",
+      "base": "main",
+      "head": "codex/d1l-ui-map-hierarchy",
+      "head_commit": "f37f6a78011a414774aaa5fff8bca0dec8a4a5a6",
+      "state": "open",
+      "draft": true,
+      "checks": "success",
+      "mergeable": true
+    },
+    {
+      "number": 64,
+      "title": "Build: qualify D1L Map/Wi-Fi on ESP-IDF 5.5.4",
+      "base": "codex/d1l-ui-map-hierarchy",
+      "head": "codex/d1l-idf55-migration",
+      "head_commit": "0399a3165128c7090da6b32594003c31aab96207",
+      "state": "open",
+      "draft": true,
+      "checks": "success",
+      "mergeable": true
+    },
+    {
+      "number": 80,
+      "title": "fix(d1l): harden retained store reconciliation",
+      "base": "codex/d1l-idf55-migration",
+      "head": "codex/d1l-retained-merge",
+      "head_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "state": "open",
+      "draft": true,
+      "checks": "success",
+      "mergeable": true,
+      "physical_gate": "not_banked"
+    }
+  ],
+  "reconciliation": [
+    {
+      "conflict": "The audited main SHA predates the merged completion-program documents.",
+      "resolution": "Use live main 157c9670eb43a0119280f1e8119d9584b06dcfbf after merged PR #81; retain the audited SHA only as history."
+    },
+    {
+      "conflict": "PR #80 text says its fresh workflows are queued.",
+      "resolution": "Live push run 29200803879 and PR run 29200804762 both completed successfully for exact SHA 07322ed4c700866106ecca6c31ff70ea3a3d4ede."
+    },
+    {
+      "conflict": "Older release docs and helpers describe COM11 as an operational peer default.",
+      "resolution": "The standing policy forbids COM11; all ledger port defaults are null and COM8, COM11, and COM29 are rejected. Historical evidence remains labelled historical only."
+    },
+    {
+      "conflict": "Current main still builds the pre-stack ESP-IDF 5.1 line while the selected release SDK is 5.5.4.",
+      "resolution": "Treat 5.5.4 as candidate-only until PR #64 is landed and requalified through WP-02."
+    }
+  ],
+  "port_policy": {
+    "forbidden": ["COM8", "COM11", "COM29"],
+    "required_environment": ["D1L_PORT", "RP2040_PORT", "MESH_PEER_PORT"],
+    "defaults": {
+      "D1L_PORT": null,
+      "RP2040_PORT": null,
+      "MESH_PEER_PORT": null
+    },
+    "fail_closed": true
+  },
+  "accepted_product_decisions": [
+    {
+      "id": "PD-001",
+      "decision": "D1L is a non-forwarding client; remote repeater and room administration does not make it a local forwarding role."
+    },
+    {
+      "id": "PD-002",
+      "decision": "Authenticated repeater and room administration remains mandatory for Stable Core unless explicitly changed."
+    },
+    {
+      "id": "PD-003",
+      "decision": "User message input is capped at 138 UTF-8 bytes unless the pinned upstream proves a lower limit."
+    },
+    {
+      "id": "PD-004",
+      "decision": "Users prepare FAT32 media on a computer; firmware and tools never format SD on-device."
+    },
+    {
+      "id": "PD-005",
+      "decision": "The default Canada/USA radio profile is 910.525 MHz, BW 62.5 kHz, SF7, CR5, 20 dBm, TCXO NONE."
+    }
+  ],
+  "pending_product_decisions": [
+    "bounded user-channel count",
+    "pending-DM reboot policy",
+    "timezone UX",
+    "Wi-Fi and BLE coexistence policy",
+    "public-scale Map provider strategy",
+    "partition and update architecture",
+    "observer or MQTT scope",
+    "remote-admin operation allowlist",
+    "curated emoji and glyph set"
+  ],
+  "capabilities": [
+    {
+      "id": "public_messages",
+      "runtime_available": true,
+      "documentation_status": "hardware_proven"
+    },
+    {
+      "id": "direct_messages",
+      "runtime_available": true,
+      "documentation_status": "partial"
+    },
+    {
+      "id": "retained_sd_storage",
+      "runtime_available": true,
+      "documentation_status": "partial"
+    },
+    {
+      "id": "map_current_view",
+      "runtime_available": true,
+      "documentation_status": "partial"
+    },
+    {
+      "id": "wifi_station",
+      "runtime_available": true,
+      "documentation_status": "experimental"
+    },
+    {
+      "id": "authenticated_remote_admin",
+      "runtime_available": false,
+      "documentation_status": "not_started"
+    },
+    {
+      "id": "ble_companion",
+      "runtime_available": false,
+      "documentation_status": "not_started"
+    },
+    {
+      "id": "signed_update_recovery",
+      "runtime_available": false,
+      "documentation_status": "not_started"
+    },
+    {
+      "id": "onboard_gps",
+      "runtime_available": false,
+      "documentation_status": "unsupported"
+    },
+    {
+      "id": "observer_mqtt",
+      "runtime_available": false,
+      "documentation_status": "hidden"
+    }
+  ],
+  "blockers": [
+    {
+      "id": "BLK-WP01-COM12-20260712",
+      "work_package": "WP-01",
+      "kind": "physical_device_unavailable",
+      "status": "closed",
+      "observed_at": "2026-07-12T20:34:26Z",
+      "closed_at": "2026-07-12T20:35:00Z",
+      "missing_input": "The D1L ESP32 console/flash endpoint COM12 is not enumerated; COM16 is present but is RP2040-only.",
+      "why_source_work_cannot_close": "WP-01 requires an exact checksum-verified ESP32/RP2040 physical pair, repeated retained reboots, inserted-card stability, real removal/reinsert, and a storage-active soak. Dry-run output cannot satisfy those gates.",
+      "last_valid_sha": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "last_valid_actions_run": "29200803879",
+      "artifact_state": "downloaded_and_checksums_verified",
+      "operator_action": "Restore or reconnect the D1L ESP32 endpoint so COM12 enumerates, then rerun only the WP-01 exact-pair sequence; do not use forbidden ports and do not format the SD card.",
+      "resolution": "COM12 returned and the exact Actions-built ESP32/RP2040 pair was installed without erasing NVS or formatting SD.",
+      "blocks_execution": false,
+      "still_unblocked": ["WP-00"]
+    },
+    {
+      "id": "BLK-WP01-RETAINED-TIMEOUT-20260712",
+      "work_package": "WP-01",
+      "kind": "exact_pair_gate_failure",
+      "status": "open",
+      "observed_at": "2026-07-12T20:38:46Z",
+      "missing_input": "An isolated diagnostic-maintenance run that prevents asynchronous storage diag raw work from overlapping the 1-second retained worker and contaminating clean retained counters.",
+      "why_source_work_cannot_close": "Preflight reached READY_SD with zero retained failure counters. The asynchronous storage diag raw command then exceeded its fixed settle window, overlapped the 1-second retained worker, and contaminated the counters before the canaries. The exact failure remains packet append failure followed by a correctly cancelled ESP_ERR_INVALID_STATE reboot; adding 750 ms to the ordinary timeout does not fix that overlap.",
+      "last_valid_sha": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "last_valid_actions_run": "29200803879",
+      "artifact_state": "exact_pair_failure_preserved",
+      "operator_action": "Run the raw diagnostic only in an isolated maintenance boot, then reset and reflash the exact Actions artifacts and require a clean READY_SD preflight with zero counters before rerunning the canaries and exact-pair gate.",
+      "blocks_execution": false,
+      "still_unblocked": ["WP-01 diagnostic-isolation fix", "WP-00"]
+    }
+  ],
+  "execution_priority": [
+    "WP-01", "WP-02", "WP-00", "WP-03", "WP-04", "WP-06", "WP-05", "WP-07",
+    "WP-08", "WP-09", "WP-10", "WP-11", "WP-12", "WP-13", "WP-14", "WP-15",
+    "WP-16", "WP-17", "WP-18", "WP-19", "WP-20", "WP-21", "WP-22", "WP-23",
+    "WP-24", "WP-25"
+  ],
+  "work_packages": [
+    {
+      "id": "WP-00",
+      "title": "Live completion ledger",
+      "lane": "release",
+      "depends_on": [],
+      "tracks": ["coordination"],
+      "status": "merged",
+      "dependency_gate": "merged",
+      "implementation_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "evidence_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+      "implementation_merged": true,
+      "proof_banked": false,
+      "required_evidence": ["completion_ledger_validation_<sha>.json"],
+      "evidence": [
+        {
+          "filename": "completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json",
+          "kind": "actions_completion_ledger_validation",
+          "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+          "workflow_run": "29208908642",
+          "valid": true,
+          "closure_required": true,
+          "scope": "exact_merged_main",
+          "sha256": "13b977eafb883d421ccdbfca4eba8dc8c3838b5198745dcf63c08cee86e741c8",
+          "metadata": {
+            "artifact_type": "completion_ledger_validation",
+            "generated_at": "2026-07-12T21:04:27.610365Z",
+            "passed": true,
+            "error_count": 0,
+            "repository_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+            "ledger_main_commit": "7c36ea8d9243b2237fe751162dda2989b67486da",
+            "highest_priority_runnable": "WP-01"
+          }
+        }
+      ],
+      "latest_valid_receipt": {
+        "filename": "completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json",
+        "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
+        "scope": "exact_merged_main",
+        "closure_eligible": true
+      },
+      "verification": {
+        "actions": {
+          "status": "success",
+          "run": "29208908642",
+          "jobs": ["change-filter", "host-checks", "firmware-build"],
+          "rp2040_job": "skipped_as_out_of_scope"
+        },
+        "host_artifact": {
+          "downloaded": true,
+          "metadata_verified": true
+        }
+      },
+      "blockers": []
+    },
+    {
+      "id": "WP-01",
+      "title": "Close PR #80 exact-pair storage/reboot gate",
+      "lane": "platform-storage",
+      "depends_on": [],
+      "tracks": [69, 78, "PR-80"],
+      "status": "in_progress",
+      "dependency_gate": "proof_banked",
+      "implementation_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "evidence_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": [
+        "sd_inserted_stability_<sha>_<d1l>_<rp2040>.json",
+        "sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json",
+        "retained_reboot_matrix_<sha>_<d1l>.json",
+        "storage_active_soak_<sha>_<d1l>.json"
+      ],
+      "evidence": [
+        {
+          "filename": "d1l_host_checks_success_07322ed4c700866106ecca6c31ff70ea3a3d4ede.json",
+          "kind": "actions_host",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "host_and_dry_run_only"
+        },
+        {
+          "filename": "esp32_flash_07322ed_actions_29200803879_COM12.json",
+          "kind": "exact_pair_install",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "checksum_verified_non_erasing_esp32_install"
+        },
+        {
+          "filename": "rp2040_seeed_official_sd_smoke_07322ed_actions_29200803879_COM16.json",
+          "kind": "partial_physical",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "official_fat32_smoke"
+        },
+        {
+          "filename": "sd_file_canary_07322ed_actions_29200803879_COM12.json",
+          "kind": "partial_physical",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "basic_file_canary"
+        },
+        {
+          "filename": "sd_map_tile_canary_07322ed_actions_29200803879_COM12.json",
+          "kind": "partial_physical",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "basic_map_cache_canary"
+        },
+        {
+          "filename": "sd_data_export_07322ed_actions_29200803879_COM12.json",
+          "kind": "partial_physical",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": true,
+          "closure_required": false,
+          "scope": "basic_export_canaries"
+        },
+        {
+          "filename": "sd_retained_history_07322ed_actions_29200803879_COM12.json",
+          "kind": "physical_gate_failure",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": false,
+          "closure_required": true,
+          "scope": "retained_packet_append_and_reboot",
+          "failure": "READY_SD preflight began with zero counters; asynchronous storage diag raw exceeded fixed settle and overlapped the 1-second retained worker before packet append failed and reboot cancelled with ESP_ERR_INVALID_STATE; a 750 ms timeout increase is not the fix"
+        },
+        {
+          "filename": "sd_reboot_remount_07322ed_actions_29200803879_COM12.json",
+          "kind": "physical_gate_failure",
+          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+          "workflow_run": "29200803879",
+          "valid": false,
+          "closure_required": true,
+          "scope": "retained_reboot_and_remount",
+          "failure": "after diagnostic overlap contaminated the retained counters, retained packet append failed and the controlled reboot correctly cancelled"
+        }
+      ],
+      "latest_valid_receipt": {
+        "filename": "sd_data_export_07322ed_actions_29200803879_COM12.json",
+        "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+        "scope": "partial_exact_pair_physical_only",
+        "closure_eligible": false
+      },
+      "verification": {
+        "host": {
+          "status": "pass",
+          "passed_tests": 614,
+          "focused_tests": 54,
+          "source": "PR #80 and exact Actions host receipt"
+        },
+        "actions": {
+          "status": "success",
+          "stage": "actions_green",
+          "push_run": "29200803879",
+          "pull_request_run": "29200804762",
+          "jobs": ["change-filter", "meshcore-conformance", "host-checks", "rp2040-sd-bridge-build", "firmware-build"]
+        },
+        "checksums": {
+          "status": "verified",
+          "verified_at": "2026-07-12T20:32:00Z",
+          "source_run": "29200803879",
+          "manifest_count": 8,
+          "firmware_manifest_sha256": "2387847867844a3083ab1fcb884361cfe2dc36a6616a12761d7265523273262e",
+          "esp32_app_sha256": "fbed8a22108d3df19cc91eb6d11e14a01684771342cd88d8a5f6de686895441a",
+          "rp2040_bridge_uf2_sha256": "1596a9cd839cad7a8206e488a8f7c0bdda783220652ccba2d0f3bd2912eca980",
+          "release_package_manifest": "verified_with_all_nested_manifests"
+        },
+        "physical": {
+          "status": "failed",
+          "dry_run_only": false,
+          "exact_pair_installed": true,
+          "d1l_port": "COM12",
+          "d1l_port_state": "enumerated_and_used",
+          "rp2040_port": "COM16",
+          "rp2040_port_state": "enumerated_and_used",
+          "passed": [
+            "official FAT32 smoke",
+            "basic SD file canary",
+            "basic Map cache canary",
+            "basic diagnostic and data export canaries"
+          ],
+          "failed": [
+            "asynchronous storage diag raw exceeded fixed settle and overlapped the 1-second retained worker after a clean READY_SD preflight",
+            "retained packet append failed after diagnostic overlap contaminated previously zero counters",
+            "a 750 ms ordinary timeout increase does not fix the diagnostic/worker overlap",
+            "controlled reboot, correctly cancelled with ESP_ERR_INVALID_STATE"
+          ],
+          "wdt_or_panic_observed": false,
+          "public_rf_tx": false,
+          "formats_sd": false
+        }
+      },
+      "blockers": ["BLK-WP01-RETAINED-TIMEOUT-20260712"]
+    },
+    {
+      "id": "WP-02",
+      "title": "Land and normalize PR stack",
+      "lane": "integration",
+      "depends_on": ["WP-01"],
+      "tracks": [62, 64, 80, 63, 78],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["integration_baseline_<main-sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-03",
+      "title": "Immutable CI and release inputs",
+      "lane": "release-security",
+      "depends_on": ["WP-02"],
+      "tracks": [17, 71],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["build_inputs_<sha>.json", "sbom_<sha>.spdx.json", "provenance_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-04",
+      "title": "MeshCore boundary and upstream oracle",
+      "lane": "protocol",
+      "depends_on": ["WP-02"],
+      "tracks": [65],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["meshcore_oracle_manifest_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-05",
+      "title": "Semantic conformance and fuzzing",
+      "lane": "protocol-qa",
+      "depends_on": ["WP-04"],
+      "tracks": [65],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["meshcore_conformance_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-06",
+      "title": "Single-owner Mesh runtime",
+      "lane": "runtime",
+      "depends_on": ["WP-02", "WP-04"],
+      "tracks": [6, 16, 69],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["mesh_runtime_ownership_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-07",
+      "title": "Truthful DM ACK/retry/delivery",
+      "lane": "protocol",
+      "depends_on": ["WP-05", "WP-06"],
+      "tracks": [66, 7],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["dm_session_acceptance_<sha>_<d1l>_<peer>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-08",
+      "title": "Canonical contacts/heard nodes/QR lifecycle",
+      "lane": "protocol-application",
+      "depends_on": ["WP-05", "WP-06"],
+      "tracks": [67, 20, 75],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["contact_lifecycle_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-09",
+      "title": "Multi-channel model and messaging",
+      "lane": "protocol-application",
+      "depends_on": ["WP-05", "WP-06", "WP-08"],
+      "tracks": [67, 20, 74],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["channel_acceptance_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-10",
+      "title": "Real PATH/direct fallback/trace",
+      "lane": "protocol",
+      "depends_on": ["WP-05", "WP-07", "WP-08"],
+      "tracks": [68, 19, 7],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["route_trace_acceptance_<sha>_<d1l>_<peer>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-11",
+      "title": "Retained durability/schema/reset/power loss",
+      "lane": "storage",
+      "depends_on": ["WP-01", "WP-02", "WP-06"],
+      "tracks": [69, 4, 78],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["retained_invariants_<sha>.json", "retained_powerloss_<sha>.json", "nvs_write_amplification_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-12",
+      "title": "Truthful time service",
+      "lane": "platform",
+      "depends_on": ["WP-02", "WP-11"],
+      "tracks": [69],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["time_service_acceptance_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-13",
+      "title": "Wi-Fi reconnect/credentials/safe mode",
+      "lane": "connectivity",
+      "depends_on": ["WP-02", "WP-06", "WP-12"],
+      "tracks": [13, 63],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["wifi_resilience_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-14",
+      "title": "UI ownership and modular extraction",
+      "lane": "ui",
+      "depends_on": ["WP-06"],
+      "tracks": [6, 16, 76],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["ui_runtime_safety_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-15",
+      "title": "Finish Messages UX",
+      "lane": "ui",
+      "depends_on": ["WP-07", "WP-09", "WP-14"],
+      "tracks": [74, 66, 67],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["messages_ui_acceptance_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-16",
+      "title": "Finish Nodes/Network/roles/Map pins",
+      "lane": "ui-application",
+      "depends_on": ["WP-08", "WP-10", "WP-14"],
+      "tracks": [73, 75, 68, 70],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["network_map_nodes_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-17",
+      "title": "Packets/diagnostics/Terminal",
+      "lane": "diagnostics-ui",
+      "depends_on": ["WP-06", "WP-11", "WP-14"],
+      "tracks": [18, 19, 76],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["diagnostics_terminal_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-18",
+      "title": "Authenticated repeater/room administration",
+      "lane": "protocol-security-ui",
+      "depends_on": ["WP-05", "WP-08", "WP-10", "WP-12", "WP-14"],
+      "tracks": [77],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["admin_session_acceptance_<sha>_<d1l>_<peer>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-19",
+      "title": "Map provider/cache lifecycle",
+      "lane": "map-connectivity",
+      "depends_on": ["WP-01", "WP-13", "WP-14", "WP-16"],
+      "tracks": [12, 14, 73],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["map_live_acceptance_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-20",
+      "title": "BLE companion transport",
+      "lane": "connectivity-protocol",
+      "depends_on": ["WP-03", "WP-06", "WP-07", "WP-09", "WP-13"],
+      "tracks": ["new-ble"],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["ble_companion_acceptance_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-21",
+      "title": "Notifications/emoji/accessibility/polish",
+      "lane": "ui",
+      "depends_on": ["WP-14", "WP-15"],
+      "tracks": [74, 76, "new-ux"],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["ui_polish_acceptance_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-22",
+      "title": "Signed SD/OTA update and recovery",
+      "lane": "update-security",
+      "depends_on": ["WP-03", "WP-11", "WP-12", "WP-17"],
+      "tracks": [21, 71, "new-partition-migration"],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["partition_update_decision_<sha>.md", "update_powerloss_acceptance_<sha>_<d1l>.json", "upgrade_matrix_<sha>_<d1l>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-23",
+      "title": "Observer/MQTT and companion-location decision",
+      "lane": "connectivity-privacy",
+      "depends_on": ["WP-13", "WP-20"],
+      "tracks": ["new-product-decision"],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["observer_location_decision_<sha>.md"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    },
+    {
+      "id": "WP-24",
+      "title": "Final release qualification",
+      "lane": "release",
+      "depends_on": [
+        "WP-00", "WP-03", "WP-05", "WP-07", "WP-08", "WP-09", "WP-10", "WP-11",
+        "WP-12", "WP-13", "WP-14", "WP-15", "WP-16", "WP-17", "WP-18", "WP-19"
+      ],
+      "tracks": [4, 7, 8, 11, 17, 23, 63, 69, 71, 78],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["release_gate_<sha>.json", "release_validation_report_<sha>.md", "release_evidence_index_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": [],
+      "profile_additional_dependencies": {
+        "stable_core": [],
+        "full_feature": ["WP-20", "WP-21", "WP-22", "WP-23"]
+      }
+    },
+    {
+      "id": "WP-25",
+      "title": "Tag/publish/post-release control",
+      "lane": "release",
+      "depends_on": ["WP-24"],
+      "tracks": ["release"],
+      "status": "blocked",
+      "dependency_gate": "merged",
+      "implementation_commit": null,
+      "implementation_merged": false,
+      "proof_banked": false,
+      "required_evidence": ["published_release_<version>_<sha>.json"],
+      "evidence": [],
+      "latest_valid_receipt": null,
+      "blockers": []
+    }
+  ],
+  "release_gates": [
+    {"id": "G0", "name": "repository_lineage", "depends_on": [], "status": "open"},
+    {"id": "G1", "name": "reproducible_build", "depends_on": ["G0"], "status": "blocked"},
+    {"id": "G2", "name": "platform_boot", "depends_on": ["G1"], "status": "blocked"},
+    {"id": "G3", "name": "storage_durability", "depends_on": ["G2"], "status": "blocked"},
+    {"id": "G4", "name": "meshcore_conformance", "depends_on": ["G1"], "status": "blocked"},
+    {"id": "G5", "name": "messaging_routing", "depends_on": ["G4"], "status": "blocked"},
+    {"id": "G6", "name": "ui_safety_workflows", "depends_on": ["G2", "G5"], "status": "blocked"},
+    {"id": "G7", "name": "connectivity_map_ble", "depends_on": ["G2", "G3", "G6"], "status": "blocked"},
+    {"id": "G8", "name": "admin_security_update", "depends_on": ["G4", "G7"], "status": "blocked"},
+    {"id": "G9", "name": "soak_field_readiness", "depends_on": ["G3", "G5", "G6", "G7", "G8"], "status": "blocked"},
+    {"id": "G10", "name": "exact_tag", "depends_on": ["G9"], "status": "blocked"}
+  ]
+}

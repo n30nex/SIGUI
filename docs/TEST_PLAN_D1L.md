@@ -89,6 +89,8 @@ Coverage:
 - Phase 2 MeshCore service command surface.
 - Phase 4 Public message store contract including retained-history search, DM store contract including thread-filtered retained history, unread/read-state contract including per-thread DM read cursors, heard-node store contract, contact store contract, route store contract, persistent packet log contract, Public composer UI contract, and serial diagnostics.
 
+- WP-01 diagnostic-isolation contract: run asynchronous `storage diag raw` only in an isolated maintenance boot and do not begin retained canaries after a diagnostic merely because an additional 750 ms ordinary timeout elapsed. After diagnostic capture, reset and reflash the checksum-verified exact Actions artifacts, then require a clean `READY_SD` preflight with zero retained read/write/rename failure counters before file, retained, reboot, inserted-card, remove/reinsert, or soak evidence begins. Any overlap with the one-second retained worker or any pre-canary counter contamination invalidates that evidence window.
+
 ## Issue #63 Supported-SDK Qualification
 
 Firmware compilation and ESP-IDF dependency resolution are GitHub-Actions-only.
