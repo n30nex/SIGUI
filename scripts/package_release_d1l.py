@@ -610,7 +610,11 @@ def write_full_flash_image(build_dir: Path, package_dir: Path, flasher_args: dic
 def write_sha256sums(package_dir: Path) -> None:
     rows = []
     manifest = package_dir / "SHA256SUMS.txt"
-    for path in sorted(package_dir.rglob("*")):
+    paths = sorted(
+        package_dir.rglob("*"),
+        key=lambda path: path.relative_to(package_dir).as_posix(),
+    )
+    for path in paths:
         if not path.is_file() or path == manifest:
             continue
         rel = path.relative_to(package_dir).as_posix()

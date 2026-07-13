@@ -121,6 +121,7 @@ def write_fake_notices(root: Path) -> None:
         "partitions_d1l.csv": "nvs,data,nvs,0x9000,0x6000\n",
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
+        "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
         "scripts/package_release_d1l.py": "# package fixture\n",
         "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",
