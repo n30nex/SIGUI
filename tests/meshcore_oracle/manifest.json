@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "corpus_version": 1,
+  "abi_version": 1,
+  "coverage_boundary": "upstream_packet_envelope_adapter_only",
+  "wp04_closure_eligible": false,
+  "upstream": {
+    "name": "MeshCore",
+    "path": "third_party/MeshCore",
+    "commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+    "sources": {
+      "third_party/MeshCore/src/MeshCore.h": "51d93fe4c18608efa827625639a68721cedd9c15a83d55e3b86629cd5710ba8a",
+      "third_party/MeshCore/src/Packet.cpp": "6f401a4abe57b67aae6ce54172a8cd5cfa64f801c2186894d4bf28aaf30b52e0",
+      "third_party/MeshCore/src/Packet.h": "dae1e63021df0b85ccd83bd409993e302daf768509a7a28e8485d02344528d9f"
+    }
+  },
+  "oracle_sources": {
+    "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "e7e596b158d239761df1ada6a73f0632a8050e230667f9b394eef0b6387fd5c1",
+    "tests/meshcore_oracle/meshcore_oracle.h": "7ffa01ef9631473e98ea16a10846131f00e42028b599f4c2dd8c5b6958a0c947",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "005bec0229f2b643b9492bdab4cb4329295c97731c98f2ba1bb45fea877d22f6"
+  },
+  "interface": {
+    "language": "c_abi",
+    "header": "tests/meshcore_oracle/meshcore_oracle.h",
+    "implementation": "tests/meshcore_oracle/meshcore_oracle.cpp",
+    "upstream_type": "mesh::Packet",
+    "reject_preserves_output": true,
+    "crypto_available": false
+  },
+  "determinism": {
+    "current_vectors": "fixed_bytes_no_rng_or_clock",
+    "future_fixtures_required": [
+      "mock_radio",
+      "deterministic_rng",
+      "deterministic_rtc",
+      "deterministic_millisecond_clock",
+      "packet_manager",
+      "mesh_tables",
+      "contacts",
+      "channels"
+    ]
+  },
+  "vectors": {
+    "roundtrip": 4,
+    "invalid": 5,
+    "semantic": 0,
+    "total": 9
+  },
+  "capabilities": [
+    {
+      "id": "packet_envelope",
+      "status": "implemented",
+      "owner": "pinned_upstream",
+      "semantic": false
+    },
+    {
+      "id": "identity_signed_advert",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "public_group_packets",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "dm_encrypt_decrypt",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "ack_multiack_ack_path",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "direct_flood_routing",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "path_return_route_codes",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "trace_path_discovery",
+      "status": "pending",
+      "owner": "unassigned"
+    },
+    {
+      "id": "login_request_response_admin",
+      "status": "pending",
+      "owner": "unassigned"
+    }
+  ],
+  "production_boundary": {
+    "direct_upstream_reuse": [
+      "packet envelope encode/decode through mesh::Packet"
+    ],
+    "local_paths_requiring_future_golden_vectors": [
+      "main/mesh/meshcore_wire.c",
+      "main/mesh/meshcore_service.c"
+    ]
+  }
+}

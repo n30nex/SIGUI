@@ -28,8 +28,16 @@ HARNESS_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_conforma
 FUZZ_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_fuzz.cpp"
 WIRE_SOURCE = ROOT / "main" / "mesh" / "meshcore_wire.c"
 PACKET_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"
+ORACLE_MANIFEST_PATH = ROOT / "tests" / "meshcore_oracle" / "manifest.json"
+ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
+ORACLE_VECTORS_PATH = (
+    ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle_vectors.cpp"
+)
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
+ORACLE_ABI_VERSION = 1
+ORACLE_CORPUS_VERSION = 1
+ORACLE_COVERAGE_BOUNDARY = "upstream_packet_envelope_adapter_only"
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -100,6 +108,34 @@ EXPECTED_FUZZ = {
     "max_input_bytes": 255,
     "sanitizers": ["address", "undefined"],
 }
+EXPECTED_ORACLE_CAPABILITIES = [
+    {
+        "id": "packet_envelope",
+        "status": "implemented",
+        "owner": "pinned_upstream",
+        "semantic": False,
+    },
+    {"id": "identity_signed_advert", "status": "pending", "owner": "unassigned"},
+    {"id": "public_group_packets", "status": "pending", "owner": "unassigned"},
+    {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "ack_multiack_ack_path",
+        "status": "pending",
+        "owner": "unassigned",
+    },
+    {"id": "direct_flood_routing", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "path_return_route_codes",
+        "status": "pending",
+        "owner": "unassigned",
+    },
+    {"id": "trace_path_discovery", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "login_request_response_admin",
+        "status": "pending",
+        "owner": "unassigned",
+    },
+]
 
 
 class GateFailure(RuntimeError):
@@ -186,6 +222,110 @@ def load_manifest() -> dict[str, Any]:
     if manifest.get("fuzz") != EXPECTED_FUZZ:
         raise GateFailure("manifest fuzz contract drifted")
     return manifest
+
+
+def load_oracle_manifest() -> dict[str, Any]:
+    try:
+        manifest = json.loads(ORACLE_MANIFEST_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise GateFailure(f"cannot read MeshCore oracle manifest: {exc}") from exc
+    if manifest.get("schema_version") != 1:
+        raise GateFailure("oracle manifest schema version drifted")
+    if manifest.get("corpus_version") != ORACLE_CORPUS_VERSION:
+        raise GateFailure("oracle corpus version drifted")
+    if manifest.get("abi_version") != ORACLE_ABI_VERSION:
+        raise GateFailure("oracle ABI version drifted")
+    if manifest.get("coverage_boundary") != ORACLE_COVERAGE_BOUNDARY:
+        raise GateFailure("oracle coverage boundary drifted")
+    if manifest.get("wp04_closure_eligible") is not False:
+        raise GateFailure("first oracle slice must not claim WP-04 closure")
+    upstream = manifest.get("upstream")
+    if not isinstance(upstream, dict) or upstream.get("commit") != EXPECTED_UPSTREAM["commit"]:
+        raise GateFailure("oracle upstream commit does not match the pinned MeshCore pin")
+    if upstream.get("path") != EXPECTED_UPSTREAM["path"]:
+        raise GateFailure("oracle upstream path drifted")
+    expected_upstream_sources = {
+        f"{EXPECTED_UPSTREAM['path']}/{relative}": digest
+        for relative, digest in EXPECTED_UPSTREAM["sources"].items()
+    }
+    if upstream.get("sources") != expected_upstream_sources:
+        raise GateFailure("oracle upstream source allowlist drifted")
+    if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
+        raise GateFailure("oracle capability registry drifted")
+    if manifest.get("vectors") != {
+        "roundtrip": 4,
+        "invalid": 5,
+        "semantic": 0,
+        "total": 9,
+    }:
+        raise GateFailure("oracle vector contract drifted")
+    interface = manifest.get("interface", {})
+    if (
+        interface.get("language") != "c_abi"
+        or interface.get("upstream_type") != "mesh::Packet"
+        or interface.get("reject_preserves_output") is not True
+        or interface.get("crypto_available") is not False
+    ):
+        raise GateFailure("oracle interface boundary drifted")
+    required_fixtures = manifest.get("determinism", {}).get(
+        "future_fixtures_required"
+    )
+    if required_fixtures != [
+        "mock_radio",
+        "deterministic_rng",
+        "deterministic_rtc",
+        "deterministic_millisecond_clock",
+        "packet_manager",
+        "mesh_tables",
+        "contacts",
+        "channels",
+    ]:
+        raise GateFailure("oracle deterministic fixture roadmap drifted")
+    oracle_sources = manifest.get("oracle_sources")
+    if not isinstance(oracle_sources, dict) or set(oracle_sources) != {
+        "tests/meshcore_conformance/stubs/SHA256.h",
+        "tests/meshcore_oracle/meshcore_oracle.cpp",
+        "tests/meshcore_oracle/meshcore_oracle.h",
+        "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
+    }:
+        raise GateFailure("oracle source allowlist drifted")
+    return manifest
+
+
+def verify_oracle_sources(manifest: dict[str, Any]) -> dict[str, Any]:
+    failures: list[str] = []
+    files: dict[str, Any] = {}
+    expected_sources = {
+        **manifest["upstream"]["sources"],
+        **manifest["oracle_sources"],
+    }
+    root = ROOT.resolve()
+    for relative, expected_hash in expected_sources.items():
+        if not isinstance(relative, str) or "\\" in relative:
+            raise GateFailure("oracle source paths must be repository-relative POSIX paths")
+        source = (ROOT / relative).resolve()
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise GateFailure(f"oracle source escapes repository root: {relative}") from exc
+        actual_hash = sha256_lf_text_file(source) if source.is_file() else None
+        matched = actual_hash == expected_hash
+        files[relative] = {
+            "expected_sha256": expected_hash,
+            "actual_sha256": actual_hash,
+            "matched": matched,
+        }
+        if not matched:
+            failures.append(f"oracle source hash mismatch: {relative}")
+    result = {
+        "verified": not failures,
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "files": files,
+        "failures": failures,
+    }
+    if failures:
+        raise GateFailure("; ".join(failures))
+    return result
 
 
 def load_corpus(manifest: dict[str, Any]) -> tuple[dict[str, Any], list[tuple[str, bytes, str]]]:
@@ -354,6 +494,55 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             str(Path(build_dir) / "meshcore_wire_conformance"),
         ],
         [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ORACLE_ADAPTER_PATH.parent),
+            "-I",
+            str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
+            str(ORACLE_ADAPTER_PATH),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_adapter.o"),
+        ],
+        [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ORACLE_ADAPTER_PATH.parent),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
+            str(ORACLE_VECTORS_PATH),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_vectors.o"),
+        ],
+        [
+            cxx,
+            common_sanitizers,
+            str(Path(build_dir) / "meshcore_packet.o"),
+            str(Path(build_dir) / "meshcore_oracle_adapter.o"),
+            str(Path(build_dir) / "meshcore_oracle_vectors.o"),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_vectors"),
+        ],
+        [
             cc,
             "-std=c11",
             "-O1",
@@ -417,6 +606,20 @@ def parse_harness_output(stdout: str) -> dict[str, Any]:
     raise GateFailure("conformance harness did not emit its JSON result")
 
 
+def parse_oracle_output(stdout: str) -> dict[str, Any]:
+    for line in reversed(stdout.splitlines()):
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(value, dict)
+            and value.get("coverage_boundary") == ORACLE_COVERAGE_BOUNDARY
+        ):
+            return value
+    raise GateFailure("MeshCore oracle did not emit its JSON result")
+
+
 def completed_fuzz_runs(stderr: str, requested: int) -> int | None:
     final_stats = re.findall(r"stat::number_of_executed_units:\s*(\d+)", stderr)
     if final_stats:
@@ -429,7 +632,11 @@ def completed_fuzz_runs(stderr: str, requested: int) -> int | None:
     return None
 
 
-def base_report(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def base_report(
+    manifest: dict[str, Any],
+    oracle_manifest: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",
@@ -450,6 +657,7 @@ def base_report(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str,
         },
         "scope": {
             "vector_oracle": "pinned_Packet_wire_read_write_only",
+            "upstream_oracle_interface": ORACLE_COVERAGE_BOUNDARY,
             "fuzz_target": "local_wire_decoder_only",
             "packet_semantics_covered": False,
             "crypto_oracle_available": False,
@@ -464,6 +672,22 @@ def base_report(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str,
             "path": str(MANIFEST_PATH.relative_to(ROOT)).replace("\\", "/"),
             "sha256": sha256_file(MANIFEST_PATH),
             "upstream_commit": manifest["upstream"]["commit"],
+        },
+        "oracle": {
+            "coverage_boundary": ORACLE_COVERAGE_BOUNDARY,
+            "static_manifest": {
+                "path": str(ORACLE_MANIFEST_PATH.relative_to(ROOT)).replace(
+                    "\\", "/"
+                ),
+                "sha256": sha256_file(ORACLE_MANIFEST_PATH),
+                "corpus_version": ORACLE_CORPUS_VERSION,
+                "abi_version": ORACLE_ABI_VERSION,
+                "upstream_commit": oracle_manifest["upstream"]["commit"],
+            },
+            "capabilities": oracle_manifest["capabilities"],
+            "source_verification": None,
+            "result": None,
+            "artifact_path": None,
         },
         "vector_matrix": manifest["vector_matrix"],
         "payload_version_gate": manifest["payload_version_gate"],
@@ -485,9 +709,51 @@ def write_report(path: Path, report: dict[str, Any]) -> None:
     path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
+    oracle = report["oracle"]
+    result = oracle["result"]
+    source_verification = oracle["source_verification"]
+    execution_complete = bool(report.get("execution_complete") and result)
+    passed = bool(
+        report.get("passed")
+        and execution_complete
+        and result.get("passed") is True
+        and source_verification
+        and source_verification.get("verified") is True
+    )
+    return {
+        "schema_version": 1,
+        "artifact_type": "meshcore_oracle_manifest",
+        "generated_at": report["generated_at"],
+        "status": "pass" if passed else report.get("status", "fail"),
+        "passed": passed,
+        "execution_complete": execution_complete,
+        "coverage_boundary": ORACLE_COVERAGE_BOUNDARY,
+        "corpus_version": ORACLE_CORPUS_VERSION,
+        "abi_version": ORACLE_ABI_VERSION,
+        "wp04_closure_eligible": False,
+        "closure_ready": False,
+        "repository_commit": (report.get("source_verification") or {}).get(
+            "repository_commit"
+        ),
+        "upstream_commit": oracle["static_manifest"]["upstream_commit"],
+        "static_manifest": oracle["static_manifest"],
+        "source_verification": source_verification,
+        "oracle_result": result,
+        "capabilities": oracle["capabilities"],
+        "pending_capabilities": [
+            capability["id"]
+            for capability in oracle["capabilities"]
+            if capability["status"] == "pending"
+        ],
+        "failure": report.get("failure"),
+    }
+
+
 def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
     manifest = load_manifest()
-    report = base_report(manifest, args)
+    oracle_manifest = load_oracle_manifest()
+    report = base_report(manifest, oracle_manifest, args)
     try:
         if args.dry_run and os.environ.get("D1L_MESHCORE_CONFORMANCE_CI") == "1":
             raise GateFailure("dry-run is forbidden in GitHub Actions")
@@ -497,6 +763,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             raise GateFailure(f"release gate requires deterministic seed {DEFAULT_SEED}")
         source_verification = verify_sources(manifest, args.commit)
         report["source_verification"] = source_verification
+        report["oracle"]["source_verification"] = verify_oracle_sources(
+            oracle_manifest
+        )
         _corpus, corpus_seeds = load_corpus(manifest)
         report["corpus"] = {
             "path": str(CORPUS_PATH.relative_to(ROOT)).replace("\\", "/"),
@@ -535,6 +804,27 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             report["commands"] = commands
             for command in commands:
                 run_process(command, timeout=args.timeout_sec, env=sanitizer_env)
+
+            oracle = run_process(
+                [str(build_dir / "meshcore_oracle_vectors")],
+                timeout=args.timeout_sec,
+                env=sanitizer_env,
+            )
+            oracle_result = parse_oracle_output(oracle.stdout)
+            report["oracle"]["result"] = oracle_result
+            if (
+                oracle_result.get("passed") is not True
+                or oracle_result.get("coverage_boundary")
+                != ORACLE_COVERAGE_BOUNDARY
+                or oracle_result.get("wp04_closure_eligible") is not False
+                or oracle_result.get("abi_version") != ORACLE_ABI_VERSION
+                or oracle_result.get("upstream_commit")
+                != EXPECTED_UPSTREAM["commit"]
+                or oracle_result.get("vectors")
+                != {"roundtrip": 4, "invalid": 5, "semantic": 0, "total": 9}
+                or oracle_result.get("failures") != 0
+            ):
+                raise GateFailure("MeshCore oracle result drifted from its fixed matrix")
 
             harness = run_process(
                 [str(build_dir / "meshcore_wire_conformance")],
@@ -646,6 +936,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--runs", "--fuzz-runs", dest="runs", type=int, default=DEFAULT_RUNS)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--oracle-out",
+        type=Path,
+        help="output path for the exact-commit MeshCore oracle artifact",
+    )
     parser.add_argument("--timeout-sec", type=int, default=300)
     parser.add_argument("--require-sanitizers", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--dry-run", action="store_true")
@@ -674,7 +969,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             "failure": str(exc),
         }
         status = 1
+    oracle_artifact = None
+    if "oracle" in report:
+        repository_commit = (report.get("source_verification") or {}).get(
+            "repository_commit"
+        )
+        artifact_commit = repository_commit or args.commit or "unknown"
+        oracle_out = args.oracle_out or (
+            args.out.parent / f"meshcore_oracle_manifest_{artifact_commit}.json"
+        )
+        report["oracle"]["artifact_path"] = str(oracle_out)
+        oracle_artifact = build_oracle_artifact(report)
     write_report(args.out, report)
+    if oracle_artifact is not None:
+        write_report(oracle_out, oracle_artifact)
     print(json.dumps(report, sort_keys=True))
     return status
 

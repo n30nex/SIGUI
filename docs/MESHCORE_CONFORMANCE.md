@@ -31,6 +31,28 @@ boundary before new evidence can be accepted.
 The upstream native-test AES and SHA mocks are deliberately excluded as
 cryptographic oracles because they do not implement production cryptography.
 
+## WP-04 Oracle ABI Foundation
+
+`tests/meshcore_oracle/meshcore_oracle.h` defines version 1 of a narrow C ABI
+around the pinned upstream `mesh::Packet` envelope reader and writer. Its
+static `manifest.json` binds that interface, the exact upstream commit, every
+source used by the target, four deterministic round-trip vectors, and five
+reject-without-output-mutation vectors by canonical-LF SHA-256. The
+`meshcore-conformance` job builds and runs this as a separate sanitized host
+target and emits
+`meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
+report.
+
+This foundation is intentionally not the completed WP-04 oracle. Its boundary
+is `upstream_packet_envelope_adapter_only`, its semantic-vector count is zero,
+and both `wp04_closure_eligible` and `closure_ready` remain false. Identity and
+signed adverts, Public and DM semantics, production encryption/decryption,
+ACK/PATH/route/trace behavior, and login/admin flows remain pending. Those
+stages require deterministic radio, RNG, RTC, millisecond-clock, packet
+manager, mesh-table, contact, and channel fixtures; they must extend the
+versioned manifest instead of silently widening what this first artifact
+claims.
+
 ## What This Slice Covers
 
 The `meshcore-conformance` Actions job runs on `ubuntu-24.04` with the pinned
