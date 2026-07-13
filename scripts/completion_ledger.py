@@ -387,6 +387,7 @@ def render_status(ledger: dict) -> str:
             package_id
             for package_id in ledger["execution_priority"]
             if package_by_id[package_id]["status"] not in ("merged", "released")
+            and not dependency_satisfied(package_by_id[package_id])
         ),
         "none",
     )
