@@ -469,6 +469,52 @@ def test_storage_status_preserves_last_confirmed_card_across_transient_bridge_fa
     assert "d1l_storage_status_policy_allows_cached_io" in export_store
 
 
+def test_stale_bridge_expiry_invalidates_operational_state_without_erasing_diagnostics():
+    source = read("main/storage/storage_status.c")
+    invalidate = source.split(
+        "static void invalidate_stale_bridge_operational_state", 1
+    )[1].split("static void note_rp2040_exchange_failure", 1)[0]
+    failure = source.split(
+        "static void note_rp2040_exchange_failure", 1
+    )[1].split("static void apply_rp2040_sd_exchange_result", 1)[0]
+
+    assert "const bool allows_cached_io" in failure
+    expired = failure.split("if (!allows_cached_io)", 1)[1].split(
+        "s_status.response_truncated", 1
+    )[0]
+    assert "d1l_retained_blob_store_note_sd_backend(false" in expired
+    assert "set_store_backends(&s_status);" in expired
+    assert "invalidate_stale_bridge_operational_state();" in expired
+
+    for field in (
+        "rp2040_sd_protocol_supported",
+        "sd_mounted",
+        "sd_data_root_ready",
+        "setup_supported",
+        "file_ops_supported",
+        "atomic_rename_supported",
+        "file_line_max",
+        "file_chunk_max",
+        "path_max",
+    ):
+        assert f"s_status.{field}" in invalidate
+    assert "s_status.sd_presence_stale = s_status.sd_present;" in invalidate
+    assert '"protocol_pending" : "rp2040_unavailable"' in invalidate
+    for diagnostic in (
+        "capacity_kb",
+        "free_kb",
+        "sd_filesystem",
+        "sd_probe_error",
+        "sd_probe_data",
+        "sd_mount_error",
+        "sd_mount_data",
+        "sd_probe_power",
+        "sd_probe_mode",
+    ):
+        assert diagnostic not in invalidate
+    assert 's_status.setup_action = "wait_for_storage_reconnect";' in failure
+
+
 def test_storage_format_request_is_guarded_before_bridge_command():
     old_request = "DESKOS_SD_" + "FORMAT"
     old_confirmation = "D1L_RP2040_SD_" + "FORMAT_CONFIRMATION"

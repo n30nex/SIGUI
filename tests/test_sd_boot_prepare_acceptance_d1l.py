@@ -151,6 +151,27 @@ def protocol_pending_storage_line(state: str = "protocol_pending") -> str:
     )
 
 
+def bridge_unavailable_storage_line(*, packets_backend: str = "nvs") -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"storage status",'
+        '"sd":{"state":"protocol_pending","present":false,"mounted":false,'
+        '"data_root_ready":false,"rp2040_protocol_supported":false,'
+        '"file_ops":false,"atomic_rename":false},'
+        '"setup_action":"bridge_protocol_pending","data_enabled":false,'
+        '"data_backend":"nvs","stores":{"messages":"nvs","dm":"nvs",'
+        f'"routes":"nvs","packets":"{packets_backend}"}}}}\n'
+    )
+
+
+def rp2040_timeout_line() -> str:
+    return (
+        '{"schema":1,"ok":false,"cmd":"rp2040 ping",'
+        '"code":"ESP_ERR_TIMEOUT","bridge_ready":true,'
+        '"protocol_supported":false,"sd_touched":false,'
+        '"public_rf_tx":false,"formats_sd":false}\n'
+    )
+
+
 def storage_setup_line() -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage setup",'
@@ -570,6 +591,45 @@ def test_boot_remount_timeout_exceeds_firmware_deadline(monkeypatch):
     boot_accept.send_with_timeout(object(), "storage remount", 1.0)
 
     assert calls == [("storage remount", 75.0)]
+
+
+def test_rp2040_unavailable_requires_complete_fail_closed_fallback(monkeypatch):
+    ser = FakeSerial(
+        [rp2040_timeout_line(), bridge_unavailable_storage_line(), health_line()]
+    )
+    install_fake_serial(monkeypatch, ser)
+
+    report = boot_accept.run_acceptance(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        scenario="rp2040-unavailable",
+        mount_poll_attempts=0,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is True
+    assert report["classification"] == "bridge_unavailable_fallback"
+    assert report["scenario_prerequisite"]["satisfied"] is True
+    assert report["storage_file_gate_ready"] is False
+    assert report["retained_store_gate_ready"] is False
+
+
+def test_rp2040_unavailable_rejects_protocol_pending_with_live_packet_backend():
+    storage = json.loads(bridge_unavailable_storage_line(packets_backend="sd"))
+
+    assert boot_accept.bridge_unavailable_fallback_ready(storage) is False
+    passed, classification = boot_accept.boot_prepare_passed(
+        "rp2040-unavailable",
+        storage_after=storage,
+        storage_setup=None,
+        filecanary=None,
+        health={"ok": True},
+        public_rf_tx=False,
+        formats_sd=False,
+    )
+    assert passed is False
+    assert classification == "bridge_unavailable_not_reported"
 
 
 def test_correct_structure_waits_through_bridge_resync_states(monkeypatch):

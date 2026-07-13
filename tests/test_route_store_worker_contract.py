@@ -171,8 +171,17 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     assert "d1l_route_store_worker_quiesce_begin" in header
     assert "d1l_route_store_worker_quiesce_end" in header
     assert "s_flush_mutex" in worker
+    assert "s_quiesce_requester" in worker
+    assert "worker_quiesce_requested" in worker
     assert "flush_retained_stores_locked(true)" in worker
     assert "flush_retained_stores_locked(false)" in worker
+
+    flush = worker.split(
+        "static esp_err_t flush_retained_stores(bool force)", 1
+    )[1].split("static esp_err_t flush_retained_stores_locked", 1)[0]
+    assert flush.count("worker_quiesce_requested()") == 4
+    assert flush.count("quiesce_yield_result(force, first_error)") == 4
+    assert "return force ? ESP_ERR_TIMEOUT : ESP_OK" in worker
 
     begin = worker.split(
         "esp_err_t d1l_route_store_worker_quiesce_begin", 1
@@ -182,13 +191,17 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     )[1]
     assert "return ESP_ERR_INVALID_ARG" in begin
     assert "return ESP_ERR_INVALID_STATE" in begin
+    assert "s_quiesce_requester == NULL" in begin
+    assert "s_quiesce_requester = current" in begin
+    assert begin.count("s_quiesce_requester = NULL") == 2
     assert "xSemaphoreTake(s_flush_mutex, ticks)" in begin
     assert begin.index("xSemaphoreTake(s_request_mutex, ticks)") < begin.index(
         "xSemaphoreTake(s_flush_mutex, ticks)"
     ) < begin.index(
-        "s_quiesce_owner = xTaskGetCurrentTaskHandle()"
+        "s_quiesce_owner = current"
     )
     assert "s_quiesce_owner != current" in end
+    assert "s_quiesce_requester = NULL" in end
     assert end.index("s_quiesce_owner = NULL") < end.index(
         "xSemaphoreGive(s_flush_mutex)"
     ) < end.index("xSemaphoreGive(s_request_mutex)")

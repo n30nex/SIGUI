@@ -600,6 +600,28 @@ static void apply_rp2040_sd_status(const d1l_rp2040_sd_status_t *sd)
     }
 }
 
+static void invalidate_stale_bridge_operational_state(void)
+{
+    /* Preserve last-confirmed capacity, filesystem, and probe diagnostics,
+     * but never expose cached protocol or file capabilities after the bounded
+     * reconnect grace expires. Presence remains a last-confirmed diagnostic;
+     * it is explicitly marked stale instead of being reported as removal. */
+    s_status.rp2040_sd_protocol_supported = false;
+    s_status.sd_presence_stale = s_status.sd_present;
+    s_status.sd_mounted = false;
+    s_status.sd_data_root_ready = false;
+    s_status.sd_needs_fat32 = false;
+    s_status.setup_required = false;
+    s_status.setup_supported = false;
+    s_status.file_ops_supported = false;
+    s_status.atomic_rename_supported = false;
+    s_status.file_line_max = 0U;
+    s_status.file_chunk_max = 0U;
+    s_status.path_max = 0U;
+    s_status.sd_state = s_status.rp2040_bridge_ready ?
+                        "protocol_pending" : "rp2040_unavailable";
+}
+
 static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
 {
     s_status.bridge_status_refresh_failures =
@@ -608,16 +630,18 @@ static void note_rp2040_exchange_failure(esp_err_t ret, bool response_truncated)
     s_status.bridge_status_stale =
         d1l_storage_status_policy_is_stale(
             s_status.bridge_status_refresh_failures);
-    if (!d1l_storage_status_policy_allows_cached_io(
-            s_status.bridge_status_refresh_failures)) {
+    const bool allows_cached_io =
+        d1l_storage_status_policy_allows_cached_io(
+            s_status.bridge_status_refresh_failures);
+    if (!allows_cached_io) {
         d1l_retained_blob_store_note_sd_backend(false, false, false, 0, 0, 0);
         set_store_backends(&s_status);
+        invalidate_stale_bridge_operational_state();
     }
     s_status.response_truncated = response_truncated;
     s_status.last_error = ret;
     s_status.setup_action = "wait_for_storage_reconnect";
-    s_status.note = d1l_storage_status_policy_allows_cached_io(
-                        s_status.bridge_status_refresh_failures) ?
+    s_status.note = allows_cached_io ?
         "Storage status is reconnecting; the last confirmed SD state remains active during a bounded grace period" :
         "Storage status did not recover; SD file access is paused and onboard fallback remains active until a valid status reply";
 }

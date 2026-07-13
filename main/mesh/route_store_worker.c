@@ -36,27 +36,60 @@ static portMUX_TYPE s_state_mux = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_quiesce_owner_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_worker_starting;
 static TaskHandle_t s_quiesce_owner;
+static TaskHandle_t s_quiesce_requester;
 static uint32_t s_next_request_id;
 static uint32_t s_result_request_id;
 static esp_err_t s_result;
 
+static bool worker_quiesce_requested(void)
+{
+    bool requested;
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    requested = s_quiesce_requester != NULL;
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    return requested;
+}
+
+static esp_err_t quiesce_yield_result(bool force, esp_err_t first_error)
+{
+    if (first_error != ESP_OK) {
+        return first_error;
+    }
+    /* A forced flush must never report success after yielding partway through
+     * its durability sequence. Background due-work may yield cleanly because
+     * the foreground quiesce owner will perform the required operation. */
+    return force ? ESP_ERR_TIMEOUT : ESP_OK;
+}
+
 static esp_err_t flush_retained_stores(bool force)
 {
     esp_err_t first_error = ESP_OK;
+    if (worker_quiesce_requested()) {
+        return quiesce_yield_result(force, first_error);
+    }
     const esp_err_t message_ret = force ? d1l_message_store_flush() :
                                           d1l_message_store_flush_if_due();
     if (message_ret != ESP_OK) {
         first_error = message_ret;
+    }
+    if (worker_quiesce_requested()) {
+        return quiesce_yield_result(force, first_error);
     }
     const esp_err_t dm_ret = force ? d1l_dm_store_flush() :
                                      d1l_dm_store_flush_if_due();
     if (dm_ret != ESP_OK && first_error == ESP_OK) {
         first_error = dm_ret;
     }
+    if (worker_quiesce_requested()) {
+        return quiesce_yield_result(force, first_error);
+    }
     const esp_err_t packet_ret = force ? d1l_packet_log_flush() :
                                          d1l_packet_log_flush_if_due();
     if (packet_ret != ESP_OK && first_error == ESP_OK) {
         first_error = packet_ret;
+    }
+    if (worker_quiesce_requested()) {
+        return quiesce_yield_result(force, first_error);
     }
     const esp_err_t route_ret = force ? d1l_route_store_flush() :
                                         d1l_route_store_flush_if_due();
@@ -241,24 +274,35 @@ esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
         return ret;
     }
 
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    bool request_registered = false;
     portENTER_CRITICAL(&s_quiesce_owner_mux);
-    const bool already_quiesced = s_quiesce_owner != NULL;
+    if (s_quiesce_owner == NULL && s_quiesce_requester == NULL) {
+        s_quiesce_requester = current;
+        request_registered = true;
+    }
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
-    if (already_quiesced) {
+    if (!request_registered) {
         return ESP_ERR_INVALID_STATE;
     }
 
     TickType_t ticks = quiesce_remaining_ticks(started_us, timeout_ms);
     if (ticks == 0U || xSemaphoreTake(s_request_mutex, ticks) != pdTRUE) {
+        portENTER_CRITICAL(&s_quiesce_owner_mux);
+        s_quiesce_requester = NULL;
+        portEXIT_CRITICAL(&s_quiesce_owner_mux);
         return ESP_ERR_TIMEOUT;
     }
     ticks = quiesce_remaining_ticks(started_us, timeout_ms);
     if (ticks == 0U || xSemaphoreTake(s_flush_mutex, ticks) != pdTRUE) {
+        portENTER_CRITICAL(&s_quiesce_owner_mux);
+        s_quiesce_requester = NULL;
+        portEXIT_CRITICAL(&s_quiesce_owner_mux);
         (void)xSemaphoreGive(s_request_mutex);
         return ESP_ERR_TIMEOUT;
     }
     portENTER_CRITICAL(&s_quiesce_owner_mux);
-    s_quiesce_owner = xTaskGetCurrentTaskHandle();
+    s_quiesce_owner = current;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
     return ESP_OK;
 }
@@ -272,6 +316,7 @@ void d1l_route_store_worker_quiesce_end(void)
         return;
     }
     s_quiesce_owner = NULL;
+    s_quiesce_requester = NULL;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
     (void)xSemaphoreGive(s_flush_mutex);
     (void)xSemaphoreGive(s_request_mutex);

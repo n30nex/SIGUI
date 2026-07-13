@@ -289,6 +289,25 @@ def sd_mount_error_present(report: dict | None) -> bool:
     return any(int(sd.get(key) or 0) != 0 for key in ("mount_error", "mount_data"))
 
 
+def bridge_unavailable_fallback_ready(report: dict | None) -> bool:
+    if not isinstance(report, dict) or report.get("ok") is not True:
+        return False
+    sd = sd_status(report)
+    stores = report.get("stores")
+    return bool(
+        sd_state(report) in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}
+        and sd.get("rp2040_protocol_supported") is False
+        and sd.get("mounted") is False
+        and sd.get("data_root_ready") is False
+        and sd.get("file_ops") is False
+        and sd.get("atomic_rename") is False
+        and report.get("data_enabled") is False
+        and report.get("data_backend") == "nvs"
+        and isinstance(stores, dict)
+        and all(stores.get(name) == "nvs" for name in RETAINED_STORE_NAMES)
+    )
+
+
 def boot_prepare_passed(
     scenario: str,
     *,
@@ -310,7 +329,7 @@ def boot_prepare_passed(
     setup_action = storage_after.get("setup_action") if isinstance(storage_after, dict) else None
 
     if scenario == "rp2040-unavailable":
-        if state in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}:
+        if bridge_unavailable_fallback_ready(storage_after):
             return True, "bridge_unavailable_fallback"
         return False, "bridge_unavailable_not_reported"
 
@@ -390,7 +409,7 @@ def scenario_prerequisite_report(
         )
         expected = "non-FAT32 or unmountable card physically inserted"
     elif scenario == "rp2040-unavailable":
-        satisfied = state in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}
+        satisfied = bridge_unavailable_fallback_ready(storage_after)
         expected = "RP2040 DeskOS bridge unavailable"
     elif scenario in FILE_GATE_SCENARIOS:
         satisfied = storage_file_gate_ready(storage_after) and retained_store_gate_ready(storage_after)
