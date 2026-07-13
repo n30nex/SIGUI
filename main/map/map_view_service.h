@@ -22,6 +22,8 @@ typedef struct {
     uint32_t generation;
     uint32_t frame_revision;
     uint32_t retry_after_sec;
+    uint32_t decode_total_us;
+    uint32_t decode_max_us;
     int32_t lat_e7;
     int32_t lon_e7;
     uint16_t width;
@@ -34,6 +36,7 @@ typedef struct {
     uint8_t downloaded_tiles;
     uint8_t rendered_tiles;
     uint8_t failed_tiles;
+    uint8_t decode_samples;
     char phase[24];
     char message[80];
 } d1l_map_view_status_t;

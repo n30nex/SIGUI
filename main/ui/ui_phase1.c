@@ -130,6 +130,7 @@ static bool s_map_location_returns_to_options;
 static d1l_contact_entry_t s_contact_detail_contact;
 static d1l_contact_entry_t s_contact_export_contact;
 static d1l_node_view_t s_node_detail_node;
+static bool s_node_detail_returns_to_map;
 static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
@@ -150,6 +151,7 @@ static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
 static const uint32_t D1L_UI_TIMER_MAX_SLEEP_MS = 50U;
+static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
 /* A full retained Packet view can legitimately take longer than 1.5 s to rebuild
  * before a nested page opens. Keep the serial proof bounded without turning a
  * populated device into a false timeout. */
@@ -211,6 +213,7 @@ static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_contact_options_event_cb(lv_event_t *event);
 static void open_contact_forget_event_cb(lv_event_t *event);
 static void open_node_detail_event_cb(lv_event_t *event);
+static void open_map_node_detail(const char *fingerprint);
 static void node_detail_dm_event_cb(lv_event_t *event);
 static void open_node_dm_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
@@ -265,7 +268,27 @@ typedef struct {
     size_t contact_count;
     size_t route_count;
     size_t packet_count;
+    bool storage_sd_present;
+    bool storage_sd_mounted;
+    bool storage_sd_data_root_ready;
+    bool storage_sd_needs_fat32;
+    bool storage_setup_required;
+    bool storage_data_enabled;
+    bool storage_retained_sd_degraded;
+    bool storage_retained_backup_degraded;
+    bool map_tile_cache_ready;
+    bool wifi_connected;
+    bool wifi_connecting;
+    const char *storage_sd_state;
+    const char *storage_setup_action;
 } d1l_ui_content_generation_t;
+
+typedef struct {
+    bool location_set;
+    int32_t lat_e7;
+    int32_t lon_e7;
+    uint8_t zoom;
+} d1l_ui_map_render_input_t;
 
 typedef enum {
     D1L_PACKET_FILTER_ALL = 0,
@@ -302,6 +325,8 @@ static bool s_content_refresh_pending = false;
 static bool s_map_interactive_touch_authorized;
 static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
+static d1l_ui_map_render_input_t s_rendered_map_input;
+static bool s_rendered_map_input_valid = false;
 static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
 static bool s_packets_paused;
 static bool s_packet_detail_advanced;
@@ -334,7 +359,28 @@ static d1l_ui_content_generation_t content_generation_from_snapshot(
         .contact_count = snapshot->contact_count,
         .route_count = snapshot->route_count,
         .packet_count = snapshot->packet_count,
+        .storage_sd_present = snapshot->storage_sd_present,
+        .storage_sd_mounted = snapshot->storage_sd_mounted,
+        .storage_sd_data_root_ready = snapshot->storage_sd_data_root_ready,
+        .storage_sd_needs_fat32 = snapshot->storage_sd_needs_fat32,
+        .storage_setup_required = snapshot->storage_setup_required,
+        .storage_data_enabled = snapshot->storage_data_enabled,
+        .storage_retained_sd_degraded = snapshot->storage_retained_sd_degraded,
+        .storage_retained_backup_degraded = snapshot->storage_retained_backup_degraded,
+        .map_tile_cache_ready = snapshot->map_tile_cache_ready,
+        .wifi_connected = snapshot->wifi_connected,
+        .wifi_connecting = snapshot->wifi_connecting,
+        .storage_sd_state = snapshot->storage_sd_state,
+        .storage_setup_action = snapshot->storage_setup_action,
     };
+}
+
+static bool content_generation_text_equal(const char *left, const char *right)
+{
+    if (left == right) {
+        return true;
+    }
+    return left && right && strcmp(left, right) == 0;
 }
 
 static bool content_generation_equal(const d1l_ui_content_generation_t *left,
@@ -359,7 +405,22 @@ static bool content_generation_equal(const d1l_ui_content_generation_t *left,
         left->node_count == right->node_count &&
         left->contact_count == right->contact_count &&
         left->route_count == right->route_count &&
-        left->packet_count == right->packet_count;
+        left->packet_count == right->packet_count &&
+        left->storage_sd_present == right->storage_sd_present &&
+        left->storage_sd_mounted == right->storage_sd_mounted &&
+        left->storage_sd_data_root_ready == right->storage_sd_data_root_ready &&
+        left->storage_sd_needs_fat32 == right->storage_sd_needs_fat32 &&
+        left->storage_setup_required == right->storage_setup_required &&
+        left->storage_data_enabled == right->storage_data_enabled &&
+        left->storage_retained_sd_degraded == right->storage_retained_sd_degraded &&
+        left->storage_retained_backup_degraded == right->storage_retained_backup_degraded &&
+        left->map_tile_cache_ready == right->map_tile_cache_ready &&
+        left->wifi_connected == right->wifi_connected &&
+        left->wifi_connecting == right->wifi_connecting &&
+        content_generation_text_equal(left->storage_sd_state,
+                                      right->storage_sd_state) &&
+        content_generation_text_equal(left->storage_setup_action,
+                                      right->storage_setup_action);
 }
 
 static void remember_rendered_content_generation(const d1l_app_snapshot_t *snapshot)
@@ -377,6 +438,33 @@ static bool content_generation_changed_from_rendered(const d1l_app_snapshot_t *s
         return false;
     }
     return !content_generation_equal(&current, &s_rendered_content_generation);
+}
+
+static d1l_ui_map_render_input_t map_render_input_from_snapshot(
+    const d1l_app_snapshot_t *snapshot)
+{
+    return (d1l_ui_map_render_input_t) {
+        .location_set = snapshot->map_location_set,
+        .lat_e7 = snapshot->map_lat_e7,
+        .lon_e7 = snapshot->map_lon_e7,
+        .zoom = snapshot->map_tile_zoom,
+    };
+}
+
+static void remember_rendered_map_input(const d1l_app_snapshot_t *snapshot)
+{
+    s_rendered_map_input = map_render_input_from_snapshot(snapshot);
+    s_rendered_map_input_valid = true;
+}
+
+static bool map_render_input_changed_from_rendered(const d1l_app_snapshot_t *snapshot)
+{
+    const d1l_ui_map_render_input_t current = map_render_input_from_snapshot(snapshot);
+    return !s_rendered_map_input_valid ||
+           current.location_set != s_rendered_map_input.location_set ||
+           current.lat_e7 != s_rendered_map_input.lat_e7 ||
+           current.lon_e7 != s_rendered_map_input.lon_e7 ||
+           current.zoom != s_rendered_map_input.zoom;
 }
 
 static void request_tab_switch(d1l_ui_tab_t tab)
@@ -608,6 +696,7 @@ static const d1l_ui_map_callbacks_t callbacks = {
     .clear_location = map_location_clear_event_cb,
     .location_textarea = map_location_textarea_event_cb,
     .location_keyboard = map_location_keyboard_event_cb,
+    .open_node_detail = open_map_node_detail,
 };
 
 static const char *tab_name(d1l_ui_tab_t tab)
@@ -1185,6 +1274,9 @@ static void show_modal(lv_obj_t *obj)
     if (!obj) {
         return;
     }
+    if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
+        d1l_ui_map_viewport_prepare_cover();
+    }
     d1l_ui_map_viewport_release();
     set_dock_hidden(true);
     d1l_ui_modal_show(obj);
@@ -1350,6 +1442,7 @@ static void hide_node_detail_sheet(void)
 {
     d1l_ui_modal_hide(s_node_detail_sheet);
     memset(&s_node_detail_node, 0, sizeof(s_node_detail_node));
+    s_node_detail_returns_to_map = false;
     restore_dock_for_active_tab();
 }
 
@@ -1638,7 +1731,19 @@ static bool node_view_can_dm(const d1l_node_view_t *view)
     return view &&
            view->node.fingerprint[0] != '\0' &&
            view->node.public_key_hex[0] != '\0' &&
-           !node_role_is_managed_service(view->role);
+           strcmp(view->role, "companion") == 0;
+}
+
+static bool contact_can_dm(const d1l_contact_entry_t *entry)
+{
+    return entry && entry->fingerprint[0] != '\0' &&
+           entry->public_key_hex[0] != '\0' && strcmp(entry->type, "chat") == 0;
+}
+
+static bool contact_can_export(const d1l_contact_entry_t *entry)
+{
+    return entry && d1l_contact_store_has_export_key(entry) &&
+           d1l_contact_store_meshcore_type_id(entry->type) != 0U;
 }
 
 static bool node_view_management_gated(const d1l_node_view_t *view)
@@ -2064,10 +2169,11 @@ static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_
     lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
     label_set_dot_width(alias, 166);
     obj_align_if(alias, LV_ALIGN_TOP_LEFT, 0, 0);
-    if (entry->public_key_hex[0] != '\0') {
+    if (contact_can_dm(entry)) {
         create_button(row, "DM", 350, -1, 48, 34, open_dm_compose_event_cb, (void *)entry);
     } else {
-        lv_obj_t *type = create_label(row, entry->type, 0xA7F3D0);
+        lv_obj_t *type = create_label(row, entry->type[0] ? entry->type : "unknown",
+                                      0xA7F3D0);
         obj_align_if(type, LV_ALIGN_TOP_RIGHT, 0, 0);
     }
     lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
@@ -2178,7 +2284,7 @@ static void mark_messages_read_event_cb(lv_event_t *event)
 
 static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
 {
-    if (!entry || entry->public_key_hex[0] == '\0') {
+    if (!contact_can_dm(entry)) {
         show_toast("DM", ESP_ERR_INVALID_STATE);
         return;
     }
@@ -2502,9 +2608,20 @@ static void render_contact_options_sheet(void)
                                    (void *)s_contact_action_mute);
     style_contact_option_button(mute, 0xC4B5FD,
                                 entry->muted ? "On  >" : "Off  >");
-    lv_obj_t *export = create_button(s_contact_options_sheet, "Export QR", 16, 280, 448, 48,
-                                     contact_detail_export_event_cb, NULL);
-    style_contact_option_button(export, 0xA7F3D0, "Share QR  >");
+    if (contact_can_export(entry)) {
+        lv_obj_t *export = create_button(s_contact_options_sheet, "Export QR", 16, 280,
+                                         448, 48, contact_detail_export_event_cb, NULL);
+        style_contact_option_button(export, 0xA7F3D0, "Share QR  >");
+    } else {
+        lv_obj_t *export = create_panel(s_contact_options_sheet, 16, 280, 448, 48);
+        if (export) {
+            lv_obj_set_style_pad_all(export, 0, 0);
+            lv_obj_t *title = create_label(export, "Export unavailable", 0x8EA0AE);
+            obj_align_if(title, LV_ALIGN_LEFT_MID, 12, 0);
+            lv_obj_t *reason = create_label(export, "Missing key or role", 0x8EA0AE);
+            obj_align_if(reason, LV_ALIGN_RIGHT_MID, -12, 0);
+        }
+    }
     lv_obj_t *forget = create_button(s_contact_options_sheet, "Forget contact", 16, 334, 448, 48,
                                      open_contact_forget_event_cb, NULL);
     style_danger_button(forget);
@@ -2885,8 +3002,15 @@ static void render_contact_detail_sheet(void)
 
     lv_obj_t *actions = create_label(s_contact_detail_sheet, "Actions", 0x5EEAD4);
     lv_obj_set_pos(actions, 16, 210);
-    create_button(s_contact_detail_sheet, "Message", 16, 238, 448, 52,
-                  contact_detail_dm_event_cb, NULL);
+    if (contact_can_dm(entry)) {
+        create_button(s_contact_detail_sheet, "Message", 16, 238, 448, 52,
+                      contact_detail_dm_event_cb, NULL);
+    } else {
+        lv_obj_t *unavailable = create_label(s_contact_detail_sheet,
+                                             "Messaging unavailable for this role",
+                                             0x8EA0AE);
+        lv_obj_set_pos(unavailable, 16, 254);
+    }
     create_button(s_contact_detail_sheet, "Contact options", 16, 304, 448, 52,
                   open_contact_options_event_cb, NULL);
 }
@@ -2947,7 +3071,26 @@ static void open_contact_detail_event_cb(lv_event_t *event)
 static void close_node_detail_event_cb(lv_event_t *event)
 {
     (void)event;
+    const bool return_to_map = s_node_detail_returns_to_map;
     hide_node_detail_sheet();
+    if (return_to_map && d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+        !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
+        map_interactive_touch_authorized() && !d1l_ui_map_viewport_reacquire()) {
+        request_content_refresh();
+    }
+}
+
+static void format_advert_coordinate(char *dest, size_t dest_len, int32_t value_e6)
+{
+    if (!dest || dest_len == 0U) {
+        return;
+    }
+    const int64_t value = value_e6;
+    const bool negative = value < 0;
+    const uint64_t magnitude = (uint64_t)(negative ? -value : value);
+    snprintf(dest, dest_len, "%s%llu.%06llu", negative ? "-" : "",
+             (unsigned long long)(magnitude / 1000000ULL),
+             (unsigned long long)(magnitude % 1000000ULL));
 }
 
 static void render_node_detail_sheet(void)
@@ -3024,6 +3167,20 @@ static void render_node_detail_sheet(void)
     lv_obj_set_width(path, 392);
     lv_obj_set_pos(path, 8, 218);
 
+    lv_obj_t *location = create_label(s_node_detail_sheet, "", 0x93C5FD);
+    if (entry->location_valid) {
+        char latitude[16];
+        char longitude[16];
+        format_advert_coordinate(latitude, sizeof(latitude), entry->lat_e6);
+        format_advert_coordinate(longitude, sizeof(longitude), entry->lon_e6);
+        label_set_fmt(location, "Advert location %s, %s", latitude, longitude);
+    } else {
+        lv_label_set_text(location, "Advert location not provided");
+    }
+    lv_label_set_long_mode(location, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(location, 392);
+    lv_obj_set_pos(location, 8, 242);
+
     lv_obj_t *heard = create_label(s_node_detail_sheet, "", 0x8EA0AE);
     label_set_fmt(heard, "Last heard %lums  first %lums  count %lu",
                   (unsigned long)entry->last_heard_ms,
@@ -3031,12 +3188,11 @@ static void render_node_detail_sheet(void)
                   (unsigned long)entry->heard_count);
     lv_label_set_long_mode(heard, LV_LABEL_LONG_DOT);
     lv_obj_set_width(heard, 392);
-    lv_obj_set_pos(heard, 8, 252);
+    lv_obj_set_pos(heard, 8, 266);
 }
 
-static void open_node_detail_event_cb(lv_event_t *event)
+static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_map)
 {
-    const d1l_node_view_t *view = (const d1l_node_view_t *)lv_event_get_user_data(event);
     if (!view || view->node.fingerprint[0] == '\0') {
         show_toast("Node", ESP_ERR_INVALID_STATE);
         return;
@@ -3055,10 +3211,38 @@ static void open_node_detail_event_cb(lv_event_t *event)
     hide_packet_search_sheet();
     hide_mesh_roles_sheet();
     s_node_detail_node = *view;
+    s_node_detail_returns_to_map = return_to_map;
     render_node_detail_sheet();
     if (s_node_detail_sheet) {
         show_modal(s_node_detail_sheet);
     }
+}
+
+static void open_node_detail_event_cb(lv_event_t *event)
+{
+    show_node_detail_view((const d1l_node_view_t *)lv_event_get_user_data(event), false);
+}
+
+static void open_map_node_detail(const char *fingerprint)
+{
+    if (!fingerprint || fingerprint[0] == '\0') {
+        show_toast("Node", ESP_ERR_INVALID_ARG);
+        return;
+    }
+    const d1l_node_query_t query = {
+        .filter = D1L_NODE_FILTER_ALL,
+        .sort = D1L_NODE_SORT_LAST_HEARD,
+        .text = fingerprint,
+    };
+    const size_t count = d1l_app_model_query_nodes(
+        &query, s_node_rows, D1L_NODE_STORE_CAPACITY);
+    for (size_t i = 0; i < count; ++i) {
+        if (strcmp(s_node_rows[i].node.fingerprint, fingerprint) == 0) {
+            show_node_detail_view(&s_node_rows[i], true);
+            return;
+        }
+    }
+    show_toast("Node", ESP_ERR_NOT_FOUND);
 }
 
 static void close_route_detail_event_cb(lv_event_t *event)
@@ -5132,6 +5316,10 @@ static const char *storage_card_state_friendly(const d1l_app_snapshot_t *snapsho
     if (storage_snapshot_needs_attention(snapshot)) {
         return "Card needs attention";
     }
+    if (storage_text_equals(snapshot->storage_setup_action,
+                            "wait_for_storage_reconnect")) {
+        return "Card reader reconnecting";
+    }
     if (storage_text_equals(snapshot->storage_setup_action, "run_storage_mount") ||
         storage_text_equals(snapshot->storage_setup_action, "wait_for_storage_mount")) {
         return "Checking card";
@@ -5195,6 +5383,9 @@ static const char *storage_readiness_friendly(const d1l_app_snapshot_t *snapshot
     if (storage_snapshot_needs_attention(snapshot) ||
         storage_text_equals(snapshot->storage_sd_state, "deskos_manifest_invalid")) {
         return "Needs attention";
+    }
+    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
+        return "Reconnecting";
     }
     if (storage_text_equals(action, "run_storage_mount") ||
         storage_text_equals(action, "wait_for_storage_mount")) {
@@ -5270,12 +5461,18 @@ static bool storage_backend_uses_sd(const char *backend)
            storage_text_equals(backend, "sd_diagnostic_exports_ready");
 }
 
-static const char *storage_retained_backend_friendly(const char *backend)
+static const char *storage_retained_backend_friendly(
+    const d1l_app_snapshot_t *snapshot, const char *backend)
 {
     if (storage_text_equals(backend, "sd") || storage_text_equals(backend, "mixed")) {
-        return "SD + internal backup";
+        return snapshot && snapshot->storage_retained_backup_degraded ?
+            "SD; backup degraded" : "SD + internal backup";
     }
-    return "Internal";
+    if (storage_text_equals(backend, "nvs")) {
+        return snapshot && snapshot->storage_retained_backup_degraded ?
+            "Internal issue" : "Internal";
+    }
+    return "Unavailable";
 }
 
 static const char *storage_map_backend_friendly(const char *backend)
@@ -5299,13 +5496,17 @@ static const char *storage_export_backend_friendly(const char *backend)
 
 static const char *storage_data_summary(const d1l_app_snapshot_t *snapshot)
 {
-    if (snapshot &&
+    const bool uses_sd = snapshot &&
         (storage_backend_uses_sd(snapshot->message_store_backend) ||
          storage_backend_uses_sd(snapshot->dm_store_backend) ||
          storage_backend_uses_sd(snapshot->packet_log_backend) ||
          storage_backend_uses_sd(snapshot->route_store_backend) ||
          storage_backend_uses_sd(snapshot->map_tile_backend) ||
-         storage_backend_uses_sd(snapshot->export_backend))) {
+         storage_backend_uses_sd(snapshot->export_backend));
+    if (snapshot && snapshot->storage_retained_backup_degraded) {
+        return uses_sd ? "SD; backup issue" : "Storage issue";
+    }
+    if (uses_sd) {
         return "SD + internal";
     }
     return "Internal";
@@ -5332,12 +5533,32 @@ typedef struct {
 static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
 {
     storage_hero_copy_t copy = {
-        .state = "Using internal storage",
-        .detail = "SD is not ready yet.",
-        .guidance = "Your data stays available internally.",
+        .state = "Storage starting",
+        .detail = "Checking saved-data storage.",
+        .guidance = "Status updates automatically.",
         .accent = 0xFBBF24,
     };
     if (!snapshot) {
+        return copy;
+    }
+
+    if (snapshot->storage_retained_backup_degraded) {
+        if (snapshot->storage_retained_sd_degraded) {
+            copy.state = "Saved storage needs attention";
+            copy.detail = "SD and internal backup reported errors.";
+            copy.guidance = "See USB diagnostics before relying on saved history.";
+            copy.accent = 0xFCA5A5;
+        } else if (snapshot->storage_data_enabled) {
+            copy.state = "SD card ready";
+            copy.detail = "Saved data is using SD.";
+            copy.guidance = "Internal backup needs attention.";
+            copy.accent = 0xFBBF24;
+        } else {
+            copy.state = "Storage needs attention";
+            copy.detail = "Internal saved-data storage is unavailable.";
+            copy.guidance = "See USB diagnostics before relying on saved history.";
+            copy.accent = 0xFCA5A5;
+        }
         return copy;
     }
 
@@ -5357,7 +5578,15 @@ static storage_hero_copy_t storage_hero_copy(const d1l_app_snapshot_t *snapshot)
         copy.accent = 0xFCA5A5;
         return copy;
     }
-    if (storage_text_equals(action, "bridge_unavailable")) {
+    if (storage_text_equals(action, "wait_for_storage_reconnect")) {
+        copy.state = "Card reader reconnecting";
+        copy.detail = snapshot->storage_data_enabled ?
+            "Last confirmed SD remains active briefly." :
+            "Internal storage is active.";
+        copy.guidance = snapshot->storage_data_enabled ?
+            "Internal fallback takes over if status retries fail." :
+            "SD access resumes after a valid status reply.";
+    } else if (storage_text_equals(action, "bridge_unavailable")) {
         copy.detail = "SD support is unavailable.";
         copy.guidance = "Internal storage remains active.";
     } else if (storage_text_equals(action, "bridge_protocol_pending")) {
@@ -5560,16 +5789,16 @@ static void render_storage_data_locations(void)
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
 
     render_storage_location_row(list, 0, "Messages",
-                                storage_retained_backend_friendly(s_snapshot.message_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.message_store_backend),
                                 storage_backend_accent(s_snapshot.message_store_backend));
     render_storage_location_row(list, 56, "Direct messages",
-                                storage_retained_backend_friendly(s_snapshot.dm_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.dm_store_backend),
                                 storage_backend_accent(s_snapshot.dm_store_backend));
     render_storage_location_row(list, 112, "Packets",
-                                storage_retained_backend_friendly(s_snapshot.packet_log_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.packet_log_backend),
                                 storage_backend_accent(s_snapshot.packet_log_backend));
     render_storage_location_row(list, 168, "Routes",
-                                storage_retained_backend_friendly(s_snapshot.route_store_backend),
+                                storage_retained_backend_friendly(&s_snapshot, s_snapshot.route_store_backend),
                                 storage_backend_accent(s_snapshot.route_store_backend));
     render_storage_location_row(list, 224, "Map tiles",
                                 storage_map_backend_friendly(s_snapshot.map_tile_backend),
@@ -6257,6 +6486,7 @@ static void render_active_tab(void)
                                renderers, sizeof(renderers) / sizeof(renderers[0]));
     update_onboarding_visibility(&s_snapshot);
     remember_rendered_content_generation(&s_snapshot);
+    remember_rendered_map_input(&s_snapshot);
     request_full_screen_repaint();
 }
 
@@ -7303,6 +7533,9 @@ static void lock_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_lock_overlay) {
+        if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP) {
+            d1l_ui_map_viewport_prepare_cover();
+        }
         d1l_ui_map_viewport_release();
         s_lock_visible = true;
         lv_obj_clear_flag(s_lock_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -7322,19 +7555,44 @@ static void unlock_event_cb(lv_event_t *event)
     }
 }
 
+static void map_viewport_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    const bool map_uncovered =
+        d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+        !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
+        map_interactive_touch_authorized();
+    if (map_uncovered) {
+        (void)d1l_ui_map_viewport_refresh();
+    }
+}
+
 static void refresh_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
     d1l_app_model_snapshot(&s_snapshot);
     update_chrome(&s_snapshot);
     update_onboarding_visibility(&s_snapshot);
-    if (d1l_ui_navigation_active() == D1L_UI_TAB_MAP &&
+    const bool map_active = d1l_ui_navigation_active() == D1L_UI_TAB_MAP;
+    const bool map_uncovered = map_active &&
         !d1l_ui_modal_has_active() && !s_lock_visible && !s_onboarding_visible &&
-        map_interactive_touch_authorized()) {
+        map_interactive_touch_authorized();
+    if (map_uncovered) {
         (void)d1l_ui_map_viewport_refresh();
     }
-    if (content_generation_changed_from_rendered(&s_snapshot)) {
+    if (map_uncovered && map_render_input_changed_from_rendered(&s_snapshot)) {
         request_content_refresh();
+    } else if (content_generation_changed_from_rendered(&s_snapshot)) {
+        if (map_active) {
+            /* Ambient mesh/message counters do not change the Map surface.
+             * A full content render tears down its visible lease and can
+             * cancel a bounded tile batch or an in-progress drag, so simply
+             * acknowledge these counters here.  Explicit Map changes such as
+             * saving/clearing a location still call request_content_refresh(). */
+            remember_rendered_content_generation(&s_snapshot);
+        } else {
+            request_content_refresh();
+        }
     }
     if (s_toast && s_toast_until != 0 && lv_tick_get() > s_toast_until) {
         lv_obj_add_flag(s_toast, LV_OBJ_FLAG_HIDDEN);
@@ -7789,8 +8047,8 @@ static void create_node_detail_sheet(lv_obj_t *screen)
     if (!s_node_detail_sheet) {
         return;
     }
-    lv_obj_set_size(s_node_detail_sheet, 448, 286);
-    lv_obj_set_pos(s_node_detail_sheet, 16, 100);
+    lv_obj_set_size(s_node_detail_sheet, 448, 320);
+    lv_obj_set_pos(s_node_detail_sheet, 16, 82);
     lv_obj_set_style_radius(s_node_detail_sheet, 8, 0);
     lv_obj_set_style_bg_color(s_node_detail_sheet, lv_color_hex(0x111923), 0);
     lv_obj_set_style_border_color(s_node_detail_sheet, lv_color_hex(0x334155), 0);
@@ -8197,6 +8455,7 @@ esp_err_t d1l_ui_phase1_show_home(void)
     create_onboarding_sheet(s_screen);
 
     render_active_tab();
+    lv_timer_create(map_viewport_timer_cb, D1L_UI_MAP_VIEWPORT_REFRESH_MS, NULL);
     lv_timer_create(refresh_timer_cb, 2000, NULL);
     lv_scr_load(s_screen);
     return ESP_OK;

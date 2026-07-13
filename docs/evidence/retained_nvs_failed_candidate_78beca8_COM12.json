@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "kind": "d1l_retained_failed_candidate_evidence",
+  "audit_state": "accepted_failed_first_boot",
+  "commit": "78beca8ea430202a534fb143f2f51dd158ed9e52",
+  "github_actions_run": "29174653535",
+  "port": "COM12",
+  "device": {
+    "chip": "esp32s3",
+    "mac": "d8:3b:da:75:72:6c",
+    "identity_fingerprint": "FB15C73CA24D6DAF"
+  },
+  "first_boot_failed_before_retained_initialization": true,
+  "flash_receipt": {
+    "name": "esp32_flash_78beca8_actions_29174653535_COM12.json",
+    "sha256": "606e282120faa49828bd681c08eed353bc56204112bce0eee3a005d98c39f336"
+  },
+  "first_boot_receipt": {
+    "name": "rp2040_preflight_78beca8_actions_29174653535_COM12.json",
+    "sha256": "67d1f7074d7f352e48bfbc250496ed6f855b2f692c87399cf63726404cb9b3d1"
+  },
+  "artifact": {
+    "manifest_sha256": "D9C193C93804F4EA6C59AF534F4CA9A2616D76087BDFEC1F26341FF11614B2C8",
+    "bootloader_sha256": "C638429E53E31F0CD24D3944F9A189C79004705B93C5CC73E688D6E55E2188F1",
+    "partition_table_sha256": "8FFF27AB4ABF09FCCACFE7503CD190A5F7EC46C756DF56B1051B89F9FFCA17D1",
+    "application_sha256": "8678F92B4299FDF553300C2E1D28B33DE0EE3BED7B5D6DD7921D2C9BC5935D0B"
+  },
+  "expected_retained_state": {
+    "partition": "d1l_retained",
+    "marker_ready": false,
+    "initialized_this_boot": false,
+    "ready": false,
+    "init_error": "ESP_ERR_INVALID_STATE",
+    "migrated_keys": 0,
+    "migration_error": "ESP_ERR_INVALID_STATE"
+  },
+  "pre_erase_retained_region": {
+    "offset": 8261632,
+    "size": 126976,
+    "sha256": "d37b6d64efe90a98fc8a9529d20cf07945bef9487085fa8960d9a082b1ce1af3",
+    "all_ff": false,
+    "captured_at_utc": "2026-07-12T02:47:02.0654442Z",
+    "temporary_capture_deleted": true,
+    "backup_created": false
+  }
+}

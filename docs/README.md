@@ -13,9 +13,10 @@ This folder contains only active release-facing documentation. Historical phase 
 - [Known limitations](KNOWN_LIMITATIONS.md): honest current gaps and non-goals.
 - [Test plan](TEST_PLAN_D1L.md): host, hardware, SD, RF, UI, soak, and release-gate validation.
 - [Fast release workflow](FAST_RELEASE_WORKFLOW_D1L.md): short PR loop, fast Actions path, targeted hardware proof.
+- [Build decision](D1L_BUILD_DECISION.md): selected ESP-IDF target and the staged issue #63 qualification requirements.
 - [Codex goal prompt](CODEX_GOAL_PROMPT_D1L.md): copy-paste prompt for the next iterative release cycle.
 
-Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the source of truth for release readiness. Latest Home evidence from PR #33 (`c6a88e2` / PR Actions `28725692751`, merged as `e086312`) proves the current icon launcher pixel capture plus simulator diff. Broader UI evidence from `59610ab` / Actions `28723265336` still proves targeted UI corruption, scroll probing, and the older Public/DM compose capture subset. Latest core SD evidence from `1a29876` / Actions `28714355561` proves the installed FAT32 card path. Public release still fails closed until RF/DM, remaining physical SD matrix, manual photos/review, expanded `--targets all` keyboard/sheet review, and 12-hour soak evidence are complete.
+Current status summary: the top-level [README](../README.md) and [Roadmap](ROADMAP.md) are the release-readiness source of truth. Standalone Map/Wi-Fi `de79c9f` has green Actions and exact-COM12 boot-loop/Wi-Fi/memory/SD stability proof, with physical Map acceptance still open. Standalone ESP-IDF 5.5.4 `39a043c` has the exact Actions-generated dependency lock plus green host, firmware, package, checksum, effective-config, and release checks, with no hardware qualification. The combined candidate needs fresh Actions and exact-COM12 proof before either evidence set can qualify it. Public release also remains blocked by the KRAB-derived MeshCore conformance, reliable DM/ACK/retry/PATH/trace, contact/channel, runtime durability, remaining RF/SD/physical UI, soak, package, and final exact-commit gate requirements.
 
 ## User And Developer Guides
 
@@ -23,7 +24,6 @@ Current status summary: the top-level [README](../README.md) and [Roadmap](ROADM
 - [Developer guide](DEVELOPER_GUIDE_D1L.md)
 - [Flash recovery](FLASH_RECOVERY_D1L.md)
 - [Board bring-up](D1L_BOARD_BRINGUP.md)
-- [Build decision](D1L_BUILD_DECISION.md)
 - [480x480 UI spec](UI_SPEC_480x480_DARK.md)
 
 ## SD Card Docs

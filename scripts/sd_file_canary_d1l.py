@@ -12,9 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from artifact_metadata import stamp_report
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.artifact_metadata import stamp_report
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 CANARY_COMMANDS = [
@@ -42,12 +44,29 @@ def _number_at_least(value, minimum: int) -> bool:
         return False
 
 
+def storage_status_fresh(storage_status: dict) -> bool:
+    sd = storage_status.get("sd")
+    if not isinstance(sd, dict):
+        return False
+    try:
+        refresh_failures = int(sd.get("refresh_failures"))
+    except (TypeError, ValueError):
+        return False
+    return (
+        sd.get("status_stale") is False
+        and sd.get("presence_stale") is False
+        and refresh_failures == 0
+    )
+
+
 def storage_file_gate_ready(storage_status: dict) -> bool:
     sd = storage_status.get("sd")
     if not isinstance(sd, dict):
         return False
     return (
-        sd.get("state") == "ready"
+        storage_status_fresh(storage_status)
+        and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -74,6 +93,9 @@ def storage_ready_for_filecanary(storage_status: dict) -> bool:
 def retained_history_backends_ready(storage_status: dict) -> bool:
     stores = storage_status.get("stores")
     store_backends = stores if isinstance(stores, dict) else {}
+    retained_nvs = storage_status.get("retained_nvs")
+    retained_sd = storage_status.get("retained_sd")
+    retained_store_stats = retained_sd.get("stores") if isinstance(retained_sd, dict) else None
     return (
         storage_status.get("ok") is True
         and storage_status.get("data_enabled") is True
@@ -83,6 +105,25 @@ def retained_history_backends_ready(storage_status: dict) -> bool:
         and store_backends.get("dm") == "sd"
         and store_backends.get("routes") == "sd"
         and store_backends.get("packets") == "sd"
+        and isinstance(retained_nvs, dict)
+        and retained_nvs.get("partition") == "d1l_retained"
+        and retained_nvs.get("marker_ready") is True
+        and retained_nvs.get("markers_complete") is True
+        and retained_nvs.get("anchor_ready") is True
+        and retained_nvs.get("sentinel_ready") is True
+        and retained_nvs.get("external_init_required") is False
+        and retained_nvs.get("ready") is True
+        and retained_nvs.get("init_error") == "ESP_OK"
+        and retained_nvs.get("migration_error") == "ESP_OK"
+        and isinstance(retained_sd, dict)
+        and retained_sd.get("degraded") is False
+        and retained_sd.get("backup_degraded") is False
+        and isinstance(retained_store_stats, dict)
+        and all(
+            isinstance(retained_store_stats.get(name), dict)
+            and retained_store_stats[name].get("nvs_mirror_last_error") == "ESP_OK"
+            for name in ("messages", "dm", "routes", "packets")
+        )
         and storage_file_gate_ready(storage_status)
     )
 
@@ -163,7 +204,7 @@ def run_canary(
         raise SystemExit("pyserial is required for hardware SD canary: python -m pip install pyserial") from exc
 
     results: list[dict] = []
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         before, ready_wait_results, mount_attempt = wait_for_storage_ready(
             ser,
@@ -279,6 +320,7 @@ def main() -> int:
         )
 
     root = Path(__file__).resolve().parents[1]
+    stamp_report(report, root)
     if args.out:
         out_path = Path(args.out)
         if not out_path.is_absolute():

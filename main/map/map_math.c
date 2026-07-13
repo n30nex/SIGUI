@@ -33,6 +33,12 @@ static uint32_t wrap_tile_x(int64_t x, uint32_t tile_count)
     return (uint32_t)wrapped;
 }
 
+static bool map_zoom_valid(uint8_t zoom)
+{
+    return zoom >= D1L_MAP_VIEW_MIN_ZOOM && zoom <= D1L_MAP_VIEW_MAX_ZOOM &&
+           zoom <= D1L_MAP_TILE_ZOOM_MAX;
+}
+
 static bool already_planned(const planned_tile_t *tiles,
                             size_t count,
                             uint32_t x,
@@ -66,7 +72,7 @@ bool d1l_map_math_plan_current_view(int32_t lat_e7,
                                     uint16_t height,
                                     d1l_map_tile_plan_t *out_plan)
 {
-    if (!out_plan || zoom > D1L_MAP_TILE_ZOOM_MAX || width == 0U || height == 0U ||
+    if (!out_plan || !map_zoom_valid(zoom) || width == 0U || height == 0U ||
         width > D1L_MAP_VIEW_MAX_WIDTH || height > D1L_MAP_VIEW_MAX_HEIGHT ||
         lon_e7 < -1800000000LL || lon_e7 > 1800000000LL) {
         return false;
@@ -142,4 +148,53 @@ bool d1l_map_math_plan_current_view(int32_t lat_e7,
         out_plan->tiles[i] = planned[i].tile;
     }
     return planned_count > 0U;
+}
+
+bool d1l_map_math_pan_center(int32_t lat_e7,
+                             int32_t lon_e7,
+                             uint8_t zoom,
+                             int32_t delta_x_pixels,
+                             int32_t delta_y_pixels,
+                             int32_t *out_lat_e7,
+                             int32_t *out_lon_e7)
+{
+    if (!out_lat_e7 || !out_lon_e7 || !map_zoom_valid(zoom) ||
+        lon_e7 < -1800000000LL || lon_e7 > 1800000000LL) {
+        return false;
+    }
+
+    const int64_t clamped_lat_e7 =
+        clamp_i64(lat_e7, -D1L_MAP_MERCATOR_MAX_LAT_E7, D1L_MAP_MERCATOR_MAX_LAT_E7);
+    const double latitude = (double)clamped_lat_e7 / 10000000.0;
+    const double longitude = (double)lon_e7 / 10000000.0;
+    const double latitude_rad = latitude * D1L_MAP_PI / 180.0;
+    const double world_size =
+        (double)(1UL << zoom) * (double)D1L_MAP_TILE_PIXEL_SIZE;
+    double world_x = ((longitude + 180.0) / 360.0) * world_size;
+    double world_y =
+        (1.0 - log(tan(latitude_rad) + (1.0 / cos(latitude_rad))) / D1L_MAP_PI) *
+        0.5 * world_size;
+
+    world_x = fmod(world_x + (double)delta_x_pixels, world_size);
+    if (world_x < 0.0) {
+        world_x += world_size;
+    }
+    world_y += (double)delta_y_pixels;
+    if (world_y < 0.0) {
+        world_y = 0.0;
+    } else if (world_y > world_size) {
+        world_y = world_size;
+    }
+
+    const double new_longitude = (world_x / world_size) * 360.0 - 180.0;
+    const double mercator = D1L_MAP_PI - (2.0 * D1L_MAP_PI * world_y / world_size);
+    const double new_latitude = atan(sinh(mercator)) * 180.0 / D1L_MAP_PI;
+    const int64_t new_lat_e7 = clamp_i64(
+        (int64_t)llround(new_latitude * 10000000.0),
+        -D1L_MAP_MERCATOR_MAX_LAT_E7,
+        D1L_MAP_MERCATOR_MAX_LAT_E7);
+    const int64_t new_lon_e7 = (int64_t)llround(new_longitude * 10000000.0);
+    *out_lat_e7 = (int32_t)new_lat_e7;
+    *out_lon_e7 = (int32_t)clamp_i64(new_lon_e7, -1800000000LL, 1800000000LL);
+    return true;
 }

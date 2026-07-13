@@ -374,7 +374,7 @@ For 1.0 choose one:
 - prove physical map entry, bounded tile request, cancellation and cache revisit;
 - render cached tiles correctly;
 - show attribution;
-- handle no Wi-Fi/no SD/provider failure without blocking UI or radio;
+- handle no Wi-Fi/no SD/tile-service failure without blocking UI or radio;
 - prove Wi-Fi off means the network stack and web-related services are actually inactive.
 
 **Defer maps:**

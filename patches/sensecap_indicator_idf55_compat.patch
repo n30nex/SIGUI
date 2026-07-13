@@ -1,0 +1,71 @@
+diff --git a/components/i2c_devices/touch_panel/tt21100.c b/components/i2c_devices/touch_panel/tt21100.c
+--- a/components/i2c_devices/touch_panel/tt21100.c
++++ b/components/i2c_devices/touch_panel/tt21100.c
+@@ -58 +58 @@ esp_err_t tt21100_init(void)
+-        tt21100_read(&reg_val, sizeof(reg_val));
++        tt21100_read((uint8_t *)&reg_val, sizeof(reg_val));
+@@ -118 +118 @@ esp_err_t tt21100_get_touch_points_num(uint8_t *touch_points_num)
+-    ret_val |= tt21100_read(&data_len, sizeof(data_len));
++    ret_val |= tt21100_read((uint8_t *)&data_len, sizeof(data_len));
+diff --git a/components/i2c_devices/touch_panel/gt911.c b/components/i2c_devices/touch_panel/gt911.c
+--- a/components/i2c_devices/touch_panel/gt911.c
++++ b/components/i2c_devices/touch_panel/gt911.c
+@@ -394 +394 @@ int gt911_pos_read(uint16_t *xpos, uint16_t *ypos)
+-    u8 finger_state = gtp_get_points(&g_ts_data, &points, &key_value);
++    u8 finger_state = gtp_get_points(&g_ts_data, points, &key_value);
+diff --git a/components/bsp/include/bsp_board.h b/components/bsp/include/bsp_board.h
+--- a/components/bsp/include/bsp_board.h
++++ b/components/bsp/include/bsp_board.h
+@@ -200,0 +201 @@ typedef struct {
++    esp_err_t (*read_input_pins16)(uint16_t *pin_val);
+diff --git a/components/bsp/src/boards/sensecap_indicator_board.c b/components/bsp/src/boards/sensecap_indicator_board.c
+--- a/components/bsp/src/boards/sensecap_indicator_board.c
++++ b/components/bsp/src/boards/sensecap_indicator_board.c
+@@ -51 +51,2 @@ static const io_expander_ops_t g_board_lcd_evb_io_expander_ops = {
+-    .read_input_pins = tca9535_read_input_pins,
++    .read_input_pins = NULL,
++    .read_input_pins16 = tca9535_read_input_pins,
+diff --git a/components/lora/sx126x_sensecap_board.c b/components/lora/sx126x_sensecap_board.c
+--- a/components/lora/sx126x_sensecap_board.c
++++ b/components/lora/sx126x_sensecap_board.c
+@@ -148 +148 @@ uint8_t SX126xReadFreqSelect(void)
+-        esp_err_t ret = indicator_io_expander->read_input_pins(&pin_val);
++        esp_err_t ret = indicator_io_expander->read_input_pins16(&pin_val);
+@@ -220 +220 @@ void SX126xIoIrqInit( DioIrqHandler dioIrq )
+-    g_dioIrq = (uint32_t *)dioIrq;
++    g_dioIrq = dioIrq;
+@@ -294 +294 @@ void SX126xWaitOnBusy( void )
+-        esp_err_t ret = indicator_io_expander->read_input_pins(&pin_val);
++        esp_err_t ret = indicator_io_expander->read_input_pins16(&pin_val);
+@@ -473 +473 @@ uint32_t SX126xGetDio1PinState( void )
+-    esp_err_t ret = indicator_io_expander->read_input_pins(&pin_val);
++    esp_err_t ret = indicator_io_expander->read_input_pins16(&pin_val);
+diff --git a/components/bsp/src/peripherals/bsp_lcd.c b/components/bsp/src/peripherals/bsp_lcd.c
+--- a/components/bsp/src/peripherals/bsp_lcd.c
++++ b/components/bsp/src/peripherals/bsp_lcd.c
+@@ -32,2 +32,2 @@ static esp_lcd_panel_handle_t panel_handle = NULL;
+-static uint8_t *lcd_buf0 = NULL;
+-static uint8_t *lcd_buf1 = NULL;
++static void *lcd_buf0 = NULL;
++static void *lcd_buf1 = NULL;
+@@ -42 +42 @@ static bool (*lvgl_flush_is_end)(void) = NULL;
+-static bool (*lvgl_direct_mode_buf_copy)(void) = NULL;
++static void (*lvgl_direct_mode_buf_copy)(void) = NULL;
+@@ -83 +83 @@ IRAM_ATTR static bool on_vsync_event(
+-    esp_lcd_rgb_panel_event_data_t *edata,
++    const esp_lcd_rgb_panel_event_data_t *edata,
+diff --git a/components/bsp/src/codec/es8388.c b/components/bsp/src/codec/es8388.c
+--- a/components/bsp/src/codec/es8388.c
++++ b/components/bsp/src/codec/es8388.c
+@@ -473 +473 @@
+-esp_err_t es8388_config_dac_output(int output)
++esp_err_t es8388_config_dac_output(es_dac_output_t output)
+diff --git a/components/bsp/src/calibration/touch_calibration.c b/components/bsp/src/calibration/touch_calibration.c
+--- a/components/bsp/src/calibration/touch_calibration.c
++++ b/components/bsp/src/calibration/touch_calibration.c
+@@ -53,3 +53,3 @@ static esp_err_t (*g_touch_read_rawdata)(uint16_t *x, uint16_t *y) = NULL;
+-static void lcd_draw_bitmap(int x, int y, int w, int h, void *data)
++static esp_err_t lcd_draw_bitmap(int x, int y, int w, int h, const void *data)
+ {
+-    bsp_lcd_flush(x, y, x + w, y + h, data);
++    return bsp_lcd_flush(x, y, x + w, y + h, data);

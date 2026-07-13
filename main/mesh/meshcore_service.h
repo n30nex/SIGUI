@@ -30,6 +30,7 @@ typedef struct {
 } d1l_meshcore_service_status_t;
 
 void d1l_meshcore_service_init(void);
+esp_err_t d1l_meshcore_service_start_rx_async(void);
 esp_err_t d1l_meshcore_service_ensure_identity(void);
 d1l_meshcore_service_status_t d1l_meshcore_service_status(void);
 esp_err_t d1l_meshcore_service_request_advert(bool flood);

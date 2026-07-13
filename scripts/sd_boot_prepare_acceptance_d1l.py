@@ -11,9 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from artifact_metadata import stamp_report
+    from sd_file_canary_d1l import storage_status_fresh
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.artifact_metadata import stamp_report
+    from scripts.sd_file_canary_d1l import storage_status_fresh
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 SCENARIOS = (
@@ -107,7 +111,9 @@ def _number_at_least(value, minimum: int) -> bool:
 def storage_file_gate_ready(storage_status: dict | None) -> bool:
     sd = sd_status(storage_status)
     return (
-        sd.get("state") == "ready"
+        storage_status_fresh(storage_status or {})
+        and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -341,7 +347,7 @@ def run_acceptance(
         by_command[command] = result
         return result
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         run_command(ser, "rp2040 ping")
         initial_storage = run_command(ser, "storage status")
@@ -421,6 +427,7 @@ def run_acceptance(
 
 def write_report(report: dict, out_path: Path | None) -> Path:
     root = Path(__file__).resolve().parents[1]
+    stamp_report(report, root)
     if out_path is None:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         scenario = str(report.get("scenario", "all")).replace("-", "_")

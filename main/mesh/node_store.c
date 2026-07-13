@@ -1,6 +1,7 @@
 #include "node_store.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_attr.h"
@@ -13,9 +14,11 @@
 #define D1L_NODE_STORE_NAMESPACE "d1l_nodes"
 #define D1L_NODE_STORE_KEY "heard"
 #define D1L_NODE_STORE_LEGACY_CAPACITY D1L_NODE_NVS_FALLBACK_CAPACITY
+#define D1L_NODE_STORE_LEGACY_TYPE_LEN 8U
 #define D1L_NODE_STORE_SCHEMA_V1 1U
 #define D1L_NODE_STORE_SCHEMA_V2 2U
-#define D1L_NODE_STORE_SCHEMA 3U
+#define D1L_NODE_STORE_SCHEMA_V3 3U
+#define D1L_NODE_STORE_SCHEMA 4U
 
 typedef struct {
     uint32_t seq;
@@ -25,12 +28,29 @@ typedef struct {
     uint32_t heard_count;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char name[D1L_HEARD_NODE_NAME_LEN];
-    char type[D1L_NODE_TYPE_LEN];
+    char type[D1L_NODE_STORE_LEGACY_TYPE_LEN];
     int rssi_dbm;
     int snr_tenths;
     uint8_t path_hash_bytes;
     uint8_t path_hops;
 } d1l_node_entry_v1_t;
+
+/* Schema v2/v3 entries predate signed-advert locations. Keep this layout exact. */
+typedef struct {
+    uint32_t seq;
+    uint32_t first_heard_ms;
+    uint32_t last_heard_ms;
+    uint32_t advert_timestamp;
+    uint32_t heard_count;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+    char name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_STORE_LEGACY_TYPE_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+} d1l_node_entry_v3_t;
 
 typedef struct {
     uint32_t schema;
@@ -47,8 +67,26 @@ typedef struct {
     uint32_t total_written;
     uint32_t dropped_oldest;
     uint32_t count;
-    d1l_node_entry_t entries[D1L_NODE_STORE_LEGACY_CAPACITY];
+    d1l_node_entry_v3_t entries[D1L_NODE_STORE_LEGACY_CAPACITY];
 } d1l_node_store_blob_v2_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_node_entry_v3_t entries[D1L_NODE_STORE_LEGACY_CAPACITY];
+} d1l_node_store_blob_v3_t;
+
+_Static_assert(sizeof(d1l_node_entry_v1_t) == 84U,
+               "node schema v1 layout changed");
+_Static_assert(sizeof(d1l_node_entry_v3_t) == 148U,
+               "node schema v2/v3 layout changed");
+_Static_assert(offsetof(d1l_node_entry_v1_t, rssi_dbm) == 72U,
+               "node schema v1 type offset changed");
+_Static_assert(offsetof(d1l_node_entry_v3_t, rssi_dbm) == 136U,
+               "node schema v2/v3 type offset changed");
 
 typedef struct {
     uint32_t schema;
@@ -64,6 +102,7 @@ static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
+static uint32_t s_marker_generation = 1U;
 static bool s_loaded;
 static d1l_node_store_blob_t s_blob_scratch;
 static d1l_node_view_t s_query_scratch[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
@@ -85,15 +124,34 @@ static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
     dest[out] = '\0';
 }
 
+static void migrate_legacy_advert_type(
+    char dest[D1L_NODE_TYPE_LEN],
+    const char legacy_type[D1L_NODE_STORE_LEGACY_TYPE_LEN])
+{
+    char legacy[D1L_NODE_STORE_LEGACY_TYPE_LEN + 1U] = {0};
+    memcpy(legacy, legacy_type, D1L_NODE_STORE_LEGACY_TYPE_LEN);
+    const char *canonical = "unknown";
+    if (strcmp(legacy, "chat") == 0) {
+        canonical = "chat";
+    } else if (strcmp(legacy, "room") == 0 ||
+               strcmp(legacy, "repeater") == 0) {
+        /* The legacy advert decoder mapped upstream type 2 to room. */
+        canonical = "repeater";
+    }
+    /* Legacy sensor is ambiguous: the old decoder used it for upstream room
+     * type 3 and sensor type 4. Keep it unknown until a fresh signed advert. */
+    snprintf(dest, D1L_NODE_TYPE_LEN, "%s", canonical);
+}
+
 static const char *type_name(char type_code)
 {
     switch (type_code) {
     case 'C':
         return "chat";
+    case 'P':
+        return "repeater";
     case 'R':
         return "room";
-    case 'O':
-        return "sensor";
     case 'S':
         return "sensor";
     default:
@@ -108,6 +166,38 @@ static void clear_ram(void)
     s_next_seq = 1;
     s_total_written = 0;
     s_dropped_oldest = 0;
+}
+
+static void bump_marker_generation(void)
+{
+    s_marker_generation++;
+    if (s_marker_generation == 0U) {
+        s_marker_generation = 1U;
+    }
+}
+
+static bool location_in_bounds(int32_t lat_e6, int32_t lon_e6)
+{
+    return lat_e6 >= -90000000 && lat_e6 <= 90000000 &&
+           lon_e6 >= -180000000 && lon_e6 <= 180000000;
+}
+
+static bool marker_material_changed(const d1l_node_entry_t *before,
+                                    const d1l_node_entry_t *after)
+{
+    const bool before_valid = before && before->location_valid;
+    const bool after_valid = after && after->location_valid;
+    if (before_valid != after_valid) {
+        return true;
+    }
+    if (!before_valid) {
+        return false;
+    }
+    return before->lat_e6 != after->lat_e6 || before->lon_e6 != after->lon_e6 ||
+           before->location_seq != after->location_seq ||
+           strncmp(before->fingerprint, after->fingerprint, D1L_NODE_FINGERPRINT_LEN) != 0 ||
+           strncmp(before->name, after->name, D1L_HEARD_NODE_NAME_LEN) != 0 ||
+           strncmp(before->type, after->type, D1L_NODE_TYPE_LEN) != 0;
 }
 
 static void fill_blob(d1l_node_store_blob_t *blob)
@@ -179,6 +269,14 @@ static bool blob_v2_is_valid(const d1l_node_store_blob_v2_t *blob, size_t len)
            blob->next_seq > 0;
 }
 
+static bool blob_v3_is_valid(const d1l_node_store_blob_v3_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_NODE_STORE_SCHEMA_V3 &&
+           blob->count <= D1L_NODE_STORE_LEGACY_CAPACITY &&
+           blob->next_seq > 0;
+}
+
 static void migrate_v1_blob(const d1l_node_store_blob_v1_t *old_blob)
 {
     clear_ram();
@@ -195,11 +293,32 @@ static void migrate_v1_blob(const d1l_node_store_blob_v1_t *old_blob)
         memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
                sizeof(s_entries[i].fingerprint));
         memcpy(s_entries[i].name, old_blob->entries[i].name, sizeof(s_entries[i].name));
-        memcpy(s_entries[i].type, old_blob->entries[i].type, sizeof(s_entries[i].type));
+        migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
         s_entries[i].rssi_dbm = old_blob->entries[i].rssi_dbm;
         s_entries[i].snr_tenths = old_blob->entries[i].snr_tenths;
         s_entries[i].path_hash_bytes = old_blob->entries[i].path_hash_bytes;
         s_entries[i].path_hops = old_blob->entries[i].path_hops;
+    }
+}
+
+static void migrate_v3_entries(const d1l_node_entry_v3_t *old_entries, size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        s_entries[i].seq = old_entries[i].seq;
+        s_entries[i].first_heard_ms = old_entries[i].first_heard_ms;
+        s_entries[i].last_heard_ms = old_entries[i].last_heard_ms;
+        s_entries[i].advert_timestamp = old_entries[i].advert_timestamp;
+        s_entries[i].heard_count = old_entries[i].heard_count;
+        memcpy(s_entries[i].fingerprint, old_entries[i].fingerprint,
+               sizeof(s_entries[i].fingerprint));
+        memcpy(s_entries[i].public_key_hex, old_entries[i].public_key_hex,
+               sizeof(s_entries[i].public_key_hex));
+        memcpy(s_entries[i].name, old_entries[i].name, sizeof(s_entries[i].name));
+        migrate_legacy_advert_type(s_entries[i].type, old_entries[i].type);
+        s_entries[i].rssi_dbm = old_entries[i].rssi_dbm;
+        s_entries[i].snr_tenths = old_entries[i].snr_tenths;
+        s_entries[i].path_hash_bytes = old_entries[i].path_hash_bytes;
+        s_entries[i].path_hops = old_entries[i].path_hops;
     }
 }
 
@@ -210,9 +329,17 @@ static void migrate_v2_blob(const d1l_node_store_blob_v2_t *old_blob)
     s_next_seq = old_blob->next_seq;
     s_total_written = old_blob->total_written;
     s_dropped_oldest = old_blob->dropped_oldest;
-    for (size_t i = 0; i < s_count; ++i) {
-        s_entries[i] = old_blob->entries[i];
-    }
+    migrate_v3_entries(old_blob->entries, s_count);
+}
+
+static void migrate_v3_blob(const d1l_node_store_blob_v3_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    migrate_v3_entries(old_blob->entries, s_count);
 }
 
 static int find_by_fingerprint(const char *fingerprint)
@@ -293,13 +420,16 @@ static const char *node_role_name(const d1l_node_entry_t *node)
     if (strcmp(node->type, "room") == 0) {
         return "room";
     }
-    if (strcmp(node->type, "sensor") == 0 || strcmp(node->type, "observer") == 0) {
+    if (strcmp(node->type, "sensor") == 0) {
         return "sensor";
     }
-    if (strcmp(node->type, "repeater") == 0 || node->path_hops > 0) {
+    if (strcmp(node->type, "repeater") == 0) {
         return "repeater";
     }
-    return "companion";
+    if (strcmp(node->type, "chat") == 0) {
+        return "companion";
+    }
+    return "unknown";
 }
 
 static uint8_t node_role_order(const char *role)
@@ -448,6 +578,7 @@ static bool node_view_better(const d1l_node_view_t *candidate, const d1l_node_vi
 
 esp_err_t d1l_node_store_init(void)
 {
+    s_marker_generation = 1U;
     clear_ram();
     bool migrated = false;
 
@@ -469,6 +600,10 @@ esp_err_t d1l_node_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK &&
+               blob_v3_is_valid((const d1l_node_store_blob_v3_t *)&s_blob_scratch, len)) {
+        migrate_v3_blob((const d1l_node_store_blob_v3_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK &&
                blob_v2_is_valid((const d1l_node_store_blob_v2_t *)&s_blob_scratch, len)) {
         migrate_v2_blob((const d1l_node_store_blob_v2_t *)&s_blob_scratch);
@@ -498,7 +633,14 @@ esp_err_t d1l_node_store_init(void)
 esp_err_t d1l_node_store_clear(void)
 {
     d1l_store_lock_take(&s_store_lock);
+    bool had_markers = false;
+    for (size_t i = 0; i < s_count; ++i) {
+        had_markers = had_markers || s_entries[i].location_valid;
+    }
     clear_ram();
+    if (had_markers) {
+        bump_marker_generation();
+    }
     s_loaded = true;
 
     nvs_handle_t handle;
@@ -522,9 +664,15 @@ esp_err_t d1l_node_store_clear(void)
 esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *public_key_hex,
                                        const char *name, char type_code, int rssi_dbm,
                                        int snr_tenths, uint8_t path_hash_bytes,
-                                       uint8_t path_hops, uint32_t advert_timestamp)
+                                       uint8_t path_hops, uint32_t advert_timestamp,
+                                       bool location_valid, int32_t lat_e6, int32_t lon_e6,
+                                       bool *out_stale)
 {
-    if (!fingerprint || fingerprint[0] == '\0') {
+    if (!out_stale || !fingerprint || fingerprint[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_stale = false;
+    if (location_valid && !location_in_bounds(lat_e6, lon_e6)) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_loaded) {
@@ -535,19 +683,34 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     }
 
     d1l_store_lock_take(&s_store_lock);
+    const size_t count_before = s_count;
+    const uint32_t next_seq_before = s_next_seq;
+    const uint32_t total_written_before = s_total_written;
+    const uint32_t dropped_oldest_before = s_dropped_oldest;
+    const uint32_t marker_generation_before = s_marker_generation;
     int existing = find_by_fingerprint(fingerprint);
+    if (existing >= 0 && advert_timestamp <= s_entries[existing].advert_timestamp) {
+        d1l_store_lock_give(&s_store_lock);
+        *out_stale = true;
+        return ESP_OK;
+    }
     size_t index;
     bool is_new = existing < 0;
+    bool replacing_oldest = false;
     if (!is_new) {
         index = (size_t)existing;
     } else if (s_count < D1L_NODE_STORE_CAPACITY) {
         index = s_count++;
     } else {
         index = oldest_index();
+        replacing_oldest = true;
         s_dropped_oldest++;
     }
 
     d1l_node_entry_t *entry = &s_entries[index];
+    const d1l_node_entry_t entry_before = *entry;
+    const d1l_node_entry_t marker_before =
+        (!is_new || replacing_oldest) ? entry_before : (d1l_node_entry_t){0};
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     if (is_new) {
         memset(entry, 0, sizeof(*entry));
@@ -573,8 +736,26 @@ esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *publ
     if (entry->name[0] == '\0') {
         sanitize_ascii(entry->name, sizeof(entry->name), entry->fingerprint);
     }
+    if (location_valid) {
+        entry->location_valid = true;
+        entry->lat_e6 = lat_e6;
+        entry->lon_e6 = lon_e6;
+        entry->location_advert_timestamp = advert_timestamp;
+        entry->location_seq = entry->seq;
+    }
+    if (marker_material_changed(&marker_before, entry)) {
+        bump_marker_generation();
+    }
     s_total_written++;
     esp_err_t ret = persist_store();
+    if (ret != ESP_OK) {
+        *entry = entry_before;
+        s_count = count_before;
+        s_next_seq = next_seq_before;
+        s_total_written = total_written_before;
+        s_dropped_oldest = dropped_oldest_before;
+        s_marker_generation = marker_generation_before;
+    }
     d1l_store_lock_give(&s_store_lock);
     return ret;
 }
@@ -674,6 +855,63 @@ size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_
         }
         used[best] = true;
         out_entries[copied++] = s_query_scratch[best];
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return copied;
+}
+
+uint32_t d1l_node_store_marker_generation(void)
+{
+    if (!s_loaded && d1l_node_store_init() != ESP_OK) {
+        return 0U;
+    }
+    d1l_store_lock_take(&s_store_lock);
+    const uint32_t generation = s_marker_generation;
+    d1l_store_lock_give(&s_store_lock);
+    return generation;
+}
+
+size_t d1l_node_store_copy_markers(d1l_node_marker_t *out_markers, size_t max_markers)
+{
+    if (!out_markers || max_markers == 0U) {
+        return 0U;
+    }
+    if (!s_loaded && d1l_node_store_init() != ESP_OK) {
+        return 0U;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    bool used[D1L_NODE_STORE_CAPACITY] = {0};
+    size_t copied = 0U;
+    while (copied < max_markers) {
+        size_t best = 0U;
+        bool best_set = false;
+        for (size_t i = 0; i < s_count; ++i) {
+            if (used[i] || !s_entries[i].location_valid) {
+                continue;
+            }
+            if (!best_set || s_entries[i].location_seq >
+                                 s_entries[best].location_seq ||
+                (s_entries[i].location_seq == s_entries[best].location_seq &&
+                 s_entries[i].seq > s_entries[best].seq)) {
+                best = i;
+                best_set = true;
+            }
+        }
+        if (!best_set) {
+            break;
+        }
+        used[best] = true;
+        d1l_node_marker_t *marker = &out_markers[copied++];
+        memset(marker, 0, sizeof(*marker));
+        sanitize_ascii(marker->fingerprint, sizeof(marker->fingerprint),
+                       s_entries[best].fingerprint);
+        sanitize_ascii(marker->name, sizeof(marker->name), s_entries[best].name);
+        sanitize_ascii(marker->type, sizeof(marker->type), s_entries[best].type);
+        marker->lat_e6 = s_entries[best].lat_e6;
+        marker->lon_e6 = s_entries[best].lon_e6;
+        marker->location_advert_timestamp = s_entries[best].location_advert_timestamp;
+        marker->location_seq = s_entries[best].location_seq;
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;

@@ -1,6 +1,6 @@
 # Source Audit and Attribution
 
-Date: 2026-06-29
+Last updated: 2026-07-10
 
 This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
 
@@ -15,7 +15,9 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
 
 - MeshCore upstream: https://github.com/meshcore-dev/MeshCore
   - License: MIT-style `license.txt` in the upstream repo, with bundled third-party notices.
-  - Use: Protocol/library base for Phase 2 MeshCore service integration.
+  - Pinned gitlink reviewed for the issue #65 wire-envelope slice: `e8d3c53ba1ea863937081cd0caad759b832f3028`.
+  - Use: protocol reference plus the exact structural packet-envelope oracle for the first issue #65 CI slice. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
+  - Conformance boundary: only the pinned packet-envelope implementation is an oracle in this slice. The upstream native-test AES/SHA mocks are not production cryptography and are excluded as cryptographic evidence. A passing `wire_envelope_only` comparison makes no semantic, crypto, retained-state, real-peer, full-conformance, or release claim.
   - Risk: Upstream is Arduino/PlatformIO oriented in many paths; ESP-IDF integration may need an adapter layer rather than direct reuse. Optional web stack dependencies must be reviewed before Wi-Fi management is added.
 
 ## Reference Repositories
@@ -62,7 +64,7 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
   - Data license: ODbL 1.0, https://opendatacommons.org/licenses/odbl/1-0/
   - Service policy: https://operations.osmfoundation.org/policies/tiles/
   - Required attribution: `© OpenStreetMap contributors`; the UI keeps the hardware-font-compatible `(c) OpenStreetMap contributors` visible on the actual Map.
-  - Request boundary: built-in source only; at most the visible current-view 3x3 at one zoom, only while Map is visible, with cache/reuse. Probes, background tasks, and hidden Map surfaces make no tile requests. No provider editor, arbitrary URL, multi-zoom prefetch, or area download is permitted.
+  - Request boundary: built-in source only; at most the visible current-view 3x3 at one zoom per visible generation, only while Map is visible, with tile-cache reuse. The user may pan with one finger and select zooms 8 through 14, but each committed view remains a separate bounded plan; drag motion, probes, background tasks, and hidden Map surfaces make no tile requests. A completed exact-view Home-to-Map revisit uses its retained rendered frame without network or SD reread. No provider editor, arbitrary URL, multi-zoom prefetch, off-screen batch, or area download is permitted.
   - Privacy: a tile request discloses the viewed approximate area and network address to the tile service/CDN. Network access therefore requires explicit Wi-Fi setup and an actively visible Map.
   - Independence: reference to OpenStreetMap does not imply endorsement by OpenStreetMap or the OpenStreetMap Foundation.
 

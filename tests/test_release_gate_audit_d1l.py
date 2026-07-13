@@ -1,6 +1,9 @@
 import hashlib
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
@@ -275,6 +278,13 @@ def scroll_probe_payload(**overrides: object) -> dict:
 
 
 def write_json(path: Path, payload: dict) -> None:
+    payload = dict(payload)
+    if "artifacts" in {part.lower() for part in path.parts} and not audit.artifact_commit_values(payload):
+        lowered_name = path.name.lower()
+        if COMMIT[:7] in lowered_name:
+            payload["commit"] = COMMIT
+        elif STALE_COMMIT[:7] in lowered_name:
+            payload["commit"] = STALE_COMMIT
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -287,32 +297,275 @@ def write_manifest_file(directory: Path, name: str, payload: bytes = b"ok") -> N
     (directory / "SHA256SUMS.txt").write_text(f"{digest}  ./{name}\n", encoding="ascii")
 
 
-def write_release_package(run_dir: Path) -> Path:
+def write_esp32_actions_artifact(run_dir: Path) -> dict:
+    artifact = run_dir / "d1l-firmware-artifacts"
+    build = artifact / "build"
+    files = {
+        "build/bootloader/bootloader.bin": b"BOOT",
+        "build/partition_table/partition-table.bin": b"PART",
+        "build/meshcore_deskos_d1l.bin": b"APP",
+    }
+    flasher = {
+        "flash_files": {
+            "0x0": "bootloader/bootloader.bin",
+            "0x8000": "partition_table/partition-table.bin",
+            "0x10000": "meshcore_deskos_d1l.bin",
+        }
+    }
+    files["build/flasher_args.json"] = json.dumps(flasher, sort_keys=True).encode("utf-8")
+    for relative, payload in files.items():
+        target = artifact / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    rows = [
+        f"{hashlib.sha256(payload).hexdigest()}  ./{relative}"
+        for relative, payload in sorted(files.items())
+    ]
+    manifest = artifact / "SHA256SUMS.txt"
+    manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
+    return {"artifact": artifact, "manifest": manifest, "flasher": flasher, "files": files}
+
+
+def smoke_device_payload(commit: str = COMMIT, port: str = "COM12") -> dict:
+    return {
+        "schema": 1,
+        "mode": "hardware",
+        "port": port,
+        "commit": commit,
+        "expected_firmware_commit": commit,
+        "device_build_commit": commit,
+        "firmware_identity_required": True,
+        "firmware_identity_ok": True,
+        "ok": True,
+        "results": [
+            {"schema": 1, "ok": True, "cmd": "version", "build_commit": commit}
+        ],
+    }
+
+
+def write_esp32_flash_receipt(
+    root: Path,
+    run_dir: Path,
+    *,
+    commit: str = COMMIT,
+    run_id: str = RUN_ID,
+    port: str = "COM12",
+) -> Path:
+    artifact = run_dir / "d1l-firmware-artifacts"
+    manifest = artifact / "SHA256SUMS.txt"
+    manifest_entries = audit.checksum_manifest_entries(manifest)
+    flasher_path = artifact / "build" / "flasher_args.json"
+    flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    flash_rows = []
+    command = ["python", "-m", "esptool", "--chip", "esp32s3", "-p", port, "write-flash"]
+    for raw_offset, relative in sorted(
+        flasher["flash_files"].items(), key=lambda item: int(item[0], 0)
+    ):
+        offset = int(raw_offset, 0)
+        artifact_relative = f"build/{relative}"
+        target = artifact / artifact_relative
+        flash_rows.append(
+            {
+                "offset": offset,
+                "offset_hex": hex(offset),
+                "path": artifact_relative,
+                "size": target.stat().st_size,
+                "sha256": manifest_entries[artifact_relative].upper(),
+            }
+        )
+        command.extend([hex(offset), str(target)])
+    payload = {
+        "schema": 1,
+        "kind": "esp32_flash",
+        "mode": "hardware",
+        "port": port,
+        "commit": commit,
+        "github_actions_run": run_id,
+        "public_rf_tx": False,
+        "formats_sd": False,
+        "artifact_verification": {
+            "ok": True,
+            "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest().upper(),
+            "manifest_entry_count": len(manifest_entries),
+            "manifest_complete": True,
+            "flasher_args_sha256": hashlib.sha256(flasher_path.read_bytes()).hexdigest().upper(),
+            "flash_files": flash_rows,
+        },
+        "command": command,
+        "result": {
+            "name": "esp32_flash",
+            "ok": True,
+            "returncode": 0,
+            "args": command,
+        },
+        "flashed_at": datetime.now(timezone.utc).isoformat(),
+        "ok": True,
+    }
+    path = (
+        root
+        / "artifacts"
+        / "hardware"
+        / port.lower()
+        / f"esp32_flash_{commit[:7]}_actions_{run_id}_{port}.json"
+    )
+    write_json(path, payload)
+    return path
+
+
+def write_supported_sdk_lock(
+    root: Path,
+    version: str = audit.SUPPORTED_ESP_IDF_LOCK_VERSION,
+) -> None:
+    (root / "dependencies.lock").write_text(
+        "dependencies:\n"
+        "  idf:\n"
+        "    source:\n"
+        "      type: idf\n"
+        f"    version: {version}\n"
+        "manifest_hash: test\n"
+        "target: esp32s3\n"
+        "version: 2.0.0\n",
+        encoding="utf-8",
+    )
+
+
+def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_IDF_IMAGE) -> None:
+    workflow = root / ".github" / "workflows" / "d1l-ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text(
+        "name: d1l-ci\n"
+        "jobs:\n"
+        "  firmware-build:\n"
+        "    runs-on: ubuntu-latest\n"
+        f"    container: {image}\n"
+        "    steps: []\n",
+        encoding="utf-8",
+    )
+    write_supported_sdk_lock(root)
+
+
+def meshcore_conformance_payload(
+    commit: str = COMMIT,
+    *,
+    generated_at: datetime | None = None,
+    **overrides: object,
+) -> dict:
+    payload = {
+        "schema_version": 1,
+        "artifact_type": audit.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
+        "passed": True,
+        "status": "pass",
+        "execution_complete": True,
+        "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
+        "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
+        "closure_ready": False,
+        "issue_65_closure_eligible": False,
+        "source_verification": {"repository_commit": commit},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def write_release_package(
+    run_dir: Path,
+    *,
+    commit: str = COMMIT,
+    conformance: dict | None = None,
+    workflow_run_id: str = RUN_ID,
+    git_dirty: bool = False,
+) -> Path:
     package = run_dir / "d1l-release-package" / f"d1l-release-{COMMIT}"
-    write_manifest_file(package, "README_RELEASE.md", b"release")
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "README_RELEASE.md").write_bytes(b"release")
     notices = {
         "notices/LICENSE": b"project license",
         "notices/THIRD_PARTY_NOTICES.md": b"third party",
         "notices/ATTRIBUTIONS.md": b"attributions",
         "notices/SOURCE_AUDIT_AND_ATTRIBUTION.md": b"source audit",
     }
-    rows = [(package / "SHA256SUMS.txt").read_text(encoding="ascii").strip()]
     for relative, payload in notices.items():
         target = package / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
-        rows.append(f"{hashlib.sha256(payload).hexdigest()}  ./{relative}")
-    (package / "SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
+    report = conformance or meshcore_conformance_payload(commit)
+    generated_at = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
+    expires_at = generated_at + timedelta(days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    evidence_relative = f"evidence/meshcore_conformance_{commit}.json"
+    evidence_path = package / evidence_relative
+    write_json(evidence_path, report)
+    evidence_bytes = evidence_path.read_bytes()
     write_json(
         package / "manifest.json",
-        {"notice_files": [{"path": relative} for relative in notices]},
+        {
+            "git": {
+                "commit": commit,
+                "dirty": git_dirty,
+                "dirty_entries": [" M main/example.c"] if git_dirty else [],
+            },
+            "workflow": {"sha": commit, "run_id": workflow_run_id},
+            "notice_files": [{"path": relative} for relative in notices],
+            "meshcore_conformance": {
+                "artifact_type": audit.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
+                "path": evidence_relative,
+                "size": len(evidence_bytes),
+                "sha256": hashlib.sha256(evidence_bytes).hexdigest(),
+                "source_commit": commit,
+                "generated_at": generated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "expires_at": expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "max_age_days": audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
+                "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
+                "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
+                "closure_ready": False,
+                "issue_65_closure_eligible": False,
+                "passed": True,
+                "execution_complete": True,
+            },
+        },
     )
+    rows = []
+    for path in sorted(package.rglob("*")):
+        if path.is_file() and path.name != "SHA256SUMS.txt":
+            relative = path.relative_to(package).as_posix()
+            rows.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  ./{relative}")
+    (package / "SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
     return package
 
 
+def write_host_checks_success(
+    run_dir: Path,
+    *,
+    commit: str = COMMIT,
+    run_id: str = RUN_ID,
+) -> Path:
+    marker = (
+        run_dir
+        / "d1l-host-artifacts"
+        / "host-checks"
+        / f"d1l_host_checks_success_{commit}.json"
+    )
+    write_json(
+        marker,
+        {
+            "schema": 1,
+            "artifact_type": audit.HOST_CHECKS_ARTIFACT_TYPE,
+            "status": "pass",
+            "passed": True,
+            "all_prior_steps_completed": True,
+            "job": "host-checks",
+            "repository_commit": commit,
+            "workflow_run_id": run_id,
+            "workflow_run_attempt": "1",
+        },
+    )
+    return marker
+
+
 def write_core_evidence(root: Path) -> None:
+    write_supported_sdk_workflow(root)
     run_dir = root / "artifacts" / "github" / RUN_ID
-    write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
+    write_host_checks_success(run_dir)
+    write_esp32_actions_artifact(run_dir)
     write_manifest_file(run_dir / "rp2040-sd-bridge-firmware", "deskos_sd_bridge.ino.uf2", b"uf2")
     write_manifest_file(
         run_dir / "rp2040-seeed-official-sd-smoke-firmware",
@@ -322,7 +575,8 @@ def write_core_evidence(root: Path) -> None:
     write_release_package(run_dir)
 
     hardware = root / "artifacts" / "hardware" / "com12"
-    write_json(hardware / "smoke_68350bf.json", {"ok": True, "port": "COM12"})
+    write_esp32_flash_receipt(root, run_dir)
+    write_json(hardware / "smoke_68350bf.json", smoke_device_payload())
     write_json(hardware / "ui_corruption_probe_68350bf.json", ui_corruption_probe_payload())
     write_json(hardware / "ui_pixel_capture_68350bf.json", ui_pixel_capture_payload())
     write_json(hardware / "ui_compose_keyboard_capture_68350bf.json", compose_keyboard_capture_payload())
@@ -490,12 +744,17 @@ def ready_storage_status() -> dict:
     return {
         "ok": True,
         "cmd": "storage status",
+        "manager": {"running": True, "state": "READY_SD"},
         "sd": {
             "state": "ready",
+            "filesystem": "fat32",
             "present": True,
             "mounted": True,
             "data_root_ready": True,
             "rp2040_protocol_supported": True,
+            "status_stale": False,
+            "presence_stale": False,
+            "refresh_failures": 0,
             "file_ops": True,
             "atomic_rename": True,
             "file_line_max": 512,
@@ -508,6 +767,27 @@ def ready_storage_status() -> dict:
         "dm_store_backend": "sd",
         "route_store_backend": "sd",
         "packet_log_backend": "sd",
+        "retained_nvs": {
+            "partition": "d1l_retained",
+            "marker_ready": True,
+            "markers_complete": True,
+            "anchor_ready": True,
+            "sentinel_ready": True,
+            "external_init_required": False,
+            "initialized_this_boot": False,
+            "ready": True,
+            "init_error": "ESP_OK",
+            "migrated_keys": 4,
+            "migration_error": "ESP_OK",
+        },
+        "retained_sd": {
+            "degraded": False,
+            "backup_degraded": False,
+            "stores": {
+                name: {"nvs_mirror_last_error": "ESP_OK"}
+                for name in ("messages", "dm", "routes", "packets")
+            }
+        },
         "stores": {"messages": "sd", "dm": "sd", "routes": "sd", "packets": "sd"},
     }
 
@@ -540,6 +820,7 @@ def write_ready_sd_preflight(root: Path, commit: str = COMMIT, metadata_commit: 
                 "sd_state": "ready",
                 "next_action": "run_sd_file_and_export_acceptance",
             },
+            "storage_status": ready_storage_status(),
             "artifact": {"sha256": "032ff80a0f94613bb18742e08cb97aa548bff882c3afacaf15f5c01"},
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -704,6 +985,8 @@ def write_file_canary_evidence(root: Path, commit: str = COMMIT, metadata_commit
             "canary_unavailable_ok": False,
             "storage_file_gate_ready_before": True,
             "storage_file_gate_ready_after": True,
+            "storage_before": ready_storage_status(),
+            "storage_after": ready_storage_status(),
             "retained_history_sd_ready_before": False,
             "retained_history_sd_ready_after": False,
             "commands": ["storage status", "storage filecanary", "storage status", "packets", "health"],
@@ -727,7 +1010,20 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "filecanary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
-            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "reboot", "health"],
+            "reboot_command_passed": True,
+            "reboot_route_flush": "ESP_OK",
+            "pre_reboot_boot_nonce": 111,
+            "post_reboot_boot_nonce": 222,
+            "reboot_proven": True,
+            "storage_file_gate_ready_before": True,
+            "storage_file_gate_ready_after": True,
+            "retained_history_sd_ready_before": True,
+            "retained_history_sd_ready_after_canary": True,
+            "retained_history_sd_ready_after": True,
+            "storage_before": ready_storage_status(),
+            "storage_after_canary": ready_storage_status(),
+            "storage_after": ready_storage_status(),
+            "commands": ["storage status", "storage filecanary", "storage retained-canary sd1", "storage status", "reboot", "storage status", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -745,11 +1041,22 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "ok": True,
             "pre_remount_ready": True,
             "post_remount_ready": True,
+            "pre_remount_command_passed": True,
+            "post_remount_command_passed": True,
+            "retained_history_sd_ready_before": True,
+            "retained_history_sd_ready_after": True,
             "retained_canary_passed": True,
             "pre_reboot_readbacks_ok": True,
             "post_reboot_readbacks_ok": True,
+            "reboot_command_passed": True,
+            "reboot_route_flush": "ESP_OK",
+            "pre_reboot_boot_nonce": 111,
+            "post_reboot_boot_nonce": 222,
+            "reboot_proven": True,
             "pre_map_tile_canary_passed": True,
             "post_map_tile_canary_passed": True,
+            "storage_before_reboot": ready_storage_status(),
+            "storage_after_reboot": ready_storage_status(),
             "commands": ["storage status", "storage remount", "storage map-tile-canary sd1", "reboot", "storage map-tile-check sd1", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -773,6 +1080,8 @@ def write_map_tile_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
             "storage_file_gate_ready_after": True,
             "map_tile_backend_ready_before": True,
             "map_tile_backend_ready_after": True,
+            "storage_before": ready_storage_status(),
+            "storage_after": ready_storage_status(),
             "commands": ["storage status", "storage map-tile-canary map1", "storage status", "health"],
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
@@ -792,6 +1101,8 @@ def write_export_evidence(root: Path, commit: str = COMMIT, metadata_commit: str
         "storage_file_gate_ready_after": True,
         "export_backend_ready_before": True,
         "export_backend_ready_after": True,
+        "storage_before": ready_storage_status(),
+        "storage_after": ready_storage_status(),
         **({"firmware_commit": metadata_commit} if metadata_commit else {}),
     }
     write_json(
@@ -913,14 +1224,48 @@ def gate_by_id(report: dict) -> dict:
     return {gate["id"]: gate for gate in report["gates"]}
 
 
+def test_artifact_commit_matching_requires_consistent_canonical_metadata(tmp_path: Path):
+    path = tmp_path / f"artifact_{COMMIT[:7]}.json"
+
+    assert audit.artifact_commit_matches(path, {"commit": COMMIT}, COMMIT) is True
+    assert audit.artifact_commit_matches(
+        path,
+        {"commit": COMMIT[:12], "git": {"commit": COMMIT}},
+        COMMIT,
+    ) is True
+    assert audit.artifact_commit_matches(
+        path,
+        {"commit": COMMIT, "firmware_commit": STALE_COMMIT},
+        COMMIT,
+    ) is False
+    assert audit.artifact_commit_matches(
+        path,
+        {"commit": COMMIT[:7] + "-actions"},
+        COMMIT,
+    ) is False
+    assert audit.artifact_commit_matches(path, {}, COMMIT) is False
+
+
 def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     write_core_evidence(tmp_path)
 
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
+    assert gates["supported_sdk_baseline"]["ok"] is True
+    assert gates["same_run_host_checks_passed"]["ok"] is True
+    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == "espressif/idf:v5.5.4"
     assert gates["ci_artifacts_checksums"]["ok"] is True
+    assert gates["meshcore_wire_conformance_packaged"]["ok"] is True
+    assert gates["meshcore_wire_conformance_packaged"]["details"]["closure_ready"] is False
+    assert gates["meshcore_wire_conformance_packaged"]["details"]["issue_65_closure_eligible"] is False
+    assert gates["meshcore_full_conformance_complete"]["ok"] is False
+    assert gates["meshcore_full_conformance_complete"]["severity"] == "P0"
+    assert gates["meshcore_full_conformance_complete"]["details"][
+        "wire_envelope_evidence_is_sufficient"
+    ] is False
     assert gates["release_notices_included"]["ok"] is True
+    assert gates["exact_actions_esp32_flash"]["ok"] is True
     assert gates["com12_smoke"]["ok"] is True
     assert gates["ui_corruption_probe"]["ok"] is True
     assert gates["ui_pixel_capture"]["ok"] is True
@@ -929,6 +1274,428 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+def test_flash_receipt_gate_fails_when_skip_flash_leaves_no_receipt(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    receipt.unlink()
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert "flash_receipt_missing" in gate["details"]["failures"]
+
+
+def test_flash_receipt_gate_rejects_stale_commit_and_tampered_hash(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload["commit"] = STALE_COMMIT
+    write_json(receipt, payload)
+    stale = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+    assert stale["ok"] is False
+    assert "flash_receipt_missing" in stale["details"]["failures"]
+
+    write_core_evidence(tmp_path)
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload["artifact_verification"]["flash_files"][0]["sha256"] = "0" * 64
+    write_json(receipt, payload)
+    tampered = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+    assert tampered["ok"] is False
+    assert "flash_files_exact" in tampered["details"]["failures"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "failure"),
+    [
+        ("github_actions_run", "999999", "receipt_run_id"),
+        ("port", "COM9", "receipt_port"),
+    ],
+)
+def test_flash_receipt_gate_rejects_wrong_run_or_port(
+    tmp_path: Path, field: str, value: str, failure: str
+):
+    write_core_evidence(tmp_path)
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    payload[field] = value
+    write_json(receipt, payload)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert failure in gate["details"]["failures"]
+
+
+def test_flash_receipt_gate_rejects_command_file_outside_selected_artifact(
+    tmp_path: Path,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    artifact = run_dir / "d1l-firmware-artifacts"
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    expected_app = artifact / "build" / "meshcore_deskos_d1l.bin"
+    outside_app = tmp_path / "evil" / "build" / "meshcore_deskos_d1l.bin"
+    outside_app.parent.mkdir(parents=True)
+    outside_app.write_bytes(expected_app.read_bytes())
+    command = list(payload["command"])
+    command[command.index(str(expected_app))] = str(outside_app)
+    payload["command"] = command
+    payload["result"]["args"] = command
+    write_json(receipt, payload)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert "flash_command_files_exact" in gate["details"]["failures"]
+
+
+def test_flash_receipt_gate_rejects_extra_write_flash_pair(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    receipt = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("esp32_flash_*.json")
+    )
+    payload = json.loads(receipt.read_text(encoding="utf-8"))
+    nvs_image = tmp_path / "unexpected-nvs.bin"
+    nvs_image.write_bytes(b"must not be flashed")
+    command = [*payload["command"], "0x9000", str(nvs_image)]
+    payload["command"] = command
+    payload["result"]["args"] = command
+    write_json(receipt, payload)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert "flash_command_files_exact" in gate["details"]["failures"]
+
+
+def test_flash_receipt_gate_requires_known_d1l_flash_roles(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    artifact = run_dir / "d1l-firmware-artifacts"
+    flasher_path = artifact / "build" / "flasher_args.json"
+    flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    flasher["flash_files"].pop("0x10000")
+    flasher_path.write_text(json.dumps(flasher, sort_keys=True), encoding="utf-8")
+    manifest = artifact / "SHA256SUMS.txt"
+    manifest.write_text(
+        "\n".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  ./"
+            f"{path.relative_to(artifact).as_posix()}"
+            for path in sorted(artifact.rglob("*"))
+            if path.is_file() and path != manifest
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    write_esp32_flash_receipt(tmp_path, run_dir)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["failures"] == ["required_flash_roles"]
+
+
+def test_flash_receipt_gate_rejects_checksummed_extra_flasher_role(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    artifact = run_dir / "d1l-firmware-artifacts"
+    flasher_path = artifact / "build" / "flasher_args.json"
+    flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    extra = artifact / "build" / "unexpected-nvs.bin"
+    extra.write_bytes(b"must not be flashed")
+    flasher["flash_files"]["0x9000"] = "unexpected-nvs.bin"
+    flasher_path.write_text(json.dumps(flasher, sort_keys=True), encoding="utf-8")
+    manifest = artifact / "SHA256SUMS.txt"
+    manifest.write_text(
+        "\n".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  ./"
+            f"{path.relative_to(artifact).as_posix()}"
+            for path in sorted(artifact.rglob("*"))
+            if path.is_file() and path != manifest
+        )
+        + "\n",
+        encoding="ascii",
+    )
+    write_esp32_flash_receipt(tmp_path, run_dir)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["failures"] == ["required_flash_roles"]
+
+
+def test_flash_receipt_gate_rejects_flasher_path_escape(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    artifact = run_dir / "d1l-firmware-artifacts"
+    flasher_path = artifact / "build" / "flasher_args.json"
+    flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    outside_app = run_dir / "outside-app.bin"
+    outside_app.write_bytes(b"APP")
+    flasher["flash_files"]["0x10000"] = "../../outside-app.bin"
+    flasher_path.write_text(json.dumps(flasher, sort_keys=True), encoding="utf-8")
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["exact_actions_esp32_flash"]
+
+    assert gate["ok"] is False
+    assert "flasher_flash_files_invalid" in gate["details"]["failures"]
+
+
+def test_com12_smoke_rejects_wrong_device_build_commit(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    smoke = tmp_path / "artifacts" / "hardware" / "com12" / "smoke_68350bf.json"
+    payload = json.loads(smoke.read_text(encoding="utf-8"))
+    payload["device_build_commit"] = STALE_COMMIT
+    payload["results"][0]["build_commit"] = STALE_COMMIT
+    payload["firmware_identity_ok"] = True
+    write_json(smoke, payload)
+
+    gate = gate_by_id(build_audit(audit_args(tmp_path)))["com12_smoke"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["path_found"] is True
+
+
+def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
+    tmp_path: Path, monkeypatch
+):
+    valid_run = tmp_path / "valid"
+    valid_package = write_release_package(valid_run)
+    valid = audit.meshcore_conformance_evidence_gate(
+        valid_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+
+    assert valid["ok"] is True
+    assert valid["details"]["coverage_level"] == "wire_envelope_only"
+    assert valid["details"]["closure_ready"] is False
+    assert "does not close issue #65" in valid["message"]
+
+    mismatched_run = tmp_path / "mismatched"
+    write_release_package(mismatched_run, commit=STALE_COMMIT)
+    mismatched = audit.meshcore_conformance_evidence_gate(
+        mismatched_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert mismatched["ok"] is False
+    assert "metadata_source_commit" in mismatched["details"]["failures"]
+    assert "report_source_commit" in mismatched["details"]["failures"]
+
+    expired_run = tmp_path / "expired"
+    expired_at = datetime.now(timezone.utc) - timedelta(
+        days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS + 1
+    )
+    write_release_package(
+        expired_run,
+        conformance=meshcore_conformance_payload(generated_at=expired_at),
+    )
+    expired = audit.meshcore_conformance_evidence_gate(
+        expired_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert expired["ok"] is False
+    assert "evidence_not_expired" in expired["details"]["failures"]
+
+    evidence = valid_package / f"evidence/meshcore_conformance_{COMMIT}.json"
+    evidence.write_text(evidence.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    tampered = audit.meshcore_conformance_evidence_gate(
+        valid_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert tampered["ok"] is False
+    assert "evidence_sha256_mismatch" in tampered["details"]["failures"]
+    assert "evidence_size_mismatch" in tampered["details"]["failures"]
+
+    wrong_run_dir = tmp_path / "wrong-run"
+    write_release_package(wrong_run_dir, workflow_run_id="999999")
+    wrong_run = audit.meshcore_conformance_evidence_gate(
+        wrong_run_dir,
+        tmp_path,
+        COMMIT,
+        expected_run_id=RUN_ID,
+    ).to_dict()
+    assert wrong_run["ok"] is False
+    assert "package_workflow_run_id" in wrong_run["details"]["failures"]
+
+    dirty_run_dir = tmp_path / "dirty-run"
+    write_release_package(dirty_run_dir, git_dirty=True)
+    dirty = audit.meshcore_conformance_evidence_gate(
+        dirty_run_dir,
+        tmp_path,
+        COMMIT,
+        expected_run_id=RUN_ID,
+    ).to_dict()
+    assert dirty["ok"] is False
+    assert "package_git_clean" in dirty["details"]["failures"]
+
+    overflow_run_dir = tmp_path / "overflow"
+    overflow_package = write_release_package(overflow_run_dir)
+    overflow_evidence = overflow_package / f"evidence/meshcore_conformance_{COMMIT}.json"
+    overflow_report = json.loads(overflow_evidence.read_text(encoding="utf-8"))
+    overflow_report["generated_at"] = "9999-12-31T00:00:00Z"
+    write_json(overflow_evidence, overflow_report)
+    overflow_manifest_path = overflow_package / "manifest.json"
+    overflow_manifest = json.loads(overflow_manifest_path.read_text(encoding="utf-8"))
+    overflow_metadata = overflow_manifest["meshcore_conformance"]
+    overflow_metadata["generated_at"] = overflow_report["generated_at"]
+    overflow_metadata["expires_at"] = "9999-12-31T23:59:59Z"
+    overflow_metadata["size"] = overflow_evidence.stat().st_size
+    overflow_metadata["sha256"] = hashlib.sha256(overflow_evidence.read_bytes()).hexdigest()
+    write_json(overflow_manifest_path, overflow_manifest)
+    overflow = audit.meshcore_conformance_evidence_gate(
+        overflow_run_dir,
+        tmp_path,
+        COMMIT,
+        expected_run_id=RUN_ID,
+    ).to_dict()
+    assert overflow["ok"] is False
+    assert "expires_at_computable" in overflow["details"]["failures"]
+    assert "generated_at_not_future" in overflow["details"]["failures"]
+
+    unreadable_run_dir = tmp_path / "unreadable"
+    write_release_package(unreadable_run_dir)
+
+    def unreadable_hash(_path: Path) -> str:
+        raise OSError("simulated evidence read failure")
+
+    monkeypatch.setattr(audit, "sha256_file", unreadable_hash)
+    unreadable = audit.meshcore_conformance_evidence_gate(
+        unreadable_run_dir,
+        tmp_path,
+        COMMIT,
+        expected_run_id=RUN_ID,
+    ).to_dict()
+    assert unreadable["ok"] is False
+    assert "evidence_hash_unreadable" in unreadable["details"]["failures"]
+
+
+def test_package_evidence_requires_explicit_expected_run_id(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    write_release_package(run_dir)
+
+    gate = audit.meshcore_conformance_evidence_gate(
+        run_dir, tmp_path, COMMIT
+    ).to_dict()
+
+    assert gate["ok"] is False
+    assert "expected_run_id_missing" in gate["details"]["failures"]
+    assert "package_workflow_run_id" in gate["details"]["failures"]
+
+
+def test_host_checks_gate_rejects_missing_or_cross_run_marker(tmp_path: Path):
+    run_dir = tmp_path / "run"
+    missing = audit.host_checks_success_gate(
+        run_dir, tmp_path, COMMIT, RUN_ID
+    ).to_dict()
+    assert missing["ok"] is False
+    assert "host_checks_marker_missing" in missing["details"]["failures"]
+
+    marker = write_host_checks_success(run_dir, run_id="999999")
+    cross_run = audit.host_checks_success_gate(
+        run_dir, tmp_path, COMMIT, RUN_ID
+    ).to_dict()
+    assert marker.is_file()
+    assert cross_run["ok"] is False
+    assert "marker_run_id" in cross_run["details"]["failures"]
+
+
+def test_full_meshcore_conformance_stays_fail_closed_after_wire_gate_passes():
+    gate = audit.meshcore_full_conformance_gate().to_dict()
+
+    assert gate["id"] == "meshcore_full_conformance_complete"
+    assert gate["severity"] == "P0"
+    assert gate["ok"] is False
+    assert gate["details"]["issue"] == 65
+    assert gate["details"]["closure_artifact_required"] is True
+    assert gate["details"]["closure_artifact_present"] is False
+    assert "wire-envelope evidence does not prove" in gate["message"]
+
+
+def test_supported_sdk_gate_fails_closed_without_workflow_or_firmware_job(tmp_path: Path):
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert missing["ok"] is False
+    assert missing["severity"] == "P0"
+    assert missing["evidence"] == []
+    assert missing["details"]["workflow_found"] is False
+    assert missing["details"]["firmware_job_found"] is False
+
+    workflow = tmp_path / ".github" / "workflows" / "d1l-ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("name: d1l-ci\njobs:\n  host-checks:\n    runs-on: windows-latest\n", encoding="utf-8")
+    missing_job = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert missing_job["ok"] is False
+    assert missing_job["details"]["workflow_found"] is True
+    assert missing_job["details"]["firmware_job_found"] is False
+
+
+def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Path):
+    for image, moving in (
+        ("espressif/idf:release-v5.1", True),
+        ("espressif/idf:release-v5.5", True),
+        ("espressif/idf:latest", True),
+        ("espressif/idf:v5.5.3", False),
+    ):
+        write_supported_sdk_workflow(tmp_path, image)
+        gate = audit.supported_sdk_gate(tmp_path).to_dict()
+
+        assert gate["ok"] is False
+        assert gate["details"]["configured_images"] == [image]
+        assert gate["details"]["moving_images"] == ([image] if moving else [])
+        assert gate["details"]["exact_release_pin"] is False
+
+
+def test_supported_sdk_gate_accepts_only_pinned_v5_5_4(tmp_path: Path):
+    write_supported_sdk_workflow(tmp_path)
+
+    gate = audit.supported_sdk_gate(tmp_path).to_dict()
+
+    assert gate["ok"] is True
+    assert gate["details"]["expected_version"] == "v5.5.4"
+    assert gate["details"]["configured_images"] == ["espressif/idf:v5.5.4"]
+    assert gate["details"]["moving_images"] == []
+    assert gate["details"]["exact_release_pin"] is True
+    assert gate["details"]["component_lock_found"] is True
+    assert gate["details"]["expected_lock_version"] == "5.5.4"
+    assert gate["details"]["locked_idf_version"] == "5.5.4"
+    assert gate["details"]["exact_component_lock"] is True
+
+
+def test_supported_sdk_gate_rejects_missing_malformed_or_stale_component_lock(tmp_path: Path):
+    write_supported_sdk_workflow(tmp_path)
+    component_lock = tmp_path / "dependencies.lock"
+
+    component_lock.unlink()
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert missing["ok"] is False
+    assert missing["details"]["component_lock_found"] is False
+    assert missing["details"]["locked_idf_version"] is None
+
+    component_lock.write_text(
+        "dependencies:\n  idf:\n    source:\n      type: idf\n    version:\n",
+        encoding="utf-8",
+    )
+    malformed = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert malformed["ok"] is False
+    assert malformed["details"]["component_lock_found"] is True
+    assert malformed["details"]["locked_idf_version"] is None
+
+    write_supported_sdk_lock(tmp_path, "5.1.7")
+    stale = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert stale["ok"] is False
+    assert stale["details"]["locked_idf_version"] == "5.1.7"
+    assert stale["details"]["exact_component_lock"] is False
 
 
 def test_release_gate_checksum_allows_esp32_only_actions_package(tmp_path: Path):
@@ -979,7 +1746,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -1012,7 +1779,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 17
+    assert report["p0_failed_count"] == 18
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -1102,7 +1869,196 @@ def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
     assert gates["sd_filecanary_independent"]["details"]["retained_history_sd_ready_before"] is False
     assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 3
+    assert report["p0_failed_count"] == 4
+
+
+def test_release_gate_audit_rejects_stale_sd_status_even_when_cached_ready_fields_pass(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_official_seeed_smoke_evidence(tmp_path)
+    write_ready_sd_preflight(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+
+    canary_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_file_canary_{COMMIT[:7]}.json"
+    )
+    canary = json.loads(canary_path.read_text(encoding="utf-8"))
+    canary["storage_after"]["sd"]["status_stale"] = True
+    canary["storage_after"]["sd"]["refresh_failures"] = 3
+    write_json(canary_path, canary)
+
+    report = build_audit(audit_args(tmp_path))
+    gates = gate_by_id(report)
+
+    assert gates["sd_filecanary_independent"]["ok"] is False
+    assert audit.storage_file_gate_ready_status(canary["storage_after"]) is False
+
+
+def test_release_gate_ready_status_rejects_unconfirmed_card_presence():
+    status = ready_storage_status()
+    assert audit.storage_file_gate_ready_status(status) is True
+
+    status["sd"]["presence_stale"] = True
+    assert audit.storage_file_gate_ready_status(status) is False
+
+    status = ready_storage_status()
+    status["sd"]["filesystem"] = "exfat"
+    assert audit.storage_file_gate_ready_status(status) is False
+
+
+def test_release_gate_audit_rejects_retained_readbacks_from_nvs_without_post_reboot_sd(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_official_seeed_smoke_evidence(tmp_path)
+    write_ready_sd_preflight(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+
+    retained_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_retained_history_{COMMIT[:7]}.json"
+    )
+    retained = json.loads(retained_path.read_text(encoding="utf-8"))
+    retained["storage_after"] = {
+        "ok": True,
+        "data_backend": "nvs",
+        "stores": {"messages": "nvs", "dm": "nvs", "routes": "nvs", "packets": "nvs"},
+        "sd": {
+            "state": "no_card",
+            "present": False,
+            "mounted": False,
+            "data_root_ready": False,
+            "rp2040_protocol_supported": True,
+            "file_ops": False,
+            "atomic_rename": False,
+            "status_stale": False,
+            "presence_stale": False,
+            "refresh_failures": 0,
+        },
+    }
+    # Keep the summary flag optimistic to prove the gate validates raw post-reboot status.
+    retained["storage_file_gate_ready_after"] = True
+    write_json(retained_path, retained)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_retained_canary_passed"]
+
+    assert retained["pre_reboot_readbacks_ok"] is True
+    assert retained["post_reboot_readbacks_ok"] is True
+    assert audit.storage_file_gate_ready_status(retained["storage_after"]) is False
+    assert gate["ok"] is False
+
+
+def test_release_gate_audit_rejects_pre_reboot_mirror_failure(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    retained_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_retained_history_{COMMIT[:7]}.json"
+    )
+    retained = json.loads(retained_path.read_text(encoding="utf-8"))
+    retained["storage_after_canary"]["retained_sd"]["backup_degraded"] = True
+    retained["storage_after_canary"]["retained_sd"]["stores"]["packets"][
+        "nvs_mirror_last_error"
+    ] = "ESP_ERR_NVS_NOT_ENOUGH_SPACE"
+    # Keep the producer summary optimistic; the audit must inspect raw status.
+    retained["retained_history_sd_ready_after_canary"] = True
+    write_json(retained_path, retained)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_retained_canary_passed"]
+
+    assert audit.retained_history_sd_ready_status(
+        retained["storage_after_canary"]
+    ) is False
+    assert gate["ok"] is False
+
+
+def test_release_gate_audit_rejects_nvs_backends_behind_ready_file_gate(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    retained_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_retained_history_{COMMIT[:7]}.json"
+    )
+    retained = json.loads(retained_path.read_text(encoding="utf-8"))
+    storage_after = ready_storage_status()
+    storage_after.update(
+        {
+            "data_backend": "nvs",
+            "message_store_backend": "nvs",
+            "dm_store_backend": "nvs",
+            "route_store_backend": "nvs",
+            "packet_log_backend": "nvs",
+            "stores": {
+                "messages": "nvs",
+                "dm": "nvs",
+                "routes": "nvs",
+                "packets": "nvs",
+            },
+        }
+    )
+    retained["storage_after"] = storage_after
+    retained["storage_file_gate_ready_after"] = True
+    retained["retained_history_sd_ready_after"] = True
+    write_json(retained_path, retained)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_retained_canary_passed"]
+
+    assert audit.storage_file_gate_ready_status(storage_after) is True
+    assert audit.retained_history_sd_ready_status(storage_after) is False
+    assert gate["ok"] is False
+
+
+def test_retained_history_ready_rejects_missing_dedicated_anchor():
+    storage = ready_storage_status()
+    assert audit.retained_history_sd_ready_status(storage)
+
+    storage["retained_nvs"]["anchor_ready"] = False
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    del storage["retained_nvs"]["anchor_ready"]
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    storage = ready_storage_status()
+    storage["retained_nvs"]["markers_complete"] = False
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+    storage = ready_storage_status()
+    storage["retained_nvs"]["external_init_required"] = True
+    assert audit.retained_history_sd_ready_status(storage) is False
+
+
+def test_release_gate_audit_rejects_failed_remount_summary(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    remount_path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_reboot_remount_{COMMIT[:7]}.json"
+    )
+    remount = json.loads(remount_path.read_text(encoding="utf-8"))
+    remount["post_remount_command_passed"] = False
+    write_json(remount_path, remount)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["sd_reboot_remount_passed"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["post_remount_command_passed"] is False
 
 
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
@@ -1205,7 +2161,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_accepts_full_soak_when_duration_and_summary_pass(tmp_path: Path):
@@ -1603,7 +2559,7 @@ def test_release_gate_audit_discovers_autonomous_script_artifact_dirs(tmp_path: 
 
     write_json(
         tmp_path / "artifacts" / "smoke" / "d1l-smoke-COM12-actions-68350bf.json",
-        {"ok": True, "port": "COM12", "firmware_commit": COMMIT},
+        smoke_device_payload(),
     )
     write_json(
         tmp_path / "artifacts" / "ui-corruption-probe" / "d1l-ui-corruption-probe-COM12-actions-68350bf.json",
@@ -1660,3 +2616,42 @@ def test_release_gate_audit_accepts_full_rf_acceptance_artifact(tmp_path: Path):
     gates = gate_by_id(report)
 
     assert gates["full_rf_dm_acceptance"]["ok"] is True
+
+
+def test_release_gate_audit_rejects_unchanged_reboot_nonce(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    evidence = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob("sd_reboot_remount_*.json")
+    )
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    payload["post_reboot_boot_nonce"] = payload["pre_reboot_boot_nonce"]
+    payload["reboot_proven"] = True
+    write_json(evidence, payload)
+
+    report = build_audit(audit_args(tmp_path))
+
+    gate = gate_by_id(report)["sd_reboot_remount_passed"]
+    assert gate["ok"] is False
+    assert gate["details"]["pre_reboot_boot_nonce"] == 111
+    assert gate["details"]["post_reboot_boot_nonce"] == 111
+    assert gate["details"]["reboot_proven"] is True
+
+
+def test_release_gate_audit_rejects_missing_route_flush_proof(tmp_path: Path):
+    write_core_evidence(tmp_path)
+    write_strict_sd_evidence(tmp_path)
+    evidence = next(
+        (tmp_path / "artifacts" / "hardware" / "com12").glob(
+            "sd_reboot_remount_*.json"
+        )
+    )
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    payload.pop("reboot_route_flush")
+    write_json(evidence, payload)
+
+    report = build_audit(audit_args(tmp_path))
+
+    gate = gate_by_id(report)["sd_reboot_remount_passed"]
+    assert gate["ok"] is False
+    assert gate["details"]["reboot_route_flush"] is None

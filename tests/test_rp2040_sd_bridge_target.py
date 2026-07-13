@@ -155,6 +155,16 @@ def test_rp2040_bridge_target_has_d1l_pin_and_protocol_contract():
     request_mount_body = sketch.split("SdSnapshot request_mount_status()", 1)[1].split(
         "DiagSnapshot pending_diag_snapshot()", 1
     )[0]
+    assert 'strcmp(status.state, "no_card") == 0' in request_mount_body
+    assert request_mount_body.index('strcmp(status.state, "no_card") == 0') < (
+        request_mount_body.index("start_sd_worker(SD_WORKER_MOUNT)")
+    )
+    ready_branch = request_mount_body.split(
+        "if (snapshot_ready_for_file_ops(status))", 1
+    )[1].split('if (strcmp(status.state, "no_card")', 1)[0]
+    assert "s_sd_removal_samples > 0U" in ready_branch
+    assert "recover_file_ops_mount()" in ready_branch
+    assert "return current_status();" in ready_branch
     assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
     assert "mount_status_blocking()" not in request_mount_body
     assert 'pending_snapshot("sd_worker_busy")' in request_mount_body
@@ -358,6 +368,34 @@ def test_rp2040_bridge_target_emits_complete_status_tokens():
         assert " " not in note
 
 
+def test_rp2040_bridge_runtime_removal_is_debounced_and_non_destructive():
+    sketch = SKETCH.read_text(encoding="utf-8")
+
+    assert "constexpr uint8_t SD_REMOVAL_DEBOUNCE_SAMPLES = 3;" in sketch
+    assert "detect_sample_confirms_inserted" in sketch
+    assert "snapshot_detect_confirms_inserted" in sketch
+    assert "s_sd_detect_inserted_signature_proven" in sketch
+    assert 'make_snapshot("no_card", "card_removed")' in sketch
+    assert 'make_snapshot("mount_required", "card_reinserted")' in sketch
+
+    status_body = sketch.split("SdSnapshot current_status()", 1)[1].split(
+        "SdSnapshot cache_status", 1
+    )[0]
+    assert "!s_worker_busy" in status_body
+    assert "s_worker_request == SD_WORKER_NONE" in status_body
+    assert "!s_file_command_active" in status_body
+    assert "s_sd_removal_samples < SD_REMOVAL_DEBOUNCE_SAMPLES" in status_body
+    assert "s_sd_removal_samples >= SD_REMOVAL_DEBOUNCE_SAMPLES" in status_body
+    assert "s_sd_reinsert_samples >= SD_REMOVAL_DEBOUNCE_SAMPLES" in status_body
+    assert status_body.index("detect_sample_confirms_inserted") < status_body.index(
+        'make_snapshot("no_card", "card_removed")'
+    )
+    assert "s_sd_mounted = false" in status_body
+    assert "SD.end" not in status_body
+    assert "SPI1.end" not in status_body
+    assert "format" not in status_body.lower()
+
+
 def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     sketch = SKETCH.read_text(encoding="utf-8")
 
@@ -408,7 +446,10 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     )[0]
     assert "SdSnapshot mounted = mounted_snapshot_from_current_config();" in request_mount_body
     assert "snapshot_ready_for_file_ops(mounted)" in request_mount_body
-    assert "recover_file_ops_mount()" not in request_mount_body
+    assert "recover_file_ops_mount()" in request_mount_body
+    assert request_mount_body.index("recover_file_ops_mount()") < (
+        request_mount_body.index("start_sd_worker(SD_WORKER_MOUNT)")
+    )
     assert "start_sd_worker(SD_WORKER_MOUNT)" in request_mount_body
     file_line_body = sketch.split("void handle_file_line", 1)[1].split(
         "void handle_line", 1

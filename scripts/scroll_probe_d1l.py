@@ -11,11 +11,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
     from artifact_metadata import stamp_report
 except ModuleNotFoundError:
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 SCROLL_SURFACES = {
@@ -260,7 +260,7 @@ def run_scroll_probe(
     first_map_index = map_indices[0] if map_indices else None
     last_map_index = map_indices[-1] if map_indices else None
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
 

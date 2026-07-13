@@ -1,0 +1,2 @@
+tests/meshcore_conformance/*.json text eol=lf
+docs/evidence/*.json text eol=lf

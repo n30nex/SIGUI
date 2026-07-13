@@ -30,12 +30,15 @@ Required tokens:
 - `probe_power`, `probe_mode`, `probe_present`, `probe_err`, and
   `probe_data`: non-formatting card-probe diagnostics. `mount_err` and
   `mount_data` are captured SdFat diagnostic error bytes from the filesystem
-  mount attempt. Older bridge firmware may omit these tokens; ESP32 treats them
-  as optional.
+  mount attempt. The current ESP32 parser requires `probe_power`, `probe_mode`,
+  `probe_err`, `probe_data`, `mount_err`, and `mount_data`; a bridge build that
+  omits them fails closed as a stale/malformed exchange and must be upgraded.
+  `probe_present` remains supplemental and is not consumed by the parser.
 - `detect`, `detect_driven`, `det_pullup`, and `det_pulldown`: raw GPIO7
   SD-detect diagnostics. The bridge samples GPIO7 with pull-up and pull-down so
   operators can distinguish a floating detect line from a board-driven high or
-  low state without assuming a card-format problem.
+  low state without assuming a card-format problem. These tokens are
+  supplemental; the ESP32 storage parser does not use them to enable stores.
 - `file_ops`: `1` when the card is ready and the generic file protocol below is available.
 - `file_line_max`: maximum request/reply line length, excluding newline. Current value: `512`.
 - `file_chunk_max`: maximum decoded read/write/append payload size. Current value: `192` bytes.
@@ -51,7 +54,14 @@ On the D1L RP2040 bridge, status is safe to call from boot and UI polling. It
 does not probe, mount, format, or write SD. Before any explicit mount result is
 cached, the bridge reports `state=mount_required note=mount_not_checked`.
 After `DESKOS_SD_MOUNT` or file operations complete, status returns the cached
-latest SD state.
+latest SD state. After a successful mounted snapshot has established the
+inserted-card GPIO7 signature as `detect=low detect_driven=1`, status polling
+uses only that detect pin for runtime-removal monitoring. Three consecutive
+nonmatching samples invalidate the cached mount and return
+`state=no_card note=card_removed`. Three consecutive returns to the proven
+signature publish `state=mount_required note=card_reinserted`; the ESP32 can
+then issue a fresh explicit mount. This debounce does not touch the SD bus and
+does not infer a polarity before a successful mount proves the board signature.
 
 ## Mount Request
 
@@ -65,7 +75,11 @@ DESKOS_SD_MOUNT
 RP2040 replies with one status-shaped line using the mount prefix after the
 explicit SD-touch attempt completes. `DESKOS_SD_STATUS` remains safe and
 non-touching before this command, and returns the cached result after this
-command completes.
+command completes. When a ready snapshot is already cached, this explicit
+request closes and reinitializes the filesystem path rather than accepting the
+cache as proof; it is therefore the recovery path for a stale SD session. A
+debounced `state=no_card` is returned without touching the bus until GPIO7
+confirms reinsertion and status advances to `mount_required`.
 
 The RP2040 bridge is built by GitHub Actions with the Arduino-Pico board
 package's default SD library settings. The filesystem path runs on the
@@ -78,48 +92,31 @@ then call `SD.begin(13, 1000000, SPI1)`. This first attempt intentionally
 avoids explicit `SPI1.begin()` or a second SdFat probe before failure handling.
 If that already-powered library path does not mount, the bridge repeats the
 same Seeed path once after cycling GPIO18 with SD SPI pins floated during
-rail-off so CS/MOSI/SCK cannot backfeed the card before it falls back to
-bounded raw SPI presence probes across the high/low rail and dedicated/shared
-SPI candidates. High-power candidates are tried once without force-cycling the
-rail before force-cycled fallback probes run. Only fallback
-candidates that answer a valid SD idle/init sequence receive one matching
-Arduino `SD`/`SDFS` filesystem mount attempt on the expected D1L SD bus. Failed
-fallback filesystem attempts can record captured SdFat diagnostic error bytes. An
-electrically absent or non-responsive card should report `no_card` rather than
-wedging the UART bridge. A selected-card response path that returns all-zero
-CMD0/CMD8 bytes reports `state=error note=sd_probe_rejected_card`, which the
-ESP32 treats as an RP2040 firmware/SPI initialization path instead of a
-card-format request.
+rail-off so CS/MOSI/SCK cannot backfeed the card. If both official attempts
+fail, the bridge reports
+`state=error note=sd_mount_failed_official_seeed_path` with the captured mount
+error bytes. It deliberately does not turn a cold mount failure into strict
+`no_card`: an absent card and an inserted-but-unresponsive card are not safely
+distinguishable from the filesystem failure alone, and a false absence would
+erase the ESP32's last confirmed presence. Operators can request the separate,
+non-writing `DESKOS_SD_DIAG` raw-probe matrix when diagnosing that error.
 
 ```text
 DESKOS_SD_MOUNT state=ready present=1 mounted=1 deskos=1 fs=fat32 needs_fat32=0 capacity_kb=31166976 free_kb=31100000 note=ready probe_power=high probe_mode=mount probe_present=1 probe_err=0 probe_data=0 detect=low detect_driven=1 det_pullup=0 det_pulldown=0 mount_err=0 mount_data=0 file_ops=1 file_line_max=512 file_chunk_max=192 path_max=96 atomic_rename=1
 ```
 
-The D1L bridge tries a Seeed-style high/dedicated filesystem mount before the
-fallback raw SPI probes for high/dedicated, high/shared, low/dedicated, and
-low/shared candidates. The high/dedicated and high/shared probes preserve the
-already-powered rail state first; force-cycled candidates run after that. The
-probe retries `CMD0` with CS-high recovery clocks and requires the SD idle
-response `0x01` before sending `CMD8`, so an all-zero selected-card path cannot
-look present in the fallback matrix. It then tries one matching filesystem mount on each raw-present candidate before
-reporting `no_card` or a FAT32-required state. The first filesystem init
-preserves the already-powered rail state; fallback probes and mounts can toggle
-the selected power-rail level and reclock the card so warm firmware resets do
-not leave the card outside `CMD0` idle detection. The manual probe sends each
-`CMD0` attempt immediately after CS-high idle clocks and CS assertion, matching
-the SD SPI entry sequence instead of waiting with the card selected before the
-reset command. The manual
-diagnostic request below reports the same candidate matrix without filesystem
-writes. If no card
-responds with a valid `CMD0` idle reply, the bridge reports `state=no_card`;
-if the selected-card path returns all-zero CMD0/CMD8 bytes, the bridge reports
-`state=error note=sd_probe_rejected_card`. If a card responds but the
-filesystem is unusable, the bridge reports `state=not_fat32_or_unmountable`,
-`present=1`, `mounted=0`, `needs_fat32=1`, and
-`note=needs_fat32_on_computer`; the ESP32 keeps NVS fallback active. When
-`mount_err` or `mount_data` is nonzero on a user-confirmed FAT32 card, the
-ESP32 must surface `inspect_rp2040_sd_mount_error_firmware_path` instead of
-telling the user to prepare another card.
+The D1L bridge tries the Seeed-style high/dedicated filesystem mount once with
+the already-powered rail and once after a bounded power cycle. A mounted
+non-FAT32 filesystem reports `state=not_fat32_or_unmountable`, `present=1`,
+`mounted=1`, `needs_fat32=1`, and `note=needs_fat32_on_computer`; the ESP32
+keeps NVS fallback active. A failed mount remains `state=error`, even when the
+reply's instantaneous `present` field is `0`; only the debounced runtime
+removal of a previously ready card emits strict `state=no_card`. The ESP32 must
+therefore preserve last-confirmed presence across error replies and surface
+`inspect_rp2040_sd_mount_error_firmware_path` when `mount_err` or `mount_data`
+is nonzero on a user-confirmed FAT32 card instead of telling the user to
+prepare another card. The manual diagnostic request below remains available
+for the broader raw probe matrix without filesystem writes.
 
 ## Ping Request
 
@@ -202,6 +199,13 @@ still pending, or the ready file-operation gate is not available.
 After retained stores initialize, `storage_manager` continues convergence in
 the background with explicit states `BRIDGE_WAIT`, `PING`, `STATUS`, `MOUNT`,
 `READY_SD`, `READY_NVS`, `NEEDS_FAT32`, `NO_CARD`, and `ERROR_BACKOFF`.
+Before any valid DeskOS bridge response is seen, three consecutive initial ping
+timeouts queue the existing reset-and-remount recovery exactly once per ESP32
+boot. The manager sends one final bounded ping before claiming that queued
+reset. Any valid DeskOS ping, status, or mount response cancels that automatic
+pulse and permanently disables another for the rest of the boot, so
+an active or mounted SD bridge cannot enter a reset storm. The recovery remains
+non-formatting and sends no RF.
 `storage remount` queues a new non-formatting mount attempt, `storage
 reset-bridge` resets the RP2040 bridge and remounts, and `storage force-nvs
 [on|off]` provides an operator fallback override without formatting or Public
@@ -444,4 +448,4 @@ python .\tools\rp2040_sd_protocol.py --scenario ready --map-tile-canary-transcri
 - Users must supply FAT32 SD cards prepared on a computer.
 - Settings, identity, and minimum boot-critical state remain on onboard NVS.
 - Until SD-backed retained-history stores are enabled, valid SD cards are reported as `store_migration_pending`.
-- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; retained-store SD write/read/rename failures are counted separately from NVS mirror failures, and the UI must show `SD degraded; using internal fallback` after a real SD failure latches. Diagnostic and sampled-data exports use their existing bounded paths. `storage map-tile-canary` is a synthetic storage-only check: it never performs network I/O and is not live-map acceptance. The production Map has a built-in OpenStreetMap Standard source and no arbitrary URL/template command. Network fetch is allowed only while the actual Map is visible, for at most its visible current-view 3x3 at one zoom, with cache/reuse and `(c) OpenStreetMap contributors`; background and area download are forbidden.
+- The RP2040 bridge may create `/deskos` on a mounted card and exposes bounded file operations. Public/DM message history, route history, and packet history can use SD when ready with NVS mirrors; retained-store SD write/read/rename failures are counted separately from NVS mirror failures, and the UI must show `SD degraded; using internal fallback` after a real SD failure latches. Diagnostic and sampled-data exports use their existing bounded paths. `storage map-tile-canary` is a synthetic storage-only check: it never performs network I/O and is not live-map acceptance. The production Map has a built-in OpenStreetMap Standard source and no arbitrary URL/template command. Network fetch is allowed only while the actual Map is visible, for at most its visible current-view 3x3 at one zoom per visible generation, with tile-cache reuse and `(c) OpenStreetMap contributors`; pan/zoom may select a new bounded current view but background fetch, multi-zoom prefetch, off-screen batches, and area download are forbidden. A completed exact-view Home-to-Map revisit uses the ESP32's retained rendered frame without a network request or RP2040 SD reread; SD tile cache remains the reboot/later-session reuse layer.

@@ -199,7 +199,10 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "Mesh ready, listening" not in labels_by_view["home"]
     assert "D1L Desk" not in labels_by_view["home"]
     assert not any(label.startswith("--:--  Mesh") for label in labels_by_view["home"])
+    assert ui_simulator.TOP_BAR_H == 56
     assert ui_simulator.HOME_TOP_BAR_H == 16
+    assert ui_simulator.DOCK_Y == 418
+    assert ui_simulator.DOCK_H == 62
     assert "RX" not in labels_by_view["home"]
     assert "TX" not in labels_by_view["home"]
     assert not any(target["kind"] == "dock_tab" for target in views_by_name["home"]["touch_targets"])
@@ -365,7 +368,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
         "Forget contact",
         "Requires confirmation",
     } <= labels_by_view["contact_options_page"]
-    assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
+    assert {"Node Detail", "Role", "Fingerprint", "Public key", "Signal", "Path", "Advert location", "Last heard", "Close"} <= labels_by_view["node_detail_sheet"]
     assert {"Rename Contact", "YKF Corebot", "Back", "Contact alias", "Keyboard", "Cancel", "Save name"} <= labels_by_view["contact_edit_sheet"]
     assert "Forget" not in labels_by_view["contact_edit_sheet"]
     assert {"Export Contact", "YKF Corebot", "Back", "MeshCore QR", "Fingerprint", "URI", "Ready to scan"} <= labels_by_view["contact_export_sheet"]
@@ -1045,7 +1048,12 @@ def test_storage_root_summary_uses_all_six_child_backends():
 
     retained_only = replace(pending, message_store_backend="sd")
     assert ui_simulator.storage_root_location_summary(retained_only) == "SD + internal"
-    assert ui_simulator.retained_storage_label(retained_only.message_store_backend) == "SD + internal backup"
+    assert (
+        ui_simulator.retained_storage_label(
+            retained_only, retained_only.message_store_backend
+        )
+        == "SD + internal backup"
+    )
 
     map_only = ui_simulator.storage_ready_map_only_sd_snapshot()
     assert ui_simulator.storage_root_location_summary(map_only) == "SD + internal"
@@ -1056,6 +1064,59 @@ def test_storage_root_summary_uses_all_six_child_backends():
     assert ui_simulator.storage_root_location_summary(export_only) == "SD + internal"
     assert ui_simulator.map_storage_label(export_only.map_tile_backend) == "Pending"
     assert ui_simulator.export_storage_label(export_only.export_backend) == "SD card"
+
+
+def test_backup_degradation_is_truthful_without_disabling_healthy_sd_map():
+    sd_primary = ui_simulator.storage_backup_degraded_sd_snapshot()
+    state, detail, guidance, color = ui_simulator.storage_friendly_state(sd_primary)
+
+    assert state == "SD card ready"
+    assert detail == "Saved data is using SD."
+    assert guidance == "Internal backup needs attention."
+    assert color == ui_simulator.AMBER
+    assert ui_simulator.storage_menu_status(sd_primary) == "Needs attention"
+    assert ui_simulator.home_storage_status(sd_primary) == "backup issue"
+    assert ui_simulator.storage_card_menu_status(sd_primary) == "Ready"
+    assert ui_simulator.storage_card_readiness(sd_primary) == "Ready"
+    assert ui_simulator.map_storage_summary(sd_primary) == "SD starting"
+    assert ui_simulator.storage_root_location_summary(sd_primary) == "SD; backup issue"
+    assert (
+        ui_simulator.retained_storage_label(
+            sd_primary, sd_primary.message_store_backend
+        )
+        == "SD; backup degraded"
+    )
+    storage_category = next(
+        category
+        for category in ui_simulator.more_category_specs(sd_primary)
+        if category["key"] == "storage_maps"
+    )
+    assert storage_category["summary"] == "Backup needs attention"
+    assert storage_category["leaves"][0][1] == "Ready"
+    assert storage_category["leaves"][0][5] is False
+
+    internal = ui_simulator.storage_backup_degraded_internal_snapshot()
+    state, detail, guidance, color = ui_simulator.storage_friendly_state(internal)
+    assert state == "Storage needs attention"
+    assert detail == "Internal saved-data storage is unavailable."
+    assert "USB diagnostics" in guidance
+    assert color == ui_simulator.WARNING_TEXT
+    assert ui_simulator.storage_root_location_summary(internal) == "Storage issue"
+    assert (
+        ui_simulator.retained_storage_label(
+            internal, internal.message_store_backend
+        )
+        == "Unavailable"
+    )
+
+    combined = replace(sd_primary, storage_retained_sd_degraded=True)
+    assert ui_simulator.home_storage_status(combined) == "storage issue"
+    combined_category = next(
+        category
+        for category in ui_simulator.more_category_specs(combined)
+        if category["key"] == "storage_maps"
+    )
+    assert combined_category["summary"] == "Storage needs attention"
 
 
 def test_storage_warning_propagates_to_collapsed_and_expanded_more_rows(tmp_path):
@@ -1094,8 +1155,11 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
     assert report["overflow_count"] == 0
     assert report["touch_target_issue_count"] == 0
     assert report["required_labels_missing"] == []
-    assert {"SD card needed", "Options", "(c) OpenStreetMap contributors"} <= labels
+    assert {"Waiting for storage", "Options", "(c) OpenStreetMap contributors"} <= labels
     assert view["metrics"]["map_location_set"] is True
+    assert view["metrics"]["map_progress_bar_supported"] is True
+    assert view["metrics"]["map_progress_bar_visible"] is False
+    assert view["metrics"]["map_tile_style"] == "local_dark_osm_standard"
     assert view["metrics"]["map_center_source"] == "manual"
     assert view["metrics"]["map_center_lat_e7"] == 436532000
     assert view["metrics"]["map_center_lon_e7"] == -793832000
@@ -1104,7 +1168,7 @@ def test_ui_simulator_manual_location_scenario_fits(tmp_path):
 def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
     expected = {
         "default": "Set a location",
-        "manual-location": "Needs SD",
+        "manual-location": "SD starting",
         "map-location-wifi-off": "Needs Wi-Fi",
         "map-ready": "Ready to open",
     }
@@ -1117,6 +1181,112 @@ def test_ui_simulator_home_map_card_reports_honest_setup_state(tmp_path):
         assert status in labels, scenario
         assert "Map cache ready" not in labels, scenario
         assert "Set up Map" not in labels, scenario
+
+
+def test_map_storage_copy_state_table_distinguishes_starting_absent_fat32_and_error():
+    base = ui_simulator.manual_location_snapshot()
+    cases = (
+        (
+            replace(base, storage_setup_action="bridge_protocol_pending"),
+            "SD starting",
+            "Waiting for storage",
+        ),
+        (
+            replace(base, storage_setup_action="wait_for_storage_reconnect"),
+            "SD starting",
+            "Waiting for storage",
+        ),
+        (
+            replace(base, storage_setup_action="insert_card"),
+            "Insert SD",
+            "SD card required",
+        ),
+        (
+            replace(
+                base,
+                storage_setup_action="prepare_fat32_on_computer",
+                storage_sd_present=True,
+                storage_sd_needs_fat32=True,
+            ),
+            "Needs FAT32",
+            "FAT32 card required",
+        ),
+        (
+            replace(base, storage_sd_state="error"),
+            "Check SD",
+            "Map unavailable",
+        ),
+    )
+    for snapshot, summary, viewport_title in cases:
+        assert ui_simulator.map_storage_summary(snapshot) == summary
+        assert ui_simulator.map_view_status(snapshot)[0] == viewport_title
+
+    reconnecting = replace(
+        base,
+        storage_setup_action="wait_for_storage_reconnect",
+        storage_data_enabled=True,
+    )
+    assert ui_simulator.storage_menu_status(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_menu_status(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_readiness(reconnecting) == "Reconnecting"
+    assert ui_simulator.storage_card_state(reconnecting) == "Card reader reconnecting"
+    assert ui_simulator.storage_friendly_state(reconnecting)[1:3] == (
+        "Last confirmed SD remains active briefly.",
+        "Internal fallback takes over if status retries fail.",
+    )
+    reconnecting_fallback = replace(reconnecting, storage_data_enabled=False)
+    assert ui_simulator.storage_friendly_state(reconnecting_fallback)[1:3] == (
+        "Internal storage is active.",
+        "SD access resumes after a valid status reply.",
+    )
+
+
+def test_settings_map_status_matches_location_storage_wifi_and_renderer_priority():
+    base = ui_simulator.manual_location_snapshot()
+    cases = (
+        (replace(base, map_location_set=False), "Set location"),
+        (replace(base, storage_setup_action="bridge_protocol_pending"), "SD starting"),
+        (replace(base, storage_setup_action="insert_card"), "Insert SD"),
+        (
+            replace(
+                base,
+                storage_setup_action="prepare_fat32_on_computer",
+                storage_sd_needs_fat32=True,
+            ),
+            "Needs FAT32",
+        ),
+        (replace(base, storage_sd_state="error"), "Check SD"),
+        (
+            replace(base, map_tile_cache_ready=True, wifi_connected=False),
+            "Needs Wi-Fi",
+        ),
+        (
+            replace(
+                base,
+                map_tile_cache_ready=True,
+                wifi_connected=True,
+                map_tile_render_supported=False,
+            ),
+            "Loading",
+        ),
+        (
+            replace(
+                base,
+                map_tile_cache_ready=True,
+                wifi_connected=True,
+                map_tile_render_supported=True,
+            ),
+            "Ready",
+        ),
+    )
+    for snapshot, expected in cases:
+        assert ui_simulator.settings_map_status(snapshot) == expected
+        storage_category = next(
+            category
+            for category in ui_simulator.more_category_specs(snapshot)
+            if category["key"] == "storage_maps"
+        )
+        assert storage_category["leaves"][1][1] == expected
 
 
 def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
@@ -1138,6 +1308,17 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert views["map"]["metrics"]["map_hierarchy_level"] == "actual_view"
     assert views["map"]["metrics"]["map_actual_view"] is True
     assert views["map"]["metrics"]["map_landing_action_count"] == 1
+    assert views["map"]["metrics"]["map_view_control_count"] == 3
+    assert views["map"]["metrics"]["map_pan_gesture"] is True
+    assert views["map"]["metrics"]["map_full_bleed_content"] is True
+    assert views["map"]["metrics"]["map_local_header_height"] == 0
+    assert views["map"]["metrics"]["map_controls_overlay_canvas"] is True
+    assert views["map"]["metrics"]["map_min_control_target"] == 48
+    assert views["map"]["metrics"]["map_viewport"] == [0, ui_simulator.TOP_BAR_H, 480, ui_simulator.DOCK_Y]
+    assert views["map"]["metrics"]["map_default_zoom"] == 10
+    assert views["map"]["metrics"]["map_min_zoom"] == 8
+    assert views["map"]["metrics"]["map_max_zoom"] == 14
+    assert views["map"]["metrics"]["map_same_view_frame_reuse"] is True
     assert views["map"]["metrics"]["map_visible_tile_limit"] == 9
     assert views["map"]["metrics"]["map_zoom_batch_count"] == 1
     assert views["map"]["metrics"]["map_cached_tile_count"] == 9
@@ -1148,6 +1329,15 @@ def test_ui_simulator_map_hierarchy_is_simple_friendly_and_bounded(tmp_path):
     assert "SD ready" in labels["map_options"]
     assert "Local area saved" not in labels["map_options"]
     assert views["map_cache"]["metrics"]["map_cache_read_only"] is True
+
+    assert {"map_recenter", "map_zoom_out", "map_zoom_in"}.issubset(actions["map"])
+    for action in ("map_recenter", "map_zoom_out", "map_zoom_in"):
+        target = actions["map"][action]
+        assert target["width"] >= 48
+        assert target["height"] >= 48
+        assert target["rf_tx"] is False
+        assert target["formats_sd"] is False
+    assert {"Center", "Drag to pan", "z10", "-", "+"}.issubset(labels["map"])
 
     assert_pairwise_disjoint(views["map_options"]["metrics"]["map_options_regions"])
     assert_pairwise_disjoint(views["map_cache"]["metrics"]["map_cache_row_boxes"])
@@ -1218,6 +1408,89 @@ def test_ui_simulator_built_in_map_states_are_deterministic_and_policy_bounded(t
         assert view["metrics"].get("map_probe_network_allowed") is False
         assert view["metrics"].get("map_background_download") is False
         assert view["metrics"].get("map_area_download") is False
+
+
+def test_ui_simulator_map_markers_are_named_bounded_and_open_node_detail(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path / "map-markers", views=("map", "node_detail_sheet"), scenario="map-ready"
+    )
+    views = {view["name"]: view for view in report["views"]}
+    map_view = views["map"]
+    detail = views["node_detail_sheet"]
+
+    assert report["ok"] is True
+    assert map_view["metrics"]["map_marker_query_limit"] == 32
+    assert map_view["metrics"]["map_marker_display_limit"] == 8
+    assert map_view["metrics"]["map_marker_query_count"] == 3
+    assert map_view["metrics"]["map_marker_displayed_count"] == 3
+    assert set(map_view["metrics"]["map_marker_full_names"]) == {
+        "YKF Corebot",
+        "YKF Room",
+        "Krabs Lagoon Repeater",
+    }
+    assert set(map_view["metrics"]["map_marker_names"]) == {
+        "YKF Corebot",
+        "YKF Room",
+        "Krabs Lagoo...",
+    }
+    assert map_view["metrics"]["map_marker_name_max_chars"] == 14
+    assert map_view["metrics"]["map_marker_truncated_count"] == 1
+    assert map_view["metrics"]["map_marker_labels_below"] is True
+    assert map_view["metrics"]["map_marker_overlay_separate"] is True
+    assert map_view["metrics"]["map_marker_refresh_rebuilds_tiles"] is False
+    assert map_view["metrics"]["map_marker_hit_diameter_px"] == 44
+    assert map_view["metrics"]["map_marker_source"] == "signed_advert_location"
+    assert map_view["metrics"]["map_saved_center_pin"] == "omitted"
+    assert len(set(map_view["metrics"]["map_marker_colors"])) == 3
+    assert "#F87171" not in map_view["metrics"]["map_marker_colors"]
+    assert set(map_view["metrics"]["map_marker_colors"]) == {
+        "#2DD4BF",
+        "#FACC15",
+        "#C084FC",
+    }
+    assert_pairwise_disjoint(map_view["metrics"]["map_marker_bounds"])
+    for marker_box in map_view["metrics"]["map_marker_bounds"]:
+        for exclusion_box in map_view["metrics"]["map_marker_exclusion_boxes"]:
+            assert boxes_overlap(marker_box, exclusion_box) is False
+    marker_targets = [
+        target for target in map_view["touch_targets"]
+        if target["kind"] == "map_marker_hit"
+    ]
+    assert len(marker_targets) == 3
+    assert all(target["width"] == 44 and target["height"] == 44 for target in marker_targets)
+    assert all(target["action"] == "open_map_node_detail" for target in marker_targets)
+    assert all(target["destination"] == "node_detail_sheet" for target in marker_targets)
+    assert all(target["rf_tx"] is False and target["formats_sd"] is False for target in marker_targets)
+    assert "Krabs Lagoo..." in map_view["labels"]
+    assert "Advert location" in detail["labels"]
+    assert detail["metrics"]["node_detail_location_provenance"] == "advert"
+    assert detail["metrics"]["node_detail_advert_location"] == "43.675000, -79.440000"
+    assert detail["metrics"]["node_detail_dm_available"] is True
+    assert detail["metrics"]["node_detail_management_gated"] is False
+    dm_targets = [
+        target for target in detail["touch_targets"]
+        if target["action"] == "open_node_dm"
+    ]
+    assert len(dm_targets) == 1
+    assert dm_targets[0]["destination"] == "compose_sheet"
+    assert detail["metrics"]["node_detail_return_destination"] == "map"
+    assert detail["metrics"]["node_detail_return_reuses_map_view"] is True
+
+
+def test_ui_simulator_map_downloading_shows_determinate_progress(tmp_path):
+    report = ui_simulator.generate(
+        tmp_path / "map-downloading", views=("map",), scenario="map-downloading"
+    )
+    view = report["views"][0]
+
+    assert report["ok"] is True
+    assert "Downloading 3/9" in view["labels"]
+    assert view["metrics"]["map_frame_ready"] is False
+    assert view["metrics"]["map_progress_bar_supported"] is True
+    assert view["metrics"]["map_progress_bar_visible"] is True
+    assert view["metrics"]["map_progress_completed"] == 3
+    assert view["metrics"]["map_progress_total"] == 9
+    assert view["metrics"]["map_marker_displayed_count"] == 0
 
 
 def test_ui_simulator_map_setup_connection_live_and_cached_states(tmp_path):

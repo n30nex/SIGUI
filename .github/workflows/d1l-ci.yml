@@ -141,10 +141,71 @@ jobs:
       - name: Release gate audit dry run
         run: python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json
 
+      - name: Record exact host-check success evidence
+        shell: pwsh
+        run: |
+          $out = Join-Path "artifacts" "host-checks"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $payload = [ordered]@{
+            schema = 1
+            artifact_type = "d1l_host_checks_success"
+            status = "pass"
+            passed = $true
+            all_prior_steps_completed = $true
+            job = "host-checks"
+            repository_commit = $env:GITHUB_SHA
+            workflow_run_id = [string]$env:GITHUB_RUN_ID
+            workflow_run_attempt = [string]$env:GITHUB_RUN_ATTEMPT
+          }
+          $path = Join-Path $out ("d1l_host_checks_success_{0}.json" -f $env:GITHUB_SHA)
+          $payload | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8NoBOM
+
       - uses: actions/upload-artifact@v7
         with:
           name: d1l-host-artifacts
           path: artifacts/**
+          if-no-files-found: error
+          retention-days: 14
+
+  meshcore-conformance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Install pinned Clang sanitizer toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y clang-18
+          clang-18 --version | grep -E '^Ubuntu clang version 18\.'
+          clang++-18 --version | grep -E '^Ubuntu clang version 18\.'
+
+      - name: Run MeshCore wire-envelope conformance and RX fuzzing
+        shell: bash
+        env:
+          D1L_MESHCORE_CONFORMANCE_CI: "1"
+          ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/meshcore-conformance
+          python ./scripts/meshcore_conformance_d1l.py \
+            --cc clang-18 \
+            --cxx clang++-18 \
+            --commit "$GITHUB_SHA" \
+            --seed 13746277 \
+            --runs 100000 \
+            --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: d1l-meshcore-wire-conformance
+          path: artifacts/meshcore-conformance/**
           if-no-files-found: error
           retention-days: 14
 
@@ -230,14 +291,60 @@ jobs:
           retention-days: 14
 
   firmware-build:
-    needs: [change-filter, rp2040-sd-bridge-build]
-    if: ${{ always() && needs.change-filter.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
+    needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]
+    if: ${{ always() && needs.change-filter.result == 'success' && needs.host-checks.result == 'success' && needs.meshcore-conformance.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
     runs-on: ubuntu-latest
-    container: espressif/idf:release-v5.1
+    container: espressif/idf:v5.5.4
     steps:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      - name: Download exact MeshCore conformance evidence
+        uses: actions/download-artifact@v7
+        with:
+          name: d1l-meshcore-wire-conformance
+          path: artifacts/meshcore-conformance-input
+
+      - name: Verify exact MeshCore conformance evidence
+        shell: bash
+        run: |
+          mapfile -t conformance_files < <(
+            find artifacts/meshcore-conformance-input -type f \
+              -name "meshcore_conformance_${GITHUB_SHA}.json" -print
+          )
+          if [[ "${#conformance_files[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one current-commit conformance JSON, found %s\n' \
+              "${#conformance_files[@]}" >&2
+            exit 1
+          fi
+          conformance_json="${conformance_files[0]}"
+          python - "$conformance_json" <<'PY'
+          import json
+          import os
+          import sys
+
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as stream:
+              report = json.load(stream)
+          source = report.get("source_verification") or {}
+          required = {
+              "schema_version": report.get("schema_version") == 1,
+              "artifact_type": report.get("artifact_type") == "d1l_meshcore_wire_conformance",
+              "passed": report.get("passed") is True,
+              "status": report.get("status") == "pass",
+              "execution_complete": report.get("execution_complete") is True,
+              "repository_commit": source.get("repository_commit") == os.environ["GITHUB_SHA"],
+              "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
+              "coverage_level": report.get("coverage_level") == "wire_envelope_only",
+              "closure_ready_false": report.get("closure_ready") is False,
+              "issue_65_closure_eligible_false": report.get("issue_65_closure_eligible") is False,
+          }
+          failed = [name for name, ok in required.items() if not ok]
+          if failed:
+              raise SystemExit("MeshCore conformance validation failed: " + ", ".join(failed))
+          PY
+          printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
 
       - name: Build D1L firmware
         shell: bash
@@ -245,6 +352,38 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           . /opt/esp/idf/export.sh
           idf.py build
+
+      - name: Capture ESP-IDF migration state
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p artifacts/idf-migration
+          printf '%s\n' 'espressif/idf:v5.5.4' > artifacts/idf-migration/container-image.txt
+          (. /opt/esp/idf/export.sh >/dev/null && idf.py --version) \
+            > artifacts/idf-migration/idf-version.txt 2>&1 || true
+          git -C /opt/esp/idf rev-parse HEAD \
+            > artifacts/idf-migration/idf-git-sha.txt 2>&1 || true
+          git diff -- dependencies.lock \
+            > artifacts/idf-migration/dependencies.lock.patch
+          git status --short --ignored -- dependencies.lock sdkconfig sdkconfig.defaults \
+            > artifacts/idf-migration/config-status.txt
+          for src in dependencies.lock sdkconfig build/config/sdkconfig.json; do
+            if [[ -f "$src" ]]; then
+              cp "$src" "artifacts/idf-migration/$(basename "$src")"
+            fi
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: d1l-idf55-migration-state
+          path: artifacts/idf-migration/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Require committed dependency solution
+        shell: bash
+        run: git diff --exit-code -- dependencies.lock
 
       - name: Collect firmware artifacts
         shell: bash
@@ -267,7 +406,7 @@ jobs:
       - name: Package D1L release
         shell: bash
         run: |
-          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}")
+          package_args=(--build-dir build --out-dir artifacts/release --package-name "d1l-release-${GITHUB_SHA}" --meshcore-conformance-json "$D1L_MESHCORE_CONFORMANCE_JSON")
           if [[ "${{ needs.change-filter.outputs.include_sd_bridge }}" == "true" ]]; then
             package_args+=(--rp2040-artifact-root artifacts/rp2040-release-inputs)
           fi

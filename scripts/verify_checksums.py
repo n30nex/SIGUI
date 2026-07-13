@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 from pathlib import Path
 
 
@@ -20,24 +21,84 @@ def strip_leading_current_dir(filename: str) -> str:
     return filename[2:] if filename.startswith("./") else filename
 
 
+def safe_checksum_target(parent: Path, filename: str) -> Path | None:
+    filename = strip_leading_current_dir(filename)
+    if not filename or "\\" in filename:
+        return None
+    relative = Path(filename)
+    if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+        return None
+    try:
+        target = (parent / relative).resolve()
+        target.relative_to(parent.resolve())
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return target
+
+
+def parse_checksum_row(line: str, parent: Path) -> tuple[str, Path] | None:
+    try:
+        expected, filename = line.split(maxsplit=1)
+    except ValueError:
+        return None
+    if re.fullmatch(r"[0-9a-fA-F]{64}", expected) is None:
+        return None
+    target = safe_checksum_target(parent, filename)
+    if target is None:
+        return None
+    return expected.lower(), target
+
+
 def verify_sha256_file(path: Path) -> bool:
-    text = path.read_text(encoding="ascii").strip()
-    expected, filename = text.split(maxsplit=1)
-    target = path.parent / filename
-    return target.exists() and sha256_file(target).lower() == expected.lower()
+    try:
+        lines = [line.strip() for line in path.read_text(encoding="ascii").splitlines() if line.strip()]
+    except (OSError, UnicodeError):
+        return False
+    if len(lines) != 1:
+        return False
+    row = parse_checksum_row(lines[0], path.parent)
+    if row is None:
+        return False
+    expected, target = row
+    try:
+        return target.is_file() and sha256_file(target).lower() == expected
+    except OSError:
+        return False
 
 
 def verify_sha256_manifest(path: Path) -> bool:
-    for line in path.read_text(encoding="ascii").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        expected, filename = line.split(maxsplit=1)
-        filename = strip_leading_current_dir(filename)
-        target = path.parent / filename
-        if not target.exists() or sha256_file(target).lower() != expected.lower():
+    try:
+        manifest = path.resolve()
+        lines = [line.strip() for line in path.read_text(encoding="ascii").splitlines() if line.strip()]
+    except (OSError, UnicodeError):
+        return False
+    if not lines:
+        return False
+
+    listed: set[Path] = set()
+    for line in lines:
+        row = parse_checksum_row(line, path.parent)
+        if row is None:
             return False
-    return True
+        expected, target = row
+        if target in listed:
+            return False
+        listed.add(target)
+        try:
+            if not target.is_file() or sha256_file(target).lower() != expected:
+                return False
+        except OSError:
+            return False
+
+    try:
+        actual = {
+            candidate.resolve()
+            for candidate in path.parent.rglob("*")
+            if candidate.is_file() and candidate.resolve() != manifest
+        }
+    except OSError:
+        return False
+    return listed == actual
 
 
 def main() -> int:

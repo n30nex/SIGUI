@@ -15,9 +15,11 @@
 #include "mbedtls/aes.h"
 #include "mbedtls/md.h"
 #include "ed_25519.h"
+#include "mesh/advert_data.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/meshcore_radio_profile.h"
+#include "mesh/meshcore_wire.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
 #include "mesh/packet_log.h"
@@ -25,31 +27,14 @@
 #include "radio.h"
 #include "sx126x.h"
 
-#define D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD 0x00U
-#define D1L_MESHCORE_ROUTE_FLOOD 0x01U
-#define D1L_MESHCORE_ROUTE_DIRECT 0x02U
-#define D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT 0x03U
-#define D1L_MESHCORE_PAYLOAD_TEXT 0x02U
-#define D1L_MESHCORE_PAYLOAD_ACK 0x03U
-#define D1L_MESHCORE_PAYLOAD_ADVERT 0x04U
-#define D1L_MESHCORE_PAYLOAD_GROUP_TEXT 0x05U
-#define D1L_MESHCORE_PAYLOAD_PATH 0x08U
-#define D1L_MESHCORE_PAYLOAD_MULTIPART 0x0AU
-#define D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD \
-    ((uint8_t)((D1L_MESHCORE_PAYLOAD_GROUP_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
-#define D1L_MESHCORE_HEADER_DM_TEXT_FLOOD \
-    ((uint8_t)((D1L_MESHCORE_PAYLOAD_TEXT << 2) | D1L_MESHCORE_ROUTE_FLOOD))
-#define D1L_MESHCORE_HEADER_DM_TEXT_DIRECT \
-    ((uint8_t)((D1L_MESHCORE_PAYLOAD_TEXT << 2) | D1L_MESHCORE_ROUTE_DIRECT))
 #define D1L_MESHCORE_PUB_KEY_SIZE 32U
 #define D1L_MESHCORE_SIGNATURE_SIZE 64U
 #define D1L_MESHCORE_SEED_SIZE 32U
 #define D1L_MESHCORE_ADVERT_MIN_PAYLOAD \
     (D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_SIGNATURE_SIZE)
-#define D1L_MESHCORE_MAX_ADVERT_DATA 32U
+#define D1L_MESHCORE_MAX_ADVERT_DATA D1L_ADVERT_DATA_MAX_LEN
 #define D1L_MESHCORE_CIPHER_BLOCK_SIZE 16U
 #define D1L_MESHCORE_CIPHER_MAC_SIZE 2U
-#define D1L_MESHCORE_MAX_RAW_PACKET 255U
 #define D1L_MESHCORE_MAX_TEXT_BYTES 160U
 #define D1L_MESHCORE_USER_TEXT_MAX D1L_MESSAGE_MAX_CHARS
 #define D1L_MESHCORE_BW_INDEX_62K5 3U
@@ -66,12 +51,15 @@ _Static_assert(D1L_MESHCORE_USER_TEXT_MAX == 138U,
                "MeshCore user text limit must reject 139+ chars");
 _Static_assert(D1L_MESHCORE_USER_TEXT_MAX <= (D1L_MESHCORE_MAX_TEXT_BYTES - 5U),
                "MeshCore plaintext buffer must fit the user text limit");
+_Static_assert(D1L_ADVERT_DATA_NAME_LEN == D1L_HEARD_NODE_NAME_LEN,
+               "Advert parser and heard-node name bounds must match");
 
 static const char *TAG = "d1l_mesh";
 static d1l_meshcore_service_status_t s_status;
 static SemaphoreHandle_t s_status_mutex;
 static QueueHandle_t s_service_queue;
 static TaskHandle_t s_service_task;
+static bool s_service_initialized;
 static bool s_radio_started;
 static volatile bool s_tx_busy;
 static bool s_pending_public_tx;
@@ -134,19 +122,6 @@ static void status_unlock(void)
         (void)xSemaphoreGive(s_status_mutex);
     }
 }
-
-typedef struct {
-    uint8_t header;
-    uint8_t route;
-    uint8_t type;
-    uint8_t path_len;
-    uint8_t path_hash_bytes;
-    uint8_t path_hops;
-    const uint8_t *path;
-    uint8_t path_byte_len;
-    const uint8_t *payload;
-    uint16_t payload_len;
-} d1l_meshcore_wire_packet_t;
 
 static void sanitize_note(char *dest, size_t dest_size, const char *src)
 {
@@ -399,28 +374,6 @@ static uint32_t read_le32(const uint8_t *src)
            ((uint32_t)src[3] << 24);
 }
 
-static bool path_len_valid(uint8_t path_len)
-{
-    const uint8_t hash_count = path_len & 63U;
-    const uint8_t hash_size = (uint8_t)((path_len >> 6) + 1U);
-    return hash_size < 4U && (hash_count * hash_size) <= 64U;
-}
-
-static uint8_t path_hash_size(uint8_t path_len)
-{
-    return (uint8_t)((path_len >> 6) + 1U);
-}
-
-static uint8_t path_hash_count(uint8_t path_len)
-{
-    return (uint8_t)(path_len & 63U);
-}
-
-static uint8_t path_byte_len(uint8_t path_len)
-{
-    return (uint8_t)(path_hash_size(path_len) * path_hash_count(path_len));
-}
-
 static const char *route_name(uint8_t route)
 {
     switch (route) {
@@ -435,42 +388,6 @@ static const char *route_name(uint8_t route)
     default:
         return "unknown";
     }
-}
-
-static bool parse_wire_packet(const uint8_t *raw, uint16_t size, d1l_meshcore_wire_packet_t *out)
-{
-    if (!raw || !out || size < 3U) {
-        return false;
-    }
-
-    size_t i = 0;
-    memset(out, 0, sizeof(*out));
-    out->header = raw[i++];
-    out->route = out->header & 0x03U;
-    out->type = (out->header >> 2) & 0x0fU;
-    if (out->route == D1L_MESHCORE_ROUTE_TRANSPORT_FLOOD ||
-        out->route == D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT) {
-        if (i + 4U >= size) {
-            return false;
-        }
-        i += 4U;
-    }
-    out->path_len = raw[i++];
-    if (!path_len_valid(out->path_len)) {
-        return false;
-    }
-    const uint8_t path_bytes = path_byte_len(out->path_len);
-    if (i + path_bytes >= size) {
-        return false;
-    }
-    out->path = path_bytes > 0 ? &raw[i] : NULL;
-    out->path_byte_len = path_bytes;
-    i += path_bytes;
-    out->path_hash_bytes = path_hash_size(out->path_len);
-    out->path_hops = path_hash_count(out->path_len);
-    out->payload = &raw[i];
-    out->payload_len = (uint16_t)(size - i);
-    return true;
 }
 
 static bool bandwidth_to_driver_index(float bandwidth_khz, uint32_t *out_index,
@@ -696,12 +613,13 @@ static esp_err_t build_public_text_packet(const char *text, uint8_t path_hash_by
     memcpy(&plain[5], text, message_len);
     const size_t plain_len = 5U + message_len;
 
-    if (raw_size < 4U) {
+    size_t i = 0;
+    if (!d1l_meshcore_wire_write_prefix(
+            D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD, 0U, 0U,
+            (uint8_t)((path_hash_bytes - 1U) << 6), NULL,
+            raw, raw_size, &i) || i >= raw_size) {
         return ESP_ERR_INVALID_SIZE;
     }
-    size_t i = 0;
-    raw[i++] = D1L_MESHCORE_HEADER_GROUP_TEXT_FLOOD;
-    raw[i++] = (uint8_t)((path_hash_bytes - 1U) << 6);
     raw[i++] = s_public_channel_hash;
 
     size_t mac_cipher_len = 0;
@@ -774,8 +692,9 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
     if (!use_direct && (flood_path_hash_bytes < 1 || flood_path_hash_bytes > 3)) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (use_direct && (!path_len_valid(direct_path_len) ||
-                       (path_byte_len(direct_path_len) > 0 && direct_path == NULL))) {
+    if (use_direct && (!d1l_meshcore_wire_path_len_valid(direct_path_len) ||
+                       (d1l_meshcore_wire_path_byte_len(direct_path_len) > 0U &&
+                        direct_path == NULL))) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -801,16 +720,16 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
         return ret;
     }
 
-    const uint8_t direct_path_bytes = use_direct ? path_byte_len(direct_path_len) : 0U;
-    if (raw_size < (size_t)(4U + direct_path_bytes)) {
-        return ESP_ERR_INVALID_SIZE;
-    }
     size_t i = 0;
-    raw[i++] = use_direct ? D1L_MESHCORE_HEADER_DM_TEXT_DIRECT : D1L_MESHCORE_HEADER_DM_TEXT_FLOOD;
-    raw[i++] = use_direct ? direct_path_len : (uint8_t)((flood_path_hash_bytes - 1U) << 6);
-    if (direct_path_bytes > 0) {
-        memcpy(&raw[i], direct_path, direct_path_bytes);
-        i += direct_path_bytes;
+    if (!d1l_meshcore_wire_write_prefix(
+            use_direct ? D1L_MESHCORE_HEADER_DM_TEXT_DIRECT :
+                         D1L_MESHCORE_HEADER_DM_TEXT_FLOOD,
+            0U, 0U,
+            use_direct ? direct_path_len :
+                         (uint8_t)((flood_path_hash_bytes - 1U) << 6),
+            use_direct ? direct_path : NULL,
+            raw, raw_size, &i) || raw_size - i < 2U) {
+        return ESP_ERR_INVALID_SIZE;
     }
     raw[i++] = dest_pub[0];
     raw[i++] = settings->identity_public_key[0];
@@ -833,7 +752,7 @@ static esp_err_t build_dm_text_packet(const d1l_settings_t *settings,
 static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!parse_wire_packet(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_GROUP_TEXT ||
         packet.payload_len < 3U ||
         packet.payload[0] != s_public_channel_hash) {
@@ -866,7 +785,7 @@ static void parse_rx_public_packet(uint8_t *payload, uint16_t size, int16_t rssi
 static void parse_rx_dm_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!parse_wire_packet(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_TEXT ||
         packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
         return;
@@ -961,7 +880,7 @@ static void record_dm_ack(uint32_t ack_hash, const d1l_meshcore_wire_packet_t *p
 static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!parse_wire_packet(payload, size, &packet)) {
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet)) {
         return;
     }
 
@@ -985,7 +904,7 @@ static void parse_rx_ack_packet(uint8_t *payload, uint16_t size, int16_t rssi, i
 static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!parse_wire_packet(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_PATH ||
         packet.payload_len <= (2U + D1L_MESHCORE_CIPHER_MAC_SIZE)) {
         return;
@@ -1019,10 +938,10 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
         }
 
         const uint8_t out_path_len = plain[0];
-        if (!path_len_valid(out_path_len)) {
+        if (!d1l_meshcore_wire_path_len_valid(out_path_len)) {
             continue;
         }
-        const uint8_t out_path_bytes = path_byte_len(out_path_len);
+        const uint8_t out_path_bytes = d1l_meshcore_wire_path_byte_len(out_path_len);
         if ((size_t)(2U + out_path_bytes) > plain_len) {
             continue;
         }
@@ -1037,8 +956,8 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
             return;
         }
 
-        const uint8_t out_hash_bytes = path_hash_size(out_path_len);
-        const uint8_t out_hops = path_hash_count(out_path_len);
+        const uint8_t out_hash_bytes = d1l_meshcore_wire_path_hash_size(out_path_len);
+        const uint8_t out_hops = d1l_meshcore_wire_path_hash_count(out_path_len);
         s_status.rx_packets++;
         esp_err_t route_ret =
             d1l_route_store_upsert_observation(contact->fingerprint, contact->alias, "path_return",
@@ -1057,60 +976,6 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
         }
         return;
     }
-}
-
-static char advert_type_code(uint8_t flags)
-{
-    switch (flags & 0x0fU) {
-    case 1:
-        return 'C';
-    case 2:
-        return 'R';
-    case 3:
-        return 'O';
-    case 4:
-        return 'S';
-    default:
-        return 'N';
-    }
-}
-
-static bool parse_advert_name(const uint8_t *app_data, size_t app_data_len, char *name, size_t name_size)
-{
-    if (!name || name_size == 0) {
-        return false;
-    }
-    name[0] = '\0';
-    if (!app_data || app_data_len == 0) {
-        return true;
-    }
-
-    const uint8_t flags = app_data[0];
-    size_t i = 1;
-    if ((flags & 0x10U) != 0) {
-        i += 8U;
-    }
-    if ((flags & 0x20U) != 0) {
-        i += 2U;
-    }
-    if ((flags & 0x40U) != 0) {
-        i += 2U;
-    }
-    if (i > app_data_len) {
-        return false;
-    }
-    if ((flags & 0x80U) == 0 || i == app_data_len) {
-        return true;
-    }
-
-    char raw_name[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    size_t out = 0;
-    while (i < app_data_len && out + 1U < sizeof(raw_name)) {
-        raw_name[out++] = (char)app_data[i++];
-    }
-    raw_name[out] = '\0';
-    sanitize_note(name, name_size, raw_name);
-    return true;
 }
 
 static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *timestamp,
@@ -1174,9 +1039,15 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
     }
 
     size_t i = 0;
-    raw[i++] = (uint8_t)((D1L_MESHCORE_PAYLOAD_ADVERT << 2) |
-                         (flood ? D1L_MESHCORE_ROUTE_FLOOD : D1L_MESHCORE_ROUTE_DIRECT));
-    raw[i++] = flood ? (uint8_t)((settings->path_hash_bytes - 1U) << 6) : 0;
+    if (!d1l_meshcore_wire_write_prefix(
+            (uint8_t)((D1L_MESHCORE_PAYLOAD_ADVERT << 2) |
+                      (flood ? D1L_MESHCORE_ROUTE_FLOOD :
+                               D1L_MESHCORE_ROUTE_DIRECT)),
+            0U, 0U,
+            flood ? (uint8_t)((settings->path_hash_bytes - 1U) << 6) : 0U,
+            NULL, raw, raw_size, &i)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     memcpy(&raw[i], settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE);
     i += D1L_MESHCORE_PUB_KEY_SIZE;
     write_le32(&raw[i], tx_timestamp);
@@ -1205,7 +1076,7 @@ static esp_err_t build_advert_packet(const d1l_settings_t *settings, bool flood,
 static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr)
 {
     d1l_meshcore_wire_packet_t packet;
-    if (!parse_wire_packet(payload, size, &packet) ||
+    if (!d1l_meshcore_wire_decode_v1(payload, size, &packet) ||
         packet.type != D1L_MESHCORE_PAYLOAD_ADVERT ||
         packet.payload_len < D1L_MESHCORE_ADVERT_MIN_PAYLOAD) {
         return;
@@ -1215,15 +1086,19 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
     const uint8_t *timestamp = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE];
     const uint8_t *signature = &packet.payload[D1L_MESHCORE_PUB_KEY_SIZE + 4U];
     const uint8_t *app_data = &packet.payload[D1L_MESHCORE_ADVERT_MIN_PAYLOAD];
-    size_t app_data_len = packet.payload_len - D1L_MESHCORE_ADVERT_MIN_PAYLOAD;
-    if (app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
-        app_data_len = D1L_MESHCORE_MAX_ADVERT_DATA;
-    }
+    const size_t app_data_len = packet.payload_len - D1L_MESHCORE_ADVERT_MIN_PAYLOAD;
 
     char pub_prefix[17] = {0};
     hex_prefix(pub_prefix, sizeof(pub_prefix), pub_key, 8U);
     char pub_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
     hex_prefix(pub_key_hex, sizeof(pub_key_hex), pub_key, D1L_MESHCORE_PUB_KEY_SIZE);
+    if (app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "app_oversize pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_bad_app", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
     const bool valid_signature =
         verify_advert_signature(pub_key, timestamp, signature, app_data, app_data_len);
     if (!valid_signature) {
@@ -1234,29 +1109,57 @@ static void parse_rx_advert_packet(uint8_t *payload, uint16_t size, int16_t rssi
         return;
     }
 
-    char name[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    bool app_data_valid = parse_advert_name(app_data, app_data_len, name, sizeof(name));
-    const char type = app_data_len > 0 ? advert_type_code(app_data[0]) : 'N';
+    const d1l_settings_t *settings = d1l_settings_current();
+    if (settings->identity_ready &&
+        memcmp(pub_key, settings->identity_public_key, D1L_MESHCORE_PUB_KEY_SIZE) == 0) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "self pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_self", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
+
+    d1l_advert_data_t advert = {0};
+    if (!d1l_advert_data_parse(app_data, app_data_len, &advert)) {
+        char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+        snprintf(note, sizeof(note), "app_invalid pub=%s", pub_prefix);
+        append_packet_log("rx", "advert_bad_app", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
+
     char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
-    if (name[0]) {
+    if (advert.name[0]) {
         char short_name[13] = {0};
-        sanitize_note(short_name, sizeof(short_name), name);
-        snprintf(note, sizeof(note), "adv %c %s %.8s", type, short_name, pub_prefix);
+        sanitize_note(short_name, sizeof(short_name), advert.name);
+        snprintf(note, sizeof(note), "adv %c %s %.8s", advert.type_code, short_name, pub_prefix);
     } else {
-        snprintf(note, sizeof(note), "adv %c %.8s%s", type, pub_prefix,
-                 app_data_valid ? "" : " app_bad");
+        snprintf(note, sizeof(note), "adv %c %.8s", advert.type_code, pub_prefix);
     }
     s_status.rx_packets++;
-    s_status.rx_adverts++;
-    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, name, type, rssi,
+    const uint32_t advert_timestamp = read_le32(timestamp);
+    bool advert_stale = false;
+    esp_err_t ret = d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name,
+                                                 advert.type_code, rssi,
                                                  (snr * 10) / 4,
                                                  packet.path_hash_bytes, packet.path_hops,
-                                                 read_le32(timestamp));
+                                                 advert_timestamp, advert.location_valid,
+                                                 advert.lat_e6, advert.lon_e6,
+                                                 &advert_stale);
+    if (advert_stale) {
+        snprintf(note, sizeof(note), "replay %.8s ts=%lu", pub_prefix,
+                 (unsigned long)advert_timestamp);
+        append_packet_log("rx", "advert_replay", rssi, snr, packet.path_hash_bytes,
+                          packet.path_hops, size, payload, size, note);
+        return;
+    }
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "node store upsert failed: %s", esp_err_to_name(ret));
     }
+    s_status.rx_adverts++;
     esp_err_t route_ret =
-        d1l_route_store_upsert_observation(pub_prefix, name[0] ? name : pub_prefix, "advert",
+        d1l_route_store_upsert_observation(pub_prefix,
+                                           advert.name[0] ? advert.name : pub_prefix, "advert",
                                            route_name(packet.route), "rx", rssi,
                                            (snr * 10) / 4, packet.path_hash_bytes,
                                            packet.path_hops, size);
@@ -1366,7 +1269,7 @@ static esp_err_t ensure_radio_started(void)
         return ret;
     }
     s_status.radio_ready = true;
-    s_status.identity_ready = true;
+    s_status.identity_ready = d1l_settings_current()->identity_ready;
     s_status.companion_framing_ready = true;
     if (!s_tx_busy) {
         s_status.state = D1L_MESHCORE_SERVICE_READY;
@@ -1452,6 +1355,10 @@ static void meshcore_service_task(void *arg)
             ret = ESP_ERR_INVALID_ARG;
             break;
         }
+        if (cmd.type == D1L_MESHCORE_SERVICE_CMD_START_RX &&
+            cmd.reply_task == NULL && ret != ESP_OK) {
+            ESP_LOGW(TAG, "asynchronous MeshCore RX start failed: %s", esp_err_to_name(ret));
+        }
         meshcore_service_reply(&cmd, ret);
     }
 }
@@ -1525,6 +1432,18 @@ static void meshcore_service_request_rx_async(void)
     (void)xQueueSend(s_service_queue, &cmd, 0);
 }
 
+esp_err_t d1l_meshcore_service_start_rx_async(void)
+{
+    esp_err_t ret = meshcore_service_start_task();
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    d1l_meshcore_service_cmd_t cmd = {
+        .type = D1L_MESHCORE_SERVICE_CMD_START_RX,
+    };
+    return xQueueSend(s_service_queue, &cmd, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
 static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
                                            uint8_t raw_len,
                                            uint32_t timeout_ms)
@@ -1543,8 +1462,15 @@ static esp_err_t meshcore_service_send_raw(const uint8_t *raw,
 void d1l_meshcore_service_init(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
-    (void)meshcore_service_start_task();
+    const esp_err_t task_ret = meshcore_service_start_task();
     status_lock();
+    // Runtime settings flows reuse init; preserve the live radio and queued work.
+    if (s_service_initialized) {
+        s_status.path_hash_bytes = settings->path_hash_bytes;
+        s_status.identity_ready = settings->identity_ready;
+        status_unlock();
+        return;
+    }
     memset(&s_status, 0, sizeof(s_status));
     s_status.state = D1L_MESHCORE_SERVICE_WAITING_FOR_RADIO;
     s_status.path_hash_bytes = settings->path_hash_bytes;
@@ -1560,6 +1486,7 @@ void d1l_meshcore_service_init(void)
     s_pending_public_tx = false;
     s_pending_public_text[0] = '\0';
     memset(&s_pending_dm_tx, 0, sizeof(s_pending_dm_tx));
+    s_service_initialized = task_ret == ESP_OK;
     status_unlock();
 }
 
@@ -1734,6 +1661,20 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     if (ret != ESP_OK) {
         return ret;
     }
+
+    /* Resolve and authorize the target before identity/radio side effects.
+     * Only canonical chat adverts are direct-message endpoints. */
+    d1l_contact_entry_t contact = {0};
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
+        contact.public_key_hex[0] == '\0') {
+        s_status.rejected_commands++;
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (strcmp(contact.type, "chat") != 0) {
+        s_status.rejected_commands++;
+        return ESP_ERR_INVALID_STATE;
+    }
+
     ret = d1l_meshcore_service_ensure_identity();
     if (ret != ESP_OK) {
         s_status.rejected_commands++;
@@ -1752,21 +1693,17 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
         return ESP_ERR_INVALID_STATE;
     }
 
-    d1l_contact_entry_t contact = {0};
-    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
-        contact.public_key_hex[0] == '\0') {
-        s_status.rejected_commands++;
-        return ESP_ERR_NOT_FOUND;
-    }
-
     uint8_t raw[D1L_MESHCORE_MAX_RAW_PACKET];
     uint8_t raw_len = 0;
     uint32_t ack_hash = 0;
     const d1l_settings_t *settings = d1l_settings_current();
-    const bool use_direct = contact.out_path_valid && path_len_valid(contact.out_path_len);
-    const uint8_t route_path_hash_bytes = use_direct ? path_hash_size(contact.out_path_len) :
+    const bool use_direct = contact.out_path_valid &&
+                            d1l_meshcore_wire_path_len_valid(contact.out_path_len);
+    const uint8_t route_path_hash_bytes = use_direct ?
+                                          d1l_meshcore_wire_path_hash_size(contact.out_path_len) :
                                           settings->path_hash_bytes;
-    const uint8_t route_path_hops = use_direct ? path_hash_count(contact.out_path_len) : 0U;
+    const uint8_t route_path_hops = use_direct ?
+                                    d1l_meshcore_wire_path_hash_count(contact.out_path_len) : 0U;
     uint32_t tx_timestamp = 0;
     ret = d1l_settings_next_mesh_timestamp(&tx_timestamp);
     if (ret != ESP_OK) {
@@ -1842,10 +1779,13 @@ esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
     }
 
     const d1l_settings_t *settings = d1l_settings_current();
-    const bool use_direct = contact.out_path_valid && path_len_valid(contact.out_path_len);
-    const uint8_t route_path_hash_bytes = use_direct ? path_hash_size(contact.out_path_len) :
+    const bool use_direct = contact.out_path_valid &&
+                            d1l_meshcore_wire_path_len_valid(contact.out_path_len);
+    const uint8_t route_path_hash_bytes = use_direct ?
+                                          d1l_meshcore_wire_path_hash_size(contact.out_path_len) :
                                           settings->path_hash_bytes;
-    const uint8_t route_path_hops = use_direct ? path_hash_count(contact.out_path_len) : 0U;
+    const uint8_t route_path_hops = use_direct ?
+                                    d1l_meshcore_wire_path_hash_count(contact.out_path_len) : 0U;
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(contact.fingerprint, contact.alias, "trace_probe",
                                            route_name(use_direct ? D1L_MESHCORE_ROUTE_DIRECT :

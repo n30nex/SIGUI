@@ -1,3 +1,5 @@
+import json
+
 from scripts import sd_file_canary_d1l
 
 
@@ -8,15 +10,68 @@ def ready_storage_status(manager_state: str | None = None) -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
         f"{manager}"
-        '"sd":{"state":"ready","present":true,"mounted":true,'
+        '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"rp2040_protocol_supported":true,'
+        '"status_stale":false,"presence_stale":false,"refresh_failures":0,'
         '"file_ops":true,"atomic_rename":true,'
         '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
         '"data_enabled":true,"data_backend":"mixed",'
         '"message_store_backend":"sd","dm_store_backend":"sd",'
         '"route_store_backend":"sd","packet_log_backend":"sd",'
+        '"retained_nvs":{"partition":"d1l_retained","marker_ready":true,'
+        '"markers_complete":true,'
+        '"anchor_ready":true,'
+        '"sentinel_ready":true,'
+        '"external_init_required":false,'
+        '"initialized_this_boot":false,"ready":true,"init_error":"ESP_OK",'
+        '"migrated_keys":4,"migration_error":"ESP_OK"},'
+        '"retained_sd":{"degraded":false,"backup_degraded":false,"stores":{'
+        '"messages":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"dm":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"routes":{"nvs_mirror_last_error":"ESP_OK"},'
+        '"packets":{"nvs_mirror_last_error":"ESP_OK"}}},'
         '"stores":{"messages":"sd","dm":"sd","routes":"sd","packets":"sd"}}\n'
     )
+
+
+def test_sd_file_gate_rejects_stale_or_failed_status_refresh():
+    fresh = json.loads(ready_storage_status())
+    assert sd_file_canary_d1l.storage_file_gate_ready(fresh)
+
+    stale = json.loads(ready_storage_status())
+    stale["sd"]["status_stale"] = True
+    assert not sd_file_canary_d1l.storage_file_gate_ready(stale)
+
+    presence_stale = json.loads(ready_storage_status())
+    presence_stale["sd"]["presence_stale"] = True
+    assert not sd_file_canary_d1l.storage_file_gate_ready(presence_stale)
+
+    failed = json.loads(ready_storage_status())
+    failed["sd"]["refresh_failures"] = 1
+    assert not sd_file_canary_d1l.storage_file_gate_ready(failed)
+
+    wrong_filesystem = json.loads(ready_storage_status())
+    wrong_filesystem["sd"]["filesystem"] = "exfat"
+    assert not sd_file_canary_d1l.storage_file_gate_ready(wrong_filesystem)
+
+
+def test_retained_history_backends_require_dedicated_anchor():
+    ready = json.loads(ready_storage_status())
+    assert sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    incomplete = json.loads(ready_storage_status())
+    incomplete["retained_nvs"]["markers_complete"] = False
+    assert not sd_file_canary_d1l.retained_history_backends_ready(incomplete)
+
+    ready["retained_nvs"]["anchor_ready"] = False
+    assert not sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    del ready["retained_nvs"]["anchor_ready"]
+    assert not sd_file_canary_d1l.retained_history_backends_ready(ready)
+
+    external = json.loads(ready_storage_status())
+    external["retained_nvs"]["external_init_required"] = True
+    assert not sd_file_canary_d1l.retained_history_backends_ready(external)
 
 
 def canary_success() -> str:
@@ -48,6 +103,9 @@ class FakeSerial:
 
     def reset_input_buffer(self):
         self.reset_count += 1
+
+    def open(self):
+        pass
 
     def __enter__(self):
         return self

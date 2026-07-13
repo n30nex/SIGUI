@@ -52,6 +52,8 @@ static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
+static d1l_message_entry_t s_volatile_entry;
+static bool s_volatile_valid;
 static bool s_loaded;
 static d1l_message_store_blob_t s_blob_scratch;
 static d1l_message_store_blob_v1_t s_blob_v1_scratch;
@@ -109,13 +111,6 @@ static bool message_matches_query(const d1l_message_entry_t *entry, const char *
            contains_casefold(entry->direction, query);
 }
 
-static bool is_volatile_ui_canary(const d1l_message_entry_t *entry)
-{
-    return entry &&
-           strncmp(entry->author, "UI Canary", sizeof(entry->author)) == 0 &&
-           strncmp(entry->text, "ui-data-canary ", strlen("ui-data-canary ")) == 0;
-}
-
 static void clear_ram(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
@@ -124,6 +119,8 @@ static void clear_ram(void)
     s_next_seq = 1;
     s_total_written = 0;
     s_dropped_oldest = 0;
+    memset(&s_volatile_entry, 0, sizeof(s_volatile_entry));
+    s_volatile_valid = false;
 }
 
 static void fill_blob(d1l_message_store_blob_t *blob)
@@ -138,7 +135,7 @@ static void fill_blob(d1l_message_store_blob_t *blob)
     for (size_t i = 0; i < s_count; ++i) {
         const d1l_message_entry_t *entry =
             &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
-        if (!is_volatile_ui_canary(entry) && blob->count < D1L_MESSAGE_STORE_CAPACITY) {
+        if (blob->count < D1L_MESSAGE_STORE_CAPACITY) {
             blob->entries[blob->count++] = *entry;
         }
     }
@@ -298,7 +295,7 @@ static esp_err_t append_public_internal(const char *direction, const char *autho
 
     d1l_store_lock_take(&s_store_lock);
     d1l_message_entry_t entry = {
-        .seq = s_next_seq++,
+        .seq = s_next_seq,
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
         .rssi_dbm = rssi_dbm,
         .snr_tenths = snr_tenths,
@@ -316,6 +313,20 @@ static esp_err_t append_public_internal(const char *direction, const char *autho
         strncpy(entry.author, "Public", sizeof(entry.author) - 1U);
     }
 
+    if (!persist) {
+        /* The UI canary is a preview of the next durable row.  Keeping it
+         * outside the ring means a full history cannot be evicted merely by
+         * asking the UI to refresh. */
+        s_volatile_entry = entry;
+        s_volatile_valid = true;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
+    }
+
+    /* A real append owns the borrowed sequence and supersedes the preview. */
+    s_volatile_valid = false;
+    s_next_seq++;
+
     s_entries[s_head] = entry;
     s_head = (s_head + 1U) % D1L_MESSAGE_STORE_CAPACITY;
     if (s_count < D1L_MESSAGE_STORE_CAPACITY) {
@@ -324,7 +335,7 @@ static esp_err_t append_public_internal(const char *direction, const char *autho
         s_dropped_oldest++;
     }
     s_total_written++;
-    esp_err_t ret = persist ? persist_store() : ESP_OK;
+    esp_err_t ret = persist_store();
     d1l_store_lock_give(&s_store_lock);
     return ret;
 }
@@ -368,18 +379,20 @@ size_t d1l_message_store_copy_recent(d1l_message_entry_t *out_entries, size_t ma
     }
 
     d1l_store_lock_take(&s_store_lock);
-    if (s_count == 0) {
+    if (s_count == 0 && !s_volatile_valid) {
         d1l_store_lock_give(&s_store_lock);
         return 0;
     }
-    const size_t n = s_count < max_entries ? s_count : max_entries;
-    size_t oldest = (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
-    if (s_count > n) {
-        oldest = (oldest + (s_count - n)) % D1L_MESSAGE_STORE_CAPACITY;
-    }
-
+    const size_t visible_count = s_count + (s_volatile_valid ? 1U : 0U);
+    const size_t n = visible_count < max_entries ? visible_count : max_entries;
+    const size_t first = visible_count - n;
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
     for (size_t i = 0; i < n; ++i) {
-        out_entries[i] = s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
+        const size_t visible_index = first + i;
+        out_entries[i] = visible_index < s_count ?
+            s_entries[(oldest + visible_index) % D1L_MESSAGE_STORE_CAPACITY] :
+            s_volatile_entry;
     }
     d1l_store_lock_give(&s_store_lock);
     return n;
@@ -397,17 +410,21 @@ size_t d1l_message_store_query_page(d1l_message_entry_t *out_entries, size_t max
     }
 
     d1l_store_lock_take(&s_store_lock);
-    if (s_count == 0) {
+    if (s_count == 0 && !s_volatile_valid) {
         d1l_store_lock_give(&s_store_lock);
         return 0;
     }
     size_t total_matches = 0;
-    size_t oldest = (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_MESSAGE_STORE_CAPACITY - s_count) % D1L_MESSAGE_STORE_CAPACITY;
     for (size_t i = 0; i < s_count; ++i) {
         const d1l_message_entry_t *entry = &s_entries[(oldest + i) % D1L_MESSAGE_STORE_CAPACITY];
         if (!message_matches_query(entry, query)) {
             continue;
         }
+        total_matches++;
+    }
+    if (s_volatile_valid && message_matches_query(&s_volatile_entry, query)) {
         total_matches++;
     }
 
@@ -434,6 +451,12 @@ size_t d1l_message_store_query_page(d1l_message_entry_t *out_entries, size_t max
             out_entries[out_index++] = *entry;
         }
         match_index++;
+    }
+    if (s_volatile_valid && out_index < copied &&
+        message_matches_query(&s_volatile_entry, query)) {
+        if (match_index >= first_match && match_index < last_match) {
+            out_entries[out_index++] = s_volatile_entry;
+        }
     }
     d1l_store_lock_give(&s_store_lock);
     return out_index;

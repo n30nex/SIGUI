@@ -9,10 +9,12 @@ def read(rel: str) -> str:
 
 
 def test_bulk_store_and_inspector_buffers_use_external_bss():
+    defaults = read("sdkconfig.defaults")
     packet_log = read("main/mesh/packet_log.c")
     node_store = read("main/mesh/node_store.c")
     mesh_inspector = read("main/mesh/mesh_inspector.c")
 
+    assert "CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y" in defaults
     for source in (packet_log, node_store, mesh_inspector):
         assert '#include "esp_attr.h"' in source
 

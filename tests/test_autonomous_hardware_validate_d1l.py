@@ -25,8 +25,8 @@ def patch_sd_evidence_runners(monkeypatch, ok_step):
 
 
 def write_flasher_args(build: Path) -> None:
-    (build / "bootloader").mkdir(parents=True)
-    (build / "partition_table").mkdir(parents=True)
+    (build / "bootloader").mkdir(parents=True, exist_ok=True)
+    (build / "partition_table").mkdir(parents=True, exist_ok=True)
     (build / "bootloader" / "bootloader.bin").write_bytes(b"boot")
     (build / "partition_table" / "partition-table.bin").write_bytes(b"part")
     (build / "meshcore_deskos_d1l.bin").write_bytes(b"app")
@@ -48,6 +48,16 @@ def write_flasher_args(build: Path) -> None:
         ),
         encoding="ascii",
     )
+    artifact_root = build.parent
+    rows = []
+    for path in sorted(
+        item
+        for item in artifact_root.rglob("*")
+        if item.is_file() and item.name != "SHA256SUMS.txt"
+    ):
+        relative = path.relative_to(artifact_root).as_posix()
+        rows.append(f"{runner.sha256_file(path)}  {relative}")
+    (artifact_root / "SHA256SUMS.txt").write_text("\n".join(rows) + "\n", encoding="ascii")
 
 
 def test_port_guard_blocks_forbidden_ports():
@@ -99,8 +109,91 @@ def test_flash_esp32_waits_after_successful_hard_reset(tmp_path, monkeypatch):
     report = runner.flash_esp32(ctx, dry_run=False)
 
     assert report["ok"] is True
+    assert report["artifact_verification"]["ok"] is True
+    assert report["artifact_verification"]["manifest_complete"] is True
+    assert len(report["artifact_verification"]["flash_files"]) == 3
+    assert report["flashed_at"]
     assert report["post_flash_settle_sec"] == runner.POST_ESP32_FLASH_SETTLE_SEC
     assert sleeps == [runner.POST_ESP32_FLASH_SETTLE_SEC]
+
+
+def test_flash_esp32_fails_closed_on_incomplete_or_tampered_actions_manifest(
+    tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    build = run_dir / "d1l-firmware-artifacts" / "build"
+    write_flasher_args(build)
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=run_dir,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    calls = []
+    monkeypatch.setattr(runner, "command_report", lambda *args, **kwargs: calls.append(args))
+
+    manifest = run_dir / "d1l-firmware-artifacts" / "SHA256SUMS.txt"
+    manifest.write_text("", encoding="ascii")
+    empty = runner.flash_esp32(ctx, dry_run=False)
+
+    assert empty["ok"] is False
+    assert empty["artifact_verification"]["ok"] is False
+    assert calls == []
+
+    write_flasher_args(build)
+    (build / "meshcore_deskos_d1l.bin").write_bytes(b"tampered")
+    tampered = runner.flash_esp32(ctx, dry_run=False)
+
+    assert tampered["ok"] is False
+    assert "checksum mismatch" in tampered["artifact_verification"]["error"]
+    assert calls == []
+
+
+def test_flash_esp32_rejects_checksummed_extra_flash_role(tmp_path):
+    run_dir = tmp_path / "artifacts" / "github" / "28663994079-current"
+    artifact_root = run_dir / "d1l-firmware-artifacts"
+    build = artifact_root / "build"
+    write_flasher_args(build)
+    extra = build / "unexpected-nvs.bin"
+    extra.write_bytes(b"must not be flashed")
+    flasher_path = build / "flasher_args.json"
+    flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    flasher["flash_files"]["0x9000"] = extra.name
+    flasher_path.write_text(json.dumps(flasher), encoding="ascii")
+    manifest = artifact_root / "SHA256SUMS.txt"
+    rows = []
+    for path in sorted(
+        item
+        for item in artifact_root.rglob("*")
+        if item.is_file() and item != manifest
+    ):
+        rows.append(
+            f"{runner.sha256_file(path)}  {path.relative_to(artifact_root).as_posix()}"
+        )
+    manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=run_dir,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+
+    with pytest.raises(runner.FlashGuardError, match="must exactly match"):
+        runner.verify_esp32_flash_inputs(ctx)
 
 
 def test_release_gate_command_disables_meshbot_port(tmp_path):
@@ -125,6 +218,37 @@ def test_release_gate_command_disables_meshbot_port(tmp_path):
     assert "COM8" not in command
     assert "COM11" not in command
     assert "COM29" not in command
+
+
+def test_autonomous_smoke_binds_device_version_to_selected_commit(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    captured = {}
+
+    def fake_run(_ctx, kind, args, out, timeout, dry_run):
+        captured["kind"] = kind
+        captured["args"] = args
+        return {"ok": True}
+
+    monkeypatch.setattr(runner, "run_existing_script", fake_run)
+
+    report = runner.run_smoke(ctx, dry_run=True)
+
+    assert report["ok"] is True
+    assert captured["kind"] == "smoke"
+    index = captured["args"].index("--expected-firmware-commit")
+    assert captured["args"][index + 1] == COMMIT
 
 
 def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(tmp_path, monkeypatch):

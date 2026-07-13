@@ -260,6 +260,7 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->storage_data_enabled = storage.data_enabled;
     snapshot->storage_response_truncated = storage.response_truncated;
     snapshot->storage_retained_sd_degraded = storage.retained_sd_degraded;
+    snapshot->storage_retained_backup_degraded = storage.retained_backup_degraded;
     snapshot->map_page_supported = true;
     snapshot->map_tile_cache_ready = d1l_map_tile_store_sd_ready(&storage);
     snapshot->map_tile_render_supported = D1L_MAP_TILE_RENDER_SUPPORTED;
