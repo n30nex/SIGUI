@@ -65,12 +65,16 @@ def sample(label, elapsed, health, mesh, packets=None, signal=None):
 def storage_status(
     *,
     state="ready",
+    filesystem="fat32",
     protocol_supported=True,
     present=True,
     mounted=True,
     data_root_ready=True,
     file_ops=True,
     atomic_rename=True,
+    status_stale=False,
+    presence_stale=False,
+    refresh_failures=0,
     data_enabled=True,
     data_backend="mixed",
     message_store_backend="nvs",
@@ -84,6 +88,7 @@ def storage_status(
         "cmd": soak_d1l.STORAGE_STATUS_COMMAND,
         "sd": {
             "state": state,
+            "filesystem": filesystem,
             "interface": "rp2040",
             "rp2040_protocol_supported": protocol_supported,
             "present": present,
@@ -91,6 +96,9 @@ def storage_status(
             "data_root_ready": data_root_ready,
             "file_ops": file_ops,
             "atomic_rename": atomic_rename,
+            "status_stale": status_stale,
+            "presence_stale": presence_stale,
+            "refresh_failures": refresh_failures,
             "file_line_max": 512 if file_ops else 0,
             "file_chunk_max": 192 if file_ops else 0,
             "path_max": 96 if file_ops else 0,
@@ -117,6 +125,11 @@ def storage_status(
             "exports": "sd_diagnostic_exports_ready" if file_ops else "serial",
         },
     }
+
+
+def test_file_ops_ready_requires_fat32_filesystem():
+    assert soak_d1l.file_ops_ready(storage_status()) is True
+    assert soak_d1l.file_ops_ready(storage_status(filesystem="exfat")) is False
 
 
 def test_dry_run_reports_soak_commands():
@@ -434,6 +447,26 @@ def test_summarize_soak_accepts_stable_retained_history_sd_backends():
     assert summary["storage_store_backends"]["packets"] == ["sd"]
     assert summary["storage_store_backends"]["routes"] == ["sd"]
     assert summary["storage_store_backend_stable_all"] is True
+
+
+def test_summarize_soak_rejects_stale_storage_telemetry():
+    row = sample("start", 0, base_health(), {"rx_packets": 5, "tx_packets": 7})
+    row["results"].append(storage_status(status_stale=True, refresh_failures=3))
+
+    summary = soak_d1l.summarize_soak(
+        samples=[row],
+        active_events=[],
+        require_rx_delta=False,
+        min_rx_delta=1,
+        min_tx_delta=0,
+        sample_storage=True,
+    )
+
+    assert summary["ok"] is False
+    assert summary["storage_status_stale_count"] == 1
+    assert summary["storage_refresh_failures_max"] == 3
+    assert "storage_status_stale" in summary["threshold_failures"]
+    assert "storage_refresh_failures" in summary["threshold_failures"]
 
 
 def test_summarize_soak_allows_pre_flash_sd_filecanary_unavailable():

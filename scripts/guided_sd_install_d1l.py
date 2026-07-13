@@ -29,7 +29,7 @@ try:
         metadata_for_volume,
         verify_artifact,
     )
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.flash_rp2040_sd_bridge_uf2 import (
         FlashGuardError,
@@ -39,7 +39,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         metadata_for_volume,
         verify_artifact,
     )
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 DEFAULT_D1L_PORT = "COM" + "12"
@@ -372,7 +372,7 @@ def send_d1l_console(port: str, baud: int, command: str, timeout: float) -> dict
     except ImportError as exc:  # pragma: no cover - dependency dependent
         return {"schema": 1, "ok": False, "cmd": command, "error": f"pyserial is required: {exc}"}
     try:
-        with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             time.sleep(1.0)
             ser.reset_input_buffer()
             return send_console_command(ser, command, timeout)

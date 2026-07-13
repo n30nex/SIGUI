@@ -20,10 +20,13 @@ idf_component_register(
         "hal/indicator_board.c"
         "hal/indicator_pins.c"
         "hal/rp2040_bridge.c"
+        "hal/rp2040_sd_reply.c"
         "hal/sx1262_indicator.c"
         "map/map_math.c"
+        "map/map_point_projection.c"
         "map/map_png_decoder.c"
         "map/map_view_service.c"
+        "mesh/advert_data.c"
         "mesh/contact_store.c"
         "mesh/dm_store.c"
         "mesh/mesh_inspector.c"
@@ -32,12 +35,15 @@ idf_component_register(
         "mesh/packet_log.c"
         "mesh/read_state.c"
         "mesh/route_store.c"
+        "mesh/route_store_worker.c"
         "mesh/meshcore_service.c"
+        "mesh/meshcore_wire.c"
         "mesh/meshcore_radio_profile.c"
         "storage/retained_blob_store.c"
         "storage/export_store.c"
         "storage/map_tile_store.c"
         "storage/storage_status.c"
+        "storage/storage_status_policy.c"
         "ui/ui_chrome.c"
         "ui/ui_home.c"
         "ui/ui_keyboard.c"
@@ -75,6 +81,27 @@ idf_component_register(
         nvs_flash
 )
 
+set(D1L_BUILD_GIT_COMMIT "$ENV{GITHUB_SHA}")
+string(LENGTH "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT_LENGTH)
+if(NOT D1L_BUILD_GIT_COMMIT_LENGTH EQUAL 40 OR
+   NOT D1L_BUILD_GIT_COMMIT MATCHES "^[0-9a-fA-F]+$")
+    execute_process(
+        COMMAND git rev-parse HEAD
+        WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.."
+        OUTPUT_VARIABLE D1L_BUILD_GIT_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+endif()
+string(LENGTH "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT_LENGTH)
+if(NOT D1L_BUILD_GIT_COMMIT_LENGTH EQUAL 40 OR
+   NOT D1L_BUILD_GIT_COMMIT MATCHES "^[0-9a-fA-F]+$")
+    set(D1L_BUILD_GIT_COMMIT "unknown")
+else()
+    string(TOLOWER "${D1L_BUILD_GIT_COMMIT}" D1L_BUILD_GIT_COMMIT)
+endif()
+
 target_compile_definitions(${COMPONENT_LIB} PRIVATE
     MESHCORE_CA_DESK_MODE=1
+    D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"
 )

@@ -13,7 +13,8 @@ from pathlib import Path
 try:
     from artifact_metadata import stamp_report
     from flash_rp2040_sd_bridge_uf2 import FlashGuardError, candidate_volumes, verify_artifact
-    from smoke_d1l import send_console_command
+    from sd_file_canary_d1l import storage_status_fresh
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
     from scripts.flash_rp2040_sd_bridge_uf2 import (
@@ -21,7 +22,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         candidate_volumes,
         verify_artifact,
     )
-    from scripts.smoke_d1l import send_console_command
+    from scripts.sd_file_canary_d1l import storage_status_fresh
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 PREFLIGHT_COMMANDS = [
@@ -85,7 +87,9 @@ def storage_file_gate_ready(storage_status: dict) -> bool:
     if not isinstance(sd, dict):
         return False
     return (
-        sd.get("state") == "ready"
+        storage_status_fresh(storage_status)
+        and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -270,7 +274,7 @@ def run_preflight(
         results.append(result)
         return result
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         rp2040_status = send_command(ser, "rp2040 status", timeout)

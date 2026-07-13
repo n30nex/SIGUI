@@ -656,8 +656,9 @@ def test_ui_data_canary_uses_volatile_store_paths():
         "main/mesh/packet_log.c",
     ]:
         source = read(rel)
-        assert "static bool is_volatile_ui_canary" in source
-        assert "is_volatile_ui_canary" in source.split("static void fill", 1)[1]
+        assert "s_volatile_entry" in source
+        assert "s_volatile_valid" in source
+        assert "is_volatile_ui_canary" not in source
 
 
 def test_touch_callbacks_defer_content_rebuilds_instead_of_rendering_inline():
@@ -1090,7 +1091,6 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     assert "render_metric_card(" not in wrapper
 
     for label in (
-        '"Map"',
         '"Options"',
         '"Map options"',
         '"Set location"',
@@ -1117,18 +1117,26 @@ def test_map_screen_uses_built_in_source_and_a_bounded_visible_view():
     landing = map_source.split("void d1l_ui_map_render(", 1)[1].split(
         "static void map_render_options_root", 1
     )[0]
-    assert landing.count('map_button(parent, "Options"') == 1
+    assert 'map_label(parent, "Map"' not in landing
+    assert landing.count('viewport, "Options", 8, 8, 96, 48') == 1
     assert "map_view_service_acquire_visible" in landing
-    assert "D1L_MAP_VIEW_FIXED_ZOOM" in landing
-    assert "MAP_VIEWPORT_WIDTH 446U" in map_source
-    assert "MAP_VIEWPORT_HEIGHT 288U" in map_source
+    assert "s_viewport_lat_e7, s_viewport_lon_e7, s_viewport_zoom" in landing
+    assert 'viewport, "Center", 8, 302, 96, 52' in landing
+    assert 'viewport, "-", 420, 92, 52, 52' in landing
+    assert 'viewport, "+", 420, 8, 52, 52' in landing
+    assert 'map_label(viewport, "Drag to pan"' in landing
+    assert "MAP_VIEWPORT_WIDTH 478U" in map_source
+    assert "MAP_VIEWPORT_HEIGHT 360U" in map_source
 
     options = map_source.split("static void map_render_options_root", 1)[1].split(
         "static void map_render_cache_status", 1
     )[0]
     assert 'map_menu_row(parent, 68, "Set location"' in options
     assert 'map_menu_row(parent, 140, "Cache status"' in options
-    assert 'cache_ready ? "SD ready" : "Needs SD"' in options
+    assert 'const char *cache_status = "Storage starting";' in options
+    assert 'cache_status = "SD ready";' in options
+    assert 'cache_status = "Insert SD";' in options
+    assert 'cache_status = "Needs FAT32";' in options
     assert options.count("map_menu_row(") == 2
     assert '"Built-in map"' not in options
     assert (
@@ -1298,6 +1306,8 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     detail = static_void_body(source, "render_contact_detail_sheet")
     assert '"Back"' in detail
     assert '"Message"' in detail
+    assert '"Messaging unavailable for this role"' in detail
+    assert "contact_can_dm(entry)" in detail
     assert '"Contact options"' in detail
     for hidden_action in ('"Trace"', '"Edit"', '"Export"', '"Fav"', '"Mute"', '"Forget'):
         assert hidden_action not in detail

@@ -32,8 +32,10 @@
 #include "mesh/packet_log.h"
 #include "mesh/read_state.h"
 #include "mesh/route_store.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_service.h"
+#include "map/map_png_decoder.h"
 #include "map/map_view_service.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
@@ -43,6 +45,7 @@
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
+static const uint32_t D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS = 15000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
@@ -255,8 +258,10 @@ static void sanitize_node_name(char *name)
 static void cmd_version(void)
 {
     ok_begin("version");
-    printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true}\n",
-           D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, esp_get_idf_version());
+    printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"build_commit\":\"%s\","
+           "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true}\n",
+           D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, D1L_BUILD_GIT_COMMIT,
+           esp_get_idf_version());
 }
 
 static void cmd_board(void)
@@ -1310,6 +1315,9 @@ static void cmd_rp2040_ping(void)
 {
     d1l_rp2040_ping_t ping = {0};
     esp_err_t ret = d1l_rp2040_bridge_ping(&ping, D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);
+    if (ret == ESP_OK && ping.bridge_ready && ping.protocol_supported) {
+        d1l_storage_status_note_valid_bridge_response();
+    }
     printf("{\"schema\":%d,\"ok\":%s,\"cmd\":\"rp2040 ping\",\"code\":\"%s\",\"bridge_ready\":%s,\"protocol_supported\":%s,\"response_truncated\":%s,\"version\":%lu,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"sd_touched\":%s,\"public_rf_tx\":false,\"formats_sd\":false,\"note\":",
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK),
@@ -1373,21 +1381,28 @@ static void cmd_storage_status(void)
     printf(",\"manager\":{\"running\":%s,\"state\":",
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
-    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
+           "\"initial_ping_timeouts\":%lu,\"bridge_response_seen\":%s,"
+           "\"auto_reset_pending\":%s,\"auto_reset_attempted\":%s},\"sd\":{\"state\":",
            (unsigned long)status.manager_attempt,
            (unsigned long)status.manager_backoff_ms,
-           bool_json(status.force_nvs));
+           bool_json(status.force_nvs),
+           (unsigned long)status.manager_initial_ping_timeouts,
+           bool_json(status.manager_bridge_response_seen),
+           bool_json(status.manager_auto_reset_pending),
+           bool_json(status.manager_auto_reset_attempted));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
     printf(",\"interface\":");
     print_json_string(status.sd_interface ? status.sd_interface : "unknown");
     printf(",\"filesystem\":");
     print_json_string(status.sd_filesystem ? status.sd_filesystem : "unknown");
-    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"mount_point\":",
+    printf(",\"direct_supported\":%s,\"rp2040_bridge_required\":%s,\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"presence_stale\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"needs_fat32\":%s,\"capacity_kb\":%lu,\"free_kb\":%lu,\"file_ops\":%s,\"file_line_max\":%lu,\"file_chunk_max\":%lu,\"path_max\":%lu,\"atomic_rename\":%s,\"response_truncated\":%s,\"status_stale\":%s,\"refresh_failures\":%lu,\"mount_point\":",
            bool_json(status.direct_supported),
            bool_json(status.rp2040_bridge_required),
            bool_json(status.rp2040_bridge_ready),
            bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
+           bool_json(status.sd_presence_stale),
            bool_json(status.sd_mounted),
            bool_json(status.sd_data_root_ready),
            bool_json(status.sd_needs_fat32),
@@ -1398,7 +1413,9 @@ static void cmd_storage_status(void)
            (unsigned long)status.file_chunk_max,
            (unsigned long)status.path_max,
            bool_json(status.atomic_rename_supported),
-           bool_json(status.response_truncated));
+           bool_json(status.response_truncated),
+           bool_json(status.bridge_status_stale),
+           (unsigned long)status.bridge_status_refresh_failures);
     print_json_string(status.mount_point ? status.mount_point : "");
     printf(",\"data_root\":");
     print_json_string(status.data_root ? status.data_root : "");
@@ -1442,8 +1459,20 @@ static void cmd_storage_status(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"export_backend\":");
     print_json_string(status.export_backend ? status.export_backend : "serial");
-    printf(",\"retained_sd\":{\"degraded\":%s,\"note\":",
-           bool_json(status.retained_sd_degraded));
+    printf(",\"retained_nvs\":{\"partition\":\"d1l_retained\",\"marker_ready\":%s,\"markers_complete\":%s,\"anchor_ready\":%s,\"sentinel_ready\":%s,\"external_init_required\":%s,\"initialized_this_boot\":%s,\"ready\":%s,\"init_error\":\"%s\",\"migrated_keys\":%lu,\"migration_error\":\"%s\"}",
+           bool_json(d1l_retained_blob_store_nvs_marker_ready()),
+           bool_json(d1l_retained_blob_store_nvs_markers_complete()),
+           bool_json(d1l_retained_blob_store_nvs_anchor_ready()),
+           bool_json(d1l_retained_blob_store_nvs_sentinel_ready()),
+           bool_json(d1l_retained_blob_store_nvs_external_init_required()),
+           bool_json(d1l_retained_blob_store_nvs_initialized_this_boot()),
+           bool_json(d1l_retained_blob_store_nvs_ready()),
+           esp_err_to_name(d1l_retained_blob_store_nvs_error()),
+           (unsigned long)d1l_retained_blob_store_nvs_migrated_keys(),
+           esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
+    printf(",\"retained_sd\":{\"degraded\":%s,\"backup_degraded\":%s,\"note\":",
+           bool_json(status.retained_sd_degraded),
+           bool_json(status.retained_backup_degraded));
     print_json_string(status.retained_sd_degraded ?
                       D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE : "");
     printf(",\"stores\":{\"messages\":");
@@ -1537,17 +1566,26 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
            esp_err_to_name(ret),
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
-    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s},\"sd\":{\"state\":",
+    printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
+           "\"initial_ping_timeouts\":%lu,\"bridge_response_seen\":%s,"
+           "\"auto_reset_pending\":%s,\"auto_reset_attempted\":%s},\"sd\":{\"state\":",
            (unsigned long)status.manager_attempt,
            (unsigned long)status.manager_backoff_ms,
-           bool_json(status.force_nvs));
+           bool_json(status.force_nvs),
+           (unsigned long)status.manager_initial_ping_timeouts,
+           bool_json(status.manager_bridge_response_seen),
+           bool_json(status.manager_auto_reset_pending),
+           bool_json(status.manager_auto_reset_attempted));
     print_json_string(status.sd_state ? status.sd_state : "unknown");
-    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"mounted\":%s,\"data_root_ready\":%s},\"setup_action\":",
+    printf(",\"rp2040_bridge_ready\":%s,\"rp2040_protocol_supported\":%s,\"present\":%s,\"presence_stale\":%s,\"mounted\":%s,\"data_root_ready\":%s,\"status_stale\":%s,\"refresh_failures\":%lu},\"setup_action\":",
            bool_json(status.rp2040_bridge_ready),
            bool_json(status.rp2040_sd_protocol_supported),
            bool_json(status.sd_present),
+           bool_json(status.sd_presence_stale),
            bool_json(status.sd_mounted),
-           bool_json(status.sd_data_root_ready));
+           bool_json(status.sd_data_root_ready),
+           bool_json(status.bridge_status_stale),
+           (unsigned long)status.bridge_status_refresh_failures);
     print_json_string(status.setup_action ? status.setup_action : "not_available");
     printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"note\":");
     print_json_string(status.note ? status.note : "");
@@ -1690,10 +1728,13 @@ static void cmd_storage_map_policy(void)
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
     printf(",\"license_url\":");
     print_json_string(D1L_MAP_TILE_LICENSE_URL);
-    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
+    printf(",\"built_in\":true,\"current_view_only\":true,\"max_current_view_tiles\":%u,\"min_cache_days\":%u,\"zoom\":%u,\"default_zoom\":%u,\"min_zoom\":%u,\"max_zoom\":%u,\"sideload_supported\":false,\"canary_command\":\"storage map-tile-canary <token>\",\"download_supported\":%s,\"live_network_download\":%s,\"download_state\":",
            (unsigned)D1L_MAP_VIEW_MAX_TILES,
            (unsigned)D1L_MAP_TILE_MIN_CACHE_DAYS,
-           (unsigned)D1L_MAP_VIEW_FIXED_ZOOM,
+           (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
+           (unsigned)D1L_MAP_VIEW_DEFAULT_ZOOM,
+           (unsigned)D1L_MAP_VIEW_MIN_ZOOM,
+           (unsigned)D1L_MAP_VIEW_MAX_ZOOM,
            bool_json(download_supported),
            bool_json(live_network_download));
     print_json_string(download_state);
@@ -1714,15 +1755,20 @@ static void cmd_map_tiles_status(void)
     ok_begin("map tiles status");
     printf(",\"source\":");
     print_json_string(D1L_MAP_TILE_SOURCE_ID);
+    printf(",\"render_style\":");
+    print_json_string(D1L_MAP_RENDER_STYLE_ID);
     printf(",\"attribution\":");
     print_json_string(D1L_MAP_TILE_ATTRIBUTION);
-    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
+    printf(",\"initialized\":%s,\"visible\":%s,\"worker_running\":%s,\"frame_ready\":%s,\"sd_cache_ready\":%s,\"wifi_connected\":%s,\"rate_limited\":%s,\"current_view_only\":%s,\"generation\":%lu,\"frame_revision\":%lu,\"retry_after_sec\":%lu,\"decode_total_us\":%lu,\"decode_max_us\":%lu,\"decode_samples\":%u,\"lat_e7\":%ld,\"lon_e7\":%ld,\"width\":%u,\"height\":%u,\"zoom\":%u,\"planned_tiles\":%u,\"attempted_tiles\":%u,\"cache_hits\":%u,\"network_requests\":%u,\"downloaded_tiles\":%u,\"rendered_tiles\":%u,\"failed_tiles\":%u,\"phase\":",
            bool_json(status.initialized), bool_json(status.visible),
            bool_json(status.worker_running), bool_json(status.frame_ready),
            bool_json(status.sd_cache_ready), bool_json(status.wifi_connected),
            bool_json(status.rate_limited), bool_json(status.current_view_only),
            (unsigned long)status.generation, (unsigned long)status.frame_revision,
-           (unsigned long)status.retry_after_sec, (long)status.lat_e7,
+           (unsigned long)status.retry_after_sec,
+           (unsigned long)status.decode_total_us,
+           (unsigned long)status.decode_max_us,
+           (unsigned)status.decode_samples, (long)status.lat_e7,
            (long)status.lon_e7, (unsigned)status.width, (unsigned)status.height,
            (unsigned)status.zoom, (unsigned)status.planned_tiles,
            (unsigned)status.attempted_tiles, (unsigned)status.cache_hits,
@@ -2390,7 +2436,7 @@ static bool build_diagnostic_export_payload(const char *token,
         return false;
     }
     if (!append_export_json(dest, dest_size, &used,
-                            "\"health\":{\"uptime_ms\":%lu,\"heap_free\":%lu,"
+                            "\"health\":{\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,"
                             "\"heap_min_free\":%lu,\"heap_largest_free\":%lu,"
                             "\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,"
                             "\"internal_heap_largest_free\":%lu,"
@@ -2400,7 +2446,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"current_task_stack_free_words\":%lu,"
                             "\"ui_task_stack_free_words\":%lu,"
                             "\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,"
-                            "\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\"},",
+                            "\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\"},",
+                            (unsigned long)h.boot_nonce,
                             (unsigned long)h.uptime_ms,
                             (unsigned long)h.heap_free,
                             (unsigned long)h.heap_min_free,
@@ -2418,6 +2465,8 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.lvgl_free_bytes,
                             (unsigned long)h.lvgl_largest_free_bytes,
                             h.lvgl_used_pct,
+                            bool_json(h.nvs_ready),
+                            esp_err_to_name(h.nvs_error),
                             h.reset_reason ? h.reset_reason : "UNKNOWN")) {
         return false;
     }
@@ -2679,11 +2728,19 @@ static bool append_data_export_node_entries(char *dest, size_t dest_size, size_t
             !append_export_json_string_field(dest, dest_size, used, "type", e->type) ||
             !append_export_json(dest, dest_size, used,
                                 ",\"rssi_dbm\":%d,\"snr_tenths\":%d,"
-                                "\"path_hash_bytes\":%u,\"path_hops\":%u}",
+                                "\"path_hash_bytes\":%u,\"path_hops\":%u,"
+                                "\"location_valid\":%s,\"lat_e6\":%ld,"
+                                "\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,"
+                                "\"location_seq\":%lu}",
                                 e->rssi_dbm,
                                 e->snr_tenths,
                                 (unsigned)e->path_hash_bytes,
-                                (unsigned)e->path_hops)) {
+                                (unsigned)e->path_hops,
+                                bool_json(e->location_valid),
+                                (long)e->lat_e6,
+                                (long)e->lon_e6,
+                                (unsigned long)e->location_advert_timestamp,
+                                (unsigned long)e->location_seq)) {
             return false;
         }
     }
@@ -3686,6 +3743,7 @@ static void cmd_messages_read(const char *line)
 static void cmd_nodes(void)
 {
     d1l_node_store_stats_t stats = d1l_node_store_stats();
+    const uint32_t marker_generation = d1l_node_store_marker_generation();
     static d1l_node_view_t entries[8];
     const d1l_node_query_t query = {
         .filter = D1L_NODE_FILTER_ALL,
@@ -3696,22 +3754,26 @@ static void cmd_nodes(void)
     };
     size_t copied = d1l_node_store_query(&query, entries, 8);
     ok_begin("nodes");
-    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"active_capacity\":%u,\"sd_history_capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"marker_generation\":%lu,\"filter\":\"all\",\"sort\":\"last_heard\",\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
            (unsigned)D1L_NODE_RAM_ACTIVE_CAPACITY,
            (unsigned)D1L_NODE_SD_HISTORY_CAPACITY,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           (unsigned long)marker_generation);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_node_view_t *view = &entries[i];
         const d1l_node_entry_t *e = &view->node;
-        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u}",
+        printf("%s{\"seq\":%lu,\"first_heard_ms\":%lu,\"last_heard_ms\":%lu,\"advert_timestamp\":%lu,\"heard_count\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"name\":\"%s\",\"display_name\":\"%s\",\"type\":\"%s\",\"role\":\"%s\",\"favorite\":%s,\"muted\":%s,\"keyed\":%s,\"reachable\":%s,\"rssi_dbm\":%d,\"snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"location_valid\":%s,\"lat_e6\":%ld,\"lon_e6\":%ld,\"location_advert_timestamp\":%lu,\"location_seq\":%lu}",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->first_heard_ms,
                (unsigned long)e->last_heard_ms, (unsigned long)e->advert_timestamp,
                (unsigned long)e->heard_count, e->fingerprint, e->public_key_hex,
                e->name, view->display_name, e->type, view->role,
                bool_json(view->favorite), bool_json(view->muted),
                bool_json(view->keyed), bool_json(view->reachable),
-               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops);
+               e->rssi_dbm, e->snr_tenths, e->path_hash_bytes, e->path_hops,
+               bool_json(e->location_valid), (long)e->lat_e6, (long)e->lon_e6,
+               (unsigned long)e->location_advert_timestamp,
+               (unsigned long)e->location_seq);
     }
     printf("],\"persisted\":true,\"note\":\"Verified MeshCore adverts populate this bounded heard-node store; enriched query rows expose role, favorite, keyed, and reachability state\"}\n");
 }
@@ -4031,14 +4093,44 @@ static void cmd_routes(void)
     static d1l_route_entry_t entries[8];
     size_t copied = d1l_route_store_copy_recent(entries, 8);
     ok_begin("routes");
-    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,\"entries\":[",
+    printf(",\"count\":%u,\"capacity\":%u,\"total_written\":%lu,\"dropped_oldest\":%lu,"
+           "\"persistence\":{\"revision\":%llu,\"commit_count\":%lu,"
+           "\"coalesced_count\":%lu,\"fail_count\":%lu,"
+           "\"stale_snapshot_count\":%lu,\"dirty\":%s,"
+           "\"clear_failure_latched\":%s,\"clear_fail_count\":%lu,"
+           "\"clear_last_error\":\"%s\","
+           "\"sd_primary\":{\"required\":%s,\"backend_generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commit_count\":%lu,"
+           "\"fail_count\":%lu,\"last_error\":\"%s\"},"
+           "\"nvs_fallback\":{\"dirty\":%s,\"commit_count\":%lu,"
+           "\"fail_count\":%lu,\"last_error\":\"%s\"}},\"entries\":[",
            (unsigned)stats.count, (unsigned)stats.capacity,
-           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
+           (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest,
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_coalesced_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.persistence_dirty),
+           bool_json(stats.clear_failure_latched),
+           (unsigned long)stats.clear_fail_count,
+           esp_err_to_name(stats.clear_last_error),
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_route_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Routes are learned from MeshCore path metadata on Public and advert packets\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Routes are learned from MeshCore path metadata on Public and advert packets\"}\n",
+           bool_json(!stats.persistence_dirty));
 }
 
 static void cmd_routes_detail(const char *line)
@@ -4304,7 +4396,8 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+           (unsigned long)h.boot_nonce,
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
            (unsigned long)h.heap_largest_free,
@@ -4319,7 +4412,8 @@ static void cmd_health(void)
            (unsigned long)h.ui_task_stack_free_words,
            (unsigned long)h.lvgl_free_bytes,
            (unsigned long)h.lvgl_largest_free_bytes,
-           h.lvgl_used_pct, h.reset_reason,
+           h.lvgl_used_pct, bool_json(h.nvs_ready), esp_err_to_name(h.nvs_error),
+           h.reset_reason,
            d1l_app_model_get()->board_ready ? "true" : "false",
            d1l_app_model_get()->ui_ready ? "true" : "false");
 }
@@ -4832,8 +4926,15 @@ static void handle_line(const char *line)
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
     } else if (strcmp(line, "reboot") == 0) {
+        esp_err_t route_flush_ret = d1l_route_store_worker_force_flush(
+            D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS);
+        if (route_flush_ret != ESP_OK) {
+            err_result("reboot", esp_err_to_name(route_flush_ret),
+                       "retained route flush failed; reboot cancelled");
+            return;
+        }
         ok_begin("reboot");
-        printf(",\"rebooting\":true}\n");
+        printf(",\"rebooting\":true,\"route_flush\":\"ESP_OK\"}\n");
         fflush(stdout);
         esp_restart();
     } else if (strcmp(line, "factory-reset-confirm") == 0) {

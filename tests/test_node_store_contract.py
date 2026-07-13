@@ -21,13 +21,19 @@ def test_heard_node_store_is_bounded_and_nvs_backed():
     assert "D1L_NODE_STORE_CAPACITY D1L_NODE_RAM_ACTIVE_CAPACITY" in header
     assert "D1L_NODE_PUBLIC_KEY_HEX_LEN 65U" in header
     assert "D1L_HEARD_NODE_NAME_LEN 24U" in header
-    assert "D1L_NODE_STORE_SCHEMA 3U" in source
+    assert "D1L_NODE_TYPE_LEN 9U" in header
+    assert "D1L_NODE_STORE_SCHEMA 4U" in source
+    assert "D1L_NODE_STORE_SCHEMA_V3 3U" in source
     assert "D1L_NODE_STORE_SCHEMA_V2 2U" in source
     assert "D1L_NODE_STORE_LEGACY_CAPACITY D1L_NODE_NVS_FALLBACK_CAPACITY" in source
     assert "d1l_node_store_blob_v1_t" in source
     assert "d1l_node_store_blob_v2_t" in source
+    assert "d1l_node_store_blob_v3_t" in source
     assert "migrate_v1_blob" in source
     assert "migrate_v2_blob" in source
+    assert "migrate_v3_blob" in source
+    assert "node schema v1 layout changed" in source
+    assert "node schema v2/v3 layout changed" in source
     assert "entries[D1L_NODE_NVS_FALLBACK_CAPACITY]" in source
     assert "D1L_NODE_NVS_FALLBACK_CAPACITY ?" in source
     assert "blob->entries[out] = s_entries[best]" in source
@@ -80,7 +86,7 @@ def test_verified_adverts_upsert_heard_nodes():
     assert "verify_advert_signature" in source
     assert "D1L_NODE_PUBLIC_KEY_HEX_LEN" in source
     assert "hex_prefix(pub_key_hex" in source
-    assert "d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, name, type" in source
+    assert "d1l_node_store_upsert_advert(pub_prefix, pub_key_hex, advert.name" in source
     assert "read_le32(timestamp)" in source
     assert "node store upsert failed" in source
     assert "d1l_node_store_find_by_fingerprint" in read("main/mesh/node_store.h")

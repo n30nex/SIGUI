@@ -207,7 +207,9 @@ Expected proof with a ready card:
   leaves the final synthetic tile present, and reports `public_rf_tx=false`
   plus `formats_sd=false`. This is a storage-only synthetic canary and never
   requests a network tile. Live Map acceptance is separate and remains limited
-  to the visible current-view 3x3 at one zoom while the actual Map is active.
+  to the visible current-view 3x3 at one zoom per visible generation while the
+  actual Map is active. User pan/zoom may select another current view,
+  but never starts background or multi-zoom prefetch.
 - `storage retained-canary <token>` returns `ok=true`, appends synthetic Public,
   DM, route, and packet rows without Public RF or formatting, and
   `sd_retained_history_acceptance_d1l.py` proves those rows are readable before

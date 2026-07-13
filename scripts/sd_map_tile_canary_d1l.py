@@ -12,9 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from artifact_metadata import stamp_report
+    from sd_file_canary_d1l import storage_status_fresh
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.artifact_metadata import stamp_report
+    from scripts.sd_file_canary_d1l import storage_status_fresh
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
@@ -45,8 +49,10 @@ def storage_file_gate_ready(storage_status: dict) -> bool:
     if not isinstance(sd, dict):
         return False
     return (
-        storage_status.get("ok") is True
+        storage_status_fresh(storage_status)
+        and storage_status.get("ok") is True
         and sd.get("state") == "ready"
+        and sd.get("filesystem") == "fat32"
         and sd.get("present") is True
         and sd.get("mounted") is True
         and sd.get("data_root_ready") is True
@@ -157,7 +163,7 @@ def run_canary(
 
     commands: list[str] = []
     results: list[dict] = []
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
         before = wait_for_ready_storage(
             ser,
@@ -266,6 +272,7 @@ def main() -> int:
         )
 
     root = Path(__file__).resolve().parents[1]
+    stamp_report(report, root)
     if args.out:
         out_path = Path(args.out)
         if not out_path.is_absolute():

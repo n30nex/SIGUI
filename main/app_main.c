@@ -7,6 +7,7 @@
 #include "d1l_config.h"
 #include "app/settings_model.h"
 #include "diagnostics/crash_log.h"
+#include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
 #include "hal/rp2040_bridge.h"
 #include "mesh/contact_store.h"
@@ -16,7 +17,9 @@
 #include "mesh/packet_log.h"
 #include "mesh/read_state.h"
 #include "mesh/route_store.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/meshcore_service.h"
+#include "storage/retained_blob_store.h"
 #include "storage/storage_status.h"
 #include "ui/ui_phase1.h"
 #include "comms/connectivity_manager.h"
@@ -27,14 +30,31 @@ static const char *TAG = "d1l_main";
 void app_main(void)
 {
     esp_err_t nvs_ret = nvs_flash_init();
-    if (nvs_ret == ESP_ERR_NVS_NO_FREE_PAGES || nvs_ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        nvs_ret = nvs_flash_init();
+    d1l_health_monitor_init(nvs_ret);
+    if (nvs_ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS unavailable; preserving persisted data: %s",
+                 esp_err_to_name(nvs_ret));
     }
-    ESP_ERROR_CHECK(nvs_ret);
+    esp_err_t retained_nvs_ret = d1l_retained_blob_store_init();
+    if (retained_nvs_ret != ESP_OK) {
+        ESP_LOGE(TAG, "retained NVS unavailable; preserving legacy mirrors: %s",
+                 esp_err_to_name(retained_nvs_ret));
+    }
 
-    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\"}\n",
-           D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION);
+    printf("{\"schema\":%d,\"event\":\"boot\",\"firmware\":\"%s\",\"version\":\"%s\",\"target\":\"seeed_indicator_d1l\",\"boot_nonce\":%lu,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"retained_nvs_marker_ready\":%s,\"retained_nvs_markers_complete\":%s,\"retained_nvs_anchor_ready\":%s,\"retained_nvs_sentinel_ready\":%s,\"retained_nvs_external_init_required\":%s,\"retained_nvs_initialized_this_boot\":%s,\"retained_nvs_ready\":%s,\"retained_nvs_init_error\":\"%s\",\"retained_nvs_migration_error\":\"%s\"}\n",
+           D1L_CONSOLE_SCHEMA, D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION,
+           (unsigned long)d1l_health_monitor_boot_nonce(),
+           nvs_ret == ESP_OK ? "true" : "false", esp_err_to_name(nvs_ret),
+           d1l_retained_blob_store_nvs_marker_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_markers_complete() ? "true" : "false",
+           d1l_retained_blob_store_nvs_anchor_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_sentinel_ready() ? "true" : "false",
+           d1l_retained_blob_store_nvs_external_init_required() ?
+               "true" : "false",
+           d1l_retained_blob_store_nvs_initialized_this_boot() ? "true" : "false",
+           d1l_retained_blob_store_nvs_ready() ? "true" : "false",
+           esp_err_to_name(d1l_retained_blob_store_nvs_error()),
+           esp_err_to_name(d1l_retained_blob_store_nvs_migration_error()));
 
     esp_err_t storage_ret = d1l_storage_status_init();
     if (storage_ret != ESP_OK) {
@@ -84,6 +104,11 @@ void app_main(void)
     if (route_store_ret != ESP_OK) {
         ESP_LOGW(TAG, "route store load failed: %s", esp_err_to_name(route_store_ret));
     }
+    esp_err_t route_worker_ret = d1l_route_store_worker_start();
+    if (route_worker_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route persistence worker start failed: %s",
+                 esp_err_to_name(route_worker_ret));
+    }
     esp_err_t packet_log_ret = d1l_packet_log_init();
     if (packet_log_ret != ESP_OK) {
         ESP_LOGW(TAG, "packet log load failed: %s", esp_err_to_name(packet_log_ret));
@@ -95,6 +120,12 @@ void app_main(void)
     d1l_meshcore_service_init();
 
     esp_err_t board_ret = d1l_board_init();
+    if (board_ret == ESP_OK) {
+        esp_err_t mesh_rx_ret = d1l_meshcore_service_start_rx_async();
+        if (mesh_rx_ret != ESP_OK) {
+            ESP_LOGW(TAG, "MeshCore RX start queue failed: %s", esp_err_to_name(mesh_rx_ret));
+        }
+    }
     esp_err_t connectivity_ret = d1l_connectivity_init();
     if (connectivity_ret != ESP_OK) {
         ESP_LOGW(TAG, "connectivity policy init failed: %s", esp_err_to_name(connectivity_ret));

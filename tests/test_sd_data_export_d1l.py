@@ -7,10 +7,11 @@ TOKEN = "dataTest1"
 def ready_storage_status(*, export_backend="sd_diagnostic_exports_ready") -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
-        '"sd":{"state":"ready","present":true,"mounted":true,'
+        '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"rp2040_protocol_supported":true,'
         '"file_ops":true,"atomic_rename":true,'
-        '"file_line_max":512,"file_chunk_max":192,"path_max":96},'
+        '"file_line_max":512,"file_chunk_max":192,"path_max":96,'
+        '"status_stale":false,"presence_stale":false,"refresh_failures":0},'
         '"data_enabled":true,"data_backend":"mixed",'
         f'"export_backend":"{export_backend}",'
         '"stores":{'
@@ -51,6 +52,9 @@ class FakeSerial:
 
     def reset_input_buffer(self):
         self.reset_count += 1
+
+    def open(self):
+        pass
 
     def __enter__(self):
         return self

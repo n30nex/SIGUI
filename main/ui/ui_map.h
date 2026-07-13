@@ -11,6 +11,8 @@ typedef enum {
     D1L_UI_MAP_OPTIONS_CACHE_STATUS,
 } d1l_ui_map_options_page_t;
 
+typedef void (*d1l_ui_map_open_node_detail_cb_t)(const char *fingerprint);
+
 typedef struct {
     lv_event_cb_t open_options;
     lv_event_cb_t close_options;
@@ -22,6 +24,7 @@ typedef struct {
     lv_event_cb_t clear_location;
     lv_event_cb_t location_textarea;
     lv_event_cb_t location_keyboard;
+    d1l_ui_map_open_node_detail_cb_t open_node_detail;
 } d1l_ui_map_callbacks_t;
 
 typedef struct {
@@ -49,8 +52,15 @@ void d1l_ui_map_render_location(lv_obj_t *parent,
 /* The UI owns the visible-map lease. Covers and probes must release it before
  * they obscure or inspect the Map screen. */
 void d1l_ui_map_viewport_release(void);
+/* UI-task-only visual cover hook. Marker objects are hidden before a partial
+ * modal or lock overlay exposes the Map around its edges. */
+void d1l_ui_map_viewport_prepare_cover(void);
 void d1l_ui_map_viewport_set_suppressed(bool suppressed);
 void d1l_ui_map_viewport_suppress_next_acquire(void);
 bool d1l_ui_map_viewport_refresh(void);
+/* Reacquire the unchanged visible view after a Map-owned modal closes. The
+ * service's exact-view retention/cache policy decides whether any frame copy
+ * is needed; this never changes the center or zoom. */
+bool d1l_ui_map_viewport_reacquire(void);
 bool d1l_ui_map_viewport_lease_active(void);
 uint32_t d1l_ui_map_viewport_generation(void);

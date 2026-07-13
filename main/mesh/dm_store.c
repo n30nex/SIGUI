@@ -56,6 +56,8 @@ static size_t s_count;
 static uint32_t s_next_seq = 1;
 static uint32_t s_total_written;
 static uint32_t s_dropped_oldest;
+static d1l_dm_entry_t s_volatile_entry;
+static bool s_volatile_valid;
 static bool s_loaded;
 static d1l_dm_store_blob_t s_blob_scratch;
 static d1l_dm_store_blob_v1_t s_blob_v1_scratch;
@@ -87,13 +89,8 @@ static void clear_ram(void)
     s_next_seq = 1;
     s_total_written = 0;
     s_dropped_oldest = 0;
-}
-
-static bool is_volatile_ui_canary(const d1l_dm_entry_t *entry)
-{
-    return entry &&
-           strncmp(entry->contact_alias, "UI Canary", sizeof(entry->contact_alias)) == 0 &&
-           strncmp(entry->text, "ui-data-canary ", strlen("ui-data-canary ")) == 0;
+    memset(&s_volatile_entry, 0, sizeof(s_volatile_entry));
+    s_volatile_valid = false;
 }
 
 static void fill_blob(d1l_dm_store_blob_t *blob)
@@ -108,7 +105,7 @@ static void fill_blob(d1l_dm_store_blob_t *blob)
     for (size_t i = 0; i < s_count; ++i) {
         const d1l_dm_entry_t *entry =
             &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
-        if (!is_volatile_ui_canary(entry) && blob->count < D1L_DM_STORE_CAPACITY) {
+        if (blob->count < D1L_DM_STORE_CAPACITY) {
             blob->entries[blob->count++] = *entry;
         }
     }
@@ -274,7 +271,7 @@ static esp_err_t append_internal(const char *contact_fingerprint, const char *co
 
     d1l_store_lock_take(&s_store_lock);
     d1l_dm_entry_t entry = {
-        .seq = s_next_seq++,
+        .seq = s_next_seq,
         .uptime_ms = (uint32_t)(esp_timer_get_time() / 1000ULL),
         .rssi_dbm = rssi_dbm,
         .snr_tenths = snr_tenths,
@@ -291,6 +288,19 @@ static esp_err_t append_internal(const char *contact_fingerprint, const char *co
     sanitize_ascii(entry.direction, sizeof(entry.direction), direction && direction[0] ? direction : "rx");
     sanitize_ascii(entry.text, sizeof(entry.text), text);
 
+    if (!persist) {
+        /* Keep the UI preview outside the durable ring.  In particular, a
+         * canary cannot evict a real DM when the history is full. */
+        s_volatile_entry = entry;
+        s_volatile_valid = true;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_OK;
+    }
+
+    /* A durable DM supersedes the preview and consumes its borrowed seq. */
+    s_volatile_valid = false;
+    s_next_seq++;
+
     s_entries[s_head] = entry;
     s_head = (s_head + 1U) % D1L_DM_STORE_CAPACITY;
     if (s_count < D1L_DM_STORE_CAPACITY) {
@@ -299,7 +309,7 @@ static esp_err_t append_internal(const char *contact_fingerprint, const char *co
         s_dropped_oldest++;
     }
     s_total_written++;
-    esp_err_t ret = persist ? persist_store() : ESP_OK;
+    esp_err_t ret = persist_store();
     d1l_store_lock_give(&s_store_lock);
     return ret;
 }
@@ -381,26 +391,28 @@ size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries, size_t max_ent
     }
 
     d1l_store_lock_take(&s_store_lock);
-    if (s_count == 0) {
+    if (s_count == 0 && !s_volatile_valid) {
         d1l_store_lock_give(&s_store_lock);
         return 0;
     }
+    const size_t visible_count = s_count + (s_volatile_valid ? 1U : 0U);
     if (out_total_matches) {
-        *out_total_matches = s_count;
+        *out_total_matches = visible_count;
     }
-    if (skip_newest >= s_count) {
+    if (skip_newest >= visible_count) {
         d1l_store_lock_give(&s_store_lock);
         return 0;
     }
-    const size_t available = s_count - skip_newest;
+    const size_t available = visible_count - skip_newest;
     const size_t n = available < max_entries ? available : max_entries;
-    size_t oldest = (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
-    if (s_count > skip_newest + n) {
-        oldest = (oldest + (s_count - skip_newest - n)) % D1L_DM_STORE_CAPACITY;
-    }
-
+    const size_t first = visible_count - skip_newest - n;
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
     for (size_t i = 0; i < n; ++i) {
-        out_entries[i] = s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
+        const size_t visible_index = first + i;
+        out_entries[i] = visible_index < s_count ?
+            s_entries[(oldest + visible_index) % D1L_DM_STORE_CAPACITY] :
+            s_volatile_entry;
     }
     d1l_store_lock_give(&s_store_lock);
     return n;
@@ -425,18 +437,25 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
     }
 
     d1l_store_lock_take(&s_store_lock);
-    if (s_count == 0) {
+    if (s_count == 0 && !s_volatile_valid) {
         d1l_store_lock_give(&s_store_lock);
         return 0;
     }
     size_t total_matches = 0;
-    size_t oldest = (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
+    const size_t oldest = s_count == 0 ? 0 :
+        (s_head + D1L_DM_STORE_CAPACITY - s_count) % D1L_DM_STORE_CAPACITY;
     for (size_t i = 0; i < s_count; ++i) {
         const d1l_dm_entry_t *entry = &s_entries[(oldest + i) % D1L_DM_STORE_CAPACITY];
         if (strncmp(entry->contact_fingerprint, contact_fingerprint,
                     sizeof(entry->contact_fingerprint)) != 0) {
             continue;
         }
+        total_matches++;
+    }
+    const bool volatile_matches = s_volatile_valid &&
+        strncmp(s_volatile_entry.contact_fingerprint, contact_fingerprint,
+                sizeof(s_volatile_entry.contact_fingerprint)) == 0;
+    if (volatile_matches) {
         total_matches++;
     }
 
@@ -464,6 +483,11 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
             out_entries[out_index++] = *entry;
         }
         match_index++;
+    }
+    if (volatile_matches && out_index < copied) {
+        if (match_index >= first_match && match_index < last_match) {
+            out_entries[out_index++] = s_volatile_entry;
+        }
     }
     d1l_store_lock_give(&s_store_lock);
     return out_index;

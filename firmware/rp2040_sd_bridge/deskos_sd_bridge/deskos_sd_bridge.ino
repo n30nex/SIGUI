@@ -42,6 +42,7 @@ constexpr uint16_t SD_POWER_SETTLE_MS = 1000;
 constexpr uint16_t SD_SELECTED_READY_WAIT_MS = 500;
 constexpr uint16_t SD_CMD0_READY_SAMPLE_MS = 10;
 constexpr uint8_t SD_CMD0_RETRIES = 8;
+constexpr uint8_t SD_REMOVAL_DEBOUNCE_SAMPLES = 3;
 constexpr uint8_t SD_CMD0_RECOVERY_CLOCKS = 16;
 constexpr uint8_t SD_CMD0_BITSLIP_CLOCKS = 8;
 constexpr uint8_t SD_BITBANG_HALF_PERIOD_US = 4;
@@ -206,6 +207,9 @@ volatile uint32_t s_worker_snapshot_revision = 0;
 volatile uint32_t s_worker_diag_revision = 0;
 uint32_t s_seen_snapshot_revision = 0;
 uint32_t s_seen_diag_revision = 0;
+uint8_t s_sd_removal_samples = 0;
+uint8_t s_sd_reinsert_samples = 0;
+bool s_sd_detect_inserted_signature_proven = false;
 
 uint32_t clamp_kb(uint64_t bytes) {
     const uint64_t kb = bytes / 1024ULL;
@@ -223,6 +227,7 @@ const char *spi_mode_token(uint8_t options) {
 SdSpiConfig sd_spi_config(uint8_t options);
 uint8_t sd_spi_transfer(uint8_t value);
 bool recover_file_ops_mount();
+bool snapshot_ready_for_file_ops(const SdSnapshot &snapshot);
 
 DetectSample sample_sd_detect() {
     pinMode(SD_DET_PIN, INPUT_PULLUP);
@@ -247,12 +252,25 @@ DetectSample sample_sd_detect() {
     return sample;
 }
 
-void apply_detect_to_snapshot(SdSnapshot &snapshot) {
-    const DetectSample detect = sample_sd_detect();
+bool detect_sample_confirms_inserted(const DetectSample &sample) {
+    return sample.driven && strcmp(sample.state, "low") == 0;
+}
+
+bool snapshot_detect_confirms_inserted(const SdSnapshot &snapshot) {
+    return snapshot.detect_driven && snapshot.detect_state &&
+           strcmp(snapshot.detect_state, "low") == 0;
+}
+
+void apply_detect_sample_to_snapshot(SdSnapshot &snapshot, const DetectSample &detect) {
     snapshot.detect_state = detect.state;
     snapshot.detect_driven = detect.driven;
     snapshot.detect_pullup_level = detect.pullup_level;
     snapshot.detect_pulldown_level = detect.pulldown_level;
+}
+
+void apply_detect_to_snapshot(SdSnapshot &snapshot) {
+    const DetectSample detect = sample_sd_detect();
+    apply_detect_sample_to_snapshot(snapshot, detect);
 }
 
 void apply_detect_to_diag(DiagSnapshot &diag) {
@@ -1335,15 +1353,69 @@ bool raw_probe_rejected_card(const CardProbe &probe) {
 }
 
 SdSnapshot current_status() {
-    if (s_cached_snapshot_valid) {
-        return s_cached_snapshot;
+    if (!s_cached_snapshot_valid) {
+        return make_snapshot("mount_required", "mount_not_checked");
     }
-    return make_snapshot("mount_required", "mount_not_checked");
+
+    const bool removal_check_safe = !s_worker_busy &&
+                                    s_worker_request == SD_WORKER_NONE &&
+                                    !s_file_command_active;
+    if (removal_check_safe && snapshot_ready_for_file_ops(s_cached_snapshot) &&
+        s_sd_detect_inserted_signature_proven) {
+        const DetectSample detect = sample_sd_detect();
+        if (detect_sample_confirms_inserted(detect)) {
+            s_sd_removal_samples = 0;
+        } else {
+            if (s_sd_removal_samples < SD_REMOVAL_DEBOUNCE_SAMPLES) {
+                ++s_sd_removal_samples;
+            }
+            if (s_sd_removal_samples >= SD_REMOVAL_DEBOUNCE_SAMPLES) {
+                SdSnapshot removed = make_snapshot("no_card", "card_removed");
+                apply_detect_sample_to_snapshot(removed, detect);
+                s_sd_mounted = false;
+                s_cached_snapshot = removed;
+                s_cached_snapshot_valid = true;
+                s_sd_removal_samples = 0;
+            }
+        }
+    } else if (removal_check_safe && s_sd_detect_inserted_signature_proven &&
+               strcmp(s_cached_snapshot.state, "no_card") == 0) {
+        const DetectSample detect = sample_sd_detect();
+        if (!detect_sample_confirms_inserted(detect)) {
+            s_sd_reinsert_samples = 0;
+        } else {
+            if (s_sd_reinsert_samples < SD_REMOVAL_DEBOUNCE_SAMPLES) {
+                ++s_sd_reinsert_samples;
+            }
+            if (s_sd_reinsert_samples >= SD_REMOVAL_DEBOUNCE_SAMPLES) {
+                SdSnapshot reinserted = make_snapshot("mount_required", "card_reinserted");
+                apply_detect_sample_to_snapshot(reinserted, detect);
+                s_cached_snapshot = reinserted;
+                s_cached_snapshot_valid = true;
+                s_sd_reinsert_samples = 0;
+            }
+        }
+    } else if (!snapshot_ready_for_file_ops(s_cached_snapshot)) {
+        s_sd_removal_samples = 0;
+        s_sd_reinsert_samples = 0;
+    }
+    return s_cached_snapshot;
 }
 
 SdSnapshot cache_status(const SdSnapshot &snapshot) {
     s_cached_snapshot = snapshot;
     s_cached_snapshot_valid = true;
+    if (snapshot_ready_for_file_ops(snapshot) &&
+        snapshot_detect_confirms_inserted(snapshot)) {
+        s_sd_detect_inserted_signature_proven = true;
+    }
+    if (!snapshot_ready_for_file_ops(snapshot) ||
+        !snapshot_detect_confirms_inserted(snapshot)) {
+        s_sd_removal_samples = 0;
+    }
+    if (strcmp(snapshot.state, "no_card") != 0) {
+        s_sd_reinsert_samples = 0;
+    }
     return snapshot;
 }
 
@@ -1824,6 +1896,17 @@ SdSnapshot request_mount_status() {
     refresh_worker_results();
     SdSnapshot status = current_status();
     if (snapshot_ready_for_file_ops(status)) {
+        if (s_sd_removal_samples > 0U) {
+            return status;
+        }
+        if (s_worker_busy || s_worker_request != SD_WORKER_NONE ||
+            s_file_command_active) {
+            return pending_snapshot("sd_worker_busy");
+        }
+        (void)recover_file_ops_mount();
+        return current_status();
+    }
+    if (strcmp(status.state, "no_card") == 0) {
         return status;
     }
     if (status.mounted && snapshot_fs_is_fat32(status)) {

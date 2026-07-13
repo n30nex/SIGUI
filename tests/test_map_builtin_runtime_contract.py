@@ -38,12 +38,18 @@ def test_builtin_openstreetmap_source_is_fixed_identified_and_attributed():
     assert 'strcmp(line, "map tiles status")' in console
 
 
-def test_current_view_planner_is_one_zoom_center_first_and_at_most_three_by_three():
+def test_current_view_planner_accepts_bounded_zoom_and_stays_at_most_three_by_three():
     header = read("main/map/map_math.h")
     source = read("main/map/map_math.c")
 
-    assert "D1L_MAP_VIEW_FIXED_ZOOM 12U" in header
+    assert "D1L_MAP_VIEW_DEFAULT_ZOOM 10U" in header
+    assert "D1L_MAP_VIEW_MIN_ZOOM 8U" in header
+    assert "D1L_MAP_VIEW_MAX_ZOOM 14U" in header
     assert "D1L_MAP_VIEW_MAX_TILES 9U" in header
+    assert (
+        "zoom >= D1L_MAP_VIEW_MIN_ZOOM && zoom <= D1L_MAP_VIEW_MAX_ZOOM"
+        in source
+    )
     assert "(max_unwrapped_x - min_unwrapped_x + 1LL) > 3LL" in source
     assert "(max_y - min_y + 1LL) > 3LL" in source
     assert "planned_count >= D1L_MAP_VIEW_MAX_TILES" in source
@@ -54,14 +60,66 @@ def test_current_view_planner_is_one_zoom_center_first_and_at_most_three_by_thre
     assert "distance_sq" in source
 
 
+def test_touch_pan_center_uses_bounded_web_mercator_math():
+    header = read("main/map/map_math.h")
+    source = read("main/map/map_math.c")
+    pan = body(source, "bool d1l_map_math_pan_center", "\n}")
+
+    assert "d1l_map_math_pan_center" in header
+    assert "!map_zoom_valid(zoom)" in pan
+    assert "D1L_MAP_MERCATOR_MAX_LAT_E7" in pan
+    assert "world_x + (double)delta_x_pixels" in pan
+    assert "world_y += (double)delta_y_pixels" in pan
+    assert "fmod(" in pan
+    assert "atan(sinh(mercator))" in pan
+    assert "clamp_i64(new_lon_e7, -1800000000LL, 1800000000LL)" in pan
+
+
 def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_cache():
     service = read("main/map/map_view_service.c")
     store = read("main/storage/map_tile_store.c")
     run = body(service, "static void run_generation", "static void map_worker")
+    wait_for_sd = body(
+        service, "static bool wait_for_sd_cache", "static void fill_placeholder"
+    )
+    wait_reason = body(
+        service,
+        "static void set_storage_wait_message_locked",
+        "static bool generation_visible_locked",
+    )
 
     assert run.count("for (uint8_t i = 0;") == 1
     assert run.index("d1l_map_tile_store_read(") < run.index("d1l_map_tile_store_fetch(")
-    assert "if (!sd_ready || !publish_initial_frame" in run
+    assert "wait_for_sd_cache(generation, &storage)" in run
+    assert run.index("wait_for_sd_cache(generation, &storage)") < run.index(
+        "publish_initial_frame(plan, generation)"
+    ) < run.index("for (uint8_t i = 0;")
+    assert "generation_continue(&generation)" in wait_for_sd
+    assert "d1l_storage_status(&storage)" in wait_for_sd
+    assert "d1l_map_tile_store_sd_ready(&storage)" in wait_for_sd
+    assert "*out_storage = storage" in wait_for_sd
+    assert "set_storage_wait_message_locked(&storage)" in wait_for_sd
+    assert "set_storage_wait_message_locked(&storage)" in run
+    for phase in (
+        '"sd_attention"',
+        '"sd_card_required"',
+        '"sd_fat32_required"',
+        '"sd_reconnecting"',
+        '"sd_cache_required"',
+    ):
+        assert phase in wait_reason
+    assert '"insert_card"' in wait_reason
+    assert '"wait_for_storage_reconnect"' in wait_reason
+    assert "D1L_MAP_SD_POLL_MS 500U" in service
+    for forbidden in (
+        "d1l_storage_status_refresh",
+        "d1l_storage_status_mount",
+        "d1l_storage_manager_reset_bridge",
+        "d1l_map_tile_store_read",
+        "d1l_map_tile_store_fetch",
+        "network_requests",
+    ):
+        assert forbidden not in wait_for_sd
     assert "generation_continue(&generation)" in run
     assert "generation_continue, &generation" in run
     assert "wait_for_wifi(generation)" in run
@@ -91,6 +149,72 @@ def test_worker_is_sequential_cancelable_and_never_fetches_without_persistent_ca
     assert "result.status_code == 429" in fetch
     assert "png_content_type(headers.content_type)" in fetch
     assert "d1l_map_tile_png_valid(buffer, result.bytes)" in fetch
+
+
+def test_osm_standard_tiles_are_dark_styled_locally_after_decode():
+    decoder = read("main/map/map_png_decoder.c")
+    service = read("main/map/map_view_service.c")
+    store = read("main/storage/map_tile_store.h")
+
+    assert "static uint16_t dark_style_rgb565" in decoder
+    assert '#define D1L_MAP_RENDER_STYLE_ID "local-dark-v1"' in read(
+        "main/map/map_png_decoder.h"
+    )
+    assert "77U * red" in decoder
+    assert "150U * green" in decoder
+    assert "29U * blue" in decoder
+    assert "+ 128U) >> 8U" in decoder
+    assert "(255U - luminance) * 207U + 128U" in decoder
+    assert "dark_style_chroma_adjust" in decoder
+    assert "delta * 3" in decoder
+    assert "out_pixels[i] = dark_style_rgb565(red, green, blue)" in decoder
+    assert "d1l_map_png_decode_rgb565" in service
+    assert "decode_started_us = esp_timer_get_time()" in service
+    assert "decode_total_us" in service
+    assert "decode_max_us" in service
+    assert "decode_samples" in service
+    console = read("main/comms/usb_console.c")
+    assert "D1L_MAP_RENDER_STYLE_ID" in console
+    assert '\\"decode_total_us\\":%lu' in console
+    assert '\\"decode_max_us\\":%lu' in console
+    assert 'D1L_MAP_TILE_SOURCE_ID "openstreetmap-standard"' in store
+    assert "tile.openstreetmap.org" in store
+
+
+def test_local_dark_style_golden_palette_and_grayscale_contrast():
+    def styled_rgb565(red: int, green: int, blue: int) -> int:
+        luminance = (77 * red + 150 * green + 29 * blue + 128) >> 8
+        dark_luminance = 14 + (((255 - luminance) * 207 + 128) >> 8)
+
+        def adjust(channel: int) -> int:
+            scaled = (channel - luminance) * 3
+            if scaled > 0:
+                return (scaled + 4) // 8
+            if scaled < 0:
+                return -((-scaled + 4) // 8)
+            return 0
+
+        channels = [
+            max(0, min(255, dark_luminance + adjust(channel)))
+            for channel in (red, green, blue)
+        ]
+        return ((channels[0] >> 3) << 11) | ((channels[1] >> 2) << 5) | (
+            channels[2] >> 3
+        )
+
+    assert styled_rgb565(255, 255, 255) == 0x0861
+    assert styled_rgb565(242, 239, 233) == 0x18C3
+    assert styled_rgb565(68, 68, 68) == 0xA534
+    assert styled_rgb565(170, 211, 223) == 0x29E8
+    assert styled_rgb565(0, 0, 0) == 0xDEFB
+
+    grayscale = [styled_rgb565(value, value, value) for value in range(256)]
+    decoded_luminance = [
+        (((pixel >> 11) & 0x1F) << 3) + (((pixel >> 5) & 0x3F) << 2) +
+        ((pixel & 0x1F) << 3)
+        for pixel in grayscale
+    ]
+    assert all(left >= right for left, right in zip(decoded_luminance, decoded_luminance[1:]))
 
 
 def test_http_header_length_contract_handles_errors_chunking_and_hard_bounds():
@@ -208,21 +332,44 @@ def test_worker_publishes_immutable_psram_frames_without_lvgl_calls_or_replay():
     )
 
 
-def test_same_visible_plan_reuses_generation_and_does_not_notify_worker_again():
+def test_same_visible_or_complete_hidden_plan_reuses_frame_without_worker_replay():
     service = read("main/map/map_view_service.c")
     acquire = body(
         service,
         "esp_err_t d1l_map_view_service_acquire_visible",
         "void d1l_map_view_service_release_visible",
     )
-    identical = acquire.split("if (s_map.status.visible", 1)[1].split(
+    identical = acquire.split("if (same_plan &&", 1)[1].split(
         "uint32_t generation", 1
     )[0]
+    completed = body(
+        service, "static bool completed_frame_locked", "static bool generation_continue"
+    )
+    worker = body(service, "static void map_worker", "esp_err_t d1l_map_view_service_init")
 
+    assert "s_map.status.visible || completed_frame_locked()" in identical
+    assert "s_map.status.visible = true" in identical
+    assert "if (completed_frame_locked())" in identical
+    assert 'set_message_locked("ready", "Map ready")' in identical
     assert "*out_generation = s_map.status.generation" in identical
     assert "xTaskNotifyGive" not in identical
     assert "xTaskNotifyGive(s_map.worker)" in acquire
     assert acquire.index("uint32_t generation") < acquire.index("xTaskNotifyGive(s_map.worker)")
+
+    for required in (
+        "s_map.status.frame_ready",
+        "s_map.status.frame_revision > 0U",
+        "s_map.status.planned_tiles > 0U",
+        "s_map.status.attempted_tiles == s_map.status.planned_tiles",
+        "s_map.status.rendered_tiles == s_map.status.planned_tiles",
+        "s_map.status.failed_tiles == 0U",
+    ):
+        assert required in completed
+    assert "if (completed_frame_locked())" in worker
+    assert worker.index("if (completed_frame_locked())") < worker.index(
+        "run_generation(&plan, generation)"
+    )
+    assert "ulTaskNotifyTake(pdTRUE, 0U)" in worker
 
 
 def test_visible_lease_revocation_cannot_time_out_before_worker_notification():

@@ -12,7 +12,7 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Copyright and attribution terms: https://www.openstreetmap.org/copyright
 - Data license: Open Database License 1.0, https://opendatacommons.org/licenses/odbl/1-0/
 - Tile service policy: https://operations.osmfoundation.org/policies/tiles/
-- Product use: OpenStreetMap Standard is the built-in map source. Requests are limited to the visible current-view 3x3 at one zoom while the actual Map is visible; cache revisits are reused, and background or area download is not provided.
+- Product use: OpenStreetMap Standard is the built-in map source. Users may pan and select zooms 8 through 14, but requests remain limited to the visible current-view 3x3 at one zoom per visible generation while the actual Map is visible. Completed exact-view Home-to-Map revisits reuse the retained frame; later sessions reuse cached tiles. Background fetch, multi-zoom prefetch, off-screen batches, and area download are not provided.
 - No endorsement: OpenStreetMap and the OpenStreetMap Foundation do not endorse this project.
 
 ## LodePNG
@@ -26,7 +26,8 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 
 - Project: Seeed SenseCAP Indicator ESP32 SDK and examples
 - Repository: https://github.com/Seeed-Solution/SenseCAP_Indicator_ESP32
-- Use in this project: board support package, LCD/touch integration patterns, D1L/GX display configuration, and firmware build baseline.
+- Pinned submodule: `third_party/sensecap_indicator_esp32` at commit `77edb8d2b9a92fc67965c1b2d4a838f0d09a1800` (`v1.1.0`)
+- Use in this project: tracked compatibility/BSP reference for board support, LCD/touch integration patterns, and D1L/GX display configuration. Its documented ESP-IDF v5.1.x baseline does not set the production SDK version; issue #63 separately selects v5.5.4 as the migration target and requires qualification before it becomes the production baseline.
 
 ## SigurdOS-TDeck
 

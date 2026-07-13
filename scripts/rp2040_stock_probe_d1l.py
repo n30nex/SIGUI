@@ -10,9 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 DEFAULT_PORT = "COM" + "12"
@@ -65,7 +65,7 @@ def build_report(args: argparse.Namespace) -> dict:
         return report
 
     try:
-        with serial.Serial(port=port, baudrate=args.baud, timeout=args.timeout) as ser:
+        with open_d1l_serial(serial, port=port, baudrate=args.baud, timeout=args.timeout) as ser:
             for command in COMMANDS:
                 result = send_console_command(ser, command, args.timeout)
                 report["results"].append(result)

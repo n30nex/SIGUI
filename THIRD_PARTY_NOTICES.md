@@ -21,7 +21,8 @@ The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore De
 
 - Source: https://github.com/Seeed-Solution/sensecap_indicator_esp32
 - License: Apache-2.0
-- Use: Seeed SenseCAP Indicator D1L BSP, display/touch/radio hardware support, and ESP-IDF build baseline.
+- Pinned submodule commit: `77edb8d2b9a92fc67965c1b2d4a838f0d09a1800` (`v1.1.0`)
+- Use: tracked compatibility/BSP reference for Seeed SenseCAP Indicator D1L display, touch, radio, and board support. Its ESP-IDF v5.1.x example baseline does not determine the separately selected v5.5.4 migration target.
 
 ## MeshCore
 

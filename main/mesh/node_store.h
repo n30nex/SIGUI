@@ -13,7 +13,7 @@
 #define D1L_NODE_FINGERPRINT_LEN 17U
 #define D1L_NODE_PUBLIC_KEY_HEX_LEN 65U
 #define D1L_HEARD_NODE_NAME_LEN 24U
-#define D1L_NODE_TYPE_LEN 8U
+#define D1L_NODE_TYPE_LEN 9U
 #define D1L_NODE_ROLE_LEN 12U
 
 typedef struct {
@@ -30,7 +30,22 @@ typedef struct {
     int snr_tenths;
     uint8_t path_hash_bytes;
     uint8_t path_hops;
+    bool location_valid;
+    int32_t lat_e6;
+    int32_t lon_e6;
+    uint32_t location_advert_timestamp;
+    uint32_t location_seq;
 } d1l_node_entry_t;
+
+typedef struct {
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int32_t lat_e6;
+    int32_t lon_e6;
+    uint32_t location_advert_timestamp;
+    uint32_t location_seq;
+} d1l_node_marker_t;
 
 typedef enum {
     D1L_NODE_FILTER_ALL = 0,
@@ -77,12 +92,24 @@ typedef struct {
 
 esp_err_t d1l_node_store_init(void);
 esp_err_t d1l_node_store_clear(void);
+/*
+ * Accepts only a node's first or strictly newer signed advert timestamp.
+ * A newer locationless advert updates identity/heard metadata while retaining
+ * the most recent valid location. out_stale reports an intentional replay
+ * rejection separately from storage or initialization errors.
+ */
 esp_err_t d1l_node_store_upsert_advert(const char *fingerprint, const char *public_key_hex,
                                        const char *name, char type_code, int rssi_dbm,
                                        int snr_tenths, uint8_t path_hash_bytes,
-                                       uint8_t path_hops, uint32_t advert_timestamp);
+                                       uint8_t path_hops, uint32_t advert_timestamp,
+                                       bool location_valid, int32_t lat_e6, int32_t lon_e6,
+                                       bool *out_stale);
 d1l_node_store_stats_t d1l_node_store_stats(void);
 bool d1l_node_store_find_by_fingerprint(const char *fingerprint, d1l_node_entry_t *out_entry);
 size_t d1l_node_store_copy_recent(d1l_node_entry_t *out_entries, size_t max_entries);
 size_t d1l_node_store_query(const d1l_node_query_t *query, d1l_node_view_t *out_entries,
                             size_t max_entries);
+/* Changes only for marker membership, identity/name/type, or coordinate changes. */
+uint32_t d1l_node_store_marker_generation(void);
+/* Passive, bounded snapshot of located nodes, newest local location receipt first. */
+size_t d1l_node_store_copy_markers(d1l_node_marker_t *out_markers, size_t max_markers);

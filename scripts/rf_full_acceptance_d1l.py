@@ -12,10 +12,10 @@ from pathlib import Path
 
 try:
     from artifact_metadata import stamp_report
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 DEFAULT_TARGET_FINGERPRINT = "0BF0A701D5AE2DB6"
@@ -392,7 +392,7 @@ def run_hardware(
         steps.append({"command": command, "result": result})
         return result
 
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         run_command(ser, "identity status")

@@ -30,7 +30,7 @@ try:
         parse_sha256sums,
         sha256_file,
     )
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import git_metadata
     from scripts.flash_rp2040_sd_bridge_uf2 import (
@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         parse_sha256sums,
         sha256_file,
     )
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
 
 
 DEFAULT_D1L_PORT = "COM" + "12"
@@ -246,6 +246,102 @@ def verify_named_artifact(artifact_dir: Path, filename: str, expected_sha256: st
     }
 
 
+def verify_esp32_flash_inputs(ctx: RunContext) -> dict:
+    artifact_root = artifact_dirs(ctx)["esp32"].resolve()
+    build_dir = artifact_dirs(ctx)["esp32_build"].resolve()
+    manifest_path = require_path(artifact_root / "SHA256SUMS.txt", "ESP32 SHA256SUMS.txt")
+    checksums = parse_sha256sums(manifest_path)
+    manifest_rows = [
+        line for line in manifest_path.read_text(encoding="ascii").splitlines()
+        if line.strip()
+    ]
+    if not checksums:
+        raise FlashGuardError("ESP32 SHA256SUMS.txt is empty")
+    if len(checksums) != len(manifest_rows):
+        raise FlashGuardError("ESP32 SHA256SUMS.txt contains duplicate paths")
+
+    actual_files = {
+        path.relative_to(artifact_root).as_posix(): path
+        for path in artifact_root.rglob("*")
+        if path.is_file() and path != manifest_path
+    }
+    if set(checksums) != set(actual_files):
+        missing = sorted(set(actual_files) - set(checksums))
+        extra = sorted(set(checksums) - set(actual_files))
+        raise FlashGuardError(
+            f"ESP32 checksum coverage mismatch: unlisted={missing}, missing_files={extra}"
+        )
+    for relative, path in actual_files.items():
+        actual = sha256_file(path)
+        if actual.lower() != checksums[relative].lower():
+            raise FlashGuardError(
+                f"checksum mismatch for {relative}: expected {checksums[relative]}, actual {actual}"
+            )
+
+    flasher_path = require_path(build_dir / "flasher_args.json", "flasher_args.json")
+    try:
+        flasher = json.loads(flasher_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise FlashGuardError(f"invalid flasher_args.json: {exc}") from exc
+    flash_files = flasher.get("flash_files")
+    if not isinstance(flash_files, dict) or not flash_files:
+        raise FlashGuardError("flasher_args.json has no flash_files")
+
+    verified_files: list[dict] = []
+    seen_offsets: set[int] = set()
+    for raw_offset, raw_relative in sorted(
+        flash_files.items(), key=lambda item: int(str(item[0]), 0)
+    ):
+        try:
+            offset = int(str(raw_offset), 0)
+        except ValueError as exc:
+            raise FlashGuardError(f"invalid flash offset {raw_offset!r}") from exc
+        if offset < 0 or offset in seen_offsets:
+            raise FlashGuardError(f"duplicate or invalid flash offset {raw_offset!r}")
+        seen_offsets.add(offset)
+        target = (build_dir / str(raw_relative)).resolve()
+        try:
+            target.relative_to(build_dir)
+            artifact_relative = target.relative_to(artifact_root).as_posix()
+        except ValueError as exc:
+            raise FlashGuardError(f"flash file escapes Actions artifact: {raw_relative!r}") from exc
+        if not target.is_file() or artifact_relative not in checksums:
+            raise FlashGuardError(f"unverified flash file: {artifact_relative}")
+        verified_files.append(
+            {
+                "offset": offset,
+                "offset_hex": hex(offset),
+                "path": artifact_relative,
+                "size": target.stat().st_size,
+                "sha256": checksums[artifact_relative].upper(),
+            }
+        )
+
+    required_roles = {
+        0x0: "build/bootloader/bootloader.bin",
+        0x8000: "build/partition_table/partition-table.bin",
+        0x10000: "build/meshcore_deskos_d1l.bin",
+    }
+    verified_by_offset = {item["offset"]: item["path"] for item in verified_files}
+    if verified_by_offset != required_roles:
+        raise FlashGuardError(
+            "ESP32 flash roles must exactly match the non-erasing project image: "
+            f"expected={required_roles}, actual={verified_by_offset}"
+        )
+
+    return {
+        "ok": True,
+        "artifact_root": str(artifact_root),
+        "manifest": str(manifest_path),
+        "manifest_sha256": sha256_file(manifest_path).upper(),
+        "manifest_entry_count": len(checksums),
+        "manifest_complete": True,
+        "required_flash_roles": {hex(offset): path for offset, path in required_roles.items()},
+        "flasher_args_sha256": sha256_file(flasher_path).upper(),
+        "flash_files": verified_files,
+    }
+
+
 def command_report(name: str, args: list[str], cwd: Path, timeout: int | None = None) -> dict:
     started_at = utc_now()
     try:
@@ -342,8 +438,26 @@ def write_json(path: Path, payload: dict) -> Path:
 
 def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
     build_dir = artifact_dirs(ctx)["esp32_build"]
-    cmd = esptool_flash_command(build_dir, ctx.d1l_port, ctx.esp32_flash_baud)
     out = ctx.hardware_dir / f"esp32_flash_{ctx.short_commit}_actions_{ctx.github_run_id}_{ctx.d1l_port}.json"
+    try:
+        artifact_verification = verify_esp32_flash_inputs(ctx)
+        cmd = esptool_flash_command(build_dir, ctx.d1l_port, ctx.esp32_flash_baud)
+    except Exception as exc:
+        report = {
+            "schema": 1,
+            "kind": "esp32_flash",
+            "mode": "dry-run" if dry_run else "hardware",
+            "port": ctx.d1l_port,
+            "commit": ctx.commit,
+            "github_actions_run": ctx.github_run_id,
+            "public_rf_tx": False,
+            "formats_sd": False,
+            "artifact_verification": {"ok": False, "error": str(exc)},
+            "ok": False,
+        }
+        write_json(out, report)
+        report["path"] = str(out)
+        return report
     report = {
         "schema": 1,
         "kind": "esp32_flash",
@@ -351,6 +465,7 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
         "port": ctx.d1l_port,
         "commit": ctx.commit,
         "github_actions_run": ctx.github_run_id,
+        "artifact_verification": artifact_verification,
         "public_rf_tx": False,
         "formats_sd": False,
         "command": cmd,
@@ -361,6 +476,7 @@ def flash_esp32(ctx: RunContext, *, dry_run: bool) -> dict:
         report["result"] = command_report("esp32_flash", cmd, ctx.root, timeout=240)
         report["ok"] = report["result"].get("ok") is True
         if report["ok"]:
+            report["flashed_at"] = utc_now()
             time.sleep(POST_ESP32_FLASH_SETTLE_SEC)
     write_json(out, report)
     report["path"] = str(out)
@@ -728,7 +844,7 @@ def send_d1l_console(port: str, baud: int, command: str, timeout: float, *, sett
         import serial
     except ImportError as exc:  # pragma: no cover - dependency dependent
         return {"ok": False, "error": f"pyserial is required: {exc}", "cmd": command}
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(settle_sec)
         ser.reset_input_buffer()
         return send_console_command(ser, command, timeout)
@@ -1225,6 +1341,8 @@ def run_smoke(ctx: RunContext, dry_run: bool) -> dict:
         "--timeout",
         "5",
         "--persistence-test",
+        "--expected-firmware-commit",
+        ctx.commit,
     ]
     report = run_existing_script(ctx, "smoke", args, out, timeout=180, dry_run=dry_run)
     if dry_run or report.get("ok") is True:

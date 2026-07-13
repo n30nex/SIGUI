@@ -27,6 +27,7 @@ def test_settings_model_defaults_and_nvs_contract():
     assert "map_tile_url_template" not in header
     assert "map_tile_attribution" not in header
     assert "map_tile_zoom" in header
+    assert "D1L_MAP_TILE_DEFAULT_ZOOM 10U" in header
     assert "map_lat_e7" in header
     assert "map_lon_e7" in header
     assert "D1L_MAP_LOCATION_LAT_E7_MIN" in header

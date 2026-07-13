@@ -38,10 +38,18 @@ typedef struct {
     uint32_t sd_mount_data;
     uint32_t manager_attempt;
     uint32_t manager_backoff_ms;
+    uint32_t manager_initial_ping_timeouts;
+    uint32_t bridge_status_refresh_failures;
     esp_err_t last_error;
     bool manager_running;
     bool force_nvs;
+    bool manager_bridge_response_seen;
+    bool manager_auto_reset_pending;
+    bool manager_auto_reset_attempted;
+    bool bridge_status_stale;
+    bool sd_presence_stale;
     bool retained_sd_degraded;
+    bool retained_backup_degraded;
     char sd_probe_power[8];
     char sd_probe_mode[16];
     const char *manager_state;
@@ -65,6 +73,8 @@ typedef struct {
 
 esp_err_t d1l_storage_status_init(void);
 void d1l_storage_status_note_rp2040(esp_err_t rp2040_init_result);
+/* Latches a parsed DeskOS bridge response and cancels any queued auto-reset. */
+void d1l_storage_status_note_valid_bridge_response(void);
 esp_err_t d1l_storage_boot_prepare(uint32_t timeout_ms);
 esp_err_t d1l_storage_manager_start(void);
 esp_err_t d1l_storage_manager_request_remount(void);

@@ -88,8 +88,13 @@ def test_storage_retained_sd_degradation_is_copied_into_touch_snapshot():
     )
 
     assert "bool storage_retained_sd_degraded;" in snapshot_struct
+    assert "bool storage_retained_backup_degraded;" in snapshot_struct
     assert (
         "snapshot->storage_retained_sd_degraded = storage.retained_sd_degraded;"
+        in snapshot_copy
+    )
+    assert (
+        "snapshot->storage_retained_backup_degraded = storage.retained_backup_degraded;"
         in snapshot_copy
     )
 
@@ -131,9 +136,16 @@ def test_storage_touch_ui_prioritizes_all_attention_states():
     assert readiness.index("storage_snapshot_needs_attention(snapshot)") < readiness.index(
         "snapshot->storage_sd_mounted && snapshot->storage_sd_data_root_ready"
     )
-    assert hero.index("snapshot->storage_retained_sd_degraded") < hero.index(
-        "snapshot->storage_data_enabled"
+    assert hero.index("snapshot->storage_retained_backup_degraded") < hero.index(
+        "if (snapshot->storage_retained_sd_degraded)",
+        hero.index("snapshot->storage_retained_sd_degraded") + 1,
     )
+    assert hero.index('storage_text_equals(action, "wait_for_storage_reconnect")') < hero.rindex(
+        "} else if (snapshot->storage_data_enabled)"
+    )
+    assert 'copy.state = "Card reader reconnecting";' in hero
+    assert '"Last confirmed SD remains active briefly."' in hero
+    assert '"Internal fallback takes over if status retries fail."' in hero
     assert 'copy.accent = 0xFCA5A5;' in hero
 
 
@@ -145,10 +157,18 @@ def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
         "static void render_storage_header",
     )
 
-    retained = hero.index("snapshot->storage_retained_sd_degraded")
+    backup = hero.index("snapshot->storage_retained_backup_degraded")
+    retained = hero.index(
+        "if (snapshot->storage_retained_sd_degraded)",
+        hero.index("snapshot->storage_retained_sd_degraded") + 1,
+    )
     general_attention = hero.index("storage_snapshot_needs_attention(snapshot)")
-    ready = hero.index("snapshot->storage_data_enabled")
-    assert retained < general_attention < ready
+    ready = hero.rindex("} else if (snapshot->storage_data_enabled)")
+    assert backup < retained < general_attention < ready
+
+    backup_branch = hero[backup:retained]
+    assert 'copy.guidance = "Internal backup needs attention.";' in backup_branch
+    assert 'copy.detail = "Internal saved-data storage is unavailable.";' in backup_branch
 
     retained_branch = hero[retained:general_attention]
     assert 'copy.state = "SD needs attention";' in retained_branch
@@ -158,6 +178,31 @@ def test_storage_hero_distinguishes_retained_fallback_from_card_errors():
     assert 'copy.state = "Card needs attention";' in media_branch
     assert 'copy.detail = "Internal storage is active.";' in media_branch
     assert 'copy.guidance = "Technical details are available over USB.";' in media_branch
+
+
+def test_storage_backup_degradation_redraws_and_avoids_false_internal_claims():
+    source = read("main/ui/ui_phase1.c")
+    generation = function_slice(
+        source,
+        "static d1l_ui_content_generation_t content_generation_from_snapshot",
+        "static bool content_generation_text_equal",
+    )
+    equality = function_slice(
+        source,
+        "static bool content_generation_equal",
+        "static void remember_rendered_content_generation",
+    )
+    friendly = function_slice(
+        source,
+        "static const char *storage_retained_backend_friendly",
+        "static const char *storage_map_backend_friendly",
+    )
+
+    assert "snapshot->storage_retained_backup_degraded" in generation
+    assert "storage_retained_backup_degraded" in equality
+    assert '"SD; backup degraded"' in friendly
+    assert '"Internal issue"' in friendly
+    assert '"Unavailable"' in friendly
 
 
 def test_storage_root_summary_counts_only_genuinely_sd_ready_backends():

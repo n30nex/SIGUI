@@ -1,7 +1,12 @@
 # MeshCore DeskOS D1L 8 MB single-app layout.
-# Keep NVS/PHY and the factory app offset aligned with ESP-IDF defaults so
-# project flashing preserves onboard settings while allowing a release-sized app.
+# Keep default NVS/PHY and the factory app offset aligned with ESP-IDF defaults
+# so project flashing preserves settings. Retained history mirrors use their
+# own NVS partition at the unused top of flash, avoiding default-NVS pressure.
+# A separate marker sector makes first-use initialization distinguishable from
+# later retained-partition corruption, which must fail closed without erasing.
 # Name,     Type, SubType, Offset,   Size,     Flags
 nvs,        data, nvs,     0x9000,   0x6000,
 phy_init,   data, phy,     0xf000,   0x1000,
-factory,    app,  factory, 0x10000,  0x7F0000,
+factory,    app,  factory, 0x10000,  0x7D0000,
+d1l_ret_meta,data, 0x40,    0x7E0000, 0x1000,
+d1l_retained,data, nvs,     0x7E1000, 0x1F000,

@@ -11,6 +11,7 @@
 #include "freertos/semphr.h"
 
 #include "hal/indicator_pins.h"
+#include "hal/rp2040_sd_reply.h"
 #include "tca9535.h"
 
 #define D1L_RP2040_UART_BUF_SIZE 4096
@@ -616,37 +617,39 @@ static esp_err_t parse_sd_line_with_prefix(const char *line,
                                            const char *prefix,
                                            d1l_rp2040_sd_status_t *status)
 {
-    if (!line || !prefix || !status || !line_has_prefix(line, prefix)) {
-        return ESP_FAIL;
+    d1l_rp2040_sd_reply_t reply = {0};
+    if (!status || !d1l_rp2040_sd_reply_parse(line, prefix, &reply)) {
+        return ESP_ERR_INVALID_RESPONSE;
     }
 
     init_sd_status(status, ESP_OK);
     status->protocol_supported = true;
-    parse_word_token(line, "state", status->state, sizeof(status->state));
-    parse_word_token(line, "fs", status->filesystem, sizeof(status->filesystem));
-    parse_word_token(line, "note", status->note, sizeof(status->note));
-    (void)parse_bool_token(line, "present", &status->card_present);
-    (void)parse_bool_token(line, "mounted", &status->filesystem_mounted);
-    (void)parse_bool_token(line, "deskos", &status->deskos_root_ready);
+    memcpy(status->state, reply.state, sizeof(status->state));
+    memcpy(status->filesystem, reply.filesystem, sizeof(status->filesystem));
+    memcpy(status->note, reply.note, sizeof(status->note));
+    memcpy(status->probe_power, reply.probe_power, sizeof(status->probe_power));
+    memcpy(status->probe_mode, reply.probe_mode, sizeof(status->probe_mode));
+    status->card_present = reply.card_present;
+    status->filesystem_mounted = reply.filesystem_mounted;
+    status->deskos_root_ready = reply.deskos_root_ready;
+    status->needs_fat32 = reply.needs_fat32;
+    status->file_ops_supported = reply.file_ops_supported;
+    status->atomic_rename_supported = reply.atomic_rename_supported;
+    status->capacity_kb = reply.capacity_kb;
+    status->free_kb = reply.free_kb;
+    status->file_line_max = reply.file_line_max;
+    status->file_chunk_max = reply.file_chunk_max;
+    status->path_max = reply.path_max;
+    status->probe_error = reply.probe_error;
+    status->probe_data = reply.probe_data;
+    status->mount_error = reply.mount_error;
+    status->mount_data = reply.mount_data;
+
     bool legacy_format_required = false;
-    (void)parse_bool_token(line, "needs_fat32", &status->needs_fat32);
     if (parse_bool_token(line, "format_required", &legacy_format_required) &&
         legacy_format_required) {
         status->needs_fat32 = true;
     }
-    (void)parse_bool_token(line, "file_ops", &status->file_ops_supported);
-    (void)parse_bool_token(line, "atomic_rename", &status->atomic_rename_supported);
-    (void)parse_u32_token(line, "capacity_kb", &status->capacity_kb);
-    (void)parse_u32_token(line, "free_kb", &status->free_kb);
-    (void)parse_u32_token(line, "file_line_max", &status->file_line_max);
-    (void)parse_u32_token(line, "file_chunk_max", &status->file_chunk_max);
-    (void)parse_u32_token(line, "path_max", &status->path_max);
-    (void)parse_u32_token(line, "probe_err", &status->probe_error);
-    (void)parse_u32_token(line, "probe_data", &status->probe_data);
-    (void)parse_u32_token(line, "mount_err", &status->mount_error);
-    (void)parse_u32_token(line, "mount_data", &status->mount_data);
-    parse_word_token(line, "probe_power", status->probe_power, sizeof(status->probe_power));
-    parse_word_token(line, "probe_mode", status->probe_mode, sizeof(status->probe_mode));
 
     const bool probe_rejected_card =
         strcmp(status->note, "sd_probe_rejected_card") == 0 ||

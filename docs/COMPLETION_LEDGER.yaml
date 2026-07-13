@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-13T21:23:00Z",
+  "snapshot_at": "2026-07-13T21:41:47Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,21 +12,24 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
-      "actions_run": "29285852443",
+      "commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
+      "actions_run": "29286754864",
       "actions_status": "success",
-      "host_tests_passed": 388,
-      "checksum_manifests_verified": 2,
-      "checksum_entries_verified": 35,
-      "firmware_manifest_sha256": "fd13f6fbabde7415fa29e9d95ccbca8cbc49168208a1e27e54f32e6fdf9d2312",
-      "release_manifest_sha256": "dc3d046eec5825ab434b2923818cfda5d2ea246085bd169a16451f59feaad369",
-      "note": "PR #83 merged the exact WP-01 proof ledger. WP-02 is active; the implementation stack is not yet merged."
+      "host_tests_passed": 423,
+      "checksum_status": "failed_closed_after_download",
+      "checksum_manifests_total": 8,
+      "checksum_manifests_verified": 7,
+      "checksum_entries_present": 73,
+      "firmware_manifest_sha256": "0d841cf10185e445afa87d54e625f64b9706b47b181a3e8508157f31e9e5c5f4",
+      "release_manifest_sha256": "2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1",
+      "checksum_failure": "The top-level release manifest omits the three copied nested RP2040 SHA256SUMS.txt files. All listed file hashes and all seven other manifests pass, but exact recursive coverage fails.",
+      "note": "PR #62 merged the bounded Map foundation. WP-02 remains active; PR #64 carries the fail-closed checksum verifier and package-manifest coverage fix."
     },
     "working_branch": {
-      "name": "codex/d1l-ui-map-hierarchy",
-      "base_commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
-      "pull_request": 62,
-      "merged_pull_request": 83
+      "name": "codex/wp02-pr64-refresh",
+      "base_commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
+      "pull_request": 64,
+      "merged_pull_request": 62
     },
     "audit_snapshot": {
       "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
@@ -44,23 +47,6 @@
   },
   "active_pull_requests": [
     {
-      "number": 62,
-      "title": "Map: built-in bounded OpenStreetMap current view",
-      "base": "main",
-      "head": "codex/d1l-ui-map-hierarchy",
-      "head_commit": "f37f6a78011a414774aaa5fff8bca0dec8a4a5a6",
-      "state": "open",
-      "draft": true,
-      "checks": "success",
-      "mergeable": false,
-      "local_resolution_commit": "7648611c412e7f4658f5d14b43ba530744d96160",
-      "local_resolution_tests": 423,
-      "local_resolution_focused_tests": 80,
-      "local_resolution_scope": "pre_final_local_only",
-      "absorbed_main_commit": "c3f9106ea9b88c491889cd8dea9ad883a0d72180",
-      "absorbed_main_actions_run": "29285852443"
-    },
-    {
       "number": 64,
       "title": "Build: qualify D1L Map/Wi-Fi on ESP-IDF 5.5.4",
       "base": "codex/d1l-ui-map-hierarchy",
@@ -73,7 +59,10 @@
       "local_resolution_commit": "c5886de1e2988b2097034183d5e39bb3aec88344",
       "local_resolution_tests": 575,
       "local_resolution_focused_tests": 128,
-      "local_resolution_scope": "pre_final_local_only"
+      "local_resolution_scope": "pre_final_local_only",
+      "absorbed_main_commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
+      "absorbed_main_actions_run": "29286754864",
+      "artifact_integrity_fix": "top-level release manifest includes nested RP2040 checksum manifests and exact coverage is enforced"
     },
     {
       "number": 80,
@@ -95,7 +84,7 @@
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
-      "resolution": "Use live main c3f9106ea9b88c491889cd8dea9ad883a0d72180 after merged PR #83 and exact-main Actions run 29285852443; retain the audited SHA only as history."
+      "resolution": "Use live main 570a94ad6ead0941f7acb7d9c9812c63df869e33 after merged PR #62 and exact-main Actions run 29286754864; retain the audited SHA only as history."
     },
     {
       "conflict": "PR #80 text says its fresh workflows are queued.",
@@ -108,6 +97,10 @@
     {
       "conflict": "Current main still builds the pre-stack ESP-IDF 5.1 line while the selected release SDK is 5.5.4.",
       "resolution": "Treat 5.5.4 as candidate-only until PR #64 is landed and requalified through WP-02."
+    },
+    {
+      "conflict": "Exact-main Actions 29286754864 was green although the downloaded release package failed recursive checksum coverage.",
+      "resolution": "Seven of eight manifests and every listed hash passed. The top manifest omitted exactly three nested RP2040 SHA256SUMS.txt files because main excluded every file with that basename. PR #64 already narrows the exclusion to the root manifest itself; a package-level regression now requires the top manifest to list and validate all nested manifests. Keep the receipt fail-closed until exact PR #64 artifacts verify after download."
     }
   ],
   "port_policy": {
@@ -239,6 +232,21 @@
       "resolution": "PR #80 isolated diagnostic maintenance from the retained worker. Exact Actions SHA 092293f then passed the clean autonomous baseline, 10 removal/reinsert cycles, five controlled retained reboots, and 7207.089 seconds of storage-active testing without WDT, panic, RF transmission, or SD formatting.",
       "blocks_execution": false,
       "still_unblocked": ["WP-02 integration stack"]
+    },
+    {
+      "id": "BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713",
+      "work_package": "WP-02",
+      "kind": "downloaded_artifact_integrity_failure",
+      "status": "open",
+      "observed_at": "2026-07-13T21:37:00Z",
+      "missing_input": "Exact PR #64 push and PR artifacts whose top-level release checksum manifest includes and verifies the three nested RP2040 SHA256SUMS.txt files.",
+      "why_source_work_cannot_close": "Run 29286754864 was green, but downloaded verification found only 7 of 8 manifests recursively complete. The root release manifest omitted three real files, so the exact-main package is not reproducibly verified.",
+      "last_valid_sha": "7a6ff86493042cc5617ef88c4765312cea46150d",
+      "last_valid_actions_run": "29286378383",
+      "artifact_state": "exact_failure_preserved_top_manifest_2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1",
+      "operator_action": "Push the refreshed PR #64 head, require the package regression and hardened verifier in Actions, download both exact workflows, and verify every nested and top-level manifest before merge.",
+      "blocks_execution": false,
+      "still_unblocked": ["WP-02 PR #64 checksum coverage fix and integration validation"]
     }
   ],
   "execution_priority": [
@@ -479,7 +487,7 @@
       "required_evidence": ["integration_baseline_<main-sha>.json"],
       "evidence": [],
       "latest_valid_receipt": null,
-      "blockers": []
+      "blockers": ["BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713"]
     },
     {
       "id": "WP-03",

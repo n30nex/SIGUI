@@ -23,6 +23,13 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS 1500U" in header
     assert "d1l_storage_status_init" in header
     assert "d1l_storage_status_note_rp2040" in header
+    note_rp2040 = source.split("void d1l_storage_status_note_rp2040", 1)[1].split(
+        "esp_err_t d1l_storage_status_refresh", 1
+    )[0]
+    assert "if (manager_force_nvs_enabled())" in note_rp2040
+    assert "apply_force_nvs_status();" in note_rp2040
+    assert "bridge_status_refresh_failures = 0" not in note_rp2040
+    assert "bridge_status_stale = false" not in note_rp2040
     assert "d1l_storage_boot_prepare" in header
     assert "d1l_storage_manager_start" in header
     assert "d1l_storage_manager_request_remount" in header
@@ -38,10 +45,16 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "manager_running" in header
     assert "force_nvs" in header
     assert "manager_backoff_ms" in header
+    assert "manager_initial_ping_timeouts" in header
+    assert "manager_bridge_response_seen" in header
+    assert "manager_auto_reset_pending" in header
+    assert "manager_auto_reset_attempted" in header
     assert "setup_action" in header
     assert '"storage/storage_status.c"' in cmake
+    assert '"storage/storage_status_policy.c"' in cmake
     assert '"storage/export_store.c"' in cmake
     assert '"storage/map_tile_store.c"' in cmake
+    assert '"hal/rp2040_sd_reply.c"' in cmake
     assert '"storage"' in cmake
     assert "esp_err_t storage_ret = d1l_storage_status_init()" in app_main
     assert app_main.index("d1l_storage_status_init()") < app_main.index("d1l_message_store_init()")
@@ -70,6 +83,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "D1L_STORAGE_MANAGER_RESET_SETTLE_MS 8000U" in source
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS" in source
     assert "D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS" in source
+    assert "D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U" in source
+    assert "s_manager_control_lock" in source
+    assert "s_manager_sequence_mutex" in source
     assert 'xTaskCreate(storage_manager_task' in source
     assert "d1l_rp2040_bridge_ping" in source
     assert "d1l_rp2040_bridge_reset" in source
@@ -109,6 +125,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "sd_probe_error" in header
     assert "sd_mount_error" in header
     assert "retained_sd_degraded" in header
+    assert "retained_backup_degraded" in header
     assert "retained_sd_stats" in header
     assert "s_status.file_ops_supported = sd->file_ops_supported" in source
     assert "s_status.atomic_rename_supported = sd->atomic_rename_supported" in source
@@ -128,6 +145,8 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "refresh_retained_sd_health" in source
     assert "d1l_retained_blob_store_sd_stats(D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES" in source
     assert "d1l_retained_blob_store_any_sd_degraded()" in source
+    assert "d1l_retained_blob_store_nvs_ready()" in source
+    assert "nvs_mirror_last_error != ESP_OK" in source
     assert "D1L_RETAINED_BLOB_STORE_SD_DEGRADED_NOTE" in source
     assert 'status->message_store_backend = "nvs"' not in source
     assert 'status->dm_store_backend = "nvs"' not in source
@@ -135,7 +154,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "d1l_retained_blob_store_note_sd_backend(sd->data_ready" in source
     assert "sd->file_ops_supported" in source
     assert "sd->atomic_rename_supported" in source
-    assert 'status->data_backend = any_retained_sd ? "mixed" : "nvs"' in source
+    assert 'status->data_backend = any_retained_sd ? "mixed" :' in source
     assert '#include "storage/map_tile_store.h"' in source
     assert "d1l_map_tile_store_sd_ready(status)" in source
     assert '"sd_map_tiles_ready" : "unavailable"' in source
@@ -162,6 +181,9 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
         "d1l_rp2040_bridge_mount_sd(&sd, timeout_ms)"
     )
     assert "s_status.last_error = ESP_OK" in mount_body
+    assert "if (manager_force_nvs_enabled())" in mount_body
+    assert "apply_force_nvs_status();" in mount_body
+    assert "return ESP_ERR_INVALID_STATE;" in mount_body
     remount_body = source.split("esp_err_t d1l_storage_status_remount_blocking", 1)[1].split(
         "void d1l_storage_status", 1
     )[0]
@@ -169,8 +191,11 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "storage_status_mount(timeout_ms, true)" in remount_body
     assert "remount_timeout_needs_bridge_reset()" in remount_body
     assert "reset_bridge_and_remount_blocking(timeout_ms)" in remount_body
-    assert "request_bridge_reset_remount_recovery()" in remount_body
-    assert "d1l_storage_manager_start()" in remount_body
+    assert "manager_sequence_try_take()" in remount_body
+    assert "ESP_ERR_INVALID_STATE" in remount_body
+    assert "manager_sequence_give()" in remount_body
+    assert "request_bridge_reset_remount_recovery()" not in remount_body
+    assert "d1l_storage_manager_start()" not in remount_body
     assert "classify_storage_manager_state(ret)" in remount_body
     assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
     assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
@@ -194,6 +219,180 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert manager_task_body.index("storage_manager_pause_delay_ms()") < manager_task_body.index(
         "storage_manager_run_once()"
     )
+
+
+def test_storage_manager_performs_one_bounded_initial_bridge_recovery_without_reset_storm():
+    source = read("main/storage/storage_status.c")
+    header = read("main/storage/storage_status.h")
+    console = read("main/comms/usb_console.c")
+
+    policy = source.split(
+        "static bool initial_ping_timeout_requires_reset", 1
+    )[1].split("static void set_store_backends", 1)[0]
+    claim = source.split(
+        "static bool claim_initial_bridge_reset", 1
+    )[1].split("static void set_store_backends", 1)[0]
+    valid = source.split(
+        "void d1l_storage_status_note_valid_bridge_response", 1
+    )[1].split("static bool initial_ping_timeout_requires_reset", 1)[0]
+    apply_status = source.split(
+        "static void apply_rp2040_sd_status", 1
+    )[1].split("esp_err_t d1l_storage_status_init", 1)[0]
+    manager = source.split(
+        "static void storage_manager_run_once", 1
+    )[1].split("static uint32_t storage_manager_pause_delay_ms", 1)[0]
+    ping_flow = manager.split("d1l_rp2040_ping_t ping", 1)[1]
+
+    assert "D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U" in source
+    assert "s_manager_bridge_response_seen || s_manager_auto_reset_attempted" in policy
+    assert "s_manager_initial_reset_budget_spent" in policy
+    assert "result != ESP_ERR_TIMEOUT" in policy
+    assert "++s_manager_initial_ping_timeouts" in policy
+    assert "s_manager_auto_reset_pending = true;" in policy
+    assert "s_manager_auto_reset_pending" in claim
+    assert "!s_manager_bridge_response_seen" in claim
+    assert "!s_manager_auto_reset_attempted" in claim
+    assert "s_manager_auto_reset_pending = false;" in claim
+    assert "s_manager_auto_reset_attempted = true;" in claim
+    assert "s_manager_initial_reset_budget_spent = true;" in claim
+    assert "s_manager_initial_ping_timeouts = 0U;" in claim
+    assert "s_manager_bridge_response_seen = true;" in valid
+    assert "s_manager_initial_ping_timeouts = 0U;" in valid
+    assert "s_manager_auto_reset_pending = false;" in valid
+    assert "sd->bridge_ready && sd->protocol_supported" in apply_status
+    assert "d1l_storage_status_note_valid_bridge_response();" in apply_status
+    assert "initial_ping_timeout_requires_reset(ret)" in ping_flow
+    assert 'set_manager_state(D1L_STORAGE_MANAGER_BRIDGE_WAIT);' in ping_flow
+    assert "claim_initial_bridge_reset()" in manager
+    assert "initial_bridge_reset_is_pending()" in manager
+    assert "manager_control_take(" in manager
+    assert "manual_reset_requested" in manager
+    assert "manual_remount_requested" in manager
+    assert "manager_control_satisfy_reset();" in manager
+    assert "manager_force_nvs_enabled()" in manager
+    status_to_mount = manager.split(
+        "ret = d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_BOOT_PROBE_TIMEOUT_MS);", 1
+    )[1].split("const bool remount_requested", 1)[0]
+    assert "if (manager_force_nvs_enabled())" in status_to_mount
+    assert "apply_force_nvs_status();" in status_to_mount
+    ping_to_status = ping_flow.split(
+        "d1l_storage_status_note_valid_bridge_response();", 1
+    )[1].split("set_manager_state(D1L_STORAGE_MANAGER_STATUS);", 1)[0]
+    assert "if (manager_force_nvs_enabled())" in ping_to_status
+    assert "d1l_storage_status_note_rp2040(ESP_OK);" not in ping_to_status
+    assert "d1l_rp2040_ping_t final_ping" in manager
+    assert "final_ping_ret == ESP_OK" in manager
+    assert manager.index("d1l_rp2040_ping_t final_ping") < manager.index(
+        "claim_initial_bridge_reset()"
+    )
+    assert manager.index("d1l_storage_status_note_valid_bridge_response();") < manager.index(
+        "ping_already_valid = true;"
+    )
+    assert manager.index("claim_initial_bridge_reset()") < manager.index(
+        "d1l_rp2040_bridge_reset("
+    )
+    assert "auto_reset_performed" in manager
+    timeout_recovery = manager.split(
+        "if (ret == ESP_ERR_TIMEOUT && manual_remount_requested", 1
+    )[1].split("}", 1)[0]
+    assert "!manual_reset_requested && !auto_reset_performed" in timeout_recovery
+    assert "request_bridge_reset_remount_recovery();" in timeout_recovery
+    queued_recovery = source.split(
+        "static bool request_bridge_reset_remount_recovery", 1
+    )[1].split("static esp_err_t reset_bridge_and_remount_blocking", 1)[0]
+    assert "const bool queued = !s_force_nvs && !s_manager_reset_recovery_active" in queued_recovery
+    assert "if (!queued)" in queued_recovery
+    control_take = source.split("static void manager_control_take", 1)[1].split(
+        "static bool manager_force_nvs_enabled", 1
+    )[0]
+    assert control_take.index("s_manager_reset_bridge_requested") < control_take.index(
+        "s_manager_reset_bridge_requested = false"
+    )
+    force_nvs = source.split("void d1l_storage_manager_force_nvs", 1)[1].split(
+        "static esp_err_t storage_status_mount", 1
+    )[0]
+    assert "s_manager_auto_reset_pending = false" in force_nvs
+    assert "s_manager_reset_bridge_requested = false" in force_nvs
+    assert "else if (!s_manager_reset_recovery_active)" in force_nvs
+    status_copy = source.split("void d1l_storage_status(", 1)[1]
+    assert "portENTER_CRITICAL(&s_manager_control_lock)" in status_copy
+    assert status_copy.index("sync_initial_recovery_status_locked()") < status_copy.index(
+        "*out_status = s_status"
+    )
+    assert "d1l_storage_status_note_valid_bridge_response();" in ping_flow
+    assert "d1l_storage_status_note_valid_bridge_response" in header
+    assert "ret == ESP_OK && ping.bridge_ready && ping.protocol_supported" in console
+    assert "manager_initial_ping_timeouts" in header
+    assert "manager_bridge_response_seen" in header
+    assert "manager_auto_reset_pending" in header
+    assert "manager_auto_reset_attempted" in header
+    assert '\\"initial_ping_timeouts\\":%lu' in console
+    assert '\\"bridge_response_seen\\":%s' in console
+    assert '\\"auto_reset_pending\\":%s' in console
+    assert '\\"auto_reset_attempted\\":%s' in console
+    assert '\\"status_stale\\":%s' in console
+    assert '\\"refresh_failures\\":%lu' in console
+
+    satisfy = source.split("static void manager_control_satisfy_reset", 1)[1].split(
+        "static void manager_control_finish_reset_recovery", 1
+    )[0]
+    assert "s_manager_initial_ping_timeouts = 0U;" in satisfy
+    assert "s_manager_initial_reset_budget_spent = true;" in satisfy
+    assert "s_manager_auto_reset_pending = false;" in satisfy
+
+    manager_wrapper = source.split("static void storage_manager_run_once(void)", 1)[1].split(
+        "static uint32_t storage_manager_pause_delay_ms", 1
+    )[0]
+    assert "manager_sequence_try_take()" in manager_wrapper
+    assert "storage_manager_run_once_owned();" in manager_wrapper
+    assert "manager_control_finish_reset_recovery();" in manager_wrapper
+    assert "manager_sequence_give();" in manager_wrapper
+
+
+def test_storage_status_preserves_last_confirmed_card_across_transient_bridge_failures():
+    source = read("main/storage/storage_status.c")
+    header = read("main/storage/storage_status.h")
+    policy = read("main/storage/storage_status_policy.h")
+    map_store = read("main/storage/map_tile_store.c")
+    export_store = read("main/storage/export_store.c")
+
+    exchange_result = source.split(
+        "static void apply_rp2040_sd_exchange_result", 1
+    )[1].split("esp_err_t d1l_storage_status_init", 1)[0]
+    assert "if (ret == ESP_OK)" in exchange_result
+    assert "apply_rp2040_sd_status(sd);" in exchange_result
+    assert "note_rp2040_exchange_failure(ret, sd->response_truncated);" in exchange_result
+    assert "A timeout or malformed reply is not evidence" in exchange_result
+
+    refresh = source.split("esp_err_t d1l_storage_status_refresh", 1)[1].split(
+        "static esp_err_t poll_mount_pending", 1
+    )[0]
+    mount = source.split("static esp_err_t storage_status_mount", 2)[2].split(
+        "esp_err_t d1l_storage_status_mount", 1
+    )[0]
+    assert "apply_rp2040_sd_exchange_result(&sd, ret);" in refresh
+    assert "apply_rp2040_sd_status(&sd);" not in refresh
+    assert "apply_rp2040_sd_exchange_result(&sd, ret);" in mount
+    assert "apply_rp2040_sd_status(&sd);" not in mount
+
+    manager = source.split("static void storage_manager_run_once_owned", 1)[1].split(
+        "static void storage_manager_run_once(void)", 1
+    )[0]
+    regular_ping = manager.split("d1l_rp2040_ping_t ping", 1)[1]
+    ping_success = regular_ping.split(
+        "d1l_storage_status_note_valid_bridge_response();", 1
+    )[1].split("set_manager_state(D1L_STORAGE_MANAGER_STATUS);", 1)[0]
+    assert "d1l_storage_status_note_rp2040(ESP_OK);" not in ping_success
+    assert "note_rp2040_exchange_failure(ret, false);" in regular_ping
+
+    assert "bridge_status_refresh_failures" in header
+    assert "bridge_status_stale" in header
+    assert "D1L_STORAGE_STATUS_STALE_FAILURE_LIMIT 3U" in policy
+    assert "d1l_storage_status_policy_note_failure" in source
+    assert "wait_for_storage_reconnect" in source
+    assert "d1l_retained_blob_store_note_sd_backend(false" in source
+    assert "d1l_storage_status_policy_allows_cached_io" in map_store
+    assert "d1l_storage_status_policy_allows_cached_io" in export_store
 
 
 def test_storage_format_request_is_guarded_before_bridge_command():
@@ -226,8 +425,11 @@ def test_storage_format_request_is_guarded_before_bridge_command():
 
 def test_rp2040_format_command_waits_for_format_reply_only():
     source = read("main/hal/rp2040_bridge.c")
-    assert '"needs_fat32"' in source
+    reply_parser = read("main/hal/rp2040_sd_reply.c")
+    assert '"needs_fat32"' in reply_parser
     assert '"format_required"' in source  # legacy RP2040 status is mapped to needs_fat32.
+    assert "d1l_rp2040_sd_reply_parse" in source
+    assert "ESP_ERR_INVALID_RESPONSE" in source
     assert "d1l_rp2040_bridge_file_stat" in source
     assert "d1l_rp2040_bridge_format_sd" not in source
 
@@ -326,6 +528,10 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '\\"manager\\":{\\"running\\":%s' in console
     assert '\\"backoff_ms\\":%lu' in console
     assert '\\"force_nvs\\":%s' in console
+    assert '\\"initial_ping_timeouts\\":%lu' in console
+    assert '\\"bridge_response_seen\\":%s' in console
+    assert '\\"auto_reset_pending\\":%s' in console
+    assert '\\"auto_reset_attempted\\":%s' in console
     assert '\\"retained_sd\\":{\\"degraded\\":%s' in console
     assert '\\"sd_read_fail_count\\":%lu' in console
     assert '\\"sd_write_fail_count\\":%lu' in console
@@ -385,7 +591,10 @@ def test_storage_status_is_visible_in_snapshot_console_smoke_and_ui():
     assert '"Data locations"' in ui
     assert "This device never formats cards." in ui
     assert "const bool storage_needs_attention = settings_storage_needs_attention(snapshot)" in settings_ui
-    assert 'storage_needs_attention\n        ? "Needs attention"' in settings_ui
+    assert "const bool sd_needs_attention = settings_sd_needs_attention(snapshot)" in settings_ui
+    assert 'sd_needs_attention\n        ? "Needs attention"' in settings_ui
+    assert '"Backup needs attention"' in settings_ui
+    assert '"Storage needs attention"' in settings_ui
     assert '? "Ready"' in settings_ui
     assert '"Needs setup"' in settings_ui
     assert '"Internal storage"' in settings_ui

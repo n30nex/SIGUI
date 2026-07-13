@@ -17,11 +17,11 @@ from typing import Any
 
 try:
     from artifact_metadata import stamp_report
-    from smoke_d1l import send_console_command
+    from smoke_d1l import open_d1l_serial, send_console_command
     from ui_capture_diff_d1l import compare_pngs
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import send_console_command
+    from scripts.smoke_d1l import open_d1l_serial, send_console_command
     from scripts.ui_capture_diff_d1l import compare_pngs
 
 
@@ -222,7 +222,7 @@ def capture_frame(
     events: list[dict[str, Any]] = []
     prep_failures: list[dict[str, Any]] = []
     raw = bytearray()
-    with serial.Serial(port=port, baudrate=baud, timeout=timeout) as ser:
+    with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         time.sleep(1.0)
         ser.reset_input_buffer()
         baseline_status = send_console_command(ser, "ui capture status", timeout)
