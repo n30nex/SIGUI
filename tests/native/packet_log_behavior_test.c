@@ -459,7 +459,6 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
     if (!path || !out_data || !out_result ||
         sscanf(path, "stores/packet_log/segments/s%lu.bin", &segment) != 1 ||
         segment >= D1L_PACKET_LOG_SD_SEGMENT_COUNT ||
-        offset > s_history_segment_len[segment] ||
         s_history_segment_len[segment] == 0U) {
         if (out_result) {
             memset(out_result, 0, sizeof(*out_result));
@@ -467,6 +466,11 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
                            "not_found");
         }
         return ESP_ERR_NOT_FOUND;
+    }
+    if (offset > s_history_segment_len[segment]) {
+        memset(out_result, 0, sizeof(*out_result));
+        (void)snprintf(out_result->err, sizeof(out_result->err), "range");
+        return ESP_ERR_INVALID_SIZE;
     }
     const size_t available = s_history_segment_len[segment] - offset;
     const size_t copied = available < max_len ? available : max_len;
@@ -764,6 +768,43 @@ static void test_partial_next_slot_is_preserved_without_journal_mutation(void)
     assert(s_journal_mutations == 0U);
     assert(s_history_segment_len[0] == partial_offset + 1U);
     assert(s_history_segments[0][partial_offset] == 0xA5U);
+}
+
+static void test_short_existing_segment_defers_to_fresh_boundary(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 16U;
+    seed_primary(&s_sd_primary, 1U, 4U, 4U, "short");
+    seed_fallback(1U, 4U, 4U, "short");
+    seed_history(1U, 2U, "short");
+    const size_t original_len = s_history_segment_len[0];
+    uint8_t original[2U * sizeof(history_record_t)];
+    memcpy(original, s_history_segments[0], original_len);
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.sd_reconcile_count == 1U);
+    assert(stats.sd_reconcile_fail_count == 0U);
+    assert(stats.sd_reconcile_last_error == ESP_OK);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(!stats.persistence_dirty);
+    assert(s_journal_mutations == 0U);
+    assert(s_journal_truncates == 0U);
+    assert(s_history_segment_len[0] == original_len);
+    assert(memcmp(s_history_segments[0], original, original_len) == 0);
+
+    uint32_t stored_seq = 0U;
+    assert(append_packet_checked("short-next", &stored_seq) == ESP_OK);
+    assert(stored_seq == 5U);
+    assert(s_journal_mutations == 0U);
+    assert(s_journal_truncates == 0U);
+    assert(s_history_segment_len[0] == original_len);
+    assert(memcmp(s_history_segments[0], original, original_len) == 0);
+    stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(stats.sd_primary_commit_count == 1U);
+    assert(stats.nvs_fallback_commit_count == 1U);
 }
 
 static void test_journal_probe_transport_and_generation_errors_never_mutate(void)
@@ -1323,6 +1364,7 @@ int main(void)
     test_occupied_next_slot_is_preserved_until_fresh_boundary();
     test_exact_empty_eof_continues_journal_normally();
     test_partial_next_slot_is_preserved_without_journal_mutation();
+    test_short_existing_segment_defers_to_fresh_boundary();
     test_journal_probe_transport_and_generation_errors_never_mutate();
     test_journal_probe_no_card_is_not_treated_as_empty();
     test_v2_compact_sd_primary_is_promoted_and_rewritten();

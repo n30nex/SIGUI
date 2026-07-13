@@ -356,6 +356,15 @@ static esp_err_t probe_sd_history_slot(
         *out_state = D1L_PACKET_JOURNAL_SLOT_EMPTY;
         return ESP_OK;
     }
+    if (ret == ESP_ERR_INVALID_SIZE && strcmp(result.err, "range") == 0) {
+        /* The RP2040 reports range when this segment exists but the fixed
+         * sequence slot lies beyond its current EOF. That is distinct from a
+         * missing segment and must not be treated as a writable empty slot.
+         * Preserve the short segment as malformed lineage so reconciliation
+         * resumes only at a fresh segment boundary. */
+        *out_state = D1L_PACKET_JOURNAL_SLOT_MALFORMED;
+        return ESP_OK;
+    }
     if (ret != ESP_OK) {
         return ret;
     }
