@@ -12,26 +12,26 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
-      "actions_run": "29208908642",
+      "commit": "3e712916a05931fd10998f51d7f616e506daeeb4",
+      "actions_run": "29209377356",
       "actions_status": "success",
-      "note": "WP-00 live completion ledger is merged through PR #81; the implementation stack is not."
+      "note": "WP-00 live completion ledger and its merge receipt are merged through PR #82; the implementation stack is not."
     },
     "working_branch": {
-      "name": "codex/wp00-postmerge-ledger",
-      "base_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
-      "pull_request": 82,
-      "merged_pull_request": 81
+      "name": "codex/wp01-proof-ledger",
+      "base_commit": "3e712916a05931fd10998f51d7f616e506daeeb4",
+      "pull_request": 83,
+      "merged_pull_request": 82
     },
     "audit_snapshot": {
       "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
       "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
     },
     "integrated_candidate": {
-      "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
       "branch": "codex/d1l-retained-merge",
-      "actions_push_run": "29200803879",
-      "actions_pull_request_run": "29200804762"
+      "actions_push_run": "29272708844",
+      "actions_pull_request_run": "29272709642"
     },
     "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "selected_esp_idf": "5.5.4",
@@ -47,7 +47,9 @@
       "state": "open",
       "draft": true,
       "checks": "success",
-      "mergeable": true
+      "mergeable": false,
+      "local_resolution_commit": "ccea45dde87941e4e06be7fda0e84b8d2072e047",
+      "local_resolution_tests": 420
     },
     {
       "number": 64,
@@ -58,29 +60,33 @@
       "state": "open",
       "draft": true,
       "checks": "success",
-      "mergeable": true
+      "mergeable": true,
+      "local_resolution_commit": "7d21eb565d1c3d1ae667cc3b534813dcef505f30",
+      "local_resolution_tests": 572
     },
     {
       "number": 80,
       "title": "fix(d1l): harden retained store reconciliation",
       "base": "codex/d1l-idf55-migration",
       "head": "codex/d1l-retained-merge",
-      "head_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
+      "head_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
       "state": "open",
       "draft": true,
       "checks": "success",
       "mergeable": true,
-      "physical_gate": "not_banked"
+      "physical_gate": "final_soak_in_progress",
+      "local_resolution_commit": "8cdda10cdd556e857361829ff38435e9e2e9f660",
+      "local_resolution_tests": 784
     }
   ],
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents.",
-      "resolution": "Use live main 157c9670eb43a0119280f1e8119d9584b06dcfbf after merged PR #81; retain the audited SHA only as history."
+      "resolution": "Use live main 3e712916a05931fd10998f51d7f616e506daeeb4 after merged PR #82 and exact-main Actions run 29209377356; retain the audited SHA only as history."
     },
     {
       "conflict": "PR #80 text says its fresh workflows are queued.",
-      "resolution": "Live push run 29200803879 and PR run 29200804762 both completed successfully for exact SHA 07322ed4c700866106ecca6c31ff70ea3a3d4ede."
+      "resolution": "Live push run 29272708844 and PR run 29272709642 both completed successfully for exact SHA 092293f2311a24c9899bc9bf343ab014c4ba0411; all eight downloaded artifact manifests verify."
     },
     {
       "conflict": "Older release docs and helpers describe COM11 as an operational peer default.",
