@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 ORACLE_ROOT = ROOT / "tests" / "meshcore_oracle"
 MANIFEST = ORACLE_ROOT / "manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
-BOUNDARY = "upstream_packet_envelope_adapter_only"
+BOUNDARY = "pinned_upstream_packet_and_canonical_advert_data"
 
 
 def canonical_lf_sha256(path: Path) -> str:
@@ -37,7 +37,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 1
+    assert manifest["corpus_version"] == 2
     assert manifest["abi_version"] == 1
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -46,15 +46,32 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "language": "c_abi",
         "header": "tests/meshcore_oracle/meshcore_oracle.h",
         "implementation": "tests/meshcore_oracle/meshcore_oracle.cpp",
-        "upstream_type": "mesh::Packet",
+        "upstream_types": [
+            "mesh::Packet",
+            "AdvertDataBuilder",
+            "AdvertDataParser",
+        ],
         "reject_preserves_output": True,
         "crypto_available": False,
+        "canonical_advert_data": True,
     }
     assert manifest["vectors"] == {
-        "roundtrip": 4,
-        "invalid": 5,
-        "semantic": 0,
-        "total": 9,
+        "roundtrip": 8,
+        "invalid": 16,
+        "semantic": 15,
+        "total": 24,
+        "packet_envelope": {
+            "roundtrip": 4,
+            "invalid": 5,
+            "semantic": 0,
+            "total": 9,
+        },
+        "advert_data_fields": {
+            "roundtrip": 4,
+            "invalid": 11,
+            "semantic": 15,
+            "total": 15,
+        },
     }
     assert manifest["capabilities"][0] == {
         "id": "packet_envelope",
@@ -62,12 +79,18 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "owner": "pinned_upstream",
         "semantic": False,
     }
+    assert manifest["capabilities"][1] == {
+        "id": "advert_data_fields",
+        "status": "implemented",
+        "owner": "pinned_upstream",
+        "semantic": True,
+    }
     assert all(
         capability["status"] == "pending"
-        for capability in manifest["capabilities"][1:]
+        for capability in manifest["capabilities"][2:]
     )
     assert [
-        capability["id"] for capability in manifest["capabilities"][1:]
+        capability["id"] for capability in manifest["capabilities"][2:]
     ] == [
         "identity_signed_advert",
         "public_group_packets",
@@ -86,7 +109,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         assert canonical_lf_sha256(ROOT / relative) == expected
 
 
-def test_oracle_c_abi_wraps_only_pinned_upstream_packet():
+def test_oracle_c_abi_wraps_only_pinned_upstream_protocol_helpers():
     header = (ORACLE_ROOT / "meshcore_oracle.h").read_text(encoding="utf-8")
     adapter = (ORACLE_ROOT / "meshcore_oracle.cpp").read_text(encoding="utf-8")
 
@@ -97,6 +120,11 @@ def test_oracle_c_abi_wraps_only_pinned_upstream_packet():
     assert "upstream.writeTo" in adapter
     assert "structurally_safe_to_read" in adapter
     assert "structurally_safe_to_write" in adapter
+    assert "AdvertDataBuilder upstream" in adapter
+    assert "AdvertDataParser upstream" in adapter
+    assert "advert_layout_is_canonical" in adapter
+    assert "d1l_meshcore_oracle_advert_data_decode" in header
+    assert "d1l_meshcore_oracle_advert_data_encode" in header
     assert "main/mesh" not in adapter
     assert "Identity" not in adapter
     assert "Dispatcher" not in adapter
@@ -108,6 +136,8 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
 
     assert any("meshcore_oracle.cpp" in command for command in flattened)
     assert any("meshcore_oracle_vectors.cpp" in command for command in flattened)
+    assert any("AdvertDataHelpers.cpp" in command for command in flattened)
+    assert any("meshcore_advert_data.o" in command for command in flattened)
     assert any(command.endswith("meshcore_oracle_vectors") for command in flattened)
     assert all("main/mesh/meshcore_service" not in command for command in flattened)
 
@@ -154,6 +184,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["oracle_result"] is None
     assert len(artifact["pending_capabilities"]) == 8
     assert "packet_envelope" not in artifact["pending_capabilities"]
+    assert "advert_data_fields" not in artifact["pending_capabilities"]
 
 
 def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
@@ -173,10 +204,20 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "-I",
         str(ORACLE_ROOT),
         "-I",
+        str(ORACLE_ROOT / "stubs"),
+        "-I",
         str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
         "-isystem",
         str(ROOT / "third_party" / "MeshCore" / "src"),
         str(ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"),
+        str(
+            ROOT
+            / "third_party"
+            / "MeshCore"
+            / "src"
+            / "helpers"
+            / "AdvertDataHelpers.cpp"
+        ),
         str(ORACLE_ROOT / "meshcore_oracle.cpp"),
         str(ORACLE_ROOT / "meshcore_oracle_vectors.cpp"),
         "-o",
@@ -198,6 +239,27 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "wp04_closure_eligible": False,
         "abi_version": 1,
         "upstream_commit": UPSTREAM_COMMIT,
-        "vectors": {"roundtrip": 4, "invalid": 5, "semantic": 0, "total": 9},
+        "vectors": {
+            "roundtrip": 8,
+            "invalid": 16,
+            "semantic": 15,
+            "total": 24,
+            "packet_envelope": {
+                "roundtrip": 4,
+                "invalid": 5,
+                "semantic": 0,
+                "total": 9,
+            },
+            "advert_data_fields": {
+                "roundtrip": 4,
+                "invalid": 11,
+                "semantic": 15,
+                "total": 15,
+            },
+        },
+        "capabilities": {
+            "packet_envelope": True,
+            "advert_data_fields": True,
+        },
         "failures": 0,
     }

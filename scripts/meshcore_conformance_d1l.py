@@ -28,6 +28,14 @@ HARNESS_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_conforma
 FUZZ_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_fuzz.cpp"
 WIRE_SOURCE = ROOT / "main" / "mesh" / "meshcore_wire.c"
 PACKET_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"
+ADVERT_DATA_SOURCE = (
+    ROOT
+    / "third_party"
+    / "MeshCore"
+    / "src"
+    / "helpers"
+    / "AdvertDataHelpers.cpp"
+)
 ORACLE_MANIFEST_PATH = ROOT / "tests" / "meshcore_oracle" / "manifest.json"
 ORACLE_ADAPTER_PATH = ROOT / "tests" / "meshcore_oracle" / "meshcore_oracle.cpp"
 ORACLE_VECTORS_PATH = (
@@ -36,8 +44,8 @@ ORACLE_VECTORS_PATH = (
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 1
-ORACLE_COVERAGE_BOUNDARY = "upstream_packet_envelope_adapter_only"
+ORACLE_CORPUS_VERSION = 2
+ORACLE_COVERAGE_BOUNDARY = "pinned_upstream_packet_and_canonical_advert_data"
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -115,6 +123,12 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "owner": "pinned_upstream",
         "semantic": False,
     },
+    {
+        "id": "advert_data_fields",
+        "status": "implemented",
+        "owner": "pinned_upstream",
+        "semantic": True,
+    },
     {"id": "identity_signed_advert", "status": "pending", "owner": "unassigned"},
     {"id": "public_group_packets", "status": "pending", "owner": "unassigned"},
     {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
@@ -136,6 +150,17 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "owner": "unassigned",
     },
 ]
+EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
+    "third_party/MeshCore/src/Dispatcher.h",
+    "third_party/MeshCore/src/Identity.h",
+    "third_party/MeshCore/src/Mesh.h",
+    "third_party/MeshCore/src/MeshCore.h",
+    "third_party/MeshCore/src/Packet.cpp",
+    "third_party/MeshCore/src/Packet.h",
+    "third_party/MeshCore/src/Utils.h",
+    "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
+    "third_party/MeshCore/src/helpers/AdvertDataHelpers.h",
+}
 
 
 class GateFailure(RuntimeError):
@@ -248,23 +273,43 @@ def load_oracle_manifest() -> dict[str, Any]:
         f"{EXPECTED_UPSTREAM['path']}/{relative}": digest
         for relative, digest in EXPECTED_UPSTREAM["sources"].items()
     }
-    if upstream.get("sources") != expected_upstream_sources:
+    upstream_sources = upstream.get("sources")
+    if not isinstance(upstream_sources, dict):
+        raise GateFailure("oracle upstream source allowlist is missing")
+    if set(upstream_sources) != EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS:
         raise GateFailure("oracle upstream source allowlist drifted")
+    for relative, digest in expected_upstream_sources.items():
+        if upstream_sources.get(relative) != digest:
+            raise GateFailure(f"oracle core upstream source pin drifted: {relative}")
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 4,
-        "invalid": 5,
-        "semantic": 0,
-        "total": 9,
+        "roundtrip": 8,
+        "invalid": 16,
+        "semantic": 15,
+        "total": 24,
+        "packet_envelope": {
+            "roundtrip": 4,
+            "invalid": 5,
+            "semantic": 0,
+            "total": 9,
+        },
+        "advert_data_fields": {
+            "roundtrip": 4,
+            "invalid": 11,
+            "semantic": 15,
+            "total": 15,
+        },
     }:
         raise GateFailure("oracle vector contract drifted")
     interface = manifest.get("interface", {})
     if (
         interface.get("language") != "c_abi"
-        or interface.get("upstream_type") != "mesh::Packet"
+        or interface.get("upstream_types")
+        != ["mesh::Packet", "AdvertDataBuilder", "AdvertDataParser"]
         or interface.get("reject_preserves_output") is not True
         or interface.get("crypto_available") is not False
+        or interface.get("canonical_advert_data") is not True
     ):
         raise GateFailure("oracle interface boundary drifted")
     required_fixtures = manifest.get("determinism", {}).get(
@@ -287,6 +332,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         "tests/meshcore_oracle/meshcore_oracle.cpp",
         "tests/meshcore_oracle/meshcore_oracle.h",
         "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
+        "tests/meshcore_oracle/stubs/Arduino.h",
+        "tests/meshcore_oracle/stubs/Stream.h",
     }:
         raise GateFailure("oracle source allowlist drifted")
     return manifest
@@ -468,6 +515,22 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-g",
             "-fno-omit-frame-pointer",
             common_sanitizers,
+            "-I",
+            str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
+            str(ADVERT_DATA_SOURCE),
+            "-o",
+            str(Path(build_dir) / "meshcore_advert_data.o"),
+        ],
+        [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -506,6 +569,8 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-I",
             str(ORACLE_ADAPTER_PATH.parent),
             "-I",
+            str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
+            "-I",
             str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
@@ -537,6 +602,7 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             cxx,
             common_sanitizers,
             str(Path(build_dir) / "meshcore_packet.o"),
+            str(Path(build_dir) / "meshcore_advert_data.o"),
             str(Path(build_dir) / "meshcore_oracle_adapter.o"),
             str(Path(build_dir) / "meshcore_oracle_vectors.o"),
             "-o",
@@ -820,8 +886,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 or oracle_result.get("abi_version") != ORACLE_ABI_VERSION
                 or oracle_result.get("upstream_commit")
                 != EXPECTED_UPSTREAM["commit"]
-                or oracle_result.get("vectors")
-                != {"roundtrip": 4, "invalid": 5, "semantic": 0, "total": 9}
+                or oracle_result.get("vectors") != oracle_manifest["vectors"]
+                or oracle_result.get("capabilities")
+                != {"packet_envelope": True, "advert_data_fields": True}
                 or oracle_result.get("failures") != 0
             ):
                 raise GateFailure("MeshCore oracle result drifted from its fixed matrix")

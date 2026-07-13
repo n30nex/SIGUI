@@ -1,6 +1,7 @@
 #include "meshcore_oracle.h"
 
 #include "Packet.h"
+#include "helpers/AdvertDataHelpers.h"
 
 #include <array>
 #include <cstring>
@@ -11,6 +12,27 @@ static_assert(MAX_PACKET_PAYLOAD == D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES,
               "Pinned MeshCore payload limit changed");
 static_assert(MAX_TRANS_UNIT == D1L_MESHCORE_ORACLE_MAX_RAW_BYTES,
               "Pinned MeshCore MTU changed");
+static_assert(MAX_ADVERT_DATA_SIZE ==
+                  D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES,
+              "Pinned MeshCore advert-data limit changed");
+static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
+              "Pinned MeshCore NONE advert type changed");
+static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
+              "Pinned MeshCore CHAT advert type changed");
+static_assert(ADV_TYPE_REPEATER == D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+              "Pinned MeshCore REPEATER advert type changed");
+static_assert(ADV_TYPE_ROOM == D1L_MESHCORE_ADVERT_TYPE_ROOM,
+              "Pinned MeshCore ROOM advert type changed");
+static_assert(ADV_TYPE_SENSOR == D1L_MESHCORE_ADVERT_TYPE_SENSOR,
+              "Pinned MeshCore SENSOR advert type changed");
+static_assert(ADV_LATLON_MASK == D1L_MESHCORE_ADVERT_LATLON_MASK,
+              "Pinned MeshCore advert location flag changed");
+static_assert(ADV_FEAT1_MASK == D1L_MESHCORE_ADVERT_FEAT1_MASK,
+              "Pinned MeshCore advert feature-1 flag changed");
+static_assert(ADV_FEAT2_MASK == D1L_MESHCORE_ADVERT_FEAT2_MASK,
+              "Pinned MeshCore advert feature-2 flag changed");
+static_assert(ADV_NAME_MASK == D1L_MESHCORE_ADVERT_NAME_MASK,
+              "Pinned MeshCore advert name flag changed");
 
 namespace {
 
@@ -63,6 +85,85 @@ bool structurally_safe_to_write(const d1l_meshcore_oracle_packet_t *packet,
     }
     *required_len = encoded_len;
     return true;
+}
+
+bool advert_layout_is_canonical(const uint8_t *raw, size_t raw_len)
+{
+    if (raw == nullptr || raw_len == 0U ||
+        raw_len > MAX_ADVERT_DATA_SIZE) {
+        return false;
+    }
+    const uint8_t flags = raw[0];
+    size_t offset = 1U;
+    if ((flags & ADV_LATLON_MASK) != 0U) {
+        if (offset + 8U > raw_len) {
+            return false;
+        }
+        offset += 8U;
+    }
+    if ((flags & ADV_FEAT1_MASK) != 0U) {
+        if (offset + 2U > raw_len ||
+            (raw[offset] == 0U && raw[offset + 1U] == 0U)) {
+            return false;
+        }
+        offset += 2U;
+    }
+    if ((flags & ADV_FEAT2_MASK) != 0U) {
+        if (offset + 2U > raw_len ||
+            (raw[offset] == 0U && raw[offset + 1U] == 0U)) {
+            return false;
+        }
+        offset += 2U;
+    }
+    if ((flags & ADV_NAME_MASK) == 0U) {
+        return offset == raw_len;
+    }
+    if (offset >= raw_len) {
+        return false;
+    }
+    for (size_t index = offset; index < raw_len; ++index) {
+        if (raw[index] == 0U) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool advert_is_canonical(const d1l_meshcore_oracle_advert_data_t *advert,
+                         size_t dest_capacity,
+                         size_t *required_len)
+{
+    if (advert == nullptr || required_len == nullptr || advert->type > 0x0FU ||
+        advert->has_lat_lon > 1U || advert->has_feat1 > 1U ||
+        advert->has_feat2 > 1U || advert->has_name > 1U ||
+        (advert->has_lat_lon == 0U &&
+         (advert->latitude_e6 != 0 || advert->longitude_e6 != 0)) ||
+        (advert->has_feat1 == 0U) != (advert->feat1 == 0U) ||
+        (advert->has_feat2 == 0U) != (advert->feat2 == 0U) ||
+        (advert->has_name == 0U) != (advert->name_len == 0U) ||
+        advert->name_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES) {
+        return false;
+    }
+    for (size_t index = 0U; index < advert->name_len; ++index) {
+        if (advert->name[index] == 0U) {
+            return false;
+        }
+    }
+    const size_t encoded_len =
+        1U + (advert->has_lat_lon != 0U ? 8U : 0U) +
+        (advert->has_feat1 != 0U ? 2U : 0U) +
+        (advert->has_feat2 != 0U ? 2U : 0U) + advert->name_len;
+    if (encoded_len > MAX_ADVERT_DATA_SIZE || encoded_len > dest_capacity) {
+        return false;
+    }
+    *required_len = encoded_len;
+    return true;
+}
+
+double exact_microdegrees(int32_t coordinate)
+{
+    const double adjustment = coordinate < 0 ? -0.25 : 0.25;
+    return (static_cast<double>(coordinate) + adjustment) / 1000000.0;
 }
 
 }  // namespace
@@ -135,6 +236,94 @@ extern "C" bool d1l_meshcore_oracle_packet_encode(
     std::array<uint8_t, MAX_TRANS_UNIT> encoded{};
     const size_t encoded_len = upstream.writeTo(encoded.data());
     if (encoded_len != required_len) {
+        return false;
+    }
+    std::memcpy(dest, encoded.data(), encoded_len);
+    *out_len = encoded_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_advert_data_decode(
+    const uint8_t *raw,
+    size_t raw_len,
+    d1l_meshcore_oracle_advert_data_t *out_advert)
+{
+    if (out_advert == nullptr || !advert_layout_is_canonical(raw, raw_len)) {
+        return false;
+    }
+
+    AdvertDataParser upstream(raw, static_cast<uint8_t>(raw_len));
+    if (!upstream.isValid()) {
+        return false;
+    }
+    d1l_meshcore_oracle_advert_data_t result{};
+    const uint8_t flags = raw[0];
+    result.type = upstream.getType();
+    result.has_lat_lon = (flags & ADV_LATLON_MASK) != 0U ? 1U : 0U;
+    result.latitude_e6 = upstream.getIntLat();
+    result.longitude_e6 = upstream.getIntLon();
+    result.has_feat1 = (flags & ADV_FEAT1_MASK) != 0U ? 1U : 0U;
+    result.feat1 = upstream.getFeat1();
+    result.has_feat2 = (flags & ADV_FEAT2_MASK) != 0U ? 1U : 0U;
+    result.feat2 = upstream.getFeat2();
+    result.has_name = (flags & ADV_NAME_MASK) != 0U ? 1U : 0U;
+    if (result.has_name != 0U) {
+        result.name_len = static_cast<uint8_t>(std::strlen(upstream.getName()));
+        std::memcpy(result.name, upstream.getName(), result.name_len);
+    }
+    *out_advert = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_advert_data_encode(
+    const d1l_meshcore_oracle_advert_data_t *advert,
+    uint8_t *dest,
+    size_t dest_capacity,
+    size_t *out_len)
+{
+    if (dest == nullptr || out_len == nullptr) {
+        return false;
+    }
+    size_t required_len = 0U;
+    if (!advert_is_canonical(advert, dest_capacity, &required_len)) {
+        return false;
+    }
+
+    std::array<char, D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES + 1U> name{};
+    if (advert->name_len > 0U) {
+        std::memcpy(name.data(), advert->name, advert->name_len);
+    }
+    const double latitude = exact_microdegrees(advert->latitude_e6);
+    const double longitude = exact_microdegrees(advert->longitude_e6);
+    AdvertDataBuilder upstream = advert->has_lat_lon != 0U
+        ? AdvertDataBuilder(advert->type, name.data(), latitude, longitude)
+        : AdvertDataBuilder(advert->type, name.data());
+    if (advert->has_feat1 != 0U) {
+        upstream.setFeat1(advert->feat1);
+    }
+    if (advert->has_feat2 != 0U) {
+        upstream.setFeat2(advert->feat2);
+    }
+    std::array<uint8_t, MAX_ADVERT_DATA_SIZE> encoded{};
+    const size_t encoded_len = upstream.encodeTo(encoded.data());
+    if (encoded_len != required_len) {
+        return false;
+    }
+    d1l_meshcore_oracle_advert_data_t roundtrip{};
+    if (!d1l_meshcore_oracle_advert_data_decode(encoded.data(), encoded_len,
+                                                 &roundtrip) ||
+        roundtrip.type != advert->type ||
+        roundtrip.has_lat_lon != advert->has_lat_lon ||
+        roundtrip.latitude_e6 != advert->latitude_e6 ||
+        roundtrip.longitude_e6 != advert->longitude_e6 ||
+        roundtrip.has_feat1 != advert->has_feat1 ||
+        roundtrip.feat1 != advert->feat1 ||
+        roundtrip.has_feat2 != advert->has_feat2 ||
+        roundtrip.feat2 != advert->feat2 ||
+        roundtrip.has_name != advert->has_name ||
+        roundtrip.name_len != advert->name_len ||
+        (advert->name_len > 0U &&
+         std::memcmp(roundtrip.name, advert->name, advert->name_len) != 0)) {
         return false;
     }
     std::memcpy(dest, encoded.data(), encoded_len);
