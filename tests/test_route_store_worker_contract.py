@@ -169,13 +169,14 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     console = read("main/comms/usb_console.c")
 
     assert "d1l_route_store_worker_quiesce_begin" in header
+    assert "d1l_route_store_worker_quiesce_wait_begin" in header
     assert "d1l_route_store_worker_quiesce_end" in header
     assert "#include <stdbool.h>" in header
     assert "d1l_route_store_persistence_should_yield" in header
     assert "s_flush_mutex" in worker
     assert "s_quiesce_requester" in worker
     assert "worker_quiesce_requested" in worker
-    assert "current != requester && current != owner" in worker
+    assert "current != requester && current != owner" in worker.replace("\n", " ")
     assert "flush_retained_stores_locked(true)" in worker
     assert "flush_retained_stores_locked(false)" in worker
 
@@ -187,7 +188,7 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     assert "return force ? ESP_ERR_TIMEOUT : ESP_OK" in worker
 
     begin = worker.split(
-        "esp_err_t d1l_route_store_worker_quiesce_begin", 1
+        "static esp_err_t route_store_worker_quiesce_begin", 1
     )[1].split("void d1l_route_store_worker_quiesce_end", 1)[0]
     end = worker.split(
         "void d1l_route_store_worker_quiesce_end", 1
@@ -196,8 +197,28 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     assert "return ESP_ERR_INVALID_STATE" in begin
     assert "s_quiesce_requester == NULL" in begin
     assert "s_quiesce_requester = current" in begin
-    assert begin.count("s_quiesce_requester = NULL") == 2
+    assert begin.count("s_quiesce_requester = NULL") == 3
+    assert "s_quiesce_preempt_requested = preempt" in begin
+    assert begin.count("s_quiesce_preempt_requested = false") == 3
+    assert begin.count("s_quiesce_preempt_requested = true") == 1
+    assert "route_store_worker_quiesce_begin(timeout_ms, true)" in begin
+    assert "route_store_worker_quiesce_begin(timeout_ms, false)" in begin
     assert "xSemaphoreTake(s_flush_mutex, ticks)" in begin
+    flush_take = begin.index("xSemaphoreTake(s_flush_mutex, ticks)")
+    final_deadline = begin.index(
+        "esp_timer_get_time() - started_us >= (int64_t)timeout_ms * 1000LL",
+        flush_take,
+    )
+    owner_promotion = begin.index("s_quiesce_owner = current")
+    preempt_promotion = begin.index("s_quiesce_preempt_requested = true")
+    assert begin.index("xSemaphoreTake(s_request_mutex, ticks)") < flush_take
+    assert flush_take < final_deadline < owner_promotion < preempt_promotion < begin.index(
+        "return ESP_OK", preempt_promotion
+    )
+    deadline_cleanup = begin[final_deadline:owner_promotion]
+    assert "xSemaphoreGive(s_flush_mutex)" in deadline_cleanup
+    assert "xSemaphoreGive(s_request_mutex)" in deadline_cleanup
+    assert "return ESP_ERR_TIMEOUT" in deadline_cleanup
     assert begin.index("xSemaphoreTake(s_request_mutex, ticks)") < begin.index(
         "xSemaphoreTake(s_flush_mutex, ticks)"
     ) < begin.index(
@@ -205,6 +226,7 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     )
     assert "s_quiesce_owner != current" in end
     assert "s_quiesce_requester = NULL" in end
+    assert "s_quiesce_preempt_requested = false" in end
     assert end.index("s_quiesce_owner = NULL") < end.index(
         "xSemaphoreGive(s_flush_mutex)"
     ) < end.index("xSemaphoreGive(s_request_mutex)")
@@ -239,10 +261,11 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     manager = storage.split(
         "static void storage_manager_run_once(void)", 1
     )[1].split("static uint32_t storage_manager_pause_delay_ms", 1)[0]
-    assert "D1L_STORAGE_MANAGER_RETAINED_QUIESCE_TIMEOUT_MS" in storage
+    assert "D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS 250U" in storage
     assert manager.index("manager_sequence_try_take()") < manager.index(
-        "d1l_route_store_worker_quiesce_begin("
+        "d1l_route_store_worker_quiesce_wait_begin("
     ) < manager.index("storage_manager_run_once_owned();")
+    assert "d1l_route_store_worker_quiesce_begin(" not in manager
     assert manager.index("storage_manager_run_once_owned();") < manager.index(
         "d1l_route_store_worker_quiesce_end();"
     ) < manager.rindex("manager_sequence_give();")

@@ -371,13 +371,15 @@ def test_storage_manager_performs_one_bounded_initial_bridge_recovery_without_re
         "static uint32_t storage_manager_pause_delay_ms", 1
     )[0]
     assert "manager_sequence_try_take()" in manager_wrapper
-    assert "d1l_route_store_worker_quiesce_begin(" in manager_wrapper
+    assert "D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS 250U" in source
+    assert "d1l_route_store_worker_quiesce_wait_begin(" in manager_wrapper
+    assert "d1l_route_store_worker_quiesce_begin(" not in manager_wrapper
     assert "storage_manager_run_once_owned();" in manager_wrapper
     assert "manager_control_finish_reset_recovery();" in manager_wrapper
     assert "d1l_route_store_worker_quiesce_end();" in manager_wrapper
     assert "manager_sequence_give();" in manager_wrapper
     assert manager_wrapper.index("manager_sequence_try_take()") < manager_wrapper.index(
-        "d1l_route_store_worker_quiesce_begin("
+        "d1l_route_store_worker_quiesce_wait_begin("
     ) < manager_wrapper.index("storage_manager_run_once_owned();")
     assert manager_wrapper.index("storage_manager_run_once_owned();") < manager_wrapper.index(
         "d1l_route_store_worker_quiesce_end();"

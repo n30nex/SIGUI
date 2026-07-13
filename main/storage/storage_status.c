@@ -28,7 +28,7 @@
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_ATTEMPTS 8U
 #define D1L_STORAGE_MANAGER_RECOVERY_PING_INTERVAL_MS 500U
 #define D1L_STORAGE_MANAGER_INITIAL_PING_TIMEOUT_LIMIT 3U
-#define D1L_STORAGE_MANAGER_RETAINED_QUIESCE_TIMEOUT_MS 10000U
+#define D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS 250U
 
 typedef enum {
     D1L_STORAGE_MANAGER_BRIDGE_WAIT,
@@ -1098,10 +1098,14 @@ static void storage_manager_run_once(void)
 
     /* Match the serial remount lock order. No background status/mount/reset
      * exchange may race Public/DM/packet/route reconciliation on the same
-     * RP2040 bridge. */
+     * RP2040 bridge. Routine polling waits for the current worker pass instead
+     * of cancelling it: packet-primary reads can exceed the two-second manager
+     * cadence, so preempting every pass would restart reconciliation forever
+     * and prevent the route store later in the pass from running. Urgent serial
+     * remount/reboot paths retain the preemptive quiesce API. */
     const esp_err_t retained_quiesce_ret =
-        d1l_route_store_worker_quiesce_begin(
-            D1L_STORAGE_MANAGER_RETAINED_QUIESCE_TIMEOUT_MS);
+        d1l_route_store_worker_quiesce_wait_begin(
+            D1L_STORAGE_MANAGER_PASSIVE_QUIESCE_TIMEOUT_MS);
     if (retained_quiesce_ret != ESP_OK) {
         s_status.last_error = retained_quiesce_ret;
         s_status.manager_backoff_ms = 0;

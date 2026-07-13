@@ -37,6 +37,7 @@ static portMUX_TYPE s_quiesce_owner_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_worker_starting;
 static TaskHandle_t s_quiesce_owner;
 static TaskHandle_t s_quiesce_requester;
+static bool s_quiesce_preempt_requested;
 static uint32_t s_next_request_id;
 static uint32_t s_result_request_id;
 static esp_err_t s_result;
@@ -45,7 +46,8 @@ static bool worker_quiesce_requested(void)
 {
     bool requested;
     portENTER_CRITICAL(&s_quiesce_owner_mux);
-    requested = s_quiesce_requester != NULL;
+    requested = s_quiesce_requester != NULL &&
+                s_quiesce_preempt_requested;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
     return requested;
 }
@@ -55,11 +57,14 @@ bool d1l_route_store_persistence_should_yield(void)
     const TaskHandle_t current = xTaskGetCurrentTaskHandle();
     TaskHandle_t requester;
     TaskHandle_t owner;
+    bool preempt_requested;
     portENTER_CRITICAL(&s_quiesce_owner_mux);
     requester = s_quiesce_requester;
     owner = s_quiesce_owner;
+    preempt_requested = s_quiesce_preempt_requested;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
-    return requester != NULL && current != requester && current != owner;
+    return preempt_requested && requester != NULL &&
+           current != requester && current != owner;
 }
 
 static esp_err_t quiesce_yield_result(bool force, esp_err_t first_error)
@@ -275,7 +280,8 @@ esp_err_t d1l_route_store_worker_force_flush(uint32_t timeout_ms)
     }
 }
 
-esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
+static esp_err_t route_store_worker_quiesce_begin(uint32_t timeout_ms,
+                                                   bool preempt)
 {
     if (timeout_ms == 0U) {
         return ESP_ERR_INVALID_ARG;
@@ -291,6 +297,7 @@ esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
     portENTER_CRITICAL(&s_quiesce_owner_mux);
     if (s_quiesce_owner == NULL && s_quiesce_requester == NULL) {
         s_quiesce_requester = current;
+        s_quiesce_preempt_requested = preempt;
         request_registered = true;
     }
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
@@ -301,22 +308,54 @@ esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
     TickType_t ticks = quiesce_remaining_ticks(started_us, timeout_ms);
     if (ticks == 0U || xSemaphoreTake(s_request_mutex, ticks) != pdTRUE) {
         portENTER_CRITICAL(&s_quiesce_owner_mux);
-        s_quiesce_requester = NULL;
+        if (s_quiesce_requester == current) {
+            s_quiesce_requester = NULL;
+            s_quiesce_preempt_requested = false;
+        }
         portEXIT_CRITICAL(&s_quiesce_owner_mux);
         return ESP_ERR_TIMEOUT;
     }
     ticks = quiesce_remaining_ticks(started_us, timeout_ms);
     if (ticks == 0U || xSemaphoreTake(s_flush_mutex, ticks) != pdTRUE) {
         portENTER_CRITICAL(&s_quiesce_owner_mux);
-        s_quiesce_requester = NULL;
+        if (s_quiesce_requester == current) {
+            s_quiesce_requester = NULL;
+            s_quiesce_preempt_requested = false;
+        }
         portEXIT_CRITICAL(&s_quiesce_owner_mux);
+        (void)xSemaphoreGive(s_request_mutex);
+        return ESP_ERR_TIMEOUT;
+    }
+    if (esp_timer_get_time() - started_us >= (int64_t)timeout_ms * 1000LL) {
+        portENTER_CRITICAL(&s_quiesce_owner_mux);
+        if (s_quiesce_requester == current) {
+            s_quiesce_requester = NULL;
+            s_quiesce_preempt_requested = false;
+        }
+        portEXIT_CRITICAL(&s_quiesce_owner_mux);
+        (void)xSemaphoreGive(s_flush_mutex);
         (void)xSemaphoreGive(s_request_mutex);
         return ESP_ERR_TIMEOUT;
     }
     portENTER_CRITICAL(&s_quiesce_owner_mux);
     s_quiesce_owner = current;
+    /* Wait-mode must not cancel the worker pass whose flush mutex we are
+     * acquiring. Once ownership is established, however, direct Public/DM/
+     * packet persistence does not hold that mutex and must yield before the
+     * owner begins bridge status or mount traffic. */
+    s_quiesce_preempt_requested = true;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
     return ESP_OK;
+}
+
+esp_err_t d1l_route_store_worker_quiesce_begin(uint32_t timeout_ms)
+{
+    return route_store_worker_quiesce_begin(timeout_ms, true);
+}
+
+esp_err_t d1l_route_store_worker_quiesce_wait_begin(uint32_t timeout_ms)
+{
+    return route_store_worker_quiesce_begin(timeout_ms, false);
 }
 
 void d1l_route_store_worker_quiesce_end(void)
@@ -329,6 +368,7 @@ void d1l_route_store_worker_quiesce_end(void)
     }
     s_quiesce_owner = NULL;
     s_quiesce_requester = NULL;
+    s_quiesce_preempt_requested = false;
     portEXIT_CRITICAL(&s_quiesce_owner_mux);
     (void)xSemaphoreGive(s_flush_mutex);
     (void)xSemaphoreGive(s_request_mutex);
