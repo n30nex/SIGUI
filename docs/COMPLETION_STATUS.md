@@ -3,9 +3,9 @@
 
 Snapshot: `2026-07-12T21:07:19Z`
 
-- Live `main`: `157c9670eb43a0119280f1e8119d9584b06dcfbf`
-- Working branch: `codex/wp00-postmerge-ledger` from `157c9670eb43a0119280f1e8119d9584b06dcfbf`
-- Integrated candidate: `07322ed4c700866106ecca6c31ff70ea3a3d4ede`
+- Live `main`: `3e712916a05931fd10998f51d7f616e506daeeb4`
+- Working branch: `codex/wp01-proof-ledger` from `3e712916a05931fd10998f51d7f616e506daeeb4`
+- Integrated candidate: `092293f2311a24c9899bc9bf343ab014c4ba0411`
 - Pinned MeshCore: `e8d3c53ba1ea863937081cd0caad759b832f3028`
 - Selected ESP-IDF: `5.5.4`
 - Release posture: **not ready to tag**
