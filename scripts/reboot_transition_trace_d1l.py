@@ -39,9 +39,9 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-# COM16 is the current D1L RP2040 CDC/UF2 control surface, never an ESP32
-# console target. Keeping it out of this runner also prevents an accidental
-# 1200-baud UF2 touch from opening the RP2040 boot volume.
+# The configured RP2040 smoke/UF2 maintenance port is never an ESP32 console
+# target. Keeping it out of this runner also prevents an accidental 1200-baud
+# UF2 touch from opening the RP2040 boot volume.
 FORBIDDEN_PORTS = {"COM" + number for number in ("8", "11", "16", "29")}
 D1L_CONSOLE_BAUD = 115200
 PRE_COMMANDS = ("version", "health", "crashlog")

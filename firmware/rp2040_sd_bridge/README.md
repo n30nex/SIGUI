@@ -46,8 +46,8 @@ plain ASCII rather than Seeed's sensor `PacketSerial` framing.
 
 Firmware builds are run in GitHub Actions. The workflow installs Arduino CLI,
 adds the `earlephilhower/arduino-pico` board package URL, installs pinned
-`rp2040:rp2040@5.6.1`, and compiles the sketch with FQBN
-`rp2040:rp2040:seeed_indicator_rp2040` and
+`rp2040:rp2040@5.6.1`, and compiles the production sketch with FQBN
+`rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb` and
 `compiler.cpp.extra_flags="-DUSE_SD_CRC=1"`. The current validation card is
 user-confirmed FAT32 and accepts raw sector reads only when SD command CRC is
 valid, so the bridge stays close to Seeed's documented SD pin/power path while
@@ -55,6 +55,16 @@ using Arduino-Pico's second-port SD support,
 Seeed's `SD.begin(13, 1000000, SPI1)` sample shape, and the Arduino-Pico
 maintainer's SPI1 pin method names used by Seeed's sample: `setCS`, `setRX`,
 `setTX`, and `setSCK`.
+
+The production bridge deliberately selects Arduino-Pico's `No USB` stack. Its
+only production control/data path is the 115200-baud ESP32 UART, including the
+explicit `DESKOS_SD_BOOTLOADER` command. This prevents an unrelated Windows
+serial poll from using Arduino-Pico's standard 1200-baud/DTR USB-CDC trigger to
+put the RP2040 into UF2 mode and mount an Explorer drive while the bridge is
+idle. After a production bridge flash, COM16 is therefore expected to disappear;
+prove bridge health through the ESP32 console on COM12. The two isolated SD
+smoke sketches retain the normal USB stack because their bounded evidence is
+captured directly on COM16 before the production bridge is restored.
 
 The bridge emits checksummed artifacts under `rp2040-sd-bridge-firmware`.
 The CI job also emits `rp2040-sd-smoke-firmware`, a non-production isolation

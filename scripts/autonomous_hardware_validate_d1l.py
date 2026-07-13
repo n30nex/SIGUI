@@ -2,7 +2,8 @@
 """Autonomous hardware validation runner for MeshCore DeskOS D1L.
 
 This orchestrates existing evidence-producing scripts around the expected
-current hardware routing: ESP32 console plus RP2040 USB/UF2.
+current hardware routing: ESP32 console/UART bridge plus intentional RP2040
+USB/UF2 maintenance.
 It intentionally refuses the protected mesh/radio ports.
 """
 

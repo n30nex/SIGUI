@@ -1190,6 +1190,67 @@ def test_rp2040_access_precheck_fails_fast_without_volume_port_or_ping(tmp_path,
     assert payload["state"] == "no_autonomous_bootloader_path"
 
 
+def test_rp2040_access_precheck_accepts_no_usb_bridge_protocol(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    absent = {
+        "preferred_port": "COM16",
+        "d1l_port": "COM12",
+        "present": False,
+        "selected_port": None,
+        "candidates": [],
+        "skipped": [],
+    }
+    commands = []
+    monkeypatch.setattr(
+        runner, "uf2_volume_snapshot", lambda: {"available": False, "candidates": []}
+    )
+    monkeypatch.setattr(
+        runner, "rp2040_port_discovery", lambda port, d1l_port: dict(absent)
+    )
+    monkeypatch.setattr(
+        runner,
+        "rp2040_double_reset_sweep",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("double-reset fallback should not run")
+        ),
+    )
+    monkeypatch.setattr(
+        runner,
+        "enter_rp2040_bootloader_usb_touch",
+        lambda port: (_ for _ in ()).throw(
+            AssertionError("USB touch should not run")
+        ),
+    )
+
+    def fake_console(port, baud, command, timeout, *, settle_sec=1.0):
+        commands.append(command)
+        if command == "rp2040 ping":
+            return {"ok": True, "cmd": command, "protocol_supported": True}
+        return {"ok": True, "cmd": command}
+
+    monkeypatch.setattr(runner, "send_d1l_console", fake_console)
+
+    report = runner.rp2040_access_precheck(ctx, dry_run=False)
+
+    assert report["ok"] is True
+    assert report["state"] == "bridge_protocol_ready"
+    assert report["bootloader_entry"] == "rp2040 bootloader"
+    assert report["rp2040_port_initial"]["present"] is False
+    assert commands == ["rp2040 status", "rp2040 ping"]
+
+
 def test_rp2040_access_precheck_switches_to_baud_probe_match(tmp_path, monkeypatch):
     ctx = runner.RunContext(
         root=tmp_path,

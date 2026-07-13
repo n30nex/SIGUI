@@ -98,19 +98,25 @@ python .\scripts\autonomous_hardware_validate_d1l.py --github-run-id <run-id> --
 
 The refresh runner first binds the host-success marker and release manifest to
 the requested canonical 40-hex commit and explicitly supplied numeric Actions
-run, and verifies both packaged
-and standalone firmware hashes. It touches only COM12 and COM16, refuses
-COM8/COM11/COM29, flashes the exact ESP32 image, then performs a short RP2040 access
-precheck before any RP2040 UF2 copy. The precheck lists UF2 volumes, checks
-whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
+run, and verifies both packaged and standalone firmware hashes. It touches only
+COM12 and, during intentional smoke/UF2 maintenance, COM16; it refuses
+COM8/COM11/COM29, flashes the exact ESP32 image, then performs a short RP2040
+access precheck before any RP2040 UF2 copy. The production bridge is built with
+`usbstack=nousb`, so COM16 is expected to be absent while it runs and a
+background 1200-baud serial poll cannot reopen UF2. The precheck lists UF2
+volumes, checks whether COM16 is present, asks COM12 for `rp2040 ping`, tries a precise
 `rp2040 double-reset` bootloader-entry pattern, then tries one `rp2040 reset`,
-and fails closed if no autonomous bootloader path is available. It does not
+and fails closed if no autonomous bootloader path is available. An absent COM16
+is accepted only when the COM12 bridge protocol and explicit bootloader command
+are available. It does not
 format SD, does not send Public RF, and does not require user action.
 Pre-existing UF2 disks require explicit `--uf2-volume`; automatic selection is
 limited to exactly one newly appeared volume correlated with the commanded D1L
 transition. COM17 and other discovered RP2040-looking ports are reported only
-as read-only inventory; configured COM16 must be present and is the only RP2040
-serial port the runner may touch. When access is available, the runner flashes the official Seeed SD smoke UF2,
+as read-only inventory; configured COM16 is the only RP2040 serial port the
+runner may touch when USB smoke or maintenance firmware is active. It is not
+required while the production no-USB bridge answers through COM12. When access
+is available, the runner flashes the official Seeed SD smoke UF2,
 captures its COM16 JSON, restores the exact production bridge UF2, and performs
 a second checksum-verified, non-erasing exact ESP32 flash. That fresh ESP32 boot
 is a required boundary because the intentional bridge-unavailable smoke window
@@ -166,7 +172,9 @@ before capture starts, it must still archive the same COM16 smoke path as an
    python .\scripts\flash_rp2040_sd_bridge_uf2.py --artifact-dir artifacts\github\<run-id>\rp2040-sd-bridge-firmware --volume <RP2040_UF2_DRIVE>: --expected-sha256 <sha256> --copy --out artifacts\rp2040-flash\rp2040-sd-bridge-uf2-copy.json
    ```
 
-6. Wait for the volume to disconnect/reboot, then power-cycle the D1L if needed.
+6. Wait for the volume to disconnect/reboot. The production bridge intentionally
+   does not enumerate COM16; verify `rp2040 ping` through COM12 instead. Power-cycle
+   the D1L only if that UART proof does not recover.
 
 Do not use `flash_d1l.ps1`, `flash_project.ps1`, or `esptool` for this RP2040
 step; those are ESP32-S3 paths.

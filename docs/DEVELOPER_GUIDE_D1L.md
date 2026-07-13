@@ -76,7 +76,12 @@ python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
 ```
 
-For current local validation, `COM12` is the D1L ESP32/UI console and `COM16` is the D1L RP2040 SD bridge/UF2 side. Never open `COM8`, `COM11`, or `COM29` as the D1L serial/flash target; `COM11` may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
+For current local validation, `COM12` is the D1L ESP32/UI console and the
+production RP2040 bridge control path. `COM16` is used only for bounded RP2040
+USB smoke/UF2 maintenance; the production bridge intentionally exposes no USB
+CDC port. Never open `COM8`, `COM11`, or `COM29` as the D1L serial/flash target;
+`COM11` may be checked separately only as the independent bot/radio endpoint
+for controlled DM evidence.
 
 The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
 

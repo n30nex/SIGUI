@@ -186,7 +186,9 @@ enum SdWorkerRequest : uint8_t {
 };
 
 LineRx bridge_rx = {{0}, 0, false};
+#ifndef NO_USB
 LineRx usb_rx = {{0}, 0, false};
+#endif
 Stream *reply_stream = &Serial1;
 bool s_sd_mounted = false;
 bool s_sd_power_high = true;
@@ -3067,18 +3069,24 @@ void sd_worker_loop_once() {
 } // namespace
 
 void setup() {
+#ifndef NO_USB
     Serial.begin(115200);
+#endif
     Serial1.setRX(RP2040_ESP32_RX_PIN);
     Serial1.setTX(RP2040_ESP32_TX_PIN);
     Serial1.begin(ESP32_BRIDGE_BAUD);
     configure_seeed_sd_bus(s_sd_power_high);
     delay(50);
+#ifndef NO_USB
     Serial.println("DeskOS RP2040 SD bridge ready");
+#endif
 }
 
 void loop() {
     poll_stream(Serial1, Serial1, bridge_rx);
+#ifndef NO_USB
     poll_stream(Serial, Serial, usb_rx);
+#endif
     delay(1);
 }
 

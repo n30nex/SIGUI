@@ -20,7 +20,12 @@ DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that
 ## Non-Negotiable Release Rules
 
 - Firmware builds are GitHub-Actions-only. Hardware proof uses the exact checksummed Actions artifact for the commit under test.
-- COM12 is the D1L ESP32/UI console. COM16 is the RP2040/SD bridge only when that issue explicitly requires it. Do not open COM8, COM11, or COM29 as the D1L serial target; COM11 may be checked separately only as the independent Discord-bot radio endpoint for controlled DM evidence.
+- COM12 is the D1L ESP32/UI console and production RP2040 bridge control path.
+  COM16 is used only for bounded RP2040 USB smoke/UF2 maintenance when that
+  issue explicitly requires it; the production bridge exposes no USB CDC port.
+  Do not open COM8, COM11, or COM29 as the D1L serial target; COM11 may be
+  checked separately only as the independent Discord-bot radio endpoint for
+  controlled DM evidence.
 - Never format SD media. Users prepare FAT32 SD cards on a computer; firmware and validation retain NVS fallback for absent or unusable media. There is no device-side SD formatting path.
 - MicroSD support is handled by the RP2040 side. The ESP32 direct SD path remains disabled in the D1L BSP.
 - Automated RF acceptance uses only the dedicated `#test` channel or a controlled direct-message peer such as the COM11 bot; it never transmits on the default Public channel.

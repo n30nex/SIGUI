@@ -1,7 +1,8 @@
 # D1L SD Card Guided Install
 
-Prefer `scripts/autonomous_hardware_validate_d1l.py` for COM12/COM16 hardware
-validation. Use this guided flow only when COM12 is working but the RP2040 does
+Prefer `scripts/autonomous_hardware_validate_d1l.py` for COM12 hardware
+validation and bounded COM16 USB smoke/UF2 maintenance. Use this guided flow
+only when COM12 is working but the RP2040 does
 not answer the DeskOS bridge protocol and no autonomous UF2 path appears. The
 only manual action is putting the RP2040 into BOOTSEL/UF2 mode twice: once for
 the official SD smoke proof and once to restore the DeskOS SD bridge.
@@ -34,8 +35,10 @@ The script will:
 1. Bind the host-success marker, release manifest, packaged files, and standalone
    firmware hashes to the requested canonical 40-hex commit and explicitly
    supplied numeric Actions run.
-2. Request the configured COM16 RP2040 bootloader transition and accept only an
-   explicitly authorized UF2 volume or one newly correlated UF2 volume.
+2. Request the RP2040 bootloader transition through the COM12 bridge command
+   when available, with configured COM16 as the maintenance-only fallback, and
+   accept only an explicitly authorized UF2 volume or one newly correlated UF2
+   volume.
 3. Copy only `seeed_official_sd_smoke.ino.uf2`.
 4. Capture the official Seeed SD smoke JSON from COM16, then capture the bounded
    RP2040-unavailable fallback receipt before restoring the production bridge.
@@ -55,10 +58,11 @@ The script will:
 A UF2 disk that was present before the commanded D1L bootloader transition is
 not eligible for automatic selection. Pass `--uf2-volume <drive>:` to authorize
 that exact pre-existing volume; otherwise the runner requires exactly one newly
-appeared UF2 volume correlated with the COM12/COM16 transition.
-COM17 or any other discovered RP2040-looking serial device is inventory-only;
-the runner fails closed when configured COM16 is absent and never touches an
-alternative port.
+appeared UF2 volume correlated with the commanded D1L transition.
+COM17 or any other discovered RP2040-looking serial device is inventory-only
+and is never touched. Configured COM16 may be absent while the production
+no-USB bridge runs; that state is accepted only when COM12 proves the bridge
+protocol and explicit bootloader command.
 
 For ESP32/UI-only firmware validation after the RP2040 bridge has already been
 proved, do not run the SD command above. Skip the SD suite entirely when the fix

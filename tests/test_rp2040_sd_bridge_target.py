@@ -439,6 +439,13 @@ def test_rp2040_bridge_target_implements_generic_file_protocol_safely():
     assert "if (rx.drop_until_newline)" in sketch
     assert "poll_stream(Serial1, Serial1, bridge_rx)" in sketch
     assert "poll_stream(Serial, Serial, usb_rx)" in sketch
+    assert "#ifndef NO_USB\nLineRx usb_rx = {{0}, 0, false};\n#endif" in sketch
+    assert "#ifndef NO_USB\n    Serial.begin(115200);\n#endif" in sketch
+    assert (
+        '#ifndef NO_USB\n    Serial.println("DeskOS RP2040 SD bridge ready");\n#endif'
+        in sketch
+    )
+    assert "#ifndef NO_USB\n    poll_stream(Serial, Serial, usb_rx);\n#endif" in sketch
     assert "void setup1()" in sketch
     assert "void loop1()" in sketch
     loop_body = sketch.split("void loop()", 1)[1].split("void setup1()", 1)[0]
@@ -642,7 +649,9 @@ def test_rp2040_docs_mark_ci_build_and_store_migration_pending():
     readme = README.read_text(encoding="utf-8")
 
     assert "GitHub Actions" in readme
-    assert "rp2040:rp2040:seeed_indicator_rp2040" in readme
+    assert "rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb" in readme
+    assert "1200-baud" in readme
+    assert "COM16" in readme
     assert "Do not use the Windows host for firmware compilation" in readme
     assert "Retained Public message history, DM history, route history, and packet history" in readme
     assert "keeps onboard NVS mirrors for these retained" in readme

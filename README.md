@@ -77,7 +77,8 @@ hardware proof.
 Current D1L bench defaults:
 
 - ESP32 app/console: `COM12`
-- RP2040 USB/CDC/UF2: `COM16`
+- RP2040 smoke/UF2 maintenance: `COM16`; the production bridge intentionally
+  exposes no USB CDC port and is controlled through the ESP32 console on `COM12`.
 - Never use `COM8`, `COM11`, or `COM29` as the D1L serial/flash target. `COM11` may be checked separately only as the independent bot/radio endpoint for controlled DM evidence.
 - Do not format SD from firmware, scripts, serial commands, or UI.
 - Do not send Public RF during SD validation.
@@ -123,8 +124,10 @@ packaged files, and standalone firmware hashes to the requested full commit and
 explicitly supplied numeric Actions run before any flash; the resolved commit
 must be a canonical 40-hex SHA. A pre-existing UF2 disk is never selected
 automatically; pass `--uf2-volume` to authorize it explicitly. COM16 is the only
-RP2040 serial port the runner may mutate; other discovered ports are read-only
-inventory and an absent COM16 fails closed. The raw electrical
+RP2040 serial port the runner may mutate during smoke/maintenance; other
+discovered ports are read-only inventory. The production bridge intentionally
+has no USB CDC port, so absent COM16 is accepted only when COM12 proves the
+bridge protocol and its explicit `rp2040 bootloader` path. The raw electrical
 diagnostic is an isolated, bounded maintenance phase gated by a fresh clean
 `READY_SD` preflight both before entry and after exact bridge/ESP32 recovery.
 Any failed diagnostic, later SD stage, or post-SD smoke preserves its receipt,
