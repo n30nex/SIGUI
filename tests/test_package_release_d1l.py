@@ -111,6 +111,53 @@ def write_fake_notices(root: Path) -> None:
     (root / "docs" / "DEVELOPER_GUIDE_D1L.md").write_text("developer guide\n", encoding="ascii")
     (root / "docs" / "FLASH_RECOVERY_D1L.md").write_text("flash recovery\n", encoding="ascii")
     (root / "docs" / "RP2040_SD_BRIDGE_FLASH_D1L.md").write_text("rp2040 guide\n", encoding="ascii")
+    source_inputs = {
+        ".gitmodules": "[submodule \"MeshCore\"]\n\tpath = third_party/MeshCore\n\turl = https://github.com/meshcore-dev/MeshCore.git\n",
+        ".github/workflows/d1l-ci.yml": "name: d1l-ci\n",
+        "CMakeLists.txt": "cmake_minimum_required(VERSION 3.16)\n",
+        "dependencies.lock": "dependencies: []\n",
+        "main/CMakeLists.txt": "idf_component_register(SRCS main.c)\n",
+        "partitions_d1l.csv": "nvs,data,nvs,0x9000,0x6000\n",
+        "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
+        "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
+        "scripts/package_release_d1l.py": "# package fixture\n",
+        "scripts/sbom_d1l.py": "# sbom fixture\n",
+        "sdkconfig.defaults": "CONFIG_IDF_TARGET=\"esp32s3\"\n",
+    }
+    for relative, contents in source_inputs.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="ascii")
+
+
+def fake_source_identity(commit: str) -> dict:
+    return {
+        "commit": commit,
+        "created": "2026-07-13T18:01:56Z",
+        "repository": "https://github.com/n30nex/SIGUI",
+        "submodules": [
+            {
+                "path": "third_party/MeshCore",
+                "url": "https://github.com/meshcore-dev/MeshCore.git",
+                "commit": "1" * 40,
+                "license": "MIT",
+            },
+            {
+                "path": "third_party/sensecap_indicator_esp32",
+                "url": "https://github.com/Seeed-Solution/sensecap_indicator_esp32.git",
+                "commit": "2" * 40,
+                "license": "Apache-2.0",
+            },
+        ],
+    }
+
+
+def install_fake_source_identity(monkeypatch, commit: str) -> None:
+    monkeypatch.setattr(
+        package_release_d1l,
+        "discover_source_identity",
+        lambda _root, _expected_commit: fake_source_identity(commit),
+    )
 
 
 def write_fake_config(root: Path) -> None:
@@ -178,6 +225,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     commit = "a" * 40
     conformance = write_meshcore_conformance(root, commit)
     monkeypatch.setenv("GITHUB_SHA", commit)
+    install_fake_source_identity(monkeypatch, commit)
 
     manifest = package_release_d1l.create_release_package(
         root=root,
@@ -258,11 +306,24 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     for artifact in manifest["rp2040_artifacts"]:
         nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
         assert verify_sha256_manifest(nested_manifest)
+    assert f"./sbom_{commit}.spdx.json" in sha_text
+    sbom_path = package_dir / manifest["sbom"]["path"]
+    assert manifest["sbom"]["valid"] is True
+    assert manifest["sbom"]["source_commit"] == commit
+    assert manifest["sbom"]["sha256"] == package_release_d1l.sha256_file(sbom_path)
+    sbom = json.loads(sbom_path.read_text(encoding="ascii"))
+    assert sbom["spdxVersion"] == "SPDX-2.3"
+    assert sbom["name"] == f"n30nex-SIGUI-{commit}"
+    assert any(item["versionInfo"] == "1" * 40 for item in sbom["packages"])
+    assert any(item["versionInfo"] == "2" * 40 for item in sbom["packages"])
+    assert any(item["fileName"] == "./package/firmware/meshcore_deskos_d1l.bin" for item in sbom["files"])
+    assert any(item["fileName"] == "./source/THIRD_PARTY_NOTICES.md" for item in sbom["files"])
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
     assert "`docs/` contains the user guide" in readme
     assert "`notices/` contains the project license" in readme
+    assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
     assert "structural prerequisite and does not close issue #65" in readme
 
 
@@ -272,6 +333,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
     write_fake_build(build)
     commit = "b" * 40
     monkeypatch.setenv("GITHUB_SHA", commit)
+    install_fake_source_identity(monkeypatch, commit)
 
     mismatched = write_meshcore_conformance(
         tmp_path,
@@ -332,7 +394,8 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
         raise AssertionError("out-of-range MeshCore evidence was accepted")
 
 
-def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path):
+def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path, monkeypatch):
+    install_fake_source_identity(monkeypatch, "c" * 40)
     build = tmp_path / "build"
     out = tmp_path / "artifacts" / "release"
     write_fake_build(build)
@@ -433,11 +496,15 @@ def test_copy_rp2040_artifacts_rechecks_complete_destination_tree(
         package_release_d1l.copy_rp2040_artifacts(artifacts, package_dir)
 
 
-def test_generated_flash_scripts_require_explicit_port(tmp_path):
+def test_generated_flash_scripts_require_explicit_port(tmp_path, monkeypatch):
     root = tmp_path
     build = root / "build"
     out = root / "artifacts" / "release"
     write_fake_build(build)
+    write_fake_notices(root)
+    write_fake_config(root)
+    commit = "d" * 40
+    install_fake_source_identity(monkeypatch, commit)
 
     package_release_d1l.create_release_package(
         root=root,
@@ -460,13 +527,15 @@ def test_generated_flash_scripts_require_explicit_port(tmp_path):
     assert "COM11" not in ps1
 
 
-def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path):
+def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path, monkeypatch):
     root = tmp_path
     build = root / "build"
     out = root / "artifacts" / "release"
     write_fake_build(build)
     write_fake_notices(root)
     write_fake_config(root)
+    commit = "e" * 40
+    install_fake_source_identity(monkeypatch, commit)
 
     manifest = package_release_d1l.create_release_package(
         root=root,

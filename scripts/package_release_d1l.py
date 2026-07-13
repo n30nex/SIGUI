@@ -19,6 +19,19 @@ try:
 except ModuleNotFoundError:
     from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
 
+if __package__:
+    from .sbom_d1l import (
+        discover_source_identity,
+        exact_sha,
+        write_package_sbom,
+    )
+else:
+    from sbom_d1l import (  # type: ignore[no-redef]
+        discover_source_identity,
+        exact_sha,
+        write_package_sbom,
+    )
+
 
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
@@ -717,6 +730,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
 - `evidence/` contains current-commit MeshCore wire-envelope conformance JSON when supplied by CI. It is a structural prerequisite and does not close issue #65.
+- `{manifest['sbom']['path']}` is the deterministic SPDX 2.3 SBOM bound to the exact source, submodule, and package inputs.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash
@@ -770,7 +784,16 @@ def create_release_package(
     package_dir.mkdir(parents=True, exist_ok=True)
 
     source_git = git_info(root)
-    expected_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
+    requested_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
+    source_identity = discover_source_identity(root, requested_commit)
+    expected_commit = source_identity["commit"]
+    repository_commit = source_git.get("commit")
+    if repository_commit is not None and exact_sha(
+        repository_commit, "repository source commit"
+    ) != expected_commit:
+        raise ValueError("release package source identity does not match repository HEAD")
+    source_git["commit"] = expected_commit
+    source_git["short_commit"] = expected_commit[:7]
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
         package_dir,
@@ -813,6 +836,13 @@ def create_release_package(
             "Flash backup may be skipped only when the operator explicitly requests that for hardware validation.",
         ],
     }
+    manifest["sbom"] = write_package_sbom(
+        root,
+        package_dir,
+        manifest,
+        source_identity=source_identity,
+        expected_source_sha=expected_commit,
+    )
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="ascii")
     write_release_readme(package_dir, package_name, manifest)
     write_sha256sums(package_dir)
