@@ -39,16 +39,26 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_PORTS = {"COM" + "8", "COM" + "11", "COM" + "29"}
+# COM16 is the current D1L RP2040 CDC/UF2 control surface, never an ESP32
+# console target. Keeping it out of this runner also prevents an accidental
+# 1200-baud UF2 touch from opening the RP2040 boot volume.
+FORBIDDEN_PORTS = {"COM" + number for number in ("8", "11", "16", "29")}
+D1L_CONSOLE_BAUD = 115200
 PRE_COMMANDS = ("version", "health", "crashlog")
 POST_COMMANDS = ("version", "health", "crashlog")
 SAFE_COMMANDS = frozenset((*PRE_COMMANDS, "reboot"))
 SERIAL_LINE_LIMIT_BYTES = 16384
 IGNORED_JSON_LIMIT = 8
 BOOT_EVENT_LIMIT = 16
+TRANSITION_PHASES = frozenset({"transition", "post"})
+SW_RESET_REASONS = frozenset({"RTC_SW_CPU_RST", "SW_CPU_RESET"})
 
 ROM_BANNER_RE = re.compile(r"(?:ESP-ROM:|^ets\s)", re.IGNORECASE)
 RESET_BANNER_RE = re.compile(r"(?:^|\s)rst:0x[0-9a-f]+", re.IGNORECASE)
+RESET_CAUSE_RE = re.compile(
+    r"(?:^|\s)rst:0x(?P<code>[0-9a-f]+)\s*\((?P<reason>[^)]+)\)",
+    re.IGNORECASE,
+)
 BOOT_LINE_RE = re.compile(r"(?:^|[,\s])boot:0x[0-9a-f]+", re.IGNORECASE)
 CRASH_BANNER_RE = re.compile(r"(?:WDT|PANIC|BROWNOUT)", re.IGNORECASE)
 
@@ -102,13 +112,28 @@ class TraceRecorder:
         self.raw_lines: list[dict] = []
         self.raw_lines_dropped = 0
         self.raw_chars_dropped = 0
+        self.raw_lines_dropped_by_phase: dict[str, int] = {}
+        self.raw_chars_dropped_by_phase: dict[str, int] = {}
         self.boot_events: list[dict] = []
         self.boot_events_dropped = 0
+        self.reset_events: list[dict] = []
+        self.reset_events_dropped = 0
         self.marker_counts = {
             "rom_banner": 0,
             "reset_banner": 0,
             "boot_line": 0,
             "boot_help": 0,
+        }
+        self.transition_marker_counts = {
+            "rom_banner": 0,
+            "reset_banner": 0,
+            "boot_line": 0,
+            "boot_help": 0,
+            "crash_marker": 0,
+            "sw_reset_banner": 0,
+            "wdt_reset_banner": 0,
+            "non_sw_reset_banner": 0,
+            "unparsed_reset_banner": 0,
         }
 
     def elapsed_ms(self) -> float:
@@ -127,6 +152,8 @@ class TraceRecorder:
         if parsed is not None:
             if parsed.get("cmd") == "help":
                 self.marker_counts["boot_help"] += 1
+                if phase in TRANSITION_PHASES:
+                    self.transition_marker_counts["boot_help"] += 1
                 event = {
                     **self._event_base(phase),
                     "cmd": "help",
@@ -146,18 +173,57 @@ class TraceRecorder:
         if ROM_BANNER_RE.search(text):
             tags.append("rom_banner")
             self.marker_counts["rom_banner"] += 1
+            if phase in TRANSITION_PHASES:
+                self.transition_marker_counts["rom_banner"] += 1
         if RESET_BANNER_RE.search(text):
             tags.append("reset_banner")
             self.marker_counts["reset_banner"] += 1
+            if phase in TRANSITION_PHASES:
+                self.transition_marker_counts["reset_banner"] += 1
+                cause = RESET_CAUSE_RE.search(text)
+                if cause is None:
+                    self.transition_marker_counts["unparsed_reset_banner"] += 1
+                    reset_event = {
+                        **self._event_base(phase),
+                        "code": None,
+                        "reason": None,
+                        "is_sw": False,
+                        "is_wdt": False,
+                    }
+                else:
+                    code = int(cause.group("code"), 16)
+                    reason = cause.group("reason").strip().upper()
+                    is_sw = code == 0xC and reason in SW_RESET_REASONS
+                    is_wdt = "WDT" in reason
+                    marker = "sw_reset_banner" if is_sw else "non_sw_reset_banner"
+                    self.transition_marker_counts[marker] += 1
+                    if is_wdt:
+                        self.transition_marker_counts["wdt_reset_banner"] += 1
+                    reset_event = {
+                        **self._event_base(phase),
+                        "code": code,
+                        "reason": reason,
+                        "is_sw": is_sw,
+                        "is_wdt": is_wdt,
+                    }
+                if len(self.reset_events) < BOOT_EVENT_LIMIT:
+                    self.reset_events.append(reset_event)
+                else:
+                    self.reset_events_dropped += 1
         if BOOT_LINE_RE.search(text):
             tags.append("boot_line")
             self.marker_counts["boot_line"] += 1
+            if phase in TRANSITION_PHASES:
+                self.transition_marker_counts["boot_line"] += 1
         if CRASH_BANNER_RE.search(text):
             tags.append("crash_marker")
+            if phase in TRANSITION_PHASES:
+                self.transition_marker_counts["crash_marker"] += 1
 
         truncated = len(text) > self.max_raw_line_chars
         bounded_text = text[: self.max_raw_line_chars]
-        if len(self.raw_lines) < self.max_raw_lines:
+        retained = len(self.raw_lines) < self.max_raw_lines
+        if retained:
             self.raw_lines.append(
                 {
                     **self._event_base(phase),
@@ -169,14 +235,23 @@ class TraceRecorder:
         else:
             self.raw_lines_dropped += 1
             self.raw_chars_dropped += len(text)
-        if truncated:
-            self.raw_chars_dropped += len(text) - len(bounded_text)
+            self.raw_lines_dropped_by_phase[phase] = (
+                self.raw_lines_dropped_by_phase.get(phase, 0) + 1
+            )
+            self.raw_chars_dropped_by_phase[phase] = (
+                self.raw_chars_dropped_by_phase.get(phase, 0) + len(text)
+            )
+        if truncated and retained:
+            dropped_chars = len(text) - len(bounded_text)
+            self.raw_chars_dropped += dropped_chars
+            self.raw_chars_dropped_by_phase[phase] = (
+                self.raw_chars_dropped_by_phase.get(phase, 0) + dropped_chars
+            )
         return None
 
     def summary(self) -> dict:
-        transition_phases = {"transition", "post"}
         transition_lines = [
-            line for line in self.raw_lines if line.get("phase") in transition_phases
+            line for line in self.raw_lines if line.get("phase") in TRANSITION_PHASES
         ]
         reset_banners = [
             line for line in transition_lines if "reset_banner" in line.get("tags", ())
@@ -192,9 +267,14 @@ class TraceRecorder:
             "raw_line_count": len(self.raw_lines),
             "raw_lines_dropped": self.raw_lines_dropped,
             "raw_chars_dropped": self.raw_chars_dropped,
+            "raw_lines_dropped_by_phase": dict(self.raw_lines_dropped_by_phase),
+            "raw_chars_dropped_by_phase": dict(self.raw_chars_dropped_by_phase),
             "boot_events": self.boot_events,
             "boot_events_dropped": self.boot_events_dropped,
+            "reset_events": self.reset_events,
+            "reset_events_dropped": self.reset_events_dropped,
             "marker_counts": dict(self.marker_counts),
+            "transition_marker_counts": dict(self.transition_marker_counts),
             "reset_banners": reset_banners,
             "rom_banners": rom_banners,
             "crash_markers": crash_markers,
@@ -393,9 +473,9 @@ def classify_report(report: dict) -> None:
     post_health = post.get("health")
     post_crashlog = post.get("crashlog")
     transition = report.get("transition") if isinstance(report.get("transition"), dict) else {}
-    marker_counts = transition.get("marker_counts")
-    if not isinstance(marker_counts, dict):
-        marker_counts = {}
+    transition_marker_counts = transition.get("transition_marker_counts")
+    if not isinstance(transition_marker_counts, dict):
+        transition_marker_counts = {}
 
     pre_complete = all(
         command_result_ok(pre.get(command), command) for command in PRE_COMMANDS
@@ -419,16 +499,45 @@ def classify_report(report: dict) -> None:
         else None
     )
     multiple_boot_banners = any(
-        type(marker_counts.get(key)) is int and marker_counts.get(key) > 1
+        type(transition_marker_counts.get(key)) is int
+        and transition_marker_counts.get(key) > 1
         for key in ("rom_banner", "reset_banner", "boot_help")
     )
-    raw_crash_marker_seen = bool(transition.get("crash_markers"))
+    raw_crash_marker_seen = transition_marker_counts.get("crash_marker", 0) > 0
+    raw_wdt_reset_seen = transition_marker_counts.get("wdt_reset_banner", 0) > 0
+    raw_reset_reason_sw = (
+        transition_marker_counts.get("reset_banner") == 1
+        and transition_marker_counts.get("sw_reset_banner") == 1
+        and transition_marker_counts.get("non_sw_reset_banner") == 0
+        and transition_marker_counts.get("unparsed_reset_banner") == 0
+    )
+    dropped_lines_by_phase = transition.get("raw_lines_dropped_by_phase")
+    if not isinstance(dropped_lines_by_phase, dict):
+        dropped_lines_by_phase = {}
+    dropped_chars_by_phase = transition.get("raw_chars_dropped_by_phase")
+    if not isinstance(dropped_chars_by_phase, dict):
+        dropped_chars_by_phase = {}
+    transition_lines_dropped = sum(
+        value
+        for phase, value in dropped_lines_by_phase.items()
+        if phase in TRANSITION_PHASES and type(value) is int and value > 0
+    )
+    transition_chars_dropped = sum(
+        value
+        for phase, value in dropped_chars_by_phase.items()
+        if phase in TRANSITION_PHASES and type(value) is int and value > 0
+    )
+    raw_transition_complete = (
+        transition_lines_dropped == 0
+        and transition_chars_dropped == 0
+        and transition.get("reset_events_dropped", 0) == 0
+    )
 
     checks = {
         "pre_complete": pre_complete,
         "reboot_attempted": report.get("reboot_attempted") is True,
         "reboot_ack_ok": reboot_command_passed(report.get("reboot")),
-        "boot_help_seen": marker_counts.get("boot_help", 0) >= 1,
+        "boot_help_seen": transition_marker_counts.get("boot_help", 0) >= 1,
         "post_complete": post_complete,
         "boot_nonce_changed": nonce_changed,
         "post_reset_reason": post_reset_reason,
@@ -438,6 +547,11 @@ def classify_report(report: dict) -> None:
         "firmware_identity_expected": identity_expected,
         "multiple_boot_banners": multiple_boot_banners,
         "raw_crash_marker_seen": raw_crash_marker_seen,
+        "raw_wdt_reset_seen": raw_wdt_reset_seen,
+        "raw_reset_reason_sw": raw_reset_reason_sw,
+        "raw_transition_complete": raw_transition_complete,
+        "transition_lines_dropped": transition_lines_dropped,
+        "transition_chars_dropped": transition_chars_dropped,
     }
     report["checks"] = checks
 
@@ -447,21 +561,25 @@ def classify_report(report: dict) -> None:
         classification = "reboot_not_attempted"
     elif not checks["reboot_ack_ok"]:
         classification = "reboot_ack_failed"
+    elif post_reset_reason == "WDT" or raw_wdt_reset_seen:
+        classification = "wdt_reset"
     elif not checks["boot_help_seen"] or not post_complete:
         classification = "incomplete_transition"
     elif multiple_boot_banners:
         classification = "multiple_boot_banners"
-    elif post_reset_reason == "WDT":
-        classification = "wdt_reset"
     elif post_reset_reason != "SW":
         classification = "non_sw_reset"
+    elif not raw_transition_complete:
+        classification = "raw_transition_incomplete"
+    elif not raw_reset_reason_sw:
+        classification = "raw_reset_banner_mismatch"
     elif raw_crash_marker_seen:
         classification = "raw_reset_banner_mismatch"
     elif not nonce_changed:
         classification = "boot_nonce_not_changed"
     elif not crash.get("ok"):
         classification = "crashlog_transition_invalid"
-    elif not identity_stable or identity_expected is False:
+    elif not identity_stable or identity_expected is not True:
         classification = "firmware_identity_mismatch"
     else:
         classification = "single_sw_transition"
@@ -507,8 +625,10 @@ def base_report(args: argparse.Namespace, *, now: Callable[[], str]) -> dict:
 
 def _validate_args(args: argparse.Namespace) -> str:
     port = enforce_port_guard(args.port)
-    if args.baud <= 0:
-        raise ValueError("--baud must be positive")
+    if args.baud != D1L_CONSOLE_BAUD:
+        raise ValueError(
+            f"--baud must be {D1L_CONSOLE_BAUD}; refusing reset-prone or non-D1L baud"
+        )
     for name in (
         "command_timeout",
         "transition_timeout",
@@ -522,10 +642,13 @@ def _validate_args(args: argparse.Namespace) -> str:
         raise ValueError("--max-raw-lines must be between 1 and 1024")
     if not 64 <= args.max_raw_line_chars <= 4096:
         raise ValueError("--max-raw-line-chars must be between 64 and 4096")
-    if (
-        args.expected_firmware_commit is not None
-        and exact_commit(args.expected_firmware_commit) is None
-    ):
+    expected_commit = exact_commit(args.expected_firmware_commit)
+    if not args.dry_run and expected_commit is None:
+        raise ValueError(
+            "--expected-firmware-commit is required for hardware evidence and must "
+            "be an exact 40-character SHA"
+        )
+    if args.expected_firmware_commit is not None and expected_commit is None:
         raise ValueError("--expected-firmware-commit must be an exact 40-character SHA")
     return port
 
@@ -650,7 +773,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", required=True, help="Explicit D1L Windows COM port")
     parser.add_argument("--out", required=True, help="JSON receipt path")
-    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--baud", type=int, default=D1L_CONSOLE_BAUD)
     parser.add_argument("--command-timeout", type=float, default=30.0)
     parser.add_argument("--transition-timeout", type=float, default=15.0)
     parser.add_argument("--read-poll-sec", type=float, default=0.1)
