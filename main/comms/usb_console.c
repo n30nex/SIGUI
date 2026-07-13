@@ -2016,6 +2016,50 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
 }
 
+static bool storage_retained_history_nvs_no_card_ready(
+    const d1l_storage_status_t *status)
+{
+    return status &&
+           status->manager_running &&
+           text_equals(status->manager_state, "NO_CARD") &&
+           text_equals(status->sd_state, "no_card") &&
+           status->rp2040_bridge_ready &&
+           status->rp2040_sd_protocol_supported &&
+           !status->sd_present &&
+           !status->sd_presence_stale &&
+           !status->sd_mounted &&
+           !status->sd_data_root_ready &&
+           !status->bridge_status_stale &&
+           text_equals(status->message_store_backend, "nvs") &&
+           text_equals(status->dm_store_backend, "nvs") &&
+           text_equals(status->route_store_backend, "nvs") &&
+           text_equals(status->packet_log_backend, "nvs") &&
+           d1l_retained_blob_store_nvs_ready() &&
+           d1l_retained_blob_store_nvs_marker_ready() &&
+           d1l_retained_blob_store_nvs_markers_complete() &&
+           d1l_retained_blob_store_nvs_anchor_ready() &&
+           d1l_retained_blob_store_nvs_sentinel_ready();
+}
+
+static bool retained_canary_backend_generations(
+    bool expect_sd,
+    uint32_t generations[D1L_RETAINED_BLOB_STORE_COUNT])
+{
+    if (!generations) {
+        return false;
+    }
+    for (size_t i = 0; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        d1l_retained_blob_store_backend_state_t state = {0};
+        if (!d1l_retained_blob_store_backend_state(
+                (d1l_retained_blob_store_id_t)i, &state) ||
+            state.enabled != expect_sd || state.generation == 0U) {
+            return false;
+        }
+        generations[i] = state.generation;
+    }
+    return true;
+}
+
 static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *src)
 {
     if (!dest || dest_size == 0 || !src) {
@@ -3264,11 +3308,17 @@ static void cmd_storage_retained_canary(const char *line)
 
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
-    if (!storage_retained_history_sd_ready(&status)) {
+    const bool sd_backend_mode = storage_retained_history_sd_ready(&status);
+    const bool nvs_no_card_backend_mode =
+        storage_retained_history_nvs_no_card_ready(&status);
+    uint32_t backend_generations[D1L_RETAINED_BLOB_STORE_COUNT] = {0};
+    if ((!sd_backend_mode && !nvs_no_card_backend_mode) ||
+        !retained_canary_backend_generations(
+            sd_backend_mode, backend_generations)) {
         d1l_route_store_worker_quiesce_end();
         d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "SD_RETAINED_HISTORY_NOT_READY",
-                   "requires ready RP2040 file ops and sd backends for messages, dm, routes, and packets");
+                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD state with ready retained NVS");
         return;
     }
 
@@ -3346,12 +3396,18 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"public_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+           sd_backend_mode ? "sd" : "nvs_no_card",
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,
            status.packet_log_backend);
-    printf(",\"note\":\"Synthetic retained-history SD canary rows appended without Public RF or format command\"}\n");
+    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu}",
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_DM_MESSAGES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_ROUTES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"note\":\"Synthetic retained-history canary rows appended without Public or DM RF or a format command\"}\n");
 }
 
 static void cmd_storage_setup(const char *line)
