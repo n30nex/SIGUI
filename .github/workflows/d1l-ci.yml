@@ -11,6 +11,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   change-filter:
     runs-on: ubuntu-latest
@@ -18,7 +21,7 @@ jobs:
       include_sd_bridge: ${{ steps.scope.outputs.include_sd_bridge }}
       reason: ${{ steps.scope.outputs.reason }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
@@ -64,7 +67,7 @@ jobs:
     needs: change-filter
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
@@ -166,7 +169,7 @@ jobs:
           $path = Join-Path $out ("d1l_host_checks_success_{0}.json" -f $env:GITHUB_SHA)
           $payload | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8NoBOM
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-host-artifacts
           path: artifacts/**
@@ -177,7 +180,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
@@ -207,7 +210,7 @@ jobs:
             --runs 100000 \
             --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ always() }}
         with:
           name: d1l-meshcore-wire-conformance
@@ -220,9 +223,9 @@ jobs:
     if: needs.change-filter.outputs.include_sd_bridge == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - uses: arduino/setup-arduino-cli@v2
+      - uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2.0.0
         with:
           version: 1.x
 
@@ -289,7 +292,7 @@ jobs:
       - name: Verify RP2040 checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-sd-bridge
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-sd-bridge-firmware
           path: artifacts/rp2040-sd-bridge/**
@@ -310,7 +313,7 @@ jobs:
       - name: Verify RP2040 Seeed SD smoke checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-sd-smoke
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-sd-smoke-firmware
           path: artifacts/rp2040-sd-smoke/**
@@ -331,7 +334,7 @@ jobs:
       - name: Verify RP2040 official Seeed SD smoke checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-seeed-official-sd-smoke
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-seeed-official-sd-smoke-firmware
           path: artifacts/rp2040-seeed-official-sd-smoke/**
@@ -344,12 +347,12 @@ jobs:
     runs-on: ubuntu-latest
     container: espressif/idf:v5.5.4
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
       - name: Download exact MeshCore conformance evidence
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: d1l-meshcore-wire-conformance
           path: artifacts/meshcore-conformance-input
@@ -421,7 +424,7 @@ jobs:
             fi
           done
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ always() }}
         with:
           name: d1l-idf55-migration-state
@@ -445,7 +448,7 @@ jobs:
 
       - name: Download RP2040 release artifacts
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: rp2040-*-firmware
           path: artifacts/rp2040-release-inputs
@@ -465,14 +468,14 @@ jobs:
           python scripts/verify_checksums.py artifacts/firmware
           python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-firmware-artifacts
           path: artifacts/firmware/**
           if-no-files-found: error
           retention-days: 14
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-release-package
           path: artifacts/release/**

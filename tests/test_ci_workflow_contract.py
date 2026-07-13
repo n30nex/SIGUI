@@ -3,6 +3,13 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CHECKOUT_ACTION_PIN = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+DOWNLOAD_ARTIFACT_ACTION_PIN = (
+    "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
+)
+ARDUINO_CLI_ACTION_PIN = (
+    "arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02"
+)
 
 
 def workflow_text() -> str:
@@ -82,7 +89,7 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
 
     assert "needs: change-filter" in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
-    assert "arduino/setup-arduino-cli@v2" in job
+    assert ARDUINO_CLI_ACTION_PIN in job
     assert "package_rp2040_index.json" in job
     assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
     assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
@@ -142,7 +149,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
 
     assert "runs-on: ubuntu-24.04" in job
     assert "timeout-minutes: 10" in job
-    assert "actions/checkout@v7" in job
+    assert CHECKOUT_ACTION_PIN in job
     assert "submodules: recursive" in job
     assert "sudo apt-get install -y clang-18" in job
     assert "clang-18 --version" in job
@@ -170,7 +177,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "needs.host-checks.result == 'success'" in firmware
     assert "needs.meshcore-conformance.result == 'success'" in firmware
     assert "name: Download exact MeshCore conformance evidence" in firmware
-    assert "uses: actions/download-artifact@v7" in firmware
+    assert f"uses: {DOWNLOAD_ARTIFACT_ACTION_PIN}" in firmware
     assert "name: d1l-meshcore-wire-conformance" in firmware
     assert "path: artifacts/meshcore-conformance-input" in firmware
     assert "name: Verify exact MeshCore conformance evidence" in firmware
@@ -210,7 +217,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
         < job.index("name: Collect firmware artifacts")
         < job.index("name: Package D1L release")
     )
-    assert "actions/download-artifact@v7" in job
+    assert DOWNLOAD_ARTIFACT_ACTION_PIN in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "pattern: rp2040-*-firmware" in job
     assert "path: artifacts/rp2040-release-inputs" in job
