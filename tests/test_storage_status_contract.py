@@ -206,7 +206,7 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "manager_sequence_give()" in remount_body
     assert "request_bridge_reset_remount_recovery()" not in remount_body
     assert "d1l_storage_manager_start()" not in remount_body
-    assert "classify_storage_manager_state(ret)" in remount_body
+    assert "classify_storage_manager_state(ret, false)" in remount_body
     assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
     assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
     sync_recovery_body = source.split("static esp_err_t reset_bridge_and_remount_blocking", 1)[1].split(
@@ -357,9 +357,56 @@ def test_storage_manager_performs_one_bounded_initial_bridge_recovery_without_re
         "static uint32_t storage_manager_pause_delay_ms", 1
     )[0]
     assert "manager_sequence_try_take()" in manager_wrapper
+    assert "d1l_route_store_worker_quiesce_begin(" in manager_wrapper
     assert "storage_manager_run_once_owned();" in manager_wrapper
     assert "manager_control_finish_reset_recovery();" in manager_wrapper
+    assert "d1l_route_store_worker_quiesce_end();" in manager_wrapper
     assert "manager_sequence_give();" in manager_wrapper
+    assert manager_wrapper.index("manager_sequence_try_take()") < manager_wrapper.index(
+        "d1l_route_store_worker_quiesce_begin("
+    ) < manager_wrapper.index("storage_manager_run_once_owned();")
+    assert manager_wrapper.index("storage_manager_run_once_owned();") < manager_wrapper.index(
+        "d1l_route_store_worker_quiesce_end();"
+    ) < manager_wrapper.rindex("manager_sequence_give();")
+
+
+def test_background_manager_pauses_retained_sd_and_stays_transitional_on_stale_status():
+    source = read("main/storage/storage_status.c")
+    pause_backend = source.split(
+        "static void pause_retained_sd_backend_for_manager_failure", 1
+    )[1].split("static void set_default_actions", 1)[0]
+    classify = source.split(
+        "static void classify_storage_manager_state", 1
+    )[1].split("static void storage_manager_run_once_owned", 1)[0]
+    manager = source.split(
+        "static void storage_manager_run_once_owned", 1
+    )[1].split("static void storage_manager_run_once(void)", 1)[0]
+
+    assert "d1l_retained_blob_store_note_sd_backend(false, false, false" in pause_backend
+    assert "set_store_backends(&s_status);" in pause_backend
+    assert "retained_backend_paused_for_failure" in classify
+    non_timeout_error = classify.index("if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT)")
+    timeout_or_stale = classify.index(
+        "if ((retained_backend_paused_for_failure && ret == ESP_ERR_TIMEOUT)"
+    )
+    cached_ready = classify.index("if (storage_sd_ready_for_files())")
+    assert non_timeout_error < timeout_or_stale < cached_ready
+    stale_branch = classify[timeout_or_stale:cached_ready]
+    assert "set_manager_state(D1L_STORAGE_MANAGER_STATUS);" in stale_branch
+    assert "D1L_STORAGE_MANAGER_READY_SD" not in stale_branch
+    assert manager.count("pause_retained_sd_backend_for_manager_failure();") == 2
+    ping_failure = manager.split("note_rp2040_exchange_failure(ret, false);", 1)[1].split(
+        "return;", 1
+    )[0]
+    assert "pause_retained_sd_backend_for_manager_failure();" in ping_failure
+    final_failure = manager.split(
+        "const bool retained_backend_paused_for_failure = ret != ESP_OK;", 1
+    )[1].split(
+        "classify_storage_manager_state(ret, retained_backend_paused_for_failure);", 1
+    )[0]
+    assert "pause_retained_sd_backend_for_manager_failure();" in final_failure
+    assert "if (retained_backend_paused_for_failure)" in final_failure
+    assert "classify_storage_manager_state(ret, true);" in ping_failure
 
 
 def test_storage_status_preserves_last_confirmed_card_across_transient_bridge_failures():

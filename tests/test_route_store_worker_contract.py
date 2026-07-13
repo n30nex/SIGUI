@@ -193,6 +193,23 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     assert remount.count("d1l_route_store_worker_quiesce_end()") == 1
     assert r'\"retained_worker_quiesce_acquired\":%s' in console
 
+    manager = storage.split(
+        "static void storage_manager_run_once(void)", 1
+    )[1].split("static uint32_t storage_manager_pause_delay_ms", 1)[0]
+    assert "D1L_STORAGE_MANAGER_RETAINED_QUIESCE_TIMEOUT_MS" in storage
+    assert manager.index("manager_sequence_try_take()") < manager.index(
+        "d1l_route_store_worker_quiesce_begin("
+    ) < manager.index("storage_manager_run_once_owned();")
+    assert manager.index("storage_manager_run_once_owned();") < manager.index(
+        "d1l_route_store_worker_quiesce_end();"
+    ) < manager.rindex("manager_sequence_give();")
+    manager_acquisition_failure = manager.split(
+        "if (retained_quiesce_ret != ESP_OK)", 1
+    )[1].split("storage_manager_run_once_owned();", 1)[0]
+    assert "manager_sequence_give();" in manager_acquisition_failure
+    assert "d1l_rp2040_bridge_" not in manager_acquisition_failure
+    assert 'set_manager_state(D1L_STORAGE_MANAGER_STATUS);' in manager_acquisition_failure
+
     reboot = console.split(
         '} else if (strcmp(line, "reboot") == 0) {', 1
     )[1].split('} else if (strcmp(line, "factory-reset-confirm") == 0) {', 1)[0]
