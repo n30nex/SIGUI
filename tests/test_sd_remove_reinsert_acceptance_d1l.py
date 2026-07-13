@@ -157,6 +157,7 @@ def readbacks(token: str, receipt: dict) -> dict[str, dict]:
 
 def persistence(token: str, mode: str, generation: int) -> dict[str, dict]:
     sd_required = mode == "sd"
+    deferred_sd_sync = mode == "nvs_no_card"
     fingerprint = accept.fingerprint_for_token(token)
     message_persistence = {
         "loaded": True,
@@ -165,8 +166,8 @@ def persistence(token: str, mode: str, generation: int) -> dict[str, dict]:
         "sd": {
             "required": sd_required,
             "generation": generation,
-            "dirty": False,
-            "reconcile_pending": False,
+            "dirty": deferred_sd_sync,
+            "reconcile_pending": deferred_sd_sync,
             "failures": 0,
             "last_error": "ESP_OK",
         },
@@ -198,8 +199,8 @@ def persistence(token: str, mode: str, generation: int) -> dict[str, dict]:
                 "sd_primary": {
                     "required": sd_required,
                     "backend_generation": generation,
-                    "dirty": False,
-                    "reconcile_pending": False,
+                    "dirty": deferred_sd_sync,
+                    "reconcile_pending": deferred_sd_sync,
                     "fail_count": 0,
                     "last_error": "ESP_OK",
                 },
@@ -442,6 +443,59 @@ def test_explicit_no_card_rejects_stale_presence_and_bridge_loss():
     assert accept.storage_mode_matches(storage_status(1, "nvs_no_card"), "nvs_no_card")
     assert not accept.storage_mode_matches(stale, "nvs_no_card")
     assert not accept.storage_mode_matches(bridge_loss, "nvs_no_card")
+
+
+def test_absent_persistence_requires_deferred_sd_sync_for_mirrored_stores():
+    token = "rrtest-01-nvs"
+    results = persistence(token, "nvs_no_card", 2)
+    assert accept.persistence_snapshot_clean(results, token, "nvs_no_card")
+
+    mirrored = (
+        (f"messages public search {token}", "sd"),
+        (f"messages dm {accept.fingerprint_for_token(token)}", "sd"),
+        ("routes", "sd_primary"),
+    )
+    for command, backend in mirrored:
+        for field in ("dirty", "reconcile_pending"):
+            tampered = copy.deepcopy(results)
+            tampered[command]["persistence"][backend][field] = False
+            assert not accept.persistence_snapshot_clean(
+                tampered, token, "nvs_no_card"
+            )
+
+
+def test_absent_persistence_keeps_packet_and_nvs_state_clean():
+    token = "rrtest-01-nvs"
+    packet_command = f"packets search {token}"
+    public_command = f"messages public search {token}"
+
+    packet_dirty = persistence(token, "nvs_no_card", 2)
+    packet_dirty[packet_command]["persistence"]["sd"]["dirty"] = True
+    assert not accept.persistence_snapshot_clean(
+        packet_dirty, token, "nvs_no_card"
+    )
+
+    packet_pending = persistence(token, "nvs_no_card", 2)
+    packet_pending[packet_command]["persistence"]["reconcile"]["pending"] = True
+    assert not accept.persistence_snapshot_clean(
+        packet_pending, token, "nvs_no_card"
+    )
+
+    for field, value in (("dirty", True), ("failures", 1)):
+        nvs_bad = persistence(token, "nvs_no_card", 2)
+        nvs_bad[public_command]["persistence"]["nvs"][field] = value
+        assert not accept.persistence_snapshot_clean(
+            nvs_bad, token, "nvs_no_card"
+        )
+
+
+def test_ready_sd_persistence_still_rejects_deferred_flags():
+    token = "rrtest-01-post"
+    public_command = f"messages public search {token}"
+    for field in ("dirty", "reconcile_pending"):
+        results = persistence(token, "sd", 3)
+        results[public_command]["persistence"]["sd"][field] = True
+        assert not accept.persistence_snapshot_clean(results, token, "sd")
 
 
 def test_valid_ten_cycle_report_passes():
