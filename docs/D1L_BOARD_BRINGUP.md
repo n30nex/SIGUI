@@ -42,6 +42,8 @@ Important defaults:
 Current hardware validation status is tracked in [ROADMAP.md](ROADMAP.md),
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md), and
 [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md). Current D1L release validation uses
-COM12 for the ESP32 app/console side and COM16 for the RP2040 USB/CDC/UF2 side.
+COM12 for the ESP32 app/console and production RP2040 bridge control. COM16 is
+used only while bounded RP2040 USB smoke or UF2 maintenance firmware is active;
+the production bridge intentionally exposes no USB CDC port.
 
 Scripts still intentionally stop before flashing unless `D1L_PORT` or `--port` is supplied.

@@ -79,6 +79,11 @@ typedef struct {
 
 static bool s_toggle_backend_during_write;
 static bool s_toggle_backend_during_delete;
+static bool s_worker_should_yield;
+static bool s_chunked_read_case;
+static uint32_t s_chunked_read_count;
+static bool s_chunked_write_yield_case;
+static uint32_t s_chunked_write_count;
 static uint32_t s_rename_count;
 static uint32_t s_delete_count;
 static bool s_nvs_enabled;
@@ -560,13 +565,25 @@ esp_err_t nvs_commit(nvs_handle_t handle)
     return ESP_OK;
 }
 
+bool d1l_route_store_persistence_should_yield(void)
+{
+    return s_worker_should_yield;
+}
+
 esp_err_t d1l_rp2040_bridge_file_stat(const char *path,
                                       d1l_rp2040_file_result_t *out_result,
                                       uint32_t timeout_ms)
 {
     (void)path;
-    (void)out_result;
     (void)timeout_ms;
+    if (s_chunked_read_case) {
+        assert(out_result);
+        memset(out_result, 0, sizeof(*out_result));
+        out_result->exists = true;
+        out_result->size = D1L_RP2040_FILE_CHUNK_MAX * 2U;
+        return ESP_OK;
+    }
+    (void)out_result;
     return ESP_FAIL;
 }
 
@@ -576,11 +593,27 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
                                       uint32_t timeout_ms)
 {
     (void)path;
+    (void)timeout_ms;
+    if (s_chunked_read_case) {
+        assert(out_data);
+        assert(out_result);
+        const size_t total = D1L_RP2040_FILE_CHUNK_MAX * 2U;
+        assert(offset < total);
+        const size_t remaining = total - offset;
+        const size_t length = remaining < max_len ? remaining : max_len;
+        memset(out_data, 0x5a, length);
+        memset(out_result, 0, sizeof(*out_result));
+        out_result->offset = offset;
+        out_result->length = (uint32_t)length;
+        out_result->eof = offset + length == total;
+        ++s_chunked_read_count;
+        s_worker_should_yield = true;
+        return ESP_OK;
+    }
     (void)offset;
     (void)out_data;
     (void)max_len;
     (void)out_result;
-    (void)timeout_ms;
     return ESP_FAIL;
 }
 
@@ -598,6 +631,10 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
     assert(out_result);
     (void)timeout_ms;
     out_result->length = (uint32_t)len;
+    if (s_chunked_write_yield_case) {
+        ++s_chunked_write_count;
+        s_worker_should_yield = true;
+    }
     if (s_toggle_backend_during_write) {
         s_toggle_backend_during_write = false;
         d1l_retained_blob_store_note_sd_backend(false, false, false,
@@ -1380,6 +1417,74 @@ static void test_partition_init_failure_never_falls_back_or_resurrects(void)
     assert(memcmp(readback, dedicated_blob, sizeof(dedicated_blob)) == 0);
 }
 
+static void test_background_read_yields_between_chunks_without_degrading_sd(void)
+{
+    uint8_t readback[D1L_RP2040_FILE_CHUNK_MAX * 2U] = {0};
+    size_t readback_len = sizeof(readback);
+    d1l_retained_blob_store_sd_stats_t before = {0};
+    d1l_retained_blob_store_sd_stats_t after = {0};
+    assert(d1l_retained_blob_store_sd_stats(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &before));
+
+    s_chunked_read_case = true;
+    s_worker_should_yield = false;
+    s_chunked_read_count = 0U;
+    assert(d1l_retained_blob_store_read_sd_primary(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               "public", readback, &readback_len) == ESP_ERR_NOT_FINISHED);
+    assert(s_chunked_read_count == 1U);
+    assert(d1l_retained_blob_store_sd_stats(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &after));
+    assert(after.sd_read_fail_count == before.sd_read_fail_count);
+    assert(after.sd_last_error == before.sd_last_error);
+    assert(after.sd_degraded_latched == before.sd_degraded_latched);
+
+    s_worker_should_yield = false;
+    s_chunked_read_case = false;
+}
+
+static void test_background_write_yields_before_rename_without_degrading_sd(void)
+{
+    uint8_t payload[D1L_RP2040_FILE_CHUNK_MAX * 2U] = {0};
+    d1l_retained_blob_store_backend_state_t state = {0};
+    d1l_retained_blob_store_sd_stats_t before = {0};
+    d1l_retained_blob_store_sd_stats_t after = {0};
+    assert(d1l_retained_blob_store_backend_state(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &state));
+    assert(d1l_retained_blob_store_sd_stats(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &before));
+    const uint32_t rename_count_before = s_rename_count;
+    const uint32_t delete_count_before = s_delete_count;
+
+    s_chunked_write_yield_case = true;
+    s_worker_should_yield = false;
+    s_chunked_write_count = 0U;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               "public", payload, sizeof(payload), state.generation) ==
+           ESP_ERR_NOT_FINISHED);
+    assert(s_chunked_write_count == 1U);
+    assert(s_rename_count == rename_count_before);
+    assert(s_delete_count == delete_count_before);
+    assert(d1l_retained_blob_store_sd_stats(
+        D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES, &after));
+    assert(after.sd_write_fail_count == before.sd_write_fail_count);
+    assert(after.sd_rename_fail_count == before.sd_rename_fail_count);
+    assert(after.sd_last_error == before.sd_last_error);
+    assert(after.sd_degraded_latched == before.sd_degraded_latched);
+
+    s_chunked_write_yield_case = false;
+    s_worker_should_yield = false;
+    assert(d1l_retained_blob_store_write_sd_primary_guarded(
+               D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES,
+               "public", payload, sizeof(payload), state.generation) ==
+           ESP_OK);
+    assert(s_rename_count == rename_count_before + 1U);
+    assert(s_delete_count == delete_count_before);
+    s_rename_count = rename_count_before;
+    s_delete_count = delete_count_before;
+}
+
 int main(void)
 {
     assert_all_states(false, 0U);
@@ -1401,6 +1506,9 @@ int main(void)
         true, true, true, D1L_RP2040_FILE_LINE_MAX,
         D1L_RP2040_FILE_CHUNK_MAX, D1L_RP2040_FILE_PATH_MAX);
     assert_all_states(true, 1U);
+
+    test_background_read_yields_between_chunks_without_degrading_sd();
+    test_background_write_yields_before_rename_without_degrading_sd();
 
     d1l_retained_blob_store_note_sd_backend(
         true, true, true, D1L_RP2040_FILE_LINE_MAX,

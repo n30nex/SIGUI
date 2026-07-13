@@ -23,7 +23,7 @@ python .\scripts\smoke_d1l.py --dry-run
 python .\scripts\ui_corruption_probe_d1l.py --dry-run --rounds 20
 python .\scripts\ui_capture_d1l.py --dry-run
 python .\scripts\scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache
-python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
+python .\scripts\soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test
 python .\scripts\sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all
 ```
 
@@ -76,7 +76,12 @@ python .\scripts\smoke_d1l.py --port $env:D1L_PORT --manual-touch
 python .\scripts\ui_capture_d1l.py --port $env:D1L_PORT --out artifacts\hardware\com12\ui_pixel_capture-COM12.json
 ```
 
-For current local validation, `COM12` is the D1L ESP32/UI console and `COM16` is the D1L RP2040 SD bridge/UF2 side. Do not touch `COM8`, `COM11`, or `COM29` for D1L validation.
+For current local validation, `COM12` is the D1L ESP32/UI console and the
+production RP2040 bridge control path. `COM16` is used only for bounded RP2040
+USB smoke/UF2 maintenance; the production bridge intentionally exposes no USB
+CDC port. Never open `COM8`, `COM11`, or `COM29` as the D1L serial/flash target;
+`COM11` may be checked separately only as the independent bot/radio endpoint
+for controlled DM evidence.
 
 The other local MeshCore bot may be used as the controlled DM RF peer for production validation. Keep the bot port explicit, and prefer the targeted DM probe when Public-channel RF should stay quiet.
 

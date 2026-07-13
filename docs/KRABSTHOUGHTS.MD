@@ -47,13 +47,15 @@ For this audit, 1.0 means a standalone, touch-first MeshCore client that can be 
 
 ### Optional features must be honest
 
-BLE companion transport, OTA, GPS, online map tiles and server administration do not all have to be in 1.0. However, each feature must be one of:
+BLE companion transport, OTA, online map tiles and server administration do not all have to be in 1.0. However, each feature must be one of:
 
 1. complete and release-tested;
 2. visibly marked experimental with safe failure behavior; or
 3. absent from the release UI.
 
 A visible action that opens a working-looking page but cannot complete its workflow is a release defect.
+
+D1L has no onboard GPS. Local-GPS support is therefore outside the 1.0 product surface: Map center is set manually, signed peer-advert coordinates are labelled as advert locations, and no UI or release copy may imply that the device has a live local position.
 
 ## Current foundation that should be preserved
 
@@ -67,6 +69,16 @@ A visible action that opens a working-looking page but cannot complete its workf
 - CI and host tests are currently green.
 
 These are strong foundations. They do not replace end-to-end protocol and failure-mode proof.
+
+## Retained reboot gate addendum (2026-07-12)
+
+- Commit `a2695fb` passed its exact GitHub Actions build/package path in run `29183542983`; the checksum-verified artifact was flashed non-destructively to COM12, exact-commit smoke passed, and an SD file canary passed. This is banked diagnostic evidence, not retained-history or release qualification.
+- The first retained-history run then exposed a legitimate planned boot boundary that the host runner mishandled: controlled reboot emits exactly one boot `{"cmd":"help","ok":true}` response before the first post-reboot `storage status`. The runner and audit must accept only that exact, adjacent, one-time boundary in retained-history and reboot/remount evidence; duplicate, late, differently shaped, or unrelated help responses remain terminal.
+- A subsequent retained-history run received the successful reboot acknowledgement and flush result but then recorded an intermittent post-ack `WDT` reset instead of the required `SW` reset. That crash evidence is preserved. PR #80 remains draft and the release gate remains fail-closed; neither the earlier smoke nor the file canary proves the controlled-reboot race is fixed.
+- Commit `91be531` implements that shared-deadline/quiesce repair. Exact Actions run `29185308761` was green, every downloaded checksum manifest passed, and its package was flashed non-erasing to COM12. The first controlled persistence reboot acquired both quiesce locks, returned both flushes as `ESP_OK`, changed the boot nonce, and came back as `SW` with 9428 retained-worker stack bytes free. This is evidence that the prior post-ack WDT race did not reproduce on that cycle, not final qualification.
+- The second cleanup reboot was correctly cancelled before reset with retained flush `ESP_ERR_NOT_FOUND`. Two attempts reproduced the same failure. A live snapshot later showed `READY_SD` and isolated one route SD write failure with zero route rename failures and no errors in the other retained stores. The RP2040 write handler cannot emit `not_found`; this exact error path was its cached `no_card` gate, so an inserted card had been falsely demoted by GPIO7 polling and the route retry floor replayed that error. No new `WDT` or `PANIC` was added.
+- The current #78 repair candidate keeps normal status polling bus-silent but, only after three GPIO7 samples contradict a previously proven mounted signature, performs one bounded read-only `CMD17` sector-zero transaction on the idle shared SPI bus. A complete sector with a valid data token and CRC16 retains the ready snapshot; a failed or corrupt transaction preserves the existing fail-closed `no_card` transition. It never formats, writes, remounts, power-cycles, or weakens reboot cancellation.
+- Do not call this hardware-fixed until the successor SHA passes host tests and Actions, its package and checksums are verified, both exact ESP32 and RP2040 artifacts are installed, canonical SD file-canary/retained-history/reboot-remount evidence passes, and repeated immediate retained-canary reboot cycles all report `SW` with no new route SD failure, false `no_card`, `WDT`, or `PANIC` entry. Physical removal/reinsertion remains required to close #78.
 
 ## P0 blocker ledger
 
@@ -313,12 +325,14 @@ Required behavior:
 - Avoid rewriting unchanged advert/contact data.
 - Keep the newest critical fallback state in NVS and use SD for deeper history when available.
 - Flush safely before controlled reboot without blocking radio callbacks.
+- Bound controlled reboot with one shared deadline and quiesce both the storage manager and final RP2040 UART owner before acknowledging and restarting; a quiesce or deadline failure must cancel cleanly.
 - Document expected write frequency under a busy-mesh test profile.
 
 Acceptance:
 
 - A synthetic high-advert/high-message run demonstrates bounded commits per hour.
 - Power loss during a coalesced flush leaves either the old or new valid snapshot, never a corrupt store.
+- Repeated exact-artifact retained-canary reboot cycles report only `SW` reset and add no `WDT`/`PANIC` crash-ring entry.
 
 ### P0.14 — Finish settings schema, migration and reset safety
 
@@ -453,8 +467,11 @@ Required final proof:
 - SD matrix and recovery tests;
 - minimum existing 12-hour idle/listening soak; 24 hours is preferable for 1.0;
 - an active-traffic soak including DM ACK/retry, Public RX, adverts, UI use, Wi-Fi and storage flush;
+- a command manifest in every soak artifact so the release gate can prove exactly which diagnostics/actions ran;
 - heap, PSRAM, LVGL, stack, queue, crashlog, reset reason and persistence checks;
 - release-gate output tied to the exact tag commit.
+
+Automated RF qualification must use only the dedicated `#test` channel or targeted direct messages. The COM11 Discord Python bot may be used as an independent radio peer for bidirectional proof, but COM11 must never be opened as the D1L serial port and automation must never transmit on default Public.
 
 Acceptance:
 
@@ -480,7 +497,7 @@ Acceptance:
 | SD retained storage | Strong core, incomplete matrix | P0: physical failure/card/power matrix |
 | BLE companion | Unsupported | Defer and hide unless completed |
 | OTA | Not complete | May defer; provide excellent wired upgrade/recovery docs |
-| GPS | Not complete | May defer; do not imply live location support |
+| GPS | Unsupported; D1L has no onboard GPS | Absent; use manual Map center and label peer coordinates as advert locations |
 | Time | Monotonic protocol time, no wall clock | P0: truthful display/order; add NTP if Wi-Fi ships |
 | UI architecture | Significant progress, large remaining monolith | P0 only for ownership/race/lifetime safety |
 | Release evidence | Excellent framework | P0: final frozen-commit execution |
@@ -593,6 +610,7 @@ Each issue should name:
 - [ ] 8/16/32GB FAT32 matrix passes.
 - [ ] RP2040 unavailable/timeout/recovery passes.
 - [ ] Power-loss/atomic-write behavior passes.
+- [ ] Controlled retained-history/reboot-remount cycles on the exact artifact report `SW` only, add no `WDT`/`PANIC`, and prove bounded manager/retained/bridge quiescence.
 - [ ] NVS write rate is bounded under busy-mesh traffic.
 - [ ] Wi-Fi disabled path leaves network features inactive.
 - [ ] Wi-Fi connect/fail/reconnect/low-memory paths pass if Wi-Fi ships.
@@ -603,9 +621,10 @@ Each issue should name:
 - [ ] Official release artifact is flashed and commit identity verified.
 - [ ] Physical screenshots and manual touch review are current.
 - [ ] Full RF acceptance artifact is green.
+- [ ] Automated RF used only `#test` or targeted DMs through an independent peer; default Public stayed silent and COM11 was never opened as D1L serial.
 - [ ] SD/electrical artifact set is green.
 - [ ] Minimum 12-hour listening soak passes; 24-hour preferred.
-- [ ] Active traffic/storage/connectivity soak passes.
+- [ ] Active traffic/storage/connectivity soak passes and every soak artifact includes its command manifest.
 - [ ] Final release-gate report says `ready_for_public_release=true` for the tag commit.
 
 ## Go/no-go rule

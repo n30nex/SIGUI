@@ -28,6 +28,7 @@ CANARY_COMMANDS = [
     "packets",
     "health",
 ]
+FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
 
 RETAINED_HISTORY_BACKENDS = (
     "message_store_backend",
@@ -143,10 +144,28 @@ def filecanary_transient_timeout(canary: dict) -> bool:
         canary.get("ok") is False
         and canary.get("cmd") == "storage filecanary"
         and (
-            canary.get("code") in {"ESP_ERR_TIMEOUT", "TIMEOUT"}
+            canary.get("code") == "ESP_ERR_TIMEOUT"
             or canary.get("file_note") == "timeout"
         )
     )
+
+
+def unexpected_console_restart(result: dict) -> bool:
+    return result.get("ignored_boot_help_seen") is True or any(
+        ignored.get("cmd") == "help"
+        for ignored in (result.get("ignored_json") or [])
+        if isinstance(ignored, dict)
+    )
+
+
+def skipped_after_timeout(command: str, timed_out_command: str) -> dict:
+    return {
+        "schema": 1,
+        "ok": False,
+        "cmd": command,
+        "code": "SKIPPED_AFTER_TIMEOUT",
+        "timed_out_command": timed_out_command,
+    }
 
 
 def dry_run_report() -> dict:
@@ -171,6 +190,8 @@ def wait_for_storage_ready(
 ) -> tuple[dict, list[dict], dict | None]:
     initial = send_console_command(ser, "storage status", timeout)
     results = [initial]
+    if initial.get("code") == "TIMEOUT" or unexpected_console_restart(initial):
+        return initial, results, None
     if storage_ready_for_filecanary(initial) or allow_unavailable:
         return initial, results, None
 
@@ -178,6 +199,8 @@ def wait_for_storage_ready(
     if not storage_file_gate_ready(initial):
         mount = send_console_command(ser, "storage mount", max(timeout, 8.0))
         results.append(mount)
+        if mount.get("code") == "TIMEOUT" or unexpected_console_restart(mount):
+            return initial, results, mount
 
     deadline = time.monotonic() + mount_wait_sec
     latest = initial
@@ -185,6 +208,8 @@ def wait_for_storage_ready(
         time.sleep(poll_interval_sec)
         latest = send_console_command(ser, "storage status", timeout)
         results.append(latest)
+        if latest.get("code") == "TIMEOUT" or unexpected_console_restart(latest):
+            return latest, results, mount
         if storage_ready_for_filecanary(latest):
             return latest, results, mount
 
@@ -213,22 +238,73 @@ def run_canary(
             allow_unavailable=allow_unavailable,
         )
         results.extend(ready_wait_results)
-        canary = send_console_command(ser, "storage filecanary", timeout)
+        timed_out_command = next(
+            (
+                result.get("cmd", "storage preflight")
+                for result in ready_wait_results
+                if result.get("code") == "TIMEOUT"
+                or unexpected_console_restart(result)
+            ),
+            None,
+        )
+        canary = (
+            skipped_after_timeout("storage filecanary", timed_out_command)
+            if timed_out_command is not None
+            else send_console_command(
+                ser,
+                "storage filecanary",
+                max(timeout, FILE_CANARY_MIN_TIMEOUT_SECONDS),
+            )
+        )
         initial_canary = canary
         results.append(canary)
+        if canary.get("code") == "TIMEOUT" or unexpected_console_restart(canary):
+            timed_out_command = "storage filecanary"
         canary_retry_status = None
         canary_retry = None
-        if filecanary_transient_timeout(canary):
+        if timed_out_command is None and filecanary_transient_timeout(canary):
             canary_retry_status = send_console_command(ser, "storage status", timeout)
             results.append(canary_retry_status)
-            if storage_ready_for_filecanary(canary_retry_status):
+            if (
+                canary_retry_status.get("code") == "TIMEOUT"
+                or unexpected_console_restart(canary_retry_status)
+            ):
+                timed_out_command = "storage status"
+            elif storage_ready_for_filecanary(canary_retry_status):
                 time.sleep(1.0)
-                canary_retry = send_console_command(ser, "storage filecanary", timeout)
+                canary_retry = send_console_command(
+                    ser,
+                    "storage filecanary",
+                    max(timeout, FILE_CANARY_MIN_TIMEOUT_SECONDS),
+                )
                 results.append(canary_retry)
                 canary = canary_retry
-        after = send_console_command(ser, "storage status", timeout)
-        packets = send_console_command(ser, "packets", timeout)
-        health = send_console_command(ser, "health", timeout)
+                if (
+                    canary_retry.get("code") == "TIMEOUT"
+                    or unexpected_console_restart(canary_retry)
+                ):
+                    timed_out_command = "storage filecanary"
+        after = (
+            skipped_after_timeout("storage status", timed_out_command)
+            if timed_out_command is not None
+            else send_console_command(ser, "storage status", timeout)
+        )
+        if after.get("code") == "TIMEOUT" or unexpected_console_restart(after):
+            timed_out_command = "storage status"
+        packets = (
+            skipped_after_timeout("packets", timed_out_command)
+            if timed_out_command is not None
+            else send_console_command(ser, "packets", timeout)
+        )
+        if packets.get("code") == "TIMEOUT" or unexpected_console_restart(packets):
+            timed_out_command = "packets"
+        health = (
+            skipped_after_timeout("health", timed_out_command)
+            if timed_out_command is not None
+            else send_console_command(ser, "health", timeout)
+        )
+        if health.get("code") == "TIMEOUT" or unexpected_console_restart(health):
+            timed_out_command = "health"
         results.extend([after, packets, health])
 
     retained_history_sd_before = retained_history_backends_ready(before)
@@ -250,8 +326,14 @@ def run_canary(
         "public_rf_tx": False,
         "formats_sd": False,
         "mount_wait_sec": mount_wait_sec,
+        "sequence_completed": timed_out_command is None,
+        "timed_out_command": timed_out_command,
+        "unexpected_console_restart": any(
+            unexpected_console_restart(result) for result in results
+        ),
         "ok": (
-            before.get("ok", False)
+            timed_out_command is None
+            and before.get("ok", False)
             and (canary_ok or unavailable_ok)
             and after.get("ok", False)
             and packets.get("ok", False)

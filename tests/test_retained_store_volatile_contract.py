@@ -30,7 +30,7 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
         ),
         (
             "main/mesh/packet_log.c",
-            "static bool append_raw_internal",
+            "static esp_err_t append_raw_internal",
             "d1l_packet_log_entry_t",
             [
                 "d1l_packet_log_copy_recent",

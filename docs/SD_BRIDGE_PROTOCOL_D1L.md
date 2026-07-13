@@ -56,12 +56,17 @@ cached, the bridge reports `state=mount_required note=mount_not_checked`.
 After `DESKOS_SD_MOUNT` or file operations complete, status returns the cached
 latest SD state. After a successful mounted snapshot has established the
 inserted-card GPIO7 signature as `detect=low detect_driven=1`, status polling
-uses only that detect pin for runtime-removal monitoring. Three consecutive
-nonmatching samples invalidate the cached mount and return
-`state=no_card note=card_removed`. Three consecutive returns to the proven
-signature publish `state=mount_required note=card_reinserted`; the ESP32 can
-then issue a fresh explicit mount. This debounce does not touch the SD bus and
-does not infer a polarity before a successful mount proves the board signature.
+uses only that detect pin for routine runtime-removal monitoring. Three
+consecutive nonmatching samples trigger one bounded, read-only `CMD17` sector
+zero transaction on the idle shared SPI bus. A complete sector with a valid
+data token and CRC16 rejects the GPIO-only signal as noise and preserves the
+ready snapshot; only a failed or corrupt transaction invalidates the cache and
+returns `state=no_card note=card_removed`.
+Three consecutive returns to the proven signature publish
+`state=mount_required note=card_reinserted`; the ESP32 can then issue a fresh
+explicit mount. Routine status is bus-silent; the debounced suspicion path has
+300 ms ready and data-token bounds and never formats or writes. Neither path
+infers a polarity before a successful mount proves the board signature.
 
 ## Mount Request
 
@@ -285,11 +290,13 @@ For compacted stores and map tiles, write chunks to a temporary path, then use
 `rename replace=1` as the commit step. Retained history blobs use:
 `stores/messages/public/public.bin`, `stores/messages/dm/threads.bin`,
 `stores/routes/routes.bin`, and `stores/packet_log/ring.bin`, each committed
-through a same-directory `.tmp` path. Packet history also keeps a bounded
-append-only SD journal in `stores/packet_log/segments/sNN.bin`: 32 segment files
+through a same-directory `.tmp` path. Packet history also keeps a bounded SD
+journal in `stores/packet_log/segments/sNN.bin`: 64 segment files
 with 64 fixed-size records each, for a 4096-record SD window while NVS keeps the
-newest compact fallback rows. The first record in each segment is written with
-`write trunc=1`; later records use `append`. ESP32 keeps an onboard NVS mirror so
+newest compact fallback rows. Records use sequence-derived fixed offsets; a new
+segment cycle starts with `write trunc=1`, and an already matching record is an
+idempotent retry. An unwritten exact-EOF slot is the canonical zero-byte reply
+`len=0 eof=1 data= crc=00000000`. ESP32 keeps an onboard NVS mirror so
 removing or timing out the SD card does not strand message, route, or packet
 history. Do not blindly retry `append` after a timeout unless the higher-level
 record format has its own idempotency key.

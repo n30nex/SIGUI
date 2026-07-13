@@ -87,7 +87,10 @@ jobs:
         run: python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache
 
       - name: Soak dry run
-        run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test
+        run: python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test
+
+      - name: WP-01 storage-active soak dry run
+        run: python ./scripts/storage_active_soak_d1l.py --dry-run --expected-firmware-commit ${{ github.sha }}
 
       - name: SD file canary dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
@@ -96,6 +99,9 @@ jobs:
       - name: SD retained history acceptance dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
         run: python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run
+
+      - name: SD remove reinsert acceptance dry run
+        run: python ./scripts/sd_remove_reinsert_acceptance_d1l.py --expected-firmware-commit ${{ github.sha }} --dry-run --strict-evidence --out artifacts/host/sd-remove-reinsert-strict-dryrun.json
 
       - name: SD map tile canary dry run
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
@@ -225,14 +231,56 @@ jobs:
         run: |
           arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
-          arduino-cli core install rp2040:rp2040
+          arduino-cli core install rp2040:rp2040@5.6.1
+
+      - name: Disable unused SdFat PIO SDIO serial debug
+        shell: bash
+        run: |
+          mkdir -p artifacts/rp2040-sd-bridge
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          source = (
+              Path.home()
+              / ".arduino15/packages/rp2040/hardware/rp2040/5.6.1"
+              / "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp"
+          )
+          before = source.read_bytes()
+          old = b"#define USE_DEBUG_MODE 1"
+          new = b"#define USE_DEBUG_MODE 0"
+          if before.count(old) != 1 or before.count(new) != 0:
+              raise SystemExit(
+                  "pinned SdFat PioSdio debug marker mismatch; refusing dependency patch"
+              )
+          after = before.replace(old, new)
+          source.write_bytes(after)
+          verified = source.read_bytes()
+          if verified != after or verified.count(old) != 0 or verified.count(new) != 1:
+              raise SystemExit("SdFat PioSdio no-serial patch verification failed")
+          receipt = {
+              "schema": 1,
+              "kind": "arduino_pico_sdfat_no_usb_patch",
+              "arduino_pico_version": "5.6.1",
+              "upstream_sdfat_commit": "cda057318bec196183d4cc92b01bc1dd64bbfb02",
+              "source": "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp",
+              "change": "USE_DEBUG_MODE=1 -> USE_DEBUG_MODE=0",
+              "reason": "production_no_usb_build_has_no_Serial_and_bridge_uses_SPI1_not_PIO_SDIO",
+              "before_sha256": hashlib.sha256(before).hexdigest(),
+              "after_sha256": hashlib.sha256(after).hexdigest(),
+          }
+          Path("artifacts/rp2040-sd-bridge/sdfat-no-usb-patch.json").write_text(
+              json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="ascii"
+          )
+          PY
 
       - name: Build RP2040 SD bridge
         shell: bash
         run: |
           mkdir -p artifacts/rp2040-sd-bridge
           arduino-cli compile \
-            --fqbn rp2040:rp2040:seeed_indicator_rp2040 \
+            --fqbn rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb \
             --build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1" \
             --output-dir artifacts/rp2040-sd-bridge \
             firmware/rp2040_sd_bridge/deskos_sd_bridge

@@ -45,7 +45,8 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "ui_tab_abuse_d1l.py" not in host
     assert "python ./scripts/scroll_probe_d1l.py --dry-run --screens home,public_messages,dm_thread,nodes,packets,settings,storage,storage_card,storage_data,wifi,map,map_options,map_location,map_cache" in host
     assert "python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready" in host
-    assert "python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-public-text test" in host
+    assert "python ./scripts/soak_d1l.py --dry-run --duration-sec 60 --sample-interval-sec 15 --active-dm-fingerprint 0123456789ABCDEF --active-dm-text test" in host
+    assert "--active-public-text test" not in host
     assert "python ./scripts/sd_file_canary_d1l.py --dry-run" in host
     assert "python ./scripts/sd_retained_history_acceptance_d1l.py --dry-run --token ci-dry-run" in host
     assert "python ./scripts/sd_map_tile_canary_d1l.py --dry-run --token ci-dry-run" in host
@@ -83,9 +84,39 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "arduino/setup-arduino-cli@v2" in job
     assert "package_rp2040_index.json" in job
-    assert "arduino-cli core install rp2040:rp2040" in job
+    assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
+    assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
     assert "arduino-cli compile" in job
-    assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in job
+    patch_step = job.split(
+        "- name: Disable unused SdFat PIO SDIO serial debug", 1
+    )[1].split("- name: Build RP2040 SD bridge", 1)[0]
+    bridge_build = job.split("- name: Build RP2040 SD bridge", 1)[1].split(
+        "- name: Verify RP2040 checksums", 1
+    )[0]
+    seeed_smoke_build = job.split("- name: Build RP2040 Seeed SD smoke", 1)[1].split(
+        "- name: Verify RP2040 Seeed SD smoke checksums", 1
+    )[0]
+    official_smoke_build = job.split(
+        "- name: Build RP2040 official Seeed SD smoke", 1
+    )[1].split("- name: Verify RP2040 official Seeed SD smoke checksums", 1)[0]
+    assert (
+        "--fqbn rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb"
+        in bridge_build
+    )
+    assert ".arduino15/packages/rp2040/hardware/rp2040/5.6.1" in patch_step
+    assert "libraries/SdFat/src/SdCard/PioSdio/PioSdioCard.cpp" in patch_step
+    assert 'old = b"#define USE_DEBUG_MODE 1"' in patch_step
+    assert 'new = b"#define USE_DEBUG_MODE 0"' in patch_step
+    assert "before.count(old) != 1 or before.count(new) != 0" in patch_step
+    assert "verified.count(old) != 0 or verified.count(new) != 1" in patch_step
+    assert "cda057318bec196183d4cc92b01bc1dd64bbfb02" in patch_step
+    assert "before_sha256" in patch_step
+    assert "after_sha256" in patch_step
+    assert "sdfat-no-usb-patch.json" in patch_step
+    assert ":usbstack=nousb" not in seeed_smoke_build
+    assert ":usbstack=nousb" not in official_smoke_build
+    assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in seeed_smoke_build
+    assert "--fqbn rp2040:rp2040:seeed_indicator_rp2040" in official_smoke_build
     assert job.count('--build-property compiler.cpp.extra_flags="-DUSE_SD_CRC=1"') == 3
     assert "USE_SPI_ARRAY_TRANSFER" not in job
     assert "firmware/rp2040_sd_bridge/deskos_sd_bridge" in job

@@ -37,6 +37,7 @@ PREFLIGHT_COMMANDS = [
 ]
 MOUNT_POLL_ATTEMPTS = 30
 MOUNT_POLL_INTERVAL_SECONDS = 2.0
+TRANSITIONAL_MANAGER_STATES = {"BRIDGE_WAIT", "PING", "STATUS", "MOUNT"}
 
 
 def dry_run_report(artifact_dir: str | None = None) -> dict:
@@ -49,6 +50,8 @@ def dry_run_report(artifact_dir: str | None = None) -> dict:
         "public_rf_tx": False,
         "formats_sd": False,
         "copies_uf2": False,
+        "ready_for_sd_acceptance": False,
+        "storage_status_settle_exhausted": False,
         "ok": True,
     }
 
@@ -108,6 +111,21 @@ def sd_state(result: dict) -> str | None:
         return None
     state = sd.get("state")
     return state if isinstance(state, str) else None
+
+
+def storage_manager_state(result: dict) -> str | None:
+    manager = result.get("manager")
+    if not isinstance(manager, dict):
+        return None
+    state = manager.get("state")
+    return state if isinstance(state, str) else None
+
+
+def storage_status_transitional(result: dict) -> bool:
+    return (
+        sd_state(result) == "mount_pending"
+        or storage_manager_state(result) in TRANSITIONAL_MANAGER_STATES
+    )
 
 
 def sd_has_mount_error(sd: dict) -> bool:
@@ -172,15 +190,21 @@ def classify_preflight(
     ping_supported = rp2040_ping.get("protocol_supported") is True
     protocol_supported = sd.get("rp2040_protocol_supported") is True
     file_gate_ready = storage_file_gate_ready(storage_status)
+    manager_state = storage_manager_state(storage_status)
+    manager_ready = manager_state == "READY_SD"
+    ready_for_sd_acceptance = file_gate_ready and manager_ready
     uf2_volume_available = len(uf2_candidates) == 1
     diag_attempted = isinstance(storage_diag, dict) and bool(storage_diag)
     diag_supported = storage_diag.get("diag_supported") is True if diag_attempted else False
     mount_attempted = isinstance(storage_mount, dict) and bool(storage_mount)
     mount_ok = storage_mount.get("ok") is True if mount_attempted else None
 
-    if file_gate_ready:
+    if ready_for_sd_acceptance:
         state = "sd_bridge_ready"
         next_action = "run_sd_file_and_export_acceptance"
+    elif manager_state in TRANSITIONAL_MANAGER_STATES:
+        state = "storage_manager_transition_pending"
+        next_action = "wait_for_storage_manager_ready_sd"
     elif protocol_supported and sd.get("state") == "mount_pending":
         state = "sd_mount_pending"
         next_action = "wait_for_storage_mount_or_reset_rp2040_bridge"
@@ -243,6 +267,9 @@ def classify_preflight(
         "rp2040_diag_supported": diag_supported,
         "storage_mount_ok": mount_ok,
         "storage_file_gate_ready": file_gate_ready,
+        "storage_manager_state": manager_state,
+        "storage_manager_ready_sd": manager_ready,
+        "ready_for_sd_acceptance": ready_for_sd_acceptance,
         "sd_state": sd.get("state"),
         "sd_last_error": sd.get("last_error"),
         "sd_mount_error": sd.get("mount_error"),
@@ -267,6 +294,7 @@ def run_preflight(
     uf2_candidates = candidate_volumes()
     results: list[dict] = []
     commands_run: list[str] = []
+    storage_status_poll_reasons: list[dict] = []
 
     def send_command(ser, command: str, command_timeout: float) -> dict:
         commands_run.append(command)
@@ -307,8 +335,14 @@ def run_preflight(
             storage_status = send_command(ser, "storage status", timeout)
             post_mount_statuses = [storage_status]
             for _attempt in range(MOUNT_POLL_ATTEMPTS):
-                if sd_state(storage_status) != "mount_pending":
+                if not storage_status_transitional(storage_status):
                     break
+                storage_status_poll_reasons.append(
+                    {
+                        "sd_state": sd_state(storage_status),
+                        "manager_state": storage_manager_state(storage_status),
+                    }
+                )
                 time.sleep(MOUNT_POLL_INTERVAL_SECONDS)
                 storage_status = send_command(ser, "storage status", timeout)
                 post_mount_statuses.append(storage_status)
@@ -339,6 +373,7 @@ def run_preflight(
     rp2040_status_optional_ok = rp2040_status_ok or classification["rp2040_uart_ready"]
     command_ok = rp2040_status_optional_ok and rp2040_ping_ok and storage_ok and health_ok
     artifact_ok = artifact.get("ok") is not False
+    storage_status_settle_exhausted = storage_status_transitional(storage_status)
     return {
         "schema": 1,
         "mode": "hardware-preflight",
@@ -348,14 +383,14 @@ def run_preflight(
         "public_rf_tx": False,
         "formats_sd": False,
         "copies_uf2": False,
-        "ok": command_ok and artifact_ok,
+        "ok": command_ok and artifact_ok and not storage_status_settle_exhausted,
         "serial_commands_ok": command_ok,
         "rp2040_status_ok": rp2040_status_ok,
         "rp2040_ping_ok": rp2040_ping_ok,
         "rp2040_status_optional_ok": rp2040_status_optional_ok,
         "storage_mount_ok": storage_mount_ok,
         "storage_diag_ok": storage_diag_ok,
-        "ready_for_sd_acceptance": classification["storage_file_gate_ready"],
+        "ready_for_sd_acceptance": classification["ready_for_sd_acceptance"],
         "classification": classification,
         "artifact": artifact,
         "candidate_volumes": uf2_candidates,
@@ -365,7 +400,26 @@ def run_preflight(
         "storage_mount": storage_mount,
         "storage_status": storage_status,
         "post_mount_storage_statuses": post_mount_statuses,
-        "storage_mount_poll_count": max(0, len(post_mount_statuses) - 1),
+        "storage_mount_poll_count": sum(
+            1
+            for reason in storage_status_poll_reasons
+            if reason.get("sd_state") == "mount_pending"
+        ),
+        "storage_status_poll_count": max(0, len(post_mount_statuses) - 1),
+        "storage_status_poll_reasons": storage_status_poll_reasons,
+        "storage_manager_transition_poll_count": sum(
+            1
+            for reason in storage_status_poll_reasons
+            if reason.get("manager_state") in TRANSITIONAL_MANAGER_STATES
+        ),
+        "storage_manager_initial_state": (
+            storage_manager_state(post_mount_statuses[0]) if post_mount_statuses else None
+        ),
+        "storage_manager_final_state": storage_manager_state(storage_status),
+        "storage_manager_transition_exhausted": (
+            storage_manager_state(storage_status) in TRANSITIONAL_MANAGER_STATES
+        ),
+        "storage_status_settle_exhausted": storage_status_settle_exhausted,
         "storage_diag": storage_diag,
         "health": health,
         "results": results,
@@ -416,7 +470,19 @@ def main() -> int:
         )
 
     written = write_report(report, Path(args.out) if args.out else None)
-    print(json.dumps({"ok": report["ok"], "out": str(written), "mode": report["mode"]}))
+    print(
+        json.dumps(
+            {
+                "ok": report["ok"],
+                "ready_for_sd_acceptance": report.get("ready_for_sd_acceptance"),
+                "storage_status_settle_exhausted": report.get(
+                    "storage_status_settle_exhausted", False
+                ),
+                "out": str(written),
+                "mode": report["mode"],
+            }
+        )
+    )
     return 0 if report.get("ok") else 1
 
 

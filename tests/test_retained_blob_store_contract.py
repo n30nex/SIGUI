@@ -138,6 +138,9 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     guarded_write = source.split("static esp_err_t sd_write_blob_for_generation", 1)[1].split(
         "static esp_err_t sd_write_blob(", 1
     )[0]
+    read_blob = source.split("static esp_err_t sd_read_blob", 1)[1].split(
+        "static esp_err_t sd_write_blob_for_generation", 1
+    )[0]
     pre_rename = guarded_write.split("The replace-rename is the destructive commit point", 1)[1].split(
         "d1l_rp2040_bridge_file_rename", 1
     )[0]
@@ -145,6 +148,12 @@ def test_retained_blob_store_has_sd_history_stores_with_nvs_fallback():
     assert "d1l_rp2040_bridge_file_delete" not in pre_rename
     assert "d1l_rp2040_bridge_file_delete" in source
     assert "D1L_RP2040_FILE_CHUNK_MAX" in source
+    assert '#include "mesh/route_store_worker.h"' in source
+    assert read_blob.count("d1l_route_store_persistence_should_yield()") == 2
+    assert guarded_write.count("d1l_route_store_persistence_should_yield()") == 2
+    assert read_blob.count("return ESP_ERR_NOT_FINISHED;") == 2
+    assert guarded_write.count("return ESP_ERR_NOT_FINISHED;") == 2
+    assert "ret != ESP_ERR_NOT_FINISHED" in source
     assert "nvs_read_blob" in source
     assert "nvs_write_blob" in source
     assert "nvs_erase_blob" in source
@@ -186,10 +195,17 @@ def test_history_backends_are_reported_from_blob_store_and_can_switch_to_sd():
     assert 'status->dm_store_backend = "nvs"' not in storage_status
     assert 'status->route_store_backend = "nvs"' not in storage_status
     assert 'status->packet_log_backend = "nvs"' not in storage_status
-    assert "d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
-    assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" in packet_log
+    assert "d1l_retained_blob_store_backend_state(" in packet_log
+    assert "d1l_retained_blob_store_read_sd_primary(" in packet_log
+    assert "d1l_retained_blob_store_read_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_write_sd_primary_guarded(" in packet_log
+    assert "d1l_retained_blob_store_write_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_erase_sd_primary_guarded(" in packet_log
+    assert "d1l_retained_blob_store_erase_nvs_fallback(" in packet_log
+    assert "d1l_retained_blob_store_read(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_read_fallback(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_write_split(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
+    assert "d1l_retained_blob_store_erase(D1L_RETAINED_BLOB_STORE_PACKET_LOG" not in packet_log
 
 
 def test_release_docs_require_external_provenance_for_ambiguous_retained_bytes():

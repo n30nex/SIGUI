@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "esp_partition.h"
 #include "hal/rp2040_bridge.h"
+#include "mesh/route_store_worker.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 
@@ -944,6 +945,9 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
+    }
     d1l_rp2040_file_result_t stat = {0};
     esp_err_t ret = d1l_rp2040_bridge_file_stat(path, &stat, D1L_RETAINED_SD_READ_TIMEOUT_MS);
     if (ret != ESP_OK) {
@@ -963,6 +967,12 @@ static esp_err_t sd_read_blob(const d1l_retained_blob_store_config_t *config,
     uint8_t *out = (uint8_t *)dst;
     size_t offset = 0;
     while (offset < stat.size) {
+        /* A completed bridge chunk is a transaction-safe yield boundary.
+         * Foreground owners never see this cancellation because the
+         * predicate is scoped to the background retained worker task. */
+        if (d1l_route_store_persistence_should_yield()) {
+            return ESP_ERR_NOT_FINISHED;
+        }
         const size_t remaining = stat.size - offset;
         const size_t chunk = remaining > D1L_RP2040_FILE_CHUNK_MAX ?
                              D1L_RP2040_FILE_CHUNK_MAX : remaining;
@@ -1006,6 +1016,12 @@ static esp_err_t sd_write_blob_for_generation(
     const uint8_t *data = (const uint8_t *)src;
     size_t offset = 0;
     while (offset < len) {
+        /* Temp-file chunks are non-destructive until the final rename. A
+         * pending foreground quiesce may leave a partial temp file, which a
+         * later offset-zero retry safely truncates. */
+        if (d1l_route_store_persistence_should_yield()) {
+            return ESP_ERR_NOT_FINISHED;
+        }
         const size_t remaining = len - offset;
         const size_t chunk = remaining > D1L_RP2040_FILE_CHUNK_MAX ?
                              D1L_RP2040_FILE_CHUNK_MAX : remaining;
@@ -1030,6 +1046,9 @@ static esp_err_t sd_write_blob_for_generation(
     /* The replace-rename is the destructive commit point. If media changed
      * while chunks were written, leave the temp path alone: it may now belong
      * to the replacement card, and the old primary must remain untouched. */
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
+    }
     if (!store_backend_generation_matches(config, expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
@@ -1288,7 +1307,8 @@ esp_err_t d1l_retained_blob_store_read_sd_primary(
         return ESP_ERR_INVALID_STATE;
     }
     esp_err_t ret = sd_read_blob(config, key, dst, len_inout);
-    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND) {
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_FOUND &&
+        ret != ESP_ERR_NOT_FINISHED) {
         note_sd_failure(config, D1L_RETAINED_SD_OP_READ, ret);
     }
     return ret;
@@ -1405,6 +1425,9 @@ esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
         esp_err_t sd_ret = sd_read_blob(config, key, dst, len_inout);
         if (sd_ret == ESP_OK) {
             return ESP_OK;
+        }
+        if (sd_ret == ESP_ERR_NOT_FINISHED) {
+            return sd_ret;
         }
         note_sd_failure(config, D1L_RETAINED_SD_OP_READ, sd_ret);
         *len_inout = requested_len;

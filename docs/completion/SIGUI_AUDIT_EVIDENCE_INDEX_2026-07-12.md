@@ -8,10 +8,10 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `570a94ad6ead0941f7acb7d9c9812c63df869e33` |
+| Live merged `main` | `12d5470eca45ef6e86b6e15cf1822716e563a78e` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Active PR stack | #62 → #64 → #80 |
-| Candidate distance from live `main` | 57 commits ahead, 12 behind before PR #64 / PR #80 reconciliation |
+| Active PR stack | #80 |
+| Candidate integration state | PR #80 has absorbed exact `main` locally; refreshed remote exact-head checks and merge remain pending |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
@@ -22,12 +22,12 @@
 
 ## Live post-audit reconciliation
 
-- Live `main` is `570a94ad6ead0941f7acb7d9c9812c63df869e33`; PR #62 head `7a6ff86493042cc5617ef88c4765312cea46150d` merged after push/PR runs `29286375559` / `29286378383` passed 423 host tests each and downloaded verification passed 37/37 push entries plus 73/73 PR entries across eight PR manifests.
-- Exact-main run `29286754864` passed 423 host tests but is an exact negative integrity receipt: seven of eight downloaded manifests pass, while the top release manifest SHA-256 `2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1` omits three nested RP2040 `SHA256SUMS.txt` files. PR #64 carries the root-only exclusion and regression; no checksum closure is claimed yet.
+- Live `main` is `12d5470eca45ef6e86b6e15cf1822716e563a78e`; PR #64 head `15f2a9ed99541fa059445ff3d1b06a40b4c42bee` merged after push `29289247092` verified 2 manifests / 36 entries and PR `29289250956` on merge-test SHA `82b086baf534dade4407fb62210a3cb5218e8986` verified 8 / 75 with root manifest `0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379`.
+- Exact merged-main run `29289683188` passed 582 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 75 entries. Root manifest is `23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed`; application is `e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a`; full flash is `785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
 - WP-01 is `hardware_green` with `proof_banked=true` on exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`, but `implementation_merged=false` until WP-02 lands PR #80.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
 - The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
-- WP-02 is `in_progress`. PR #83 banked the proof and completion state at head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as exact main `c3f9106ea9b88c491889cd8dea9ad883a0d72180`.
+- WP-02 is `in_progress`. PRs #62 and #64 are merged and exact-verified; PR #80 remains the active integration layer.
 
 ### WP-01 canonical exact-source receipts
 
@@ -53,14 +53,15 @@ This proof closes only WP-01's narrow source gate. The exact integrated/frozen c
 
 ### PR #64
 
-- Base: PR #62 branch
-- Purpose: ESP-IDF 5.5.4, dependency lock, BSP compatibility, Wi-Fi/Map/platform integration
-- Must be retargeted to `main` after #62 lands and rechecked.
-- Local-only reconciliation rehearsal `c5886de1e2988b2097034183d5e39bb3aec88344` passed 575 full / 128 focused host tests. It is not remote exact Actions or hardware proof.
+- Final head: `15f2a9ed99541fa059445ff3d1b06a40b4c42bee`
+- PR merge-test SHA: `82b086baf534dade4407fb62210a3cb5218e8986`
+- Merged as: `12d5470eca45ef6e86b6e15cf1822716e563a78e`
+- Purpose: ESP-IDF 5.5.4, dependency lock, BSP compatibility, Wi-Fi/Map/platform integration, and fail-closed package checksum coverage.
+- Exact push/PR/merged-main Actions and downloaded checksum verification passed as recorded above. Physical combined-candidate qualification remains open.
 
 ### PR #80
 
-- Base: PR #64 branch
+- Remote base/head refresh remains pending; the local integration has absorbed exact merged `main` `12d5470eca45ef6e86b6e15cf1822716e563a78e`.
 - Purpose: first MeshCore envelope conformance slice, retained durability, release evidence, current false-`no_card` repair
 - Predecessor hardware failures:
   - route-persistence task stack overflow;
@@ -68,6 +69,7 @@ This proof closes only WP-01's narrow source gate. The exact integrated/frozen c
   - inserted card temporarily reported `no_card`.
 - Exact source head `092293f2311a24c9899bc9bf343ab014c4ba0411` has now passed the WP-01 exact-pair source proof listed above. It remains unmerged and does not qualify the later integrated SHA.
 - Local-only full-stack reconciliation rehearsal `341a3abf4db4c52acf5859e396f25e7adb4cbab1` passed 787 full / 302 focused host tests. It is not remote exact Actions or hardware proof.
+- Post-PR #64 local integration commit `18fa68c1eefc640c0b04ee3964fd3e34f3367875` absorbed exact main and passed 489 focused tests with 3 skips. The refreshed remote head is intentionally pending until push; this local receipt is not Actions or hardware proof.
 
 ### Stale feature branch
 

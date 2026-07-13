@@ -9,7 +9,9 @@
 
 #include "esp_err.h"
 #include "esp_random.h"
+#include "esp_rom_sys.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -45,9 +47,31 @@
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
-static const uint32_t D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS = 15000U;
+static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
+static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
+/* The default ESP-IDF console writes directly to UART0 without installing the
+ * UART driver. Give the final reboot receipt enough bounded wire time before
+ * the already-quiesced system reset. The receipt is under 300 bytes (under
+ * 27 ms at 115200 baud). */
+static const uint32_t D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS = 50U;
+static const uint32_t D1L_REBOOT_RESTART_MARGIN_MS = 100U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
+
+static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
+{
+    const int64_t elapsed_us = esp_timer_get_time() - started_us;
+    const int64_t deadline_us = (int64_t)timeout_ms * 1000LL;
+    if (elapsed_us >= deadline_us) {
+        return 0U;
+    }
+    return (uint32_t)((deadline_us - elapsed_us + 999LL) / 1000LL);
+}
+
+static uint32_t reboot_deadline_remaining_ms(int64_t started_us)
+{
+    return deadline_remaining_ms(started_us, D1L_REBOOT_QUIESCE_TIMEOUT_MS);
+}
 
 static void trim_line(char *line)
 {
@@ -1554,7 +1578,8 @@ static void cmd_storage_mount(void)
     printf("}\n");
 }
 
-static void print_storage_manager_result(const char *cmd, esp_err_t ret)
+static void print_storage_manager_result(const char *cmd, esp_err_t ret,
+                                         bool retained_worker_quiesce_acquired)
 {
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
@@ -1562,8 +1587,9 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
            D1L_CONSOLE_SCHEMA,
            bool_json(ret == ESP_OK));
     print_json_string(cmd);
-    printf(",\"code\":\"%s\",\"manager\":{\"running\":%s,\"state\":",
+    printf(",\"code\":\"%s\",\"retained_worker_quiesce_acquired\":%s,\"manager\":{\"running\":%s,\"state\":",
            esp_err_to_name(ret),
+           bool_json(retained_worker_quiesce_acquired),
            bool_json(status.manager_running));
     print_json_string(status.manager_state ? status.manager_state : "BRIDGE_WAIT");
     printf(",\"attempt\":%lu,\"backoff_ms\":%lu,\"force_nvs\":%s,"
@@ -1594,15 +1620,19 @@ static void print_storage_manager_result(const char *cmd, esp_err_t ret)
 
 static void cmd_storage_remount(void)
 {
+    bool retained_worker_quiesce_acquired = false;
     esp_err_t ret =
-        d1l_storage_status_remount_blocking(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
-    print_storage_manager_result("storage remount", ret);
+        d1l_storage_status_remount_blocking(
+            D1L_STORAGE_REMOUNT_TIMEOUT_MS,
+            &retained_worker_quiesce_acquired);
+    print_storage_manager_result("storage remount", ret,
+                                 retained_worker_quiesce_acquired);
 }
 
 static void cmd_storage_reset_bridge(void)
 {
     esp_err_t ret = d1l_storage_manager_reset_bridge();
-    print_storage_manager_result("storage reset-bridge", ret);
+    print_storage_manager_result("storage reset-bridge", ret, false);
 }
 
 static void cmd_storage_force_nvs(const char *line)
@@ -1618,7 +1648,8 @@ static void cmd_storage_force_nvs(const char *line)
     }
     d1l_storage_manager_force_nvs(force);
     esp_err_t ret = d1l_storage_manager_start();
-    print_storage_manager_result(force ? "storage force-nvs" : "storage force-nvs off", ret);
+    print_storage_manager_result(force ? "storage force-nvs" : "storage force-nvs off",
+                                 ret, false);
 }
 
 static void print_storage_diag_probe(const char *name,
@@ -1983,6 +2014,50 @@ static bool storage_retained_history_sd_ready(const d1l_storage_status_t *status
            status->file_line_max >= D1L_RP2040_FILE_LINE_MAX &&
            status->file_chunk_max >= D1L_RP2040_FILE_CHUNK_MAX &&
            status->path_max >= D1L_RP2040_FILE_PATH_MAX;
+}
+
+static bool storage_retained_history_nvs_no_card_ready(
+    const d1l_storage_status_t *status)
+{
+    return status &&
+           status->manager_running &&
+           text_equals(status->manager_state, "NO_CARD") &&
+           text_equals(status->sd_state, "no_card") &&
+           status->rp2040_bridge_ready &&
+           status->rp2040_sd_protocol_supported &&
+           !status->sd_present &&
+           !status->sd_presence_stale &&
+           !status->sd_mounted &&
+           !status->sd_data_root_ready &&
+           !status->bridge_status_stale &&
+           text_equals(status->message_store_backend, "nvs") &&
+           text_equals(status->dm_store_backend, "nvs") &&
+           text_equals(status->route_store_backend, "nvs") &&
+           text_equals(status->packet_log_backend, "nvs") &&
+           d1l_retained_blob_store_nvs_ready() &&
+           d1l_retained_blob_store_nvs_marker_ready() &&
+           d1l_retained_blob_store_nvs_markers_complete() &&
+           d1l_retained_blob_store_nvs_anchor_ready() &&
+           d1l_retained_blob_store_nvs_sentinel_ready();
+}
+
+static bool retained_canary_backend_generations(
+    bool expect_sd,
+    uint32_t generations[D1L_RETAINED_BLOB_STORE_COUNT])
+{
+    if (!generations) {
+        return false;
+    }
+    for (size_t i = 0; i < D1L_RETAINED_BLOB_STORE_COUNT; ++i) {
+        d1l_retained_blob_store_backend_state_t state = {0};
+        if (!d1l_retained_blob_store_backend_state(
+                (d1l_retained_blob_store_id_t)i, &state) ||
+            state.enabled != expect_sd || state.generation == 0U) {
+            return false;
+        }
+        generations[i] = state.generation;
+    }
+    return true;
 }
 
 static bool copy_storage_canary_token(char *dest, size_t dest_size, const char *src)
@@ -2445,6 +2520,7 @@ static bool build_diagnostic_export_payload(const char *token,
                             "\"psram_largest_free\":%lu,"
                             "\"current_task_stack_free_words\":%lu,"
                             "\"ui_task_stack_free_words\":%lu,"
+                            "\"retained_task_stack_free_bytes\":%lu,"
                             "\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,"
                             "\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\"},",
                             (unsigned long)h.boot_nonce,
@@ -2462,6 +2538,7 @@ static bool build_diagnostic_export_payload(const char *token,
                             (unsigned long)h.psram_largest_free,
                             (unsigned long)h.current_task_stack_free_words,
                             (unsigned long)h.ui_task_stack_free_words,
+                            (unsigned long)h.retained_task_stack_free_bytes,
                             (unsigned long)h.lvgl_free_bytes,
                             (unsigned long)h.lvgl_largest_free_bytes,
                             h.lvgl_used_pct,
@@ -3192,12 +3269,56 @@ static void cmd_storage_retained_canary(const char *line)
         return;
     }
 
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    const int64_t quiesce_started_us = esp_timer_get_time();
+    uint32_t remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    esp_err_t ret = remaining_ms > 0U ?
+        d1l_storage_manager_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "storage manager quiesce failed; retained canary cancelled");
+        return;
+    }
+
+    remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    ret = remaining_ms > 0U ?
+        d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_storage_manager_quiesce_end();
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "retained worker quiesce failed; retained canary cancelled");
+        return;
+    }
+
+    remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    const uint32_t refresh_timeout_ms =
+        remaining_ms < D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS;
+    ret = refresh_timeout_ms > 0U ?
+        d1l_storage_status_refresh(refresh_timeout_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "fresh storage status failed; retained canary cancelled");
+        return;
+    }
+
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
-    if (!storage_retained_history_sd_ready(&status)) {
+    const bool sd_backend_mode = storage_retained_history_sd_ready(&status);
+    const bool nvs_no_card_backend_mode =
+        storage_retained_history_nvs_no_card_ready(&status);
+    uint32_t backend_generations[D1L_RETAINED_BLOB_STORE_COUNT] = {0};
+    if ((!sd_backend_mode && !nvs_no_card_backend_mode) ||
+        !retained_canary_backend_generations(
+            sd_backend_mode, backend_generations)) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "SD_RETAINED_HISTORY_NOT_READY",
-                   "requires ready RP2040 file ops and sd backends for messages, dm, routes, and packets");
+                   "requires either ready RP2040 SD backends or an explicit fresh NO_CARD state with ready retained NVS");
         return;
     }
 
@@ -3207,9 +3328,11 @@ static void cmd_storage_retained_canary(const char *line)
     snprintf(text, sizeof(text), "sd-retained-canary %s", token);
 
     const uint32_t public_seq = d1l_message_store_stats().next_seq;
-    esp_err_t ret = d1l_message_store_append_public("tx", "SD Canary", text,
-                                                    0, 0, 1, 0, true);
+    ret = d1l_message_store_append_public("tx", "SD Canary", text,
+                                          0, 0, 1, 0, true);
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append public retained-history canary");
         return;
@@ -3220,6 +3343,8 @@ static void cmd_storage_retained_canary(const char *line)
                               0, 0, 1, 0, 0, true, true,
                               retained_canary_hash(token));
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append DM retained-history canary");
         return;
@@ -3230,12 +3355,14 @@ static void cmd_storage_retained_canary(const char *line)
                                              "sd_canary", "local", "tx",
                                              0, 0, 1, 0, (uint16_t)strlen(text));
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append route retained-history canary");
         return;
     }
 
-    const uint32_t packet_seq = d1l_packet_log_stats().next_seq;
+    uint32_t packet_seq = 0U;
     char packet_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
     snprintf(packet_note, sizeof(packet_note), "sd-canary %s", token);
     d1l_packet_log_entry_t packet = {
@@ -3248,12 +3375,18 @@ static void cmd_storage_retained_canary(const char *line)
         .payload_len = (uint16_t)strlen(text),
     };
     strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
-    if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
-        err_result("storage retained-canary", "ESP_FAIL",
+    ret = d1l_packet_log_append_raw_checked(
+        &packet, (const uint8_t *)text, strlen(text), &packet_seq);
+    if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
+        err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append packet retained-history canary");
         return;
     }
 
+    d1l_route_store_worker_quiesce_end();
+    d1l_storage_manager_quiesce_end();
     ok_begin("storage retained-canary");
     printf(",\"token\":");
     print_json_string(token);
@@ -3263,12 +3396,18 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"backend_mode\":\"%s\",\"public_rf_tx\":false,\"dm_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+           sd_backend_mode ? "sd" : "nvs_no_card",
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,
            status.packet_log_backend);
-    printf(",\"note\":\"Synthetic retained-history SD canary rows appended without Public RF or format command\"}\n");
+    printf(",\"backend_generations\":{\"messages\":%lu,\"dm\":%lu,\"routes\":%lu,\"packets\":%lu}",
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PUBLIC_MESSAGES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_DM_MESSAGES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_ROUTES],
+           (unsigned long)backend_generations[D1L_RETAINED_BLOB_STORE_PACKET_LOG]);
+    printf(",\"note\":\"Synthetic retained-history canary rows appended without Public or DM RF or a format command\"}\n");
 }
 
 static void cmd_storage_setup(const char *line)
@@ -3308,12 +3447,37 @@ static void print_packet_entries_json(const char *cmd, const char *direction, co
         printf(",\"filter\":{\"direction\":\"%s\",\"kind\":\"%s\",\"search\":\"%s\"}",
                direction ? direction : "any", kind ? kind : "any", search_text ? search_text : "");
     }
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"reconcile\":{\"pending\":%s,\"count\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"journal\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats->loaded),
+           bool_json(stats->persistence_dirty),
+           (unsigned long long)stats->persistence_revision,
+           (unsigned long)stats->persistence_commit_count,
+           (unsigned long)stats->persistence_fail_count,
+           bool_json(stats->sd_primary_reconcile_pending),
+           (unsigned long)stats->sd_reconcile_count,
+           (unsigned long)stats->sd_reconcile_fail_count,
+           esp_err_to_name(stats->sd_reconcile_last_error),
+           bool_json(stats->sd_history_enabled),
+           (unsigned long)stats->sd_backend_generation,
+           bool_json(stats->sd_primary_dirty),
+           (unsigned long)stats->sd_primary_commit_count,
+           (unsigned long)stats->sd_primary_fail_count,
+           esp_err_to_name(stats->sd_primary_last_error),
+           bool_json(stats->nvs_fallback_dirty),
+           (unsigned long)stats->nvs_fallback_commit_count,
+           (unsigned long)stats->nvs_fallback_fail_count,
+           esp_err_to_name(stats->nvs_fallback_last_error),
+           bool_json(stats->journal_dirty),
+           (unsigned long)stats->journal_commit_count,
+           (unsigned long)stats->journal_fail_count,
+           esp_err_to_name(stats->journal_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_packet_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Packet log records recent MeshCore RF TX/RX evidence\"}\n",
+           bool_json(stats->loaded && !stats->persistence_dirty));
 }
 
 static bool read_packet_token(const char **cursor, char *dest, size_t dest_size)
@@ -3544,12 +3708,34 @@ static void cmd_messages_public(const char *line)
         printf(",\"search\":");
         print_json_string(search);
     }
+    printf(",\"retained_epoch\":%lu,\"content_revision\":%lu",
+           (unsigned long)stats.epoch,
+           (unsigned long)stats.content_revision);
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"stale_snapshots\":%lu,\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats.loaded),
+           bool_json(stats.persistence_dirty),
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_public_message_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"Public messages are kept in bounded retained storage; optional search filters retained rows and offset pages older rows\"}\n",
+           bool_json(stats.loaded && !stats.persistence_dirty));
 }
 
 static void cmd_messages_clear(void)
@@ -3637,12 +3823,34 @@ static void cmd_messages_dm(const char *line)
         printf(",\"fingerprint\":\"%s\",\"thread_count\":%u",
                thread_fingerprint, (unsigned)total_matches);
     }
+    printf(",\"retained_epoch\":%lu,\"content_revision\":%lu",
+           (unsigned long)stats.epoch,
+           (unsigned long)stats.content_revision);
+    printf(",\"persistence\":{\"loaded\":%s,\"dirty\":%s,\"revision\":%llu,\"commits\":%lu,\"failures\":%lu,\"stale_snapshots\":%lu,\"sd\":{\"required\":%s,\"generation\":%lu,\"dirty\":%s,\"reconcile_pending\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"},\"nvs\":{\"dirty\":%s,\"commits\":%lu,\"failures\":%lu,\"last_error\":\"%s\"}}",
+           bool_json(stats.loaded),
+           bool_json(stats.persistence_dirty),
+           (unsigned long long)stats.persistence_revision,
+           (unsigned long)stats.persistence_commit_count,
+           (unsigned long)stats.persistence_fail_count,
+           (unsigned long)stats.persistence_stale_snapshot_count,
+           bool_json(stats.sd_primary_required),
+           (unsigned long)stats.sd_backend_generation,
+           bool_json(stats.sd_primary_dirty),
+           bool_json(stats.sd_primary_reconcile_pending),
+           (unsigned long)stats.sd_primary_commit_count,
+           (unsigned long)stats.sd_primary_fail_count,
+           esp_err_to_name(stats.sd_primary_last_error),
+           bool_json(stats.nvs_fallback_dirty),
+           (unsigned long)stats.nvs_fallback_commit_count,
+           (unsigned long)stats.nvs_fallback_fail_count,
+           esp_err_to_name(stats.nvs_fallback_last_error));
     printf(",\"entries\":[");
     for (size_t i = 0; i < copied; ++i) {
         printf("%s", i ? "," : "");
         print_dm_entry_json(&entries[i]);
     }
-    printf("],\"persisted\":true,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n");
+    printf("],\"persisted\":%s,\"note\":\"MeshCore direct-message rows are kept in bounded retained storage; optional fingerprint filters one retained thread and offset pages older rows\"}\n",
+           bool_json(stats.loaded && !stats.persistence_dirty));
 }
 
 static void cmd_messages_dm_clear(void)
@@ -4396,7 +4604,7 @@ static void cmd_health(void)
 {
     d1l_health_snapshot_t h = d1l_health_snapshot();
     ok_begin("health");
-    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
+    printf(",\"boot_nonce\":%lu,\"uptime_ms\":%lu,\"heap_free\":%lu,\"heap_min_free\":%lu,\"heap_largest_free\":%lu,\"internal_heap_free\":%lu,\"internal_heap_min_free\":%lu,\"internal_heap_largest_free\":%lu,\"dma_heap_free\":%lu,\"dma_heap_largest_free\":%lu,\"psram_free\":%lu,\"psram_min_free\":%lu,\"psram_largest_free\":%lu,\"current_task_stack_free_words\":%lu,\"ui_task_stack_free_words\":%lu,\"retained_task_stack_free_bytes\":%lu,\"lvgl_free_bytes\":%lu,\"lvgl_largest_free_bytes\":%lu,\"lvgl_used_pct\":%u,\"nvs_ready\":%s,\"nvs_error\":\"%s\",\"reset_reason\":\"%s\",\"board_ready\":%s,\"ui_ready\":%s}\n",
            (unsigned long)h.boot_nonce,
            (unsigned long)h.uptime_ms,
            (unsigned long)h.heap_free, (unsigned long)h.heap_min_free,
@@ -4410,6 +4618,7 @@ static void cmd_health(void)
            (unsigned long)h.psram_largest_free,
            (unsigned long)h.current_task_stack_free_words,
            (unsigned long)h.ui_task_stack_free_words,
+           (unsigned long)h.retained_task_stack_free_bytes,
            (unsigned long)h.lvgl_free_bytes,
            (unsigned long)h.lvgl_largest_free_bytes,
            h.lvgl_used_pct, bool_json(h.nvs_ready), esp_err_to_name(h.nvs_error),
@@ -4926,17 +5135,78 @@ static void handle_line(const char *line)
     } else if (strncmp(line, "mesh send dm ", 13) == 0) {
         cmd_mesh_send_dm(line);
     } else if (strcmp(line, "reboot") == 0) {
-        esp_err_t route_flush_ret = d1l_route_store_worker_force_flush(
-            D1L_ROUTE_REBOOT_FLUSH_TIMEOUT_MS);
-        if (route_flush_ret != ESP_OK) {
-            err_result("reboot", esp_err_to_name(route_flush_ret),
-                       "retained route flush failed; reboot cancelled");
+        const int64_t reboot_started_us = esp_timer_get_time();
+        uint32_t remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t storage_quiesce_ret =
+            d1l_storage_manager_quiesce_begin(remaining_ms);
+        if (storage_quiesce_ret != ESP_OK) {
+            err_result("reboot", esp_err_to_name(storage_quiesce_ret),
+                       "storage manager quiesce failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t retained_flush_ret = remaining_ms > 0U ?
+            d1l_route_store_worker_force_flush(remaining_ms) : ESP_ERR_TIMEOUT;
+        if (retained_flush_ret != ESP_OK) {
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(retained_flush_ret),
+                       "retained storage flush failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t retained_quiesce_ret = remaining_ms > 0U ?
+            d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+        if (retained_quiesce_ret != ESP_OK) {
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(retained_quiesce_ret),
+                       "retained worker quiesce failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        esp_err_t bridge_quiesce_ret = remaining_ms > 0U ?
+            d1l_rp2040_bridge_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+        if (bridge_quiesce_ret != ESP_OK) {
+            d1l_route_store_worker_quiesce_end();
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(bridge_quiesce_ret),
+                       "RP2040 bridge quiesce failed; reboot cancelled");
+            return;
+        }
+
+        remaining_ms = reboot_deadline_remaining_ms(reboot_started_us);
+        if (remaining_ms <= D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS +
+                            D1L_REBOOT_RESTART_MARGIN_MS) {
+            d1l_rp2040_bridge_quiesce_end();
+            d1l_route_store_worker_quiesce_end();
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(ESP_ERR_TIMEOUT),
+                       "reboot deadline lacks console drain headroom; reboot cancelled");
+            return;
+        }
+        esp_err_t connectivity_prepare_ret = d1l_connectivity_prepare_reboot();
+        if (connectivity_prepare_ret != ESP_OK) {
+            d1l_rp2040_bridge_quiesce_end();
+            d1l_route_store_worker_quiesce_end();
+            d1l_storage_manager_quiesce_end();
+            err_result("reboot", esp_err_to_name(connectivity_prepare_ret),
+                       "connectivity prepare failed; reboot cancelled");
             return;
         }
         ok_begin("reboot");
-        printf(",\"rebooting\":true,\"route_flush\":\"ESP_OK\"}\n");
+        printf(",\"rebooting\":true,\"reset_scope\":\"system\",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"rp2040_bridge_quiesced\":true,\"connectivity_prepare\":\"ESP_OK\",\"retained_flush\":\"ESP_OK\",\"route_flush\":\"ESP_OK\",\"console_drain_grace_ms\":%lu}\n",
+               (unsigned long)D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS);
         fflush(stdout);
-        esp_restart();
+        vTaskDelay(pdMS_TO_TICKS(D1L_REBOOT_CONSOLE_DRAIN_GRACE_MS));
+        /* Keep all three quiesce locks held so neither retained persistence nor
+         * a new UART2 SD exchange can begin while the bounded console grace
+         * drains UART0. A full ROM system reset avoids carrying esp_restart's
+         * one-second RTC watchdog into the next boot. */
+        esp_rom_software_reset_system();
+        for (;;) {
+        }
     } else if (strcmp(line, "factory-reset-confirm") == 0) {
         err_result("factory-reset-confirm", "SAFETY_NONCE_REQUIRED", "factory reset will require a generated nonce in a later phase");
     } else {

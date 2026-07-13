@@ -42,6 +42,11 @@ static bool s_use_packet_sd;
 static uint32_t s_fail_history_read_seq_min;
 static int64_t s_now_us;
 
+bool d1l_route_store_persistence_should_yield(void)
+{
+    return false;
+}
+
 static void mock_reset(void)
 {
     memset(s_primary, 0, sizeof(s_primary));
@@ -164,6 +169,103 @@ BaseType_t xSemaphoreGive(SemaphoreHandle_t handle)
 bool d1l_retained_blob_store_uses_sd(d1l_retained_blob_store_id_t store_id)
 {
     return s_use_packet_sd && store_id == D1L_RETAINED_BLOB_STORE_PACKET_LOG;
+}
+
+bool d1l_retained_blob_store_backend_state(
+    d1l_retained_blob_store_id_t store_id,
+    d1l_retained_blob_store_backend_state_t *out_state)
+{
+    if (store_id >= D1L_RETAINED_BLOB_STORE_COUNT || !out_state) {
+        return false;
+    }
+    out_state->enabled = d1l_retained_blob_store_uses_sd(store_id);
+    out_state->generation = out_state->enabled ? 1U : 0U;
+    return true;
+}
+
+esp_err_t d1l_retained_blob_store_read_sd_primary(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    void *dst, size_t *len_inout)
+{
+    (void)key;
+    if (!d1l_retained_blob_store_uses_sd(store_id)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return mock_blob_read(&s_primary[store_id], dst, len_inout);
+}
+
+esp_err_t d1l_retained_blob_store_read_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    void *dst, size_t *len_inout)
+{
+    (void)key;
+    return mock_blob_read(&s_fallback[store_id], dst, len_inout);
+}
+
+esp_err_t d1l_retained_blob_store_write_sd_primary(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    const void *src, size_t len)
+{
+    (void)key;
+    if (!d1l_retained_blob_store_uses_sd(store_id)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const esp_err_t ret = mock_blob_write(&s_primary[store_id], src, len);
+    if (ret == ESP_OK) {
+        s_write_count[store_id]++;
+    }
+    return ret;
+}
+
+esp_err_t d1l_retained_blob_store_write_sd_primary_guarded(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    const void *src, size_t len, uint32_t expected_generation)
+{
+    if (expected_generation != 1U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return d1l_retained_blob_store_write_sd_primary(store_id, key, src, len);
+}
+
+esp_err_t d1l_retained_blob_store_write_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    const void *src, size_t len)
+{
+    (void)key;
+    const esp_err_t ret = mock_blob_write(&s_fallback[store_id], src, len);
+    if (ret == ESP_OK) {
+        s_write_count[store_id]++;
+    }
+    return ret;
+}
+
+esp_err_t d1l_retained_blob_store_erase_sd_primary(
+    d1l_retained_blob_store_id_t store_id, const char *key)
+{
+    (void)key;
+    if (!d1l_retained_blob_store_uses_sd(store_id)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&s_primary[store_id], 0, sizeof(s_primary[store_id]));
+    return ESP_OK;
+}
+
+esp_err_t d1l_retained_blob_store_erase_sd_primary_guarded(
+    d1l_retained_blob_store_id_t store_id, const char *key,
+    uint32_t expected_generation)
+{
+    if (expected_generation != 1U) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return d1l_retained_blob_store_erase_sd_primary(store_id, key);
+}
+
+esp_err_t d1l_retained_blob_store_erase_nvs_fallback(
+    d1l_retained_blob_store_id_t store_id, const char *key)
+{
+    (void)key;
+    memset(&s_fallback[store_id], 0, sizeof(s_fallback[store_id]));
+    return ESP_OK;
 }
 
 esp_err_t d1l_retained_blob_store_read(d1l_retained_blob_store_id_t store_id,
@@ -334,8 +436,26 @@ static void assert_message_stats_equal(d1l_message_store_stats_t left,
     assert(left.next_seq == right.next_seq);
     assert(left.total_written == right.total_written);
     assert(left.dropped_oldest == right.dropped_oldest);
+    assert(left.epoch == right.epoch);
+    assert(left.content_revision == right.content_revision);
+    assert(left.persistence_commit_count == right.persistence_commit_count);
+    assert(left.persistence_fail_count == right.persistence_fail_count);
+    assert(left.persistence_stale_snapshot_count == right.persistence_stale_snapshot_count);
+    assert(left.sd_primary_commit_count == right.sd_primary_commit_count);
+    assert(left.sd_primary_fail_count == right.sd_primary_fail_count);
+    assert(left.sd_backend_generation == right.sd_backend_generation);
+    assert(left.sd_primary_last_error == right.sd_primary_last_error);
+    assert(left.nvs_fallback_commit_count == right.nvs_fallback_commit_count);
+    assert(left.nvs_fallback_fail_count == right.nvs_fallback_fail_count);
+    assert(left.nvs_fallback_last_error == right.nvs_fallback_last_error);
+    assert(left.persistence_revision == right.persistence_revision);
     assert(left.count == right.count);
     assert(left.capacity == right.capacity);
+    assert(left.persistence_dirty == right.persistence_dirty);
+    assert(left.sd_primary_required == right.sd_primary_required);
+    assert(left.sd_primary_dirty == right.sd_primary_dirty);
+    assert(left.sd_primary_reconcile_pending == right.sd_primary_reconcile_pending);
+    assert(left.nvs_fallback_dirty == right.nvs_fallback_dirty);
 }
 
 static void test_message_volatile_preview_does_not_consume_history(void)
@@ -410,8 +530,26 @@ static void assert_dm_stats_equal(d1l_dm_store_stats_t left,
     assert(left.next_seq == right.next_seq);
     assert(left.total_written == right.total_written);
     assert(left.dropped_oldest == right.dropped_oldest);
+    assert(left.epoch == right.epoch);
+    assert(left.content_revision == right.content_revision);
+    assert(left.persistence_commit_count == right.persistence_commit_count);
+    assert(left.persistence_fail_count == right.persistence_fail_count);
+    assert(left.persistence_stale_snapshot_count == right.persistence_stale_snapshot_count);
+    assert(left.sd_primary_commit_count == right.sd_primary_commit_count);
+    assert(left.sd_primary_fail_count == right.sd_primary_fail_count);
+    assert(left.sd_backend_generation == right.sd_backend_generation);
+    assert(left.sd_primary_last_error == right.sd_primary_last_error);
+    assert(left.nvs_fallback_commit_count == right.nvs_fallback_commit_count);
+    assert(left.nvs_fallback_fail_count == right.nvs_fallback_fail_count);
+    assert(left.nvs_fallback_last_error == right.nvs_fallback_last_error);
+    assert(left.persistence_revision == right.persistence_revision);
     assert(left.count == right.count);
     assert(left.capacity == right.capacity);
+    assert(left.persistence_dirty == right.persistence_dirty);
+    assert(left.sd_primary_required == right.sd_primary_required);
+    assert(left.sd_primary_dirty == right.sd_primary_dirty);
+    assert(left.sd_primary_reconcile_pending == right.sd_primary_reconcile_pending);
+    assert(left.nvs_fallback_dirty == right.nvs_fallback_dirty);
 }
 
 static void test_dm_volatile_preview_does_not_consume_history(void)
@@ -488,8 +626,31 @@ static void assert_packet_stats_equal(d1l_packet_log_stats_t left,
     assert(left.dropped_oldest == right.dropped_oldest);
     assert(left.sd_history_records == right.sd_history_records);
     assert(left.sd_history_failed_writes == right.sd_history_failed_writes);
+    assert(left.sd_backend_generation == right.sd_backend_generation);
+    assert(left.persistence_commit_count == right.persistence_commit_count);
+    assert(left.persistence_fail_count == right.persistence_fail_count);
+    assert(left.sd_reconcile_count == right.sd_reconcile_count);
+    assert(left.sd_reconcile_fail_count == right.sd_reconcile_fail_count);
+    assert(left.sd_reconcile_last_error == right.sd_reconcile_last_error);
+    assert(left.sd_primary_commit_count == right.sd_primary_commit_count);
+    assert(left.sd_primary_fail_count == right.sd_primary_fail_count);
+    assert(left.sd_primary_last_error == right.sd_primary_last_error);
+    assert(left.nvs_fallback_commit_count == right.nvs_fallback_commit_count);
+    assert(left.nvs_fallback_fail_count == right.nvs_fallback_fail_count);
+    assert(left.nvs_fallback_last_error == right.nvs_fallback_last_error);
+    assert(left.journal_commit_count == right.journal_commit_count);
+    assert(left.journal_fail_count == right.journal_fail_count);
+    assert(left.journal_last_error == right.journal_last_error);
+    assert(left.persistence_revision == right.persistence_revision);
     assert(left.count == right.count);
     assert(left.capacity == right.capacity);
+    assert(left.sd_capacity == right.sd_capacity);
+    assert(left.persistence_dirty == right.persistence_dirty);
+    assert(left.sd_primary_dirty == right.sd_primary_dirty);
+    assert(left.sd_primary_reconcile_pending == right.sd_primary_reconcile_pending);
+    assert(left.nvs_fallback_dirty == right.nvs_fallback_dirty);
+    assert(left.journal_dirty == right.journal_dirty);
+    assert(left.sd_history_enabled == right.sd_history_enabled);
 }
 
 static bool append_packet(const char *note, bool volatile_preview)

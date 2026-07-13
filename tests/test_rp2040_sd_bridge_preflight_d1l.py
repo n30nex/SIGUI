@@ -1,3 +1,6 @@
+import json
+import sys
+
 from scripts import rp2040_sd_bridge_preflight_d1l as preflight
 
 
@@ -67,9 +70,10 @@ def protocol_pending_storage_line() -> str:
     )
 
 
-def ready_storage_line() -> str:
+def ready_storage_line(manager_state: str = "READY_SD") -> str:
     return (
         '{"schema":1,"ok":true,"cmd":"storage status",'
+        f'"manager":{{"running":true,"state":"{manager_state}"}},'
         '"sd":{"state":"ready","filesystem":"fat32","present":true,"mounted":true,'
         '"data_root_ready":true,"rp2040_bridge_ready":true,'
         '"rp2040_protocol_supported":true,"file_ops":true,'
@@ -191,6 +195,38 @@ def test_preflight_dry_run_is_non_destructive():
     )
 
 
+def test_main_stdout_exposes_acceptance_and_settle_exhaustion(
+    tmp_path, monkeypatch, capsys
+):
+    exhausted = {
+        "schema": 1,
+        "mode": "hardware-preflight",
+        "ok": False,
+        "serial_commands_ok": True,
+        "ready_for_sd_acceptance": False,
+        "storage_status_settle_exhausted": True,
+    }
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["rp2040_sd_bridge_preflight_d1l.py", "--port", "COM12"],
+    )
+    monkeypatch.setattr(preflight, "run_preflight", lambda **_kwargs: exhausted)
+    monkeypatch.setattr(
+        preflight,
+        "write_report",
+        lambda report, out_path: tmp_path / "preflight.json",
+    )
+
+    code = preflight.main()
+    stdout = json.loads(capsys.readouterr().out)
+
+    assert code == 1
+    assert stdout["ok"] is False
+    assert stdout["ready_for_sd_acceptance"] is False
+    assert stdout["storage_status_settle_exhausted"] is True
+
+
 def test_preflight_classifies_protocol_pending_without_uf2_volume():
     report = preflight.classify_preflight(
         {"ok": True, "cmd": "rp2040 status", "uart_ready": True},
@@ -198,6 +234,7 @@ def test_preflight_classifies_protocol_pending_without_uf2_volume():
         {
             "ok": True,
             "cmd": "storage status",
+            "manager": {"running": True, "state": "READY_SD"},
             "sd": {
                 "state": "protocol_pending",
                 "rp2040_bridge_ready": True,
@@ -244,6 +281,7 @@ def test_preflight_classifies_ready_storage_gate():
         {
             "ok": True,
             "cmd": "storage status",
+            "manager": {"running": True, "state": "READY_SD"},
             "sd": {
                 "state": "ready",
                 "filesystem": "fat32",
@@ -268,6 +306,8 @@ def test_preflight_classifies_ready_storage_gate():
     assert report["state"] == "sd_bridge_ready"
     assert report["next_action"] == "run_sd_file_and_export_acceptance"
     assert report["storage_file_gate_ready"] is True
+    assert report["storage_manager_ready_sd"] is True
+    assert report["ready_for_sd_acceptance"] is True
 
 
 def test_preflight_classifies_ping_ok_but_status_pending_separately():
@@ -567,9 +607,12 @@ def test_run_preflight_skips_diag_when_mount_is_still_pending(monkeypatch):
         expected_sha256=None,
     )
 
-    assert report["ok"] is True
+    assert report["ok"] is False
+    assert report["serial_commands_ok"] is True
     assert report["ready_for_sd_acceptance"] is False
     assert report["storage_mount_poll_count"] == preflight.MOUNT_POLL_ATTEMPTS
+    assert report["storage_status_poll_count"] == preflight.MOUNT_POLL_ATTEMPTS
+    assert report["storage_status_settle_exhausted"] is True
     assert report["classification"]["state"] == "sd_mount_pending"
     assert report["storage_diag"]["skipped"] is True
     assert report["storage_diag"]["reason"] == "storage_mount_pending"
@@ -691,6 +734,112 @@ def test_run_preflight_reports_ready_for_sd_acceptance(monkeypatch):
         "storage status\n",
         "health\n",
     ]
+
+
+def test_run_preflight_polls_manager_ping_until_ready_sd(monkeypatch):
+    ser = CommandAwareSerial(
+        {
+            "rp2040 status": [
+                '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n'
+            ],
+            "rp2040 ping": [rp2040_ping_line()],
+            "storage status": [
+                ready_storage_line("PING"),
+                ready_storage_line("PING"),
+                ready_storage_line("READY_SD"),
+            ],
+            "storage mount": [
+                '{"schema":1,"ok":true,"cmd":"storage mount",'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ],
+            "health": [
+                '{"schema":1,"ok":true,"cmd":"health",'
+                '"board_ready":true,"ui_ready":true}\n'
+            ],
+        }
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is True
+    assert report["ready_for_sd_acceptance"] is True
+    assert report["classification"]["storage_file_gate_ready"] is True
+    assert report["classification"]["storage_manager_ready_sd"] is True
+    assert report["storage_manager_initial_state"] == "PING"
+    assert report["storage_manager_final_state"] == "READY_SD"
+    assert report["storage_manager_transition_poll_count"] == 1
+    assert report["storage_mount_poll_count"] == 0
+    assert report["storage_status_poll_count"] == 1
+    assert report["storage_status_settle_exhausted"] is False
+    assert ser.writes.count("storage status\n") == 3
+
+
+def test_run_preflight_reports_exhausted_transitional_manager_truthfully(monkeypatch):
+    ser = CommandAwareSerial(
+        {
+            "rp2040 status": [
+                '{"schema":1,"ok":true,"cmd":"rp2040 status","uart_ready":true}\n'
+            ],
+            "rp2040 ping": [rp2040_ping_line()],
+            "storage status": [
+                ready_storage_line("PING")
+                for _ in range(preflight.MOUNT_POLL_ATTEMPTS + 2)
+            ],
+            "storage mount": [
+                '{"schema":1,"ok":true,"cmd":"storage mount",'
+                '"public_rf_tx":false,"formats_sd":false}\n'
+            ],
+            "health": [
+                '{"schema":1,"ok":true,"cmd":"health",'
+                '"board_ready":true,"ui_ready":true}\n'
+            ],
+        }
+    )
+
+    class FakeSerialModule:
+        Serial = lambda self, **_kwargs: ser
+
+    monkeypatch.setitem(__import__("sys").modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(preflight.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(preflight, "verify_optional_artifact", lambda *_args: {"ok": True})
+    monkeypatch.setattr(preflight, "candidate_volumes", lambda: [])
+
+    report = preflight.run_preflight(
+        port="COM12",
+        baud=115200,
+        timeout=1.0,
+        artifact_dir="artifact",
+        expected_sha256=None,
+    )
+
+    assert report["ok"] is False
+    assert report["serial_commands_ok"] is True
+    assert report["ready_for_sd_acceptance"] is False
+    assert report["classification"]["storage_file_gate_ready"] is True
+    assert report["classification"]["storage_manager_ready_sd"] is False
+    assert report["classification"]["state"] == "storage_manager_transition_pending"
+    assert report["classification"]["next_action"] == "wait_for_storage_manager_ready_sd"
+    assert report["storage_manager_final_state"] == "PING"
+    assert report["storage_manager_transition_poll_count"] == preflight.MOUNT_POLL_ATTEMPTS
+    assert report["storage_mount_poll_count"] == 0
+    assert report["storage_status_poll_count"] == preflight.MOUNT_POLL_ATTEMPTS
+    assert report["storage_manager_transition_exhausted"] is True
+    assert report["storage_status_settle_exhausted"] is True
+    assert report["storage_diag"]["reason"] == "storage_file_gate_ready"
 
 
 def test_run_preflight_classifies_raw_present_mount_failed_card(monkeypatch):

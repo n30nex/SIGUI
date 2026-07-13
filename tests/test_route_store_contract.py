@@ -143,7 +143,7 @@ def test_ui_console_and_smoke_expose_routes():
     assert "reconcile_pending" in console
     assert "bool_json(!stats.persistence_dirty)" in console
     assert "d1l_route_store_worker_force_flush(" in console
-    assert '"retained route flush failed; reboot cancelled"' in console
+    assert '"retained storage flush failed; reboot cancelled"' in console
     assert 'ok_begin("routes detail")' in console
     assert 'ok_begin("routes trace")' in console
     assert "d1l_route_store_find_by_seq" in console
