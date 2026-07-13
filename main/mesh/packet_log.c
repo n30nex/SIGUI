@@ -302,6 +302,74 @@ static bool history_record_is_valid(const d1l_packet_log_history_record_t *recor
            record->checksum == history_record_checksum(&record->entry);
 }
 
+typedef enum {
+    D1L_PACKET_JOURNAL_SLOT_EMPTY = 0,
+    D1L_PACKET_JOURNAL_SLOT_VALID,
+    D1L_PACKET_JOURNAL_SLOT_MALFORMED,
+} d1l_packet_journal_slot_state_t;
+
+/* Read-only lineage proof. Missing files and the bridge's exact zero-byte EOF
+ * reply are the only empty states. Occupied or malformed slots are returned
+ * to the caller without mutation so reconciliation can preserve them and
+ * resume at a fresh segment boundary. Transport and media-generation errors
+ * fail closed. */
+static esp_err_t probe_sd_history_slot(
+    uint32_t seq, uint32_t expected_generation,
+    d1l_packet_journal_slot_state_t *out_state,
+    d1l_packet_log_entry_t *out_entry)
+{
+    if (seq == 0U || !out_state) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_state = D1L_PACKET_JOURNAL_SLOT_MALFORMED;
+    if (out_entry) {
+        memset(out_entry, 0, sizeof(*out_entry));
+    }
+    if (!packet_backend_generation_matches(expected_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char path[D1L_RP2040_FILE_PATH_MAX + 1U];
+    if (!history_segment_path(seq, path, sizeof(path))) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint32_t offset =
+        ((seq - 1U) % D1L_PACKET_LOG_SD_SEGMENT_CAPACITY) *
+        (uint32_t)sizeof(d1l_packet_log_history_record_t);
+    d1l_packet_log_history_record_t record = {0};
+    d1l_rp2040_file_result_t result = {0};
+    const esp_err_t ret = d1l_rp2040_bridge_file_read(
+        path, offset, (uint8_t *)&record, sizeof(record), &result,
+        D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
+    if (!packet_backend_generation_matches(expected_generation)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (ret == ESP_ERR_NOT_FOUND &&
+        strcmp(result.err, "not_found") == 0) {
+        *out_state = D1L_PACKET_JOURNAL_SLOT_EMPTY;
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    const bool unwritten_eof = result.length == 0U && result.eof &&
+                               result.offset == offset;
+    if (unwritten_eof) {
+        *out_state = D1L_PACKET_JOURNAL_SLOT_EMPTY;
+        return ESP_OK;
+    }
+    if (result.length == sizeof(record) &&
+        history_record_is_valid(&record, seq)) {
+        *out_state = D1L_PACKET_JOURNAL_SLOT_VALID;
+        if (out_entry) {
+            *out_entry = record.entry;
+        }
+        return ESP_OK;
+    }
+    *out_state = D1L_PACKET_JOURNAL_SLOT_MALFORMED;
+    return ESP_OK;
+}
+
 static bool read_sd_history_entry(uint32_t seq, d1l_packet_log_entry_t *out_entry)
 {
     if (seq == 0 || !out_entry ||
@@ -383,11 +451,22 @@ static esp_err_t append_sd_history_for_generation(
         } else if (read_result.length != sizeof(existing)) {
             return ESP_ERR_INVALID_STATE;
         } else if (history_record_is_valid(&existing, entry->seq)) {
-            if (!packet_entries_equal(&existing.entry, entry)) {
+            if (packet_entries_equal(&existing.entry, entry)) {
+                if (!segment_start) {
+                    return packet_backend_generation_matches(expected_generation) ?
+                           ESP_OK : ESP_ERR_INVALID_STATE;
+                }
+                /* Even a byte-equal boundary record must be rewritten with
+                 * truncate=true so stale later slots from the prior segment
+                 * cycle cannot survive behind it. */
+            }
+            if (!packet_entries_equal(&existing.entry, entry) &&
+                !segment_start) {
                 return ESP_ERR_INVALID_STATE;
             }
-            return packet_backend_generation_matches(expected_generation) ?
-                   ESP_OK : ESP_ERR_INVALID_STATE;
+            /* A fresh segment-cycle boundary is the sole point where a valid
+             * prior-cycle record with the same modular sequence slot may be
+             * replaced. Preserve every such collision in interior slots. */
         } else if (!segment_start) {
             /* Only a fresh segment-cycle boundary may replace a prior-cycle
              * slot. A corrupt/mismatched interior slot is preserved. */
@@ -1024,17 +1103,39 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         return note_reconcile_failure(sd_ret);
     }
 
-    bool journal_tail_valid = false;
+    bool journal_continuation_trusted = false;
     if (primary_found && s_sd_primary_blob_scratch.total_written > 0U) {
-        d1l_packet_log_entry_t tail = {0};
-        journal_tail_valid = read_sd_history_entry(
-            s_sd_primary_blob_scratch.next_seq - 1U, &tail);
+        d1l_packet_journal_slot_state_t tail_state;
+        d1l_packet_log_entry_t journal_tail = {0};
+        esp_err_t probe_ret = probe_sd_history_slot(
+            s_sd_primary_blob_scratch.next_seq - 1U,
+            expected_generation, &tail_state, &journal_tail);
+        if (probe_ret != ESP_OK) {
+            return note_reconcile_failure(probe_ret);
+        }
+        const d1l_packet_log_entry_t *primary_tail =
+            &s_sd_primary_blob_scratch.entries[
+                s_sd_primary_blob_scratch.count - 1U];
+        if (tail_state == D1L_PACKET_JOURNAL_SLOT_VALID &&
+            packet_entries_equal(&journal_tail, primary_tail)) {
+            d1l_packet_journal_slot_state_t next_state;
+            probe_ret = probe_sd_history_slot(
+                s_sd_primary_blob_scratch.next_seq,
+                expected_generation, &next_state, NULL);
+            if (probe_ret != ESP_OK) {
+                return note_reconcile_failure(probe_ret);
+            }
+            journal_continuation_trusted =
+                next_state == D1L_PACKET_JOURNAL_SLOT_EMPTY;
+        }
     }
     if (!packet_backend_generation_matches(expected_generation)) {
         return note_reconcile_failure(ESP_ERR_INVALID_STATE);
     }
 
-    bool journal_lineage_untrusted = false;
+    bool journal_lineage_untrusted =
+        primary_found && s_sd_primary_blob_scratch.total_written > 0U &&
+        !journal_continuation_trusted;
     d1l_store_lock_take(&s_store_lock);
     fill_primary_blob(&s_local_blob_scratch);
     d1l_packet_log_primary_blob_t *merged = &s_primary_blob_scratch;
@@ -1090,6 +1191,11 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
 
     const bool local_changed =
         !primary_blobs_equal(&s_local_blob_scratch, merged);
+    const bool sd_primary_changed = primary_found &&
+        !primary_blobs_equal(&s_sd_primary_blob_scratch, merged);
+    if (legacy_v2_primary || sd_primary_changed || overlay_count > 0U) {
+        journal_lineage_untrusted = true;
+    }
     if (local_changed) {
         load_primary_blob_into_ram(merged);
         s_revision++;
@@ -1105,10 +1211,11 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
     s_sd_primary_last_error = ESP_OK;
     s_last_sd_backend_generation = expected_generation;
 
-    if (primary_found && s_sd_primary_blob_scratch.total_written == 0U) {
+    if (primary_found && s_sd_primary_blob_scratch.total_written == 0U &&
+        merged->total_written == 0U) {
         s_sd_history_records = 0U;
         s_journal_next_seq = 1U;
-    } else if (primary_found && journal_tail_valid &&
+    } else if (primary_found && journal_continuation_trusted &&
                !journal_lineage_untrusted) {
         restore_sd_history_count_from_total();
         s_sd_history_records =

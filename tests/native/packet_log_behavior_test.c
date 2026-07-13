@@ -58,6 +58,9 @@ static size_t s_history_segment_len[D1L_PACKET_LOG_SD_SEGMENT_COUNT];
 static bool s_sd_enabled;
 static uint32_t s_backend_generation;
 static bool s_fail_nvs_write;
+static esp_err_t s_history_read_error;
+static bool s_history_read_no_card;
+static bool s_bump_generation_after_history_read;
 static bool s_bump_generation_after_sd_read;
 static bool s_bump_generation_before_reconcile_apply;
 static uint32_t s_backend_state_calls_after_sd_read;
@@ -73,6 +76,7 @@ static uint32_t s_sd_primary_reads;
 static uint32_t s_sd_primary_writes;
 static uint32_t s_nvs_writes;
 static uint32_t s_journal_mutations;
+static uint32_t s_journal_truncates;
 static uint32_t s_delete_count;
 static uint32_t s_first_mutation_read_count;
 static int64_t s_now_us;
@@ -86,6 +90,9 @@ static void mock_reset(void)
     s_sd_enabled = false;
     s_backend_generation = 0U;
     s_fail_nvs_write = false;
+    s_history_read_error = ESP_OK;
+    s_history_read_no_card = false;
+    s_bump_generation_after_history_read = false;
     s_bump_generation_after_sd_read = false;
     s_bump_generation_before_reconcile_apply = false;
     s_backend_state_calls_after_sd_read = 0U;
@@ -101,6 +108,7 @@ static void mock_reset(void)
     s_sd_primary_writes = 0U;
     s_nvs_writes = 0U;
     s_journal_mutations = 0U;
+    s_journal_truncates = 0U;
     s_delete_count = 0U;
     s_first_mutation_read_count = 0U;
     s_now_us = 1000000LL;
@@ -430,11 +438,27 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
 {
     unsigned long segment = 0UL;
     (void)timeout_ms;
+    if (s_history_read_error != ESP_OK) {
+        return s_history_read_error;
+    }
+    if (s_history_read_no_card) {
+        if (!out_result) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        memset(out_result, 0, sizeof(*out_result));
+        (void)snprintf(out_result->err, sizeof(out_result->err), "no_card");
+        return ESP_ERR_NOT_FOUND;
+    }
     if (!path || !out_data || !out_result ||
         sscanf(path, "stores/packet_log/segments/s%lu.bin", &segment) != 1 ||
         segment >= D1L_PACKET_LOG_SD_SEGMENT_COUNT ||
         offset > s_history_segment_len[segment] ||
         s_history_segment_len[segment] == 0U) {
+        if (out_result) {
+            memset(out_result, 0, sizeof(*out_result));
+            (void)snprintf(out_result->err, sizeof(out_result->err),
+                           "not_found");
+        }
         return ESP_ERR_NOT_FOUND;
     }
     const size_t available = s_history_segment_len[segment] - offset;
@@ -445,6 +469,10 @@ esp_err_t d1l_rp2040_bridge_file_read(const char *path, uint32_t offset,
     out_result->length = copied;
     out_result->ok = true;
     out_result->eof = offset + copied >= s_history_segment_len[segment];
+    if (s_bump_generation_after_history_read) {
+        s_bump_generation_after_history_read = false;
+        s_backend_generation++;
+    }
     return ESP_OK;
 }
 
@@ -466,6 +494,7 @@ esp_err_t d1l_rp2040_bridge_file_write(const char *path, uint32_t offset,
     note_sd_mutation();
     s_journal_mutations++;
     if (truncate) {
+        s_journal_truncates++;
         s_history_segment_len[segment] = 0U;
     }
     memcpy(s_history_segments[segment] + offset, data, len);
@@ -538,6 +567,18 @@ static bool append_packet(const char *note)
     return d1l_packet_log_append(&entry);
 }
 
+static esp_err_t append_packet_checked(const char *note,
+                                       uint32_t *out_stored_seq)
+{
+    d1l_packet_log_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    (void)snprintf(entry.direction, sizeof(entry.direction), "rx");
+    (void)snprintf(entry.kind, sizeof(entry.kind), "mesh");
+    (void)snprintf(entry.note, sizeof(entry.note), "%s", note);
+    return d1l_packet_log_append_raw_checked(
+        &entry, NULL, 0U, out_stored_seq);
+}
+
 static void test_late_sd_is_read_and_merged_before_mutation(void)
 {
     mock_reset();
@@ -559,7 +600,7 @@ static void test_late_sd_is_read_and_merged_before_mutation(void)
     assert(strcmp(primary.entries[primary.count - 1U].note,
                   "live-off-card") == 0);
     assert(primary.entries[primary.count - 1U].seq == 13U);
-    assert(s_journal_mutations == 1U);
+    assert(s_journal_mutations == 0U);
 
     const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
     assert(stats.sd_backend_generation == 2U);
@@ -599,6 +640,185 @@ static void test_checked_append_reports_resequenced_sd_overlay(void)
                   "checked-overlay") == 0);
 }
 
+static void test_occupied_next_slot_is_preserved_until_fresh_boundary(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 11U;
+    seed_primary(&s_sd_primary, 1U, 2U, 2U, "base");
+    seed_fallback(1U, 2U, 2U, "base");
+    seed_history(1U, 2U, "base");
+    seed_history(3U, 1U, "preserved");
+    seed_history(65U, 1U, "boundary");
+    seed_history(66U, 1U, "stale");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    assert(s_journal_mutations == 0U);
+    uint32_t stored_seq = 0U;
+    assert(append_packet_checked("canary", &stored_seq) == ESP_OK);
+    assert(stored_seq == 3U);
+    assert(s_journal_mutations == 0U);
+    const history_record_t *segment0 =
+        (const history_record_t *)s_history_segments[0];
+    assert(strcmp(segment0[2].entry.note, "preserved-3") == 0);
+    assert(d1l_packet_log_flush() == ESP_OK);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(!stats.journal_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.journal_commit_count == 0U);
+    assert(stats.journal_fail_count == 0U);
+    assert(stats.journal_last_error == ESP_OK);
+    assert(stats.sd_primary_commit_count == 1U);
+    assert(stats.nvs_fallback_commit_count == 1U);
+
+    for (uint32_t seq = 4U; seq < 65U; ++seq) {
+        char note[32];
+        (void)snprintf(note, sizeof(note), "deferred-%lu",
+                       (unsigned long)seq);
+        assert(append_packet(note));
+    }
+    assert(s_journal_mutations == 0U);
+    d1l_packet_log_entry_t boundary = packet_entry(65U, "boundary");
+    assert(d1l_packet_log_append_raw_checked(
+               &boundary, NULL, 0U, &stored_seq) == ESP_OK);
+    assert(stored_seq == 65U);
+    assert(s_journal_mutations == 1U);
+    assert(s_journal_truncates == 1U);
+    segment0 = (const history_record_t *)s_history_segments[0];
+    assert(strcmp(segment0[2].entry.note, "preserved-3") == 0);
+    const history_record_t *segment1 =
+        (const history_record_t *)s_history_segments[1];
+    assert(s_history_segment_len[1] == sizeof(history_record_t));
+    assert(segment1[0].entry.seq == 65U);
+    assert(strcmp(segment1[0].entry.note, "boundary-65") == 0);
+
+    assert(append_packet_checked("after-boundary", &stored_seq) == ESP_OK);
+    assert(stored_seq == 66U);
+    assert(s_journal_mutations == 2U);
+    assert(s_journal_truncates == 1U);
+    assert(s_history_segment_len[1] == 2U * sizeof(history_record_t));
+    segment1 = (const history_record_t *)s_history_segments[1];
+    assert(segment1[1].entry.seq == 66U);
+    assert(strcmp(segment1[1].entry.note, "after-boundary") == 0);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(!stats.journal_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.journal_commit_count == 2U);
+    assert(stats.journal_fail_count == 0U);
+    assert(stats.journal_last_error == ESP_OK);
+    assert(stats.sd_primary_commit_count >= 2U);
+    assert(stats.nvs_fallback_commit_count >= 2U);
+}
+
+static void test_exact_empty_eof_continues_journal_normally(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 12U;
+    seed_primary(&s_sd_primary, 1U, 2U, 2U, "eof");
+    seed_fallback(1U, 2U, 2U, "eof");
+    seed_history(1U, 2U, "eof");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    uint32_t stored_seq = 0U;
+    assert(append_packet_checked("eof-next", &stored_seq) == ESP_OK);
+    assert(stored_seq == 3U);
+    assert(s_journal_mutations == 1U);
+    const history_record_t *segment0 =
+        (const history_record_t *)s_history_segments[0];
+    assert(segment0[2].entry.seq == 3U);
+    assert(strcmp(segment0[2].entry.note, "eof-next") == 0);
+}
+
+static void test_partial_next_slot_is_preserved_without_journal_mutation(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 13U;
+    seed_primary(&s_sd_primary, 1U, 2U, 2U, "partial");
+    seed_fallback(1U, 2U, 2U, "partial");
+    seed_history(1U, 2U, "partial");
+    const size_t partial_offset = 2U * sizeof(history_record_t);
+    s_history_segments[0][partial_offset] = 0xA5U;
+    s_history_segment_len[0] = partial_offset + 1U;
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    uint32_t stored_seq = 0U;
+    assert(append_packet_checked("partial-next", &stored_seq) == ESP_OK);
+    assert(stored_seq == 3U);
+    assert(s_journal_mutations == 0U);
+    assert(s_history_segment_len[0] == partial_offset + 1U);
+    assert(s_history_segments[0][partial_offset] == 0xA5U);
+}
+
+static void test_journal_probe_transport_and_generation_errors_never_mutate(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 14U;
+    seed_primary(&s_sd_primary, 1U, 2U, 2U, "error");
+    seed_fallback(1U, 2U, 2U, "error");
+    seed_history(1U, 2U, "error");
+    s_history_read_error = ESP_ERR_TIMEOUT;
+
+    assert(d1l_packet_log_init() == ESP_ERR_TIMEOUT);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    assert(s_journal_mutations == 0U);
+
+    s_history_read_error = ESP_OK;
+    s_bump_generation_after_history_read = true;
+    assert(d1l_packet_log_flush() == ESP_ERR_INVALID_STATE);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    assert(s_journal_mutations == 0U);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    assert(!d1l_packet_log_stats().persistence_dirty);
+}
+
+static void test_journal_probe_no_card_is_not_treated_as_empty(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 15U;
+    seed_primary(&s_sd_primary, 1U, 2U, 2U, "no-card");
+    seed_fallback(1U, 2U, 2U, "no-card");
+    seed_history(1U, 2U, "no-card");
+    s_history_read_no_card = true;
+
+    assert(d1l_packet_log_init() == ESP_ERR_NOT_FOUND);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    assert(s_journal_mutations == 0U);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.sd_reconcile_last_error == ESP_ERR_NOT_FOUND);
+
+    s_history_read_no_card = false;
+    assert(d1l_packet_log_flush() == ESP_OK);
+    stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(!stats.journal_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.sd_reconcile_last_error == ESP_OK);
+    assert(stats.journal_fail_count == 0U);
+    assert(stats.journal_last_error == ESP_OK);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    assert(s_journal_mutations == 0U);
+}
+
 static void test_v2_compact_sd_primary_is_promoted_and_rewritten(void)
 {
     mock_reset();
@@ -634,6 +854,56 @@ static void test_v2_compact_sd_primary_is_promoted_and_rewritten(void)
     assert(stats.sd_primary_commit_count == 1U);
     assert(!stats.sd_primary_reconcile_pending);
     assert(!stats.persistence_dirty);
+}
+
+static void test_empty_sd_primary_with_high_local_tail_uses_fresh_boundary(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 6U;
+    seed_primary(&s_sd_primary, 1U, 0U, 0U, "empty");
+    seed_fallback(421U, 8U, 428U, "local");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    assert(s_sd_primary_writes == 1U);
+    assert(s_journal_mutations == 0U);
+    const primary_blob_t primary = current_primary();
+    assert(primary.next_seq == 429U);
+    assert(primary.total_written == 428U);
+    assert(primary.count == 8U);
+    assert(strcmp(primary.entries[0].note, "local-421") == 0);
+    assert(strcmp(primary.entries[7].note, "local-428") == 0);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(!stats.journal_dirty);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.journal_fail_count == 0U);
+    assert(stats.journal_last_error == ESP_OK);
+
+    for (uint32_t seq = 429U; seq < 449U; ++seq) {
+        char note[32];
+        (void)snprintf(note, sizeof(note), "empty-tail-%lu",
+                       (unsigned long)seq);
+        assert(append_packet(note));
+    }
+    assert(s_journal_mutations == 0U);
+    assert(d1l_packet_log_flush() == ESP_OK);
+    stats = d1l_packet_log_stats();
+    assert(!stats.persistence_dirty);
+    assert(!stats.sd_primary_dirty);
+    assert(!stats.nvs_fallback_dirty);
+    assert(!stats.journal_dirty);
+    assert(stats.journal_fail_count == 0U);
+
+    uint32_t stored_seq = 0U;
+    assert(append_packet_checked("empty-tail-boundary", &stored_seq) == ESP_OK);
+    assert(stored_seq == 449U);
+    assert(s_journal_mutations == 1U);
+    assert(s_journal_truncates == 1U);
 }
 
 static void test_disjoint_v3_primary_and_local_tail_are_resequenced(void)
@@ -1011,7 +1281,13 @@ int main(void)
 {
     test_late_sd_is_read_and_merged_before_mutation();
     test_checked_append_reports_resequenced_sd_overlay();
+    test_occupied_next_slot_is_preserved_until_fresh_boundary();
+    test_exact_empty_eof_continues_journal_normally();
+    test_partial_next_slot_is_preserved_without_journal_mutation();
+    test_journal_probe_transport_and_generation_errors_never_mutate();
+    test_journal_probe_no_card_is_not_treated_as_empty();
     test_v2_compact_sd_primary_is_promoted_and_rewritten();
+    test_empty_sd_primary_with_high_local_tail_uses_fresh_boundary();
     test_disjoint_v3_primary_and_local_tail_are_resequenced();
     test_conflicting_same_seq_rows_are_both_preserved();
     test_disjoint_reconcile_generation_edge_never_writes_and_retries();
