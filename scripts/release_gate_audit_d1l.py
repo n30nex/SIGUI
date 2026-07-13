@@ -2676,6 +2676,7 @@ def wp01_evidence_gate(
                 rp2040_port,
                 provenance if provenance_ok else None,
                 provenance_sha256 if provenance_ok else None,
+                root,
             )
         )
         paths[kind] = path

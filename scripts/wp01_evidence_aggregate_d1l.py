@@ -25,6 +25,17 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         verify_esp32_flash_inputs,
     )
 
+try:
+    from wp01_evidence_sources_d1l import (
+        SOURCE_BOUND_KINDS,
+        rebuild_source_bound_artifact,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.wp01_evidence_sources_d1l import (
+        SOURCE_BOUND_KINDS,
+        rebuild_source_bound_artifact,
+    )
+
 
 WP01_ARTIFACT_KINDS = (
     "sd_inserted_stability",
@@ -648,8 +659,21 @@ def wp01_artifact_ok(
     rp2040_port: str,
     expected_provenance: dict | None = None,
     expected_provenance_sha256: str | None = None,
+    root: Path | None = None,
 ) -> bool:
     """Validate one canonical WP-01 physical artifact without trusting its filename."""
+    rebuilt = (
+        rebuild_source_bound_artifact(
+            data,
+            root=root,
+            commit=commit,
+            github_actions_run=github_actions_run,
+            d1l_port=d1l_port,
+            rp2040_port=rp2040_port,
+        )
+        if kind in SOURCE_BOUND_KINDS and isinstance(root, Path)
+        else None
+    )
     return (
         isinstance(data, dict)
         and isinstance(expected_provenance, dict)
@@ -667,6 +691,10 @@ def wp01_artifact_ok(
         and data.get("provenance") == expected_provenance
         and data.get("provenance_receipt_sha256", "").lower()
         == expected_provenance_sha256.lower()
+        and (
+            kind not in SOURCE_BOUND_KINDS
+            or (isinstance(rebuilt, dict) and rebuilt.get("ok") is True and data == rebuilt)
+        )
     )
 
 
@@ -797,6 +825,7 @@ def build_aggregate(
             rp2040_port,
             provenance if provenance_valid else None,
             provenance_sha256 if provenance_valid else None,
+            root,
         )
         resolved = str(path.resolve())
         resolved_paths.append(resolved.lower())

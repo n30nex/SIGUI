@@ -8,6 +8,9 @@ import pytest
 from scripts import release_gate_audit_d1l as audit
 from scripts import autonomous_hardware_validate_d1l as runner
 from scripts import wp01_evidence_aggregate_d1l as wp01
+from scripts import wp01_evidence_produce_d1l as wp01_produce
+from scripts import wp01_evidence_sources_d1l as wp01_sources
+from tests.wp01_source_fixtures import write_inserted_soak, write_reboot_source
 
 
 COMMIT = "ad0aa5bda21435846f6e7fcdde8fd87a85c5da5c"
@@ -393,10 +396,11 @@ def payloads(
 
 @pytest.mark.parametrize("kind", wp01.WP01_ARTIFACT_KINDS)
 def test_wp01_artifact_validators_accept_exact_complete_evidence(tmp_path: Path, kind: str):
-    provenance, provenance_path, _, _ = write_provenance(tmp_path)
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     provenance_sha256 = wp01.sha256_file(provenance_path)
     assert wp01.wp01_artifact_ok(
-        payloads(provenance_sha256, provenance)[kind],
+        json.loads(paths[kind].read_text(encoding="utf-8")),
         kind,
         COMMIT,
         RUN_ID,
@@ -404,6 +408,7 @@ def test_wp01_artifact_validators_accept_exact_complete_evidence(tmp_path: Path,
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is True
 
 
@@ -428,9 +433,10 @@ def test_wp01_artifact_validators_accept_exact_complete_evidence(tmp_path: Path,
 def test_wp01_artifact_validators_fail_closed_on_missing_closure_condition(
     tmp_path: Path, kind, mutate
 ):
-    provenance, provenance_path, _, _ = write_provenance(tmp_path)
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     provenance_sha256 = wp01.sha256_file(provenance_path)
-    payload = payloads(provenance_sha256, provenance)[kind]
+    payload = json.loads(paths[kind].read_text(encoding="utf-8"))
     mutate(payload)
     assert wp01.wp01_artifact_ok(
         payload,
@@ -441,15 +447,17 @@ def test_wp01_artifact_validators_fail_closed_on_missing_closure_condition(
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
 
 def test_wp01_artifact_validator_rejects_stale_run_forbidden_port_and_safety_claims(
     tmp_path: Path,
 ):
-    provenance, provenance_path, _, _ = write_provenance(tmp_path)
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     provenance_sha256 = wp01.sha256_file(provenance_path)
-    payload = payloads(provenance_sha256, provenance)["sd_inserted_stability"]
+    payload = json.loads(paths["sd_inserted_stability"].read_text(encoding="utf-8"))
     payload["github_actions_run"] = "29222903209"
     assert wp01.wp01_artifact_ok(
         payload,
@@ -460,15 +468,20 @@ def test_wp01_artifact_validator_rejects_stale_run_forbidden_port_and_safety_cla
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
 
 def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provenance(
     tmp_path: Path,
 ):
-    provenance, provenance_path, run_dir, _ = write_provenance(tmp_path)
+    paths, provenance_path, run_dir = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     provenance_sha256 = wp01.sha256_file(provenance_path)
-    payload = payloads(provenance_sha256, provenance)["sd_inserted_stability"]
+    valid_inserted = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    payload = copy.deepcopy(valid_inserted)
     payload.pop("provenance")
     assert wp01.wp01_artifact_ok(
         payload,
@@ -479,9 +492,10 @@ def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provena
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
-    payload = payloads(provenance_sha256, provenance)["sd_inserted_stability"]
+    payload = copy.deepcopy(valid_inserted)
     payload["provenance"]["rp2040_device_build_commit"] = "0" * 40
     assert wp01.wp01_artifact_ok(
         payload,
@@ -492,6 +506,7 @@ def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provena
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
     fake_hash = copy.deepcopy(provenance)
@@ -506,7 +521,7 @@ def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provena
         github_run_dir=run_dir,
     ) is False
 
-    payload = payloads(provenance_sha256, provenance)["sd_inserted_stability"]
+    payload = copy.deepcopy(valid_inserted)
     payload["ports"]["d1l"] = "COM11"
     assert wp01.wp01_artifact_ok(
         payload,
@@ -517,9 +532,10 @@ def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provena
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
-    payload = payloads(provenance_sha256, provenance)["sd_inserted_stability"]
+    payload = copy.deepcopy(valid_inserted)
     payload["formats_sd"] = True
     assert wp01.wp01_artifact_ok(
         payload,
@@ -530,6 +546,7 @@ def test_wp01_artifact_validator_rejects_absent_or_mismatched_exact_pair_provena
         "COM16",
         provenance,
         provenance_sha256,
+        tmp_path,
     ) is False
 
 
@@ -600,9 +617,53 @@ def write_inputs(root: Path) -> tuple[dict[str, Path], Path, Path]:
     provenance_sha256 = wp01.sha256_file(provenance_path)
     paths = {}
     for kind, payload in payloads(provenance_sha256, provenance).items():
+        if kind in wp01_sources.SOURCE_BOUND_KINDS:
+            continue
         path = root / f"{kind}_{COMMIT[:7]}.json"
         path.write_text(json.dumps(payload), encoding="utf-8")
         paths[kind] = path
+    inserted_source = write_inserted_soak(
+        root / "sources" / "inserted-soak.json", commit=COMMIT
+    )
+    inserted = wp01_sources.build_sd_inserted_stability_artifact(
+        inserted_source,
+        provenance_path,
+        root=root,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert inserted["ok"] is True, inserted.get("failures")
+    inserted_path = root / f"sd_inserted_stability_{COMMIT[:7]}.json"
+    inserted_path.write_text(json.dumps(inserted), encoding="utf-8")
+    paths["sd_inserted_stability"] = inserted_path
+
+    reboot_sources = []
+    for index in range(5):
+        reboot_sources.append(
+            write_reboot_source(
+                root / "sources" / f"reboot-{index + 1}.json",
+                commit=COMMIT,
+                token=f"cycle{index + 1}",
+                before_nonce=100 + index,
+                after_nonce=101 + index,
+                crash_total=20 + index,
+            )
+        )
+    reboots = wp01_sources.build_retained_reboot_matrix_artifact(
+        reboot_sources,
+        provenance_path,
+        root=root,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert reboots["ok"] is True, reboots.get("failures")
+    reboot_path = root / f"retained_reboot_matrix_{COMMIT[:7]}.json"
+    reboot_path.write_text(json.dumps(reboots), encoding="utf-8")
+    paths["retained_reboot_matrix"] = reboot_path
     return paths, provenance_path, run_dir
 
 
@@ -709,3 +770,378 @@ def test_release_audit_recognizes_only_hash_bound_complete_wp01_evidence(tmp_pat
     ).to_dict()
     assert gate["ok"] is False
     assert gate["details"]["sd_inserted_stability"]["artifact_ok"] is False
+
+
+def test_source_bound_inserted_artifact_rejects_raw_source_tamper(tmp_path: Path):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance_sha256 = wp01.sha256_file(provenance_path)
+    artifact = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    assert wp01.wp01_artifact_ok(
+        artifact,
+        "sd_inserted_stability",
+        COMMIT,
+        RUN_ID,
+        "COM12",
+        "COM16",
+        provenance,
+        provenance_sha256,
+        tmp_path,
+    ) is True
+
+    source_path = Path(artifact["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    storage = next(
+        row
+        for row in source["samples"][-1]["results"]
+        if row.get("cmd") == "storage status"
+    )
+    storage["sd"]["present"] = False
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    assert wp01.wp01_artifact_ok(
+        artifact,
+        "sd_inserted_stability",
+        COMMIT,
+        RUN_ID,
+        "COM12",
+        "COM16",
+        provenance,
+        provenance_sha256,
+        tmp_path,
+    ) is False
+
+
+def test_source_bound_reboot_matrix_rejects_dirty_raw_and_broken_nonce_chain(
+    tmp_path: Path,
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance_sha256 = wp01.sha256_file(provenance_path)
+    artifact = json.loads(
+        paths["retained_reboot_matrix"].read_text(encoding="utf-8")
+    )
+    assert wp01.wp01_artifact_ok(
+        artifact,
+        "retained_reboot_matrix",
+        COMMIT,
+        RUN_ID,
+        "COM12",
+        "COM16",
+        provenance,
+        provenance_sha256,
+        tmp_path,
+    ) is True
+
+    source_path = Path(artifact["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    dm = [row for row in source["results"] if row.get("cmd") == "messages dm"][-1]
+    dm["persistence"]["sd"]["reconcile_pending"] = True
+    dm["persisted"] = False
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    assert wp01.wp01_artifact_ok(
+        artifact,
+        "retained_reboot_matrix",
+        COMMIT,
+        RUN_ID,
+        "COM12",
+        "COM16",
+        provenance,
+        provenance_sha256,
+        tmp_path,
+    ) is False
+
+    broken_sources = []
+    for index in range(5):
+        broken_sources.append(
+            write_reboot_source(
+                tmp_path / "broken" / f"cycle-{index + 1}.json",
+                commit=COMMIT,
+                token=f"broken{index + 1}",
+                before_nonce=500 + index + (10 if index >= 3 else 0),
+                after_nonce=501 + index + (10 if index >= 3 else 0),
+                crash_total=50 + index,
+            )
+        )
+    broken = wp01_sources.build_retained_reboot_matrix_artifact(
+        broken_sources,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert broken["ok"] is False
+    assert broken["failures"] == ["reboot nonce chain is not consecutive"]
+
+
+def test_source_bound_producer_cli_rebuilds_both_canonical_artifacts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    for kind in ("sd_inserted_stability", "retained_reboot_matrix"):
+        canonical = json.loads(paths[kind].read_text(encoding="utf-8"))
+        out = tmp_path / "produced" / f"{kind}.json"
+        argv = [
+            "--kind",
+            kind,
+            "--root",
+            str(tmp_path),
+            "--commit",
+            COMMIT,
+            "--github-actions-run",
+            RUN_ID,
+            "--d1l-port",
+            "COM12",
+            "--rp2040-port",
+            "COM16",
+            "--exact-pair-provenance",
+            str(provenance_path),
+            "--out",
+            str(out),
+        ]
+        for receipt in canonical["source_receipts"]:
+            argv.extend(("--source", receipt["path"]))
+
+        assert wp01_produce.main(argv) == 0
+        assert json.loads(out.read_text(encoding="utf-8")) == canonical
+
+    summaries = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [summary["kind"] for summary in summaries] == [
+        "sd_inserted_stability",
+        "retained_reboot_matrix",
+    ]
+    assert all(summary["ok"] is True for summary in summaries)
+
+
+def test_source_bound_artifact_rejects_provenance_outside_root(tmp_path: Path):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    outside_dir = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside_dir.mkdir()
+    outside_provenance = outside_dir / provenance_path.name
+    shutil.copy2(provenance_path, outside_provenance)
+
+    escaped = wp01_sources.build_sd_inserted_stability_artifact(
+        source_path,
+        outside_provenance,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert escaped["ok"] is False
+    assert escaped["failures"] == [
+        "exact-pair provenance is outside repository root"
+    ]
+
+
+def test_inserted_source_rejects_degraded_backends_and_failed_commands(
+    tmp_path: Path,
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    for sample in source["samples"]:
+        for row in sample["results"]:
+            if row.get("cmd") == "storage status":
+                row["retained_sd"]["degraded"] = True
+                row["retained_sd"]["backup_degraded"] = True
+                for name in ("messages", "dm", "routes", "packets"):
+                    row["stores"][name] = "nvs"
+            elif row.get("cmd") == "packets":
+                row["ok"] = False
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_sd_inserted_stability_artifact(
+        source_path,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+    assert rebuilt["failures"] == [
+        "inserted-card soak sample command cohort failed"
+    ]
+
+
+@pytest.mark.parametrize("tamper", ["identity", "preflight_order"])
+def test_reboot_source_rejects_identity_or_late_preflight(
+    tmp_path: Path, tamper: str
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(paths["retained_reboot_matrix"].read_text(encoding="utf-8"))
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if tamper == "identity":
+        source["expected_firmware_commit"] = "0" * 40
+        source["pre_device_build_commit"] = "0" * 40
+        source["device_build_commit"] = "0" * 40
+        source["pre_firmware_identity_ok"] = False
+        source["post_firmware_identity_ok"] = False
+        source["firmware_identity_ok"] = False
+    else:
+        preflight = list(zip(source["commands"][:2], source["results"][:2]))
+        remaining = list(zip(source["commands"][2:], source["results"][2:]))
+        reboot_index = next(
+            index for index, (command, _result) in enumerate(remaining) if command == "reboot"
+        )
+        reordered = [
+            *remaining[:reboot_index],
+            *preflight,
+            *remaining[reboot_index:],
+        ]
+        source["commands"] = [command for command, _result in reordered]
+        source["results"] = [result for _command, result in reordered]
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_retained_reboot_matrix_artifact(
+        [Path(receipt["path"]) for receipt in canonical["source_receipts"]],
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+    assert rebuilt["cycle_count"] == 0
+
+
+def test_reboot_matrix_rejects_discontinuous_crashlog_chain(tmp_path: Path):
+    _paths, provenance_path, _ = write_inputs(tmp_path)
+    crash_totals = (20, 100, 50, 200, 1)
+    sources = [
+        write_reboot_source(
+            tmp_path / "disjoint" / f"cycle-{index + 1}.json",
+            commit=COMMIT,
+            token=f"disjoint{index + 1}",
+            before_nonce=700 + index,
+            after_nonce=701 + index,
+            crash_total=crash_total,
+        )
+        for index, crash_total in enumerate(crash_totals)
+    ]
+    rebuilt = wp01_sources.build_retained_reboot_matrix_artifact(
+        sources,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+    assert rebuilt["failures"] == ["reboot crashlog chain is not consecutive"]
+
+
+@pytest.mark.parametrize(
+    "tamper", ["intermediate_crash", "flat_elapsed", "infinite_elapsed"]
+)
+def test_inserted_source_rejects_hidden_crash_or_zero_observed_span(
+    tmp_path: Path, tamper: str
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if tamper == "flat_elapsed":
+        for sample in source["samples"]:
+            sample["elapsed_sec"] = 300.0
+    elif tamper == "infinite_elapsed":
+        source["samples"][-1]["elapsed_sec"] = float("inf")
+    else:
+        crashlog = next(
+            row
+            for row in source["samples"][3]["results"]
+            if row.get("cmd") == "crashlog"
+        )
+        crashlog["total_written"] = 2
+        crashlog["entries"].append(
+            {"seq": 2, "reset_reason": "WDT_TASK", "crash_like": True}
+        )
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_sd_inserted_stability_artifact(
+        source_path,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+
+
+def test_reboot_matrix_rejects_failed_health_boundary(tmp_path: Path):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(paths["retained_reboot_matrix"].read_text(encoding="utf-8"))
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    for row in source["results"]:
+        if row.get("cmd") == "health":
+            row["ok"] = False
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_retained_reboot_matrix_artifact(
+        [Path(receipt["path"]) for receipt in canonical["source_receipts"]],
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+    assert rebuilt["ok"] is False
+    assert rebuilt["failures"] == ["reboot source health boundary is missing"]
+
+
+def test_source_bound_producer_refuses_to_overwrite_raw_source(tmp_path: Path):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(
+        paths["sd_inserted_stability"].read_text(encoding="utf-8")
+    )
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source_sha256 = wp01.sha256_file(source_path)
+    with pytest.raises(
+        SystemExit, match="output must not overwrite a source or provenance receipt"
+    ):
+        wp01_produce.main(
+            [
+                "--kind",
+                "sd_inserted_stability",
+                "--root",
+                str(tmp_path),
+                "--commit",
+                COMMIT,
+                "--github-actions-run",
+                RUN_ID,
+                "--d1l-port",
+                "COM12",
+                "--rp2040-port",
+                "COM16",
+                "--exact-pair-provenance",
+                str(provenance_path),
+                "--source",
+                str(source_path),
+                "--out",
+                str(source_path),
+            ]
+        )
+    assert wp01.sha256_file(source_path) == source_sha256
