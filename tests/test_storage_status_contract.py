@@ -201,14 +201,28 @@ def test_storage_status_service_is_boot_safe_and_nvs_fallback():
     assert "poll_mount_pending_until(deadline_us)" in remount_body
     assert "remount_timeout_needs_bridge_reset()" in remount_body
     assert "reset_bridge_and_remount_blocking(deadline_us)" in remount_body
-    assert "manager_sequence_try_take()" in remount_body
-    assert "ESP_ERR_INVALID_STATE" in remount_body
+    assert "manager_sequence_take(remaining_ms)" in remount_body
+    assert "manager_sequence_ret != ESP_OK" in remount_body
+    assert "return manager_sequence_ret" in remount_body
+    assert "ESP_ERR_TIMEOUT" in remount_body
     assert "manager_sequence_give()" in remount_body
     assert "request_bridge_reset_remount_recovery()" not in remount_body
     assert "d1l_storage_manager_start()" not in remount_body
     assert "classify_storage_manager_state(ret, false)" in remount_body
     assert "d1l_rp2040_bridge_ping(&ping, timeout_ms)" not in remount_body
     assert "d1l_storage_status_refresh(timeout_ms)" not in remount_body
+    sequence_take = source.split(
+        "static esp_err_t manager_sequence_take", 1
+    )[1].split("static bool manager_sequence_try_take", 1)[0]
+    assert "pdMS_TO_TICKS(timeout_ms)" in sequence_take
+    assert "xSemaphoreTake(s_manager_sequence_mutex, ticks)" in sequence_take
+    assert "ESP_ERR_TIMEOUT" in sequence_take
+    sequence_failure = remount_body.split(
+        "if (manager_sequence_ret != ESP_OK)", 1
+    )[1].split("remaining_ms = storage_deadline_remaining_ms", 1)[0]
+    assert "d1l_route_store_worker_quiesce_begin" not in sequence_failure
+    assert "storage_status_mount" not in sequence_failure
+    assert "return manager_sequence_ret" in sequence_failure
     sync_recovery_body = source.split("static esp_err_t reset_bridge_and_remount_blocking", 1)[1].split(
         "static void classify_storage_manager_state", 1
     )[0]

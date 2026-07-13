@@ -139,11 +139,23 @@ static void ensure_manager_sequence_mutex(void)
     }
 }
 
-static bool manager_sequence_try_take(void)
+static esp_err_t manager_sequence_take(uint32_t timeout_ms)
 {
     ensure_manager_sequence_mutex();
-    return s_manager_sequence_mutex &&
-           xSemaphoreTake(s_manager_sequence_mutex, 0) == pdTRUE;
+    if (!s_manager_sequence_mutex) {
+        return ESP_ERR_NO_MEM;
+    }
+    TickType_t ticks = pdMS_TO_TICKS(timeout_ms);
+    if (timeout_ms > 0U && ticks == 0U) {
+        ticks = 1U;
+    }
+    return xSemaphoreTake(s_manager_sequence_mutex, ticks) == pdTRUE ?
+        ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+static bool manager_sequence_try_take(void)
+{
+    return manager_sequence_take(0U) == ESP_OK;
 }
 
 static void manager_sequence_give(void)
@@ -1333,14 +1345,18 @@ esp_err_t d1l_storage_status_remount_blocking(
     }
 
     /* The serial blocking path and background manager share one high-level
-     * owner. A command racing an active manager recovery reports busy instead
-     * of starting a second reset/remount sequence. */
-    if (!manager_sequence_try_take()) {
-        s_status.last_error = ESP_ERR_INVALID_STATE;
-        return ESP_ERR_INVALID_STATE;
+     * owner. Wait within the command's existing absolute deadline so a
+     * periodic manager cycle cannot make an otherwise healthy remount fail
+     * merely because it owns the sequence at that instant. */
+    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    const esp_err_t manager_sequence_ret = remaining_ms > 0U ?
+        manager_sequence_take(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (manager_sequence_ret != ESP_OK) {
+        s_status.last_error = manager_sequence_ret;
+        return manager_sequence_ret;
     }
 
-    uint32_t remaining_ms = storage_deadline_remaining_ms(deadline_us);
+    remaining_ms = storage_deadline_remaining_ms(deadline_us);
     const esp_err_t retained_quiesce_ret = remaining_ms > 0U ?
         d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
     if (retained_quiesce_ret != ESP_OK) {

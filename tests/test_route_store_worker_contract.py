@@ -176,9 +176,14 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
     )[1].split(
         "void d1l_storage_status", 1
     )[0]
-    assert remount.index("manager_sequence_try_take") < remount.index(
+    assert remount.index("manager_sequence_take(remaining_ms)") < remount.index(
         "d1l_route_store_worker_quiesce_begin"
     ) < remount.index("storage_status_mount")
+    sequence_failure = remount.split(
+        "if (manager_sequence_ret != ESP_OK)", 1
+    )[1].split("remaining_ms = storage_deadline_remaining_ms", 1)[0]
+    assert "return manager_sequence_ret" in sequence_failure
+    assert "d1l_route_store_worker_quiesce_begin" not in sequence_failure
     assert remount.rindex("d1l_route_store_worker_quiesce_end") < remount.rindex(
         "manager_sequence_give()"
     )
