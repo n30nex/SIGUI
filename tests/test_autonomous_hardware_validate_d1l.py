@@ -479,6 +479,39 @@ def test_autonomous_smoke_binds_device_version_to_selected_commit(tmp_path, monk
     assert captured["args"][index + 1] == COMMIT
 
 
+def test_autonomous_reboot_remount_binds_exact_device_commit(tmp_path, monkeypatch):
+    ctx = runner.RunContext(
+        root=tmp_path,
+        commit=COMMIT,
+        short_commit=COMMIT[:7],
+        github_run_id="28663994079",
+        github_run_dir=tmp_path / "artifacts" / "github" / "28663994079-current",
+        d1l_port="COM12",
+        rp2040_port="COM16",
+        hardware_dir=tmp_path / "artifacts" / "hardware" / "com12",
+        rp2040_hardware_dir=tmp_path / "artifacts" / "hardware" / "com16",
+        baud=115200,
+        esp32_flash_baud=460800,
+    )
+    captured = {}
+
+    def fake_run(_ctx, kind, args, out, timeout, dry_run):
+        captured.update(
+            {"kind": kind, "args": args, "timeout": timeout, "dry_run": dry_run}
+        )
+        return {"ok": True}
+
+    monkeypatch.setattr(runner, "run_existing_script", fake_run)
+
+    report = runner.run_sd_reboot_remount(ctx, dry_run=True)
+
+    assert report["ok"] is True
+    assert captured["kind"] == "sd_reboot_remount"
+    index = captured["args"].index("--expected-firmware-commit")
+    assert captured["args"][index + 1] == COMMIT
+    assert captured["timeout"] == 300
+
+
 def test_compose_keyboard_capture_command_uses_com12_targets_and_artifact_path(tmp_path, monkeypatch):
     ctx = runner.RunContext(
         root=tmp_path,

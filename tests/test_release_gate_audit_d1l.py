@@ -1084,12 +1084,165 @@ def write_retained_canary_evidence(root: Path, commit: str = COMMIT, metadata_co
 
 
 def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
+    token = "remount1"
+    persistence_commands = audit.persistence_readback_commands(token)
+    message_persistence = {
+        "loaded": True,
+        "dirty": False,
+        "failures": 0,
+        "sd": {
+            "required": True,
+            "dirty": False,
+            "reconcile_pending": False,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+        "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+    }
+    clean_storage = ready_storage_status()
+    for store in clean_storage["retained_sd"]["stores"].values():
+        store.update(
+            {
+                "sd_read_fail_count": 0,
+                "sd_write_fail_count": 0,
+                "sd_rename_fail_count": 0,
+                "nvs_mirror_fail_count": 0,
+                "sd_last_error": "ESP_OK",
+                "sd_degraded_latched": False,
+            }
+        )
+    persistence_results = [
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages public",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages dm",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes",
+            "persisted": True,
+            "persistence": {
+                "dirty": False,
+                "fail_count": 0,
+                "clear_failure_latched": False,
+                "clear_fail_count": 0,
+                "clear_last_error": "ESP_OK",
+                "sd_primary": {
+                    "required": True,
+                    "dirty": False,
+                    "reconcile_pending": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs_fallback": {
+                    "dirty": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "packets search",
+            "persisted": True,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "failures": 0,
+                "reconcile": {
+                    "pending": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "sd": {
+                    "required": True,
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+                "journal": {
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        clean_storage,
+    ]
+    crashlog_before = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 10,
+        "entries": [{"seq": 10, "reset_reason": "SW", "crash_like": False}],
+    }
+    crashlog_after = {
+        "schema": 1,
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 11,
+        "entries": [
+            {"seq": 10, "reset_reason": "SW", "crash_like": False},
+            {"seq": 11, "reset_reason": "SW", "crash_like": False},
+        ],
+    }
+    version = {"schema": 1, "ok": True, "cmd": "version", "build_commit": commit}
+    commands = [
+        "version",
+        "crashlog",
+        "health",
+        "reboot",
+        "health",
+        "version",
+        "crashlog",
+        *persistence_commands,
+    ]
+    results = [
+        version,
+        crashlog_before,
+        {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+        {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
+        {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
+        json.loads(json.dumps(version)),
+        crashlog_after,
+        *persistence_results,
+    ]
+    post_persistence = dict(zip(persistence_commands, persistence_results))
     write_json(
         root / "artifacts" / "hardware" / "com12" / f"sd_reboot_remount_{commit[:7]}.json",
         {
             "schema": 1,
             "mode": "hardware",
             "port": "COM12",
+            "token": token,
+            "expected_firmware_commit": commit,
+            "pre_device_build_commit": commit,
+            "device_build_commit": commit,
+            "firmware_identity_required": True,
+            "pre_firmware_identity_ok": True,
+            "post_firmware_identity_ok": True,
+            "firmware_identity_ok": True,
+            "persistence_clean_required": True,
+            "post_reboot_persistence_clean": True,
+            "post_reboot_pending_dirty": False,
+            "persistence_poll_attempts_used": 1,
+            "post_reboot_persistence": post_persistence,
+            "crashlog_transition_required": True,
+            "crashlog_transition_ok": True,
+            "crashlog_before_reboot": crashlog_before,
+            "crashlog_after_reboot": crashlog_after,
             "public_rf_tx": False,
             "formats_sd": False,
             "ok": True,
@@ -1113,6 +1266,7 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_reboot_readbacks_ok": True,
             "health_ok": True,
             "reboot_command_passed": True,
+            "reboot_retained_flush": "ESP_OK",
             "reboot_route_flush": "ESP_OK",
             "reboot_storage_manager_quiesced": True,
             "reboot_retained_worker_quiesced": True,
@@ -1126,12 +1280,8 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_map_tile_canary_passed": True,
             "storage_before_reboot": ready_storage_status(),
             "storage_after_reboot": ready_storage_status(),
-            "commands": ["health", "reboot", "health"],
-            "results": [
-                {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
-                {"ok": True, "cmd": "reboot", "rebooting": True, "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
-                {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
-            ],
+            "commands": commands,
+            "results": results,
             **({"firmware_commit": metadata_commit} if metadata_commit else {}),
         },
     )
@@ -2166,6 +2316,102 @@ def test_release_gate_requires_retained_worker_quiesce_receipts(tmp_path: Path):
     assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
     missing_remount_receipt["pre_remount_manager_busy"] = True
     assert audit.sd_reboot_remount_artifact_ok(missing_remount_receipt, "COM12") is False
+
+
+def test_reboot_remount_gate_recomputes_identity_persistence_and_crashlog(tmp_path: Path):
+    write_reboot_remount_evidence(tmp_path)
+    path = (
+        tmp_path
+        / "artifacts"
+        / "hardware"
+        / "com12"
+        / f"sd_reboot_remount_{COMMIT[:7]}.json"
+    )
+    valid = json.loads(path.read_text(encoding="utf-8"))
+    assert audit.sd_reboot_remount_artifact_ok(valid, "COM12", COMMIT) is True
+
+    optimistic_dirty = json.loads(json.dumps(valid))
+    dm = [
+        row
+        for row in optimistic_dirty["results"]
+        if row.get("cmd") == "messages dm"
+    ][-1]
+    dm["persistence"]["sd"]["reconcile_pending"] = True
+    dm["persisted"] = False
+    assert optimistic_dirty["post_reboot_persistence_clean"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_dirty, "COM12", COMMIT
+    ) is False
+
+    optimistic_sha = json.loads(json.dumps(valid))
+    versions = [
+        row for row in optimistic_sha["results"] if row.get("cmd") == "version"
+    ]
+    versions[-1]["build_commit"] = STALE_COMMIT
+    assert optimistic_sha["firmware_identity_ok"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_sha, "COM12", COMMIT
+    ) is False
+
+    optimistic_crashlog = json.loads(json.dumps(valid))
+    crashlogs = [
+        row
+        for row in optimistic_crashlog["results"]
+        if row.get("cmd") == "crashlog"
+    ]
+    crashlogs[-1]["entries"][-1]["crash_like"] = True
+    crashlogs[-1]["entries"][-1]["reset_reason"] = "WDT"
+    assert optimistic_crashlog["crashlog_transition_ok"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_crashlog, "COM12", COMMIT
+    ) is False
+
+    misplaced_version = json.loads(json.dumps(valid))
+    reboot_index = misplaced_version["commands"].index("reboot")
+    version_indices = [
+        index
+        for index, command in enumerate(misplaced_version["commands"])
+        if command == "version"
+    ]
+    post_version_index = version_indices[-1]
+    moved_command = misplaced_version["commands"].pop(post_version_index)
+    moved_result = misplaced_version["results"].pop(post_version_index)
+    misplaced_version["commands"].insert(reboot_index, moved_command)
+    misplaced_version["results"].insert(reboot_index, moved_result)
+    assert audit.command_result_transcript_aligned(misplaced_version) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        misplaced_version, "COM12", COMMIT
+    ) is False
+
+    misplaced_crashlog = json.loads(json.dumps(valid))
+    reboot_index = misplaced_crashlog["commands"].index("reboot")
+    crashlog_indices = [
+        index
+        for index, command in enumerate(misplaced_crashlog["commands"])
+        if command == "crashlog"
+    ]
+    post_crashlog_index = crashlog_indices[-1]
+    moved_command = misplaced_crashlog["commands"].pop(post_crashlog_index)
+    moved_result = misplaced_crashlog["results"].pop(post_crashlog_index)
+    misplaced_crashlog["commands"].insert(reboot_index, moved_command)
+    misplaced_crashlog["results"].insert(reboot_index, moved_result)
+    assert audit.command_result_transcript_aligned(misplaced_crashlog) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        misplaced_crashlog, "COM12", COMMIT
+    ) is False
+
+    partial_final_poll = json.loads(json.dumps(valid))
+    first_poll_command = audit.persistence_readback_commands("remount1")[0]
+    partial_final_poll["commands"].append(first_poll_command)
+    partial_final_poll["results"].append(
+        json.loads(
+            json.dumps(partial_final_poll["post_reboot_persistence"][first_poll_command])
+        )
+    )
+    assert audit.command_result_transcript_aligned(partial_final_poll) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        partial_final_poll, "COM12", COMMIT
+    ) is False
 
 
 def test_boot_prepare_gate_requires_remount_worker_receipt_except_bridge_unavailable():

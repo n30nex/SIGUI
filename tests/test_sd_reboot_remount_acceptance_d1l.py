@@ -217,6 +217,93 @@ def health_line(boot_nonce: int | None = 2, reset_reason: str = "SW") -> str:
     return f'{{"schema":1,"ok":true,"cmd":"health","board_ready":true,"ui_ready":true,"reset_reason":"{reset_reason}"{nonce}}}\n'
 
 
+def clean_persistence_snapshot(token: str) -> dict[str, dict]:
+    fp = remount_accept.fingerprint_for_token(token)
+    message_persistence = {
+        "loaded": True,
+        "dirty": False,
+        "failures": 0,
+        "sd": {
+            "required": True,
+            "dirty": False,
+            "reconcile_pending": False,
+            "failures": 0,
+            "last_error": "ESP_OK",
+        },
+        "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+    }
+    return {
+        f"messages public search {token}": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages public",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        f"messages dm {fp}": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "messages dm",
+            "persisted": True,
+            "persistence": json.loads(json.dumps(message_persistence)),
+        },
+        "routes": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes",
+            "persisted": True,
+            "persistence": {
+                "dirty": False,
+                "fail_count": 0,
+                "clear_failure_latched": False,
+                "clear_fail_count": 0,
+                "clear_last_error": "ESP_OK",
+                "sd_primary": {
+                    "required": True,
+                    "dirty": False,
+                    "reconcile_pending": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs_fallback": {
+                    "dirty": False,
+                    "fail_count": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        f"packets search {token}": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "packets search",
+            "persisted": True,
+            "persistence": {
+                "loaded": True,
+                "dirty": False,
+                "failures": 0,
+                "reconcile": {
+                    "pending": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "sd": {
+                    "required": True,
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+                "nvs": {"dirty": False, "failures": 0, "last_error": "ESP_OK"},
+                "journal": {
+                    "dirty": False,
+                    "failures": 0,
+                    "last_error": "ESP_OK",
+                },
+            },
+        },
+        "storage status": json.loads(ready_storage_line()),
+    }
+
+
 def test_storage_ready_requires_fat32_filesystem():
     ready = json.loads(ready_storage_line())
     assert remount_accept.storage_ready(ready) is True
@@ -230,6 +317,162 @@ def test_storage_ready_requires_manager_ready_sd_not_cached_sd_fields():
 
     cached_ready["manager"]["state"] = "READY_SD"
     assert remount_accept.storage_ready(cached_ready) is True
+
+
+def test_strict_dry_run_declares_exact_identity_crashlog_and_clean_persistence():
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    report = remount_accept.dry_run_report(
+        "strict1", expected_firmware_commit=commit
+    )
+
+    assert report["firmware_identity_required"] is True
+    assert report["persistence_clean_required"] is True
+    assert report["crashlog_transition_required"] is True
+    assert report["commands"].count("version") == 2
+    assert report["commands"].count("crashlog") == 2
+    assert "routes" in report["commands"]
+    assert "crashlog clear" not in report["commands"]
+
+
+def test_persistence_snapshot_requires_every_store_clean_and_error_free():
+    token = "clean1"
+    snapshot = clean_persistence_snapshot(token)
+    assert remount_accept.persistence_snapshot_clean(snapshot, token) is True
+
+    fingerprint = remount_accept.fingerprint_for_token(token)
+    snapshot[f"messages dm {fingerprint}"]["persistence"]["sd"][
+        "reconcile_pending"
+    ] = True
+    assert remount_accept.persistence_snapshot_clean(snapshot, token) is False
+
+    snapshot = clean_persistence_snapshot(token)
+    snapshot["routes"]["persistence"]["sd_primary"]["fail_count"] = 1
+    assert remount_accept.persistence_snapshot_clean(snapshot, token) is False
+
+    snapshot = clean_persistence_snapshot(token)
+    del snapshot[f"packets search {token}"]["persistence"]["journal"]["dirty"]
+    assert remount_accept.persistence_snapshot_clean(snapshot, token) is False
+
+
+def test_persistence_poll_retries_dirty_snapshot_until_clean():
+    token = "poll1"
+    dirty = clean_persistence_snapshot(token)
+    fingerprint = remount_accept.fingerprint_for_token(token)
+    dirty[f"messages dm {fingerprint}"]["persistence"]["dirty"] = True
+    dirty[f"messages dm {fingerprint}"]["persisted"] = False
+    clean = clean_persistence_snapshot(token)
+    plan = remount_accept.persistence_readback_commands(token)
+    serial = FakeSerial(
+        [json.dumps(dirty[command]) + "\n" for command in plan]
+        + [json.dumps(clean[command]) + "\n" for command in plan]
+    )
+
+    commands, results, latest, passed, attempts = remount_accept.run_persistence_poll(
+        serial,
+        token=token,
+        timeout=0.1,
+        attempts=2,
+        interval_sec=0.0,
+    )
+
+    assert passed is True
+    assert attempts == 2
+    assert commands == plan + plan
+    assert len(results) == len(plan) * 2
+    assert remount_accept.persistence_snapshot_clean(latest, token) is True
+
+
+def test_persistence_poll_fails_closed_when_routes_stay_dirty():
+    token = "poll2"
+    dirty = clean_persistence_snapshot(token)
+    dirty["routes"]["persistence"]["dirty"] = True
+    dirty["routes"]["persisted"] = False
+    plan = remount_accept.persistence_readback_commands(token)
+    serial = FakeSerial([json.dumps(dirty[command]) + "\n" for command in plan])
+
+    _commands, _results, latest, passed, attempts = remount_accept.run_persistence_poll(
+        serial,
+        token=token,
+        timeout=0.1,
+        attempts=1,
+        interval_sec=0.0,
+    )
+
+    assert passed is False
+    assert attempts == 1
+    assert remount_accept.persistence_snapshot_clean(latest, token) is False
+
+
+def test_crashlog_transition_requires_one_new_non_crash_software_reset():
+    before = {
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 3,
+        "entries": [{"seq": 3, "reset_reason": "SW", "crash_like": False}],
+    }
+    after = {
+        "ok": True,
+        "cmd": "crashlog",
+        "total_written": 4,
+        "entries": [
+            {"seq": 3, "reset_reason": "SW", "crash_like": False},
+            {"seq": 4, "reset_reason": "SW", "crash_like": False},
+        ],
+    }
+    assert remount_accept.crashlog_transition_passed(before, after) is True
+
+    after["entries"][-1]["crash_like"] = True
+    assert remount_accept.crashlog_transition_passed(before, after) is False
+    after["entries"][-1]["crash_like"] = False
+    after["total_written"] = 5
+    assert remount_accept.crashlog_transition_passed(before, after) is False
+
+
+def test_wrong_preflight_sha_stops_before_retained_mutation(monkeypatch):
+    expected = "0123456789abcdef0123456789abcdef01234567"
+    wrong = "f" * 40
+    pre = FakeSerial(
+        [
+            json.dumps(
+                {"schema": 1, "ok": True, "cmd": "version", "build_commit": wrong}
+            )
+            + "\n",
+            json.dumps(
+                {
+                    "schema": 1,
+                    "ok": True,
+                    "cmd": "crashlog",
+                    "total_written": 1,
+                    "entries": [
+                        {"seq": 1, "reset_reason": "SW", "crash_like": False}
+                    ],
+                }
+            )
+            + "\n",
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        0.1,
+        "wrongsha",
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+        expected_firmware_commit=expected,
+        persistence_poll_attempts=1,
+        persistence_poll_interval_sec=0.0,
+    )
+
+    assert report["firmware_identity_ok"] is False
+    assert report["pre_firmware_identity_ok"] is False
+    assert report["reboot_attempted"] is False
+    assert report["ok"] is False
+    assert "storage remount" not in report["commands"]
+    assert "storage filecanary" not in report["commands"]
 
 
 def install_fake_serial(monkeypatch, serials):

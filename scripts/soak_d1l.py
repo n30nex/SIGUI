@@ -14,10 +14,20 @@ from typing import Callable, Iterable
 
 try:
     from artifact_metadata import stamp_report
-    from smoke_d1l import open_d1l_serial, send_console_command
+    from smoke_d1l import (
+        exact_commit,
+        firmware_identity_matches,
+        open_d1l_serial,
+        send_console_command,
+    )
 except ModuleNotFoundError:
     from scripts.artifact_metadata import stamp_report
-    from scripts.smoke_d1l import open_d1l_serial, send_console_command
+    from scripts.smoke_d1l import (
+        exact_commit,
+        firmware_identity_matches,
+        open_d1l_serial,
+        send_console_command,
+    )
 
 
 SOAK_COMMANDS = [
@@ -609,7 +619,17 @@ def dry_run_report(
     allow_sd_unavailable: bool = False,
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
+    expected_firmware_commit: str | None = None,
 ) -> dict:
+    normalized_commit = (
+        exact_commit(expected_firmware_commit)
+        if expected_firmware_commit is not None
+        else None
+    )
+    if expected_firmware_commit is not None and normalized_commit is None:
+        raise ValueError(
+            "expected_firmware_commit must be an exact 40-character hexadecimal SHA"
+        )
     active_command = active_dm_command(
         active_public_text, active_dm_fingerprint, active_dm_text
     )
@@ -618,6 +638,11 @@ def dry_run_report(
         "mode": "dry-run",
         "hardware_required": False,
         "ok": True,
+        "preflight_commands": ["version"] if normalized_commit is not None else [],
+        "expected_firmware_commit": normalized_commit,
+        "device_build_commit": None,
+        "firmware_identity_required": normalized_commit is not None,
+        "firmware_identity_ok": None,
         "duration_sec": duration_sec,
         "sample_interval_sec": sample_interval_sec,
         "commands": soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary),
@@ -664,7 +689,18 @@ def run_serial_soak(
     allow_sd_unavailable: bool = False,
     active_dm_fingerprint: str | None = None,
     active_dm_text: str | None = None,
+    expected_firmware_commit: str | None = None,
 ) -> dict:
+    normalized_commit = (
+        exact_commit(expected_firmware_commit)
+        if expected_firmware_commit is not None
+        else None
+    )
+    if expected_firmware_commit is not None and normalized_commit is None:
+        raise ValueError(
+            "expected_firmware_commit must be an exact 40-character hexadecimal SHA"
+        )
+
     try:
         import serial
     except ImportError as exc:
@@ -683,6 +719,9 @@ def run_serial_soak(
     samples: list[dict] = []
     active_events: list[dict] = []
     setup_events: list[dict] = []
+    version_preflight: dict = {}
+    firmware_identity_ok: bool | None = None
+    preflight_failure: str | None = None
     started_at = datetime.now(timezone.utc)
     commands = soak_commands(sample_storage=sample_storage, sd_file_canary=sd_file_canary)
 
@@ -690,16 +729,41 @@ def run_serial_soak(
         time.sleep(startup_settle_sec)
         ser.reset_input_buffer()
 
-        if clear_crashlog_before_start:
+        if normalized_commit is not None:
+            version_preflight = send_soak_command(
+                ser, "version", timeout, command_retries, retry_delay_sec
+            )
             setup_events.append(
                 {
                     "elapsed_sec": 0.0,
-                    "cmd": "crashlog clear",
-                    "result": send_soak_command(
-                        ser, "crashlog clear", timeout, command_retries, retry_delay_sec
-                    ),
+                    "cmd": "version",
+                    "result": version_preflight,
                 }
             )
+            firmware_identity_ok = (
+                version_preflight.get("ok") is True
+                and firmware_identity_matches(version_preflight, normalized_commit)
+            )
+            if version_preflight.get("ok") is not True:
+                preflight_failure = "version_preflight_failed"
+            elif not firmware_identity_ok:
+                preflight_failure = "firmware_identity_mismatch"
+
+        if clear_crashlog_before_start:
+            if preflight_failure is None:
+                setup_events.append(
+                    {
+                        "elapsed_sec": 0.0,
+                        "cmd": "crashlog clear",
+                        "result": send_soak_command(
+                            ser,
+                            "crashlog clear",
+                            timeout,
+                            command_retries,
+                            retry_delay_sec,
+                        ),
+                    }
+                )
 
         fatal_timeout_command = next(
             (
@@ -716,7 +780,7 @@ def run_serial_soak(
         next_active = start if active_command else float("inf")
         sample_index = 0
 
-        while fatal_timeout_command is None:
+        while fatal_timeout_command is None and preflight_failure is None:
             now = time.monotonic()
             elapsed = now - start
 
@@ -770,7 +834,7 @@ def run_serial_soak(
             sleep_for = min(next_sample, next_active, deadline) - now
             time.sleep(max(0.1, min(sleep_for, 1.0)))
 
-        if fatal_timeout_command is None:
+        if fatal_timeout_command is None and preflight_failure is None:
             final_elapsed = time.monotonic() - start
             final_sample = collect_sample(
                 ser,
@@ -811,12 +875,22 @@ def run_serial_soak(
         summary["command_failures"].extend(setup_failures)
         summary["command_failure_count"] = len(summary["command_failures"])
         summary["ok"] = False
+    if preflight_failure is not None:
+        summary["threshold_failures"].append(preflight_failure)
+        summary["ok"] = False
 
     return {
         "schema": 1,
         "mode": "hardware",
         "port": port,
         "baud": baud,
+        "preflight_commands": ["version"] if normalized_commit is not None else [],
+        "expected_firmware_commit": normalized_commit,
+        "device_build_commit": version_preflight.get("build_commit"),
+        "firmware_identity_required": normalized_commit is not None,
+        "firmware_identity_ok": firmware_identity_ok,
+        "version_preflight": version_preflight,
+        "preflight_failure": preflight_failure,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
         "ended_at": ended_at.isoformat().replace("+00:00", "Z"),
         "duration_sec": duration_sec,
@@ -885,6 +959,7 @@ def main() -> int:
     parser.add_argument("--sample-storage", action="store_true")
     parser.add_argument("--sd-file-canary", action="store_true")
     parser.add_argument("--allow-sd-unavailable", action="store_true")
+    parser.add_argument("--expected-firmware-commit", default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
@@ -897,6 +972,16 @@ def main() -> int:
         )
     except ValueError as exc:
         parser.error(str(exc))
+
+    normalized_commit = (
+        exact_commit(args.expected_firmware_commit)
+        if args.expected_firmware_commit is not None
+        else None
+    )
+    if args.expected_firmware_commit is not None and normalized_commit is None:
+        parser.error(
+            "--expected-firmware-commit must be an exact 40-character hexadecimal SHA"
+        )
 
     if args.dry_run:
         report = dry_run_report(
@@ -915,11 +1000,14 @@ def main() -> int:
             allow_sd_unavailable=args.allow_sd_unavailable,
             active_dm_fingerprint=args.active_dm_fingerprint,
             active_dm_text=args.active_dm_text,
+            expected_firmware_commit=normalized_commit,
         )
         mode = "dry-run"
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+        if normalized_commit is None:
+            parser.error("Hardware soak requires --expected-firmware-commit.")
         try:
             report = run_serial_soak(
                 port=args.port,
@@ -941,6 +1029,7 @@ def main() -> int:
                 allow_sd_unavailable=args.allow_sd_unavailable,
                 active_dm_fingerprint=args.active_dm_fingerprint,
                 active_dm_text=args.active_dm_text,
+                expected_firmware_commit=normalized_commit,
             )
         except ValueError as exc:
             parser.error(str(exc))

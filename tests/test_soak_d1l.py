@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from scripts import soak_d1l
@@ -139,6 +141,7 @@ def test_file_ops_ready_requires_fat32_filesystem():
 
 
 def test_dry_run_reports_soak_commands():
+    commit = "a" * 40
     report = soak_d1l.dry_run_report(
         duration_sec=60,
         sample_interval_sec=10,
@@ -152,6 +155,7 @@ def test_dry_run_reports_soak_commands():
         retry_delay_sec=0.5,
         active_dm_fingerprint="0BF0A701D5AE2DB6",
         active_dm_text="test",
+        expected_firmware_commit=commit.upper(),
     )
 
     assert report["ok"] is True
@@ -163,6 +167,11 @@ def test_dry_run_reports_soak_commands():
     assert report["require_rx_delta"] is True
     assert report["clear_crashlog_before_start"] is True
     assert report["command_retries"] == 1
+    assert report["preflight_commands"] == ["version"]
+    assert report["expected_firmware_commit"] == commit
+    assert report["device_build_commit"] is None
+    assert report["firmware_identity_required"] is True
+    assert report["firmware_identity_ok"] is None
 
 
 def test_dry_run_rejects_automated_public_tx():
@@ -850,6 +859,7 @@ def run_soak_for_timeout_test(**overrides):
         "sample_storage": False,
         "sd_file_canary": False,
         "allow_sd_unavailable": False,
+        "expected_firmware_commit": None,
     }
     args.update(overrides)
     return soak_d1l.run_serial_soak(**args)
@@ -956,3 +966,122 @@ def test_final_sample_timeout_is_reported_at_top_level(monkeypatch):
     assert collected == ["start", "final"]
     assert report["aborted_after_timeout"] == "health"
     assert report["ok"] is False
+
+
+def test_hardware_soak_preflights_exact_firmware_identity_before_sampling(monkeypatch):
+    commit = "a" * 40
+    calls = []
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        calls.append(command)
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": command,
+            "build_commit": commit.upper(),
+        }
+
+    def fake_collect(_ser, _timeout, label, elapsed_sec, *_args, **_kwargs):
+        calls.append(f"sample:{label}")
+        row = sample(label, elapsed_sec, base_health(), {"rx_packets": 0, "tx_packets": 0})
+        row["aborted_after_timeout"] = None
+        return row
+
+    class FakeSerialModule:
+        pass
+
+    monkeypatch.setitem(sys.modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(soak_d1l, "open_d1l_serial", lambda *_args, **_kwargs: FakeSoakPort())
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(soak_d1l, "collect_sample", fake_collect)
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        duration_sec=0.001,
+        expected_firmware_commit=commit,
+    )
+
+    assert calls[0] == "version"
+    assert calls[1].startswith("sample:")
+    assert report["preflight_commands"] == ["version"]
+    assert report["expected_firmware_commit"] == commit
+    assert report["device_build_commit"] == commit.upper()
+    assert report["firmware_identity_required"] is True
+    assert report["firmware_identity_ok"] is True
+    assert report["version_preflight"]["cmd"] == "version"
+    assert report["preflight_failure"] is None
+    assert report["ok"] is True
+
+
+def test_hardware_soak_fails_closed_before_sampling_on_commit_mismatch(monkeypatch):
+    expected = "a" * 40
+    wrong = "b" * 40
+    calls = []
+
+    def fake_send(_ser, command, *_args, **_kwargs):
+        calls.append(command)
+        return {
+            "schema": 1,
+            "ok": True,
+            "cmd": command,
+            "build_commit": wrong,
+        }
+
+    class FakeSerialModule:
+        pass
+
+    monkeypatch.setitem(sys.modules, "serial", FakeSerialModule())
+    monkeypatch.setattr(soak_d1l, "open_d1l_serial", lambda *_args, **_kwargs: FakeSoakPort())
+    monkeypatch.setattr(soak_d1l, "send_soak_command", fake_send)
+    monkeypatch.setattr(
+        soak_d1l,
+        "collect_sample",
+        lambda *_args, **_kwargs: pytest.fail("sampling must not start after identity mismatch"),
+    )
+    monkeypatch.setattr(soak_d1l.time, "sleep", lambda _seconds: None)
+
+    report = run_soak_for_timeout_test(
+        clear_crashlog_before_start=True,
+        expected_firmware_commit=expected,
+    )
+
+    assert calls == ["version"]
+    assert report["samples"] == []
+    assert report["device_build_commit"] == wrong
+    assert report["firmware_identity_ok"] is False
+    assert report["preflight_failure"] == "firmware_identity_mismatch"
+    assert "firmware_identity_mismatch" in report["summary"]["threshold_failures"]
+    assert report["ok"] is False
+
+
+def test_hardware_soak_rejects_non_exact_expected_commit_before_opening_port():
+    with pytest.raises(ValueError, match="exact 40-character hexadecimal SHA"):
+        run_soak_for_timeout_test(expected_firmware_commit="abc1234")
+
+
+def test_main_requires_exact_firmware_commit_for_hardware(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["soak_d1l.py", "--port", "COM12"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        soak_d1l.main()
+
+    assert exc_info.value.code == 2
+
+
+def test_main_rejects_malformed_expected_firmware_commit(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "soak_d1l.py",
+            "--port",
+            "COM12",
+            "--expected-firmware-commit",
+            "abc1234",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        soak_d1l.main()
+
+    assert exc_info.value.code == 2

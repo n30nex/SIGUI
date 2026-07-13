@@ -1924,8 +1924,10 @@ def run_sd_reboot_remount(ctx: RunContext, dry_run: bool) -> dict:
         "90",
         "--token",
         token_for(ctx, "rem"),
+        "--expected-firmware-commit",
+        ctx.commit,
     ]
-    return run_existing_script(ctx, "sd_reboot_remount", args, out, timeout=240, dry_run=dry_run)
+    return run_existing_script(ctx, "sd_reboot_remount", args, out, timeout=300, dry_run=dry_run)
 
 
 def run_smoke(ctx: RunContext, dry_run: bool) -> dict:

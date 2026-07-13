@@ -15,6 +15,8 @@ try:
     from artifact_metadata import stamp_report
     from smoke_d1l import (
         boot_transition_proven,
+        exact_commit,
+        firmware_identity_matches,
         health_boot_nonce,
         open_d1l_serial,
         reboot_command_passed,
@@ -39,6 +41,8 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.artifact_metadata import stamp_report
     from scripts.smoke_d1l import (
         boot_transition_proven,
+        exact_commit,
+        firmware_identity_matches,
         health_boot_nonce,
         open_d1l_serial,
         reboot_command_passed,
@@ -67,10 +71,32 @@ MOUNT_POLL_INTERVAL_SECONDS = 2.0
 SD_OPERATION_MIN_TIMEOUT_SECONDS = 120.0
 RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
 REMOUNT_COMMAND_MIN_TIMEOUT_SECONDS = 75.0
+PERSISTENCE_POLL_ATTEMPTS = 30
+PERSISTENCE_POLL_INTERVAL_SECONDS = 1.0
 
 
-def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
-    commands = [
+def persistence_readback_commands(token: str) -> list[str]:
+    fingerprint = fingerprint_for_token(token)
+    return [
+        f"messages public search {token}",
+        f"messages dm {fingerprint}",
+        "routes",
+        f"packets search {token}",
+        "storage status",
+    ]
+
+
+def command_plan(
+    token: str,
+    *,
+    include_reboot: bool = True,
+    strict_evidence: bool = False,
+) -> list[str]:
+    commands: list[str] = []
+    if strict_evidence:
+        commands.extend(["version", "crashlog"])
+    commands.extend(
+        [
         "storage status",
         "storage remount",
         "storage status",
@@ -79,7 +105,8 @@ def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
         f"storage map-tile-canary {token}",
         *retained_readback_commands(token),
         "storage status",
-    ]
+        ]
+    )
     if include_reboot:
         commands.extend(
             [
@@ -93,19 +120,35 @@ def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
                 "health",
             ]
         )
+        if strict_evidence:
+            commands.extend(["version", "crashlog", *persistence_readback_commands(token)])
     else:
         commands.append("health")
     return commands
 
 
-def dry_run_report(token: str, *, include_reboot: bool = True) -> dict:
+def dry_run_report(
+    token: str,
+    *,
+    include_reboot: bool = True,
+    expected_firmware_commit: str | None = None,
+) -> dict:
+    strict_evidence = expected_firmware_commit is not None
     return {
         "schema": 1,
         "mode": "dry-run",
         "hardware_required": False,
         "token": token,
         "fingerprint": fingerprint_for_token(token),
-        "commands": command_plan(token, include_reboot=include_reboot),
+        "commands": command_plan(
+            token,
+            include_reboot=include_reboot,
+            strict_evidence=strict_evidence,
+        ),
+        "expected_firmware_commit": expected_firmware_commit,
+        "firmware_identity_required": strict_evidence,
+        "persistence_clean_required": strict_evidence and include_reboot,
+        "crashlog_transition_required": strict_evidence and include_reboot,
         "public_rf_tx": False,
         "formats_sd": False,
         "ok": True,
@@ -149,6 +192,156 @@ def storage_ready(result: dict | None) -> bool:
         and sd.get("data_root_ready") is True
         and sd.get("file_ops") is True
         and sd.get("atomic_rename") is True
+    )
+
+
+def _zero_int(value: object) -> bool:
+    return type(value) is int and value == 0
+
+
+def _message_persistence_clean(result: dict | None, expected_cmd: str) -> bool:
+    if not isinstance(result, dict):
+        return False
+    persistence = result.get("persistence")
+    sd = persistence.get("sd") if isinstance(persistence, dict) else None
+    nvs = persistence.get("nvs") if isinstance(persistence, dict) else None
+    return (
+        result.get("ok") is True
+        and result.get("cmd") == expected_cmd
+        and result.get("persisted") is True
+        and isinstance(persistence, dict)
+        and persistence.get("loaded") is True
+        and persistence.get("dirty") is False
+        and _zero_int(persistence.get("failures"))
+        and isinstance(sd, dict)
+        and sd.get("required") is True
+        and sd.get("dirty") is False
+        and sd.get("reconcile_pending") is False
+        and _zero_int(sd.get("failures"))
+        and sd.get("last_error") == "ESP_OK"
+        and isinstance(nvs, dict)
+        and nvs.get("dirty") is False
+        and _zero_int(nvs.get("failures"))
+        and nvs.get("last_error") == "ESP_OK"
+    )
+
+
+def _route_persistence_clean(result: dict | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    persistence = result.get("persistence")
+    sd = persistence.get("sd_primary") if isinstance(persistence, dict) else None
+    nvs = persistence.get("nvs_fallback") if isinstance(persistence, dict) else None
+    return (
+        result.get("ok") is True
+        and result.get("cmd") == "routes"
+        and result.get("persisted") is True
+        and isinstance(persistence, dict)
+        and persistence.get("dirty") is False
+        and _zero_int(persistence.get("fail_count"))
+        and persistence.get("clear_failure_latched") is False
+        and _zero_int(persistence.get("clear_fail_count"))
+        and persistence.get("clear_last_error") == "ESP_OK"
+        and isinstance(sd, dict)
+        and sd.get("required") is True
+        and sd.get("dirty") is False
+        and sd.get("reconcile_pending") is False
+        and _zero_int(sd.get("fail_count"))
+        and sd.get("last_error") == "ESP_OK"
+        and isinstance(nvs, dict)
+        and nvs.get("dirty") is False
+        and _zero_int(nvs.get("fail_count"))
+        and nvs.get("last_error") == "ESP_OK"
+    )
+
+
+def _packet_persistence_clean(result: dict | None) -> bool:
+    if not isinstance(result, dict):
+        return False
+    persistence = result.get("persistence")
+    reconcile = persistence.get("reconcile") if isinstance(persistence, dict) else None
+    sd = persistence.get("sd") if isinstance(persistence, dict) else None
+    nvs = persistence.get("nvs") if isinstance(persistence, dict) else None
+    journal = persistence.get("journal") if isinstance(persistence, dict) else None
+    return (
+        result.get("ok") is True
+        and result.get("cmd") == "packets search"
+        and result.get("persisted") is True
+        and isinstance(persistence, dict)
+        and persistence.get("loaded") is True
+        and persistence.get("dirty") is False
+        and _zero_int(persistence.get("failures"))
+        and isinstance(reconcile, dict)
+        and reconcile.get("pending") is False
+        and _zero_int(reconcile.get("failures"))
+        and reconcile.get("last_error") == "ESP_OK"
+        and isinstance(sd, dict)
+        and sd.get("required") is True
+        and sd.get("dirty") is False
+        and _zero_int(sd.get("failures"))
+        and sd.get("last_error") == "ESP_OK"
+        and isinstance(nvs, dict)
+        and nvs.get("dirty") is False
+        and _zero_int(nvs.get("failures"))
+        and nvs.get("last_error") == "ESP_OK"
+        and isinstance(journal, dict)
+        and journal.get("dirty") is False
+        and _zero_int(journal.get("failures"))
+        and journal.get("last_error") == "ESP_OK"
+    )
+
+
+def persistence_snapshot_clean(results: dict[str, dict], token: str) -> bool:
+    fingerprint = fingerprint_for_token(token)
+    return (
+        _message_persistence_clean(
+            results.get(f"messages public search {token}"), "messages public"
+        )
+        and _message_persistence_clean(
+            results.get(f"messages dm {fingerprint}"), "messages dm"
+        )
+        and _route_persistence_clean(results.get("routes"))
+        and _packet_persistence_clean(results.get(f"packets search {token}"))
+        and retained_storage_clean(results.get("storage status"))
+    )
+
+
+def crashlog_transition_passed(before: dict | None, after: dict | None) -> bool:
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    before_total = before.get("total_written")
+    after_total = after.get("total_written")
+    before_entries = before.get("entries")
+    after_entries = after.get("entries")
+    if (
+        before.get("ok") is not True
+        or before.get("cmd") != "crashlog"
+        or after.get("ok") is not True
+        or after.get("cmd") != "crashlog"
+        or type(before_total) is not int
+        or type(after_total) is not int
+        or after_total != before_total + 1
+        or not isinstance(before_entries, list)
+        or not isinstance(after_entries, list)
+    ):
+        return False
+    before_sequences = [
+        entry.get("seq")
+        for entry in before_entries
+        if isinstance(entry, dict) and type(entry.get("seq")) is int
+    ]
+    previous_max = max(before_sequences, default=0)
+    new_entries = [
+        entry
+        for entry in after_entries
+        if isinstance(entry, dict)
+        and type(entry.get("seq")) is int
+        and entry.get("seq") > previous_max
+    ]
+    return (
+        len(new_entries) == 1
+        and new_entries[0].get("reset_reason") == "SW"
+        and new_entries[0].get("crash_like") is False
     )
 
 
@@ -309,6 +502,39 @@ def run_commands_until_terminal(
     return commands, results
 
 
+def run_persistence_poll(
+    ser,
+    *,
+    token: str,
+    timeout: float,
+    attempts: int,
+    interval_sec: float,
+) -> tuple[list[str], list[dict], dict[str, dict], bool, int]:
+    commands: list[str] = []
+    results: list[dict] = []
+    latest: dict[str, dict] = {}
+    attempts_used = 0
+    plan = persistence_readback_commands(token)
+    for attempt in range(max(1, attempts)):
+        attempts_used = attempt + 1
+        poll_commands, poll_results = run_commands_until_terminal(ser, plan, timeout)
+        commands.extend(poll_commands)
+        results.extend(poll_results)
+        latest = dict(zip(poll_commands, poll_results))
+        if sequence_completed(poll_commands, poll_results, plan) and persistence_snapshot_clean(
+            latest, token
+        ):
+            return commands, results, latest, True, attempts_used
+        if len(poll_commands) != len(plan) or any(
+            host_timed_out(result) or unexpected_console_restart([result])
+            for result in poll_results
+        ):
+            break
+        if attempt + 1 < max(1, attempts):
+            time.sleep(interval_sec)
+    return commands, results, latest, False, attempts_used
+
+
 def run_pre_data_sequence(
     ser,
     *,
@@ -430,6 +656,9 @@ def run_acceptance(
     reboot_settle_sec: float,
     mount_poll_attempts: int,
     mount_poll_interval_sec: float,
+    expected_firmware_commit: str | None = None,
+    persistence_poll_attempts: int = PERSISTENCE_POLL_ATTEMPTS,
+    persistence_poll_interval_sec: float = PERSISTENCE_POLL_INTERVAL_SECONDS,
 ) -> dict:
     try:
         import serial
@@ -437,20 +666,49 @@ def run_acceptance(
         raise SystemExit("pyserial is required: python -m pip install pyserial") from exc
 
     fingerprint = fingerprint_for_token(token)
+    strict_evidence = expected_firmware_commit is not None
     results: list[dict] = []
     commands: list[str] = []
+    preflight_commands: list[str] = []
+    preflight_results: list[dict] = []
     pre_data_commands: list[str] = []
     pre_data_results: list[dict] = []
+    pre_mount_commands: list[str] = []
+    pre_mount_results: list[dict] = []
+    pre_storage: dict = {}
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
         ser.reset_input_buffer()
-        pre_mount_commands, pre_mount_results, pre_storage = run_mount_sequence(
-            ser,
-            timeout=timeout,
-            mount_poll_attempts=mount_poll_attempts,
-            mount_poll_interval_sec=mount_poll_interval_sec,
+        if strict_evidence:
+            preflight_plan = ["version", "crashlog"]
+            preflight_commands, preflight_results = run_commands_until_terminal(
+                ser, preflight_plan, timeout
+            )
+            commands.extend(preflight_commands)
+            results.extend(preflight_results)
+        preflight_complete = (
+            not strict_evidence
+            or sequence_completed(
+                preflight_commands,
+                preflight_results,
+                ["version", "crashlog"],
+            )
         )
-        commands.extend(pre_mount_commands)
-        results.extend(pre_mount_results)
+        preflight_by_command = dict(zip(preflight_commands, preflight_results))
+        pre_version = preflight_by_command.get("version", {})
+        pre_firmware_identity_ok = (
+            firmware_identity_matches(pre_version, expected_firmware_commit)
+            if strict_evidence and expected_firmware_commit is not None
+            else None
+        )
+        if preflight_complete and pre_firmware_identity_ok is not False:
+            pre_mount_commands, pre_mount_results, pre_storage = run_mount_sequence(
+                ser,
+                timeout=timeout,
+                mount_poll_attempts=mount_poll_attempts,
+                mount_poll_interval_sec=mount_poll_interval_sec,
+            )
+            commands.extend(pre_mount_commands)
+            results.extend(pre_mount_results)
         pre_remount_results = [
             result
             for result in pre_mount_results
@@ -480,7 +738,11 @@ def run_acceptance(
             and pre_remount_command_passed
             and storage_ready(pre_storage)
         )
-        if pre_mount_complete:
+        if (
+            pre_mount_complete
+            and preflight_complete
+            and pre_firmware_identity_ok is not False
+        ):
             pre_data_commands, pre_data_results = run_pre_data_sequence(
                 ser,
                 token=token,
@@ -493,14 +755,19 @@ def run_acceptance(
 
     pre_sequence_complete = (
         pre_mount_complete
+        and preflight_complete
+        and pre_firmware_identity_ok is not False
         and bool(pre_data_commands)
         and sequence_completed(
             pre_data_commands, pre_data_results, pre_data_commands
         )
     )
-    pre_results = [*pre_mount_results, *pre_data_results]
+    pre_results = [*pre_mount_results, *preflight_results, *pre_data_results]
     unexpected_restart_before_reboot = unexpected_console_restart(pre_results)
-    pre_by_command = dict(zip(pre_data_commands, pre_data_results))
+    pre_by_command = {
+        **dict(zip(preflight_commands, preflight_results)),
+        **dict(zip(pre_data_commands, pre_data_results)),
+    }
     filecanary_result = pre_by_command.get("storage filecanary", {})
     retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
     pre_map_tile = pre_by_command.get(f"storage map-tile-canary {token}", {})
@@ -512,6 +779,11 @@ def run_acceptance(
     post_mount_results: list[dict] = []
     post_data_commands: list[str] = []
     post_data_results: list[dict] = []
+    post_persistence_commands: list[str] = []
+    post_persistence_results: list[dict] = []
+    post_persistence_by_command: dict[str, dict] = {}
+    post_persistence_clean = not (strict_evidence and include_reboot)
+    persistence_poll_attempts_used = 0
     post_remount_busy = False
     post_remount_retained_worker_quiesce_acquired = None
     post_remount_command_passed = not include_reboot
@@ -617,16 +889,38 @@ def run_acceptance(
                     f"storage map-tile-check {token}",
                     "health",
                 ]
+                if strict_evidence:
+                    post_data_plan.extend(["version", "crashlog"])
                 if post_mount_complete:
                     post_data_commands, post_data_results = run_commands_until_terminal(
                         ser, post_data_plan, timeout
                     )
                     commands.extend(post_data_commands)
                     results.extend(post_data_results)
-                post_sequence_complete = post_mount_complete and sequence_completed(
+                post_base_sequence_complete = post_mount_complete and sequence_completed(
                     post_data_commands, post_data_results, post_data_plan
                 )
                 post_by_command = dict(zip(post_data_commands, post_data_results))
+                if post_base_sequence_complete and strict_evidence:
+                    (
+                        post_persistence_commands,
+                        post_persistence_results,
+                        post_persistence_by_command,
+                        post_persistence_clean,
+                        persistence_poll_attempts_used,
+                    ) = run_persistence_poll(
+                        ser,
+                        token=token,
+                        timeout=timeout,
+                        attempts=persistence_poll_attempts,
+                        interval_sec=persistence_poll_interval_sec,
+                    )
+                    commands.extend(post_persistence_commands)
+                    results.extend(post_persistence_results)
+                    post_by_command.update(post_persistence_by_command)
+                post_sequence_complete = (
+                    post_base_sequence_complete and post_persistence_clean
+                )
                 post_map_tile = post_by_command.get(f"storage map-tile-check {token}", {})
                 health = post_by_command.get("health", {})
     elif not include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
@@ -678,6 +972,25 @@ def run_acceptance(
         else map_tile_write_passed(post_map_tile, token)
     )
     health_ok = health.get("ok") is True
+    post_version = post_by_command.get("version", {})
+    post_firmware_identity_ok = (
+        firmware_identity_matches(post_version, expected_firmware_commit)
+        if strict_evidence and include_reboot and expected_firmware_commit is not None
+        else None
+    )
+    firmware_identity_ok = (
+        pre_firmware_identity_ok is True
+        and (post_firmware_identity_ok is True if include_reboot else True)
+        if strict_evidence
+        else None
+    )
+    pre_crashlog = pre_by_command.get("crashlog", {})
+    post_crashlog = post_by_command.get("crashlog", {})
+    crashlog_transition_ok = (
+        crashlog_transition_passed(pre_crashlog, post_crashlog)
+        if strict_evidence and include_reboot
+        else None
+    )
     timed_out_command = next(
         (
             result.get("cmd", "unknown")
@@ -694,6 +1007,26 @@ def run_acceptance(
         "baud": baud,
         "token": token,
         "fingerprint": fingerprint,
+        "expected_firmware_commit": expected_firmware_commit,
+        "pre_device_build_commit": pre_version.get("build_commit"),
+        "device_build_commit": post_version.get("build_commit") if include_reboot else pre_version.get("build_commit"),
+        "firmware_identity_required": strict_evidence,
+        "pre_firmware_identity_ok": pre_firmware_identity_ok,
+        "post_firmware_identity_ok": post_firmware_identity_ok,
+        "firmware_identity_ok": firmware_identity_ok,
+        "persistence_clean_required": strict_evidence and include_reboot,
+        "post_reboot_persistence_clean": (
+            post_persistence_clean if strict_evidence and include_reboot else None
+        ),
+        "post_reboot_pending_dirty": (
+            not post_persistence_clean if strict_evidence and include_reboot else None
+        ),
+        "persistence_poll_attempts_used": persistence_poll_attempts_used,
+        "post_reboot_persistence": post_persistence_by_command,
+        "crashlog_transition_required": strict_evidence and include_reboot,
+        "crashlog_transition_ok": crashlog_transition_ok,
+        "crashlog_before_reboot": pre_crashlog,
+        "crashlog_after_reboot": post_crashlog,
         "commands": commands,
         "public_rf_tx": public_rf_tx,
         "formats_sd": formats_sd,
@@ -728,6 +1061,11 @@ def run_acceptance(
             retained_storage_clean_after_canary
         ),
         "reboot_command_passed": reboot_ok if include_reboot else None,
+        "reboot_retained_flush": (
+            reboot_result.get("retained_flush")
+            if include_reboot and isinstance(reboot_result, dict)
+            else None
+        ),
         "reboot_route_flush": (
             reboot_result.get("route_flush")
             if include_reboot and isinstance(reboot_result, dict)
@@ -787,6 +1125,9 @@ def run_acceptance(
             and pre_map_tile_ok
             and post_map_tile_ok
             and health_ok
+            and (firmware_identity_ok is not False)
+            and (post_persistence_clean if strict_evidence and include_reboot else True)
+            and (crashlog_transition_ok is True if strict_evidence and include_reboot else True)
         ),
     }
 
@@ -814,6 +1155,9 @@ def main() -> int:
     parser.add_argument("--reboot-settle-sec", type=float, default=8.0)
     parser.add_argument("--mount-poll-attempts", type=int, default=MOUNT_POLL_ATTEMPTS)
     parser.add_argument("--mount-poll-interval-sec", type=float, default=MOUNT_POLL_INTERVAL_SECONDS)
+    parser.add_argument("--expected-firmware-commit")
+    parser.add_argument("--persistence-poll-attempts", type=int, default=PERSISTENCE_POLL_ATTEMPTS)
+    parser.add_argument("--persistence-poll-interval-sec", type=float, default=PERSISTENCE_POLL_INTERVAL_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--list-commands", action="store_true")
     parser.add_argument("--out")
@@ -821,18 +1165,37 @@ def main() -> int:
 
     if not TOKEN_RE.match(args.token):
         parser.error("--token must be 1-31 chars: A-Z a-z 0-9 _ . -")
+    if (
+        args.expected_firmware_commit is not None
+        and exact_commit(args.expected_firmware_commit) is None
+    ):
+        parser.error("--expected-firmware-commit must be an exact 40-character hexadecimal SHA")
+    if args.persistence_poll_attempts < 1:
+        parser.error("--persistence-poll-attempts must be at least 1")
+    if args.persistence_poll_interval_sec < 0:
+        parser.error("--persistence-poll-interval-sec cannot be negative")
     include_reboot = not args.no_reboot
 
     if args.list_commands:
-        for command in command_plan(args.token, include_reboot=include_reboot):
+        for command in command_plan(
+            args.token,
+            include_reboot=include_reboot,
+            strict_evidence=args.expected_firmware_commit is not None,
+        ):
             print(command)
         return 0
 
     if args.dry_run:
-        report = dry_run_report(args.token, include_reboot=include_reboot)
+        report = dry_run_report(
+            args.token,
+            include_reboot=include_reboot,
+            expected_firmware_commit=args.expected_firmware_commit,
+        )
     else:
         if not args.port:
             parser.error("No D1L port supplied. Set D1L_PORT or pass --port.")
+        if args.expected_firmware_commit is None:
+            parser.error("Hardware evidence requires --expected-firmware-commit.")
         report = run_acceptance(
             args.port,
             args.baud,
@@ -842,6 +1205,9 @@ def main() -> int:
             reboot_settle_sec=args.reboot_settle_sec,
             mount_poll_attempts=args.mount_poll_attempts,
             mount_poll_interval_sec=args.mount_poll_interval_sec,
+            expected_firmware_commit=args.expected_firmware_commit,
+            persistence_poll_attempts=args.persistence_poll_attempts,
+            persistence_poll_interval_sec=args.persistence_poll_interval_sec,
         )
 
     written = write_report(report, Path(args.out) if args.out else None)

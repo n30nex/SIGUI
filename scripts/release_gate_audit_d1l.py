@@ -19,6 +19,19 @@ except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
 try:
+    from sd_reboot_remount_acceptance_d1l import (
+        crashlog_transition_passed,
+        persistence_readback_commands,
+        persistence_snapshot_clean,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.sd_reboot_remount_acceptance_d1l import (
+        crashlog_transition_passed,
+        persistence_readback_commands,
+        persistence_snapshot_clean,
+    )
+
+try:
     from wp01_evidence_aggregate_d1l import (
         WP01_ARTIFACT_KINDS,
         WP01_ARTIFACT_PATTERNS,
@@ -1938,7 +1951,96 @@ def sd_retained_canary_artifact_ok(data: dict, expected_port: str) -> bool:
     )
 
 
-def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
+def strict_reboot_remount_evidence_ok(
+    data: dict, expected_commit: str | None
+) -> bool:
+    commit = expected_commit or data.get("expected_firmware_commit")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-fA-F]{40}", commit) is None:
+        return False
+    if not command_result_transcript_aligned(data):
+        return False
+    commands = data["commands"]
+    results = data["results"]
+    reboot_indices = [
+        index
+        for index, result in enumerate(results)
+        if isinstance(result, dict) and result.get("cmd") == "reboot"
+    ]
+    if len(reboot_indices) != 1:
+        return False
+    reboot_index = reboot_indices[0]
+    pre_results = results[:reboot_index]
+    post_results = results[reboot_index + 1 :]
+    pre_versions = [
+        result
+        for result in pre_results
+        if isinstance(result, dict) and result.get("cmd") == "version"
+    ]
+    post_versions = [
+        result
+        for result in post_results
+        if isinstance(result, dict) and result.get("cmd") == "version"
+    ]
+    pre_crashlogs = [
+        result
+        for result in pre_results
+        if isinstance(result, dict) and result.get("cmd") == "crashlog"
+    ]
+    post_crashlogs = [
+        result
+        for result in post_results
+        if isinstance(result, dict) and result.get("cmd") == "crashlog"
+    ]
+    if not all(
+        len(rows) == 1
+        for rows in (pre_versions, post_versions, pre_crashlogs, post_crashlogs)
+    ):
+        return False
+    version_results = [pre_versions[0], post_versions[0]]
+    crashlog_results = [pre_crashlogs[0], post_crashlogs[0]]
+    if not all(
+        result.get("ok") is True
+        and exact_full_commit(result.get("build_commit"), commit)
+        for result in version_results
+    ):
+        return False
+    token = data.get("token")
+    if not isinstance(token, str) or not token:
+        return False
+    persistence_plan = persistence_readback_commands(token)
+    if commands[-len(persistence_plan) :] != persistence_plan:
+        return False
+    final_persistence = dict(
+        zip(persistence_plan, results[-len(persistence_plan) :])
+    )
+    return (
+        exact_full_commit(data.get("expected_firmware_commit"), commit)
+        and exact_full_commit(data.get("pre_device_build_commit"), commit)
+        and exact_full_commit(data.get("device_build_commit"), commit)
+        and data.get("firmware_identity_required") is True
+        and data.get("pre_firmware_identity_ok") is True
+        and data.get("post_firmware_identity_ok") is True
+        and data.get("firmware_identity_ok") is True
+        and data.get("persistence_clean_required") is True
+        and data.get("post_reboot_persistence_clean") is True
+        and data.get("post_reboot_pending_dirty") is False
+        and type(data.get("persistence_poll_attempts_used")) is int
+        and data.get("persistence_poll_attempts_used") >= 1
+        and set(final_persistence) == set(persistence_plan)
+        and persistence_snapshot_clean(final_persistence, token)
+        and data.get("post_reboot_persistence") == final_persistence
+        and data.get("crashlog_transition_required") is True
+        and data.get("crashlog_transition_ok") is True
+        and data.get("crashlog_before_reboot") == crashlog_results[0]
+        and data.get("crashlog_after_reboot") == crashlog_results[1]
+        and crashlog_transition_passed(crashlog_results[0], crashlog_results[1])
+        and data.get("reboot_retained_flush") == "ESP_OK"
+    )
+
+
+def sd_reboot_remount_artifact_ok(
+    data: dict, expected_port: str, expected_commit: str | None = None
+) -> bool:
     return (
         data.get("mode") == "hardware"
         and exact_port_ok(data, expected_port)
@@ -1974,6 +2076,7 @@ def sd_reboot_remount_artifact_ok(data: dict, expected_port: str) -> bool:
         and storage_status_fresh_status(data.get("storage_before_reboot"))
         and storage_status_fresh_status(data.get("storage_after_reboot"))
         and "reboot" in (data.get("commands") or [])
+        and strict_reboot_remount_evidence_ok(data, expected_commit)
     )
 
 
@@ -2475,7 +2578,11 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
         "reboot_remount_*.json",
     )
     data = read_json(remount)
-    ok = bool(remount and data and sd_reboot_remount_artifact_ok(data, expected_port))
+    ok = bool(
+        remount
+        and data
+        and sd_reboot_remount_artifact_ok(data, expected_port, commit)
+    )
     return GateResult(
         "sd_reboot_remount_passed",
         "P0",
@@ -2499,10 +2606,15 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "retained_history_sd_ready_after": data.get("retained_history_sd_ready_after") if data else None,
             "reboot_command_passed": data.get("reboot_command_passed") if data else None,
             "reboot_route_flush": data.get("reboot_route_flush") if data else None,
+            "reboot_retained_flush": data.get("reboot_retained_flush") if data else None,
             "reboot_retained_worker_quiesced": data.get("reboot_retained_worker_quiesced") if data else None,
             "pre_reboot_boot_nonce": data.get("pre_reboot_boot_nonce") if data else None,
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
+            "firmware_identity_ok": data.get("firmware_identity_ok") if data else None,
+            "post_reboot_persistence_clean": data.get("post_reboot_persistence_clean") if data else None,
+            "post_reboot_pending_dirty": data.get("post_reboot_pending_dirty") if data else None,
+            "crashlog_transition_ok": data.get("crashlog_transition_ok") if data else None,
             "pre_map_tile_canary_passed": data.get("pre_map_tile_canary_passed") if data else None,
             "post_map_tile_canary_passed": data.get("post_map_tile_canary_passed") if data else None,
         },
