@@ -59,6 +59,9 @@ static bool s_sd_enabled;
 static uint32_t s_backend_generation;
 static bool s_fail_nvs_write;
 static bool s_bump_generation_after_sd_read;
+static bool s_bump_generation_before_reconcile_apply;
+static uint32_t s_backend_state_calls_after_sd_read;
+static bool s_preapply_generation_bump_fired;
 static uint32_t s_fail_backend_state_on_call;
 static bool s_inject_append_during_primary_write;
 static uint32_t s_bump_generation_after_delete_count;
@@ -84,6 +87,9 @@ static void mock_reset(void)
     s_backend_generation = 0U;
     s_fail_nvs_write = false;
     s_bump_generation_after_sd_read = false;
+    s_bump_generation_before_reconcile_apply = false;
+    s_backend_state_calls_after_sd_read = 0U;
+    s_preapply_generation_bump_fired = false;
     s_fail_backend_state_on_call = 0U;
     s_inject_append_during_primary_write = false;
     s_bump_generation_after_delete_count = 0U;
@@ -179,6 +185,25 @@ static void seed_fallback(uint32_t first_seq, uint32_t count,
     assert(mock_blob_write(&s_nvs_fallback, &blob, sizeof(blob)) == ESP_OK);
 }
 
+static void seed_v2_compact_primary(uint32_t first_seq, uint32_t count,
+                                    uint32_t total_written,
+                                    const char *prefix)
+{
+    fallback_blob_t blob;
+    memset(&blob, 0, sizeof(blob));
+    blob.schema = 2U;
+    blob.next_seq = total_written + 1U;
+    blob.total_written = total_written;
+    blob.dropped_oldest = total_written > D1L_PACKET_LOG_RAM_CAPACITY ?
+                          total_written - D1L_PACKET_LOG_RAM_CAPACITY : 0U;
+    blob.count = count;
+    blob.head = count % D1L_PACKET_LOG_NVS_FALLBACK_CAPACITY;
+    for (uint32_t i = 0U; i < count; ++i) {
+        blob.entries[i] = packet_entry(first_seq + i, prefix);
+    }
+    assert(mock_blob_write(&s_sd_primary, &blob, sizeof(blob)) == ESP_OK);
+}
+
 static uint32_t history_checksum(const d1l_packet_log_entry_t *entry)
 {
     const uint8_t *data = (const uint8_t *)entry;
@@ -272,6 +297,15 @@ bool d1l_retained_blob_store_backend_state(
 {
     if (store_id != D1L_RETAINED_BLOB_STORE_PACKET_LOG || !out_state) {
         return false;
+    }
+    if (s_bump_generation_before_reconcile_apply &&
+        s_sd_primary_reads > 0U) {
+        s_backend_state_calls_after_sd_read++;
+        if (s_backend_state_calls_after_sd_read == 2U) {
+            s_backend_generation++;
+            s_bump_generation_before_reconcile_apply = false;
+            s_preapply_generation_bump_fired = true;
+        }
     }
     if (s_fail_backend_state_on_call > 0U) {
         s_fail_backend_state_on_call--;
@@ -534,6 +568,199 @@ static void test_late_sd_is_read_and_merged_before_mutation(void)
     assert(!stats.persistence_dirty);
 }
 
+static void test_checked_append_reports_resequenced_sd_overlay(void)
+{
+    mock_reset();
+    seed_fallback(1U, 8U, 8U, "nvs");
+    assert(d1l_packet_log_init() == ESP_OK);
+
+    seed_primary(&s_sd_primary, 1U, 12U, 12U, "sd");
+    seed_history(1U, 12U, "sd");
+    s_sd_enabled = true;
+    s_backend_generation = 2U;
+
+    d1l_packet_log_entry_t entry;
+    memset(&entry, 0, sizeof(entry));
+    (void)snprintf(entry.direction, sizeof(entry.direction), "tx");
+    (void)snprintf(entry.kind, sizeof(entry.kind), "canary");
+    (void)snprintf(entry.note, sizeof(entry.note), "checked-overlay");
+    uint32_t stored_seq = 0U;
+    assert(d1l_packet_log_append_raw_checked(
+               &entry, NULL, 0U, &stored_seq) == ESP_OK);
+    assert(stored_seq == 13U);
+
+    d1l_packet_log_entry_t stored = {0};
+    assert(d1l_packet_log_find_by_seq(stored_seq, &stored) == ESP_OK);
+    assert(strcmp(stored.note, "checked-overlay") == 0);
+    const primary_blob_t primary = current_primary();
+    assert(primary.next_seq == 14U);
+    assert(primary.entries[primary.count - 1U].seq == stored_seq);
+    assert(strcmp(primary.entries[primary.count - 1U].note,
+                  "checked-overlay") == 0);
+}
+
+static void test_v2_compact_sd_primary_is_promoted_and_rewritten(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 4U;
+    seed_v2_compact_primary(1U, 8U, 8U, "upgrade");
+    seed_fallback(5U, 8U, 12U, "upgrade");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    assert(s_sd_primary_reads > 0U);
+    assert(s_first_mutation_read_count > 0U);
+    assert(s_sd_primary_writes == 1U);
+    assert(s_sd_primary.len == sizeof(primary_blob_t));
+
+    const primary_blob_t primary = current_primary();
+    assert(primary.schema == 3U);
+    assert(primary.next_seq == 13U);
+    assert(primary.total_written == 12U);
+    assert(primary.count == 12U);
+    for (uint32_t i = 0U; i < primary.count; ++i) {
+        assert(primary.entries[i].seq == i + 1U);
+        char expected[48];
+        (void)snprintf(expected, sizeof(expected), "upgrade-%lu",
+                       (unsigned long)(i + 1U));
+        assert(strcmp(primary.entries[i].note, expected) == 0);
+    }
+
+    const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.sd_backend_generation == 4U);
+    assert(stats.sd_reconcile_count == 1U);
+    assert(stats.sd_reconcile_fail_count == 0U);
+    assert(stats.sd_reconcile_last_error == ESP_OK);
+    assert(stats.sd_primary_commit_count == 1U);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(!stats.persistence_dirty);
+}
+
+static void test_disjoint_v3_primary_and_local_tail_are_resequenced(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 7U;
+    seed_primary(&s_sd_primary, 192U, 128U, 319U, "sd");
+    seed_fallback(421U, 8U, 428U, "local");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    assert(s_first_mutation_read_count > 0U);
+    assert(s_sd_primary_writes == 1U);
+
+    const primary_blob_t primary = current_primary();
+    assert(primary.schema == 3U);
+    assert(primary.next_seq == 429U);
+    assert(primary.total_written == 428U);
+    assert(primary.count == D1L_PACKET_LOG_RAM_CAPACITY);
+    assert(primary.entries[0].seq == 301U);
+    assert(strcmp(primary.entries[0].note, "sd-200") == 0);
+    assert(primary.entries[119].seq == 420U);
+    assert(strcmp(primary.entries[119].note, "sd-319") == 0);
+    assert(primary.entries[120].seq == 421U);
+    assert(strcmp(primary.entries[120].note, "local-421") == 0);
+    assert(primary.entries[127].seq == 428U);
+    assert(strcmp(primary.entries[127].note, "local-428") == 0);
+
+    const d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.sd_reconcile_count == 1U);
+    assert(stats.sd_reconcile_fail_count == 0U);
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(!stats.persistence_dirty);
+    assert(!stats.journal_dirty);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    assert(s_sd_primary_writes == 1U);
+}
+
+static void test_conflicting_same_seq_rows_are_both_preserved(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 8U;
+    seed_primary(&s_sd_primary, 5U, 8U, 12U, "sd");
+    seed_fallback(9U, 8U, 16U, "local");
+
+    assert(d1l_packet_log_init() == ESP_OK);
+    const primary_blob_t primary = current_primary();
+    assert(primary.next_seq == 17U);
+    assert(primary.total_written == 16U);
+    assert(primary.count == 16U);
+    assert(strcmp(primary.entries[4].note, "sd-9") == 0);
+    assert(strcmp(primary.entries[5].note, "local-9") == 0);
+    assert(strcmp(primary.entries[10].note, "sd-12") == 0);
+    assert(strcmp(primary.entries[11].note, "local-12") == 0);
+    assert(strcmp(primary.entries[12].note, "local-13") == 0);
+    for (uint32_t i = 0U; i < primary.count; ++i) {
+        assert(primary.entries[i].seq == i + 1U);
+    }
+    assert(!d1l_packet_log_stats().persistence_dirty);
+}
+
+static void test_disjoint_reconcile_generation_edge_never_writes_and_retries(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 9U;
+    seed_primary(&s_sd_primary, 192U, 128U, 319U, "edge-sd");
+    seed_fallback(421U, 8U, 428U, "edge-local");
+    s_bump_generation_after_sd_read = true;
+
+    assert(d1l_packet_log_init() == ESP_ERR_INVALID_STATE);
+    assert(s_sd_primary_reads == 1U);
+    assert(s_sd_primary_writes == 0U);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.sd_reconcile_last_error == ESP_ERR_INVALID_STATE);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    assert(s_sd_primary_writes == 1U);
+    stats = d1l_packet_log_stats();
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(stats.sd_reconcile_last_error == ESP_OK);
+    assert(!stats.persistence_dirty);
+    const primary_blob_t primary = current_primary();
+    assert(primary.next_seq == 429U);
+    assert(strcmp(primary.entries[120].note, "edge-local-421") == 0);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    assert(s_sd_primary_writes == 1U);
+}
+
+static void test_disjoint_reconcile_generation_edge_before_apply_never_imports(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 14U;
+    seed_primary(&s_sd_primary, 192U, 128U, 319U, "apply-edge-sd");
+    seed_fallback(421U, 8U, 428U, "apply-edge-local");
+    /* Arm relative to the primary read: the first later observation is the
+     * post-read guard and the second is the final pre-apply guard. */
+    s_bump_generation_before_reconcile_apply = true;
+
+    assert(d1l_packet_log_init() == ESP_ERR_INVALID_STATE);
+    assert(s_preapply_generation_bump_fired);
+    assert(s_backend_state_calls_after_sd_read == 2U);
+    assert(s_sd_primary_reads == 1U);
+    assert(s_sd_primary_writes == 0U);
+    assert(s_nvs_writes == 0U);
+    d1l_packet_log_entry_t found = {0};
+    assert(d1l_packet_log_find_by_seq(421U, &found) == ESP_OK);
+    assert(strcmp(found.note, "apply-edge-local-421") == 0);
+    assert(d1l_packet_log_find_by_seq(301U, &found) == ESP_ERR_NOT_FOUND);
+    d1l_packet_log_stats_t stats = d1l_packet_log_stats();
+    assert(stats.total_written == 428U);
+    assert(stats.sd_primary_reconcile_pending);
+    assert(stats.sd_reconcile_last_error == ESP_ERR_INVALID_STATE);
+
+    assert(d1l_packet_log_flush() == ESP_OK);
+    assert(s_sd_primary_writes == 1U);
+    assert(s_nvs_writes == 1U);
+    stats = d1l_packet_log_stats();
+    assert(!stats.sd_primary_reconcile_pending);
+    assert(!stats.persistence_dirty);
+}
+
 static void test_sd_success_nvs_failure_stays_retryable(void)
 {
     mock_reset();
@@ -783,6 +1010,12 @@ static void test_force_flush_rejects_snapshot_staled_by_concurrent_append(void)
 int main(void)
 {
     test_late_sd_is_read_and_merged_before_mutation();
+    test_checked_append_reports_resequenced_sd_overlay();
+    test_v2_compact_sd_primary_is_promoted_and_rewritten();
+    test_disjoint_v3_primary_and_local_tail_are_resequenced();
+    test_conflicting_same_seq_rows_are_both_preserved();
+    test_disjoint_reconcile_generation_edge_never_writes_and_retries();
+    test_disjoint_reconcile_generation_edge_before_apply_never_imports();
     test_sd_success_nvs_failure_stays_retryable();
     test_corrupt_or_changed_sd_never_mutates_before_reconcile();
     test_init_does_not_erase_corrupt_sd();

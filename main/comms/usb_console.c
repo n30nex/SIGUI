@@ -3305,7 +3305,7 @@ static void cmd_storage_retained_canary(const char *line)
         return;
     }
 
-    const uint32_t packet_seq = d1l_packet_log_stats().next_seq;
+    uint32_t packet_seq = 0U;
     char packet_note[D1L_PACKET_LOG_NOTE_LEN] = {0};
     snprintf(packet_note, sizeof(packet_note), "sd-canary %s", token);
     d1l_packet_log_entry_t packet = {
@@ -3318,10 +3318,12 @@ static void cmd_storage_retained_canary(const char *line)
         .payload_len = (uint16_t)strlen(text),
     };
     strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
-    if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
+    ret = d1l_packet_log_append_raw_checked(
+        &packet, (const uint8_t *)text, strlen(text), &packet_seq);
+    if (ret != ESP_OK) {
         d1l_route_store_worker_quiesce_end();
         d1l_storage_manager_quiesce_end();
-        err_result("storage retained-canary", "ESP_FAIL",
+        err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append packet retained-history canary");
         return;
     }

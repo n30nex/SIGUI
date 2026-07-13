@@ -649,6 +649,21 @@ static bool primary_blob_is_valid(const d1l_packet_log_primary_blob_t *blob, siz
                blob->entries);
 }
 
+static void promote_v2_compact_primary(
+    const d1l_packet_log_fallback_blob_t *legacy,
+    d1l_packet_log_primary_blob_t *primary)
+{
+    memset(primary, 0, sizeof(*primary));
+    primary->schema = D1L_PACKET_LOG_SCHEMA;
+    primary->next_seq = legacy->next_seq;
+    primary->total_written = legacy->total_written;
+    primary->dropped_oldest = legacy->dropped_oldest;
+    primary->count = legacy->count;
+    primary->head = legacy->count % D1L_PACKET_LOG_RAM_CAPACITY;
+    memcpy(primary->entries, legacy->entries,
+           legacy->count * sizeof(legacy->entries[0]));
+}
+
 static void load_fallback_blob_into_ram(
     const d1l_packet_log_fallback_blob_t *blob)
 {
@@ -782,6 +797,122 @@ static esp_err_t merge_same_lineage(
            ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
+static bool merge_contains_exact_entry(size_t count,
+                                       const d1l_packet_log_entry_t *entry)
+{
+    for (size_t i = 0U; i < count; ++i) {
+        if (packet_entries_equal(&s_merge_entries[i], entry)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static esp_err_t append_unique_merge_entry(
+    size_t *count, const d1l_packet_log_entry_t *entry)
+{
+    if (merge_contains_exact_entry(*count, entry)) {
+        return ESP_OK;
+    }
+    if (*count >= D1L_PACKET_LOG_RAM_CAPACITY * 2U) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    s_merge_entries[(*count)++] = *entry;
+    return ESP_OK;
+}
+
+static esp_err_t fill_resequenced_divergent_primary(
+    d1l_packet_log_primary_blob_t *out, size_t merged_count,
+    uint32_t preferred_total, uint32_t dropped_oldest)
+{
+    uint32_t total_written = preferred_total;
+    if (merged_count > total_written) {
+        if (merged_count >= UINT32_MAX) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        total_written = (uint32_t)merged_count;
+    }
+    if (total_written == UINT32_MAX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const uint32_t next_seq = total_written + 1U;
+    fill_primary_from_merge(out, merged_count, next_seq, total_written,
+                            dropped_oldest);
+    if (out->count > 0U) {
+        const uint32_t first_seq = next_seq - out->count;
+        for (uint32_t i = 0U; i < out->count; ++i) {
+            out->entries[i].seq = first_seq + i;
+        }
+    }
+    return primary_blob_is_valid(out, sizeof(*out)) ?
+           ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+/* A valid compact SD primary and a valid device-local NVS/live tail may be
+ * separated by records that were irretrievably dropped while SD was absent.
+ * Preserve every available row that fits the bounded primary, remove only
+ * byte-for-byte duplicates, and deterministically resequence the retained
+ * order into one contiguous current lineage. Same-seq different payloads are
+ * separate evidence and are therefore both retained. */
+static esp_err_t merge_divergent_lineage(
+    const d1l_packet_log_primary_blob_t *local,
+    const d1l_packet_log_primary_blob_t *sd,
+    d1l_packet_log_primary_blob_t *out)
+{
+    size_t merged_count = 0U;
+    esp_err_t ret = ESP_OK;
+    if (local->total_written > sd->total_written) {
+        size_t local_index = 0U;
+        size_t sd_index = 0U;
+        while (local_index < local->count || sd_index < sd->count) {
+            if (sd_index >= sd->count ||
+                (local_index < local->count &&
+                 local->entries[local_index].seq < sd->entries[sd_index].seq)) {
+                ret = append_unique_merge_entry(
+                    &merged_count, &local->entries[local_index++]);
+            } else if (local_index >= local->count ||
+                       sd->entries[sd_index].seq < local->entries[local_index].seq) {
+                ret = append_unique_merge_entry(
+                    &merged_count, &sd->entries[sd_index++]);
+            } else {
+                ret = append_unique_merge_entry(
+                    &merged_count, &sd->entries[sd_index++]);
+                if (ret == ESP_OK) {
+                    ret = append_unique_merge_entry(
+                        &merged_count, &local->entries[local_index++]);
+                }
+            }
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        }
+    } else {
+        /* The removable primary is newer or tied: retain its order as the
+         * base, then replay every distinct device-local/live row as overlay. */
+        for (size_t i = 0U; i < sd->count; ++i) {
+            ret = append_unique_merge_entry(&merged_count, &sd->entries[i]);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        }
+        for (size_t i = 0U; i < local->count; ++i) {
+            ret = append_unique_merge_entry(&merged_count, &local->entries[i]);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        }
+    }
+
+    const uint32_t preferred_total =
+        local->total_written > sd->total_written ?
+        local->total_written : sd->total_written;
+    const uint32_t dropped_oldest =
+        local->dropped_oldest > sd->dropped_oldest ?
+        local->dropped_oldest : sd->dropped_oldest;
+    return fill_resequenced_divergent_primary(
+        out, merged_count, preferred_total, dropped_oldest);
+}
+
 static esp_err_t adopt_sd_with_live_overlay(
     const d1l_packet_log_primary_blob_t *local,
     const d1l_packet_log_primary_blob_t *sd,
@@ -861,12 +992,32 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         return note_reconcile_failure(ESP_ERR_INVALID_STATE);
     }
 
+    memset(&s_sd_primary_blob_scratch, 0, sizeof(s_sd_primary_blob_scratch));
     size_t sd_len = sizeof(s_sd_primary_blob_scratch);
     const esp_err_t sd_ret = packet_read_sd_primary(
         &s_sd_primary_blob_scratch, &sd_len);
-    const bool primary_found = sd_ret == ESP_OK;
-    if (primary_found &&
-        !primary_blob_is_valid(&s_sd_primary_blob_scratch, sd_len)) {
+    bool primary_found = false;
+    bool legacy_v2_primary = false;
+    if (sd_ret == ESP_OK &&
+        primary_blob_is_valid(&s_sd_primary_blob_scratch, sd_len)) {
+        primary_found = true;
+    } else if (sd_ret == ESP_OK &&
+               sd_len == sizeof(s_fallback_blob_scratch)) {
+        /* Schema v2 used the same eight-entry compact blob for SD and NVS.
+         * Accept only that exact legacy size/layout, then expand it in RAM so
+         * the normal merge and guarded replacement can upgrade it without
+         * discarding newer NVS or live entries. */
+        memcpy(&s_fallback_blob_scratch, &s_sd_primary_blob_scratch,
+               sizeof(s_fallback_blob_scratch));
+        if (fallback_blob_v2_is_valid(&s_fallback_blob_scratch, sd_len)) {
+            promote_v2_compact_primary(&s_fallback_blob_scratch,
+                                       &s_sd_primary_blob_scratch);
+            primary_found = true;
+            legacy_v2_primary = true;
+        } else {
+            return note_reconcile_failure(ESP_ERR_INVALID_STATE);
+        }
+    } else if (sd_ret == ESP_OK) {
         return note_reconcile_failure(ESP_ERR_INVALID_STATE);
     }
     if (sd_ret != ESP_OK && sd_ret != ESP_ERR_NOT_FOUND) {
@@ -883,6 +1034,7 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         return note_reconcile_failure(ESP_ERR_INVALID_STATE);
     }
 
+    bool journal_lineage_untrusted = false;
     d1l_store_lock_take(&s_store_lock);
     fill_primary_blob(&s_local_blob_scratch);
     d1l_packet_log_primary_blob_t *merged = &s_primary_blob_scratch;
@@ -908,6 +1060,11 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         } else {
             merge_ret = merge_same_lineage(
                 &s_local_blob_scratch, &s_sd_primary_blob_scratch, merged);
+            if (merge_ret == ESP_ERR_INVALID_STATE) {
+                merge_ret = merge_divergent_lineage(
+                    &s_local_blob_scratch, &s_sd_primary_blob_scratch, merged);
+                journal_lineage_untrusted = merge_ret == ESP_OK;
+            }
         }
     }
     if (merge_ret != ESP_OK) {
@@ -919,6 +1076,18 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         return merge_ret;
     }
 
+    /* The card may have changed while valid histories were being compared.
+     * Re-sample at the last possible point before importing any SD-derived
+     * rows into RAM or making that import eligible for an NVS write. */
+    if (!packet_backend_generation_matches(expected_generation)) {
+        s_sd_reconcile_pending = true;
+        s_sd_reconcile_fail_count++;
+        s_sd_reconcile_last_error = ESP_ERR_INVALID_STATE;
+        s_sd_primary_last_error = ESP_ERR_INVALID_STATE;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     const bool local_changed =
         !primary_blobs_equal(&s_local_blob_scratch, merged);
     if (local_changed) {
@@ -927,7 +1096,8 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         s_nvs_fallback_dirty = true;
     }
     s_sd_primary_dirty = primary_found ?
-        !primary_blobs_equal(&s_sd_primary_blob_scratch, merged) :
+        (legacy_v2_primary ||
+         !primary_blobs_equal(&s_sd_primary_blob_scratch, merged)) :
         merged->total_written > 0U;
     s_sd_reconcile_pending = false;
     s_sd_reconcile_count++;
@@ -938,7 +1108,8 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
     if (primary_found && s_sd_primary_blob_scratch.total_written == 0U) {
         s_sd_history_records = 0U;
         s_journal_next_seq = 1U;
-    } else if (primary_found && journal_tail_valid) {
+    } else if (primary_found && journal_tail_valid &&
+               !journal_lineage_untrusted) {
         restore_sd_history_count_from_total();
         s_sd_history_records =
             s_sd_primary_blob_scratch.total_written < D1L_PACKET_LOG_SD_CAPACITY ?
@@ -1366,14 +1537,19 @@ bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry)
     return d1l_packet_log_append_raw(entry, NULL, 0);
 }
 
-static bool append_raw_internal(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
-                                size_t raw_len, bool persist)
+static esp_err_t append_raw_internal(const d1l_packet_log_entry_t *entry,
+                                     const uint8_t *raw, size_t raw_len,
+                                     bool persist, uint32_t *out_stored_seq)
 {
-    if (entry == NULL) {
-        return false;
+    if (out_stored_seq) {
+        *out_stored_seq = 0U;
     }
-    if (ensure_packet_log_initialized() != ESP_OK) {
-        return false;
+    if (entry == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const esp_err_t init_ret = ensure_packet_log_initialized();
+    if (init_ret != ESP_OK) {
+        return init_ret;
     }
 
     d1l_store_lock_take(&s_append_clear_lock);
@@ -1381,7 +1557,7 @@ static bool append_raw_internal(const d1l_packet_log_entry_t *entry, const uint8
     if (s_clear_in_progress) {
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_append_clear_lock);
-        return false;
+        return ESP_ERR_INVALID_STATE;
     }
     d1l_packet_log_entry_t copy = *entry;
     copy.seq = s_next_seq;
@@ -1410,14 +1586,14 @@ static bool append_raw_internal(const d1l_packet_log_entry_t *entry, const uint8
         s_volatile_valid = true;
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_append_clear_lock);
-        return true;
+        return ESP_OK;
     }
 
     /* The next durable packet supersedes the preview and owns its seq. */
     if (s_next_seq == UINT32_MAX) {
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_append_clear_lock);
-        return false;
+        return ESP_ERR_INVALID_STATE;
     }
     s_volatile_valid = false;
     s_next_seq++;
@@ -1451,20 +1627,36 @@ static bool append_raw_internal(const d1l_packet_log_entry_t *entry, const uint8
          now_ms - s_last_sd_flush_ms >= D1L_PACKET_LOG_SD_FLUSH_INTERVAL_MS);
     d1l_store_lock_give(&s_store_lock);
     const esp_err_t ret = persist_store(flush_primary, false);
+    if (ret == ESP_OK && out_stored_seq) {
+        /* The append/clear owner excludes another packet append while a
+         * reconciliation may replay this new row after a newer SD base. The
+         * appended row is therefore still the newest retained row even when
+         * its originally assigned sequence was deterministically changed. */
+        d1l_store_lock_take(&s_store_lock);
+        *out_stored_seq = s_next_seq > 1U ? s_next_seq - 1U : 0U;
+        d1l_store_lock_give(&s_store_lock);
+    }
     d1l_store_lock_give(&s_append_clear_lock);
-    return ret == ESP_OK;
+    return ret;
+}
+
+esp_err_t d1l_packet_log_append_raw_checked(const d1l_packet_log_entry_t *entry,
+                                            const uint8_t *raw, size_t raw_len,
+                                            uint32_t *out_stored_seq)
+{
+    return append_raw_internal(entry, raw, raw_len, true, out_stored_seq);
 }
 
 bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
                                size_t raw_len)
 {
-    return append_raw_internal(entry, raw, raw_len, true);
+    return d1l_packet_log_append_raw_checked(entry, raw, raw_len, NULL) == ESP_OK;
 }
 
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
                                         const uint8_t *raw, size_t raw_len)
 {
-    return append_raw_internal(entry, raw, raw_len, false);
+    return append_raw_internal(entry, raw, raw_len, false, NULL) == ESP_OK;
 }
 
 esp_err_t d1l_packet_log_flush(void)

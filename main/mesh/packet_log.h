@@ -75,6 +75,9 @@ typedef struct {
 esp_err_t d1l_packet_log_init(void);
 esp_err_t d1l_packet_log_clear(void);
 bool d1l_packet_log_append(const d1l_packet_log_entry_t *entry);
+esp_err_t d1l_packet_log_append_raw_checked(const d1l_packet_log_entry_t *entry,
+                                            const uint8_t *raw, size_t raw_len,
+                                            uint32_t *out_stored_seq);
 bool d1l_packet_log_append_raw(const d1l_packet_log_entry_t *entry, const uint8_t *raw,
                                size_t raw_len);
 bool d1l_packet_log_append_raw_volatile(const d1l_packet_log_entry_t *entry,
