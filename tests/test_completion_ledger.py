@@ -26,6 +26,8 @@ def package(ledger: dict, package_id: str) -> dict:
 def bank_wp01_proof(ledger: dict) -> dict:
     item = package(ledger, "WP-01")
     item["status"] = "hardware_green"
+    item["implementation_commit"] = WP01_COMMIT
+    item["implementation_merged"] = False
     item["proof_banked"] = True
     item["evidence"].extend(
         {
@@ -44,6 +46,15 @@ def bank_wp01_proof(ledger: dict) -> dict:
     return item
 
 
+def reset_wp02_before_merge(ledger: dict) -> dict:
+    item = package(ledger, "WP-02")
+    item["status"] = "in_progress"
+    item["dependency_gate"] = "merged"
+    item["implementation_commit"] = None
+    item["implementation_merged"] = False
+    return item
+
+
 def test_repository_ledger_validates_and_status_is_current():
     ledger = load_ledger(LEDGER_PATH)
 
@@ -51,10 +62,29 @@ def test_repository_ledger_validates_and_status_is_current():
     assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
 
 
-def test_current_runnable_selection_advances_to_wp02_after_wp01_proof_is_banked():
+def test_current_runnable_selection_advances_past_merged_wp02_implementation():
     ledger = load_ledger(LEDGER_PATH)
 
-    assert runnable_work_packages(ledger)[0] == "WP-02"
+    assert runnable_work_packages(ledger)[:2] == ["WP-03", "WP-04"]
+
+
+def test_implementation_merged_gate_unlocks_dependents_while_proof_remains_open():
+    ledger = ledger_copy()
+    wp02 = package(ledger, "WP-02")
+
+    assert wp02["status"] == "in_progress"
+    assert wp02["dependency_gate"] == "implementation_merged"
+    assert wp02["implementation_merged"] is True
+    assert wp02["proof_banked"] is False
+    assert dependency_satisfied(wp02) is True
+
+
+def test_implementation_merged_gate_fails_closed_without_merged_implementation():
+    ledger = ledger_copy()
+    wp02 = package(ledger, "WP-02")
+    wp02["implementation_merged"] = False
+
+    assert dependency_satisfied(wp02) is False
 
 
 def test_execution_blocker_removes_wp01_from_runnable_work():
@@ -112,8 +142,7 @@ def test_merged_item_without_required_evidence_is_rejected():
 def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
     ledger = ledger_copy()
     wp01 = bank_wp01_proof(ledger)
-    wp02 = package(ledger, "WP-02")
-    wp02["status"] = "in_progress"
+    reset_wp02_before_merge(ledger)
 
     errors = validate_ledger(ledger)
 
@@ -126,7 +155,7 @@ def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
 def test_banked_wp01_status_describes_wp02_as_unlocked():
     ledger = ledger_copy()
     bank_wp01_proof(ledger)
-    package(ledger, "WP-02")["status"] = "in_progress"
+    reset_wp02_before_merge(ledger)
 
     rendered = render_status(ledger)
 

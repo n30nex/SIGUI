@@ -8,26 +8,26 @@
 
 | Item | Value |
 |---|---|
-| Live merged `main` | `12d5470eca45ef6e86b6e15cf1822716e563a78e` |
+| Live merged `main` | `4ee07caf09906abdcebe8faccd95790dceb5fe88` |
 | WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
-| Active PR stack | #80 |
-| Candidate integration state | PR #80 has absorbed exact `main` locally; refreshed remote exact-head checks and merge remain pending |
+| Active PR stack | none |
+| Candidate integration state | PRs #62, #64, and #80 are merged; software integration is complete and exact-main physical qualification remains open |
 | Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Candidate host suite | 773 passing tests in exact Actions host job |
-| Candidate CI | push `29272708844` and PR `29272709642` green; 8 manifests / 78 checksum entries verified |
+| Candidate host suite | 795 passing tests in exact merged-main Actions host job |
+| Candidate CI | run `29290978741` green; 8 manifests / 78 checksum entries verified |
 | Conformance closure | false; `wire_envelope_only` |
 | Release status | not ready to tag; 15 P0 failures and 16 failures overall including P1 remain |
 
 ## Live post-audit reconciliation
 
-- Live `main` is `12d5470eca45ef6e86b6e15cf1822716e563a78e`; PR #64 head `15f2a9ed99541fa059445ff3d1b06a40b4c42bee` merged after push `29289247092` verified 2 manifests / 36 entries and PR `29289250956` on merge-test SHA `82b086baf534dade4407fb62210a3cb5218e8986` verified 8 / 75 with root manifest `0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379`.
-- Exact merged-main run `29289683188` passed 582 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 75 entries. Root manifest is `23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed`; application is `e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a`; full flash is `785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
-- WP-01 is `hardware_green` with `proof_banked=true` on exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`, but `implementation_merged=false` until WP-02 lands PR #80.
+- Live `main` is `4ee07caf09906abdcebe8faccd95790dceb5fe88`; PR #80 head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` is merged after PRs #62 and #64.
+- Exact merged-main run `29290978741` passed 795 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 78 entries. Root manifest is `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`; application is `44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a`; full flash is `ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
+- WP-01 is `merged` with `proof_banked=true`; its physical evidence remains explicitly bound to exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
 - The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
-- WP-02 is `in_progress`. PRs #62 and #64 are merged and exact-verified; PR #80 remains the active integration layer.
+- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. Baseline `integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c`) fails closed only for missing board, UI, SD, reboot, and Map-open exact-main role receipts. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` is non-execution-blocking, so WP-03 and WP-04 remain runnable.
 
 ### WP-01 canonical exact-source receipts
 
@@ -61,15 +61,15 @@ This proof closes only WP-01's narrow source gate. The exact integrated/frozen c
 
 ### PR #80
 
-- Remote base/head refresh remains pending; the local integration has absorbed exact merged `main` `12d5470eca45ef6e86b6e15cf1822716e563a78e`.
+- Final integration head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as exact main `4ee07caf09906abdcebe8faccd95790dceb5fe88`.
 - Purpose: first MeshCore envelope conformance slice, retained durability, release evidence, current false-`no_card` repair
 - Predecessor hardware failures:
   - route-persistence task stack overflow;
   - post-ack WDT;
   - inserted card temporarily reported `no_card`.
-- Exact source head `092293f2311a24c9899bc9bf343ab014c4ba0411` has now passed the WP-01 exact-pair source proof listed above. It remains unmerged and does not qualify the later integrated SHA.
+- Exact source head `092293f2311a24c9899bc9bf343ab014c4ba0411` passed the WP-01 exact-pair proof listed above. That predecessor proof remains valid for WP-01 but does not qualify the later integrated SHA.
 - Local-only full-stack reconciliation rehearsal `341a3abf4db4c52acf5859e396f25e7adb4cbab1` passed 787 full / 302 focused host tests. It is not remote exact Actions or hardware proof.
-- Post-PR #64 local integration commit `18fa68c1eefc640c0b04ee3964fd3e34f3367875` absorbed exact main and passed 489 focused tests with 3 skips. The refreshed remote head is intentionally pending until push; this local receipt is not Actions or hardware proof.
+- Exact merged-main Actions `29290978741` and downloaded 8-manifest / 78-entry verification supersede the local integration rehearsals for software proof. Physical proof remains separately exact-SHA-bound.
 
 ### Stale feature branch
 
@@ -146,7 +146,7 @@ Confirmed risk:
 
 - behavior is duplicated across stores;
 - reboot/quiescence spans multiple tasks/locks;
-- the narrow `092293f` WP-01 exact-pair repair is physically proof-banked but not merged or requalified on the integrated line;
+- the narrow `092293f` WP-01 exact-pair repair is physically proof-banked and merged through PR #80, but not requalified on the integrated `4ee07caf` line;
 - broader coalescing, power-loss, schema, reset, and time work remains open.
 
 ### RP2040 bridge

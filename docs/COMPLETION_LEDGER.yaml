@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-13T22:36:55Z",
+  "snapshot_at": "2026-07-13T23:13:07Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,21 +12,26 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
-      "actions_run": "29289683188",
+      "commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+      "actions_run": "29290978741",
       "actions_status": "success",
-      "host_tests_passed": 582,
+      "host_tests_passed": 795,
       "checksum_contract_tests_passed": 24,
       "checksum_status": "strict_pass_after_download",
       "checksum_manifests_total": 8,
       "checksum_manifests_verified": 8,
-      "checksum_entries_present": 75,
-      "firmware_manifest_sha256": "536641dd0845b99dca6093474759e2e0a3a0312f02623f260d6bb7f88c1bc6c1",
-      "release_manifest_sha256": "23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed",
-      "application_sha256": "e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a",
-      "full_flash_sha256": "785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e",
+      "checksum_entries_present": 78,
+      "firmware_manifest_sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+      "release_manifest_sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+      "release_package_manifest_json_sha256": "cef679f861b1e91bd648520ea3901b717d2a7a81b4a39c9af1f68de12b776111",
+      "application_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+      "full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd",
+      "rp2040_bridge_uf2_sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096",
+      "downloaded_tree_file_count": 244,
+      "downloaded_tree_sha256": "8a80700b90f7a77c868fbc6ef721c4dbd8936364aa50ab3439fb533184cc5efa",
+      "host_success_marker_sha256": "32566016625de5eb3bd8644df11bba918055d7cc0c9923e7bf9f71127e62e481",
       "checksum_failure": null,
-      "note": "PR #64 is merged and exact merged-main Actions 29289683188 passed. Downloaded verification strict-passed all 8 manifests / 75 entries for exact main 12d5470eca45ef6e86b6e15cf1822716e563a78e.",
+      "note": "PR #80 is merged and exact merged-main Actions 29290978741 passed. Downloaded verification strict-passed all 8 manifests / 78 entries for exact main 4ee07caf09906abdcebe8faccd95790dceb5fe88.",
       "previous_artifact_integrity_failure": {
         "commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
         "actions_run": "29286754864",
@@ -40,11 +45,11 @@
       }
     },
     "working_branch": {
-      "name": "codex/wp02-pr80-refresh",
-      "base_commit": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
-      "pull_request": 80,
-      "merged_pull_request": 64,
-      "local_integration_commit_before_ledger": "18fa68c1eefc640c0b04ee3964fd3e34f3367875"
+      "name": "codex/wp02-baseline-artifact",
+      "base_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+      "pull_request": null,
+      "merged_pull_request": 80,
+      "local_integration_commit_before_ledger": "f5c78f11a143ca437c479cdf793eea83a9572b9d"
     },
     "merged_pull_request_receipts": {
       "64": {
@@ -69,6 +74,20 @@
         "merged_main_root_manifest_sha256": "23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed",
         "merged_main_application_sha256": "e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a",
         "merged_main_full_flash_sha256": "785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e"
+      },
+      "80": {
+        "head_commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+        "merge_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+        "merged_main_actions_run": "29290978741",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 795,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 8,
+        "merged_main_checksum_entries_verified": 78,
+        "merged_main_firmware_manifest_sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+        "merged_main_root_manifest_sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+        "merged_main_application_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+        "merged_main_full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd"
       }
     },
     "audit_snapshot": {
@@ -76,46 +95,24 @@
       "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
     },
     "integrated_candidate": {
-      "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
-      "branch": "codex/d1l-retained-merge",
-      "actions_push_run": "29272708844",
-      "actions_pull_request_run": "29272709642"
+      "commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+      "branch": "main",
+      "actions_run": "29290978741",
+      "status": "software_integrated_physical_qualification_open"
     },
     "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "selected_esp_idf": "5.5.4",
     "main_esp_idf": "5.5.4"
   },
-  "active_pull_requests": [
-    {
-      "number": 80,
-      "title": "fix(d1l): harden retained store reconciliation",
-      "base": "main",
-      "head": "codex/d1l-retained-merge",
-      "head_commit": null,
-      "remote_pre_refresh_head": "092293f2311a24c9899bc9bf343ab014c4ba0411",
-      "state": "open",
-      "draft": true,
-      "checks": "pending_refreshed_exact_head_push",
-      "mergeable": null,
-      "physical_gate": "banked_exact_092293f",
-      "local_resolution_commit": "18fa68c1eefc640c0b04ee3964fd3e34f3367875",
-      "local_resolution_tests": null,
-      "local_resolution_focused_tests": 489,
-      "local_resolution_skipped_tests": 3,
-      "local_resolution_scope": "post_pr64_merge_focused_green_docs_only_full_not_rerun",
-      "absorbed_main_commit": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
-      "absorbed_main_actions_run": "29289683188",
-      "absorbed_main_actions_status": "success"
-    }
-  ],
+  "active_pull_requests": [],
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
-      "resolution": "Use live main 12d5470eca45ef6e86b6e15cf1822716e563a78e after merged PR #64; retain the audited SHA and PR #62 main as history. Exact merged-main Actions 29289683188 passed 582 host tests, 24 checksum-contract tests, and downloaded strict verification of 8 manifests / 75 entries."
+      "resolution": "Use live main 4ee07caf09906abdcebe8faccd95790dceb5fe88 after merged PR #80; retain audited and predecessor SHAs as history. Exact merged-main Actions 29290978741 passed 795 host tests, 24 checksum-contract tests, and downloaded strict verification of 8 manifests / 78 entries."
     },
     {
-      "conflict": "PR #80 text says its fresh workflows are queued.",
-      "resolution": "Live push run 29272708844 and PR run 29272709642 both completed successfully for exact SHA 092293f2311a24c9899bc9bf343ab014c4ba0411; all eight downloaded artifact manifests verify."
+      "conflict": "The audited snapshot and predecessor ledger described PR #80 as open or awaiting refresh.",
+      "resolution": "PR #80 head ab3e7d82b6f3c4b38fd80d833e155aa941dee045 merged as exact main 4ee07caf09906abdcebe8faccd95790dceb5fe88. Exact merged-main run 29290978741 succeeded and all eight downloaded manifests with 78 entries strict-verified."
     },
     {
       "conflict": "Older release docs and helpers describe COM11 as an operational peer default.",
@@ -123,11 +120,15 @@
     },
     {
       "conflict": "Current main still builds the pre-stack ESP-IDF 5.1 line while the selected release SDK is 5.5.4.",
-      "resolution": "PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee landed as main 12d5470eca45ef6e86b6e15cf1822716e563a78e with the selected ESP-IDF 5.5.4 build path. Its branch artifacts and exact merged-main Actions 29289683188 are verified. Physical combined-candidate qualification remains open."
+      "resolution": "PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee and PR #80 head ab3e7d82b6f3c4b38fd80d833e155aa941dee045 are both ancestors of exact main 4ee07caf09906abdcebe8faccd95790dceb5fe88 with the selected ESP-IDF 5.5.4 build path. Exact merged-main Actions 29290978741 and downloaded artifacts are verified. Physical combined-candidate qualification remains open."
     },
     {
       "conflict": "Exact-main Actions 29286754864 was green although the downloaded release package failed recursive checksum coverage.",
-      "resolution": "The negative receipt remains preserved. PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee fixed root-manifest coverage and exact-package-root verification. Push run 29289247092 verified 2 manifests / 36 entries; PR run 29289250956 on merge-test SHA 82b086baf534dade4407fb62210a3cb5218e8986 verified 8 manifests / 75 entries, including root manifest 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379. Exact merged-main run 29289683188 then strict-passed 8 manifests / 75 entries with root manifest 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed. The blocker is closed."
+      "resolution": "The negative receipt remains preserved. PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee fixed root-manifest coverage and exact-package-root verification. Push run 29289247092 verified 2 manifests / 36 entries; PR run 29289250956 on merge-test SHA 82b086baf534dade4407fb62210a3cb5218e8986 verified 8 manifests / 75 entries. Exact PR #80 merged-main run 29290978741 strict-passed 8 manifests / 78 entries with root manifest 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64. The blocker is closed."
+    },
+    {
+      "conflict": "The merged WP-02 software stack is complete, but predecessor physical proof is bound to SHA 092293f rather than exact main 4ee07caf.",
+      "resolution": "Record the exact-main integration baseline as fail-closed with only the board, UI, SD, reboot, and Map-open role receipts missing. Keep WP-02 in progress and proof_banked=false, but use the implementation_merged dependency gate so this non-execution blocker does not stall WP-03 or WP-04."
     }
   ],
   "port_policy": {
@@ -279,6 +280,23 @@
       "resolution": "Push run 29289247092 passed with 2 manifests / 36 entries. PR run 29289250956 passed on merge-test SHA 82b086baf534dade4407fb62210a3cb5218e8986 with 8 manifests / 75 entries and root manifest SHA-256 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379. Head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee merged as 12d5470eca45ef6e86b6e15cf1822716e563a78e. Exact merged-main run 29289683188 also strict-passed 8 manifests / 75 entries with root manifest SHA-256 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed.",
       "blocks_execution": false,
       "still_unblocked": ["WP-02 PR #80 integration validation"]
+    },
+    {
+      "id": "BLK-WP02-EXACT-HARDWARE-ROLES-20260713",
+      "work_package": "WP-02",
+      "kind": "exact_main_hardware_qualification_missing",
+      "status": "open",
+      "observed_at": "2026-07-13T22:59:46Z",
+      "missing_input": "Five exact-main role receipts for 4ee07caf09906abdcebe8faccd95790dceb5fe88 and Actions run 29290978741: board boot/runtime on COM12, UI workflow on COM12, SD path on COM12/COM16, retained reboot on COM12/COM16, and Map-open on COM12.",
+      "why_source_work_cannot_close": "The valid WP-01 receipts are bound to predecessor SHA 092293f2311a24c9899bc9bf343ab014c4ba0411 and cover its storage/reboot acceptance. Simulation, source inspection, exact-main Actions success, and predecessor physical evidence cannot prove the five required physical roles on successor SHA 4ee07caf09906abdcebe8faccd95790dceb5fe88.",
+      "last_valid_sha": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+      "last_valid_actions_run": "29272708844",
+      "artifact_state": "exact_main_software_and_downloaded_actions_green_baseline_fail_closed_only_five_physical_roles_missing",
+      "baseline_artifact": "integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+      "baseline_sha256": "dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c",
+      "operator_action": "Install the checksum-verified exact 4ee07caf ESP32/RP2040 pair and collect only the five narrow role receipts on COM12/COM16. Do not use forbidden ports, transmit Public or DM RF, or format SD.",
+      "blocks_execution": false,
+      "still_unblocked": ["WP-03", "WP-04"]
     }
   ],
   "execution_priority": [
@@ -344,15 +362,15 @@
     },
     {
       "id": "WP-01",
-      "title": "Close PR #80 exact-pair storage/reboot gate",
+      "title": "Bank PR #80 exact-pair storage/reboot gate",
       "lane": "platform-storage",
       "depends_on": [],
       "tracks": [69, 78, "PR-80"],
-      "status": "hardware_green",
+      "status": "merged",
       "dependency_gate": "proof_banked",
-      "implementation_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+      "implementation_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
       "evidence_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
-      "implementation_merged": false,
+      "implementation_merged": true,
       "proof_banked": true,
       "required_evidence": [
         "sd_inserted_stability_<sha>_<d1l>_<rp2040>.json",
@@ -512,9 +530,9 @@
       "depends_on": ["WP-01"],
       "tracks": [62, 64, 80, 63, 78],
       "status": "in_progress",
-      "dependency_gate": "merged",
-      "implementation_commit": null,
-      "implementation_merged": false,
+      "dependency_gate": "implementation_merged",
+      "implementation_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+      "implementation_merged": true,
       "proof_banked": false,
       "merged_slices": {
         "pr62": {
@@ -539,12 +557,59 @@
           "merged_main_checksum_manifests_verified": 8,
           "merged_main_checksum_entries_verified": 75,
           "merged_main_root_manifest_sha256": "23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed"
+        },
+        "pr80": {
+          "head_commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+          "merge_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+          "merged_main_actions_run": "29290978741",
+          "merged_main_actions_status": "success",
+          "merged_main_host_tests_passed": 795,
+          "merged_main_checksum_contract_tests_passed": 24,
+          "merged_main_checksum_manifests_verified": 8,
+          "merged_main_checksum_entries_verified": 78,
+          "merged_main_firmware_manifest_sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+          "merged_main_root_manifest_sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+          "merged_main_application_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+          "merged_main_full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd"
         }
       },
       "required_evidence": ["integration_baseline_<main-sha>.json"],
-      "evidence": [],
+      "evidence": [
+        {
+          "filename": "integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+          "kind": "exact_merged_main_integration_baseline",
+          "commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+          "workflow_run": "29290978741",
+          "valid": false,
+          "closure_required": true,
+          "scope": "software_integrated_physical_qualification_open",
+          "sha256": "dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c",
+          "actions_checksums_verified": true,
+          "actions_payloads_verified": true,
+          "repository_layers_landed": true,
+          "checksum_manifests_verified": 8,
+          "checksum_entries_verified": 78,
+          "failures": [
+            "receipt:board:missing_or_outside_repository",
+            "receipt:map_open:missing_or_outside_repository",
+            "receipt:reboot:missing_or_outside_repository",
+            "receipt:sd:missing_or_outside_repository",
+            "receipt:ui:missing_or_outside_repository"
+          ]
+        }
+      ],
       "latest_valid_receipt": null,
-      "blockers": []
+      "verification": {
+        "local_post_merge": {
+          "worktree_parent_commit": "f5c78f11a143ca437c479cdf793eea83a9572b9d",
+          "focused_tests_passed": 42,
+          "focused_tests_skipped": 2,
+          "full_tests_passed": 811,
+          "full_tests_skipped": 3,
+          "ruff_status": "pass"
+        }
+      },
+      "blockers": ["BLK-WP02-EXACT-HARDWARE-ROLES-20260713"]
     },
     {
       "id": "WP-03",
@@ -552,7 +617,7 @@
       "lane": "release-security",
       "depends_on": ["WP-02"],
       "tracks": [17, 71],
-      "status": "blocked",
+      "status": "open",
       "dependency_gate": "merged",
       "implementation_commit": null,
       "implementation_merged": false,
@@ -568,7 +633,7 @@
       "lane": "protocol",
       "depends_on": ["WP-02"],
       "tracks": [65],
-      "status": "blocked",
+      "status": "open",
       "dependency_gate": "merged",
       "implementation_commit": null,
       "implementation_merged": false,

@@ -3,8 +3,8 @@ generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 12d5470eca45ef6e86b6e15cf1822716e563a78e
-  integrated_candidate: 092293f2311a24c9899bc9bf343ab014c4ba0411
+  merged_baseline: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  integrated_candidate: 4ee07caf09906abdcebe8faccd95790dceb5fe88
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -36,18 +36,28 @@ project:
     pr_checksum_manifests_verified: 8
     pr_checksum_entries_verified: 75
     pr_root_manifest_sha256: 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379
+  pr80_merge:
+    head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+    merge_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+    merged_main_actions_run: 29290978741
+    merged_main_actions_status: success
   live_main_artifact_integrity:
-    run: 29289683188
+    run: 29290978741
     status: success
-    host_tests_passed: 582
+    host_tests_passed: 795
     checksum_contract_tests_passed: 24
     manifests_total: 8
     manifests_verified: 8
-    checksum_entries_verified: 75
-    firmware_manifest_sha256: 536641dd0845b99dca6093474759e2e0a3a0312f02623f260d6bb7f88c1bc6c1
-    release_manifest_sha256: 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed
-    application_sha256: e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a
-    full_flash_sha256: 785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e
+    checksum_entries_verified: 78
+    firmware_manifest_sha256: 5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9
+    release_manifest_sha256: 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64
+    release_package_manifest_json_sha256: cef679f861b1e91bd648520ea3901b717d2a7a81b4a39c9af1f68de12b776111
+    application_sha256: 44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a
+    full_flash_sha256: ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd
+    rp2040_bridge_uf2_sha256: ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096
+    downloaded_tree_file_count: 244
+    downloaded_tree_sha256: 8a80700b90f7a77c868fbc6ef721c4dbd8936364aa50ab3439fb533184cc5efa
+    host_success_marker_sha256: 32566016625de5eb3bd8644df11bba918055d7cc0c9923e7bf9f71127e62e481
     note: Exact merged-main Actions and downloaded recursive verification strict-passed.
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
@@ -57,7 +67,7 @@ project:
       manifests_verified: 7
       release_manifest_sha256: 2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1
       failure: top release manifest omitted three nested RP2040 SHA256SUMS.txt files
-  integrated_candidate_actions:
+  wp01_evidence_source_actions:
     push_run: 29272708844
     pr_run: 29272709642
     host_tests_passed: 773
@@ -83,15 +93,17 @@ project:
       full_host_tests_passed: 787
       focused_tests_passed: 302
       evidence_scope: local_only
-  latest_pr80_integration:
-    commit_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
-    absorbed_main: 12d5470eca45ef6e86b6e15cf1822716e563a78e
-    focused_tests_passed: 489
-    tests_skipped: 3
-    full_tests_passed: null
-    evidence_scope: local_focused_green_docs_only_full_not_rerun
-  active_pr_stack:
-  - 80
+  latest_wp02_baseline_refresh:
+    head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+    merged_main: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+    merged_main_actions_run: 29290978741
+    focused_tests_passed: 42
+    focused_tests_skipped: 2
+    full_tests_passed: 811
+    full_tests_skipped: 3
+    ruff_status: pass
+    evidence_scope: exact_merged_main_actions_and_local_post_merge_baseline_refresh
+  active_pr_stack: []
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
   target: seeed-sensecap-indicator-d1l
@@ -197,15 +209,17 @@ work_packages:
   - completion_ledger_validation_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-01
-  title: 'Close PR #80 exact-pair storage/reboot gate'
+  title: 'Bank PR #80 exact-pair storage/reboot gate'
   lane: platform-storage
   depends_on: []
   tracks:
   - 69
   - 78
-  status: hardware_green
+  status: merged
   proof_banked: true
-  implementation_merged: false
+  implementation_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  evidence_commit: 092293f2311a24c9899bc9bf343ab014c4ba0411
+  implementation_merged: true
   required_artifacts:
   - sd_inserted_stability_<sha>_<d1l>_<rp2040>.json
   - sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json
@@ -232,14 +246,14 @@ work_packages:
     aggregate_sha256: 994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277
     public_rf_tx: false
     formats_sd: false
-  remaining_scope: Implementation merge is owned by WP-02; broader final SD/card/Seeed/electrical/power-loss/boot/12-hour qualification remains open.
-  closure_rule: Exact source implementation, Actions, checksums, inserted/removal/reboot/active-soak evidence, docs, and ledger proof are banked; implementation merge remains false until WP-02 lands PR #80.
+  remaining_scope: Broader final SD/card/Seeed/electrical/power-loss/boot/12-hour qualification remains owned by downstream release gates.
+  closure_rule: Exact source implementation, Actions, checksums, inserted/removal/reboot/active-soak evidence, docs, and ledger proof are banked; PR80 is merged on exact main.
 - id: WP-02
   title: Land and normalize PR stack
   lane: integration
   depends_on:
   - WP-01
-  dependency_gate: proof_banked
+  dependency_gate: implementation_merged
   tracks:
   - 62
   - 64
@@ -247,6 +261,9 @@ work_packages:
   - 63
   - 78
   status: in_progress
+  implementation_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  implementation_merged: true
+  proof_banked: false
   required_artifacts:
   - integration_baseline_<main-sha>.json
   merged_slices:
@@ -272,16 +289,48 @@ work_packages:
       merged_main_checksum_manifests_verified: 8
       merged_main_checksum_entries_verified: 75
       merged_main_root_manifest_sha256: 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed
+    pr80:
+      head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+      merge_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+      merged_main_actions_run: 29290978741
+      merged_main_actions_status: success
+      merged_main_host_tests_passed: 795
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 8
+      merged_main_checksum_entries_verified: 78
+      merged_main_firmware_manifest_sha256: 5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9
+      merged_main_root_manifest_sha256: 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64
   closed_receipts:
   - id: BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713
     status: closed
     resolution: PR64 branch and merged-main downloaded artifacts recursively strict-pass complete root and nested checksum coverage.
   artifact_integrity_fix: verified on PR64 push, PR merge-test, and exact merged main
+  integration_baseline:
+    filename: integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json
+    sha256: dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c
+    valid: false
+    software_integration_complete: true
+    actions_run: 29290978741
+    checksum_manifests_verified: 8
+    checksum_entries_verified: 78
+    missing_exact_main_roles:
+    - board
+    - map_open
+    - reboot
+    - sd
+    - ui
+  open_receipts:
+  - id: BLK-WP02-EXACT-HARDWARE-ROLES-20260713
+    status: open
+    blocks_execution: false
+    last_valid_sha: 092293f2311a24c9899bc9bf343ab014c4ba0411
+    last_valid_actions_run: 29272708844
+    operator_action: Install the checksum-verified exact 4ee07caf ESP32/RP2040 pair and collect the five narrow role receipts on COM12/COM16; do not use forbidden ports, transmit Public or DM RF, or format SD.
   local_rehearsals:
     predecessor_pr64: c5886de1e2988b2097034183d5e39bb3aec88344
     predecessor_pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
     current_pr80_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
-  evidence_scope: PR62 and PR64 are merged and exact-verified. PR80 has absorbed exact main locally and passed 489 focused tests with 3 skips; its refreshed remote exact-head Actions, downloaded checksums, merge, and final integration baseline remain open.
+  evidence_scope: PR62, PR64, and PR80 are merged. Exact main Actions and downloaded checksums are green; the integration baseline fails closed only because five exact-main physical role receipts are absent. Predecessor 092293f evidence cannot close successor 4ee07caf roles.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
@@ -291,7 +340,7 @@ work_packages:
   tracks:
   - 17
   - 71
-  status: blocked
+  status: open
   required_artifacts:
   - build_inputs_<sha>.json
   - sbom_<sha>.spdx.json
@@ -304,7 +353,7 @@ work_packages:
   - WP-02
   tracks:
   - 65
-  status: blocked
+  status: open
   required_artifacts:
   - meshcore_oracle_manifest_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.

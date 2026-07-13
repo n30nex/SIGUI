@@ -25,7 +25,7 @@ VALID_STATES = (
     "merged",
     "released",
 )
-DEPENDENCY_GATES = ("merged", "proof_banked")
+DEPENDENCY_GATES = ("merged", "proof_banked", "implementation_merged")
 WORKING_DOC_STATES = ("working", "hardware_proven", "released")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TEMPLATE_TOKEN_RE = re.compile(r"<[^>]+>")
@@ -87,6 +87,15 @@ def dependency_satisfied(item: dict) -> bool:
     gate = item.get("dependency_gate", "merged")
     if gate == "proof_banked":
         return item.get("proof_banked") is True and item.get("status") in (
+            "hardware_green",
+            "merged",
+            "released",
+        )
+    if gate == "implementation_merged":
+        return item.get("implementation_merged") is True and item.get("status") in (
+            "in_progress",
+            "host_green",
+            "actions_green",
             "hardware_green",
             "merged",
             "released",
@@ -434,20 +443,21 @@ def render_status(ledger: dict) -> str:
         checksums = wp01.get("verification", {}).get("checksums", {})
         physical = wp01.get("verification", {}).get("physical", {})
         wp02_dependency_note = (
-            "`WP-02` is unlocked because WP-01 reached `hardware_green` with "
-            "`proof_banked=true`. PR #80 is still merged by WP-02 itself; WP-01 "
-            "is not marked `merged` early."
+            "`WP-02` is unlocked because WP-01 banked its required exact-pair "
+            "hardware proof. The implementation may land on a successor SHA while "
+            "the evidence remains explicitly bound to its proven source SHA."
             if dependency_satisfied(wp01)
-            else "`WP-02` remains blocked until WP-01 reaches `hardware_green` with "
-            "`proof_banked=true`. That proof satisfies WP-02's dependency even though "
-            "PR #80 is merged by WP-02 itself; WP-01 is not marked `merged` early."
+            else "`WP-02` remains blocked until WP-01 banks its required exact-pair "
+            "hardware proof."
         )
         lines.extend(
             [
                 "",
                 "## WP-01 exact-candidate checkpoint",
                 "",
-                "- Candidate SHA: `%s`" % wp01.get("implementation_commit"),
+                "- Merged implementation SHA: `%s`" % wp01.get("implementation_commit"),
+                "- Exact physical evidence SHA: `%s`"
+                % wp01.get("evidence_commit", wp01.get("implementation_commit")),
                 "- Execution state: **%s** (stage `%s`)"
                 % (wp01.get("status"), actions.get("stage", "unknown")),
                 "- Host suite: **%s**, %s tests"

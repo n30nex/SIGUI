@@ -128,7 +128,7 @@ Do not run a local firmware build and do not hand-edit `dependencies.lock`.
 
 ## WP-01 Exact-Pair Evidence Checkpoint
 
-WP-01 is `hardware_green` with `proof_banked=true`, but its implementation is not merged. The accepted source is `092293f2311a24c9899bc9bf343ab014c4ba0411`; exact push/PR Actions runs are `29272708844` / `29272709642`. The Actions host job reports **773 passed**, and checksum verification covers **8 manifests / 78 entries**.
+WP-01 is merged with `proof_banked=true`. Its accepted physical source remains `092293f2311a24c9899bc9bf343ab014c4ba0411`; exact push/PR Actions runs are `29272708844` / `29272709642`. The Actions host job reports **773 passed**, and checksum verification covers **8 manifests / 78 entries**. This evidence remains predecessor-bound and must not be relabelled as successor proof.
 
 | Canonical artifact | SHA-256 | Accepted result |
 |---|---|---|
@@ -141,9 +141,11 @@ WP-01 is `hardware_green` with `proof_banked=true`, but its implementation is no
 
 All accepted WP-01 evidence reports `public_rf_tx=false` and `formats_sd=false`. It closes only the narrow PR #80 source storage/reboot gate. It does **not** close the later exact integrated/frozen-candidate no-card, unusable/non-FAT32, representative-card/size, Seeed, electrical, power-loss, cold/warm boot, 12-hour idle/listening, UI, Map, or RF matrices.
 
-PRs #62 and #64 are merged on live `main` `12d5470eca45ef6e86b6e15cf1822716e563a78e`. PR #64 head `15f2a9ed99541fa059445ff3d1b06a40b4c42bee` and PR merge-test SHA `82b086baf534dade4407fb62210a3cb5218e8986` passed downloaded branch verification before merge; exact merged-main Actions `29289683188` then passed 582 host plus 24 checksum-contract tests. PR #80 remains unmerged and must produce fresh exact-head checks after absorbing current `main`.
+PRs #62, #64, and #80 are merged on live `main` `4ee07caf09906abdcebe8faccd95790dceb5fe88`. Exact merged-main Actions `29290978741` passed 795 host plus 24 checksum-contract tests, and downloaded verification strict-passed 8 manifests / 78 entries. The exact-main integration baseline verifies repository lineage, required PR layers, Actions identity, checksums, and payloads, then fails closed only for five absent physical roles.
 
-Downloaded release-package verification is recursive and fail-closed. The top `SHA256SUMS.txt` must cover every package file except itself, including each copied RP2040 bundle's nested `SHA256SUMS.txt`; each nested manifest must independently verify its own files. Exact-main run `29286754864` remains the preserved 7/8 negative receipt. PR #64 closed the defect: push `29289247092` passed 2 manifests / 36 entries, PR `29289250956` passed 8 / 75, and merged-main `29289683188` strict-passed 8 / 75 with root manifest SHA-256 `23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed`.
+For WP-02 physical closure, install the checksum-verified exact `4ee07caf` ESP32/RP2040 pair and collect only board boot/runtime on COM12, UI workflow on COM12, SD path on COM12/COM16, retained reboot on COM12/COM16, and Map-open on COM12. Each receipt must bind SHA `4ee07caf09906abdcebe8faccd95790dceb5fe88`, run `29290978741`, the applicable explicit ports, and `public_rf_tx=false`, `dm_rf_tx=false`, `formats_sd=false`. Never use COM8, COM11, or COM29 and never format SD. Until all five exist, `integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` remains `ok=false`; this does not block host-only WP-03/WP-04 execution.
+
+Downloaded release-package verification is recursive and fail-closed. The top `SHA256SUMS.txt` must cover every package file except itself, including each copied RP2040 bundle's nested `SHA256SUMS.txt`; each nested manifest must independently verify its own files. Exact-main run `29286754864` remains the preserved 7/8 negative receipt. PR #64 closed the defect; successor exact-main run `29290978741` strict-passed 8 manifests / 78 entries with root manifest SHA-256 `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`.
 
 ## Hardware Smoke
 
