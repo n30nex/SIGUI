@@ -1,8 +1,8 @@
 # SIGUI Audit Pack Validation Report
 
-**Validated:** 2026-07-13 18:36 EDT
+**Validated:** 2026-07-13 19:00 EDT
 
-**Live `main`:** `12d5470eca45ef6e86b6e15cf1822716e563a78e`
+**Live `main`:** `4ee07caf09906abdcebe8faccd95790dceb5fe88`
 
 **WP-01 exact source:** `092293f2311a24c9899bc9bf343ab014c4ba0411`
 
@@ -10,13 +10,13 @@
 
 ## Refreshed execution state
 
-- WP-01 is `hardware_green`, `proof_banked=true`, and `implementation_merged=false`.
+- WP-01 is `merged`, `proof_banked=true`, and `implementation_merged=true`; accepted physical evidence remains bound to predecessor source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
 - Exact push/PR Actions `29272708844` / `29272709642` are green; the host job reports 773 passed and 8 manifests / 78 checksum entries verify.
 - Canonical WP-01 aggregate SHA-256 is `994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277`.
 - WP-02 is `in_progress`.
-- PRs #62 and #64 are merged. PR #64 head `15f2a9ed99541fa059445ff3d1b06a40b4c42bee` merged as `12d5470eca45ef6e86b6e15cf1822716e563a78e` after exact push/PR artifact verification.
-- Merged-main Actions `29289683188` passed 582 host plus 24 checksum-contract tests and strict-verified 8 manifests / 75 entries. The earlier 7/8 negative receipt remains preserved; `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed.
-- PR #80 has absorbed exact current main locally at pre-ledger commit `18fa68c1eefc640c0b04ee3964fd3e34f3367875` and passed 489 focused tests with 3 skips. Its refreshed remote exact-head Actions/checksum receipt and merge are still pending; predecessor rehearsal `341a3abf4db4c52acf5859e396f25e7adb4cbab1` is history only.
+- PRs #62, #64, and #80 are merged. PR #80 head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as exact main `4ee07caf09906abdcebe8faccd95790dceb5fe88`.
+- Merged-main Actions `29290978741` passed 795 host plus 24 checksum-contract tests and strict-verified 8 manifests / 78 entries. The earlier 7/8 negative receipt remains preserved; `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed.
+- WP-02 software integration is complete. Tracked portable baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) fails closed only for five exact-main physical roles, so WP-02 remains `in_progress` while WP-03/WP-04 continue and release readiness remains false.
 - The exact release audit remains fail-closed with 15 P0 failures and 16 failures overall including P1.
 
 ## Structural checks
@@ -26,7 +26,7 @@
 - Work-package IDs are unique.
 - Every dependency resolves to a declared work package.
 - Dependency graph is acyclic.
-- WP-02 depends on WP-01's banked-proof gate and is now the active integration package.
+- WP-02 depends on WP-01's banked-proof gate. WP-02's merged implementation gate now unlocks WP-03/WP-04 without misrepresenting its missing physical qualification as closed.
 - Stable Core profile includes its direct dependencies and the completion ledger.
 - Full Feature profile contains all 26 work packages.
 - WP-24 requires WP-00 and all Stable Core implementation domains; its Full Feature profile adds WP-20 through WP-23.

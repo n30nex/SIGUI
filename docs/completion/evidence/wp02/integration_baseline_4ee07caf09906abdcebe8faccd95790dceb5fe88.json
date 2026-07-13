@@ -1,0 +1,310 @@
+{
+  "actions": {
+    "checks": {
+      "all_checksum_files_verified": true,
+      "firmware_payload_identity": true,
+      "host_success_marker": true,
+      "release_manifest_identity": true,
+      "required_checksum_manifests": true,
+      "rp2040_payload_identity": true
+    },
+    "checksum_entry_count": 78,
+    "checksum_files": [],
+    "checksum_manifest_count": 8,
+    "checksum_manifests": [
+      {
+        "entry_count": 14,
+        "path": "d1l-firmware-artifacts/SHA256SUMS.txt",
+        "sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+        "valid": true
+      },
+      {
+        "entry_count": 5,
+        "path": "d1l-release-package/d1l-release-4ee07caf09906abdcebe8faccd95790dceb5fe88/rp2040/rp2040-sd-bridge-firmware/SHA256SUMS.txt",
+        "sha256": "e8e61be4e9a2bcbc6840c9491c531856cdf9df02c3c4273dcdd6be31261c3b81",
+        "valid": true
+      },
+      {
+        "entry_count": 4,
+        "path": "d1l-release-package/d1l-release-4ee07caf09906abdcebe8faccd95790dceb5fe88/rp2040/rp2040-sd-smoke-firmware/SHA256SUMS.txt",
+        "sha256": "82813dd814ce7a2c9e79a5575605eca15fc5a7b59af1e63de358f86f91310e1b",
+        "valid": true
+      },
+      {
+        "entry_count": 4,
+        "path": "d1l-release-package/d1l-release-4ee07caf09906abdcebe8faccd95790dceb5fe88/rp2040/rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
+        "sha256": "57eaded4bb46ccf4d43ac89aa60dba361b643d657971efdd50ecd63937f32eb4",
+        "valid": true
+      },
+      {
+        "entry_count": 38,
+        "path": "d1l-release-package/d1l-release-4ee07caf09906abdcebe8faccd95790dceb5fe88/SHA256SUMS.txt",
+        "sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+        "valid": true
+      },
+      {
+        "entry_count": 5,
+        "path": "rp2040-sd-bridge-firmware/SHA256SUMS.txt",
+        "sha256": "e8e61be4e9a2bcbc6840c9491c531856cdf9df02c3c4273dcdd6be31261c3b81",
+        "valid": true
+      },
+      {
+        "entry_count": 4,
+        "path": "rp2040-sd-smoke-firmware/SHA256SUMS.txt",
+        "sha256": "82813dd814ce7a2c9e79a5575605eca15fc5a7b59af1e63de358f86f91310e1b",
+        "valid": true
+      },
+      {
+        "entry_count": 4,
+        "path": "rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt",
+        "sha256": "57eaded4bb46ccf4d43ac89aa60dba361b643d657971efdd50ecd63937f32eb4",
+        "valid": true
+      }
+    ],
+    "esp32_app_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+    "firmware": [
+      {
+        "role": "bootloader",
+        "sha256": "768f729bec2f51eb3dca097b8458b68ba3f447912c278f8259321f4c42250d65",
+        "source": "d1l-firmware-artifacts/build/bootloader/bootloader.bin",
+        "valid": true
+      },
+      {
+        "role": "partition-table",
+        "sha256": "8fff27ab4abf09fccacfe7503cd190a5f7ec46c756df56b1051b89f9ffca17d1",
+        "source": "d1l-firmware-artifacts/build/partition_table/partition-table.bin",
+        "valid": true
+      },
+      {
+        "role": "app",
+        "sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+        "source": "d1l-firmware-artifacts/build/meshcore_deskos_d1l.bin",
+        "valid": true
+      }
+    ],
+    "host_success_marker": {
+      "path": "d1l-host-artifacts/host-checks/d1l_host_checks_success_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+      "sha256": "32566016625de5eb3bd8644df11bba918055d7cc0c9923e7bf9f71127e62e481"
+    },
+    "release_manifest": {
+      "path": "d1l-release-package/d1l-release-4ee07caf09906abdcebe8faccd95790dceb5fe88/manifest.json",
+      "sha256": "cef679f861b1e91bd648520ea3901b717d2a7a81b4a39c9af1f68de12b776111"
+    },
+    "repository": "n30nex/SIGUI",
+    "rp2040": [
+      {
+        "files": [
+          {
+            "path": "SHA256SUMS.txt",
+            "sha256": "e8e61be4e9a2bcbc6840c9491c531856cdf9df02c3c4273dcdd6be31261c3b81",
+            "valid": true
+          },
+          {
+            "path": "deskos_sd_bridge.ino.bin",
+            "sha256": "39504fcc8459628e9f63f1070ea3be4ad348dacd3b2e05ad829ff3331690f9f3",
+            "valid": true
+          },
+          {
+            "path": "deskos_sd_bridge.ino.elf",
+            "sha256": "4848f4c6c5871840d347439bd67846767fb1a3530654a8eca3a5d173464bf03f",
+            "valid": true
+          },
+          {
+            "path": "deskos_sd_bridge.ino.map",
+            "sha256": "254cc999706ab240511465a14cf86d8181f44f23ad8fec3ed8887338845823dd",
+            "valid": true
+          },
+          {
+            "path": "deskos_sd_bridge.ino.uf2",
+            "sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096",
+            "valid": true
+          },
+          {
+            "path": "sdfat-no-usb-patch.json",
+            "sha256": "6f1f4bbb0349408de4b326031b6bdf72062163c34ea8e17fe69cdd8e54de4d7f",
+            "valid": true
+          }
+        ],
+        "name": "rp2040-sd-bridge-firmware",
+        "valid": true
+      },
+      {
+        "files": [
+          {
+            "path": "SHA256SUMS.txt",
+            "sha256": "82813dd814ce7a2c9e79a5575605eca15fc5a7b59af1e63de358f86f91310e1b",
+            "valid": true
+          },
+          {
+            "path": "seeed_sd_smoke.ino.bin",
+            "sha256": "390ad633c5e6fbc5d0e33944f067a7fb349f6b395a13eab9c9488e80870b5aee",
+            "valid": true
+          },
+          {
+            "path": "seeed_sd_smoke.ino.elf",
+            "sha256": "59461b81d9354b421a1114fe7999c67e662635d0c2e2de013d8881a858efceee",
+            "valid": true
+          },
+          {
+            "path": "seeed_sd_smoke.ino.map",
+            "sha256": "6a866a4aa892956e9b29d6ac13fec70cc595e117a146fd52a4da62f673d1f6b1",
+            "valid": true
+          },
+          {
+            "path": "seeed_sd_smoke.ino.uf2",
+            "sha256": "966721ac630882f0f0b47e84fe8caf64b4dbeecfa1823873f30837e32864758b",
+            "valid": true
+          }
+        ],
+        "name": "rp2040-sd-smoke-firmware",
+        "valid": true
+      },
+      {
+        "files": [
+          {
+            "path": "SHA256SUMS.txt",
+            "sha256": "57eaded4bb46ccf4d43ac89aa60dba361b643d657971efdd50ecd63937f32eb4",
+            "valid": true
+          },
+          {
+            "path": "seeed_official_sd_smoke.ino.bin",
+            "sha256": "6798fa7735e6b3f445fbc2e39b93a9e121ae4b54d3fa3c3aba452b23e43fa015",
+            "valid": true
+          },
+          {
+            "path": "seeed_official_sd_smoke.ino.elf",
+            "sha256": "a519e5c6e5d7b2a46fa655a81f4f0c815b275ad49b3455a1ecb6450ff602b1a6",
+            "valid": true
+          },
+          {
+            "path": "seeed_official_sd_smoke.ino.map",
+            "sha256": "a1802a62b9329cf4875718962c0e9e0fff227dd8827bcf5603bdbe95c65a34c1",
+            "valid": true
+          },
+          {
+            "path": "seeed_official_sd_smoke.ino.uf2",
+            "sha256": "bd4c8f7dc48c2b627ddf57f248b003ceada37d6ffa2e23e0d342cfacf5048630",
+            "valid": true
+          }
+        ],
+        "name": "rp2040-seeed-official-sd-smoke-firmware",
+        "valid": true
+      }
+    ],
+    "rp2040_bridge_sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096",
+    "run_dir": "artifacts/github/29290978741-4ee07caf",
+    "run_id": "29290978741",
+    "tree_file_count": 244,
+    "tree_sha256": "8a80700b90f7a77c868fbc6ef721c4dbd8936364aa50ab3439fb533184cc5efa",
+    "valid": true,
+    "workflow_run_attempt": "1"
+  },
+  "checks": {
+    "actions_checksums_verified": true,
+    "actions_exact_run_and_commit": true,
+    "actions_payloads_verified": true,
+    "board_receipt": false,
+    "context_valid": true,
+    "map_open_receipt": false,
+    "reboot_receipt": false,
+    "receipt_paths_unique": true,
+    "receipt_physical_fields": false,
+    "receipt_safety_fields": false,
+    "repository_exact_clean_main": true,
+    "required_pr_layers_landed": true,
+    "sd_receipt": false,
+    "ui_receipt": false
+  },
+  "dm_rf_tx": false,
+  "failures": [
+    "receipt:board:missing_or_outside_repository",
+    "receipt:map_open:missing_or_outside_repository",
+    "receipt:reboot:missing_or_outside_repository",
+    "receipt:sd:missing_or_outside_repository",
+    "receipt:ui:missing_or_outside_repository"
+  ],
+  "formats_sd": false,
+  "github_actions_run": "29290978741",
+  "kind": "wp02_integration_baseline",
+  "main_sha": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+  "mode": "exact-merged-main",
+  "ok": false,
+  "ports": {
+    "d1l": "COM12",
+    "rp2040": "COM16"
+  },
+  "public_rf_tx": false,
+  "qualification": {
+    "board": {
+      "path": "artifacts/hardware/wp02/board_4ee07caf09906abdcebe8faccd95790dceb5fe88_COM12.json",
+      "sha256": null,
+      "valid": false
+    },
+    "map_open": {
+      "path": "artifacts/hardware/wp02/map_open_4ee07caf09906abdcebe8faccd95790dceb5fe88_COM12.json",
+      "sha256": null,
+      "valid": false
+    },
+    "reboot": {
+      "path": "artifacts/hardware/wp02/reboot_4ee07caf09906abdcebe8faccd95790dceb5fe88_COM12_COM16.json",
+      "sha256": null,
+      "valid": false
+    },
+    "sd": {
+      "path": "artifacts/hardware/wp02/sd_4ee07caf09906abdcebe8faccd95790dceb5fe88_COM12_COM16.json",
+      "sha256": null,
+      "valid": false
+    },
+    "ui": {
+      "path": "artifacts/hardware/wp02/ui_4ee07caf09906abdcebe8faccd95790dceb5fe88_COM12.json",
+      "sha256": null,
+      "valid": false
+    }
+  },
+  "repository": {
+    "checks": {
+      "head_is_main_sha": true,
+      "main_ref_is_main_sha": true,
+      "repository_root": true,
+      "required_layers_exact": true,
+      "required_layers_landed": true,
+      "required_layers_present": true,
+      "required_layers_unique": true,
+      "working_tree_clean": true
+    },
+    "clean": true,
+    "head_sha": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+    "layers": [
+      {
+        "ancestor_of_main": true,
+        "commit": "7a6ff86493042cc5617ef88c4765312cea46150d",
+        "exists": true,
+        "pr": 62,
+        "trusted": true,
+        "trusted_commit": "7a6ff86493042cc5617ef88c4765312cea46150d"
+      },
+      {
+        "ancestor_of_main": true,
+        "commit": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+        "exists": true,
+        "pr": 64,
+        "trusted": true,
+        "trusted_commit": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee"
+      },
+      {
+        "ancestor_of_main": true,
+        "commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+        "exists": true,
+        "pr": 80,
+        "trusted": true,
+        "trusted_commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045"
+      }
+    ],
+    "main_ref": "refs/heads/main",
+    "main_ref_sha": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+    "main_sha": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+    "repository": "n30nex/SIGUI",
+    "valid": true
+  },
+  "schema": 1
+}

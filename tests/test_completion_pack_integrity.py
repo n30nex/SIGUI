@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PACK_DIR = ROOT / "docs" / "completion"
 MANIFEST = PACK_DIR / "SHA256SUMS.txt"
 ATTRIBUTES = ROOT / ".gitattributes"
-ROW_RE = re.compile(r"^([0-9a-f]{64})  ([^/\\]+)$")
+ROW_RE = re.compile(r"^([0-9a-f]{64})  ([^\r\n\\]+)$")
 
 
 def test_completion_pack_manifest_is_complete_and_current() -> None:
@@ -22,9 +22,16 @@ def test_completion_pack_manifest_is_complete_and_current() -> None:
         parsed[name] = expected
 
     expected_files = {
-        path.name for path in PACK_DIR.iterdir() if path.is_file() and path != MANIFEST
+        path.relative_to(PACK_DIR).as_posix()
+        for path in PACK_DIR.rglob("*")
+        if path.is_file() and path != MANIFEST
     }
     assert set(parsed) == expected_files
+    assert (
+        "evidence/wp02/"
+        "integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json"
+        in parsed
+    )
     assert MANIFEST.read_text(encoding="ascii") == render_manifest(PACK_DIR)
 
 
@@ -33,4 +40,5 @@ def test_completion_pack_checkout_bytes_are_pinned_to_lf() -> None:
 
     assert "docs/completion/*.md text eol=lf" in policy
     assert "docs/completion/*.yaml text eol=lf" in policy
+    assert "docs/completion/evidence/**/*.json text eol=lf" in policy
     assert "docs/completion/SHA256SUMS.txt text eol=lf" in policy
