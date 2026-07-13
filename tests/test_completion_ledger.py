@@ -51,16 +51,24 @@ def test_repository_ledger_validates_and_status_is_current():
     assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
 
 
-def test_current_runnable_selection_keeps_failed_wp01_root_cause_work_active():
+def test_current_runnable_selection_advances_to_wp02_after_wp01_proof_is_banked():
     ledger = load_ledger(LEDGER_PATH)
 
-    assert runnable_work_packages(ledger)[0] == "WP-01"
+    assert runnable_work_packages(ledger)[0] == "WP-02"
 
 
 def test_execution_blocker_removes_wp01_from_runnable_work():
     ledger = ledger_copy()
-    blocker = next(item for item in ledger["blockers"] if item["status"] == "open")
+    blocker = next(
+        item for item in ledger["blockers"] if item["id"] == "BLK-WP01-RETAINED-TIMEOUT-20260712"
+    )
+    blocker["status"] = "open"
     blocker["blocks_execution"] = True
+    item = package(ledger, "WP-01")
+    item["status"] = "in_progress"
+    item["proof_banked"] = False
+    item["blockers"] = [blocker["id"]]
+    package(ledger, "WP-02")["status"] = "blocked"
 
     assert runnable_work_packages(ledger) == []
 
@@ -124,6 +132,7 @@ def test_banked_wp01_status_describes_wp02_as_unlocked():
 
     assert "`WP-02` is unlocked" in rendered
     assert "`WP-02` remains blocked" not in rendered
+    assert "Highest-priority pending: `WP-02`" in rendered
 
 
 def test_hardware_green_requires_proof_banked():
