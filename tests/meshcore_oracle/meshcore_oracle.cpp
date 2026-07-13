@@ -17,6 +17,10 @@ static_assert(MAX_ADVERT_DATA_SIZE ==
               "Pinned MeshCore advert-data limit changed");
 static_assert(D1L_MESHCORE_ORACLE_MIN_ACK_BYTES == sizeof(uint32_t),
               "Pinned MeshCore ACK CRC width changed");
+static_assert(D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES == 9U,
+              "Pinned MeshCore TRACE prefix changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES + 1U == MAX_PATH_SIZE,
+              "Pinned MeshCore TRACE hop capacity changed");
 static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
               "Pinned MeshCore NONE advert type changed");
 static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
@@ -546,5 +550,111 @@ extern "C" bool d1l_meshcore_oracle_parse_ack(
     *out_ack_len = ack_len;
     *out_remaining = remaining;
     *out_is_multipart = is_multipart;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_trace(
+    uint32_t tag,
+    uint32_t auth_code,
+    uint8_t flags,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (out_packet == nullptr || flags != 0U) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT);
+    std::memcpy(&result.payload[0], &tag, sizeof(tag));
+    std::memcpy(&result.payload[4], &auth_code, sizeof(auth_code));
+    result.payload[8] = flags;
+    result.payload_len = D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES;
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_prepare_trace_direct(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    const uint8_t *path_hashes,
+    size_t path_hashes_len,
+    uint8_t *out_priority)
+{
+    if (in_out_packet == nullptr || out_priority == nullptr ||
+        (path_hashes_len > 0U && path_hashes == nullptr) ||
+        path_hashes_len > D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES) {
+        return false;
+    }
+
+    mesh::Packet upstream;
+    if (!packet_to_upstream(in_out_packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_TRACE ||
+        upstream.payload_len != D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES ||
+        upstream.path_len != 0U || upstream.payload[8] != 0U) {
+        return false;
+    }
+
+    upstream.header &= static_cast<uint8_t>(~PH_ROUTE_MASK);
+    upstream.header |= ROUTE_TYPE_DIRECT;
+    upstream.transport_codes[0] = 0U;
+    upstream.transport_codes[1] = 0U;
+    if (path_hashes_len > 0U) {
+        std::memcpy(&upstream.payload[D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES],
+                    path_hashes, path_hashes_len);
+    }
+    upstream.payload_len = static_cast<uint16_t>(
+        D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES + path_hashes_len);
+    upstream.path_len = 0U;
+    *in_out_packet = packet_from_upstream(upstream);
+    *out_priority = 5U;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_trace_source(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint32_t *out_tag,
+    uint32_t *out_auth_code,
+    uint8_t *out_flags,
+    uint8_t *out_path_hashes,
+    size_t path_hashes_capacity,
+    size_t *out_path_hashes_len)
+{
+    if (out_tag == nullptr || out_auth_code == nullptr ||
+        out_flags == nullptr || out_path_hashes == nullptr ||
+        out_path_hashes_len == nullptr) {
+        return false;
+    }
+
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_TRACE ||
+        upstream.getRouteType() != ROUTE_TYPE_DIRECT ||
+        upstream.path_len != 0U ||
+        upstream.payload_len < D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES ||
+        upstream.payload[8] != 0U) {
+        return false;
+    }
+    const size_t path_hashes_len =
+        upstream.payload_len - D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES;
+    const uint8_t flags = upstream.payload[8];
+    if (path_hashes_len > D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES ||
+        path_hashes_len > path_hashes_capacity) {
+        return false;
+    }
+
+    uint32_t tag = 0U;
+    uint32_t auth_code = 0U;
+    std::memcpy(&tag, &upstream.payload[0], sizeof(tag));
+    std::memcpy(&auth_code, &upstream.payload[4], sizeof(auth_code));
+    if (path_hashes_len > 0U) {
+        std::memcpy(out_path_hashes,
+                    &upstream.payload[D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES],
+                    path_hashes_len);
+    }
+    *out_tag = tag;
+    *out_auth_code = auth_code;
+    *out_flags = flags;
+    *out_path_hashes_len = path_hashes_len;
     return true;
 }

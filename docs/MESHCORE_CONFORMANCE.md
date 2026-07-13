@@ -35,7 +35,7 @@ cryptographic oracles because they do not implement production cryptography.
 
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 1 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
-`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 4 static
+`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 5 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -54,12 +54,18 @@ reject-without-output-mutation behavior. ACK constructors return a canonical
 pre-route layout; vectors apply the pinned zero-hop route preparation before
 encoding, so that intermediate header is never presented as production wire
 fidelity. The `meshcore-conformance` job builds and runs this as a separate
-sanitized host target and emits
+sanitized host target. Six initial outbound TRACE round trips plus nineteen
+reject vectors cover the pinned nine-byte tag/auth/flags prefix, flags-zero
+contract, zero-to-63 one-byte route hashes appended to the payload, direct
+route, zero outer path, priority five, fixed little-endian bytes on the
+supported targets, and reject-without-output-mutation behavior. TRACE creation
+is likewise pre-route and is never encoded before direct preparation. The job
+emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
 report.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
-is `pinned_upstream_packet_advert_route_and_ack_frames`; the advert
+is `pinned_upstream_packet_advert_route_ack_and_trace_source_frames`; the advert
 vectors cover only canonical application fields, not a complete signed Mesh
 advert. The pinned repository does not vendor the production
 `Ed25519::verify` implementation used by `Identity.cpp`, and signed advert
@@ -68,14 +74,19 @@ that blocker recorded in the manifest. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public and DM semantics,
 production encryption/decryption, expected-ACK hash derivation, encrypted
-ACK+PATH handling, ACK correlation/delivery state, PATH/trace behavior, and
-login/admin flows also remain pending, so both `wp04_closure_eligible` and
-`closure_ready` remain false. The expected-ACK and ACK+PATH remainder is
+ACK+PATH handling, ACK correlation/delivery state, PATH-return behavior, TRACE
+forwarding/path discovery, and login/admin flows also remain pending, so both
+`wp04_closure_eligible` and `closure_ready` remain false. The expected-ACK and
+ACK+PATH remainder is
 explicitly blocked by the unpinned external SHA/AES implementations and missing
 mesh-session fixtures; ACK framing must not be cited as evidence for those
 semantics. ACK dispatch, correlation, and delivery state remain a separate
 pending capability blocked on deterministic Mesh dispatch, packet-manager,
-table, and clock fixtures. Those stages require deterministic radio, RNG, RTC,
+table, and clock fixtures. Path-return creation is separately blocked by the
+unpinned AES/SHA implementation plus RNG, identity, and mesh-session fixtures.
+TRACE framing does not authenticate `auth_code` or prove discovery; forwarding
+still requires identity matching, duplicate tables, radio SNR, scheduling, and
+clock fixtures. Those stages require deterministic radio, RNG, RTC,
 millisecond-clock, packet manager, mesh-table, contact, and channel fixtures;
 they must extend the versioned manifest instead of silently widening what this
 artifact claims.
@@ -129,9 +140,10 @@ This bounded gate makes no claim about:
 
 - encryption, decryption, MACs, signatures, keys, channel secrets, or identity;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
-  traffic. Simple and multipart ACK payload framing is covered, but expected
-  hash derivation, encrypted ACK+PATH handling, correlation, and remaining
-  Dispatcher behavior are not;
+  traffic. Simple/multipart ACK and initial flags-zero TRACE payload framing
+  are covered, but expected hash derivation, encrypted ACK+PATH handling, TRACE
+  forwarding/SNR/path discovery, correlation, and remaining Dispatcher
+  behavior are not;
 - ACK timing, retry/delivery state, duplicate or replay control, packet
   lifetime, route selection/fallback, or self-message behavior;
 - persisted/retained state, schema migration, reboot recovery, or write

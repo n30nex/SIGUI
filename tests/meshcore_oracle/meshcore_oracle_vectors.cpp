@@ -19,6 +19,8 @@ constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
 constexpr std::size_t kAckInvalidVectors = 17U;
+constexpr std::size_t kTraceRoundtripVectors = 6U;
+constexpr std::size_t kTraceInvalidVectors = 19U;
 
 struct Vector {
     uint8_t header;
@@ -45,6 +47,13 @@ struct AckVector {
     std::vector<uint8_t> ack;
     uint8_t remaining;
     bool multipart;
+};
+
+struct TraceVector {
+    uint32_t tag;
+    uint32_t auth_code;
+    uint8_t flags;
+    std::vector<uint8_t> path_hashes;
 };
 
 bool packet_matches(const d1l_meshcore_oracle_packet_t &packet,
@@ -828,32 +837,303 @@ int main()
     expect_ack_parse_reject("undersized ACK destination", malformed_ack,
                             malformed_ack.payload_len - 1U);
 
+    std::vector<uint8_t> maximum_trace_path(
+        D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    for (size_t index = 0U; index < maximum_trace_path.size(); ++index) {
+        maximum_trace_path[index] = static_cast<uint8_t>(index ^ 0x3CU);
+    }
+    const std::array<TraceVector, kTraceRoundtripVectors> trace_vectors = {{
+        {0U, 0U, 0x00U, {}},
+        {0x12345678U, 0xAABBCCDDU, 0x00U, {0x42U}},
+        {0x87654321U, 0x10203040U, 0x00U,
+         {0x11U, 0x12U, 0x21U, 0x22U}},
+        {0xDEADBEEFU, 0xCAFEBABEU, 0x00U,
+         {0x01U, 0x02U, 0x03U, 0x04U,
+          0x11U, 0x12U, 0x13U, 0x14U}},
+        {0x0BADF00DU, 0x55AA55AAU, 0x00U,
+         {0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+          0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U}},
+        {0xFFFFFFFFU, 0x01020304U, 0x00U, maximum_trace_path},
+    }};
+    for (size_t index = 0U; index < trace_vectors.size(); ++index) {
+        const TraceVector &vector = trace_vectors[index];
+        d1l_meshcore_oracle_packet_t trace{};
+        const std::array<uint8_t,
+                         D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES> expected_prefix = {{
+            static_cast<uint8_t>(vector.tag),
+            static_cast<uint8_t>(vector.tag >> 8U),
+            static_cast<uint8_t>(vector.tag >> 16U),
+            static_cast<uint8_t>(vector.tag >> 24U),
+            static_cast<uint8_t>(vector.auth_code),
+            static_cast<uint8_t>(vector.auth_code >> 8U),
+            static_cast<uint8_t>(vector.auth_code >> 16U),
+            static_cast<uint8_t>(vector.auth_code >> 24U),
+            vector.flags,
+        }};
+        if (!d1l_meshcore_oracle_create_trace(
+                vector.tag, vector.auth_code, vector.flags, &trace) ||
+            trace.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) ||
+            trace.transport_codes[0] != 0U ||
+            trace.transport_codes[1] != 0U || trace.path_len != 0U ||
+            trace.payload_len != D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES ||
+            std::memcmp(trace.payload, expected_prefix.data(),
+                        expected_prefix.size()) != 0) {
+            failures.push_back("TRACE create changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        const d1l_meshcore_oracle_packet_t pre_route = trace;
+        uint8_t trace_priority = 0xFFU;
+        const uint8_t *path_hashes = vector.path_hashes.empty()
+            ? nullptr
+            : vector.path_hashes.data();
+        if (!d1l_meshcore_oracle_prepare_trace_direct(
+                &trace, path_hashes, vector.path_hashes.size(),
+                &trace_priority) ||
+            trace.header != static_cast<uint8_t>(
+                (PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT) ||
+            trace.transport_codes[0] != 0U ||
+            trace.transport_codes[1] != 0U || trace.path_len != 0U ||
+            trace.payload_len != D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES +
+                                     vector.path_hashes.size() ||
+            trace_priority != 5U ||
+            (!vector.path_hashes.empty() &&
+             std::memcmp(
+                 &trace.payload[D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES],
+                 vector.path_hashes.data(), vector.path_hashes.size()) != 0)) {
+            failures.push_back("TRACE direct preparation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> trace_raw{};
+        size_t trace_raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded_trace{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &trace, trace_raw.data(), trace_raw.size(), &trace_raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(
+                trace_raw.data(), trace_raw_len, &decoded_trace) ||
+            !packets_equal(trace, decoded_trace)) {
+            failures.push_back("TRACE packet did not round trip vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint32_t parsed_tag = 0U;
+        uint32_t parsed_auth_code = 0U;
+        uint8_t parsed_flags = 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES> parsed_path{};
+        size_t parsed_path_len = 0U;
+        if (!d1l_meshcore_oracle_parse_trace_source(
+                &decoded_trace, &parsed_tag, &parsed_auth_code, &parsed_flags,
+                parsed_path.data(), parsed_path.size(), &parsed_path_len) ||
+            parsed_tag != vector.tag ||
+            parsed_auth_code != vector.auth_code ||
+            parsed_flags != vector.flags ||
+            parsed_path_len != vector.path_hashes.size() ||
+            (!vector.path_hashes.empty() &&
+             std::memcmp(parsed_path.data(), vector.path_hashes.data(),
+                         vector.path_hashes.size()) != 0)) {
+            failures.push_back("TRACE parse changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t recreated_trace{};
+        uint8_t recreated_priority = 0xFFU;
+        if (!d1l_meshcore_oracle_create_trace(
+                parsed_tag, parsed_auth_code, parsed_flags,
+                &recreated_trace) ||
+            !packets_equal(pre_route, recreated_trace) ||
+            !d1l_meshcore_oracle_prepare_trace_direct(
+                &recreated_trace, parsed_path.data(), parsed_path_len,
+                &recreated_priority) ||
+            recreated_priority != 5U ||
+            !packets_equal(trace, recreated_trace)) {
+            failures.push_back("TRACE recreate changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    if (d1l_meshcore_oracle_create_trace(1U, 2U, 0U, nullptr)) {
+        failures.push_back("null TRACE packet accepted");
+    }
+    d1l_meshcore_oracle_packet_t rejected_trace_flags;
+    std::memset(&rejected_trace_flags, 0xA9,
+                sizeof(rejected_trace_flags));
+    const d1l_meshcore_oracle_packet_t rejected_trace_flags_before =
+        rejected_trace_flags;
+    if (d1l_meshcore_oracle_create_trace(
+            1U, 2U, 1U, &rejected_trace_flags) ||
+        std::memcmp(&rejected_trace_flags, &rejected_trace_flags_before,
+                    sizeof(rejected_trace_flags)) != 0) {
+        failures.push_back("unsupported TRACE flags changed output");
+    }
+    d1l_meshcore_oracle_packet_t base_trace{};
+    if (!d1l_meshcore_oracle_create_trace(
+            0x12345678U, 0xAABBCCDDU, 0U, &base_trace)) {
+        failures.push_back("TRACE invalid-vector setup rejected");
+    }
+    uint8_t rejected_trace_priority = 0xA5U;
+    if (d1l_meshcore_oracle_prepare_trace_direct(
+            nullptr, nullptr, 0U, &rejected_trace_priority) ||
+        rejected_trace_priority != 0xA5U) {
+        failures.push_back("null TRACE preparation changed priority");
+    }
+    d1l_meshcore_oracle_packet_t rejected_trace = base_trace;
+    const d1l_meshcore_oracle_packet_t rejected_trace_before = rejected_trace;
+    if (d1l_meshcore_oracle_prepare_trace_direct(
+            &rejected_trace, nullptr, 0U, nullptr) ||
+        !packets_equal(rejected_trace, rejected_trace_before)) {
+        failures.push_back("null TRACE priority changed packet");
+    }
+    auto expect_trace_prepare_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &input,
+                    const uint8_t *path_hashes,
+                    size_t path_hashes_len) {
+            d1l_meshcore_oracle_packet_t packet = input;
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_trace_direct(
+                    &packet, path_hashes, path_hashes_len, &priority) ||
+                !packets_equal(packet, before) || priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " TRACE preparation changed output");
+            }
+        };
+    const std::array<uint8_t, 1> one_trace_hash = {0x42U};
+    rejected_trace = base_trace;
+    rejected_trace.header = static_cast<uint8_t>(
+        (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_TRANSPORT_FLOOD);
+    expect_trace_prepare_reject("wrong type", rejected_trace, nullptr, 0U);
+    rejected_trace = base_trace;
+    rejected_trace.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_trace_prepare_reject("future version", rejected_trace, nullptr, 0U);
+    rejected_trace = base_trace;
+    rejected_trace.payload_len++;
+    expect_trace_prepare_reject("non-base payload", rejected_trace, nullptr,
+                                0U);
+    rejected_trace = base_trace;
+    rejected_trace.path_len = 0x01U;
+    rejected_trace.path[0] = 0x42U;
+    expect_trace_prepare_reject("pre-existing path", rejected_trace, nullptr,
+                                0U);
+    expect_trace_prepare_reject("null path hashes", base_trace, nullptr, 1U);
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES + 1U> overlong_trace{};
+    expect_trace_prepare_reject("overlong path hashes", base_trace,
+                                overlong_trace.data(), overlong_trace.size());
+    rejected_trace = base_trace;
+    rejected_trace.payload[8] = 0x01U;
+    const std::array<uint8_t, 7> unsupported_flags_path{};
+    expect_trace_prepare_reject("unsupported flags", rejected_trace,
+                                unsupported_flags_path.data(),
+                                unsupported_flags_path.size());
+
+    d1l_meshcore_oracle_packet_t routed_trace = base_trace;
+    uint8_t routed_trace_priority = 0xFFU;
+    if (!d1l_meshcore_oracle_prepare_trace_direct(
+            &routed_trace, one_trace_hash.data(), one_trace_hash.size(),
+            &routed_trace_priority)) {
+        failures.push_back("TRACE parse invalid-vector setup rejected");
+    }
+    auto expect_trace_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &packet,
+                    size_t path_capacity) {
+            uint32_t tag = 0xAAAAAAAAU;
+            uint32_t auth_code = 0xBBBBBBBBU;
+            uint8_t flags = 0xCCU;
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES> path_hashes;
+            path_hashes.fill(0xDDU);
+            const auto path_hashes_before = path_hashes;
+            size_t path_hashes_len = 0xBEEFU;
+            if (d1l_meshcore_oracle_parse_trace_source(
+                    &packet, &tag, &auth_code, &flags, path_hashes.data(),
+                    path_capacity, &path_hashes_len) ||
+                tag != 0xAAAAAAAAU || auth_code != 0xBBBBBBBBU ||
+                flags != 0xCCU || path_hashes != path_hashes_before ||
+                path_hashes_len != 0xBEEFU) {
+                failures.push_back(std::string(name) +
+                                   " TRACE parse changed output");
+            }
+        };
+    rejected_trace = routed_trace;
+    rejected_trace.header = static_cast<uint8_t>(
+        (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+    expect_trace_parse_reject("wrong type", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    expect_trace_parse_reject("pre-route", base_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_trace_parse_reject("future version", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.payload_len =
+        D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES - 1U;
+    expect_trace_parse_reject("short payload", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.path_len = 0x01U;
+    rejected_trace.path[0] = 0x42U;
+    expect_trace_parse_reject("forwarded SNR path", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.payload[8] = 0x01U;
+    expect_trace_parse_reject("unsupported flags", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    expect_trace_parse_reject("undersized path destination", routed_trace,
+                              0U);
+    uint32_t null_path_tag = 0xAAAAAAAAU;
+    uint32_t null_path_auth = 0xBBBBBBBBU;
+    uint8_t null_path_flags = 0xCCU;
+    size_t null_path_len = 0xBEEFU;
+    if (d1l_meshcore_oracle_parse_trace_source(
+            &routed_trace, &null_path_tag, &null_path_auth, &null_path_flags,
+            nullptr, D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES,
+            &null_path_len) ||
+        null_path_tag != 0xAAAAAAAAU || null_path_auth != 0xBBBBBBBBU ||
+        null_path_flags != 0xCCU || null_path_len != 0xBEEFU) {
+        failures.push_back("null path TRACE parse changed output");
+    }
+
     const bool passed = failures.empty();
     for (const std::string &failure : failures) {
         std::cerr << failure << '\n';
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_route_and_ack_frames\""
+                 "\"pinned_upstream_packet_advert_route_ack_and_trace_source_frames\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
-                  kRouteRoundtripVectors + kAckRoundtripVectors)
+                  kRouteRoundtripVectors + kAckRoundtripVectors +
+                  kTraceRoundtripVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
-                  kRouteInvalidVectors + kAckInvalidVectors)
+                  kRouteInvalidVectors + kAckInvalidVectors +
+                  kTraceInvalidVectors)
               << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
-                  kAckRoundtripVectors + kAckInvalidVectors)
+                  kAckRoundtripVectors + kAckInvalidVectors +
+                  kTraceRoundtripVectors + kTraceInvalidVectors)
               << ",\"total\":"
               << (kPacketRoundtripVectors + kPacketInvalidVectors +
                   kAdvertRoundtripVectors + kAdvertInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
-                  kAckRoundtripVectors + kAckInvalidVectors)
+                  kAckRoundtripVectors + kAckInvalidVectors +
+                  kTraceRoundtripVectors + kTraceInvalidVectors)
               << ",\"packet_envelope\":{\"roundtrip\":"
               << kPacketRoundtripVectors << ",\"invalid\":"
               << kPacketInvalidVectors << ",\"semantic\":0,\"total\":"
@@ -875,11 +1155,18 @@ int main()
               << kAckInvalidVectors << ",\"semantic\":"
               << (kAckRoundtripVectors + kAckInvalidVectors)
               << ",\"total\":"
-              << (kAckRoundtripVectors + kAckInvalidVectors) << "}}"
+              << (kAckRoundtripVectors + kAckInvalidVectors) << "}"
+              << ",\"trace_source_frames\":{\"roundtrip\":"
+              << kTraceRoundtripVectors << ",\"invalid\":"
+              << kTraceInvalidVectors << ",\"semantic\":"
+              << (kTraceRoundtripVectors + kTraceInvalidVectors)
+              << ",\"total\":"
+              << (kTraceRoundtripVectors + kTraceInvalidVectors) << "}}"
               << ",\"capabilities\":{\"packet_envelope\":true"
               << ",\"advert_data_fields\":true"
               << ",\"direct_flood_headers\":true"
-              << ",\"ack_frames\":true}"
+              << ",\"ack_frames\":true"
+              << ",\"trace_source_frames\":true}"
               << ",\"failures\":" << failures.size() << "}\n";
     return passed ? 0 : 1;
 }

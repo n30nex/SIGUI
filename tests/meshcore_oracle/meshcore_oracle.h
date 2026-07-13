@@ -18,6 +18,8 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
 #define D1L_MESHCORE_ORACLE_MIN_ACK_BYTES 4U
+#define D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES 9U
+#define D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES 63U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -137,6 +139,36 @@ bool d1l_meshcore_oracle_parse_ack(
     size_t *out_ack_len,
     uint8_t *out_remaining,
     uint8_t *out_is_multipart);
+
+/*
+ * Canonical source TRACE framing derived from pinned Mesh::createTrace and the
+ * TRACE branch of Mesh::sendDirect. The constructor result is pre-route;
+ * prepare_trace_direct must be applied before wire encoding. Only the public
+ * flags-zero, one-byte-hash source layout is accepted. This boundary does not
+ * authenticate auth_code or claim hop forwarding, SNR collection, identity
+ * matching, duplicate suppression, route discovery completion, or callback
+ * dispatch.
+ */
+bool d1l_meshcore_oracle_create_trace(
+    uint32_t tag,
+    uint32_t auth_code,
+    uint8_t flags,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_prepare_trace_direct(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    const uint8_t *path_hashes,
+    size_t path_hashes_len,
+    uint8_t *out_priority);
+
+bool d1l_meshcore_oracle_parse_trace_source(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint32_t *out_tag,
+    uint32_t *out_auth_code,
+    uint8_t *out_flags,
+    uint8_t *out_path_hashes,
+    size_t path_hashes_capacity,
+    size_t *out_path_hashes_len);
 
 #ifdef __cplusplus
 }

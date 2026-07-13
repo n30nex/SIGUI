@@ -44,9 +44,9 @@ ORACLE_VECTORS_PATH = (
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 4
+ORACLE_CORPUS_VERSION = 5
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_route_and_ack_frames"
+    "pinned_upstream_packet_advert_route_ack_and_trace_source_frames"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -146,6 +146,13 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "scope": "simple_and_multipart_payload_framing_only",
     },
     {
+        "id": "trace_source_frames",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "initial_outbound_direct_flags_zero_trace_framing_only",
+    },
+    {
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
@@ -181,8 +188,18 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "id": "path_return_route_codes",
         "status": "pending",
         "owner": "unassigned",
+        "blocked_by": (
+            "external_unpinned_aes_sha_rng_identity_and_mesh_session_fixtures"
+        ),
     },
-    {"id": "trace_path_discovery", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "trace_forwarding_and_path_discovery",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": (
+            "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
+        ),
+    },
     {
         "id": "login_request_response_admin",
         "status": "pending",
@@ -324,10 +341,10 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 20,
-        "invalid": 43,
-        "semantic": 54,
-        "total": 63,
+        "roundtrip": 26,
+        "invalid": 62,
+        "semantic": 79,
+        "total": 88,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -352,6 +369,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 22,
             "total": 22,
         },
+        "trace_source_frames": {
+            "roundtrip": 6,
+            "invalid": 19,
+            "semantic": 25,
+            "total": 25,
+        },
     }:
         raise GateFailure("oracle vector contract drifted")
     interface = manifest.get("interface", {})
@@ -366,10 +389,13 @@ def load_oracle_manifest() -> dict[str, Any]:
         != "non_trace_direct_flood_and_zero_hop_headers"
         or interface.get("ack_frame_scope")
         != "simple_and_multipart_payload_framing_only"
+        or interface.get("trace_frame_scope")
+        != "initial_outbound_direct_flags_zero_trace_framing_only"
         or interface.get("golden_vector_sources")
         != {
             "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
             "ack_frames": "third_party/MeshCore/src/Mesh.cpp",
+            "trace_source_frames": "third_party/MeshCore/src/Mesh.cpp",
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
@@ -954,6 +980,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "advert_data_fields": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
+                    "trace_source_frames": True,
                 }
                 or oracle_result.get("failures") != 0
             ):

@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 ORACLE_ROOT = ROOT / "tests" / "meshcore_oracle"
 MANIFEST = ORACLE_ROOT / "manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
-BOUNDARY = "pinned_upstream_packet_advert_route_and_ack_frames"
+BOUNDARY = "pinned_upstream_packet_advert_route_ack_and_trace_source_frames"
 
 
 def canonical_lf_sha256(path: Path) -> str:
@@ -37,7 +37,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 4
+    assert manifest["corpus_version"] == 5
     assert manifest["abi_version"] == 1
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -56,16 +56,20 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
         "ack_frame_scope": "simple_and_multipart_payload_framing_only",
+        "trace_frame_scope": (
+            "initial_outbound_direct_flags_zero_trace_framing_only"
+        ),
         "golden_vector_sources": {
             "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
             "ack_frames": "third_party/MeshCore/src/Mesh.cpp",
+            "trace_source_frames": "third_party/MeshCore/src/Mesh.cpp",
         },
     }
     assert manifest["vectors"] == {
-        "roundtrip": 20,
-        "invalid": 43,
-        "semantic": 54,
-        "total": 63,
+        "roundtrip": 26,
+        "invalid": 62,
+        "semantic": 79,
+        "total": 88,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -89,6 +93,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 17,
             "semantic": 22,
             "total": 22,
+        },
+        "trace_source_frames": {
+            "roundtrip": 6,
+            "invalid": 19,
+            "semantic": 25,
+            "total": 25,
         },
     }
     assert manifest["capabilities"][0] == {
@@ -118,6 +128,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "scope": "simple_and_multipart_payload_framing_only",
     }
     assert manifest["capabilities"][4] == {
+        "id": "trace_source_frames",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "initial_outbound_direct_flags_zero_trace_framing_only",
+    }
+    assert manifest["capabilities"][5] == {
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
@@ -125,10 +142,10 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     }
     assert all(
         capability["status"] == "pending"
-        for capability in manifest["capabilities"][4:]
+        for capability in manifest["capabilities"][5:]
     )
     assert [
-        capability["id"] for capability in manifest["capabilities"][4:]
+        capability["id"] for capability in manifest["capabilities"][5:]
     ] == [
         "identity_signed_advert",
         "public_group_packets",
@@ -137,7 +154,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "ack_dispatch_correlation_and_delivery",
         "route_selection_and_forwarding",
         "path_return_route_codes",
-        "trace_path_discovery",
+        "trace_forwarding_and_path_discovery",
         "login_request_response_admin",
     ]
     pending = {
@@ -150,6 +167,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     )
     assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
         "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
+    )
+    assert pending["path_return_route_codes"]["blocked_by"] == (
+        "external_unpinned_aes_sha_rng_identity_and_mesh_session_fixtures"
+    )
+    assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
+        "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
     )
 
     for relative, expected in {
@@ -181,6 +204,9 @@ def test_oracle_c_abi_wraps_only_pinned_upstream_protocol_helpers():
     assert "d1l_meshcore_oracle_create_ack" in header
     assert "d1l_meshcore_oracle_create_multi_ack" in header
     assert "d1l_meshcore_oracle_parse_ack" in header
+    assert "d1l_meshcore_oracle_create_trace" in header
+    assert "d1l_meshcore_oracle_prepare_trace_direct" in header
+    assert "d1l_meshcore_oracle_parse_trace_source" in header
     assert "mesh::Packet::copyPath" in adapter
     assert "PAYLOAD_TYPE_TRACE" in adapter
     assert "main/mesh" not in adapter
@@ -245,6 +271,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "direct_flood_headers" not in artifact["pending_capabilities"]
     assert "ack_frames" not in artifact["pending_capabilities"]
+    assert "trace_source_frames" not in artifact["pending_capabilities"]
 
 
 def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
@@ -300,10 +327,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 1,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 20,
-            "invalid": 43,
-            "semantic": 54,
-            "total": 63,
+            "roundtrip": 26,
+            "invalid": 62,
+            "semantic": 79,
+            "total": 88,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -328,12 +355,19 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 22,
                 "total": 22,
             },
+            "trace_source_frames": {
+                "roundtrip": 6,
+                "invalid": 19,
+                "semantic": 25,
+                "total": 25,
+            },
         },
         "capabilities": {
             "packet_envelope": True,
             "advert_data_fields": True,
             "direct_flood_headers": True,
             "ack_frames": True,
+            "trace_source_frames": True,
         },
         "failures": 0,
     }
