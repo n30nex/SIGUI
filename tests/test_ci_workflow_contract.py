@@ -57,7 +57,8 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge" in host
     assert "python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all" in host
     assert host.count(sd_gate) >= 9
-    assert "python ./scripts/verify_checksums.py artifacts" in host
+    assert "python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py" in host
+    assert "python ./scripts/verify_checksums.py artifacts" not in host
     assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
 
 
@@ -219,7 +220,8 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
-    assert "python scripts/verify_checksums.py artifacts/release" in job
+    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"' in job
+    assert "python scripts/verify_checksums.py artifacts/release\n" not in job
     assert "test -f sdkconfig" in job
     assert "test -f build/config/sdkconfig.json" in job
     assert "cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/" in job

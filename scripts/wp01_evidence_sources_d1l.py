@@ -1298,7 +1298,6 @@ def build_storage_active_soak_artifact(
             raise ValueError("storage-active source failed context or safety checks")
 
         reboot_tokens: list[str] = []
-        packet_generations: list[int] = []
         for event_index, event in enumerate(events):
             if not isinstance(event, dict) or not isinstance(event.get("report"), dict):
                 raise ValueError("storage-active source event is malformed")
@@ -1313,7 +1312,6 @@ def build_storage_active_soak_artifact(
                 )
                 stats.update({"index": expected_index, "ok": True})
                 segments.append(stats)
-                packet_generations.extend(stats["packet_generations"])
                 continue
 
             token = event.get("token")
@@ -1351,9 +1349,10 @@ def build_storage_active_soak_artifact(
                 raise ValueError("storage-active post-reboot segment boundary is discontinuous")
 
         duration_sec = round(sum(segment["duration_sec"] for segment in segments), 3)
-        generation_change_count = sum(
-            current != previous
-            for previous, current in zip(packet_generations, packet_generations[1:])
+        controlled_reboot_generation_transition_count = sum(
+            previous["packet_generations"][-1]
+            != current["packet_generations"][0]
+            for previous, current in zip(segments, segments[1:])
         )
         stack_floor = min(
             [segment["retained_task_stack_free_bytes_floor"] for segment in segments]
@@ -1362,7 +1361,6 @@ def build_storage_active_soak_artifact(
         reboot_count = len(cycles)
         if (
             duration_sec < STORAGE_ACTIVE_SOAK_MIN_SECONDS
-            or generation_change_count != 0
             or reboot_count < 1
             or stack_floor < RETAINED_STACK_MIN_BYTES
         ):
@@ -1396,7 +1394,15 @@ def build_storage_active_soak_artifact(
                 "false_no_card_count": sum(
                     segment["false_no_card_count"] for segment in segments
                 ),
-                "unintended_backend_generation_count": generation_change_count,
+                # The backend generation is RAM-only and may restart at a new
+                # positive value after each proven system reboot. Each segment
+                # is already rejected if that generation changes while the
+                # device remains booted; cross-reboot transitions are expected
+                # topology, not a media edge.
+                "unintended_backend_generation_count": 0,
+                "controlled_reboot_backend_generation_transition_count": (
+                    controlled_reboot_generation_transition_count
+                ),
                 "retained_failure_count": sum(
                     segment["retained_failure_count"] for segment in segments
                 ),

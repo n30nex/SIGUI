@@ -12,7 +12,7 @@ from scripts.completion_ledger import (
 
 LEDGER_PATH = Path("docs/COMPLETION_LEDGER.yaml")
 STATUS_PATH = Path("docs/COMPLETION_STATUS.md")
-WP01_COMMIT = "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
+WP01_COMMIT = "092293f2311a24c9899bc9bf343ab014c4ba0411"
 
 
 def ledger_copy() -> dict:
@@ -35,10 +35,10 @@ def bank_wp01_proof(ledger: dict) -> dict:
             "valid": True,
         }
         for filename in (
-            "sd_inserted_stability_07322ed_COM12_COM16.json",
-            "sd_remove_reinsert_07322ed_COM12_COM16.json",
-            "retained_reboot_matrix_07322ed_COM12.json",
-            "storage_active_soak_07322ed_COM12.json",
+            "sd_inserted_stability_092293f_COM12_COM16.json",
+            "sd_remove_reinsert_092293f_COM12_COM16.json",
+            "retained_reboot_matrix_092293f_COM12.json",
+            "storage_active_soak_092293f_COM12_COM16.json",
         )
     )
     return item
@@ -51,16 +51,24 @@ def test_repository_ledger_validates_and_status_is_current():
     assert STATUS_PATH.read_text(encoding="utf-8") == render_status(ledger)
 
 
-def test_current_runnable_selection_keeps_failed_wp01_root_cause_work_active():
+def test_current_runnable_selection_advances_to_wp02_after_wp01_proof_is_banked():
     ledger = load_ledger(LEDGER_PATH)
 
-    assert runnable_work_packages(ledger)[0] == "WP-01"
+    assert runnable_work_packages(ledger)[0] == "WP-02"
 
 
 def test_execution_blocker_removes_wp01_from_runnable_work():
     ledger = ledger_copy()
-    blocker = next(item for item in ledger["blockers"] if item["status"] == "open")
+    blocker = next(
+        item for item in ledger["blockers"] if item["id"] == "BLK-WP01-RETAINED-TIMEOUT-20260712"
+    )
+    blocker["status"] = "open"
     blocker["blocks_execution"] = True
+    item = package(ledger, "WP-01")
+    item["status"] = "in_progress"
+    item["proof_banked"] = False
+    item["blockers"] = [blocker["id"]]
+    package(ledger, "WP-02")["status"] = "blocked"
 
     assert runnable_work_packages(ledger) == []
 
@@ -111,7 +119,20 @@ def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
 
     assert wp01["implementation_merged"] is False
     assert dependency_satisfied(wp01) is True
+    assert runnable_work_packages(ledger)[0] == "WP-02"
     assert not any("WP-02" in error and "dependency WP-01" in error for error in errors)
+
+
+def test_banked_wp01_status_describes_wp02_as_unlocked():
+    ledger = ledger_copy()
+    bank_wp01_proof(ledger)
+    package(ledger, "WP-02")["status"] = "in_progress"
+
+    rendered = render_status(ledger)
+
+    assert "`WP-02` is unlocked" in rendered
+    assert "`WP-02` remains blocked" not in rendered
+    assert "Highest-priority pending: `WP-02`" in rendered
 
 
 def test_hardware_green_requires_proof_banked():
