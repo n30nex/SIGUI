@@ -10,7 +10,7 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 try:
@@ -52,6 +52,10 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
+RELEASE_GATE_AUDIT_SCHEMA = 2
+BUILD_INPUTS_SCHEMA = 1
+BUILD_INPUTS_KIND = "d1l_build_inputs"
+ARDUINO_BUILD_INPUTS_KIND = "d1l_arduino_build_inputs"
 SUPPORTED_ESP_IDF_IMAGE_TAG = "espressif/idf:v5.5.4"
 SUPPORTED_ESP_IDF_IMAGE_DIGEST = (
     "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
@@ -3552,6 +3556,309 @@ def supported_sdk_gate(root: Path) -> GateResult:
     )
 
 
+def immutable_release_source_inputs_gate(
+    github_run_dir: Path | None,
+    root: Path,
+    commit: str | None,
+    expected_run_id: str | None,
+) -> GateResult:
+    """Bind the selected run's host, IDF, and Arduino receipts to one lock."""
+
+    def json_object(path: Path | None) -> dict[str, Any]:
+        try:
+            value = read_json(path)
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def digest(path: Path | None) -> str | None:
+        try:
+            return sha256_file(path) if path and path.is_file() else None
+        except OSError:
+            return None
+
+    def text(path: Path | None) -> str | None:
+        try:
+            return path.read_text(encoding="utf-8").strip() if path and path.is_file() else None
+        except (OSError, UnicodeError):
+            return None
+
+    def normalized_packages(value: object) -> dict[str, str] | None:
+        if not isinstance(value, list):
+            return None
+        packages: dict[str, str] = {}
+        for item in value:
+            if not isinstance(item, dict):
+                return None
+            name = item.get("name")
+            version = item.get("version")
+            if not isinstance(name, str) or not name.strip() or not isinstance(version, str):
+                return None
+            normalized = re.sub(r"[-_.]+", "-", name.strip()).lower()
+            if normalized in packages or not version.strip():
+                return None
+            packages[normalized] = version.strip()
+        return packages
+
+    metadata_path = root / SUPPORTED_ESP_IDF_BUILD_INPUTS
+    requirements_path = root / "requirements" / "ci-host-windows.txt"
+    dependency_lock = root / "dependencies.lock"
+    metadata = json_object(metadata_path)
+    metadata_sha = digest(metadata_path)
+
+    host_dir = github_run_dir / "d1l-host-artifacts" / "build-inputs" if github_run_dir else None
+    host_metadata = host_dir / "d1l-build-inputs.json" if host_dir else None
+    host_requirements = host_dir / "ci-host-windows.txt" if host_dir else None
+    host_installed = host_dir / "ci-host-windows-installed.json" if host_dir else None
+    host_checksums = host_dir / "SHA256SUMS.txt" if host_dir else None
+
+    idf_dir = github_run_dir / "d1l-idf55-migration-state" if github_run_dir else None
+    idf_metadata = idf_dir / "build-inputs.json" if idf_dir else None
+    idf_container = idf_dir / "container-image.txt" if idf_dir else None
+    idf_version = idf_dir / "idf-version.txt" if idf_dir else None
+    idf_dependency_lock = idf_dir / "dependencies.lock" if idf_dir else None
+    idf_dependency_patch = idf_dir / "dependencies.lock.patch" if idf_dir else None
+
+    arduino_dir = github_run_dir / "rp2040-sd-bridge-firmware" if github_run_dir else None
+    arduino_receipt_path = arduino_dir / "build-inputs.json" if arduino_dir else None
+    arduino_checksums = arduino_dir / "SHA256SUMS.txt" if arduino_dir else None
+    arduino_receipt = json_object(arduino_receipt_path)
+
+    esp_idf = metadata.get("esp_idf") if isinstance(metadata.get("esp_idf"), dict) else {}
+    container = esp_idf.get("container") if isinstance(esp_idf.get("container"), dict) else {}
+    host_python = (
+        metadata.get("host_python") if isinstance(metadata.get("host_python"), dict) else {}
+    )
+    requirements = (
+        host_python.get("requirements")
+        if isinstance(host_python.get("requirements"), dict)
+        else {}
+    )
+    expected_packages_raw = requirements.get("packages")
+    expected_packages = (
+        {
+            re.sub(r"[-_.]+", "-", str(name)).lower(): str(version)
+            for name, version in expected_packages_raw.items()
+        }
+        if isinstance(expected_packages_raw, dict)
+        and expected_packages_raw
+        and all(
+            isinstance(name, str)
+            and name.strip()
+            and isinstance(version, str)
+            and version.strip()
+            for name, version in expected_packages_raw.items()
+        )
+        else None
+    )
+    expected_package_metadata_valid = (
+        expected_packages is not None
+        and isinstance(expected_packages_raw, dict)
+        and len(expected_packages) == len(expected_packages_raw)
+    )
+    try:
+        installed_value = (
+            json.loads(host_installed.read_text(encoding="utf-8"))
+            if host_installed and host_installed.is_file()
+            else None
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        installed_value = None
+    installed_packages = normalized_packages(installed_value)
+
+    arduino = metadata.get("arduino") if isinstance(metadata.get("arduino"), dict) else {}
+    arduino_cli = arduino.get("cli") if isinstance(arduino.get("cli"), dict) else {}
+    rp2040 = arduino.get("rp2040") if isinstance(arduino.get("rp2040"), dict) else {}
+    platform_archive = (
+        rp2040.get("platform_archive")
+        if isinstance(rp2040.get("platform_archive"), dict)
+        else {}
+    )
+    tools = rp2040.get("tools") if isinstance(rp2040.get("tools"), list) else []
+    expected_archive_rows = [platform_archive, *tools] if platform_archive else []
+    expected_archives: dict[str, tuple[str, int]] = {}
+    archive_metadata_valid = bool(expected_archive_rows)
+    for item in expected_archive_rows:
+        if not isinstance(item, dict):
+            archive_metadata_valid = False
+            continue
+        filename = item.get("filename")
+        archive_sha = item.get("sha256")
+        size = item.get("size")
+        if (
+            not isinstance(filename, str)
+            or Path(filename).name != filename
+            or filename in expected_archives
+            or not isinstance(archive_sha, str)
+            or re.fullmatch(r"[0-9a-f]{64}", archive_sha) is None
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size <= 0
+        ):
+            archive_metadata_valid = False
+            continue
+        expected_archives[filename] = (archive_sha, size)
+
+    receipt_archives: dict[str, tuple[str, int]] = {}
+    receipt_archive_paths_valid = True
+    raw_receipt_archives = arduino_receipt.get("archives")
+    if isinstance(raw_receipt_archives, list):
+        for item in raw_receipt_archives:
+            if not isinstance(item, dict):
+                receipt_archive_paths_valid = False
+                continue
+            filename = item.get("filename")
+            relative_path = item.get("relative_path")
+            archive_sha = item.get("sha256")
+            size = item.get("size")
+            relative = PurePosixPath(relative_path) if isinstance(relative_path, str) else None
+            if (
+                not isinstance(filename, str)
+                or filename in receipt_archives
+                or relative is None
+                or relative.is_absolute()
+                or any(part in {"", ".", ".."} for part in relative.parts)
+                or relative.name != filename
+                or not isinstance(archive_sha, str)
+                or re.fullmatch(r"[0-9a-f]{64}", archive_sha) is None
+                or isinstance(size, bool)
+                or not isinstance(size, int)
+                or size <= 0
+            ):
+                receipt_archive_paths_valid = False
+                continue
+            receipt_archives[filename] = (archive_sha, size)
+    else:
+        receipt_archive_paths_valid = False
+
+    receipt_metadata = (
+        arduino_receipt.get("metadata")
+        if isinstance(arduino_receipt.get("metadata"), dict)
+        else {}
+    )
+    expected_submodules = metadata.get("submodules")
+    submodule_metadata_valid = (
+        isinstance(expected_submodules, dict)
+        and bool(expected_submodules)
+        and all(
+            isinstance(path, str)
+            and path.strip()
+            and isinstance(value, str)
+            and re.fullmatch(r"[0-9a-f]{40}", value) is not None
+            for path, value in expected_submodules.items()
+        )
+    )
+
+    host_entries = checksum_manifest_entries(host_checksums) if host_checksums else {}
+    arduino_entries = checksum_manifest_entries(arduino_checksums) if arduino_checksums else {}
+    expected_host_entries = {
+        "d1l-build-inputs.json",
+        "ci-host-windows.txt",
+        "ci-host-windows-installed.json",
+    }
+    checks = {
+        "github_run_dir_present": github_run_dir is not None and github_run_dir.is_dir(),
+        "expected_commit_exact": isinstance(commit, str)
+        and re.fullmatch(r"[0-9a-f]{40}", commit) is not None,
+        "expected_run_id_numeric": isinstance(expected_run_id, str)
+        and re.fullmatch(r"[1-9][0-9]*", expected_run_id) is not None,
+        "metadata_schema": metadata.get("schema") == BUILD_INPUTS_SCHEMA
+        and metadata.get("kind") == BUILD_INPUTS_KIND,
+        "metadata_hash_readable": metadata_sha is not None,
+        "esp_idf_lock_exact": esp_idf.get("version") == SUPPORTED_ESP_IDF_VERSION
+        and container.get("reference") == SUPPORTED_ESP_IDF_IMAGE
+        and container.get("index_digest") == SUPPORTED_ESP_IDF_IMAGE_DIGEST,
+        "requirements_lock_exact": requirements.get("path")
+        == "requirements/ci-host-windows.txt"
+        and digest(requirements_path) == requirements.get("sha256"),
+        "host_metadata_copy_exact": metadata_sha is not None
+        and digest(host_metadata) == metadata_sha,
+        "host_requirements_copy_exact": digest(requirements_path) is not None
+        and digest(host_requirements) == digest(requirements_path),
+        "host_installed_packages_exact": expected_package_metadata_valid
+        and installed_packages == expected_packages,
+        "host_checksum_manifest_complete": bool(host_checksums)
+        and verify_sha256_manifest(host_checksums)
+        and set(host_entries) == expected_host_entries,
+        "idf_metadata_copy_exact": metadata_sha is not None
+        and digest(idf_metadata) == metadata_sha,
+        "idf_container_exact": text(idf_container) == SUPPORTED_ESP_IDF_IMAGE,
+        "idf_version_exact": text(idf_version) == f"ESP-IDF {SUPPORTED_ESP_IDF_VERSION}",
+        "idf_dependency_lock_exact": digest(dependency_lock) is not None
+        and digest(idf_dependency_lock) == digest(dependency_lock),
+        "idf_dependency_patch_empty": digest(idf_dependency_patch)
+        == hashlib.sha256(b"").hexdigest(),
+        "arduino_receipt_schema": arduino_receipt.get("schema") == BUILD_INPUTS_SCHEMA
+        and arduino_receipt.get("kind") == ARDUINO_BUILD_INPUTS_KIND
+        and arduino_receipt.get("ok") is True,
+        "arduino_receipt_source_commit": isinstance(commit, str)
+        and arduino_receipt.get("source_commit") == commit,
+        "arduino_receipt_metadata_exact": receipt_metadata.get("path")
+        == SUPPORTED_ESP_IDF_BUILD_INPUTS
+        and metadata_sha is not None
+        and receipt_metadata.get("sha256") == metadata_sha,
+        "arduino_cli_version_exact": isinstance(arduino_cli.get("version"), str)
+        and re.fullmatch(r"\d+\.\d+\.\d+", arduino_cli["version"]) is not None
+        and arduino_receipt.get("arduino_cli_version") == arduino_cli["version"],
+        "rp2040_core_version_exact": isinstance(rp2040.get("version"), str)
+        and re.fullmatch(r"\d+\.\d+\.\d+", rp2040["version"]) is not None
+        and arduino_receipt.get("rp2040_core_version") == rp2040["version"],
+        "submodule_gitlinks_exact": submodule_metadata_valid
+        and arduino_receipt.get("submodules") == expected_submodules,
+        "arduino_archives_verified": arduino_receipt.get("archives_verified") is True,
+        "arduino_archive_inventory_exact": archive_metadata_valid
+        and receipt_archive_paths_valid
+        and receipt_archives == expected_archives,
+        "arduino_checksum_manifest_complete": bool(arduino_checksums)
+        and verify_sha256_manifest(arduino_checksums)
+        and digest(arduino_receipt_path) is not None
+        and arduino_entries.get("build-inputs.json") == digest(arduino_receipt_path),
+    }
+    failures = [name for name, passed in checks.items() if not passed]
+    evidence_paths = [
+        metadata_path,
+        requirements_path,
+        dependency_lock,
+        host_checksums,
+        host_metadata,
+        host_requirements,
+        host_installed,
+        idf_metadata,
+        idf_container,
+        idf_version,
+        idf_dependency_lock,
+        idf_dependency_patch,
+        arduino_receipt_path,
+        arduino_checksums,
+    ]
+    evidence = [rel(path, root) for path in evidence_paths if path and path.is_file()]
+    ok = not failures
+    return GateResult(
+        "immutable_release_source_inputs",
+        "P0",
+        ok,
+        "Immutable release source and toolchain inputs",
+        evidence,
+        (
+            "The selected Actions run binds host Python, ESP-IDF, Arduino/RP2040 archives, and submodules to the committed build-input lock."
+            if ok
+            else "The selected Actions run is missing or contradicts immutable host, ESP-IDF, Arduino/RP2040, or submodule input receipts."
+        ),
+        {
+            "failures": failures,
+            "checks": checks,
+            "expected_commit": commit,
+            "expected_run_id": expected_run_id,
+            "metadata_sha256": metadata_sha,
+            "host_package_count": len(installed_packages or {}),
+            "arduino_archive_count": len(receipt_archives),
+            "submodule_count": len(expected_submodules or {})
+            if isinstance(expected_submodules, dict)
+            else 0,
+        },
+    )
+
+
 def docs_freshness_gate(root: Path, commit: str | None, run_id: str | None) -> GateResult:
     docs = [
         root / "README.md",
@@ -3632,6 +3939,14 @@ def build_audit(args: argparse.Namespace) -> dict:
     unformatted_boot_path = newest_boot_prepare_artifact(boot_prepare_roots, args.commit, "unformatted")
 
     gates.append(supported_sdk_gate(root))
+    gates.append(
+        immutable_release_source_inputs_gate(
+            github_run_dir,
+            root,
+            args.commit,
+            args.github_run_id,
+        )
+    )
     gates.append(
         host_checks_success_gate(
             github_run_dir,
@@ -3779,10 +4094,12 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(full_rf_gate(hardware_dir, root, args.commit))
     gates.append(docs_freshness_gate(root, args.commit, args.github_run_id))
 
-    p0_failed = [gate for gate in gates if gate.severity == "P0" and not gate.ok]
+    p0_gates = [gate for gate in gates if gate.severity == "P0"]
+    p1_gates = [gate for gate in gates if gate.severity == "P1"]
+    p0_failed = [gate for gate in p0_gates if not gate.ok]
     failed = [gate for gate in gates if not gate.ok]
     return {
-        "schema": 1,
+        "schema": RELEASE_GATE_AUDIT_SCHEMA,
         "mode": "release-gate-audit",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "root": str(root),
@@ -3794,6 +4111,10 @@ def build_audit(args: argparse.Namespace) -> dict:
         "rp2040_port": args.rp2040_port,
         "rp2040_hardware_dir": str(rp2040_hardware_dir),
         "ready_for_public_release": not p0_failed,
+        "gate_count": len(gates),
+        "p0_gate_count": len(p0_gates),
+        "p1_gate_count": len(p1_gates),
+        "passed_count": len(gates) - len(failed),
         "p0_failed_count": len(p0_failed),
         "failed_count": len(failed),
         "gates": [gate.to_dict() for gate in gates],

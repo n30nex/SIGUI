@@ -297,6 +297,20 @@ def write_manifest_file(directory: Path, name: str, payload: bytes = b"ok") -> N
     (directory / "SHA256SUMS.txt").write_text(f"{digest}  ./{name}\n", encoding="ascii")
 
 
+def write_checksum_manifest(directory: Path) -> None:
+    manifest = directory / "SHA256SUMS.txt"
+    rows = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  ./"
+        f"{path.relative_to(directory).as_posix()}"
+        for path in sorted(
+            directory.rglob("*"),
+            key=lambda candidate: candidate.relative_to(directory).as_posix(),
+        )
+        if path.is_file() and path != manifest
+    ]
+    manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
+
+
 def write_esp32_actions_artifact(run_dir: Path) -> dict:
     artifact = run_dir / "d1l-firmware-artifacts"
     files = {
@@ -457,6 +471,105 @@ def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_ID
     write_supported_sdk_lock(root)
 
 
+def write_immutable_build_input_receipts(root: Path, run_dir: Path) -> None:
+    metadata_path = root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    requirements_path = root / "requirements" / "ci-host-windows.txt"
+    requirements_path.parent.mkdir(parents=True, exist_ok=True)
+    requirements_path.write_text("pytest==9.1.1 --hash=sha256:" + "1" * 64 + "\n", encoding="ascii")
+    metadata["host_python"] = {
+        "version": "3.13.6",
+        "architecture": "x64",
+        "requirements": {
+            "path": "requirements/ci-host-windows.txt",
+            "sha256": hashlib.sha256(requirements_path.read_bytes()).hexdigest(),
+            "packages": {"pip": "26.1.2", "pytest": "9.1.1"},
+        },
+    }
+    archives = [
+        {
+            "filename": "rp2040-5.6.1.zip",
+            "sha256": "2" * 64,
+            "size": 100,
+        },
+        {
+            "filename": "pqt-gcc.tar.gz",
+            "sha256": "3" * 64,
+            "size": 200,
+        },
+    ]
+    metadata["arduino"] = {
+        "cli": {"version": "1.5.0"},
+        "rp2040": {
+            "version": "5.6.1",
+            "compiler_tool": "pqt-gcc",
+            "platform_archive": archives[0],
+            "tools": [{"name": "pqt-gcc", "version": "fixture", **archives[1]}],
+        },
+    }
+    metadata["submodules"] = {
+        "third_party/MeshCore": "4" * 40,
+        "third_party/sensecap_indicator_esp32": "5" * 40,
+    }
+    write_json(metadata_path, metadata)
+    metadata_bytes = metadata_path.read_bytes()
+    metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+
+    host_dir = run_dir / "d1l-host-artifacts" / "build-inputs"
+    host_dir.mkdir(parents=True, exist_ok=True)
+    (host_dir / "d1l-build-inputs.json").write_bytes(metadata_bytes)
+    (host_dir / "ci-host-windows.txt").write_bytes(requirements_path.read_bytes())
+    (host_dir / "ci-host-windows-installed.json").write_text(
+        json.dumps(
+            [
+                {"name": "pip", "version": "26.1.2"},
+                {"name": "pytest", "version": "9.1.1"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_checksum_manifest(host_dir)
+
+    idf_dir = run_dir / "d1l-idf55-migration-state"
+    idf_dir.mkdir(parents=True, exist_ok=True)
+    (idf_dir / "build-inputs.json").write_bytes(metadata_bytes)
+    (idf_dir / "container-image.txt").write_text(
+        audit.SUPPORTED_ESP_IDF_IMAGE + "\n", encoding="ascii"
+    )
+    (idf_dir / "idf-version.txt").write_text(
+        f"ESP-IDF {audit.SUPPORTED_ESP_IDF_VERSION}\n", encoding="ascii"
+    )
+    (idf_dir / "dependencies.lock").write_bytes((root / "dependencies.lock").read_bytes())
+    (idf_dir / "dependencies.lock.patch").write_bytes(b"")
+
+    bridge_dir = run_dir / "rp2040-sd-bridge-firmware"
+    write_json(
+        bridge_dir / "build-inputs.json",
+        {
+            "schema": 1,
+            "kind": "d1l_arduino_build_inputs",
+            "ok": True,
+            "source_commit": COMMIT,
+            "metadata": {
+                "path": audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+                "sha256": metadata_sha,
+            },
+            "arduino_cli_version": "1.5.0",
+            "rp2040_core_version": "5.6.1",
+            "submodules": metadata["submodules"],
+            "archives_verified": True,
+            "archives": [
+                {
+                    **archive,
+                    "relative_path": f"staging/{archive['filename']}",
+                }
+                for archive in archives
+            ],
+        },
+    )
+    write_checksum_manifest(bridge_dir)
+
+
 def meshcore_conformance_payload(
     commit: str = COMMIT,
     *,
@@ -586,6 +699,7 @@ def write_core_evidence(root: Path) -> None:
         b"official-smoke-uf2",
     )
     write_release_package(run_dir)
+    write_immutable_build_input_receipts(root, run_dir)
 
     hardware = root / "artifacts" / "hardware" / "com12"
     write_esp32_flash_receipt(root, run_dir)
@@ -1505,7 +1619,17 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
+    assert report["schema"] == audit.RELEASE_GATE_AUDIT_SCHEMA == 2
+    assert report["gate_count"] == 35
+    assert report["p0_gate_count"] == 33
+    assert report["p1_gate_count"] == 2
+    assert report["passed_count"] + report["failed_count"] == report["gate_count"]
     assert gates["supported_sdk_baseline"]["ok"] is True
+    assert gates["immutable_release_source_inputs"]["ok"] is True
+    assert gates["immutable_release_source_inputs"]["details"]["failures"] == []
+    assert gates["immutable_release_source_inputs"]["details"]["host_package_count"] == 2
+    assert gates["immutable_release_source_inputs"]["details"]["arduino_archive_count"] == 2
+    assert gates["immutable_release_source_inputs"]["details"]["submodule_count"] == 2
     assert gates["same_run_host_checks_passed"]["ok"] is True
     assert gates["supported_sdk_baseline"]["details"]["expected_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
     assert gates["ci_artifacts_checksums"]["ok"] is True
@@ -1527,6 +1651,95 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("relative", "failure"),
+    [
+        (
+            "d1l-host-artifacts/build-inputs/d1l-build-inputs.json",
+            "host_metadata_copy_exact",
+        ),
+        ("d1l-idf55-migration-state/build-inputs.json", "idf_metadata_copy_exact"),
+        ("rp2040-sd-bridge-firmware/build-inputs.json", "arduino_receipt_schema"),
+    ],
+)
+def test_immutable_source_inputs_gate_rejects_missing_run_receipts(
+    tmp_path: Path,
+    relative: str,
+    failure: str,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    target = run_dir / relative
+    target.unlink()
+    if target.parent.name in {"build-inputs", "rp2040-sd-bridge-firmware"}:
+        write_checksum_manifest(target.parent)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["immutable_release_source_inputs"]
+
+    assert gate["ok"] is False
+    assert failure in gate["details"]["failures"]
+    assert report["p0_failed_count"] == 21
+
+
+@pytest.mark.parametrize(
+    ("surface", "failure"),
+    [
+        ("host_packages", "host_installed_packages_exact"),
+        ("idf_container", "idf_container_exact"),
+        ("arduino_commit", "arduino_receipt_source_commit"),
+        ("arduino_archive", "arduino_archive_inventory_exact"),
+    ],
+)
+def test_immutable_source_inputs_gate_rejects_rechecksummed_semantic_tampering(
+    tmp_path: Path,
+    surface: str,
+    failure: str,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    if surface == "host_packages":
+        installed = (
+            run_dir
+            / "d1l-host-artifacts"
+            / "build-inputs"
+            / "ci-host-windows-installed.json"
+        )
+        installed.write_text(
+            json.dumps(
+                [
+                    {"name": "pip", "version": "26.1.2"},
+                    {"name": "pytest", "version": "9.1.1"},
+                    {"name": "unexpected", "version": "1.0"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        write_checksum_manifest(installed.parent)
+    elif surface == "idf_container":
+        (run_dir / "d1l-idf55-migration-state" / "container-image.txt").write_text(
+            "espressif/idf:latest\n", encoding="ascii"
+        )
+    else:
+        bridge = run_dir / "rp2040-sd-bridge-firmware"
+        receipt_path = bridge / "build-inputs.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if surface == "arduino_commit":
+            receipt["source_commit"] = STALE_COMMIT
+        else:
+            receipt["archives"][0]["sha256"] = "9" * 64
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        write_checksum_manifest(bridge)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["immutable_release_source_inputs"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["checks"][failure] is False
+    assert failure in gate["details"]["failures"]
+    assert report["p0_failed_count"] == 21
 
 
 def test_flash_receipt_gate_fails_when_skip_flash_leaves_no_receipt(tmp_path: Path):
