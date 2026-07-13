@@ -40,7 +40,12 @@ RUN_ID_RE = re.compile(r"[1-9][0-9]*")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 COM_PORT_RE = re.compile(r"COM[1-9][0-9]*")
 FORBIDDEN_PORTS = {"COM" + str(number) for number in (8, 11, 29)}
-REQUIRED_PR_LAYERS = (62, 64, 80)
+TRUSTED_PR_LAYERS = {
+    62: "7a6ff86493042cc5617ef88c4765312cea46150d",
+    64: "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+    80: "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+}
+REQUIRED_PR_LAYERS = tuple(TRUSTED_PR_LAYERS)
 RP2040_GROUPS = (
     "rp2040-sd-bridge-firmware",
     "rp2040-sd-smoke-firmware",
@@ -52,6 +57,13 @@ ROLE_CHECKS = {
     "sd": ("sd_ready", "storage_clean"),
     "reboot": ("reboot_completed", "post_reboot_ready"),
     "map_open": ("map_opened", "map_rendered"),
+}
+CANONICAL_PHYSICAL_FIELDS = {
+    "physical_observed": True,
+    "dry_run": False,
+    "simulated": False,
+    "simulation": False,
+    "source_inspection": False,
 }
 
 
@@ -175,18 +187,24 @@ def _repository_evidence(
     if set(layers) != set(REQUIRED_PR_LAYERS):
         failures.append("repository:required_pr_layers_incomplete")
     for pr in REQUIRED_PR_LAYERS:
+        trusted_commit = TRUSTED_PR_LAYERS[pr]
         commit = _exact_commit(layers.get(pr))
+        trusted = commit == trusted_commit
         exists = bool(
             commit
             and _git(root, "cat-file", "-e", f"{commit}^{{commit}}").returncode == 0
         )
         ancestor = bool(
             exists
-            and _git(root, "merge-base", "--is-ancestor", commit or "", main_sha).returncode
+            and _git(
+                root, "merge-base", "--is-ancestor", commit or "", main_sha
+            ).returncode
             == 0
         )
         if not commit:
             failures.append(f"repository:pr_{pr}_commit_invalid")
+        elif not trusted:
+            failures.append(f"repository:pr_{pr}_commit_untrusted")
         elif not exists:
             failures.append(f"repository:pr_{pr}_commit_missing")
         elif not ancestor:
@@ -195,6 +213,8 @@ def _repository_evidence(
             {
                 "pr": pr,
                 "commit": commit or str(layers.get(pr) or "").lower(),
+                "trusted_commit": trusted_commit,
+                "trusted": trusted,
                 "exists": exists,
                 "ancestor_of_main": ancestor,
             }
@@ -206,7 +226,12 @@ def _repository_evidence(
         "main_ref_is_main_sha": main_ref_sha == main_sha,
         "working_tree_clean": clean,
         "required_layers_present": set(layers) == set(REQUIRED_PR_LAYERS),
-        "required_layers_landed": all(row["ancestor_of_main"] for row in layer_rows),
+        "required_layers_exact": all(row["trusted"] for row in layer_rows),
+        "required_layers_unique": len({row["commit"] for row in layer_rows})
+        == len(REQUIRED_PR_LAYERS),
+        "required_layers_landed": all(
+            row["trusted"] and row["ancestor_of_main"] for row in layer_rows
+        ),
     }
     return (
         {
@@ -232,7 +257,11 @@ def _unique_file(root: Path, pattern: str) -> Path | None:
 def _checksum_entry_count(path: Path) -> int:
     try:
         return len(
-            [line for line in path.read_text(encoding="ascii").splitlines() if line.strip()]
+            [
+                line
+                for line in path.read_text(encoding="ascii").splitlines()
+                if line.strip()
+            ]
         )
     except (OSError, UnicodeError):
         return 0
@@ -245,7 +274,9 @@ def _tree_receipt(root: Path) -> tuple[list[dict[str, Any]], str]:
             "size": path.stat().st_size,
             "sha256": sha256_file(path).lower(),
         }
-        for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file())
+        for path in sorted(
+            candidate for candidate in root.rglob("*") if candidate.is_file()
+        )
     ]
     return rows, _canonical_sha256(rows)
 
@@ -260,7 +291,7 @@ def _actions_evidence(
     base: dict[str, Any] = {
         "repository": REPOSITORY,
         "run_id": run_id,
-        "run_dir": _relative(run_dir, root) if _within(run_dir, root) else str(run_dir),
+        "run_dir": _relative(run_dir, root) if _within(run_dir, root) else None,
         "valid": False,
     }
     if not _within(run_dir, root):
@@ -277,7 +308,9 @@ def _actions_evidence(
         f"d1l-release-package/d1l-release-{main_sha}/manifest.json",
     )
     marker = _read_json(marker_path) if marker_path else {}
-    package_manifest = _read_json(package_manifest_path) if package_manifest_path else {}
+    package_manifest = (
+        _read_json(package_manifest_path) if package_manifest_path else {}
+    )
 
     marker_valid = bool(
         marker_path
@@ -370,7 +403,9 @@ def _actions_evidence(
         "app": "meshcore_deskos_d1l.bin",
     }
     firmware_rows: list[dict[str, Any]] = []
-    firmware_valid = set(flash_by_role) == set(expected_sources) and package_root is not None
+    firmware_valid = (
+        set(flash_by_role) == set(expected_sources) and package_root is not None
+    )
     for role, source_rel in expected_sources.items():
         row = flash_by_role.get(role, {})
         source = run_dir / "d1l-firmware-artifacts" / "build" / source_rel
@@ -419,10 +454,16 @@ def _actions_evidence(
             (item for item in files if isinstance(item, dict)),
             key=lambda item: str(item.get("path")),
         ):
-            packaged = package_root / str(row.get("path") or "") if package_root else Path()
+            packaged = (
+                package_root / str(row.get("path") or "") if package_root else Path()
+            )
             package_prefix = f"rp2040/{name}/"
             raw_path = str(row.get("path") or "")
-            local_name = raw_path[len(package_prefix) :] if raw_path.startswith(package_prefix) else ""
+            local_name = (
+                raw_path[len(package_prefix) :]
+                if raw_path.startswith(package_prefix)
+                else ""
+            )
             direct = direct_root / local_name
             expected_sha = _exact_sha256(row.get("sha256"))
             valid = bool(
@@ -448,7 +489,9 @@ def _actions_evidence(
         }
         listed_names = {row["path"] for row in verified_files}
         group_valid = group_valid and direct_names == listed_names
-        uf2_rows = [row for row in verified_files if row["path"].lower().endswith(".uf2")]
+        uf2_rows = [
+            row for row in verified_files if row["path"].lower().endswith(".uf2")
+        ]
         group_valid = group_valid and len(uf2_rows) == 1
         if name == "rp2040-sd-bridge-firmware" and len(uf2_rows) == 1:
             bridge_sha256 = uf2_rows[0]["sha256"]
@@ -517,9 +560,14 @@ def _receipt_evidence(
     actions: dict[str, Any],
 ) -> tuple[dict[str, Any], list[str]]:
     failures: list[str] = []
-    if not _within(path, root) or not path.is_file():
+    inside = _within(path, root)
+    if not inside or not path.is_file():
         return (
-            {"path": str(path), "sha256": None, "valid": False},
+            {
+                "path": _relative(path, root) if inside else None,
+                "sha256": None,
+                "valid": False,
+            },
             [f"receipt:{role}:missing_or_outside_repository"],
         )
     data = _read_json(path)
@@ -534,6 +582,10 @@ def _receipt_evidence(
         data.get("schema") == SCHEMA
         and data.get("kind") == f"wp02_{role}_qualification"
         and data.get("mode") == "hardware"
+        and all(
+            data.get(name) is expected
+            for name, expected in CANONICAL_PHYSICAL_FIELDS.items()
+        )
         and data.get("ok") is True
         and data.get("commit") == main_sha
         and str(data.get("github_actions_run")) == run_id
@@ -578,6 +630,7 @@ def _receipt_evidence(
             "dm_rf_tx": data.get("dm_rf_tx"),
             "formats_sd": data.get("formats_sd"),
         },
+        "physical": {name: data.get(name) for name in CANONICAL_PHYSICAL_FIELDS},
         "valid": valid,
     }
     return entry, failures
@@ -655,6 +708,13 @@ def build_integration_baseline(
             for entry in qualification.values()
         )
     )
+    receipt_physical = bool(
+        qualification
+        and all(
+            entry.get("physical") == CANONICAL_PHYSICAL_FIELDS
+            for entry in qualification.values()
+        )
+    )
     checks = {
         "context_valid": context_valid,
         "repository_exact_clean_main": repository.get("valid") is True,
@@ -678,6 +738,7 @@ def build_integration_baseline(
         and actions.get("checks", {}).get("rp2040_payload_identity") is True,
         "receipt_paths_unique": unique_receipts,
         "receipt_safety_fields": receipt_safety,
+        "receipt_physical_fields": receipt_physical,
         **{
             f"{role}_receipt": qualification.get(role, {}).get("valid") is True
             for role in ROLE_CHECKS
@@ -720,7 +781,9 @@ def validate_integration_baseline(data: dict[str, Any], root: Path) -> bool:
     actions = data.get("actions")
     qualification = data.get("qualification")
     ports = data.get("ports")
-    if not all(isinstance(value, dict) for value in (repository, actions, qualification, ports)):
+    if not all(
+        isinstance(value, dict) for value in (repository, actions, qualification, ports)
+    ):
         return False
     try:
         layers = {
@@ -827,7 +890,9 @@ def main(argv: list[str] | None = None) -> int:
         receipts=receipts,
     )
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out.write_bytes(
+        (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    )
     print(
         json.dumps(
             {

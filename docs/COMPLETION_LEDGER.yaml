@@ -292,9 +292,10 @@
       "last_valid_sha": "092293f2311a24c9899bc9bf343ab014c4ba0411",
       "last_valid_actions_run": "29272708844",
       "artifact_state": "exact_main_software_and_downloaded_actions_green_baseline_fail_closed_only_five_physical_roles_missing",
-      "baseline_artifact": "integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
-      "baseline_sha256": "dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c",
+      "baseline_artifact": "docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+      "baseline_sha256": "39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c",
       "operator_action": "Install the checksum-verified exact 4ee07caf ESP32/RP2040 pair and collect only the five narrow role receipts on COM12/COM16. Do not use forbidden ports, transmit Public or DM RF, or format SD.",
+      "blocks_package": true,
       "blocks_execution": false,
       "still_unblocked": ["WP-03", "WP-04"]
     }
@@ -573,17 +574,24 @@
           "merged_main_full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd"
         }
       },
-      "required_evidence": ["integration_baseline_<main-sha>.json"],
+      "required_evidence": ["docs/completion/evidence/wp02/integration_baseline_<main-sha>.json"],
       "evidence": [
         {
-          "filename": "integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+          "filename": "docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
           "kind": "exact_merged_main_integration_baseline",
           "commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
           "workflow_run": "29290978741",
           "valid": false,
           "closure_required": true,
           "scope": "software_integrated_physical_qualification_open",
-          "sha256": "dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c",
+          "sha256": "39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c",
+          "tracked": true,
+          "portable_paths": true,
+          "trusted_pr_heads": {
+            "62": "7a6ff86493042cc5617ef88c4765312cea46150d",
+            "64": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+            "80": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045"
+          },
           "actions_checksums_verified": true,
           "actions_payloads_verified": true,
           "repository_layers_landed": true,
@@ -601,10 +609,10 @@
       "latest_valid_receipt": null,
       "verification": {
         "local_post_merge": {
-          "worktree_parent_commit": "f5c78f11a143ca437c479cdf793eea83a9572b9d",
-          "focused_tests_passed": 42,
+          "worktree_parent_commit": "f57ce26beade61584b8d26bd34ba576e0422dce1",
+          "focused_tests_passed": 50,
           "focused_tests_skipped": 2,
-          "full_tests_passed": 811,
+          "full_tests_passed": 820,
           "full_tests_skipped": 3,
           "ruff_status": "pass"
         }

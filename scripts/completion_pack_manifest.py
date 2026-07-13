@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate or verify the flat SIGUI completion-pack SHA-256 manifest."""
+"""Generate or verify the recursive SIGUI completion-pack SHA-256 manifest."""
 
 from __future__ import annotations
 
@@ -26,24 +26,26 @@ def completion_pack_files(pack_dir: Path) -> list[Path]:
     paths = sorted(
         (
             path
-            for path in pack_dir.iterdir()
-            if path.is_file() and path.name != MANIFEST_NAME
+            for path in pack_dir.rglob("*")
+            if path.is_file() and path != pack_dir / MANIFEST_NAME
         ),
-        key=lambda path: path.name,
+        key=lambda path: path.relative_to(pack_dir).as_posix(),
     )
     if not paths:
         raise ValueError("completion pack contains no manifest inputs")
     for path in paths:
+        relative = path.relative_to(pack_dir).as_posix()
         if path.is_symlink():
-            raise ValueError(f"completion pack input must not be a symlink: {path.name}")
-        if any(character in path.name for character in "\r\n/\\"):
-            raise ValueError(f"invalid completion pack filename: {path.name!r}")
+            raise ValueError(f"completion pack input must not be a symlink: {relative}")
+        if any(character in relative for character in "\r\n\\"):
+            raise ValueError(f"invalid completion pack filename: {relative!r}")
     return paths
 
 
 def render_manifest(pack_dir: Path) -> str:
     return "".join(
-        f"{sha256(path)}  {path.name}\n" for path in completion_pack_files(pack_dir)
+        f"{sha256(path)}  {path.relative_to(pack_dir).as_posix()}\n"
+        for path in completion_pack_files(pack_dir)
     )
 
 

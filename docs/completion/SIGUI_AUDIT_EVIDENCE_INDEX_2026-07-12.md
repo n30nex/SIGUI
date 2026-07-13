@@ -27,7 +27,7 @@
 - WP-01 is `merged` with `proof_banked=true`; its physical evidence remains explicitly bound to exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
 - Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
 - The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
-- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. Baseline `integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c`) fails closed only for missing board, UI, SD, reboot, and Map-open exact-main role receipts. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` is non-execution-blocking, so WP-03 and WP-04 remain runnable.
+- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. The tracked repository-relative baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) binds PR #62/#64/#80 to their trusted heads and fails closed only for missing board, UI, SD, reboot, and Map-open exact-main physical receipts. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` blocks WP-02 completion but not dependent implementation execution, so WP-03 and WP-04 remain runnable while release readiness remains false.
 
 ### WP-01 canonical exact-source receipts
 

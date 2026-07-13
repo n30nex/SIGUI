@@ -9,7 +9,8 @@ Snapshot: `2026-07-13T23:13:07Z`
 - Pinned MeshCore: `e8d3c53ba1ea863937081cd0caad759b832f3028`
 - Selected ESP-IDF: `5.5.4`
 - Release posture: **not ready to tag**
-- Highest-priority pending: `WP-03`
+- Ledger release ready: **no**
+- Highest-priority pending: `WP-02`
 - Highest-priority runnable now: `WP-03`
 
 ## Work packages

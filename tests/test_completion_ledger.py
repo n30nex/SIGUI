@@ -4,6 +4,8 @@ from pathlib import Path
 from scripts.completion_ledger import (
     dependency_satisfied,
     load_ledger,
+    pending_work_packages,
+    release_ready,
     render_status,
     runnable_work_packages,
     validate_ledger,
@@ -52,6 +54,7 @@ def reset_wp02_before_merge(ledger: dict) -> dict:
     item["dependency_gate"] = "merged"
     item["implementation_commit"] = None
     item["implementation_merged"] = False
+    item["blockers"] = []
     return item
 
 
@@ -66,6 +69,8 @@ def test_current_runnable_selection_advances_past_merged_wp02_implementation():
     ledger = load_ledger(LEDGER_PATH)
 
     assert runnable_work_packages(ledger)[:2] == ["WP-03", "WP-04"]
+    assert pending_work_packages(ledger)[0] == "WP-02"
+    assert release_ready(ledger) is False
 
 
 def test_implementation_merged_gate_unlocks_dependents_while_proof_remains_open():
@@ -87,10 +92,23 @@ def test_implementation_merged_gate_fails_closed_without_merged_implementation()
     assert dependency_satisfied(wp02) is False
 
 
+def test_ready_release_posture_rejects_incomplete_wp02():
+    ledger = ledger_copy()
+    ledger["release_posture"] = "ready_to_tag"
+
+    errors = validate_ledger(ledger)
+
+    assert any(
+        "release_posture ready_to_tag" in error and "WP-02" in error for error in errors
+    )
+
+
 def test_execution_blocker_removes_wp01_from_runnable_work():
     ledger = ledger_copy()
     blocker = next(
-        item for item in ledger["blockers"] if item["id"] == "BLK-WP01-RETAINED-TIMEOUT-20260712"
+        item
+        for item in ledger["blockers"]
+        if item["id"] == "BLK-WP01-RETAINED-TIMEOUT-20260712"
     )
     blocker["status"] = "open"
     blocker["blocks_execution"] = True
@@ -116,14 +134,20 @@ def test_valid_evidence_must_match_declared_exact_commit():
         "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
     )
 
-    assert any("valid evidence" in error and "expected" in error for error in validate_ledger(ledger))
+    assert any(
+        "valid evidence" in error and "expected" in error
+        for error in validate_ledger(ledger)
+    )
 
 
 def test_latest_receipt_must_reference_valid_exact_commit_evidence():
     ledger = ledger_copy()
     package(ledger, "WP-01")["latest_valid_receipt"]["filename"] = "missing.json"
 
-    assert any("latest_valid_receipt is not present" in error for error in validate_ledger(ledger))
+    assert any(
+        "latest_valid_receipt is not present" in error
+        for error in validate_ledger(ledger)
+    )
 
 
 def test_merged_item_without_required_evidence_is_rejected():
@@ -136,7 +160,10 @@ def test_merged_item_without_required_evidence_is_rejected():
     item["evidence"] = []
     item["latest_valid_receipt"] = None
 
-    assert any("WP-00 is merged but lacks evidence" in error for error in validate_ledger(ledger))
+    assert any(
+        "WP-00 is merged but lacks evidence" in error
+        for error in validate_ledger(ledger)
+    )
 
 
 def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
@@ -169,19 +196,29 @@ def test_hardware_green_requires_proof_banked():
     item = bank_wp01_proof(ledger)
     item["proof_banked"] = False
 
-    assert any("hardware_green requires proof_banked=true" in error for error in validate_ledger(ledger))
+    assert any(
+        "hardware_green requires proof_banked=true" in error
+        for error in validate_ledger(ledger)
+    )
 
 
 def test_operational_port_default_is_rejected():
     ledger = ledger_copy()
     ledger["port_policy"]["defaults"]["MESH_PEER_PORT"] = "COM11"
 
-    assert any("MESH_PEER_PORT must not have an operational default" in error for error in validate_ledger(ledger))
+    assert any(
+        "MESH_PEER_PORT must not have an operational default" in error
+        for error in validate_ledger(ledger)
+    )
 
 
 def test_unavailable_capability_cannot_be_documented_as_working():
     ledger = ledger_copy()
-    capability = next(item for item in ledger["capabilities"] if item["id"] == "ble_companion")
+    capability = next(
+        item for item in ledger["capabilities"] if item["id"] == "ble_companion"
+    )
     capability["documentation_status"] = "working"
 
-    assert any("ble_companion is unavailable" in error for error in validate_ledger(ledger))
+    assert any(
+        "ble_companion is unavailable" in error for error in validate_ledger(ledger)
+    )

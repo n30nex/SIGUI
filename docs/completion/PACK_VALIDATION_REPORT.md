@@ -16,7 +16,7 @@
 - WP-02 is `in_progress`.
 - PRs #62, #64, and #80 are merged. PR #80 head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as exact main `4ee07caf09906abdcebe8faccd95790dceb5fe88`.
 - Merged-main Actions `29290978741` passed 795 host plus 24 checksum-contract tests and strict-verified 8 manifests / 78 entries. The earlier 7/8 negative receipt remains preserved; `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed.
-- WP-02 software integration is complete. Baseline SHA-256 `dfc54d14c90a79e4053a6ad956365dc024b190685d55f2753aa183262e765a7c` fails closed only for five exact-main physical roles, so WP-02 remains `in_progress` while WP-03/WP-04 continue.
+- WP-02 software integration is complete. Tracked portable baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) fails closed only for five exact-main physical roles, so WP-02 remains `in_progress` while WP-03/WP-04 continue and release readiness remains false.
 - The exact release audit remains fail-closed with 15 P0 failures and 16 failures overall including P1.
 
 ## Structural checks

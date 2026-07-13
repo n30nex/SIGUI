@@ -110,9 +110,7 @@ def write_actions_fixture(root: Path, commit: str) -> tuple[Path, dict[str, str]
                     "sha256": baseline.sha256_file(direct),
                 }
             )
-        package_groups.append(
-            {"name": name, "path": f"rp2040/{name}", "files": files}
-        )
+        package_groups.append({"name": name, "path": f"rp2040/{name}", "files": files})
 
     package.mkdir(parents=True, exist_ok=True)
     package_manifest = package / "manifest.json"
@@ -160,8 +158,7 @@ def write_actions_fixture(root: Path, commit: str) -> tuple[Path, dict[str, str]
         "release_manifest_sha256": baseline.sha256_file(package_manifest),
         "esp32_app_sha256": baseline.sha256_file(build / sources["app"][0]),
         "rp2040_bridge_sha256": baseline.sha256_file(
-            direct_groups["rp2040-sd-bridge-firmware"]
-            / "rp2040-sd-bridge-firmware.uf2"
+            direct_groups["rp2040-sd-bridge-firmware"] / "rp2040-sd-bridge-firmware.uf2"
         ),
     }
     return run_dir, identities
@@ -178,6 +175,11 @@ def write_receipts(
             "schema": 1,
             "kind": f"wp02_{role}_qualification",
             "mode": "hardware",
+            "physical_observed": True,
+            "dry_run": False,
+            "simulated": False,
+            "simulation": False,
+            "source_inspection": False,
             "ok": True,
             "commit": commit,
             "github_actions_run": RUN_ID,
@@ -208,7 +210,7 @@ def write_receipts(
 
 
 @pytest.fixture()
-def context(tmp_path: Path) -> dict:
+def context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     root = tmp_path / "repo"
     root.mkdir()
     git(root, "init", "-b", "main")
@@ -220,6 +222,11 @@ def context(tmp_path: Path) -> dict:
     pr62 = commit_file(root, "pr62.txt", "62\n")
     pr64 = commit_file(root, "pr64.txt", "64\n")
     pr80 = commit_file(root, "pr80.txt", "80\n")
+    monkeypatch.setattr(
+        baseline,
+        "TRUSTED_PR_LAYERS",
+        {62: pr62, 64: pr64, 80: pr80},
+    )
     run_dir, identities = write_actions_fixture(root, pr80)
     receipts = write_receipts(root, pr80, identities)
     assert git(root, "status", "--porcelain", "--untracked-files=all") == ""
@@ -288,12 +295,59 @@ def test_dirty_or_non_main_repository_fails_closed(context: dict):
     assert "repository:main_ref_not_exact_main_sha" in report["failures"]
 
 
+def test_missing_receipt_baseline_is_repo_relative_and_reproducible_across_roots(
+    context: dict, tmp_path: Path
+):
+    clone_root = tmp_path / "relocated-repo"
+    shutil.copytree(context["root"], clone_root)
+
+    for path in context["receipts"].values():
+        path.unlink()
+    clone_receipts = {
+        role: clone_root / path.relative_to(context["root"])
+        for role, path in context["receipts"].items()
+    }
+    for path in clone_receipts.values():
+        path.unlink()
+
+    original = build(context)
+    relocated = build(
+        context,
+        root=clone_root,
+        github_run_dir=clone_root / context["run_dir"].relative_to(context["root"]),
+        receipts=clone_receipts,
+    )
+
+    assert original == relocated
+    assert original["ok"] is False
+    assert str(context["root"]) not in json.dumps(original)
+    assert str(clone_root) not in json.dumps(relocated)
+    assert all(
+        entry["path"].startswith("artifacts/hardware/wp02/")
+        for entry in original["qualification"].values()
+    )
+
+
 def test_all_required_pr_layers_must_be_landed(context: dict):
-    report = build(context, layers={62: context["layers"][62], 80: context["layers"][80]})
+    report = build(
+        context, layers={62: context["layers"][62], 80: context["layers"][80]}
+    )
 
     assert report["ok"] is False
     assert "repository:required_pr_layers_incomplete" in report["failures"]
     assert "repository:pr_64_commit_invalid" in report["failures"]
+
+
+def test_required_pr_layers_reject_wrong_or_duplicate_valid_ancestors(context: dict):
+    initial = git(context["root"], "rev-list", "--max-parents=0", "HEAD")
+    report = build(context, layers={62: initial, 64: initial, 80: context["commit"]})
+
+    assert report["ok"] is False
+    assert "repository:pr_62_commit_untrusted" in report["failures"]
+    assert "repository:pr_64_commit_untrusted" in report["failures"]
+    assert report["repository"]["checks"]["required_layers_exact"] is False
+    assert report["repository"]["checks"]["required_layers_unique"] is False
+    assert report["repository"]["checks"]["required_layers_landed"] is False
 
 
 def test_tampered_actions_payload_fails_checksum_and_payload_identity(context: dict):
@@ -368,6 +422,31 @@ def test_receipts_must_be_independent_and_hardware_mode(context: dict):
 
 
 @pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dry_run", True),
+        ("simulated", True),
+        ("simulation", True),
+        ("source_inspection", True),
+        ("physical_observed", False),
+        ("dry_run", "false"),
+    ],
+)
+def test_hardware_receipts_reject_contradictory_or_noncanonical_physical_fields(
+    context: dict, field: str, value: object
+):
+    mutate_receipt(
+        context["receipts"]["board"], lambda row: row.__setitem__(field, value)
+    )
+
+    report = build(context)
+
+    assert report["ok"] is False
+    assert "receipt:board:invalid_or_stale" in report["failures"]
+    assert report["checks"]["receipt_physical_fields"] is False
+
+
+@pytest.mark.parametrize(
     ("d1l_port", "rp2040_port"),
     [("COM8", "COM16"), ("COM12", "COM11"), ("COM29", "COM16"), ("COM12", "COM12")],
 )
@@ -416,9 +495,14 @@ def test_generate_and_validate_cli_use_full_main_sha_filename(context: dict, cap
         / f"integration_baseline_{context['commit']}.json"
     )
     assert generated.is_file()
+    generated_bytes = generated.read_bytes()
+    assert generated_bytes.endswith(b"}\n")
+    assert b"\r\n" not in generated_bytes
     summary = json.loads(capsys.readouterr().out)
     assert summary["ok"] is True
-    assert summary["artifact"].endswith(f"integration_baseline_{context['commit']}.json")
+    assert summary["artifact"].endswith(
+        f"integration_baseline_{context['commit']}.json"
+    )
 
     assert (
         baseline.main(
