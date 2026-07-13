@@ -799,6 +799,35 @@ def test_storage_filecanary_is_serial_only_and_uses_atomic_sd_file_ops():
     assert "d1l_route_store_upsert_observation" in console
     assert "d1l_packet_log_append_raw" in console
     assert "storage retained-canary <token>" in console
+    retained_canary_body = console.split(
+        "static void cmd_storage_retained_canary", 1
+    )[1].split("static void cmd_storage_setup", 1)[0]
+    assert retained_canary_body.index(
+        "d1l_storage_manager_quiesce_begin"
+    ) < retained_canary_body.index(
+        "d1l_route_store_worker_quiesce_begin"
+    ) < retained_canary_body.index(
+        "d1l_storage_status_refresh"
+    ) < retained_canary_body.index(
+        "d1l_message_store_append_public"
+    ) < retained_canary_body.index(
+        "d1l_dm_store_append"
+    ) < retained_canary_body.index(
+        "d1l_route_store_upsert_observation"
+    ) < retained_canary_body.index(
+        "d1l_packet_log_append_raw"
+    )
+    assert retained_canary_body.count("d1l_route_store_worker_quiesce_end()") == 7
+    assert retained_canary_body.count("d1l_storage_manager_quiesce_end()") == 8
+    assert retained_canary_body.rindex(
+        "d1l_route_store_worker_quiesce_end()"
+    ) < retained_canary_body.rindex(
+        "d1l_storage_manager_quiesce_end()"
+    ) < retained_canary_body.index(
+        'ok_begin("storage retained-canary")'
+    )
+    assert '\\"storage_manager_quiesced\\":true' in retained_canary_body
+    assert '\\"retained_worker_quiesced\\":true' in retained_canary_body
     assert "cmd_storage_setup" in console
     assert "storage filecanary" in runner
     assert "mesh send public" not in runner

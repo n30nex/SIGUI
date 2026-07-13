@@ -46,19 +46,24 @@
 static const size_t D1L_CONSOLE_MESSAGE_PAGE_SIZE = 8U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_OP_TIMEOUT_MS = 30000U;
 static const uint32_t D1L_STORAGE_FILE_CANARY_MANAGER_PAUSE_MS = 60000U;
+static const uint32_t D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS = 15000U;
 static const uint32_t D1L_REBOOT_QUIESCE_TIMEOUT_MS = 15000U;
 
 static bool parse_next_u32_arg(const char **cursor, uint32_t *out_value);
 
-static uint32_t reboot_deadline_remaining_ms(int64_t started_us)
+static uint32_t deadline_remaining_ms(int64_t started_us, uint32_t timeout_ms)
 {
     const int64_t elapsed_us = esp_timer_get_time() - started_us;
-    const int64_t deadline_us =
-        (int64_t)D1L_REBOOT_QUIESCE_TIMEOUT_MS * 1000LL;
+    const int64_t deadline_us = (int64_t)timeout_ms * 1000LL;
     if (elapsed_us >= deadline_us) {
         return 0U;
     }
     return (uint32_t)((deadline_us - elapsed_us + 999LL) / 1000LL);
+}
+
+static uint32_t reboot_deadline_remaining_ms(int64_t started_us)
+{
+    return deadline_remaining_ms(started_us, D1L_REBOOT_QUIESCE_TIMEOUT_MS);
 }
 
 static void trim_line(char *line)
@@ -3213,10 +3218,48 @@ static void cmd_storage_retained_canary(const char *line)
         return;
     }
 
-    (void)d1l_storage_status_refresh(D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS);
+    const int64_t quiesce_started_us = esp_timer_get_time();
+    uint32_t remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    esp_err_t ret = remaining_ms > 0U ?
+        d1l_storage_manager_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "storage manager quiesce failed; retained canary cancelled");
+        return;
+    }
+
+    remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    ret = remaining_ms > 0U ?
+        d1l_route_store_worker_quiesce_begin(remaining_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_storage_manager_quiesce_end();
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "retained worker quiesce failed; retained canary cancelled");
+        return;
+    }
+
+    remaining_ms = deadline_remaining_ms(
+        quiesce_started_us, D1L_RETAINED_CANARY_QUIESCE_TIMEOUT_MS);
+    const uint32_t refresh_timeout_ms =
+        remaining_ms < D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS ?
+            remaining_ms : D1L_STORAGE_RP2040_SD_PROBE_TIMEOUT_MS;
+    ret = refresh_timeout_ms > 0U ?
+        d1l_storage_status_refresh(refresh_timeout_ms) : ESP_ERR_TIMEOUT;
+    if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
+        err_result("storage retained-canary", esp_err_to_name(ret),
+                   "fresh storage status failed; retained canary cancelled");
+        return;
+    }
+
     d1l_storage_status_t status = {0};
     d1l_storage_status(&status);
     if (!storage_retained_history_sd_ready(&status)) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "SD_RETAINED_HISTORY_NOT_READY",
                    "requires ready RP2040 file ops and sd backends for messages, dm, routes, and packets");
         return;
@@ -3228,9 +3271,11 @@ static void cmd_storage_retained_canary(const char *line)
     snprintf(text, sizeof(text), "sd-retained-canary %s", token);
 
     const uint32_t public_seq = d1l_message_store_stats().next_seq;
-    esp_err_t ret = d1l_message_store_append_public("tx", "SD Canary", text,
-                                                    0, 0, 1, 0, true);
+    ret = d1l_message_store_append_public("tx", "SD Canary", text,
+                                          0, 0, 1, 0, true);
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append public retained-history canary");
         return;
@@ -3241,6 +3286,8 @@ static void cmd_storage_retained_canary(const char *line)
                               0, 0, 1, 0, 0, true, true,
                               retained_canary_hash(token));
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append DM retained-history canary");
         return;
@@ -3251,6 +3298,8 @@ static void cmd_storage_retained_canary(const char *line)
                                              "sd_canary", "local", "tx",
                                              0, 0, 1, 0, (uint16_t)strlen(text));
     if (ret != ESP_OK) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", esp_err_to_name(ret),
                    "could not append route retained-history canary");
         return;
@@ -3270,11 +3319,15 @@ static void cmd_storage_retained_canary(const char *line)
     };
     strncpy(packet.note, packet_note, sizeof(packet.note) - 1U);
     if (!d1l_packet_log_append_raw(&packet, (const uint8_t *)text, strlen(text))) {
+        d1l_route_store_worker_quiesce_end();
+        d1l_storage_manager_quiesce_end();
         err_result("storage retained-canary", "ESP_FAIL",
                    "could not append packet retained-history canary");
         return;
     }
 
+    d1l_route_store_worker_quiesce_end();
+    d1l_storage_manager_quiesce_end();
     ok_begin("storage retained-canary");
     printf(",\"token\":");
     print_json_string(token);
@@ -3284,7 +3337,7 @@ static void cmd_storage_retained_canary(const char *line)
            (unsigned long)dm_seq,
            (unsigned long)route_seq,
            (unsigned long)packet_seq);
-    printf(",\"public_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
+    printf(",\"storage_manager_quiesced\":true,\"retained_worker_quiesced\":true,\"public_rf_tx\":false,\"formats_sd\":false,\"backends\":{\"messages\":\"%s\",\"dm\":\"%s\",\"routes\":\"%s\",\"packets\":\"%s\"}",
            status.message_store_backend,
            status.dm_store_backend,
            status.route_store_backend,

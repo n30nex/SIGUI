@@ -48,6 +48,13 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9_.-]{1,31}$")
 FILE_CANARY_MIN_TIMEOUT_SECONDS = 120.0
 RETAINED_CANARY_MIN_TIMEOUT_SECONDS = 180.0
 EXPECTED_REBOOT_BOOT_HELP_FIELD = "expected_boot_help_after_reboot"
+RETAINED_STORE_NAMES = ("messages", "dm", "routes", "packets")
+RETAINED_STORE_COUNTER_FIELDS = (
+    "sd_read_fail_count",
+    "sd_write_fail_count",
+    "sd_rename_fail_count",
+    "nvs_mirror_fail_count",
+)
 
 
 def retained_canary_hash(token: str) -> int:
@@ -137,6 +144,8 @@ def retained_canary_metadata(result: dict | None, token: str, fingerprint: str) 
         or result.get("cmd") != "storage retained-canary"
         or result.get("token") != token
         or result.get("fingerprint") != fingerprint
+        or result.get("storage_manager_quiesced") is not True
+        or result.get("retained_worker_quiesced") is not True
         or result.get("public_rf_tx") is not False
         or result.get("formats_sd") is not False
         or not isinstance(backends, dict)
@@ -297,6 +306,62 @@ def retained_storage_ready(result: dict | None) -> bool:
     )
 
 
+def retained_storage_clean(result: dict | None) -> bool:
+    if not retained_storage_ready(result):
+        return False
+    retained = result.get("retained_sd") if isinstance(result, dict) else None
+    stores = retained.get("stores") if isinstance(retained, dict) else None
+    if not isinstance(stores, dict):
+        return False
+    for store_name in RETAINED_STORE_NAMES:
+        store = stores.get(store_name)
+        if not isinstance(store, dict):
+            return False
+        for field in RETAINED_STORE_COUNTER_FIELDS:
+            if type(store.get(field)) is not int or store.get(field) != 0:
+                return False
+        if store.get("sd_last_error") != "ESP_OK":
+            return False
+        if store.get("nvs_mirror_last_error") != "ESP_OK":
+            return False
+        if store.get("sd_degraded_latched") is not False:
+            return False
+    return True
+
+
+def semantic_reboot_skip_reason(
+    *,
+    include_reboot: bool,
+    timeout_command: str | None,
+    unexpected_restart: bool,
+    pre_sequence_complete: bool,
+    filecanary_ok: bool,
+    canary_ok: bool,
+    pre_readbacks_ok: bool,
+    retained_storage_clean_after_canary: bool,
+    pre_health_ok: bool,
+) -> str | None:
+    if not include_reboot:
+        return "reboot_disabled"
+    if timeout_command is not None:
+        return "pre_reboot_command_timeout"
+    if unexpected_restart:
+        return "unexpected_restart_before_reboot"
+    if not pre_sequence_complete:
+        return "pre_reboot_sequence_incomplete"
+    if not filecanary_ok:
+        return "filecanary_failed"
+    if not canary_ok:
+        return "retained_canary_failed"
+    if not pre_readbacks_ok:
+        return "pre_reboot_readbacks_failed"
+    if not retained_storage_clean_after_canary:
+        return "post_canary_retained_storage_not_clean"
+    if not pre_health_ok:
+        return "pre_reboot_health_failed"
+    return None
+
+
 def wait_for_retained_storage_ready(
     ser,
     timeout: float,
@@ -378,6 +443,44 @@ def run_commands(ser, commands: list[str], timeout: float) -> list[dict]:
         elif unexpected_console_restart([result]):
             restarted_during_command = command
     return results
+
+
+def run_pre_canary_sequence(
+    ser,
+    *,
+    token: str,
+    timeout: float,
+    include_health: bool,
+) -> tuple[list[str], list[dict]]:
+    commands: list[str] = []
+    results: list[dict] = []
+
+    file_command = "storage filecanary"
+    file_result = run_command(ser, file_command, timeout)
+    commands.append(file_command)
+    results.append(file_result)
+    if file_result.get("code") == "TIMEOUT" or unexpected_console_restart(
+        [file_result]
+    ):
+        return commands, results
+
+    if file_result.get("ok") is True:
+        retained_command = f"storage retained-canary {token}"
+        retained_result = run_command(ser, retained_command, timeout)
+        commands.append(retained_command)
+        results.append(retained_result)
+        if retained_result.get("code") == "TIMEOUT" or unexpected_console_restart(
+            [retained_result]
+        ):
+            return commands, results
+
+    diagnostic_commands = [*retained_readback_commands(token), "storage status"]
+    if include_health:
+        diagnostic_commands.append("health")
+    diagnostic_results = run_commands(ser, diagnostic_commands, timeout)
+    commands.extend(diagnostic_commands)
+    results.extend(diagnostic_results)
+    return commands, results
 
 
 def sequence_completed(results: list[dict]) -> bool:
@@ -543,19 +646,59 @@ def run_acceptance(
                 ready_wait_results[-1].get("cmd", "storage preflight"),
             )
         else:
-            retained_run_results = run_commands(ser, retained_commands, timeout)
+            retained_run_commands, retained_run_results = run_pre_canary_sequence(
+                ser,
+                token=token,
+                timeout=timeout,
+                include_health=include_reboot,
+            )
         results.extend(retained_run_results)
 
-    retained_start = len(ready_wait_results)
-    filecanary_result = results[retained_start]
-    retained_result = results[retained_start + 1]
-    pre_commands = [row.get("cmd", "") for row in ready_wait_results] + retained_commands
+    if preflight_timeout is not None or preflight_restart:
+        retained_run_commands = retained_commands
+    pre_commands = [
+        row.get("cmd", "") for row in ready_wait_results
+    ] + retained_run_commands
     pre_sequence_results = [*ready_wait_results, *retained_run_results]
     pre_sequence_complete = sequence_completed(pre_sequence_results)
     unexpected_restart_before_reboot = unexpected_console_restart(
         pre_sequence_results
     )
-    if allow_unavailable and allowed_unavailable(retained_result):
+    pre_by_command = {
+        cmd: result
+        for cmd, result in zip(pre_commands, pre_sequence_results)
+    }
+    filecanary_result = pre_by_command.get("storage filecanary", {})
+    retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
+    canary_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
+    filecanary_ok = filecanary_result.get("ok") is True
+    pre_readbacks_ok = readbacks_pass(
+        pre_by_command, token, fingerprint, retained_result
+    )
+    storage_after_canary = pre_by_command.get("storage status", {})
+    retained_storage_clean_after_canary = retained_storage_clean(
+        storage_after_canary
+    )
+    pre_health = pre_by_command.get("health", {})
+    pre_health_ok = pre_health.get("ok") is True if include_reboot else None
+    pre_reboot_timeout = timed_out_command(pre_sequence_results)
+    reboot_skipped_reason = semantic_reboot_skip_reason(
+        include_reboot=include_reboot,
+        timeout_command=pre_reboot_timeout,
+        unexpected_restart=unexpected_restart_before_reboot,
+        pre_sequence_complete=pre_sequence_complete,
+        filecanary_ok=filecanary_ok,
+        canary_ok=canary_ok,
+        pre_readbacks_ok=pre_readbacks_ok,
+        retained_storage_clean_after_canary=retained_storage_clean_after_canary,
+        pre_health_ok=pre_health_ok is True,
+    )
+    pre_reboot_gate_passed = (
+        reboot_skipped_reason is None if include_reboot else None
+    )
+    retained_unavailable = allowed_unavailable(retained_result)
+    file_unavailable = filecanary_unavailable(filecanary_result)
+    if allow_unavailable and (retained_unavailable or file_unavailable):
         public_rf_tx, formats_sd = result_safety_flags(results)
         report = {
             "schema": 1,
@@ -572,12 +715,39 @@ def run_acceptance(
             "post_sequence_complete": None,
             "timed_out_command": timed_out_command(results),
             "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
-            "retained_canary_unavailable_ok": True,
-            "filecanary_unavailable_ok": filecanary_unavailable(filecanary_result),
+            "pre_mutating_commands_attempted": [
+                command
+                for command in retained_run_commands
+                if command == "storage filecanary"
+                or command.startswith("storage retained-canary ")
+            ],
+            "pre_reboot_gate_passed": False if include_reboot else None,
+            "reboot_attempted": False,
+            "reboot_skipped_reason": (
+                (
+                    "retained_canary_unavailable"
+                    if retained_unavailable
+                    else "filecanary_unavailable"
+                )
+                if include_reboot
+                else "reboot_disabled"
+            ),
+            "reboot_command_passed": False if include_reboot else None,
+            "retained_canary_unavailable_ok": (
+                True if retained_unavailable else None
+            ),
+            "retained_canary_attempted": (
+                f"storage retained-canary {token}" in retained_run_commands
+            ),
+            "retained_canary_skipped_reason": (
+                "filecanary_failed" if not retained_unavailable else None
+            ),
+            "filecanary_unavailable_ok": file_unavailable,
             "storage_file_gate_ready_before": storage_file_gate_ready(storage_before),
             "storage_file_gate_ready_after": False,
             "retained_history_sd_ready_before": retained_storage_ready(storage_before),
             "retained_history_sd_ready_after_canary": False,
+            "retained_history_sd_clean_after_canary": False,
             "retained_history_sd_ready_after": False,
             "storage_before": semantic_storage_copy(storage_before),
             "storage_after_canary": {},
@@ -600,11 +770,13 @@ def run_acceptance(
 
     reboot_result: dict | None = None
     reboot_ok = not include_reboot
+    reboot_attempted = False
     post_commands_ran = False
     post_results: list[dict] = []
     post_ready_wait_results: list[dict] = []
     post_readback_results: list[dict] = []
-    if include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
+    if include_reboot and pre_reboot_gate_passed:
+        reboot_attempted = True
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             reboot_result = run_command(ser, "reboot", timeout)
             results.append(reboot_result)
@@ -656,17 +828,11 @@ def run_acceptance(
         commands = pre_commands
 
     by_command = {row.get("cmd", ""): row for row in results}
-    pre_by_command = {cmd: result for cmd, result in zip(pre_commands, results[: len(pre_commands)])}
     post_by_command = {}
     if post_commands_ran:
         if post_ready_wait_results:
             post_by_command["storage status"] = post_ready_wait_results[-1]
         post_by_command.update(dict(zip(post_commands[1:], post_readback_results)))
-    canary_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
-    filecanary_ok = filecanary_result.get("ok") is True
-    pre_readbacks_ok = readbacks_pass(pre_by_command, token, fingerprint, retained_result)
-    storage_after_canary = pre_by_command.get("storage status", {})
-    pre_health = pre_by_command.get("health", {})
     post_health = post_by_command.get("health", {})
     reboot_nonce_proven = (
         boot_transition_proven(pre_health, post_health) if include_reboot else True
@@ -720,12 +886,27 @@ def run_acceptance(
         "post_sequence_complete": post_sequence_complete,
         "timed_out_command": timeout_command,
         "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
+        "pre_mutating_commands_attempted": [
+            command
+            for command in retained_run_commands
+            if command == "storage filecanary"
+            or command.startswith("storage retained-canary ")
+        ],
+        "pre_reboot_gate_passed": pre_reboot_gate_passed,
+        "pre_reboot_health_ok": pre_health_ok,
+        "reboot_attempted": reboot_attempted,
+        "reboot_skipped_reason": (
+            None if reboot_attempted else reboot_skipped_reason
+        ),
         "retained_canary_passed": canary_ok,
         "filecanary_passed": filecanary_ok,
         "storage_file_gate_ready_before": storage_file_gate_ready_before,
         "storage_file_gate_ready_after": storage_file_gate_ready_after,
         "retained_history_sd_ready_before": retained_history_sd_ready_before,
         "retained_history_sd_ready_after_canary": retained_history_sd_ready_after_canary,
+        "retained_history_sd_clean_after_canary": (
+            retained_storage_clean_after_canary
+        ),
         "retained_history_sd_ready_after": retained_history_sd_ready_after,
         "storage_ready_waited": len(ready_wait_results) > 1,
         "storage_ready_poll_count": sum(

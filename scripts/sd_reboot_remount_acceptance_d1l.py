@@ -31,6 +31,7 @@ try:
         semantic_storage_copy,
         retained_canary_hash,
         retained_canary_metadata,
+        retained_storage_clean,
         retained_storage_ready,
         retained_readback_commands,
     )
@@ -54,6 +55,7 @@ except ImportError:  # pragma: no cover - package import path used by pytest
         semantic_storage_copy,
         retained_canary_hash,
         retained_canary_metadata,
+        retained_storage_clean,
         retained_storage_ready,
         retained_readback_commands,
     )
@@ -76,6 +78,7 @@ def command_plan(token: str, *, include_reboot: bool = True) -> list[str]:
         f"storage retained-canary {token}",
         f"storage map-tile-canary {token}",
         *retained_readback_commands(token),
+        "storage status",
     ]
     if include_reboot:
         commands.extend(
@@ -174,6 +177,45 @@ def canary_passed(result: dict | None) -> bool:
     return isinstance(result, dict) and result.get("ok") is True
 
 
+def semantic_reboot_skip_reason(
+    *,
+    include_reboot: bool,
+    timeout_command: str | None,
+    unexpected_restart: bool,
+    pre_mount_complete: bool,
+    pre_sequence_complete: bool,
+    filecanary_ok: bool,
+    retained_canary_ok: bool,
+    map_tile_canary_ok: bool,
+    pre_readbacks_ok: bool,
+    retained_storage_clean_after_canary: bool,
+    pre_health_ok: bool,
+) -> str | None:
+    if not include_reboot:
+        return "reboot_disabled"
+    if timeout_command is not None:
+        return "pre_reboot_command_timeout"
+    if unexpected_restart:
+        return "unexpected_restart_before_reboot"
+    if not pre_mount_complete:
+        return "pre_remount_failed"
+    if not pre_sequence_complete:
+        return "pre_reboot_sequence_incomplete"
+    if not filecanary_ok:
+        return "filecanary_failed"
+    if not retained_canary_ok:
+        return "retained_canary_failed"
+    if not map_tile_canary_ok:
+        return "map_tile_canary_failed"
+    if not pre_readbacks_ok:
+        return "pre_reboot_readbacks_failed"
+    if not retained_storage_clean_after_canary:
+        return "post_canary_retained_storage_not_clean"
+    if not pre_health_ok:
+        return "pre_reboot_health_failed"
+    return None
+
+
 def map_tile_write_passed(result: dict | None, token: str) -> bool:
     if not isinstance(result, dict):
         return False
@@ -267,6 +309,55 @@ def run_commands_until_terminal(
     return commands, results
 
 
+def run_pre_data_sequence(
+    ser,
+    *,
+    token: str,
+    fingerprint: str,
+    timeout: float,
+    include_health: bool,
+) -> tuple[list[str], list[dict]]:
+    commands: list[str] = []
+    results: list[dict] = []
+    mutating_stages = (
+        ("storage filecanary", canary_passed),
+        (
+            f"storage retained-canary {token}",
+            lambda result: retained_canary_metadata(
+                result, token, fingerprint
+            ) is not None,
+        ),
+        (
+            f"storage map-tile-canary {token}",
+            lambda result: map_tile_write_passed(result, token),
+        ),
+    )
+
+    for command, stage_passed in mutating_stages:
+        stage_commands, stage_results = run_commands_until_terminal(
+            ser, [command], timeout
+        )
+        commands.extend(stage_commands)
+        results.extend(stage_results)
+        if not stage_results:
+            return commands, results
+        result = stage_results[-1]
+        if host_timed_out(result) or unexpected_console_restart([result]):
+            return commands, results
+        if not stage_passed(result):
+            break
+
+    diagnostic_plan = [*retained_readback_commands(token), "storage status"]
+    if include_health:
+        diagnostic_plan.append("health")
+    diagnostic_commands, diagnostic_results = run_commands_until_terminal(
+        ser, diagnostic_plan, timeout
+    )
+    commands.extend(diagnostic_commands)
+    results.extend(diagnostic_results)
+    return commands, results
+
+
 def run_mount_sequence(
     ser,
     *,
@@ -348,15 +439,6 @@ def run_acceptance(
     fingerprint = fingerprint_for_token(token)
     results: list[dict] = []
     commands: list[str] = []
-    pre_data_plan = [
-        "storage filecanary",
-        f"storage retained-canary {token}",
-        f"storage map-tile-canary {token}",
-        *retained_readback_commands(token),
-    ]
-    if include_reboot:
-        pre_data_plan.append("health")
-
     pre_data_commands: list[str] = []
     pre_data_results: list[dict] = []
     with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
@@ -399,14 +481,22 @@ def run_acceptance(
             and storage_ready(pre_storage)
         )
         if pre_mount_complete:
-            pre_data_commands, pre_data_results = run_commands_until_terminal(
-                ser, pre_data_plan, timeout
+            pre_data_commands, pre_data_results = run_pre_data_sequence(
+                ser,
+                token=token,
+                fingerprint=fingerprint,
+                timeout=timeout,
+                include_health=include_reboot,
             )
             commands.extend(pre_data_commands)
             results.extend(pre_data_results)
 
-    pre_sequence_complete = pre_mount_complete and sequence_completed(
-        pre_data_commands, pre_data_results, pre_data_plan
+    pre_sequence_complete = (
+        pre_mount_complete
+        and bool(pre_data_commands)
+        and sequence_completed(
+            pre_data_commands, pre_data_results, pre_data_commands
+        )
     )
     pre_results = [*pre_mount_results, *pre_data_results]
     unexpected_restart_before_reboot = unexpected_console_restart(pre_results)
@@ -428,8 +518,51 @@ def run_acceptance(
     post_sequence_complete = False
     reboot_result: dict | None = None
     reboot_ok = not include_reboot
+    reboot_attempted = False
 
-    if include_reboot and pre_sequence_complete and not unexpected_restart_before_reboot:
+    pre_readbacks_ok = readbacks_pass(
+        pre_by_command, token, fingerprint, retained_result
+    )
+    pre_health = pre_by_command.get("health", {})
+    pre_health_ok = pre_health.get("ok") is True if include_reboot else None
+    filecanary_ok = canary_passed(filecanary_result)
+    retained_ok = retained_canary_metadata(
+        retained_result, token, fingerprint
+    ) is not None
+    pre_map_tile_ok = map_tile_write_passed(pre_map_tile, token)
+    storage_after_canary = pre_by_command.get("storage status", {})
+    retained_storage_clean_after_canary = retained_storage_clean(
+        storage_after_canary
+    )
+    pre_timeout_command = next(
+        (
+            result.get("cmd", "unknown")
+            for result in pre_results
+            if host_timed_out(result)
+        ),
+        None,
+    )
+    reboot_skipped_reason = semantic_reboot_skip_reason(
+        include_reboot=include_reboot,
+        timeout_command=pre_timeout_command,
+        unexpected_restart=unexpected_restart_before_reboot,
+        pre_mount_complete=pre_mount_complete,
+        pre_sequence_complete=pre_sequence_complete,
+        filecanary_ok=filecanary_ok,
+        retained_canary_ok=retained_ok,
+        map_tile_canary_ok=pre_map_tile_ok,
+        pre_readbacks_ok=pre_readbacks_ok,
+        retained_storage_clean_after_canary=(
+            retained_storage_clean_after_canary
+        ),
+        pre_health_ok=pre_health_ok is True,
+    )
+    pre_reboot_gate_passed = (
+        reboot_skipped_reason is None if include_reboot else None
+    )
+
+    if include_reboot and pre_reboot_gate_passed:
+        reboot_attempted = True
         with open_d1l_serial(serial, port=port, baudrate=baud, timeout=timeout) as ser:
             commands.append("reboot")
             reboot_result = run_command(ser, "reboot", timeout)
@@ -516,10 +649,6 @@ def run_acceptance(
     formats_sd = any_flag(results, "formats_sd") or any(
         result.get("format_performed") is True for result in results
     )
-    pre_readbacks_ok = readbacks_pass(
-        pre_by_command, token, fingerprint, retained_result
-    )
-    pre_health = pre_by_command.get("health", {})
     reboot_nonce_proven = (
         boot_transition_proven(pre_health, health) if include_reboot else True
     )
@@ -537,15 +666,12 @@ def run_acceptance(
         if include_reboot
         else storage_ready(post_storage)
     )
-    filecanary_ok = canary_passed(filecanary_result)
-    retained_ok = retained_canary_metadata(retained_result, token, fingerprint) is not None
     pre_retained_sd_ready = retained_storage_ready(pre_storage)
     post_retained_sd_ready = (
         reboot_proof_ok and retained_storage_ready(post_storage)
         if include_reboot
         else retained_storage_ready(post_storage)
     )
-    pre_map_tile_ok = map_tile_write_passed(pre_map_tile, token)
     post_map_tile_ok = (
         reboot_proof_ok and map_tile_check_passed(post_map_tile, token)
         if include_reboot
@@ -575,6 +701,19 @@ def run_acceptance(
         "post_sequence_complete": post_sequence_complete,
         "timed_out_command": timed_out_command,
         "unexpected_restart_before_reboot": unexpected_restart_before_reboot,
+        "pre_mutating_commands_attempted": [
+            command
+            for command in pre_data_commands
+            if command == "storage filecanary"
+            or command.startswith("storage retained-canary ")
+            or command.startswith("storage map-tile-canary ")
+        ],
+        "pre_reboot_gate_passed": pre_reboot_gate_passed,
+        "pre_reboot_health_ok": pre_health_ok,
+        "reboot_attempted": reboot_attempted,
+        "reboot_skipped_reason": (
+            None if reboot_attempted else reboot_skipped_reason
+        ),
         "pre_remount_ready": pre_ready,
         "post_remount_ready": post_ready,
         "pre_remount_manager_busy": pre_remount_busy,
@@ -585,6 +724,9 @@ def run_acceptance(
         "post_remount_command_passed": post_remount_command_passed,
         "retained_history_sd_ready_before": pre_retained_sd_ready,
         "retained_history_sd_ready_after": post_retained_sd_ready,
+        "retained_history_sd_clean_after_canary": (
+            retained_storage_clean_after_canary
+        ),
         "reboot_command_passed": reboot_ok if include_reboot else None,
         "reboot_route_flush": (
             reboot_result.get("route_flush")
@@ -619,6 +761,7 @@ def run_acceptance(
         "post_map_tile_canary_passed": post_map_tile_ok,
         "health_ok": health_ok,
         "storage_before_reboot": semantic_storage_copy(pre_storage),
+        "storage_after_canary": semantic_storage_copy(storage_after_canary),
         "storage_after_reboot": semantic_storage_copy(post_storage),
         "health": health,
         "results": results,

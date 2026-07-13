@@ -51,10 +51,18 @@ def ready_storage_line(manager_state: str = "READY_SD") -> str:
         '"initialized_this_boot":false,"ready":true,'
         '"init_error":"ESP_OK","migrated_keys":4,"migration_error":"ESP_OK"},'
         '"retained_sd":{"degraded":false,"backup_degraded":false,'
-        '"stores":{"messages":{"nvs_mirror_last_error":"ESP_OK"},'
-        '"dm":{"nvs_mirror_last_error":"ESP_OK"},'
-        '"routes":{"nvs_mirror_last_error":"ESP_OK"},'
-        '"packets":{"nvs_mirror_last_error":"ESP_OK"}}}}\n'
+        '"stores":{"messages":{"sd_read_fail_count":0,"sd_write_fail_count":0,'
+        '"sd_rename_fail_count":0,"nvs_mirror_fail_count":0,"sd_last_error":"ESP_OK",'
+        '"nvs_mirror_last_error":"ESP_OK","sd_degraded_latched":false},'
+        '"dm":{"sd_read_fail_count":0,"sd_write_fail_count":0,'
+        '"sd_rename_fail_count":0,"nvs_mirror_fail_count":0,"sd_last_error":"ESP_OK",'
+        '"nvs_mirror_last_error":"ESP_OK","sd_degraded_latched":false},'
+        '"routes":{"sd_read_fail_count":0,"sd_write_fail_count":0,'
+        '"sd_rename_fail_count":0,"nvs_mirror_fail_count":0,"sd_last_error":"ESP_OK",'
+        '"nvs_mirror_last_error":"ESP_OK","sd_degraded_latched":false},'
+        '"packets":{"sd_read_fail_count":0,"sd_write_fail_count":0,'
+        '"sd_rename_fail_count":0,"nvs_mirror_fail_count":0,"sd_last_error":"ESP_OK",'
+        '"nvs_mirror_last_error":"ESP_OK","sd_degraded_latched":false}}}}\n'
     )
 
 
@@ -101,6 +109,8 @@ def retained_canary_line(token: str) -> str:
             "cmd": "storage retained-canary",
             "token": token,
             "fingerprint": fp,
+            "storage_manager_quiesced": True,
+            "retained_worker_quiesced": True,
             **{f"{name}_seq": value for name, value in CANARY_SEQUENCES.items()},
             "backends": {name: "sd" for name in ("messages", "dm", "routes", "packets")},
             "public_rf_tx": False,
@@ -330,6 +340,7 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
@@ -360,6 +371,11 @@ def test_reboot_remount_requires_retained_readbacks_and_read_only_map_check(monk
     )
 
     assert report["ok"] is True
+    assert report["pre_reboot_gate_passed"] is True
+    assert report["pre_reboot_health_ok"] is True
+    assert report["reboot_attempted"] is True
+    assert report["reboot_skipped_reason"] is None
+    assert report["retained_history_sd_clean_after_canary"] is True
     assert report["reboot_command_passed"] is True
     assert report["reboot_route_flush"] == "ESP_OK"
     assert report["reboot_retained_worker_quiesced"] is True
@@ -409,6 +425,7 @@ def test_reboot_remount_rejects_watchdog_after_commanded_reboot(monkeypatch):
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = [
@@ -422,10 +439,10 @@ def test_reboot_remount_rejects_watchdog_after_commanded_reboot(monkeypatch):
         map_tile_check_line(token),
         health_line(2, "WDT"),
     ]
-    install_fake_serial(
-        monkeypatch,
-        [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)],
-    )
+    pre_serial = FakeSerial(pre)
+    reboot_serial = FakeSerial(reboot)
+    post_serial = FakeSerial(post)
+    install_fake_serial(monkeypatch, [pre_serial, reboot_serial, post_serial])
     monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
     report = remount_accept.run_acceptance(
         "COM12",
@@ -454,9 +471,8 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
             '{"schema":1,"ok":false,"cmd":"storage filecanary",'
             '"code":"ESP_FAIL","public_rf_tx":false,"formats_sd":false}\n'
         ),
-        retained_canary_line(token),
-        map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = [
@@ -471,10 +487,10 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
         map_tile_check_line(token),
         health_line(2),
     ]
-    install_fake_serial(
-        monkeypatch,
-        [FakeSerial(pre), FakeSerial(reboot), FakeSerial(post)],
-    )
+    pre_serial = FakeSerial(pre)
+    reboot_serial = FakeSerial(reboot)
+    post_serial = FakeSerial(post)
+    install_fake_serial(monkeypatch, [pre_serial, reboot_serial, post_serial])
     monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
 
     report = remount_accept.run_acceptance(
@@ -489,10 +505,82 @@ def test_failed_filecanary_cannot_pass_reboot_remount_acceptance(monkeypatch):
     )
 
     assert report["filecanary_passed"] is False
-    assert report["retained_canary_passed"] is True
-    assert report["pre_reboot_readbacks_ok"] is True
-    assert report["post_reboot_readbacks_ok"] is True
+    assert report["retained_canary_passed"] is False
+    assert report["pre_reboot_readbacks_ok"] is False
+    assert report["post_reboot_readbacks_ok"] is False
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "filecanary_failed"
+    assert report["pre_mutating_commands_attempted"] == ["storage filecanary"]
+    assert f"storage retained-canary {token}\n" not in pre_serial.writes
+    assert f"storage map-tile-canary {token}\n" not in pre_serial.writes
+    assert reboot_serial.writes == []
+    assert post_serial.writes == []
+    assert "reboot" not in report["commands"]
     assert report["ok"] is False
+
+
+def test_failed_retained_canary_keeps_read_diagnostics_and_skips_reboot(
+    monkeypatch,
+):
+    token = "remount1"
+    pre = [
+        ready_storage_line(),
+        mount_line(),
+        ready_storage_line(),
+        filecanary_line(),
+        (
+            '{"schema":1,"ok":false,"cmd":"storage retained-canary",'
+            '"code":"ESP_FAIL","hint":"could not append packet retained-history canary"}\n'
+        ),
+        *readback_lines(token),
+        ready_storage_line(),
+        health_line(1),
+    ]
+    pre_serial = FakeSerial(pre)
+    reboot_serial = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+            '"storage_manager_quiesced":true,"retained_worker_quiesced":true,'
+            '"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK",'
+            '"route_flush":"ESP_OK"}\n'
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre_serial, reboot_serial])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["pre_sequence_complete"] is True
+    assert report["filecanary_passed"] is True
+    assert report["retained_canary_passed"] is False
+    assert report["pre_reboot_readbacks_ok"] is False
+    assert report["retained_history_sd_clean_after_canary"] is True
+    assert report["pre_reboot_health_ok"] is True
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "retained_canary_failed"
+    assert report["pre_mutating_commands_attempted"] == [
+        "storage filecanary",
+        f"storage retained-canary {token}",
+    ]
+    assert f"storage map-tile-canary {token}\n" not in pre_serial.writes
+    assert reboot_serial.writes == []
+    assert "reboot" not in report["commands"]
+    assert pre_serial.writes[-6:] == [
+        *[f"{command}\n" for command in remount_accept.retained_readback_commands(token)],
+        "storage status\n",
+        "health\n",
+    ]
 
 
 def test_reboot_flush_failure_cannot_pass_remount_acceptance(monkeypatch):
@@ -505,6 +593,7 @@ def test_reboot_flush_failure_cannot_pass_remount_acceptance(monkeypatch):
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = [
@@ -559,6 +648,7 @@ def test_successful_reboot_requires_changed_valid_nonce(monkeypatch, post_nonce)
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
@@ -605,6 +695,7 @@ def test_reboot_remount_polls_transient_bridge_wait_until_ready(monkeypatch):
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = ['{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,"storage_manager_quiesced":true,"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,"retained_flush":"ESP_OK","route_flush":"ESP_OK"}\n']
@@ -831,6 +922,7 @@ def test_post_reboot_mount_timeout_stops_before_readbacks(monkeypatch):
         retained_canary_line(token),
         map_tile_canary_line(token),
         *readback_lines(token),
+        ready_storage_line(),
         health_line(1),
     ]
     reboot = [
