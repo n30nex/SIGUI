@@ -301,13 +301,16 @@ def _message_persistence_clean(result: dict | None, cmd: str, sd_required: bool)
     persistence = result.get("persistence")
     sd = persistence.get("sd") if isinstance(persistence, dict) else None
     nvs = persistence.get("nvs") if isinstance(persistence, dict) else None
+    deferred_sd_sync = not sd_required
     return (
         result.get("ok") is True and result.get("cmd") == cmd
         and result.get("persisted") is True and isinstance(persistence, dict)
         and persistence.get("loaded") is True and persistence.get("dirty") is False
         and _zero(persistence.get("failures")) and isinstance(sd, dict)
-        and sd.get("required") is sd_required and sd.get("dirty") is False
-        and sd.get("reconcile_pending") is False and _zero(sd.get("failures"))
+        and sd.get("required") is sd_required
+        and sd.get("dirty") is deferred_sd_sync
+        and sd.get("reconcile_pending") is deferred_sd_sync
+        and _zero(sd.get("failures"))
         and sd.get("last_error") == "ESP_OK" and isinstance(nvs, dict)
         and nvs.get("dirty") is False and _zero(nvs.get("failures"))
         and nvs.get("last_error") == "ESP_OK"
@@ -334,6 +337,7 @@ def persistence_generations(results: dict[str, dict]) -> dict[str, int] | None:
 
 def persistence_snapshot_clean(results: dict[str, dict], token: str, mode: str) -> bool:
     sd_required = mode == "sd"
+    deferred_sd_sync = mode == "nvs_no_card"
     fingerprint = fingerprint_for_token(token)
     route = results.get("routes")
     route_persistence = route.get("persistence") if isinstance(route, dict) else None
@@ -347,7 +351,8 @@ def persistence_snapshot_clean(results: dict[str, dict], token: str, mode: str) 
         and _zero(route_persistence.get("clear_fail_count"))
         and route_persistence.get("clear_last_error") == "ESP_OK"
         and isinstance(route_sd, dict) and route_sd.get("required") is sd_required
-        and route_sd.get("dirty") is False and route_sd.get("reconcile_pending") is False
+        and route_sd.get("dirty") is deferred_sd_sync
+        and route_sd.get("reconcile_pending") is deferred_sd_sync
         and _zero(route_sd.get("fail_count")) and route_sd.get("last_error") == "ESP_OK"
         and isinstance(route_nvs, dict) and route_nvs.get("dirty") is False
         and _zero(route_nvs.get("fail_count")) and route_nvs.get("last_error") == "ESP_OK"
