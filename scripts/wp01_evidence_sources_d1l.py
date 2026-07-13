@@ -641,14 +641,23 @@ def _derive_reboot_cycle(
         and source.get("post_firmware_identity_ok") is True
         and source.get("firmware_identity_ok") is True
         and source.get("persistence_clean_required") is True
+        and source.get("pre_reboot_persistence_checked") is True
+        and source.get("pre_reboot_persistence_clean") is True
+        and source.get("pre_reboot_pending_dirty") is False
+        and type(source.get("pre_reboot_persistence_poll_attempts_used")) is int
+        and source.get("pre_reboot_persistence_poll_attempts_used") >= 1
+        and source.get("post_reboot_persistence_checked") is True
         and source.get("post_reboot_persistence_clean") is True
         and source.get("post_reboot_pending_dirty") is False
+        and type(source.get("persistence_poll_attempts_used")) is int
+        and source.get("persistence_poll_attempts_used") >= 1
         and source.get("crashlog_transition_required") is True
         and source.get("crashlog_transition_ok") is True
         and source.get("timed_out_command") is None
         and source.get("unexpected_restart_before_reboot") is False
         and source.get("pre_reboot_gate_passed") is True
         and source.get("reboot_attempted") is True
+        and source.get("reboot_skipped_reason") is None
         and source.get("reboot_reset_scope") == "system"
         and source.get("reboot_connectivity_prepare") == "ESP_OK"
         and source.get("public_rf_tx") is False
@@ -681,6 +690,7 @@ def _derive_reboot_cycle(
         raise ValueError("reboot source crashlog totals are missing")
 
     pre_commands = [command for command, _result in pre]
+    persistence_plan = persistence_readback_commands(token)
     mutating_plan = [
         "storage filecanary",
         f"storage retained-canary {token}",
@@ -690,20 +700,41 @@ def _derive_reboot_cycle(
         mutation_indices = [pre_commands.index(command) for command in mutating_plan]
     except ValueError as exc:
         raise ValueError("reboot source pre-reboot mutation cohort is incomplete") from exc
+    health_indices = [
+        index for index, command in enumerate(pre_commands) if command == "health"
+    ]
+    pre_persistence_tail = (
+        pre_commands[health_indices[0] + 1 :] if len(health_indices) == 1 else []
+    )
     if not (
         all(pre_commands.count(command) == 1 for command in mutating_plan)
         and mutation_indices == list(
             range(mutation_indices[0], mutation_indices[0] + len(mutating_plan))
         )
         and "storage remount" in pre_commands[: mutation_indices[0]]
-        and pre_commands[-1] == "health"
+        and len(health_indices) == 1
+        and len(pre_persistence_tail) >= len(persistence_plan)
+        and len(pre_persistence_tail) % len(persistence_plan) == 0
+        and all(
+            pre_persistence_tail[index : index + len(persistence_plan)]
+            == persistence_plan
+            for index in range(0, len(pre_persistence_tail), len(persistence_plan))
+        )
     ):
         raise ValueError("reboot source pre-reboot command order is invalid")
+    pre_poll_cohorts = len(pre_persistence_tail) // len(persistence_plan)
+    if source.get("pre_reboot_persistence_poll_attempts_used") != pre_poll_cohorts:
+        raise ValueError("reboot source pre-reboot persistence attempt count is inconsistent")
     filecanary = pre[mutation_indices[0]][1]
     if not sd_filecanary_passed(filecanary):
         raise ValueError("reboot source SD file canary failed")
 
-    persistence_plan = persistence_readback_commands(token)
+    final_pre_persistence = dict(pre[-len(persistence_plan) :])
+    if not persistence_snapshot_clean(final_pre_persistence, token):
+        raise ValueError("reboot source pre-reboot persistence remained dirty")
+    if source.get("pre_reboot_persistence") != final_pre_persistence:
+        raise ValueError("reboot source pre-reboot persistence receipt is inconsistent")
+
     post_commands = [command for command, _result in post]
     version_index = post_commands.index("version")
     crashlog_index = post_commands.index("crashlog")
@@ -721,11 +752,16 @@ def _derive_reboot_cycle(
         )
     ):
         raise ValueError("reboot source post-reboot evidence order is invalid")
+    post_poll_cohorts = len(persistence_tail) // len(persistence_plan)
+    if source.get("persistence_poll_attempts_used") != post_poll_cohorts:
+        raise ValueError("reboot source post-reboot persistence attempt count is inconsistent")
     if [command for command, _result in transcript[-len(persistence_plan) :]] != persistence_plan:
         raise ValueError("reboot source final persistence cohort is incomplete")
     final_persistence = dict(transcript[-len(persistence_plan) :])
     if not persistence_snapshot_clean(final_persistence, token):
         raise ValueError("reboot source persistence remained dirty")
+    if source.get("post_reboot_persistence") != final_persistence:
+        raise ValueError("reboot source post-reboot persistence receipt is inconsistent")
     if not _successful_remount(pre) or not _successful_remount(post):
         raise ValueError("reboot source remount quiesce receipt is missing")
 

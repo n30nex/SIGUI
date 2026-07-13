@@ -1205,6 +1205,7 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
         "version",
         "crashlog",
         "health",
+        *persistence_commands,
         "reboot",
         "health",
         "version",
@@ -1215,12 +1216,14 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
         version,
         crashlog_before,
         {"ok": True, "cmd": "health", "boot_nonce": 111, "reset_reason": "SW"},
+        *[json.loads(json.dumps(value)) for value in persistence_results],
         {"ok": True, "cmd": "reboot", "rebooting": True, "reset_scope": "system", "storage_manager_quiesced": True, "retained_worker_quiesced": True, "rp2040_bridge_quiesced": True, "connectivity_prepare": "ESP_OK", "retained_flush": "ESP_OK", "route_flush": "ESP_OK"},
         {"ok": True, "cmd": "health", "boot_nonce": 222, "reset_reason": "SW"},
         json.loads(json.dumps(version)),
         crashlog_after,
         *persistence_results,
     ]
+    pre_persistence = dict(zip(persistence_commands, persistence_results))
     post_persistence = dict(zip(persistence_commands, persistence_results))
     write_json(
         root / "artifacts" / "hardware" / "com12" / f"sd_reboot_remount_{commit[:7]}.json",
@@ -1237,6 +1240,12 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_firmware_identity_ok": True,
             "firmware_identity_ok": True,
             "persistence_clean_required": True,
+            "pre_reboot_persistence_checked": True,
+            "pre_reboot_persistence_clean": True,
+            "pre_reboot_pending_dirty": False,
+            "pre_reboot_persistence_poll_attempts_used": 1,
+            "pre_reboot_persistence": pre_persistence,
+            "post_reboot_persistence_checked": True,
             "post_reboot_persistence_clean": True,
             "post_reboot_pending_dirty": False,
             "persistence_poll_attempts_used": 1,
@@ -1252,6 +1261,9 @@ def write_reboot_remount_evidence(root: Path, commit: str = COMMIT, metadata_com
             "post_sequence_complete": True,
             "timed_out_command": None,
             "unexpected_restart_before_reboot": False,
+            "pre_reboot_gate_passed": True,
+            "reboot_attempted": True,
+            "reboot_skipped_reason": None,
             "pre_remount_ready": True,
             "post_remount_ready": True,
             "pre_remount_command_passed": True,
@@ -2333,6 +2345,49 @@ def test_reboot_remount_gate_recomputes_identity_persistence_and_crashlog(tmp_pa
     )
     valid = json.loads(path.read_text(encoding="utf-8"))
     assert audit.sd_reboot_remount_artifact_ok(valid, "COM12", COMMIT) is True
+
+    for required_field in ("pre_reboot_gate_passed", "reboot_attempted"):
+        missing_receipt = json.loads(json.dumps(valid))
+        missing_receipt.pop(required_field)
+        assert audit.sd_reboot_remount_artifact_ok(
+            missing_receipt, "COM12", COMMIT
+        ) is False
+
+    for count_field in (
+        "pre_reboot_persistence_poll_attempts_used",
+        "persistence_poll_attempts_used",
+    ):
+        forged_count = json.loads(json.dumps(valid))
+        forged_count[count_field] = 999
+        assert audit.sd_reboot_remount_artifact_ok(
+            forged_count, "COM12", COMMIT
+        ) is False
+
+    partial_pre_poll = json.loads(json.dumps(valid))
+    pre_health_index = partial_pre_poll["commands"].index("health")
+    partial_pre_poll["commands"].insert(pre_health_index + 1, "routes")
+    partial_pre_poll["results"].insert(
+        pre_health_index + 1,
+        json.loads(json.dumps(partial_pre_poll["pre_reboot_persistence"]["routes"])),
+    )
+    assert audit.command_result_transcript_aligned(partial_pre_poll) is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        partial_pre_poll, "COM12", COMMIT
+    ) is False
+
+    optimistic_pre_dirty = json.loads(json.dumps(valid))
+    reboot_index = optimistic_pre_dirty["commands"].index("reboot")
+    pre_dm = [
+        row
+        for row in optimistic_pre_dirty["results"][:reboot_index]
+        if row.get("cmd") == "messages dm"
+    ][-1]
+    pre_dm["persistence"]["sd"]["reconcile_pending"] = True
+    pre_dm["persisted"] = False
+    assert optimistic_pre_dirty["pre_reboot_persistence_clean"] is True
+    assert audit.sd_reboot_remount_artifact_ok(
+        optimistic_pre_dirty, "COM12", COMMIT
+    ) is False
 
     optimistic_dirty = json.loads(json.dumps(valid))
     dm = [

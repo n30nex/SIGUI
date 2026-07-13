@@ -1977,7 +1977,9 @@ def strict_reboot_remount_evidence_ok(
     if len(reboot_indices) != 1:
         return False
     reboot_index = reboot_indices[0]
+    pre_commands = commands[:reboot_index]
     pre_results = results[:reboot_index]
+    post_commands = commands[reboot_index + 1 :]
     post_results = results[reboot_index + 1 :]
     pre_versions = [
         result
@@ -2016,8 +2018,39 @@ def strict_reboot_remount_evidence_ok(
     if not isinstance(token, str) or not token:
         return False
     persistence_plan = persistence_readback_commands(token)
-    if commands[-len(persistence_plan) :] != persistence_plan:
+    pre_health_indices = [
+        index for index, command in enumerate(pre_commands) if command == "health"
+    ]
+    post_version_indices = [
+        index for index, command in enumerate(post_commands) if command == "version"
+    ]
+    post_crashlog_indices = [
+        index for index, command in enumerate(post_commands) if command == "crashlog"
+    ]
+    if (
+        len(pre_health_indices) != 1
+        or len(post_version_indices) != 1
+        or len(post_crashlog_indices) != 1
+        or post_crashlog_indices[0] != post_version_indices[0] + 1
+    ):
         return False
+    pre_persistence_tail = pre_commands[pre_health_indices[0] + 1 :]
+    post_persistence_tail = post_commands[post_crashlog_indices[0] + 1 :]
+    if not all(
+        len(tail) >= len(persistence_plan)
+        and len(tail) % len(persistence_plan) == 0
+        and all(
+            tail[index : index + len(persistence_plan)] == persistence_plan
+            for index in range(0, len(tail), len(persistence_plan))
+        )
+        for tail in (pre_persistence_tail, post_persistence_tail)
+    ):
+        return False
+    pre_poll_cohorts = len(pre_persistence_tail) // len(persistence_plan)
+    post_poll_cohorts = len(post_persistence_tail) // len(persistence_plan)
+    final_pre_persistence = dict(
+        zip(persistence_plan, pre_results[-len(persistence_plan) :])
+    )
     final_persistence = dict(
         zip(persistence_plan, results[-len(persistence_plan) :])
     )
@@ -2030,10 +2063,22 @@ def strict_reboot_remount_evidence_ok(
         and data.get("post_firmware_identity_ok") is True
         and data.get("firmware_identity_ok") is True
         and data.get("persistence_clean_required") is True
+        and data.get("pre_reboot_persistence_checked") is True
+        and data.get("pre_reboot_persistence_clean") is True
+        and data.get("pre_reboot_pending_dirty") is False
+        and type(data.get("pre_reboot_persistence_poll_attempts_used")) is int
+        and data.get("pre_reboot_persistence_poll_attempts_used") == pre_poll_cohorts
+        and set(final_pre_persistence) == set(persistence_plan)
+        and persistence_snapshot_clean(final_pre_persistence, token)
+        and data.get("pre_reboot_persistence") == final_pre_persistence
+        and data.get("pre_reboot_gate_passed") is True
+        and data.get("reboot_attempted") is True
+        and data.get("reboot_skipped_reason") is None
+        and data.get("post_reboot_persistence_checked") is True
         and data.get("post_reboot_persistence_clean") is True
         and data.get("post_reboot_pending_dirty") is False
         and type(data.get("persistence_poll_attempts_used")) is int
-        and data.get("persistence_poll_attempts_used") >= 1
+        and data.get("persistence_poll_attempts_used") == post_poll_cohorts
         and set(final_persistence) == set(persistence_plan)
         and persistence_snapshot_clean(final_persistence, token)
         and data.get("post_reboot_persistence") == final_persistence
@@ -2624,6 +2669,9 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "post_reboot_boot_nonce": data.get("post_reboot_boot_nonce") if data else None,
             "reboot_proven": data.get("reboot_proven") if data else None,
             "firmware_identity_ok": data.get("firmware_identity_ok") if data else None,
+            "pre_reboot_persistence_checked": data.get("pre_reboot_persistence_checked") if data else None,
+            "pre_reboot_persistence_clean": data.get("pre_reboot_persistence_clean") if data else None,
+            "pre_reboot_pending_dirty": data.get("pre_reboot_pending_dirty") if data else None,
             "post_reboot_persistence_clean": data.get("post_reboot_persistence_clean") if data else None,
             "post_reboot_pending_dirty": data.get("post_reboot_pending_dirty") if data else None,
             "crashlog_transition_ok": data.get("crashlog_transition_ok") if data else None,

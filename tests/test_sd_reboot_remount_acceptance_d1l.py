@@ -304,6 +304,64 @@ def clean_persistence_snapshot(token: str) -> dict[str, dict]:
     }
 
 
+def evidenced_persistence_snapshot(
+    token: str, manager_state: str = "READY_SD"
+) -> dict[str, dict]:
+    snapshot = clean_persistence_snapshot(token)
+    snapshot["storage status"] = json.loads(ready_storage_line(manager_state))
+    rich_readbacks = dict(
+        zip(
+            remount_accept.retained_readback_commands(token),
+            (json.loads(line) for line in readback_lines(token)),
+        )
+    )
+    for command, result in rich_readbacks.items():
+        if command in snapshot:
+            snapshot[command].update(result)
+    return snapshot
+
+
+def persistence_snapshot_lines(snapshot: dict[str, dict], token: str) -> list[str]:
+    return [
+        json.dumps(snapshot[command]) + "\n"
+        for command in remount_accept.persistence_readback_commands(token)
+    ]
+
+
+def version_line(commit: str) -> str:
+    return json.dumps(
+        {"schema": 1, "ok": True, "cmd": "version", "build_commit": commit}
+    ) + "\n"
+
+
+def crashlog_line(total: int) -> str:
+    return json.dumps(
+        {
+            "schema": 1,
+            "ok": True,
+            "cmd": "crashlog",
+            "total_written": total,
+            "entries": [
+                {
+                    "seq": total,
+                    "reset_reason": "SW",
+                    "crash_like": False,
+                }
+            ],
+        }
+    ) + "\n"
+
+
+def reboot_line() -> str:
+    return (
+        '{"schema":1,"ok":true,"cmd":"reboot","rebooting":true,'
+        '"reset_scope":"system","storage_manager_quiesced":true,'
+        '"retained_worker_quiesced":true,"rp2040_bridge_quiesced":true,'
+        '"connectivity_prepare":"ESP_OK","retained_flush":"ESP_OK",'
+        '"route_flush":"ESP_OK"}\n'
+    )
+
+
 def test_storage_ready_requires_fat32_filesystem():
     ready = json.loads(ready_storage_line())
     assert remount_accept.storage_ready(ready) is True
@@ -332,6 +390,11 @@ def test_strict_dry_run_declares_exact_identity_crashlog_and_clean_persistence()
     assert report["commands"].count("crashlog") == 2
     assert "routes" in report["commands"]
     assert "crashlog clear" not in report["commands"]
+    reboot_index = report["commands"].index("reboot")
+    persistence_plan = remount_accept.persistence_readback_commands("strict1")
+    assert report["commands"][reboot_index - len(persistence_plan) : reboot_index] == (
+        persistence_plan
+    )
 
 
 def test_persistence_snapshot_requires_every_store_clean_and_error_free():
@@ -401,6 +464,239 @@ def test_persistence_poll_fails_closed_when_routes_stay_dirty():
     assert passed is False
     assert attempts == 1
     assert remount_accept.persistence_snapshot_clean(latest, token) is False
+
+
+def test_strict_runner_polls_transient_pre_reboot_manager_until_clean(monkeypatch):
+    token = "prepoll1"
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    transient = evidenced_persistence_snapshot(token, "STATUS")
+    clean = evidenced_persistence_snapshot(token)
+    pre = FakeSerial(
+        [
+            version_line(commit),
+            crashlog_line(3),
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            filecanary_line(),
+            retained_canary_line(token),
+            map_tile_canary_line(token),
+            *readback_lines(token),
+            ready_storage_line("STATUS"),
+            health_line(1),
+            *persistence_snapshot_lines(transient, token),
+            *persistence_snapshot_lines(clean, token),
+        ]
+    )
+    reboot = FakeSerial([reboot_line()])
+    post = FakeSerial(
+        [
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            *readback_lines(token),
+            map_tile_check_line(token),
+            health_line(2),
+            version_line(commit),
+            crashlog_line(4),
+            *persistence_snapshot_lines(clean, token),
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre, reboot, post])
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+        expected_firmware_commit=commit,
+        persistence_poll_attempts=2,
+        persistence_poll_interval_sec=0.0,
+    )
+
+    plan = remount_accept.persistence_readback_commands(token)
+    reboot_index = report["commands"].index("reboot")
+    assert report["ok"] is True
+    assert report["pre_reboot_persistence_checked"] is True
+    assert report["pre_reboot_persistence_clean"] is True
+    assert report["pre_reboot_pending_dirty"] is False
+    assert report["pre_reboot_persistence_poll_attempts_used"] == 2
+    assert report["storage_after_canary"]["manager"]["state"] == "STATUS"
+    assert report["storage_before_reboot"]["manager"]["state"] == "READY_SD"
+    assert report["commands"][reboot_index - len(plan) : reboot_index] == plan
+    assert report["reboot_attempted"] is True
+    assert report["post_reboot_persistence_checked"] is True
+    assert report["post_reboot_persistence_clean"] is True
+    assert report["post_reboot_pending_dirty"] is False
+
+
+def test_strict_runner_exhausts_pre_reboot_poll_without_reboot(monkeypatch):
+    token = "prepoll2"
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    transient = evidenced_persistence_snapshot(token, "STATUS")
+    pre = FakeSerial(
+        [
+            version_line(commit),
+            crashlog_line(3),
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            filecanary_line(),
+            retained_canary_line(token),
+            map_tile_canary_line(token),
+            *readback_lines(token),
+            ready_storage_line("STATUS"),
+            health_line(1),
+            *persistence_snapshot_lines(transient, token),
+            *persistence_snapshot_lines(transient, token),
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre])
+    monkeypatch.setattr(remount_accept.time, "sleep", lambda _seconds: None)
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+        expected_firmware_commit=commit,
+        persistence_poll_attempts=2,
+        persistence_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["pre_reboot_persistence_checked"] is True
+    assert report["pre_reboot_persistence_clean"] is False
+    assert report["pre_reboot_pending_dirty"] is True
+    assert report["pre_reboot_persistence_poll_attempts_used"] == 2
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "post_canary_retained_storage_not_clean"
+    assert report["post_reboot_persistence_checked"] is False
+    assert report["post_reboot_persistence_clean"] is None
+    assert report["post_reboot_pending_dirty"] is None
+    assert "reboot\n" not in pre.writes
+
+
+def test_strict_runner_stops_on_pre_reboot_poll_timeout_without_claiming_dirty(
+    monkeypatch,
+):
+    token = "prepoll3"
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    first_poll_command = remount_accept.persistence_readback_commands(token)[0]
+    pre = FakeSerial(
+        [
+            version_line(commit),
+            crashlog_line(3),
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            filecanary_line(),
+            retained_canary_line(token),
+            map_tile_canary_line(token),
+            *readback_lines(token),
+            ready_storage_line("STATUS"),
+            health_line(1),
+            json.dumps(
+                {
+                    "schema": 1,
+                    "ok": False,
+                    "cmd": first_poll_command,
+                    "code": "TIMEOUT",
+                }
+            )
+            + "\n",
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+        expected_firmware_commit=commit,
+        persistence_poll_attempts=2,
+        persistence_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["timed_out_command"] == "messages public"
+    assert report["pre_reboot_persistence_checked"] is False
+    assert report["pre_reboot_persistence_clean"] is None
+    assert report["pre_reboot_pending_dirty"] is None
+    assert report["pre_reboot_persistence_poll_attempts_used"] == 1
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "pre_reboot_command_timeout"
+    assert "reboot\n" not in pre.writes
+
+
+def test_strict_runner_stops_on_unexpected_boot_during_pre_reboot_poll(
+    monkeypatch,
+):
+    token = "prepoll4"
+    commit = "0123456789abcdef0123456789abcdef01234567"
+    clean = evidenced_persistence_snapshot(token)
+    first_poll_command = remount_accept.persistence_readback_commands(token)[0]
+    pre = FakeSerial(
+        [
+            version_line(commit),
+            crashlog_line(3),
+            ready_storage_line(),
+            mount_line(),
+            ready_storage_line(),
+            filecanary_line(),
+            retained_canary_line(token),
+            map_tile_canary_line(token),
+            *readback_lines(token),
+            ready_storage_line("STATUS"),
+            health_line(1),
+            '{"schema":1,"ok":true,"cmd":"help"}\n',
+            json.dumps(clean[first_poll_command]) + "\n",
+        ]
+    )
+    install_fake_serial(monkeypatch, [pre])
+
+    report = remount_accept.run_acceptance(
+        "COM12",
+        115200,
+        1.0,
+        token,
+        include_reboot=True,
+        reboot_settle_sec=0.0,
+        mount_poll_attempts=1,
+        mount_poll_interval_sec=0.0,
+        expected_firmware_commit=commit,
+        persistence_poll_attempts=2,
+        persistence_poll_interval_sec=0.0,
+    )
+
+    assert report["ok"] is False
+    assert report["timed_out_command"] is None
+    assert report["unexpected_restart_before_reboot"] is True
+    assert report["pre_reboot_persistence_checked"] is False
+    assert report["pre_reboot_persistence_clean"] is None
+    assert report["pre_reboot_pending_dirty"] is None
+    assert report["pre_reboot_persistence_poll_attempts_used"] == 1
+    assert report["pre_reboot_gate_passed"] is False
+    assert report["reboot_attempted"] is False
+    assert report["reboot_skipped_reason"] == "unexpected_restart_before_reboot"
+    assert "reboot\n" not in pre.writes
 
 
 def test_crashlog_transition_requires_one_new_non_crash_software_reset():

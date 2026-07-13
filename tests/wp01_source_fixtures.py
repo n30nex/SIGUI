@@ -280,6 +280,25 @@ def write_reboot_source(
         "public_rf_tx": False,
         "formats_sd": False,
     }
+    persistence = {
+        f"messages public search {token}": json.loads(
+            json.dumps(readbacks[f"messages public search {token}"])
+        ),
+        f"messages dm {fingerprint}": json.loads(
+            json.dumps(readbacks[f"messages dm {fingerprint}"])
+        ),
+        "routes": {
+            "schema": 1,
+            "ok": True,
+            "cmd": "routes",
+            "persisted": True,
+            "persistence": route_persistence(),
+        },
+        f"packets search {token}": json.loads(
+            json.dumps(readbacks[f"packets search {token}"])
+        ),
+        "storage status": clean_storage_status(),
+    }
     pre_commands = [
         "version",
         "crashlog",
@@ -292,6 +311,7 @@ def write_reboot_source(
         *readbacks,
         "storage status",
         "health",
+        *persistence,
     ]
     pre_results = [
         version,
@@ -329,6 +349,7 @@ def write_reboot_source(
             "reset_reason": "SW",
             "retained_task_stack_free_bytes": 8192,
         },
+        *[json.loads(json.dumps(value)) for value in persistence.values()],
     ]
     reboot = {
         "schema": 1,
@@ -352,11 +373,7 @@ def write_reboot_source(
         "health",
         "version",
         "crashlog",
-        f"messages public search {token}",
-        f"messages dm {fingerprint}",
-        "routes",
-        f"packets search {token}",
-        "storage status",
+        *persistence,
     ]
     post_results = [
         clean_storage_status(),
@@ -383,17 +400,7 @@ def write_reboot_source(
         },
         json.loads(json.dumps(version)),
         crash_after,
-        json.loads(json.dumps(readbacks[f"messages public search {token}"])),
-        json.loads(json.dumps(readbacks[f"messages dm {fingerprint}"])),
-        {
-            "schema": 1,
-            "ok": True,
-            "cmd": "routes",
-            "persisted": True,
-            "persistence": route_persistence(),
-        },
-        json.loads(json.dumps(readbacks[f"packets search {token}"])),
-        clean_storage_status(),
+        *[json.loads(json.dumps(value)) for value in persistence.values()],
     ]
     commands = [*pre_commands, "reboot", *post_commands]
     results = [*pre_results, reboot, *post_results]
@@ -414,8 +421,16 @@ def write_reboot_source(
         "post_firmware_identity_ok": True,
         "firmware_identity_ok": True,
         "persistence_clean_required": True,
+        "pre_reboot_persistence_checked": True,
+        "pre_reboot_persistence_clean": True,
+        "pre_reboot_pending_dirty": False,
+        "pre_reboot_persistence_poll_attempts_used": 1,
+        "pre_reboot_persistence": json.loads(json.dumps(persistence)),
+        "post_reboot_persistence_checked": True,
         "post_reboot_persistence_clean": True,
         "post_reboot_pending_dirty": False,
+        "persistence_poll_attempts_used": 1,
+        "post_reboot_persistence": json.loads(json.dumps(persistence)),
         "crashlog_transition_required": True,
         "crashlog_transition_ok": True,
         "timed_out_command": None,
@@ -423,6 +438,7 @@ def write_reboot_source(
         "pre_reboot_gate_passed": True,
         "pre_reboot_health_ok": True,
         "reboot_attempted": True,
+        "reboot_skipped_reason": None,
         "reboot_reset_scope": "system",
         "reboot_connectivity_prepare": "ESP_OK",
         "pre_reboot_boot_nonce": before_nonce,

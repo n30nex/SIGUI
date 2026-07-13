@@ -880,6 +880,44 @@ def test_source_bound_reboot_matrix_rejects_dirty_raw_and_broken_nonce_chain(
     assert broken["failures"] == ["reboot nonce chain is not consecutive"]
 
 
+def test_source_bound_reboot_matrix_rejects_forged_poll_attempt_counts(
+    tmp_path: Path,
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(
+        paths["retained_reboot_matrix"].read_text(encoding="utf-8")
+    )
+    source_paths = [Path(receipt["path"]) for receipt in canonical["source_receipts"]]
+    first_source = source_paths[0]
+    original = first_source.read_text(encoding="utf-8")
+
+    for field, expected_failure in (
+        (
+            "pre_reboot_persistence_poll_attempts_used",
+            "reboot source pre-reboot persistence attempt count is inconsistent",
+        ),
+        (
+            "persistence_poll_attempts_used",
+            "reboot source post-reboot persistence attempt count is inconsistent",
+        ),
+    ):
+        source = json.loads(original)
+        source[field] = 999
+        first_source.write_text(json.dumps(source), encoding="utf-8")
+        rebuilt = wp01_sources.build_retained_reboot_matrix_artifact(
+            source_paths,
+            provenance_path,
+            root=tmp_path,
+            commit=COMMIT,
+            github_actions_run=RUN_ID,
+            d1l_port="COM12",
+            rp2040_port="COM16",
+        )
+        assert rebuilt["ok"] is False
+        assert rebuilt["failures"] == [expected_failure]
+        first_source.write_text(original, encoding="utf-8")
+
+
 def test_source_bound_producer_cli_rebuilds_both_canonical_artifacts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):

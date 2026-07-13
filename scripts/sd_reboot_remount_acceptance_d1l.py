@@ -108,9 +108,11 @@ def command_plan(
         ]
     )
     if include_reboot:
+        commands.append("health")
+        if strict_evidence:
+            commands.extend(persistence_readback_commands(token))
         commands.extend(
             [
-                "health",
                 "reboot",
                 "storage status",
                 "storage remount",
@@ -535,6 +537,16 @@ def run_persistence_poll(
     return commands, results, latest, False, attempts_used
 
 
+def persistence_poll_snapshot_checked(latest: dict[str, dict], token: str) -> bool:
+    plan = persistence_readback_commands(token)
+    if set(latest) != set(plan):
+        return False
+    results = [latest[command] for command in plan]
+    return not any(host_timed_out(result) for result in results) and not unexpected_console_restart(
+        results
+    )
+
+
 def run_pre_data_sequence(
     ser,
     *,
@@ -673,6 +685,11 @@ def run_acceptance(
     preflight_results: list[dict] = []
     pre_data_commands: list[str] = []
     pre_data_results: list[dict] = []
+    pre_persistence_commands: list[str] = []
+    pre_persistence_results: list[dict] = []
+    pre_persistence_by_command: dict[str, dict] = {}
+    pre_persistence_clean = not (strict_evidence and include_reboot)
+    pre_persistence_poll_attempts_used = 0
     pre_mount_commands: list[str] = []
     pre_mount_results: list[dict] = []
     pre_storage: dict = {}
@@ -752,6 +769,57 @@ def run_acceptance(
             )
             commands.extend(pre_data_commands)
             results.extend(pre_data_results)
+            pre_data_by_command = dict(zip(pre_data_commands, pre_data_results))
+            pre_data_transport_complete = sequence_completed(
+                pre_data_commands, pre_data_results, pre_data_commands
+            )
+            retained_result_for_poll = pre_data_by_command.get(
+                f"storage retained-canary {token}", {}
+            )
+            pre_poll_eligible = (
+                strict_evidence
+                and include_reboot
+                and pre_data_transport_complete
+                and not unexpected_console_restart(
+                    [*pre_mount_results, *preflight_results, *pre_data_results]
+                )
+                and canary_passed(
+                    pre_data_by_command.get("storage filecanary", {})
+                )
+                and retained_canary_metadata(
+                    retained_result_for_poll, token, fingerprint
+                )
+                is not None
+                and map_tile_write_passed(
+                    pre_data_by_command.get(
+                        f"storage map-tile-canary {token}", {}
+                    ),
+                    token,
+                )
+                and readbacks_pass(
+                    pre_data_by_command,
+                    token,
+                    fingerprint,
+                    retained_result_for_poll,
+                )
+                and pre_data_by_command.get("health", {}).get("ok") is True
+            )
+            if pre_poll_eligible:
+                (
+                    pre_persistence_commands,
+                    pre_persistence_results,
+                    pre_persistence_by_command,
+                    pre_persistence_clean,
+                    pre_persistence_poll_attempts_used,
+                ) = run_persistence_poll(
+                    ser,
+                    token=token,
+                    timeout=timeout,
+                    attempts=persistence_poll_attempts,
+                    interval_sec=persistence_poll_interval_sec,
+                )
+                commands.extend(pre_persistence_commands)
+                results.extend(pre_persistence_results)
 
     pre_sequence_complete = (
         pre_mount_complete
@@ -762,12 +830,19 @@ def run_acceptance(
             pre_data_commands, pre_data_results, pre_data_commands
         )
     )
-    pre_results = [*pre_mount_results, *preflight_results, *pre_data_results]
+    pre_results = [
+        *pre_mount_results,
+        *preflight_results,
+        *pre_data_results,
+        *pre_persistence_results,
+    ]
     unexpected_restart_before_reboot = unexpected_console_restart(pre_results)
     pre_by_command = {
         **dict(zip(preflight_commands, preflight_results)),
         **dict(zip(pre_data_commands, pre_data_results)),
+        **pre_persistence_by_command,
     }
+    initial_pre_data_by_command = dict(zip(pre_data_commands, pre_data_results))
     filecanary_result = pre_by_command.get("storage filecanary", {})
     retained_result = pre_by_command.get(f"storage retained-canary {token}", {})
     pre_map_tile = pre_by_command.get(f"storage map-tile-canary {token}", {})
@@ -802,9 +877,12 @@ def run_acceptance(
         retained_result, token, fingerprint
     ) is not None
     pre_map_tile_ok = map_tile_write_passed(pre_map_tile, token)
-    storage_after_canary = pre_by_command.get("storage status", {})
-    retained_storage_clean_after_canary = retained_storage_clean(
-        storage_after_canary
+    storage_after_canary = initial_pre_data_by_command.get("storage status", {})
+    storage_before_reboot = pre_by_command.get("storage status", {})
+    retained_storage_clean_after_canary = (
+        pre_persistence_clean
+        if strict_evidence and include_reboot
+        else retained_storage_clean(storage_after_canary)
     )
     pre_timeout_command = next(
         (
@@ -999,6 +1077,18 @@ def run_acceptance(
         ),
         None,
     )
+    pre_persistence_checked = (
+        strict_evidence
+        and include_reboot
+        and pre_persistence_poll_attempts_used > 0
+        and persistence_poll_snapshot_checked(pre_persistence_by_command, token)
+    )
+    post_persistence_checked = (
+        strict_evidence
+        and include_reboot
+        and persistence_poll_attempts_used > 0
+        and persistence_poll_snapshot_checked(post_persistence_by_command, token)
+    )
 
     return {
         "schema": 1,
@@ -1015,11 +1105,21 @@ def run_acceptance(
         "post_firmware_identity_ok": post_firmware_identity_ok,
         "firmware_identity_ok": firmware_identity_ok,
         "persistence_clean_required": strict_evidence and include_reboot,
+        "pre_reboot_persistence_checked": pre_persistence_checked,
+        "pre_reboot_persistence_clean": (
+            pre_persistence_clean if pre_persistence_checked else None
+        ),
+        "pre_reboot_pending_dirty": (
+            not pre_persistence_clean if pre_persistence_checked else None
+        ),
+        "pre_reboot_persistence_poll_attempts_used": pre_persistence_poll_attempts_used,
+        "pre_reboot_persistence": pre_persistence_by_command,
+        "post_reboot_persistence_checked": post_persistence_checked,
         "post_reboot_persistence_clean": (
-            post_persistence_clean if strict_evidence and include_reboot else None
+            post_persistence_clean if post_persistence_checked else None
         ),
         "post_reboot_pending_dirty": (
-            not post_persistence_clean if strict_evidence and include_reboot else None
+            not post_persistence_clean if post_persistence_checked else None
         ),
         "persistence_poll_attempts_used": persistence_poll_attempts_used,
         "post_reboot_persistence": post_persistence_by_command,
@@ -1108,8 +1208,9 @@ def run_acceptance(
         "pre_map_tile_canary_passed": pre_map_tile_ok,
         "post_map_tile_canary_passed": post_map_tile_ok,
         "health_ok": health_ok,
-        "storage_before_reboot": semantic_storage_copy(pre_storage),
+        "storage_before_canary": semantic_storage_copy(pre_storage),
         "storage_after_canary": semantic_storage_copy(storage_after_canary),
+        "storage_before_reboot": semantic_storage_copy(storage_before_reboot),
         "storage_after_reboot": semantic_storage_copy(post_storage),
         "health": health,
         "results": results,
@@ -1136,6 +1237,7 @@ def run_acceptance(
             and post_map_tile_ok
             and health_ok
             and (firmware_identity_ok is not False)
+            and (pre_persistence_clean if strict_evidence and include_reboot else True)
             and (post_persistence_clean if strict_evidence and include_reboot else True)
             and (crashlog_transition_ok is True if strict_evidence and include_reboot else True)
         ),
