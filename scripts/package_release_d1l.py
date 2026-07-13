@@ -20,12 +20,14 @@ except ModuleNotFoundError:
     from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
 
 if __package__:
+    from .provenance_d1l import write_package_provenance
     from .sbom_d1l import (
         discover_source_identity,
         exact_sha,
         write_package_sbom,
     )
 else:
+    from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
     from sbom_d1l import (  # type: ignore[no-redef]
         discover_source_identity,
         exact_sha,
@@ -731,6 +733,7 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
 - `evidence/` contains current-commit MeshCore wire-envelope conformance JSON when supplied by CI. It is a structural prerequisite and does not close issue #65.
 - `{manifest['sbom']['path']}` is the deterministic SPDX 2.3 SBOM bound to the exact source, submodule, and package inputs.
+- `{manifest['provenance']['path']}` is deterministic unsigned SLSA v1 provenance. Its checksums are verifiable, but authenticity requires a separately signed attestation.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash
@@ -784,6 +787,8 @@ def create_release_package(
     package_dir.mkdir(parents=True, exist_ok=True)
 
     source_git = git_info(root)
+    if source_git.get("dirty"):
+        raise ValueError("Release packaging requires a clean source worktree")
     requested_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
     source_identity = discover_source_identity(root, requested_commit)
     expected_commit = source_identity["commit"]
@@ -837,6 +842,13 @@ def create_release_package(
         ],
     }
     manifest["sbom"] = write_package_sbom(
+        root,
+        package_dir,
+        manifest,
+        source_identity=source_identity,
+        expected_source_sha=expected_commit,
+    )
+    manifest["provenance"] = write_package_provenance(
         root,
         package_dir,
         manifest,

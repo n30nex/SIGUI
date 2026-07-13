@@ -116,11 +116,13 @@ def write_fake_notices(root: Path) -> None:
         ".github/workflows/d1l-ci.yml": "name: d1l-ci\n",
         "CMakeLists.txt": "cmake_minimum_required(VERSION 3.16)\n",
         "dependencies.lock": "dependencies: []\n",
+        "docs/BUILD_PROVENANCE_D1L.md": "# fixture build type\n",
         "main/CMakeLists.txt": "idf_component_register(SRCS main.c)\n",
         "partitions_d1l.csv": "nvs,data,nvs,0x9000,0x6000\n",
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
         "scripts/package_release_d1l.py": "# package fixture\n",
+        "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",
         "sdkconfig.defaults": "CONFIG_IDF_TARGET=\"esp32s3\"\n",
     }
@@ -307,6 +309,7 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
         nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
         assert verify_sha256_manifest(nested_manifest)
     assert f"./sbom_{commit}.spdx.json" in sha_text
+    assert f"./provenance_{commit}.json" in sha_text
     sbom_path = package_dir / manifest["sbom"]["path"]
     assert manifest["sbom"]["valid"] is True
     assert manifest["sbom"]["source_commit"] == commit
@@ -318,12 +321,29 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert any(item["versionInfo"] == "2" * 40 for item in sbom["packages"])
     assert any(item["fileName"] == "./package/firmware/meshcore_deskos_d1l.bin" for item in sbom["files"])
     assert any(item["fileName"] == "./source/THIRD_PARTY_NOTICES.md" for item in sbom["files"])
+    provenance_path = package_dir / manifest["provenance"]["path"]
+    assert manifest["provenance"]["valid"] is True
+    assert manifest["provenance"]["authenticated"] is False
+    assert manifest["provenance"]["source_commit"] == commit
+    assert manifest["provenance"]["sha256"] == package_release_d1l.sha256_file(
+        provenance_path
+    )
+    provenance = json.loads(provenance_path.read_text(encoding="ascii"))
+    assert provenance["_type"] == "https://in-toto.io/Statement/v1"
+    assert provenance["predicateType"] == "https://slsa.dev/provenance/v1"
+    assert provenance["predicate"]["sigui_attestation"]["authenticated"] is False
+    assert any(
+        item["name"] == "firmware/meshcore_deskos_d1l.bin"
+        for item in provenance["subject"]
+    )
+    assert any(item["name"] == f"sbom_{commit}.spdx.json" for item in provenance["subject"])
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
     assert "`docs/` contains the user guide" in readme
     assert "`notices/` contains the project license" in readme
     assert f"`sbom_{commit}.spdx.json` is the deterministic SPDX 2.3 SBOM" in readme
+    assert f"`provenance_{commit}.json` is deterministic unsigned SLSA v1 provenance" in readme
     assert "structural prerequisite and does not close issue #65" in readme
 
 
@@ -554,6 +574,32 @@ def test_esp32_only_release_package_omits_rp2040_artifacts(tmp_path, monkeypatch
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "`rp2040/` is omitted from this ESP32-only package" in readme
     assert "`include_sd_bridge=true`" in readme
+
+
+def test_release_package_rejects_dirty_source_worktree(tmp_path, monkeypatch):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    monkeypatch.setattr(
+        package_release_d1l,
+        "git_info",
+        lambda _root: {
+            "commit": "a" * 40,
+            "short_commit": "a" * 7,
+            "branch": "test",
+            "dirty": True,
+            "dirty_entries": [" M scripts/package_release_d1l.py"],
+            "source_patches": [],
+        },
+    )
+
+    with pytest.raises(ValueError, match="clean source worktree"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "release",
+            package_name="dirty",
+            full_size=0x20000,
+        )
 
 
 def test_git_info_treats_expected_bsp_patches_as_clean(monkeypatch, tmp_path):
