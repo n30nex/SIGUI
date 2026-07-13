@@ -10,6 +10,9 @@ DOWNLOAD_ARTIFACT_ACTION_PIN = (
 ARDUINO_CLI_ACTION_PIN = (
     "arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02"
 )
+SETUP_PYTHON_ACTION_PIN = (
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+)
 ESP_IDF_CONTAINER_PIN = (
     "espressif/idf:v5.5.4@"
     "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
@@ -47,6 +50,15 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
 
     sd_gate = "if: needs.change-filter.outputs.include_sd_bridge == 'true'"
     assert "needs: change-filter" in host
+    assert SETUP_PYTHON_ACTION_PIN in host
+    assert 'python-version: "3.13.6"' in host
+    assert "architecture: x64" in host
+    assert "check-latest: false" in host
+    assert "python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath" in host
+    assert "python -m pip install --upgrade" not in host
+    assert "python -m pip check" in host
+    assert "artifacts/build-inputs/ci-host-windows-installed.json" in host
+    assert "artifacts/build-inputs/SHA256SUMS.txt" in host
     assert "python -m pytest tests -q" in host
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host

@@ -4,3 +4,4 @@ docs/completion/*.md text eol=lf
 docs/completion/*.yaml text eol=lf
 docs/completion/evidence/**/*.json text eol=lf
 docs/completion/SHA256SUMS.txt text eol=lf
+requirements/ci-host-windows.txt text eol=lf

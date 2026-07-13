@@ -1537,11 +1537,19 @@ def test_ui_simulator_unsaved_map_location_fields_start_blank(tmp_path):
 
 def test_ui_simulator_is_documented_and_run_in_ci():
     workflow = read(".github/workflows/d1l-ci.yml")
+    host_lock = read("requirements/ci-host-windows.txt")
+    build_inputs = json.loads(read(".github/d1l-build-inputs.json"))
     test_plan = read("docs/TEST_PLAN_D1L.md")
     roadmap = read("docs/ROADMAP.md")
     checklist = read("docs/RELEASE_CHECKLIST.md")
 
-    assert "Pillow" in workflow
+    assert "Pillow==12.3.0" in host_lock
+    assert "--require-hashes" in host_lock
+    assert build_inputs["host_python"]["requirements"]["path"] == (
+        "requirements/ci-host-windows.txt"
+    )
+    assert ".github/d1l-build-inputs.json" in workflow
+    assert "python -m pip install --disable-pip-version-check --require-hashes" in workflow
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in workflow
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in workflow
     assert "python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage" in workflow

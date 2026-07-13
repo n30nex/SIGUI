@@ -71,8 +71,39 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set up Python
-        run: python -m pip install --upgrade pip pytest pyserial Pillow
+      - name: Set up pinned Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.6"
+          architecture: x64
+          check-latest: false
+
+      - name: Verify and install hash-locked Python tools
+        shell: pwsh
+        run: |
+          $buildInputs = Get-Content -LiteralPath ".github/d1l-build-inputs.json" -Raw | ConvertFrom-Json
+          $requirementsPath = [string]$buildInputs.host_python.requirements.path
+          $expectedHash = [string]$buildInputs.host_python.requirements.sha256
+          $actualHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "Host requirements lock hash mismatch: expected $expectedHash, got $actualHash"
+          }
+          if ((python --version 2>&1) -notmatch '^Python 3\.13\.6$') {
+            throw "Pinned Python 3.13.6 is not active"
+          }
+          New-Item -ItemType Directory -Force -Path "artifacts/build-inputs" | Out-Null
+          Copy-Item -LiteralPath ".github/d1l-build-inputs.json" -Destination "artifacts/build-inputs/d1l-build-inputs.json"
+          Copy-Item -LiteralPath $requirementsPath -Destination "artifacts/build-inputs/ci-host-windows.txt"
+          python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath
+          python -m pip check
+          python -m pip list --format=json | Set-Content -LiteralPath "artifacts/build-inputs/ci-host-windows-installed.json" -Encoding utf8NoBOM
+          $checksumRows = Get-ChildItem -LiteralPath "artifacts/build-inputs" -File |
+            Where-Object Name -ne "SHA256SUMS.txt" |
+            Sort-Object Name |
+            ForEach-Object {
+              "{0}  ./{1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+            }
+          $checksumRows | Set-Content -LiteralPath "artifacts/build-inputs/SHA256SUMS.txt" -Encoding ascii
 
       - name: Host tests
         run: python -m pytest tests -q
