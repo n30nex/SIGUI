@@ -10,6 +10,10 @@ DOWNLOAD_ARTIFACT_ACTION_PIN = (
 ARDUINO_CLI_ACTION_PIN = (
     "arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02"
 )
+ESP_IDF_CONTAINER_PIN = (
+    "espressif/idf:v5.5.4@"
+    "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
+)
 
 
 def workflow_text() -> str:
@@ -196,7 +200,9 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "needs.host-checks.result == 'success'" in job
     assert "needs.meshcore-conformance.result == 'success'" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
-    assert job.count("container: espressif/idf:v5.5.4") == 1
+    assert job.count(f"container: {ESP_IDF_CONTAINER_PIN}") == 1
+    assert f"'{ESP_IDF_CONTAINER_PIN}' > artifacts/idf-migration/container-image.txt" in job
+    assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in job
     assert "espressif/idf:release-v5.1" not in job
     assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
     assert "idf.py build" in job

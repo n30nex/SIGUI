@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "kind": "d1l_build_inputs",
+  "esp_idf": {
+    "version": "v5.5.4",
+    "container": {
+      "registry": "docker.io",
+      "repository": "espressif/idf",
+      "tag": "v5.5.4",
+      "reference": "espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b",
+      "index_digest": "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "registry_manifest_url": "https://registry-1.docker.io/v2/espressif/idf/manifests/v5.5.4",
+      "platforms": {
+        "linux/amd64": "sha256:116f0526dfc87e764785370e59b88822e02cf4f9e1edd953cad5ed2d02672023",
+        "linux/arm64": "sha256:f3bc9daebfd8cb4e0afbdced7caac4431c7a862326a5e5587d65c31439549bb5"
+      }
+    }
+  }
+}

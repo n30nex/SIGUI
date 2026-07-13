@@ -52,7 +52,12 @@ except ImportError:  # pragma: no cover - package import path used by pytest
 
 
 RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
-SUPPORTED_ESP_IDF_IMAGE = "espressif/idf:v5.5.4"
+SUPPORTED_ESP_IDF_IMAGE_TAG = "espressif/idf:v5.5.4"
+SUPPORTED_ESP_IDF_IMAGE_DIGEST = (
+    "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
+)
+SUPPORTED_ESP_IDF_IMAGE = f"{SUPPORTED_ESP_IDF_IMAGE_TAG}@{SUPPORTED_ESP_IDF_IMAGE_DIGEST}"
+SUPPORTED_ESP_IDF_BUILD_INPUTS = ".github/d1l-build-inputs.json"
 SUPPORTED_ESP_IDF_VERSION = "v5.5.4"
 SUPPORTED_ESP_IDF_LOCK_VERSION = "5.5.4"
 ESP_IDF_MIGRATION_ISSUE = 63
@@ -3463,9 +3468,20 @@ def component_lock_idf_version(text: str) -> str | None:
 
 def supported_sdk_gate(root: Path) -> GateResult:
     workflow = root / ".github" / "workflows" / "d1l-ci.yml"
+    build_inputs_path = root / SUPPORTED_ESP_IDF_BUILD_INPUTS
     component_lock = root / "dependencies.lock"
     workflow_text = workflow.read_text(encoding="utf-8") if workflow.is_file() else ""
     lock_text = component_lock.read_text(encoding="utf-8") if component_lock.is_file() else ""
+    try:
+        build_inputs = read_json(build_inputs_path)
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        build_inputs = {}
+    esp_idf_inputs = build_inputs.get("esp_idf")
+    if not isinstance(esp_idf_inputs, dict):
+        esp_idf_inputs = {}
+    container_inputs = esp_idf_inputs.get("container")
+    if not isinstance(container_inputs, dict):
+        container_inputs = {}
     locked_idf_version = component_lock_idf_version(lock_text)
     job_match = re.search(
         r"(?ms)^  firmware-build:\s*\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*\n|\Z)",
@@ -3479,17 +3495,25 @@ def supported_sdk_gate(root: Path) -> GateResult:
         if image.endswith(":latest") or ":release-v" in image
     ]
     exact_release_pin = configured_images == [SUPPORTED_ESP_IDF_IMAGE]
+    exact_build_inputs = (
+        build_inputs.get("schema") == 1
+        and build_inputs.get("kind") == "d1l_build_inputs"
+        and esp_idf_inputs.get("version") == SUPPORTED_ESP_IDF_VERSION
+        and container_inputs.get("reference") == SUPPORTED_ESP_IDF_IMAGE
+        and container_inputs.get("index_digest") == SUPPORTED_ESP_IDF_IMAGE_DIGEST
+    )
     exact_component_lock = locked_idf_version == SUPPORTED_ESP_IDF_LOCK_VERSION
     ok = (
         workflow.is_file()
         and job_match is not None
         and exact_release_pin
         and not moving_images
+        and exact_build_inputs
         and exact_component_lock
     )
     evidence = [
         rel(path, root)
-        for path in (workflow, component_lock)
+        for path in (workflow, build_inputs_path, component_lock)
         if path.is_file()
     ]
     return GateResult(
@@ -3500,19 +3524,26 @@ def supported_sdk_gate(root: Path) -> GateResult:
         evidence,
         f"D1L firmware CI configuration and component lock target ESP-IDF {SUPPORTED_ESP_IDF_VERSION}."
         if ok else (
-            f"D1L firmware CI must pin exactly {SUPPORTED_ESP_IDF_IMAGE} and its solver-generated "
-            f"component lock must record IDF {SUPPORTED_ESP_IDF_LOCK_VERSION}; moving, EOL, or "
-            "unapproved SDK versions are release-blocking."
+            f"D1L firmware CI and build-input metadata must pin exactly {SUPPORTED_ESP_IDF_IMAGE}, "
+            f"and its solver-generated component lock must record IDF {SUPPORTED_ESP_IDF_LOCK_VERSION}; "
+            "mutable, missing, malformed, EOL, or unapproved SDK inputs are release-blocking."
         ),
         {
             "issue": ESP_IDF_MIGRATION_ISSUE,
             "expected_image": SUPPORTED_ESP_IDF_IMAGE,
+            "expected_image_tag": SUPPORTED_ESP_IDF_IMAGE_TAG,
+            "expected_image_digest": SUPPORTED_ESP_IDF_IMAGE_DIGEST,
             "expected_version": SUPPORTED_ESP_IDF_VERSION,
             "workflow_found": workflow.is_file(),
             "firmware_job_found": job_match is not None,
             "configured_images": configured_images,
             "moving_images": moving_images,
             "exact_release_pin": exact_release_pin,
+            "build_inputs_found": build_inputs_path.is_file(),
+            "build_inputs_path": SUPPORTED_ESP_IDF_BUILD_INPUTS,
+            "recorded_image": container_inputs.get("reference"),
+            "recorded_image_digest": container_inputs.get("index_digest"),
+            "exact_build_inputs": exact_build_inputs,
             "component_lock_found": component_lock.is_file(),
             "expected_lock_version": SUPPORTED_ESP_IDF_LOCK_VERSION,
             "locked_idf_version": locked_idf_version,

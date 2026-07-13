@@ -441,6 +441,20 @@ def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_ID
         "    steps: []\n",
         encoding="utf-8",
     )
+    write_json(
+        root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+        {
+            "schema": 1,
+            "kind": "d1l_build_inputs",
+            "esp_idf": {
+                "version": audit.SUPPORTED_ESP_IDF_VERSION,
+                "container": {
+                    "reference": audit.SUPPORTED_ESP_IDF_IMAGE,
+                    "index_digest": audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST,
+                },
+            },
+        },
+    )
     write_supported_sdk_lock(root)
 
 
@@ -1494,7 +1508,7 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
 
     assert gates["supported_sdk_baseline"]["ok"] is True
     assert gates["same_run_host_checks_passed"]["ok"] is True
-    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == "espressif/idf:v5.5.4"
+    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
     assert gates["ci_artifacts_checksums"]["ok"] is True
     assert gates["meshcore_wire_conformance_packaged"]["ok"] is True
     assert gates["meshcore_wire_conformance_packaged"]["details"]["closure_ready"] is False
@@ -1885,6 +1899,8 @@ def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Pat
         ("espressif/idf:release-v5.1", True),
         ("espressif/idf:release-v5.5", True),
         ("espressif/idf:latest", True),
+        ("espressif/idf:v5.5.4", False),
+        ("espressif/idf:v5.5.4@sha256:" + "0" * 64, False),
         ("espressif/idf:v5.5.3", False),
     ):
         write_supported_sdk_workflow(tmp_path, image)
@@ -1896,20 +1912,55 @@ def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Pat
         assert gate["details"]["exact_release_pin"] is False
 
 
-def test_supported_sdk_gate_accepts_only_pinned_v5_5_4(tmp_path: Path):
+def test_supported_sdk_gate_accepts_only_digest_pinned_v5_5_4(tmp_path: Path):
     write_supported_sdk_workflow(tmp_path)
 
     gate = audit.supported_sdk_gate(tmp_path).to_dict()
 
     assert gate["ok"] is True
     assert gate["details"]["expected_version"] == "v5.5.4"
-    assert gate["details"]["configured_images"] == ["espressif/idf:v5.5.4"]
+    assert gate["details"]["configured_images"] == [audit.SUPPORTED_ESP_IDF_IMAGE]
     assert gate["details"]["moving_images"] == []
     assert gate["details"]["exact_release_pin"] is True
+    assert gate["details"]["expected_image_tag"] == "espressif/idf:v5.5.4"
+    assert gate["details"]["expected_image_digest"] == audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST
+    assert gate["details"]["build_inputs_found"] is True
+    assert gate["details"]["recorded_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
+    assert gate["details"]["recorded_image_digest"] == audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST
+    assert gate["details"]["exact_build_inputs"] is True
     assert gate["details"]["component_lock_found"] is True
     assert gate["details"]["expected_lock_version"] == "5.5.4"
     assert gate["details"]["locked_idf_version"] == "5.5.4"
     assert gate["details"]["exact_component_lock"] is True
+
+
+def test_supported_sdk_gate_rejects_missing_malformed_or_stale_build_inputs(
+    tmp_path: Path,
+):
+    write_supported_sdk_workflow(tmp_path)
+    build_inputs = tmp_path / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+
+    build_inputs.unlink()
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert missing["ok"] is False
+    assert missing["details"]["build_inputs_found"] is False
+    assert missing["details"]["exact_build_inputs"] is False
+
+    build_inputs.write_text("{broken", encoding="utf-8")
+    malformed = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert malformed["ok"] is False
+    assert malformed["details"]["build_inputs_found"] is True
+    assert malformed["details"]["exact_build_inputs"] is False
+
+    write_supported_sdk_workflow(tmp_path)
+    payload = json.loads(build_inputs.read_text(encoding="utf-8"))
+    payload["esp_idf"]["container"]["index_digest"] = "sha256:" + "0" * 64
+    write_json(build_inputs, payload)
+    stale = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert stale["ok"] is False
+    assert stale["details"]["recorded_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
+    assert stale["details"]["recorded_image_digest"] == "sha256:" + "0" * 64
+    assert stale["details"]["exact_build_inputs"] is False
 
 
 def test_supported_sdk_gate_rejects_missing_malformed_or_stale_component_lock(tmp_path: Path):
