@@ -166,6 +166,44 @@ double exact_microdegrees(int32_t coordinate)
     return (static_cast<double>(coordinate) + adjustment) / 1000000.0;
 }
 
+bool packet_to_upstream(const d1l_meshcore_oracle_packet_t *packet,
+                        mesh::Packet *upstream)
+{
+    size_t encoded_len = 0U;
+    if (upstream == nullptr ||
+        !structurally_safe_to_write(packet, MAX_TRANS_UNIT, &encoded_len)) {
+        return false;
+    }
+    (void)encoded_len;
+    upstream->header = packet->header;
+    upstream->transport_codes[0] = packet->transport_codes[0];
+    upstream->transport_codes[1] = packet->transport_codes[1];
+    upstream->path_len = packet->path_len;
+    const size_t path_bytes = upstream->getPathByteLen();
+    if (path_bytes > 0U) {
+        std::memcpy(upstream->path, packet->path, path_bytes);
+    }
+    upstream->payload_len = packet->payload_len;
+    std::memcpy(upstream->payload, packet->payload, packet->payload_len);
+    return true;
+}
+
+d1l_meshcore_oracle_packet_t packet_from_upstream(const mesh::Packet &upstream)
+{
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = upstream.header;
+    result.transport_codes[0] = upstream.transport_codes[0];
+    result.transport_codes[1] = upstream.transport_codes[1];
+    result.path_len = static_cast<uint8_t>(upstream.path_len);
+    const size_t path_bytes = upstream.getPathByteLen();
+    if (path_bytes > 0U) {
+        std::memcpy(result.path, upstream.path, path_bytes);
+    }
+    result.payload_len = upstream.payload_len;
+    std::memcpy(result.payload, upstream.payload, upstream.payload_len);
+    return result;
+}
+
 }  // namespace
 
 extern "C" uint32_t d1l_meshcore_oracle_abi_version(void)
@@ -192,18 +230,7 @@ extern "C" bool d1l_meshcore_oracle_packet_decode(
         return false;
     }
 
-    d1l_meshcore_oracle_packet_t result{};
-    result.header = upstream.header;
-    result.transport_codes[0] = upstream.transport_codes[0];
-    result.transport_codes[1] = upstream.transport_codes[1];
-    result.path_len = static_cast<uint8_t>(upstream.path_len);
-    const size_t path_bytes = upstream.getPathByteLen();
-    if (path_bytes > 0U) {
-        std::memcpy(result.path, upstream.path, path_bytes);
-    }
-    result.payload_len = upstream.payload_len;
-    std::memcpy(result.payload, upstream.payload, upstream.payload_len);
-    *out_packet = result;
+    *out_packet = packet_from_upstream(upstream);
     return true;
 }
 
@@ -222,16 +249,9 @@ extern "C" bool d1l_meshcore_oracle_packet_encode(
     }
 
     mesh::Packet upstream;
-    upstream.header = packet->header;
-    upstream.transport_codes[0] = packet->transport_codes[0];
-    upstream.transport_codes[1] = packet->transport_codes[1];
-    upstream.path_len = packet->path_len;
-    const size_t path_bytes = upstream.getPathByteLen();
-    if (path_bytes > 0U) {
-        std::memcpy(upstream.path, packet->path, path_bytes);
+    if (!packet_to_upstream(packet, &upstream)) {
+        return false;
     }
-    upstream.payload_len = packet->payload_len;
-    std::memcpy(upstream.payload, packet->payload, packet->payload_len);
 
     std::array<uint8_t, MAX_TRANS_UNIT> encoded{};
     const size_t encoded_len = upstream.writeTo(encoded.data());
@@ -328,5 +348,111 @@ extern "C" bool d1l_meshcore_oracle_advert_data_encode(
     }
     std::memcpy(dest, encoded.data(), encoded_len);
     *out_len = encoded_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_prepare_flood(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    uint8_t path_hash_size,
+    uint8_t use_transport,
+    const uint16_t transport_codes[2],
+    uint8_t *out_priority)
+{
+    if (in_out_packet == nullptr || out_priority == nullptr ||
+        path_hash_size == 0U || path_hash_size > 3U || use_transport > 1U ||
+        (use_transport != 0U && transport_codes == nullptr)) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(in_out_packet, &upstream) ||
+        upstream.getPayloadType() == PAYLOAD_TYPE_TRACE) {
+        return false;
+    }
+    upstream.header &= static_cast<uint8_t>(~PH_ROUTE_MASK);
+    if (use_transport != 0U) {
+        upstream.header |= ROUTE_TYPE_TRANSPORT_FLOOD;
+        upstream.transport_codes[0] = transport_codes[0];
+        upstream.transport_codes[1] = transport_codes[1];
+    } else {
+        upstream.header |= ROUTE_TYPE_FLOOD;
+        upstream.transport_codes[0] = 0U;
+        upstream.transport_codes[1] = 0U;
+    }
+    upstream.setPathHashSizeAndCount(path_hash_size, 0U);
+    uint8_t priority = 1U;
+    if (upstream.getPayloadType() == PAYLOAD_TYPE_PATH) {
+        priority = 2U;
+    } else if (upstream.getPayloadType() == PAYLOAD_TYPE_ADVERT) {
+        priority = 3U;
+    }
+    *in_out_packet = packet_from_upstream(upstream);
+    *out_priority = priority;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_prepare_direct(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    const uint8_t *path,
+    uint8_t path_len,
+    uint8_t *out_priority)
+{
+    if (in_out_packet == nullptr || out_priority == nullptr ||
+        !mesh::Packet::isValidPathLen(path_len)) {
+        return false;
+    }
+    const size_t path_bytes =
+        static_cast<size_t>((path_len >> 6U) + 1U) * (path_len & 63U);
+    if (path_bytes > 0U && path == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(in_out_packet, &upstream) ||
+        upstream.getPayloadType() == PAYLOAD_TYPE_TRACE) {
+        return false;
+    }
+    upstream.header &= static_cast<uint8_t>(~PH_ROUTE_MASK);
+    upstream.header |= ROUTE_TYPE_DIRECT;
+    upstream.transport_codes[0] = 0U;
+    upstream.transport_codes[1] = 0U;
+    const uint8_t empty_path = 0U;
+    const uint8_t *safe_path = path_bytes > 0U ? path : &empty_path;
+    upstream.path_len =
+        mesh::Packet::copyPath(upstream.path, safe_path, path_len);
+    const uint8_t priority =
+        upstream.getPayloadType() == PAYLOAD_TYPE_PATH ? 1U : 0U;
+    *in_out_packet = packet_from_upstream(upstream);
+    *out_priority = priority;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_prepare_zero_hop(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    uint8_t use_transport,
+    const uint16_t transport_codes[2],
+    uint8_t *out_priority)
+{
+    if (in_out_packet == nullptr || out_priority == nullptr ||
+        use_transport > 1U ||
+        (use_transport != 0U && transport_codes == nullptr)) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(in_out_packet, &upstream) ||
+        upstream.getPayloadType() == PAYLOAD_TYPE_TRACE) {
+        return false;
+    }
+    upstream.header &= static_cast<uint8_t>(~PH_ROUTE_MASK);
+    if (use_transport != 0U) {
+        upstream.header |= ROUTE_TYPE_TRANSPORT_DIRECT;
+        upstream.transport_codes[0] = transport_codes[0];
+        upstream.transport_codes[1] = transport_codes[1];
+    } else {
+        upstream.header |= ROUTE_TYPE_DIRECT;
+        upstream.transport_codes[0] = 0U;
+        upstream.transport_codes[1] = 0U;
+    }
+    upstream.path_len = 0U;
+    *in_out_packet = packet_from_upstream(upstream);
+    *out_priority = 0U;
     return true;
 }

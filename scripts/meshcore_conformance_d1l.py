@@ -44,8 +44,10 @@ ORACLE_VECTORS_PATH = (
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 2
-ORACLE_COVERAGE_BOUNDARY = "pinned_upstream_packet_and_canonical_advert_data"
+ORACLE_CORPUS_VERSION = 3
+ORACLE_COVERAGE_BOUNDARY = (
+    "pinned_upstream_packet_canonical_advert_and_route_headers"
+)
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -129,7 +131,19 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "owner": "pinned_upstream",
         "semantic": True,
     },
-    {"id": "identity_signed_advert", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "direct_flood_headers",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "non_trace_direct_flood_and_zero_hop_headers",
+    },
+    {
+        "id": "identity_signed_advert",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
+    },
     {"id": "public_group_packets", "status": "pending", "owner": "unassigned"},
     {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
     {
@@ -137,7 +151,11 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
     },
-    {"id": "direct_flood_routing", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "route_selection_and_forwarding",
+        "status": "pending",
+        "owner": "unassigned",
+    },
     {
         "id": "path_return_route_codes",
         "status": "pending",
@@ -154,6 +172,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/src/Dispatcher.h",
     "third_party/MeshCore/src/Identity.h",
     "third_party/MeshCore/src/Mesh.h",
+    "third_party/MeshCore/src/Mesh.cpp",
     "third_party/MeshCore/src/MeshCore.h",
     "third_party/MeshCore/src/Packet.cpp",
     "third_party/MeshCore/src/Packet.h",
@@ -284,10 +303,10 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 8,
-        "invalid": 16,
-        "semantic": 15,
-        "total": 24,
+        "roundtrip": 15,
+        "invalid": 26,
+        "semantic": 32,
+        "total": 41,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -300,6 +319,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 15,
             "total": 15,
         },
+        "direct_flood_headers": {
+            "roundtrip": 7,
+            "invalid": 10,
+            "semantic": 17,
+            "total": 17,
+        },
     }:
         raise GateFailure("oracle vector contract drifted")
     interface = manifest.get("interface", {})
@@ -310,6 +335,12 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("reject_preserves_output") is not True
         or interface.get("crypto_available") is not False
         or interface.get("canonical_advert_data") is not True
+        or interface.get("route_header_scope")
+        != "non_trace_direct_flood_and_zero_hop_headers"
+        or interface.get("golden_vector_sources")
+        != {
+            "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
+        }
     ):
         raise GateFailure("oracle interface boundary drifted")
     required_fixtures = manifest.get("determinism", {}).get(
@@ -888,7 +919,11 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 != EXPECTED_UPSTREAM["commit"]
                 or oracle_result.get("vectors") != oracle_manifest["vectors"]
                 or oracle_result.get("capabilities")
-                != {"packet_envelope": True, "advert_data_fields": True}
+                != {
+                    "packet_envelope": True,
+                    "advert_data_fields": True,
+                    "direct_flood_headers": True,
+                }
                 or oracle_result.get("failures") != 0
             ):
                 raise GateFailure("MeshCore oracle result drifted from its fixed matrix")

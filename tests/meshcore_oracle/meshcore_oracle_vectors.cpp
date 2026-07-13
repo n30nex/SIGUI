@@ -15,6 +15,8 @@ constexpr std::size_t kPacketRoundtripVectors = 4U;
 constexpr std::size_t kPacketInvalidVectors = 5U;
 constexpr std::size_t kAdvertRoundtripVectors = 4U;
 constexpr std::size_t kAdvertInvalidVectors = 11U;
+constexpr std::size_t kRouteRoundtripVectors = 7U;
+constexpr std::size_t kRouteInvalidVectors = 10U;
 
 struct Vector {
     uint8_t header;
@@ -125,6 +127,43 @@ bool advert_matches(const d1l_meshcore_oracle_advert_data_t &advert,
            advert.name_len == vector.name.size() &&
            (vector.name.empty() ||
             std::memcmp(advert.name, vector.name.data(), vector.name.size()) == 0);
+}
+
+size_t encoded_path_bytes(uint8_t path_len)
+{
+    return static_cast<size_t>((path_len >> 6U) + 1U) * (path_len & 63U);
+}
+
+bool packets_equal(const d1l_meshcore_oracle_packet_t &left,
+                   const d1l_meshcore_oracle_packet_t &right)
+{
+    const size_t left_path_bytes = encoded_path_bytes(left.path_len);
+    return left.header == right.header &&
+           left.transport_codes[0] == right.transport_codes[0] &&
+           left.transport_codes[1] == right.transport_codes[1] &&
+           left.path_len == right.path_len &&
+           left_path_bytes == encoded_path_bytes(right.path_len) &&
+           (left_path_bytes == 0U ||
+            std::memcmp(left.path, right.path, left_path_bytes) == 0) &&
+           left.payload_len == right.payload_len &&
+           std::memcmp(left.payload, right.payload, left.payload_len) == 0;
+}
+
+d1l_meshcore_oracle_packet_t make_route_packet(uint8_t payload_type)
+{
+    d1l_meshcore_oracle_packet_t packet{};
+    packet.header = static_cast<uint8_t>((payload_type << PH_TYPE_SHIFT) |
+                                         ROUTE_TYPE_TRANSPORT_DIRECT);
+    packet.transport_codes[0] = 0xAAAAU;
+    packet.transport_codes[1] = 0x5555U;
+    packet.path_len = 0x01U;
+    packet.path[0] = 0xEEU;
+    packet.payload_len = 4U;
+    packet.payload[0] = 0x10U;
+    packet.payload[1] = 0x20U;
+    packet.payload[2] = 0x30U;
+    packet.payload[3] = 0x40U;
+    return packet;
 }
 
 }  // namespace
@@ -344,26 +383,250 @@ int main()
     invalid_advert = make_advert(advert_vectors[1]);
     expect_advert_encode_reject("undersized destination", invalid_advert, 5U);
 
+    auto check_prepared_packet =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &actual,
+                    const d1l_meshcore_oracle_packet_t &expected,
+                    uint8_t priority,
+                    uint8_t expected_priority) {
+            if (!packets_equal(actual, expected) || priority != expected_priority) {
+                failures.push_back(std::string(name) +
+                                   " route preparation mismatch");
+                return;
+            }
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!d1l_meshcore_oracle_packet_encode(
+                    &actual, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded) ||
+                !packets_equal(decoded, expected)) {
+                failures.push_back(std::string(name) +
+                                   " route packet did not round trip");
+            }
+        };
+    uint8_t priority = 0xA5U;
+    d1l_meshcore_oracle_packet_t route_packet =
+        make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    if (!d1l_meshcore_oracle_prepare_flood(&route_packet, 1U, 0U, nullptr,
+                                           &priority)) {
+        failures.push_back("plain flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x00U;
+        check_prepared_packet("plain flood", route_packet, expected, priority,
+                              1U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_PATH);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_flood(&route_packet, 2U, 0U, nullptr,
+                                           &priority)) {
+        failures.push_back("PATH flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_PATH);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x40U;
+        check_prepared_packet("PATH flood", route_packet, expected, priority,
+                              2U);
+    }
+
+    const uint16_t transport_codes[2] = {0x1234U, 0xBEEFU};
+    route_packet = make_route_packet(PAYLOAD_TYPE_ADVERT);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_flood(
+            &route_packet, 3U, 1U, transport_codes, &priority)) {
+        failures.push_back("transport advert flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ADVERT);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT) |
+            ROUTE_TYPE_TRANSPORT_FLOOD);
+        expected.transport_codes[0] = transport_codes[0];
+        expected.transport_codes[1] = transport_codes[1];
+        expected.path_len = 0x80U;
+        check_prepared_packet("transport advert flood", route_packet, expected,
+                              priority, 3U);
+    }
+
+    const std::array<uint8_t, 1> direct_path = {0x71U};
+    route_packet = make_route_packet(PAYLOAD_TYPE_ACK);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_direct(
+            &route_packet, direct_path.data(), 0x01U, &priority)) {
+        failures.push_back("direct ACK preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ACK);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x01U;
+        expected.path[0] = direct_path[0];
+        check_prepared_packet("direct ACK", route_packet, expected, priority,
+                              0U);
+    }
+
+    const std::array<uint8_t, 4> wide_direct_path = {
+        0x11U, 0x22U, 0x33U, 0x44U};
+    route_packet = make_route_packet(PAYLOAD_TYPE_PATH);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_direct(
+            &route_packet, wide_direct_path.data(), 0x42U, &priority)) {
+        failures.push_back("direct PATH preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_PATH);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x42U;
+        std::memcpy(expected.path, wide_direct_path.data(),
+                    wide_direct_path.size());
+        check_prepared_packet("direct PATH", route_packet, expected, priority,
+                              1U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_zero_hop(&route_packet, 0U, nullptr,
+                                              &priority)) {
+        failures.push_back("zero-hop direct preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x00U;
+        check_prepared_packet("zero-hop direct", route_packet, expected,
+                              priority, 0U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_ACK);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_zero_hop(
+            &route_packet, 1U, transport_codes, &priority)) {
+        failures.push_back("transport zero-hop preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ACK);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) |
+            ROUTE_TYPE_TRANSPORT_DIRECT);
+        expected.transport_codes[0] = transport_codes[0];
+        expected.transport_codes[1] = transport_codes[1];
+        expected.path_len = 0x00U;
+        check_prepared_packet("transport zero-hop", route_packet, expected,
+                              priority, 0U);
+    }
+
+    auto flood_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    uint8_t hash_size, uint8_t use_transport,
+                    const uint16_t *codes) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_flood(
+                    &packet, hash_size, use_transport, codes,
+                    &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " flood rejection mutated output");
+            }
+        };
+    flood_rejects_without_mutation("zero hash size", PAYLOAD_TYPE_ACK, 0U,
+                                   0U, nullptr);
+    flood_rejects_without_mutation("oversized hash size", PAYLOAD_TYPE_ACK,
+                                   4U, 0U, nullptr);
+    flood_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE, 1U, 0U,
+                                   nullptr);
+    flood_rejects_without_mutation("invalid transport flag", PAYLOAD_TYPE_ACK,
+                                   1U, 2U, transport_codes);
+
+    auto direct_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    const uint8_t *path, uint8_t path_len) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_direct(
+                    &packet, path, path_len, &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " direct rejection mutated output");
+            }
+        };
+    direct_rejects_without_mutation("reserved path", PAYLOAD_TYPE_ACK,
+                                    direct_path.data(), 0xC0U);
+    direct_rejects_without_mutation("null path", PAYLOAD_TYPE_ACK, nullptr,
+                                    0x01U);
+    direct_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE,
+                                    direct_path.data(), 0x01U);
+
+    auto zero_hop_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    uint8_t use_transport,
+                    const uint16_t *codes) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_zero_hop(
+                    &packet, use_transport, codes, &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " zero-hop rejection mutated output");
+            }
+        };
+    zero_hop_rejects_without_mutation("invalid transport flag",
+                                      PAYLOAD_TYPE_ACK, 2U, transport_codes);
+    zero_hop_rejects_without_mutation("missing transport codes",
+                                      PAYLOAD_TYPE_ACK, 1U, nullptr);
+    zero_hop_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE, 0U,
+                                      nullptr);
+
     const bool passed = failures.empty();
     for (const std::string &failure : failures) {
         std::cerr << failure << '\n';
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_and_canonical_advert_data\""
+                 "\"pinned_upstream_packet_canonical_advert_and_route_headers\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
-              << (kPacketRoundtripVectors + kAdvertRoundtripVectors)
+              << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
+                  kRouteRoundtripVectors)
               << ",\"invalid\":"
-              << (kPacketInvalidVectors + kAdvertInvalidVectors)
+              << (kPacketInvalidVectors + kAdvertInvalidVectors +
+                  kRouteInvalidVectors)
               << ",\"semantic\":"
-              << (kAdvertRoundtripVectors + kAdvertInvalidVectors)
+              << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kRouteRoundtripVectors + kRouteInvalidVectors)
               << ",\"total\":"
               << (kPacketRoundtripVectors + kPacketInvalidVectors +
-                  kAdvertRoundtripVectors + kAdvertInvalidVectors)
+                  kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kRouteRoundtripVectors + kRouteInvalidVectors)
               << ",\"packet_envelope\":{\"roundtrip\":"
               << kPacketRoundtripVectors << ",\"invalid\":"
               << kPacketInvalidVectors << ",\"semantic\":0,\"total\":"
@@ -373,9 +636,16 @@ int main()
               << kAdvertInvalidVectors << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors)
               << ",\"total\":"
-              << (kAdvertRoundtripVectors + kAdvertInvalidVectors) << "}}"
+              << (kAdvertRoundtripVectors + kAdvertInvalidVectors) << "}"
+              << ",\"direct_flood_headers\":{\"roundtrip\":"
+              << kRouteRoundtripVectors << ",\"invalid\":"
+              << kRouteInvalidVectors << ",\"semantic\":"
+              << (kRouteRoundtripVectors + kRouteInvalidVectors)
+              << ",\"total\":"
+              << (kRouteRoundtripVectors + kRouteInvalidVectors) << "}}"
               << ",\"capabilities\":{\"packet_envelope\":true"
-              << ",\"advert_data_fields\":true}"
+              << ",\"advert_data_fields\":true"
+              << ",\"direct_flood_headers\":true}"
               << ",\"failures\":" << failures.size() << "}\n";
     return passed ? 0 : 1;
 }

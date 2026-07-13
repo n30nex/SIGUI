@@ -87,6 +87,30 @@ bool d1l_meshcore_oracle_advert_data_encode(
     size_t dest_capacity,
     size_t *out_len);
 
+/*
+ * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp
+ * sendFlood/sendDirect/sendZeroHop rules. These return header/path/priority
+ * semantics only; they do not claim queue timing or forwarding behavior.
+ */
+bool d1l_meshcore_oracle_prepare_flood(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    uint8_t path_hash_size,
+    uint8_t use_transport,
+    const uint16_t transport_codes[2],
+    uint8_t *out_priority);
+
+bool d1l_meshcore_oracle_prepare_direct(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    const uint8_t *path,
+    uint8_t path_len,
+    uint8_t *out_priority);
+
+bool d1l_meshcore_oracle_prepare_zero_hop(
+    d1l_meshcore_oracle_packet_t *in_out_packet,
+    uint8_t use_transport,
+    const uint16_t transport_codes[2],
+    uint8_t *out_priority);
+
 #ifdef __cplusplus
 }
 #endif

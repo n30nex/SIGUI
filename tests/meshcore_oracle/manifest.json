@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 2,
+  "corpus_version": 3,
   "abi_version": 1,
-  "coverage_boundary": "pinned_upstream_packet_and_canonical_advert_data",
+  "coverage_boundary": "pinned_upstream_packet_canonical_advert_and_route_headers",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -11,6 +11,7 @@
     "sources": {
       "third_party/MeshCore/src/Dispatcher.h": "70eef11430c3aebb86e4e329978744bf20e8138ac27053045ad11aa7fc2a47bf",
       "third_party/MeshCore/src/Identity.h": "d5ec3c37606c636776571419282d845f2bcc1f3996b271eb4141558eaf0a15fc",
+      "third_party/MeshCore/src/Mesh.cpp": "e39aa2ca27cc4d6b1d19c43aeccb5915098aeb5b6a5fc9be98d9fa557a54fd7e",
       "third_party/MeshCore/src/Mesh.h": "98c1f1a2261f30fbc619dcc0209adc4e79e65a063bc807d3c01c654ccf997714",
       "third_party/MeshCore/src/MeshCore.h": "51d93fe4c18608efa827625639a68721cedd9c15a83d55e3b86629cd5710ba8a",
       "third_party/MeshCore/src/Packet.cpp": "6f401a4abe57b67aae6ce54172a8cd5cfa64f801c2186894d4bf28aaf30b52e0",
@@ -22,9 +23,9 @@
   },
   "oracle_sources": {
     "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "249c298952ff24f6d7679b709f644026e95f5febb9299e76a876df2f777db185",
-    "tests/meshcore_oracle/meshcore_oracle.h": "9ca0f5c5914b14a610e4eb48c0d8ba0239741fdf92aea6878578570e47016be9",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "22ddebd09099ececd3ab3dc0b419475f9c6923f3c7c76efc226075e8ae416d6f",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "658904b264fe0298aec3497d0005229d96dadd94f581c2a69d35989801cf6d06",
+    "tests/meshcore_oracle/meshcore_oracle.h": "270329383d47113083abaaacaa1e7d8c36c0bfa996da38979e7104bc7be9159b",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "1596c9d426e5411364dc5572b75a12f450484c073d23b34e3e8478f3108d56bd",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/Stream.h": "2232859dc0f15bfe02267eaa405c3da8d525c32d008b96401daffbd3f4d9ea90"
   },
@@ -39,7 +40,11 @@
     ],
     "reject_preserves_output": true,
     "crypto_available": false,
-    "canonical_advert_data": true
+    "canonical_advert_data": true,
+    "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
+    "golden_vector_sources": {
+      "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp"
+    }
   },
   "determinism": {
     "current_vectors": "fixed_bytes_no_rng_clock_or_keys",
@@ -55,10 +60,10 @@
     ]
   },
   "vectors": {
-    "roundtrip": 8,
-    "invalid": 16,
-    "semantic": 15,
-    "total": 24,
+    "roundtrip": 15,
+    "invalid": 26,
+    "semantic": 32,
+    "total": 41,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -70,6 +75,12 @@
       "invalid": 11,
       "semantic": 15,
       "total": 15
+    },
+    "direct_flood_headers": {
+      "roundtrip": 7,
+      "invalid": 10,
+      "semantic": 17,
+      "total": 17
     }
   },
   "capabilities": [
@@ -86,9 +97,17 @@
       "semantic": true
     },
     {
+      "id": "direct_flood_headers",
+      "status": "implemented",
+      "owner": "pinned_source_golden_vectors",
+      "semantic": true,
+      "scope": "non_trace_direct_flood_and_zero_hop_headers"
+    },
+    {
       "id": "identity_signed_advert",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture"
     },
     {
       "id": "public_group_packets",
@@ -106,7 +125,7 @@
       "owner": "unassigned"
     },
     {
-      "id": "direct_flood_routing",
+      "id": "route_selection_and_forwarding",
       "status": "pending",
       "owner": "unassigned"
     },
@@ -130,6 +149,9 @@
     "direct_upstream_reuse": [
       "packet envelope encode/decode through mesh::Packet",
       "canonical advert app-data fields through AdvertDataBuilder and AdvertDataParser"
+    ],
+    "pinned_source_golden_vectors": [
+      "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

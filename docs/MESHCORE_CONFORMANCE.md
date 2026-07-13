@@ -35,28 +35,36 @@ cryptographic oracles because they do not implement production cryptography.
 
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 1 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
-`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 2 static
+`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 3 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
 field capability adds four canonical round trips and eleven invalid-boundary
 vectors covering type, location, feature fields, name, truncation, and
-reject-without-output-mutation behavior. The `meshcore-conformance` job builds
-and runs this as a separate sanitized host target and emits
+reject-without-output-mutation behavior. Seven direct, flood, transport, and
+zero-hop preparation round trips plus ten rejects are golden-bound to the
+pinned `Mesh.cpp` header/path/priority rules. Non-transport results explicitly
+clear ignored transport fields so every accepted C-ABI result has a canonical
+wire round trip. The `meshcore-conformance` job builds and runs this as a
+separate sanitized host target and emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
 report.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
-is `pinned_upstream_packet_and_canonical_advert_data`; the advert vectors cover
-only canonical application fields, not a complete signed Mesh advert. Identity
-public keys, signatures, timestamped advert packets and dispatch remain in the
-separate pending `identity_signed_advert` capability. Public and DM semantics,
-production encryption/decryption, ACK/PATH/route/trace behavior, and
-login/admin flows also remain pending, so both `wp04_closure_eligible` and
-`closure_ready` remain false. Those stages require deterministic radio, RNG,
-RTC, millisecond-clock, packet manager, mesh-table, contact, and channel
-fixtures; they must extend the versioned manifest instead of silently widening
-what this artifact claims.
+is `pinned_upstream_packet_canonical_advert_and_route_headers`; the advert
+vectors cover only canonical application fields, not a complete signed Mesh
+advert. The pinned repository does not vendor the production
+`Ed25519::verify` implementation used by `Identity.cpp`, and signed advert
+dispatch remains inside `Mesh`, so `identity_signed_advert` stays pending with
+that blocker recorded in the manifest. The route-header capability likewise
+does not claim queue timing, route selection, retransmission, or forwarding;
+those remain `route_selection_and_forwarding`. Public and DM semantics,
+production encryption/decryption, ACK/PATH/trace behavior, and login/admin
+flows also remain pending, so both `wp04_closure_eligible` and `closure_ready`
+remain false. Those stages require deterministic radio, RNG, RTC,
+millisecond-clock, packet manager, mesh-table, contact, and channel fixtures;
+they must extend the versioned manifest instead of silently widening what this
+artifact claims.
 
 ## What This Slice Covers
 

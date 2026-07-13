@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 ORACLE_ROOT = ROOT / "tests" / "meshcore_oracle"
 MANIFEST = ORACLE_ROOT / "manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
-BOUNDARY = "pinned_upstream_packet_and_canonical_advert_data"
+BOUNDARY = "pinned_upstream_packet_canonical_advert_and_route_headers"
 
 
 def canonical_lf_sha256(path: Path) -> str:
@@ -37,7 +37,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 2
+    assert manifest["corpus_version"] == 3
     assert manifest["abi_version"] == 1
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -54,12 +54,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "reject_preserves_output": True,
         "crypto_available": False,
         "canonical_advert_data": True,
+        "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
+        "golden_vector_sources": {
+            "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
+        },
     }
     assert manifest["vectors"] == {
-        "roundtrip": 8,
-        "invalid": 16,
-        "semantic": 15,
-        "total": 24,
+        "roundtrip": 15,
+        "invalid": 26,
+        "semantic": 32,
+        "total": 41,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -71,6 +75,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 11,
             "semantic": 15,
             "total": 15,
+        },
+        "direct_flood_headers": {
+            "roundtrip": 7,
+            "invalid": 10,
+            "semantic": 17,
+            "total": 17,
         },
     }
     assert manifest["capabilities"][0] == {
@@ -85,18 +95,31 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "owner": "pinned_upstream",
         "semantic": True,
     }
+    assert manifest["capabilities"][2] == {
+        "id": "direct_flood_headers",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "non_trace_direct_flood_and_zero_hop_headers",
+    }
+    assert manifest["capabilities"][3] == {
+        "id": "identity_signed_advert",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
+    }
     assert all(
         capability["status"] == "pending"
-        for capability in manifest["capabilities"][2:]
+        for capability in manifest["capabilities"][3:]
     )
     assert [
-        capability["id"] for capability in manifest["capabilities"][2:]
+        capability["id"] for capability in manifest["capabilities"][3:]
     ] == [
         "identity_signed_advert",
         "public_group_packets",
         "dm_encrypt_decrypt",
         "ack_multiack_ack_path",
-        "direct_flood_routing",
+        "route_selection_and_forwarding",
         "path_return_route_codes",
         "trace_path_discovery",
         "login_request_response_admin",
@@ -125,6 +148,11 @@ def test_oracle_c_abi_wraps_only_pinned_upstream_protocol_helpers():
     assert "advert_layout_is_canonical" in adapter
     assert "d1l_meshcore_oracle_advert_data_decode" in header
     assert "d1l_meshcore_oracle_advert_data_encode" in header
+    assert "d1l_meshcore_oracle_prepare_flood" in header
+    assert "d1l_meshcore_oracle_prepare_direct" in header
+    assert "d1l_meshcore_oracle_prepare_zero_hop" in header
+    assert "mesh::Packet::copyPath" in adapter
+    assert "PAYLOAD_TYPE_TRACE" in adapter
     assert "main/mesh" not in adapter
     assert "Identity" not in adapter
     assert "Dispatcher" not in adapter
@@ -185,6 +213,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert len(artifact["pending_capabilities"]) == 8
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
+    assert "direct_flood_headers" not in artifact["pending_capabilities"]
 
 
 def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
@@ -240,10 +269,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 1,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 8,
-            "invalid": 16,
-            "semantic": 15,
-            "total": 24,
+            "roundtrip": 15,
+            "invalid": 26,
+            "semantic": 32,
+            "total": 41,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -256,10 +285,17 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 15,
                 "total": 15,
             },
+            "direct_flood_headers": {
+                "roundtrip": 7,
+                "invalid": 10,
+                "semantic": 17,
+                "total": 17,
+            },
         },
         "capabilities": {
             "packet_envelope": True,
             "advert_data_fields": True,
+            "direct_flood_headers": True,
         },
         "failures": 0,
     }
