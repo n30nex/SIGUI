@@ -4,15 +4,17 @@ This is the active production roadmap. The release definition and blocker analys
 
 Release status: the current audit remains `ready_for_public_release=false`. `scripts/release_gate_audit_d1l.py` must report `ready_for_public_release=true` for the exact release commit before tagging. No release tag should be cut until that exact-commit audit is green, regardless of older evidence or individually passing branches.
 
+Execution checkpoint: WP-00 is merged on `main` at `157c9670eb43a0119280f1e8119d9584b06dcfbf`; exact-main Actions run `29208908642` and the downloaded completion-ledger receipt are green. [COMPLETION_LEDGER.yaml](COMPLETION_LEDGER.yaml) remains the machine-readable execution source, with [COMPLETION_STATUS.md](COMPLETION_STATUS.md) as its generated view. This does not advance WP-01, which remains `in_progress`, `proof_banked=false`, and unmerged.
+
 ## Frozen 1.0 Product Contract
 
 DeskOS D1L 1.0 is a standalone, touch-first, non-forwarding MeshCore client that a normal user can operate without a serial console.
 
 - Core release workflows are persistent identity and adverts, Public messaging, direct messaging with truthful delivery state, contacts, heard-node discovery, channels, route discovery/fallback, real trace/path diagnostics, authenticated repeater/room administration, radio settings, retained state, and recovery.
 - The 1.0 target is multi-channel. A single hard-coded Public channel is not full 1.0; narrowing that scope requires an explicit product decision, matching UI removal, and release-note language rather than a silent waiver.
-- Map ships in 1.0. It uses built-in OpenStreetMap Standard with a deterministic local dark render style, an explicit user-set center, a regional zoom-10 default, user-controlled zooms 8 through 14, one-finger pan, direct `-`/`+`/`Center` controls, and at most one visible current-view 3x3 plan at one zoom per visible generation. Passive signed peer-advert coordinates appear as bounded bright node markers with readable names below them; they are labelled as advert locations, never as live GPS. Completed exact-view Home-to-Map revisits use the retained rendered frame without network or SD reread; SD tile cache supplies reboot/later-session reuse. Visible attribution remains mandatory, with no provider/key/source editor, background download, multi-zoom prefetch, off-screen batch, area download, or device-side SD formatting.
+- Map ships in 1.0. It uses built-in OpenStreetMap Standard with a deterministic local dark render style, an explicit user-set center, a regional zoom-10 default, user-controlled zooms 8 through 14, one-finger pan, direct `-`/`+`/`Center` controls, and at most one visible current-view 3x3 plan at one zoom per visible generation. Passive signed peer-advert coordinates appear as bounded bright node markers with readable names below them; they are labelled as advert locations, never as live GPS. Completed exact-view Home-to-Map revisits use the retained rendered frame without network or SD reread; SD tile cache supplies reboot/later-session reuse. Visible attribution remains mandatory, with no provider/key/source editor, background download, multi-zoom prefetch, off-screen batch, area download, or device-side SD formatting. PRs #62/#64 supply this bounded current-view Map foundation; full live provider/cache/fetch/render/cancel/revisit qualification remains WP-19 and is not closed by landing the stack.
 - DeskOS 1.0 uses a simple user-facing hierarchy: Messages opens two large Public and Direct-message destinations before chat-style conversation pages; Network is renamed Nodes and shows truthful heard/type totals plus a scan-friendly node list; More is renamed Tools/Settings; the bottom dock is compact and icon-led; and Home device state is a compact evidence-backed icon row rather than a dense status block. These requirements are tracked by #74, #75, and #76.
-- Rooms and Repeaters remain read-only observed/inferred inspectors until authenticated administration is implemented, but compatible repeater and room-server login, status, command, and settings flows are now required for 1.0 under #77. Unsupported or unauthenticated actions stay absent rather than appearing as dead controls.
+- Rooms and Repeaters remain read-only observed/inferred inspectors until authenticated administration is implemented, but compatible repeater and room-server login, status, command, and settings flows remain mandatory for Stable Core under WP-18/#77. Unsupported or unauthenticated actions stay absent rather than appearing as dead controls.
 - D1L has no onboard GPS and DeskOS does not expose or claim local GPS support. BLE companion and OTA are not 1.0 release claims; each remains absent/disabled until explicitly implemented and release-tested.
 - Every enabled action must complete end to end or return an honest, actionable error. A working-looking dead end is a release defect.
 - Persisted invalid settings, missing radio/RP2040, failed Wi-Fi, no/bad SD media, and upgrade state must never cause a permanent boot loop.
@@ -144,6 +146,8 @@ The detailed requirements are in the audit's P0.1-P0.20 ledger. The groups below
 | Frozen release qualification | P0.20 | #8, #71 | Current physical review, full RF, SD/electrical, idle and active soaks, package audit, and exact-tag gate are green. |
 
 ## Immediate Work Queue
+
+Before advancing this queue, close WP-01 from a clean exact-pair evidence window; it remains `in_progress`, `proof_banked=false`, and unmerged.
 
 1. Preserve `727bd23` as the bounded hardware-tested Stage 2 platform base,
    not a Stage 2 closure claim. Its Actions run, checksums, ESP32/RP2040
