@@ -125,6 +125,7 @@ def write_fake_notices(root: Path) -> None:
         "scripts/package_release_d1l.py": "# package fixture\n",
         "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",
+        "scripts/verify_arduino_build_inputs.py": "# Arduino input verifier fixture\n",
         "sdkconfig.defaults": "CONFIG_IDF_TARGET=\"esp32s3\"\n",
     }
     for relative, contents in source_inputs.items():

@@ -66,6 +66,7 @@ REQUIRED_SOURCE_INPUTS = (
     "scripts/package_release_d1l.py",
     "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
+    "scripts/verify_arduino_build_inputs.py",
     "sdkconfig.defaults",
 )
 

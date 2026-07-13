@@ -258,13 +258,22 @@ jobs:
 
       - uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2.0.0
         with:
-          version: 1.x
+          version: "1.5.0"
 
       - name: Install RP2040 Arduino core
         shell: bash
         run: |
+          mkdir -p artifacts/rp2040-sd-bridge
           arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
+          arduino-cli core download rp2040:rp2040@5.6.1
+          arduino_cli_version="$(arduino-cli version | sed -n 's/^arduino-cli[[:space:]]\+Version:[[:space:]]\+\([^[:space:]]\+\).*$/\1/p')"
+          test -n "$arduino_cli_version"
+          python scripts/verify_arduino_build_inputs.py \
+            --root . \
+            --arduino-data-dir "$HOME/.arduino15" \
+            --arduino-cli-version "$arduino_cli_version" \
+            --out artifacts/rp2040-sd-bridge/build-inputs.json
           arduino-cli core install rp2040:rp2040@5.6.1
 
       - name: Disable unused SdFat PIO SDIO serial debug
