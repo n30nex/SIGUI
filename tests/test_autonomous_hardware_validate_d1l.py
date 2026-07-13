@@ -199,6 +199,95 @@ def test_console_summary_bounds_untrusted_text_and_missing_runs():
     assert summary["report"].endswith("...")
 
 
+def test_validation_runs_ok_accepts_only_recovered_bridge_retry_chain():
+    runs = [
+        {"kind": "input_artifact_check", "ok": True},
+        {
+            "kind": "rp2040_bridge_restore",
+            "phase": "post_diag",
+            "attempt": 1,
+            "ok": False,
+        },
+        {
+            "kind": "rp2040_bridge_restore",
+            "phase": "post_diag",
+            "attempt": 2,
+            "ok": True,
+        },
+        {"kind": "d1l_smoke", "ok": True},
+        {"kind": "release_gate_audit", "ok": True},
+    ]
+
+    assert runner.validation_runs_ok(runs) is True
+
+
+@pytest.mark.parametrize(
+    "bridge_attempts",
+    [
+        [{"attempt": 1, "ok": False}],
+        [{"attempt": 1, "ok": False}, {"attempt": 2, "ok": False}],
+        [{"attempt": 2, "ok": True}],
+        [{"attempt": 1, "ok": True}, {"attempt": 2, "ok": True}],
+        [{"attempt": 1, "ok": False}, {"attempt": 3, "ok": True}],
+    ],
+)
+def test_validation_runs_ok_rejects_exhausted_or_malformed_bridge_retries(
+    bridge_attempts,
+):
+    runs = [
+        {
+            "kind": "rp2040_bridge_restore",
+            "phase": "post_diag",
+            **attempt,
+        }
+        for attempt in bridge_attempts
+    ]
+
+    assert runner.validation_runs_ok(runs) is False
+
+
+def test_validation_runs_ok_rejects_noncontiguous_or_mismatched_retry():
+    attempt_one = {
+        "kind": "rp2040_bridge_restore",
+        "phase": "post_diag",
+        "attempt": 1,
+        "ok": False,
+    }
+    attempt_two = {
+        "kind": "rp2040_bridge_restore",
+        "phase": "post_diag",
+        "attempt": 2,
+        "ok": True,
+    }
+
+    assert runner.validation_runs_ok(
+        [attempt_one, {"kind": "d1l_smoke", "ok": True}, attempt_two]
+    ) is False
+    assert runner.validation_runs_ok(
+        [attempt_one, {**attempt_two, "phase": "pre_diag"}]
+    ) is False
+
+
+def test_validation_runs_ok_does_not_hide_unrelated_failure():
+    runs = [
+        {
+            "kind": "rp2040_bridge_restore",
+            "phase": "post_diag",
+            "attempt": 1,
+            "ok": False,
+        },
+        {
+            "kind": "rp2040_bridge_restore",
+            "phase": "post_diag",
+            "attempt": 2,
+            "ok": True,
+        },
+        {"kind": "sd_reboot_remount", "ok": False},
+    ]
+
+    assert runner.validation_runs_ok(runs) is False
+
+
 def write_actions_provenance_fixture(
     run_dir: Path,
     *,
@@ -1687,6 +1776,21 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "verify_inputs", lambda ctx, args, allow_download, dry_run: ok_step("input_artifact_check"))
     patch_diag_isolation_runners(monkeypatch, ok_step)
+    restore_calls = {}
+
+    def restore_with_transient_post_diag_failure(
+        ctx, volume, uf2_timeout, dry_run, phase="initial"
+    ):
+        restore_calls[phase] = restore_calls.get(phase, 0) + 1
+        return {
+            **ok_step("rp2040_bridge_restore"),
+            "phase": phase,
+            "ok": phase != "post_diag" or restore_calls[phase] == 2,
+        }
+
+    monkeypatch.setattr(
+        runner, "restore_bridge", restore_with_transient_post_diag_failure
+    )
     monkeypatch.setattr(runner, "rp2040_access_precheck", lambda ctx, dry_run: ok_step("rp2040_autonomous_access_precheck"))
     monkeypatch.setattr(runner, "run_sd_file_canary", lambda ctx, dry_run: ok_step("sd_file_canary"))
     patch_sd_evidence_runners(monkeypatch, ok_step)
@@ -1705,8 +1809,18 @@ def test_completed_validation_surfaces_release_not_ready(tmp_path, monkeypatch):
     )
 
     report = runner.run_validation(args)
+    post_diag_attempts = [
+        step
+        for step in report["runs"]
+        if step.get("kind") == "rp2040_bridge_restore"
+        and step.get("phase") == "post_diag"
+    ]
 
     assert report["ok"] is True
+    assert [(step["attempt"], step["ok"]) for step in post_diag_attempts] == [
+        (1, False),
+        (2, True),
+    ]
     assert report["ready_for_public_release"] is False
     assert report["release_ready"] is False
     assert report["release_gate"]["p0_failed_count"] == 2

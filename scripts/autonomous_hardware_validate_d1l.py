@@ -2409,6 +2409,45 @@ def attach_release_gate_summary(report: dict, runs: list[dict]) -> dict:
     return summary
 
 
+def validation_runs_ok(runs: list[dict]) -> bool:
+    """Reduce bounded bridge retries to their terminal logical outcome."""
+    seen_bridge_phases: set[str] = set()
+    index = 0
+    while index < len(runs):
+        step = runs[index]
+        if step.get("kind") == "release_gate_audit":
+            index += 1
+            continue
+        if step.get("kind") == "rp2040_bridge_restore" and "attempt" in step:
+            phase = step.get("phase")
+            attempt = step.get("attempt")
+            if not isinstance(phase, str) or not phase or phase in seen_bridge_phases:
+                return False
+            if attempt != 1 or isinstance(attempt, bool):
+                return False
+            seen_bridge_phases.add(phase)
+            if step.get("ok") is True:
+                index += 1
+                continue
+            if index + 1 >= len(runs):
+                return False
+            retry = runs[index + 1]
+            if (
+                retry.get("kind") != "rp2040_bridge_restore"
+                or retry.get("phase") != phase
+                or retry.get("attempt") != 2
+                or isinstance(retry.get("attempt"), bool)
+                or retry.get("ok") is not True
+            ):
+                return False
+            index += 2
+            continue
+        if step.get("ok") is not True:
+            return False
+        index += 1
+    return True
+
+
 def run_bridge_restore_with_retry(ctx: RunContext, args: argparse.Namespace,
                                   runs: list[dict], *, phase: str) -> dict:
     last_report: dict[str, Any] = {}
@@ -2885,7 +2924,7 @@ def run_validation(args: argparse.Namespace) -> dict:
         report["error"] = str(exc)
         report["ok"] = False
     else:
-        report["ok"] = all(step.get("ok") is True for step in runs if step.get("kind") != "release_gate_audit")
+        report["ok"] = validation_runs_ok(runs)
         attach_release_gate_summary(report, runs)
     return report
 
