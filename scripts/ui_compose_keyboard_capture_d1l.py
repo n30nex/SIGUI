@@ -29,7 +29,6 @@ ALL_TARGETS = [
     "contact-edit",
     "onboarding",
     "map-location",
-    "map-provider",
     "wifi-ssid",
     "wifi-password",
 ]
@@ -98,6 +97,8 @@ def dry_run_report(targets: list[str], chunk_size: int) -> dict[str, Any]:
         "pixel_format": "rgb565-le",
         "chunk_size": min(chunk_size, MAX_CHUNK_BYTES),
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
         "formats_sd": False,
     }
 
@@ -151,6 +152,8 @@ def capture_target(
         "raw_path": frame.get("raw_path"),
         "target_visible": target_visible,
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
         "formats_sd": False,
     }
 
@@ -180,6 +183,8 @@ def capture_all(
         "captures": captures,
         "capture_count": len(captures),
         "public_rf_tx": False,
+        "network_tx": False,
+        "map_network_requests": False,
         "formats_sd": False,
     }
 

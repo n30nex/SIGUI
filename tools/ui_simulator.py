@@ -47,7 +47,16 @@ CONTACT_HIERARCHY_VIEWS = frozenset(
 )
 MESH_ROLE_VIEWS = frozenset({"mesh_roles_sheet", "mesh_rooms_page", "mesh_repeaters_page"})
 STORAGE_HIERARCHY_VIEWS = frozenset({"storage_setup_sheet", "storage_card_page", "storage_data_page"})
+MAP_HIERARCHY_VIEWS = frozenset(
+    {
+        "map_options",
+        "map_location",
+        "map_cache",
+    }
+)
 STORAGE_SAFETY_COPY = "FAT32 only - This device never formats cards."
+MAP_ATTRIBUTION = "(c) OpenStreetMap contributors"
+MAP_POLICY = "Visible current-view 3x3 · one zoom · cache/reuse"
 
 BG = (8, 13, 20)
 SURFACE = (20, 28, 40)
@@ -146,14 +155,16 @@ class Snapshot:
     map_tile_download_supported: bool
     map_tile_render_supported: bool
     map_tile_sideload_supported: bool
-    map_tile_provider_saved: bool
-    map_tile_url_template: str
-    map_tile_attribution: str
     map_tile_zoom: int
     map_location_set: bool
     map_lat_e7: int
     map_lon_e7: int
     map_center_source: str
+    wifi_enabled: bool = False
+    wifi_connecting: bool = False
+    wifi_connected: bool = False
+    map_cached_tile_count: int = 0
+    map_visible_tile_count: int = 9
 
 
 def sample_snapshot() -> Snapshot:
@@ -216,16 +227,13 @@ def sample_snapshot() -> Snapshot:
         map_tile_backend="unavailable",
         export_backend="serial",
         map_tile_cache_ready=False,
-        map_tile_cache_policy="sd_offline_cache_when_ready",
+        map_tile_cache_policy="active_map_visible_3x3_one_zoom_cache_reuse",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
-        map_tile_download_state="provider_required",
-        map_tile_download_requires="Connected Wi-Fi, ready SD cache, saved location, allowed provider, attribution, and tile rendering proof",
+        map_tile_download_state="location_required",
+        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at one zoom",
         map_tile_download_supported=False,
         map_tile_render_supported=False,
         map_tile_sideload_supported=True,
-        map_tile_provider_saved=False,
-        map_tile_url_template="",
-        map_tile_attribution="",
         map_tile_zoom=12,
         map_location_set=False,
         map_lat_e7=0,
@@ -335,16 +343,13 @@ def large_mesh_snapshot() -> Snapshot:
         map_tile_backend="unavailable",
         export_backend="serial",
         map_tile_cache_ready=False,
-        map_tile_cache_policy="sd_offline_cache_when_ready",
+        map_tile_cache_policy="active_map_visible_3x3_one_zoom_cache_reuse",
         map_tile_cache_path_template="map/tiles/z{z}/x{x}/y{y}.tile",
-        map_tile_download_state="provider_required",
-        map_tile_download_requires="Connected Wi-Fi, ready SD cache, saved location, allowed provider, attribution, and tile rendering proof",
+        map_tile_download_state="location_required",
+        map_tile_download_requires="Saved location, connected Wi-Fi, and the actual Map visible; at most the current-view 3x3 at one zoom",
         map_tile_download_supported=False,
         map_tile_render_supported=False,
         map_tile_sideload_supported=True,
-        map_tile_provider_saved=False,
-        map_tile_url_template="",
-        map_tile_attribution="",
         map_tile_zoom=12,
         map_location_set=False,
         map_lat_e7=0,
@@ -453,7 +458,7 @@ def storage_ready_map_tiles_sd_snapshot() -> Snapshot:
         map_tile_cache_ready=True,
         map_tile_download_supported=False,
         map_tile_render_supported=False,
-        map_tile_download_state="tile_render_pending",
+        map_tile_download_state="active_map_required",
     )
 
 
@@ -507,6 +512,52 @@ def manual_location_snapshot() -> Snapshot:
     )
 
 
+def map_location_wifi_off_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_map_tiles_sd_snapshot(),
+        map_location_set=True,
+        map_lat_e7=436532000,
+        map_lon_e7=-793832000,
+        map_center_source="manual",
+        map_tile_download_state="wifi_required",
+    )
+
+
+def map_wifi_connecting_snapshot() -> Snapshot:
+    return replace(
+        map_location_wifi_off_snapshot(),
+        wifi_enabled=True,
+        wifi_connecting=True,
+        map_tile_download_state="wifi_connecting",
+    )
+
+
+def map_ready_snapshot() -> Snapshot:
+    return replace(
+        storage_ready_map_tiles_sd_snapshot(),
+        map_location_set=True,
+        map_lat_e7=436532000,
+        map_lon_e7=-793832000,
+        map_center_source="manual",
+        wifi_enabled=True,
+        wifi_connected=True,
+        map_tile_download_supported=True,
+        map_tile_render_supported=True,
+        map_tile_download_state="active_view_ready",
+        map_cached_tile_count=9,
+    )
+
+
+def map_cached_revisit_snapshot() -> Snapshot:
+    return replace(
+        map_ready_snapshot(),
+        wifi_enabled=False,
+        wifi_connected=False,
+        map_tile_download_supported=False,
+        map_tile_download_state="cache_reuse",
+    )
+
+
 SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "default": sample_snapshot,
     "large-mesh": large_mesh_snapshot,
@@ -526,6 +577,10 @@ SCENARIOS: dict[str, Callable[[], Snapshot]] = {
     "storage-media-error": storage_media_error_snapshot,
     "storage-bridge-reported": storage_bridge_reported_snapshot,
     "manual-location": manual_location_snapshot,
+    "map-location-wifi-off": map_location_wifi_off_snapshot,
+    "map-wifi-connecting": map_wifi_connecting_snapshot,
+    "map-ready": map_ready_snapshot,
+    "map-cached-revisit": map_cached_revisit_snapshot,
 }
 
 
@@ -712,6 +767,7 @@ class Surface:
         color: tuple[int, int, int] = TEXT,
         bold: bool = False,
         line_height: int | None = None,
+        align: str = "left",
     ) -> tuple[int, int]:
         """Draw every word in a bounded multiline box and report lines/end y."""
 
@@ -736,7 +792,7 @@ class Surface:
         drawn_lines = lines[:available_lines]
         for index, line in enumerate(drawn_lines):
             line_y = y0 + index * step
-            self.text(line, (x0, line_y, x1, line_y + step), size, color, bold)
+            self.text(line, (x0, line_y, x1, line_y + step), size, color, bold, align)
         if label not in self.labels:
             self.labels.append(label)
         if len(lines) > available_lines:
@@ -1004,7 +1060,8 @@ def draw_top_bar(s: Surface, snap: Snapshot, *, compact: bool = False):
     s.text("MeshCore DeskOS", (16, 8, 190, 30), 18, TEXT, True)
     s.text(snap.node_name, (16, 30, 150, 49), 12, MUTED)
     s.text(f"--:--  Mesh {snap.mesh_state}", (202, 10, 464, 28), 12, ACCENT, True, "right")
-    s.text(f"Wi-Fi off  BLE off  SD {storage_menu_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
+    wifi_state = "connected" if snap.wifi_connected else ("connecting" if snap.wifi_connecting else "off")
+    s.text(f"Wi-Fi {wifi_state}  BLE off  SD {storage_menu_status(snap)}", (202, 31, 464, 49), 11, MUTED, align="right")
     s.line(((0, TOP_BAR_H), (WIDTH, TOP_BAR_H)))
 
 
@@ -1392,6 +1449,15 @@ def draw_row(
 
 
 def draw_home_body(s: Surface, snap: Snapshot):
+    if not snap.map_location_set:
+        map_status, map_color = "Set a location", ACCENT
+    elif not snap.map_tile_cache_ready:
+        map_status, map_color = "Needs SD", AMBER
+    elif not snap.wifi_connected:
+        map_status, map_color = "Needs Wi-Fi", AMBER
+    else:
+        map_status, map_color = "Ready to open", GREEN
+
     tiles = (
         (
             (12, 16, 234, 156),
@@ -1417,9 +1483,9 @@ def draw_home_body(s: Surface, snap: Snapshot):
             (12, 164, 234, 304),
             "map",
             "Map",
-            "Location, routes, and offline maps",
-            "Offline maps ready" if snap.map_tile_cache_ready else "Set up offline maps",
-            GREEN if snap.map_tile_cache_ready else ACCENT,
+            "Location and local map",
+            map_status,
+            map_color,
             "open_map",
             "map",
         ),
@@ -1632,68 +1698,104 @@ def render_nodes(s: Surface, snap: Snapshot):
     draw_dock(s, "Nodes")
 
 
+def draw_map_page_header(
+    s: Surface,
+    snap: Snapshot,
+    title: str,
+    subtitle: str,
+    *,
+    back_action: str,
+    back_destination: str,
+    back_label: str = "Back",
+):
+    draw_top_bar(s, snap)
+    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (10, 17, 25))
+    back_right = 136 if back_label == "Back to Map" else 96
+    title_left = back_right + 16
+    draw_button(s, (16, 64, back_right, 108), back_label, MUTED, action=back_action, destination=back_destination)
+    s.text(title, (title_left, 62, 464, 90), 22, TEXT, True)
+    s.text(subtitle, (title_left, 90, 464, 112), 12, MUTED)
+
+
+def map_wifi_status(snap: Snapshot) -> tuple[str, tuple[int, int, int]]:
+    if snap.wifi_connected:
+        return ("Connected", GREEN)
+    if snap.wifi_connecting:
+        return ("Connecting", AMBER)
+    return ("Off", MUTED)
+
+
+def map_view_status(snap: Snapshot) -> tuple[str, str, tuple[int, int, int]]:
+    """Return the same calm empty-state copy used by the firmware viewport."""
+
+    if not snap.map_location_set:
+        return ("Set a location", "Open Options to choose the area shown here.", AMBER)
+    if not snap.map_tile_cache_ready:
+        return ("SD card needed", "Map tiles are kept on a ready FAT32 card.", AMBER)
+    if snap.wifi_connecting:
+        return ("Connecting to Wi-Fi", "Connect Wi-Fi to load this local map area.", AMBER)
+    return ("Wi-Fi needed", "Connect Wi-Fi to load this local map area.", AMBER)
+
+
+def draw_map_grid(s: Surface, snap: Snapshot, box: tuple[int, int, int, int]):
+    """Draw a deterministic inset current-view mosaic without simulating network I/O."""
+
+    x_start, y_start, x_end, y_end = box
+    fills = ((22, 42, 48), (24, 47, 53), (20, 39, 46))
+    tile_w = (x_end - x_start) // 3
+    tile_h = (y_end - y_start) // 3
+    for row in range(3):
+        for col in range(3):
+            x0 = x_start + col * tile_w
+            y0 = y_start + row * tile_h
+            x1 = x_end if col == 2 else x_start + (col + 1) * tile_w
+            y1 = y_end if row == 2 else y_start + (row + 1) * tile_h
+            fill = fills[(row + col) % len(fills)]
+            s.rect((x0, y0, x1, y1), fill, (45, 67, 73))
+            s.line(((x0 + 12, y0 + tile_h - 24), (x1 - 8, y0 + 24)), (72, 101, 98))
+            s.line(((x0 + 36, y0 + 4), (x1 - 26, y1 - 8)), (58, 85, 91))
+
+    s.line(((x_start, y_start + 184), (x_end, y_start + 126)), (135, 154, 137))
+    s.line(((x_start + 110, y_start), (x_start + 266, y_end)), (92, 129, 126))
+    s.line(((x_start, y_start + 242), (x_end, y_start + 220)), (66, 102, 110))
+
+    if snap.map_location_set:
+        center_x = (x_start + x_end) // 2
+        center_y = (y_start + y_end) // 2
+        s.draw.ellipse((center_x - 14, center_y - 14, center_x + 14, center_y + 14), fill=(247, 92, 92), outline=(255, 230, 230), width=2)
+        s.draw.ellipse((center_x - 4, center_y - 4, center_x + 4, center_y + 4), fill=(255, 255, 255))
+
+
 def render_map(s: Surface, snap: Snapshot):
     draw_top_bar(s, snap)
-    s.text("Map", (16, 64, 150, 92), 22, TEXT, True)
-    draw_button(s, (250, 62, 336, 102), "Tiles", BLUE, action="open_map_tiles", destination="map_tiles_sheet")
-    draw_button(
-        s,
-        (344, 62, 456, 102),
-        "Move Pin" if snap.map_location_set else "Set Pin",
-        GREEN,
-        action="open_map_location_picker",
-        destination="map_location_sheet",
-    )
-    draw_metric(
-        s,
-        (16, 104, 230, 176),
-        "Tile Cache",
-        "SD Ready" if snap.map_tile_cache_ready else "Offline",
-        snap.map_tile_backend,
-        GREEN if snap.map_tile_cache_ready else AMBER,
-    )
-    draw_metric(
-        s,
-        (250, 104, 464, 176),
-        "Downloads",
-        "Ready" if snap.map_tile_download_supported else (
-            "Setup" if snap.map_tile_render_supported else "Unavailable"
-        ),
-        snap.map_tile_download_state,
-        BLUE,
-    )
-    s.round_rect((16, 190, 464, 276))
-    if snap.map_tile_cache_ready:
-        s.text("Offline Cache", (28, 198, 180, 220), 14, MUTED, True)
-        s.text(snap.map_tile_cache_policy, (28, 224, 452, 246), 16, TEXT, True)
-        s.text(snap.map_tile_cache_path_template, (28, 250, 452, 270), 11, MUTED)
+    ready_for_live = snap.map_location_set and snap.wifi_connected
+    frame_ready = ready_for_live or snap.map_cached_tile_count > 0
+
+    # Match ui_map.c: a simple title/action row and one 448x290 inset viewport.
+    s.text("Map", (16, 58, 328, 102), 22, TEXT, True)
+    draw_button(s, (344, 58, 464, 102), "Options", MUTED, action="open_map_options", destination="map_options")
+    viewport = (16, 112, 464, 402)
+    s.round_rect(viewport, (11, 21, 30), BORDER, 8)
+    if frame_ready:
+        draw_map_grid(s, snap, (17, 113, 463, 401))
     else:
-        s.text("No Offline Tiles", (28, 198, 220, 220), 14, MUTED, True)
-        s.text("Connect Wi-Fi and download allowed tiles for your area.", (28, 224, 452, 246), 13, TEXT, True)
-        s.text("Allowed provider and visible attribution required.", (28, 250, 452, 270), 11, MUTED)
-    s.round_rect((16, 290, 464, 402))
-    s.text("Center", (28, 298, 160, 320), 14, MUTED, True)
-    s.text("Routes", (330, 298, 452, 320), 14, MUTED, True)
-    if snap.map_location_set:
-        s.text("Manual", (28, 322, 122, 346), 16, TEXT, True)
-        s.text(
-            f"{format_e7(snap.map_lat_e7)}, {format_e7(snap.map_lon_e7)}",
-            (128, 322, 452, 346),
-            15,
-            TEXT,
-            True,
-        )
-    else:
-        s.text("Unset", (28, 322, 452, 346), 16, AMBER, True)
-    s.text(
-        f"Routes {len(snap.routes)}  heard {len(snap.heard)} nodes",
-        (28, 350, 452, 372),
-        11,
-        MUTED,
-    )
-    s.text("Connect Wi-Fi, choose an allowed provider, download only your area", (28, 374, 452, 394), 11, AMBER, True)
+        view_status, view_detail, view_color = map_view_status(snap)
+        s.text(view_status, (40, 202, 440, 236), 22, view_color, True, "center")
+        s.wrapped_text(view_detail, (40, 242, 440, 292), 13, TEXT, line_height=20, align="center")
+        wifi_label, _ = map_wifi_status(snap)
+        readiness = f"Wi-Fi {wifi_label}  |  SD {'Ready' if snap.map_tile_cache_ready else 'Not ready'}"
+        s.text(readiness, (40, 300, 440, 326), 12, MUTED, False, "center")
+
+    # The ready viewport has no technical badges; attribution is the sole overlay.
+    s.round_rect((236, 370, 452, 396), (7, 16, 24), (7, 16, 24), 4)
+    s.text(MAP_ATTRIBUTION, (242, 372, 446, 394), 10, TEXT, True, "right")
     s.metrics.update(
         {
+            "map_hierarchy_level": "actual_view",
+            "map_actual_view": True,
+            "map_landing_action_count": 1,
+            "map_viewport": list(viewport),
+            "map_frame_ready": frame_ready,
             "map_tile_cache_ready": snap.map_tile_cache_ready,
             "map_tile_download_supported": snap.map_tile_download_supported,
             "map_tile_render_supported": snap.map_tile_render_supported,
@@ -1702,90 +1804,168 @@ def render_map(s: Surface, snap: Snapshot):
             "map_center_lat_e7": snap.map_lat_e7,
             "map_center_lon_e7": snap.map_lon_e7,
             "map_route_count": len(snap.routes),
+            "map_visible_tile_limit": 9,
+            "map_zoom_batch_count": 1,
+            "map_cached_tile_count": snap.map_cached_tile_count,
+            "map_interactive_request_eligible": ready_for_live,
+            "map_background_download": False,
+            "map_area_download": False,
+            "map_probe_network_allowed": False,
+            "map_attribution_visible": True,
+            "map_attribution": MAP_ATTRIBUTION,
+            "map_policy": MAP_POLICY,
         }
     )
     draw_dock(s, "Map")
 
 
-def render_map_location_sheet(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    lat = snap.map_lat_e7 if snap.map_location_set else 436532000
-    lon = snap.map_lon_e7 if snap.map_location_set else -793832000
-    s.text("Set D1L Location", (28, 70, 240, 100), 22, TEXT, True)
-    draw_button(s, (238, 66, 300, 106), "Save", GREEN, action="save_map_location", destination="map")
-    draw_button(s, (308, 66, 378, 106), "Clear", AMBER, action="clear_d1l_pin", destination="map")
-    draw_button(s, (386, 66, 456, 106), "Skip", MUTED, action="skip_map_location", destination="map")
-    s.text("Map needs your D1L location", (28, 112, 452, 134), 13, GREEN, True)
-    s.text("Enter decimal degrees", (28, 134, 452, 156), 13, MUTED)
+def render_map_options(s: Surface, snap: Snapshot):
+    draw_map_page_header(
+        s,
+        snap,
+        "Map options",
+        "Location and cache",
+        back_action="close_map_options",
+        back_destination="map",
+        back_label="Back to Map",
+    )
+    rows = (
+        (
+            "Set location",
+            "Saved" if snap.map_location_set else "Not set",
+            GREEN if snap.map_location_set else AMBER,
+            "open_map_location",
+            "map_location",
+        ),
+        (
+            "Cache status",
+            "SD ready" if snap.map_tile_cache_ready else "Needs SD",
+            GREEN if snap.map_tile_cache_ready else AMBER,
+            "open_map_cache",
+            "map_cache",
+        ),
+    )
+    row_boxes: list[list[int]] = []
+    y = 124
+    for title, value, color, action, destination in rows:
+        box = (16, y, 464, y + 62)
+        row_boxes.append(list(box))
+        draw_more_leaf(s, box, title, value, color, action=action, destination=destination)
+        y += 72
 
-    s.text("Latitude", (28, 160, 220, 182), 13, TEXT, True)
-    s.round_rect((16, 184, 464, 228), SURFACE_2, BORDER, 8)
-    s.touch_target("Latitude", (16, 184, 464, 228), kind="text_field", action="edit_map_latitude")
-    s.text(format_e7(lat), (28, 194, 452, 222), 17, TEXT)
-
-    s.text("Longitude", (28, 236, 220, 258), 13, TEXT, True)
-    s.round_rect((16, 260, 464, 304), SURFACE_2, BORDER, 8)
-    s.touch_target("Longitude", (16, 260, 464, 304), kind="text_field", action="edit_map_longitude")
-    s.text(format_e7(lon), (28, 270, 452, 298), 17, TEXT)
-
-    s.round_rect((16, 312, 464, 468), (10, 16, 24), BORDER, 8)
-    s.text("Keyboard", (28, 322, 452, 344), 13, MUTED, True)
-    keyboard_rows = ("1 2 3 4 5 6 7 8 9 0", "- . backspace", "ready     cancel")
-    y = 352
-    for row in keyboard_rows:
-        s.text(row, (32, y, 448, y + 30), 17, TEXT, False, "center")
-        y += 36
-
-
-def render_map_tiles_sheet(s: Surface, snap: Snapshot):
-    draw_top_bar(s, snap)
-    s.rect((0, TOP_BAR_H, WIDTH, HEIGHT), (17, 25, 35))
-    s.text("Map Tiles", (28, 70, 230, 100), 22, TEXT, True)
-    draw_button(s, (392, 66, 464, 106), "Close", MUTED, action="close_map_tiles", destination="map")
-    s.text(
-        f"Cache {'ready' if snap.map_tile_cache_ready else 'needs SD'}  Wi-Fi needed  Provider {'saved' if snap.map_tile_provider_saved else 'needed'}",
-        (28, 112, 452, 134),
-        12,
-        MUTED,
-        True,
+    policy_box = (16, 336, 464, 416)
+    s.round_rect(policy_box, (13, 22, 31), BORDER, 10)
+    policy = "Tiles download only while Map is open. Reopening the same area uses the saved copy."
+    s.wrapped_text(policy, (30, 348, 450, 404), 13, MUTED, line_height=21)
+    s.metrics.update(
+        {
+            "map_hierarchy_level": "options",
+            "map_options_action_count": 2,
+            "map_options_regions": row_boxes + [list(policy_box)],
+            "map_background_download": False,
+            "map_area_download": False,
+            "map_probe_network_allowed": False,
+            "map_visible_tile_limit": 9,
+            "map_zoom_batch_count": 1,
+        }
     )
 
-    s.text("Allowed provider template", (28, 148, 452, 170), 13, GREEN, True)
-    s.round_rect((16, 172, 464, 212), SURFACE_2, BORDER, 8)
-    s.touch_target("Allowed provider template", (16, 172, 464, 212), kind="text_field", action="edit_map_tile_provider")
-    s.text(snap.map_tile_url_template or "https://provider.example/{z}/{x}/{y}.png", (28, 181, 452, 206), 12, TEXT, True)
 
-    s.text("Attribution", (28, 220, 452, 242), 13, GREEN, True)
-    s.round_rect((16, 244, 464, 284), SURFACE_2, BORDER, 8)
-    s.touch_target("Attribution", (16, 244, 464, 284), kind="text_field", action="edit_map_tile_attribution")
-    s.text(snap.map_tile_attribution or "Provider attribution", (28, 253, 452, 278), 13, TEXT, True)
+def render_map_location(s: Surface, snap: Snapshot):
+    draw_map_page_header(
+        s,
+        snap,
+        "Set location",
+        "Map center in decimal degrees",
+        back_action="close_map_location",
+        back_destination="map_options",
+    )
+    latitude_value = format_e7(snap.map_lat_e7) if snap.map_location_set else ""
+    longitude_value = format_e7(snap.map_lon_e7) if snap.map_location_set else ""
 
-    s.text(f"Zoom {snap.map_tile_zoom}", (28, 302, 108, 326), 14, TEXT, True)
-    draw_button(s, (116, 294, 170, 330), "Z-", ACCENT, action="map_tile_zoom_down")
-    draw_button(s, (178, 294, 232, 330), "Z+", ACCENT, action="map_tile_zoom_up")
-    draw_button(s, (244, 294, 306, 330), "Save", GREEN, action="save_map_tile_provider")
-    draw_button(s, (314, 294, 380, 330), "Clear", AMBER, action="clear_map_tile_provider")
-    if snap.map_tile_download_supported:
-        draw_button(
-            s,
-            (16, 340, 128, 378),
-            "Download",
-            BLUE,
-            action="download_center_tile",
-            destination=None,
-            public_rf_tx=False,
-            formats_sd=False,
-        )
-        s.text("Downloads one center tile for your saved D1L location.", (142, 340, 464, 362), 12, TEXT, True)
+    s.round_rect((16, 120, 464, 170), (13, 22, 31), BORDER, 8)
+    s.text("Set the center used for the local map area.", (28, 132, 452, 158), 12, MUTED)
+
+    s.text("Latitude", (28, 180, 220, 200), 13, GREEN, True)
+    s.round_rect((16, 202, 464, 250), SURFACE_2, BORDER, 8)
+    s.touch_target("Latitude", (16, 202, 464, 250), kind="text_field", action="edit_map_latitude")
+    if latitude_value:
+        s.text(latitude_value, (28, 212, 452, 240), 17, TEXT)
     else:
-        s.text("Live download unavailable", (28, 340, 214, 362), 12, AMBER, True)
-        s.text("Tile render pending; use serial canaries for SD cache proof.", (218, 340, 464, 362), 11, TEXT, True)
-    s.text("No public OSM bulk tile servers. Visible attribution is required.", (28, 382, 452, 408), 11, AMBER, True)
+        s.text("e.g. 43.6532000", (28, 212, 452, 240), 15, MUTED)
 
-    s.round_rect((16, 416, 464, 470), (10, 16, 24), BORDER, 8)
-    s.text("Keyboard", (28, 422, 452, 444), 13, MUTED, True)
-    s.text("{z} {x} {y}  ready  cancel", (32, 444, 448, 468), 14, TEXT, False, "center")
+    s.text("Longitude", (28, 262, 220, 282), 13, GREEN, True)
+    s.round_rect((16, 284, 464, 332), SURFACE_2, BORDER, 8)
+    s.touch_target("Longitude", (16, 284, 464, 332), kind="text_field", action="edit_map_longitude")
+    if longitude_value:
+        s.text(longitude_value, (28, 294, 452, 322), 17, TEXT)
+    else:
+        s.text("e.g. -79.3832000", (28, 294, 452, 322), 15, MUTED)
+
+    s.round_rect((16, 344, 464, 398), (13, 22, 31), BORDER, 8)
+    s.text("The keyboard opens only while editing a coordinate.", (28, 358, 452, 384), 12, MUTED)
+    save_box = (16, 412, 232 if snap.map_location_set else 464, 464)
+    draw_button(s, save_box, "Save location", GREEN, action="save_map_location", destination="map")
+    if snap.map_location_set:
+        draw_button(s, (248, 412, 464, 464), "Clear location", AMBER, action="clear_d1l_pin", destination="map")
+    s.metrics.update(
+        {
+            "map_hierarchy_level": "location",
+            "map_location_editor_base_state": True,
+            "map_location_clear_available": snap.map_location_set,
+            "map_location_latitude_value": latitude_value,
+            "map_location_longitude_value": longitude_value,
+            "map_location_examples_are_placeholders_only": True,
+            "map_probe_network_allowed": False,
+            "map_background_download": False,
+            "map_area_download": False,
+        }
+    )
+
+
+def render_map_cache(s: Surface, snap: Snapshot):
+    draw_map_page_header(
+        s,
+        snap,
+        "Cache status",
+        "Read-only readiness",
+        back_action="close_map_cache",
+        back_destination="map_options",
+    )
+    wifi_label, wifi_color = map_wifi_status(snap)
+    rows = (
+        ("Wi-Fi", wifi_label, wifi_color),
+        ("SD card", "Ready" if snap.map_tile_cache_ready else "Not ready", GREEN if snap.map_tile_cache_ready else AMBER),
+        ("Location", "Saved" if snap.map_location_set else "Not set", GREEN if snap.map_location_set else AMBER),
+        ("Map view", "Local area saved" if snap.map_cached_tile_count else "Ready to save", GREEN if snap.map_cached_tile_count else MUTED),
+    )
+    panel_box = (16, 120, 464, 444)
+    s.round_rect(panel_box, (13, 22, 31), BORDER, 8)
+    row_boxes: list[list[int]] = []
+    y = 136
+    for title, value, color in rows:
+        row_box = (28, y, 452, y + 48)
+        row_boxes.append(list(row_box))
+        draw_storage_value_row(s, row_box, title, value, color)
+        y += 64
+    s.text("OpenStreetMap is built in.", (28, 394, 452, 414), 11, MUTED, True, "center")
+    s.text(MAP_ATTRIBUTION, (28, 418, 452, 438), 11, TEXT, True, "center")
+    s.metrics.update(
+        {
+            "map_hierarchy_level": "cache",
+            "map_cache_read_only": True,
+            "map_cache_rows": [{"title": title, "value": value} for title, value, _ in rows],
+            "map_cache_panel": list(panel_box),
+            "map_cache_row_boxes": row_boxes,
+            "map_cache_reuse": True,
+            "map_background_download": False,
+            "map_area_download": False,
+            "map_probe_network_allowed": False,
+            "map_visible_tile_limit": 9,
+            "map_zoom_batch_count": 1,
+            "map_attribution_visible": True,
+        }
+    )
 
 
 def render_packets(s: Surface, snap: Snapshot):
@@ -1869,7 +2049,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
     packet_status = f"{len(snap.packets)} saved"
     storage_status = storage_menu_status(snap)
     storage_warning = storage_needs_attention(snap)
-    map_status = "Ready" if snap.map_tile_cache_ready else ("Not set up" if snap.map_tile_sideload_supported else "Unavailable")
+    map_status = "Ready" if snap.map_location_set and (snap.wifi_connected or snap.map_cached_tile_count > 0) else "Set up"
     return (
         {
             "key": "tools",
@@ -1899,7 +2079,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
         {
             "key": "storage_maps",
             "title": "Storage & maps",
-            "summary": "SD needs attention" if storage_warning else "SD card and offline maps",
+            "summary": "SD needs attention" if storage_warning else "SD card and map cache",
             "color": WARNING_TEXT if storage_warning else AMBER,
             "warning": storage_warning,
             "action": "toggle_more_storage_maps",
@@ -1912,7 +2092,7 @@ def more_category_specs(snap: Snapshot) -> tuple[dict[str, object], ...]:
                     "storage_setup_sheet",
                     storage_warning,
                 ),
-                ("Offline Maps", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_tiles", "map_tiles_sheet", False),
+                ("Map options", map_status, GREEN if map_status == "Ready" else TEXT, "open_map_options", "map_options", False),
             ),
         },
         {
@@ -3079,8 +3259,9 @@ RENDERERS: dict[str, Callable[[Surface, Snapshot], None]] = {
     "messages_dm": render_messages_dm,
     "nodes": render_nodes,
     "map": render_map,
-    "map_location_sheet": render_map_location_sheet,
-    "map_tiles_sheet": render_map_tiles_sheet,
+    "map_options": render_map_options,
+    "map_location": render_map_location,
+    "map_cache": render_map_cache,
     "packets": render_packets,
     "settings": render_settings,
     "settings_tools_expanded": render_settings_tools_expanded,
@@ -3139,37 +3320,36 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     "messages_dm": ("Messages", "Read", "Compose", "History", "Test", "Public", "DMs", "DM Conversations"),
     "nodes": ("Nodes", "Contacts", "Heard Nodes", "All Heard", "DM", "CMP", "ROOM", "RPT"),
     "map": (
-        "Map",
-        "Tiles",
-        "Tile Cache",
-        "Downloads",
-        "Center",
-        "Routes",
-        "Connect Wi-Fi, choose an allowed provider, download only your area",
+        "Options",
+        "(c) OpenStreetMap contributors",
     ),
-    "map_location_sheet": (
-        "Set D1L Location",
-        "Map needs your D1L location",
-        "Enter decimal degrees",
+    "map_options": (
+        "Map options",
+        "Back to Map",
+        "Location and cache",
+        "Set location",
+        "Cache status",
+        "Tiles download only while Map is open. Reopening the same area uses the saved copy.",
+    ),
+    "map_location": (
+        "Set location",
+        "Back",
+        "Map center in decimal degrees",
+        "Set the center used for the local map area.",
         "Latitude",
         "Longitude",
-        "Keyboard",
-        "Save",
-        "Clear",
-        "Skip",
+        "Save location",
     ),
-    "map_tiles_sheet": (
-        "Map Tiles",
-        "Allowed provider template",
-        "Attribution",
-        "Zoom 12",
-        "Save",
-        "Clear",
-        "Live download unavailable",
-        "Tile render pending; use serial canaries for SD cache proof.",
-        "No public OSM bulk tile servers. Visible attribution is required.",
-        "Keyboard",
-        "Close",
+    "map_cache": (
+        "Cache status",
+        "Back",
+        "Read-only readiness",
+        "Wi-Fi",
+        "SD card",
+        "Location",
+        "Map view",
+        "OpenStreetMap is built in.",
+        "(c) OpenStreetMap contributors",
     ),
     "packets": ("Packets", "live tail  rssi -41  snr 30  avg -46", "Mesh Roles", "All", "RX", "TX", "Text", "Search", "Pause", "Packet Feed", "Routes"),
     "settings": (
@@ -3205,7 +3385,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
         "Settings and tools",
         "Storage & maps",
         "SD Card",
-        "Offline Maps",
+        "Map options",
     ),
     "settings_device_expanded": (
         "More",
@@ -3444,7 +3624,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "steps": (
             {"view": "settings", "action": "toggle_more_storage_maps"},
             {"view": "settings_storage_maps_expanded", "action": "open_storage_setup", "destination": "storage_setup_sheet"},
-            {"view": "settings_storage_maps_expanded", "action": "open_map_tiles", "destination": "map_tiles_sheet"},
+            {"view": "settings_storage_maps_expanded", "action": "open_map_options", "destination": "map_options"},
             {"view": "settings_storage_maps_expanded", "action": "toggle_more_storage_maps"},
         ),
     },
@@ -3601,18 +3781,15 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
         "name": "map_page_policy",
         "steps": (
             {"view": "home", "action": "open_map", "destination": "map"},
-            {"view": "map", "action": "open_map_tiles", "destination": "map_tiles_sheet"},
-            {"view": "map_tiles_sheet", "action": "edit_map_tile_provider"},
-            {"view": "map_tiles_sheet", "action": "edit_map_tile_attribution"},
-            {"view": "map_tiles_sheet", "action": "map_tile_zoom_down"},
-            {"view": "map_tiles_sheet", "action": "map_tile_zoom_up"},
-            {"view": "map_tiles_sheet", "action": "save_map_tile_provider"},
-            {"view": "map_tiles_sheet", "action": "close_map_tiles", "destination": "map"},
-            {"view": "map", "action": "open_map_location_picker", "destination": "map_location_sheet"},
-            {"view": "map_location_sheet", "action": "edit_map_latitude"},
-            {"view": "map_location_sheet", "action": "edit_map_longitude"},
-            {"view": "map_location_sheet", "action": "save_map_location", "destination": "map"},
-            {"view": "map_location_sheet", "action": "skip_map_location", "destination": "map"},
+            {"view": "map", "action": "open_map_options", "destination": "map_options"},
+            {"view": "map_options", "action": "open_map_location", "destination": "map_location"},
+            {"view": "map_location", "action": "edit_map_latitude"},
+            {"view": "map_location", "action": "edit_map_longitude"},
+            {"view": "map_location", "action": "save_map_location", "destination": "map"},
+            {"view": "map_location", "action": "close_map_location", "destination": "map_options"},
+            {"view": "map_options", "action": "open_map_cache", "destination": "map_cache"},
+            {"view": "map_cache", "action": "close_map_cache", "destination": "map_options"},
+            {"view": "map_options", "action": "close_map_options", "destination": "map"},
         ),
     },
     {
@@ -3801,6 +3978,8 @@ def build_flow_report(report_views: list[dict[str, object]]) -> dict[str, object
             if target:
                 checked_step["label"] = target["label"]
                 checked_step["box"] = target["box"]
+            elif step.get("optional"):
+                checked_step["optional_skipped"] = True
             else:
                 flow_missing.append(dict(step))
                 missing_steps.append({"flow": flow["name"], **step})

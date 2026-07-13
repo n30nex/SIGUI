@@ -337,11 +337,21 @@ void d1l_ui_home_render(lv_obj_t *parent,
                             snapshot->contact_count ? 0x5EEAD4 : 0x8EA0AE,
                             D1L_UI_HOME_ACTION_NETWORK);
 
+    const char *map_status = "Ready to open";
+    uint32_t map_status_color = 0x5EEAD4;
+    if (!snapshot->map_location_set) {
+        map_status = "Set a location";
+        map_status_color = 0xFBBF24;
+    } else if (!snapshot->map_tile_cache_ready) {
+        map_status = "Needs SD";
+        map_status_color = 0xFBBF24;
+    } else if (!snapshot->wifi_connected) {
+        map_status = "Needs Wi-Fi";
+        map_status_color = 0xFBBF24;
+    }
     render_destination_card(parent, D1L_UI_HOME_DESTINATION_MAP, LV_SYMBOL_GPS, "Map",
-                            "Location, routes, and offline maps",
-                            snapshot->map_tile_cache_ready ? "Offline maps ready" :
-                            "Set up offline maps",
-                            snapshot->map_tile_cache_ready ? 0x5EEAD4 : 0x00C2FF,
+                            "Location and a small local map area",
+                            map_status, map_status_color,
                             D1L_UI_HOME_ACTION_MAP);
 
     snprintf(status, sizeof(status), "%lu packet%s captured",

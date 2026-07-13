@@ -28,3 +28,20 @@ The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore De
 - Source: https://github.com/meshcore-dev/MeshCore
 - License: MIT-style upstream license text
 - Use: MeshCore protocol/library base and feature compatibility target.
+
+## OpenStreetMap Standard Tiles
+
+- Service/data: OpenStreetMap Standard tile layer and OpenStreetMap geographic data.
+- Required attribution: `© OpenStreetMap contributors`.
+- Copyright notice shown in the product: `(c) OpenStreetMap contributors` (ASCII rendering used because the hardware font lacks the copyright glyph).
+- Copyright and attribution terms: https://www.openstreetmap.org/copyright
+- Open Database License 1.0: https://opendatacommons.org/licenses/odbl/1-0/
+- Tile service policy: https://operations.osmfoundation.org/policies/tiles/
+- Use: built-in current-view map tiles. The firmware may request at most the visible current-view 3x3 at one zoom only while the actual Map is visible, and reuses cached tiles. It does not offer background, multi-zoom, arbitrary-coordinate, or area download.
+- Independence: OpenStreetMap and the OpenStreetMap Foundation do not endorse, sponsor, or certify MeshCore DeskOS D1L.
+
+## LodePNG
+
+- Upstream: https://lodev.org/lodepng/
+- License: permissive LodePNG license; the license notice is retained in LVGL's bundled source.
+- Use: `main/map/map_png_decoder.c` compiles LVGL's bundled LodePNG as a private decode-only PNG decoder for map tiles.
