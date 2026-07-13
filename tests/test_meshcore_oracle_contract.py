@@ -18,7 +18,7 @@ MANIFEST = ORACLE_ROOT / "manifest.json"
 COVERAGE_MANIFEST = ORACLE_ROOT / "coverage_manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = (
-    "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification"
 )
 
 
@@ -40,7 +40,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 8
+    assert manifest["corpus_version"] == 9
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -51,11 +51,17 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "implementation": "tests/meshcore_oracle/meshcore_oracle.cpp",
         "upstream_types": [
             "mesh::Packet",
+            "mesh::Utils",
             "AdvertDataBuilder",
             "AdvertDataParser",
         ],
         "reject_preserves_output": True,
         "crypto_available": False,
+        "group_crypto_available": True,
+        "group_crypto_scope": (
+            "aes128_ecb_zero_padding_truncated_hmac_sha256_and_"
+            "basechatmesh_setchannel_hash_only"
+        ),
         "signed_advert_ed25519_available": True,
         "signed_advert_scope": (
             "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
@@ -84,6 +90,22 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
                 "third_party/MeshCore/lib/ed25519/ge.c"
             ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+            "public_group_channel_hash": (
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+            ),
+            "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "public_group_encrypt_mac_parse": (
+                "third_party/MeshCore/src/Utils.cpp"
+            ),
+            "public_group_aes": (
+                "third_party/sensecap_indicator_esp32/components/LoRaWAN/"
+                "soft-se/aes.c"
+            ),
+            "public_group_sha_hmac": "tests/meshcore_oracle/stubs/SHA256.h",
+            "public_group_independent_kats": (
+                "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; "
+                "FIPS 197 AES-128 cipher example"
+            ),
         },
     }
     assert manifest["determinism"]["signed_advert_seed_hex"] == (
@@ -104,12 +126,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "identity public key plus identity R and zero S accepted by the pinned "
         "verifier before strict point validation"
     )
+    assert manifest["determinism"]["public_group_recipe"] == (
+        "basechatmesh_setchannel_padded16_or_full32_secret_sha256_hash_then_"
+        "utils_aes128_ecb_zero_pad_and_two_byte_hmac_sha256"
+    )
     assert manifest["vectors"] == {
-        "roundtrip": 26,
-        "valid": 8,
-        "invalid": 83,
-        "semantic": 104,
-        "total": 117,
+        "roundtrip": 30,
+        "valid": 11,
+        "invalid": 104,
+        "semantic": 129,
+        "total": 145,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -139,6 +165,18 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 7,
             "semantic": 11,
             "total": 11,
+        },
+        "crypto_adapter_kat": {
+            "valid": 3,
+            "invalid": 0,
+            "semantic": 0,
+            "total": 3,
+        },
+        "public_group_packets": {
+            "roundtrip": 4,
+            "invalid": 21,
+            "semantic": 25,
+            "total": 25,
         },
         "direct_flood_headers": {
             "roundtrip": 7,
@@ -237,9 +275,23 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "unblocked_slice": "ed25519_point_validation",
         },
     }
+    public_group = manifest["capabilities"][8]
+    assert public_group["id"] == "public_group_packets"
+    assert public_group["status"] == "implemented"
+    assert public_group["owner"] == "pinned_upstream_utils_vendored_aes_host_sha"
+    assert public_group["semantic"] is True
+    assert public_group["implementation_receipt"]["id"] == (
+        "RCPT-WP04-PUBLIC-GROUP-20260713"
+    )
+    assert public_group["implementation_receipt"]["vectors"] == {
+        "roundtrip": 4,
+        "invalid": 21,
+        "crypto_adapter_kat": 3,
+    }
     assert all(
         capability["status"] == "pending"
         for capability in manifest["capabilities"][7:]
+        if capability["id"] != "public_group_packets"
     )
     assert [
         capability["id"] for capability in manifest["capabilities"][7:]
@@ -260,16 +312,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         if capability["status"] == "pending"
     }
     assert pending["expected_ack_hash_and_ack_path"]["blocked_by"] == (
-        "external_unpinned_sha_aes_and_mesh_session_fixtures"
+        "deterministic_identity_expected_ack_and_ack_path_mesh_session_fixtures"
     )
     assert pending["dm_encrypt_decrypt"]["blocked_by"] == (
-        "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
+        "pinned_ed25519_key_exchange_identity_and_deterministic_dm_session_fixtures"
     )
     assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
         "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
     )
     assert pending["path_return_route_codes"]["blocked_by"] == (
-        "external_unpinned_aes_sha_rng_identity_and_mesh_session_fixtures"
+        "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
     )
     assert pending["trace_forwarding_and_path_discovery"]["blocked_by"] == (
         "deterministic_identity_mesh_tables_radio_snr_and_clock_fixtures"
@@ -278,12 +330,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )
     assert pending["login_request_response_admin"]["blocked_by"] == (
-        "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
+        "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
     )
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
         **manifest["production_binding_sources"],
+        **manifest["vendored_crypto_sources"],
         **manifest["oracle_sources"],
     }.items():
         assert canonical_lf_sha256(ROOT / relative) == expected
@@ -303,14 +356,14 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert summary["closure_ready"] is False
     assert summary["unsupported_closure_rejected"] is True
     assert summary["required_surface_count"] == 9
-    assert summary["implemented_surface_count"] == 1
+    assert summary["implemented_surface_count"] == 2
     assert summary["partial_surface_count"] == 3
-    assert summary["blocked_surface_count"] == 5
+    assert summary["blocked_surface_count"] == 4
     assert summary["local_packet_type_count"] == 6
     assert summary["wire_vector_covered_packet_type_count"] == 6
     assert summary["unknown_packet_type_policy"] == "fail_closed"
-    assert len(summary["blocker_receipts"]) == 9
-    assert len(summary["unresolved_capabilities"]) == 9
+    assert len(summary["blocker_receipts"]) == 8
+    assert len(summary["unresolved_capabilities"]) == 8
     assert len(summary["local_packet_types"]) == 6
     identity_receipt = next(
         item
@@ -458,6 +511,9 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert "d1l_meshcore_oracle_advert_data_decode" in header
     assert "d1l_meshcore_oracle_advert_data_encode" in header
     assert "d1l_meshcore_oracle_verify_signed_advert" in header
+    assert "d1l_meshcore_oracle_group_channel_hash" in header
+    assert "d1l_meshcore_oracle_create_group_packet" in header
+    assert "d1l_meshcore_oracle_parse_group_packet" in header
     assert "ed25519_verify" in adapter
     assert '#include "mesh/ed25519_canonical.h"' in adapter
     assert '#include "mesh/ed25519_canonical.h"' in service
@@ -501,6 +557,26 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
     assert any("meshcore_oracle_vectors.cpp" in command for command in flattened)
     assert any("AdvertDataHelpers.cpp" in command for command in flattened)
     assert any("meshcore_advert_data.o" in command for command in flattened)
+    assert any("soft-se\\aes.c" in command or "soft-se/aes.c" in command for command in flattened)
+    assert any("Utils.cpp" in command for command in flattened)
+    assert any("meshcore_oracle_aes.o" in command for command in flattened)
+    assert any("meshcore_oracle_utils.o" in command for command in flattened)
+    packet_commands = [
+        command.replace("\\", "/")
+        for command in flattened
+        if "src\\Packet.cpp" in command or "src/Packet.cpp" in command
+    ]
+    assert len(packet_commands) == 2
+    assert any(
+        "meshcore_conformance/stubs" in command
+        and "meshcore_packet.o" in command
+        for command in packet_commands
+    )
+    assert any(
+        "meshcore_oracle/stubs" in command
+        and "meshcore_oracle_packet.o" in command
+        for command in packet_commands
+    )
     for source in conformance.ED25519_ORACLE_SOURCES:
         source_path = str(source)
         source_commands = [
@@ -513,6 +589,10 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
         command
         for command in flattened
         if command.endswith("meshcore_oracle_vectors")
+    )
+    assert "meshcore_oracle_packet.o" in oracle_link
+    assert "meshcore_packet.o" not in oracle_link.replace(
+        "meshcore_oracle_packet.o", ""
     )
     for source in conformance.ED25519_ORACLE_SOURCES:
         assert f"meshcore_ed25519_{source.stem}.o" in oracle_link
@@ -558,18 +638,19 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 8
+    assert artifact["corpus_version"] == 9
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None
-    assert len(artifact["pending_capabilities"]) == 9
+    assert len(artifact["pending_capabilities"]) == 8
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
     assert "ed25519_point_validation" not in artifact["pending_capabilities"]
+    assert "public_group_packets" not in artifact["pending_capabilities"]
     assert "direct_flood_headers" not in artifact["pending_capabilities"]
     assert "ack_frames" not in artifact["pending_capabilities"]
     assert "trace_source_frames" not in artifact["pending_capabilities"]
@@ -593,6 +674,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
     executable = tmp_path / (
         "meshcore_oracle_vectors.exe" if os.name == "nt" else "meshcore_oracle_vectors"
     )
+    aes_object = tmp_path / "meshcore_oracle_aes.o"
     ed25519_objects = []
     subprocess.run(
         [
@@ -643,6 +725,28 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             text=True,
         )
         ed25519_objects.append(str(object_path))
+    subprocess.run(
+        [
+            c_compiler,
+            "-std=c11",
+            "-O1",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-D__CORTEX_M=0",
+            "-DAES_DEC_PREKEYED=1",
+            "-I",
+            str(conformance.ORACLE_AES_ROOT),
+            "-c",
+            str(conformance.ORACLE_AES_SOURCE),
+            "-o",
+            str(aes_object),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     command = [
         compiler,
         "-std=c++17",
@@ -654,8 +758,6 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         str(ORACLE_ROOT),
         "-I",
         str(ORACLE_ROOT / "stubs"),
-        "-I",
-        str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
         "-I",
         str(ROOT / "main"),
         "-I",
@@ -671,8 +773,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             / "helpers"
             / "AdvertDataHelpers.cpp"
         ),
+        str(conformance.ORACLE_UTILS_SOURCE),
         str(ORACLE_ROOT / "meshcore_oracle.cpp"),
         str(ORACLE_ROOT / "meshcore_oracle_vectors.cpp"),
+        str(aes_object),
         *ed25519_objects,
         "-o",
         str(executable),
@@ -694,11 +798,11 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 2,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 26,
-            "valid": 8,
-            "invalid": 83,
-            "semantic": 104,
-            "total": 117,
+            "roundtrip": 30,
+            "valid": 11,
+            "invalid": 104,
+            "semantic": 129,
+            "total": 145,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -729,6 +833,18 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 11,
                 "total": 11,
             },
+            "crypto_adapter_kat": {
+                "valid": 3,
+                "invalid": 0,
+                "semantic": 0,
+                "total": 3,
+            },
+            "public_group_packets": {
+                "roundtrip": 4,
+                "invalid": 21,
+                "semantic": 25,
+                "total": 25,
+            },
             "direct_flood_headers": {
                 "roundtrip": 7,
                 "invalid": 10,
@@ -753,6 +869,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "advert_data_fields": True,
             "signed_advert_verification": True,
             "ed25519_point_validation": True,
+            "public_group_packets": True,
             "direct_flood_headers": True,
             "ack_frames": True,
             "trace_source_frames": True,

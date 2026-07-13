@@ -28,14 +28,18 @@ Any MeshCore gitlink change invalidates the prior result. A pin update requires
 an intentional review of the adapter, vector matrix, malformed cases, and this
 boundary before new evidence can be accepted.
 
-The upstream native-test AES and SHA mocks are deliberately excluded as
-cryptographic oracles because they do not implement production cryptography.
+The upstream native-test AES and SHA mocks remain excluded because they do not
+implement production cryptography. The public-group slice instead compiles the
+real AES source already vendored with the pinned Seeed BSP and a deterministic
+host SHA-256/HMAC adapter, each checked against independent published
+known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 
 ## WP-04 Oracle ABI Foundation
 
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
-`AdvertDataBuilder`/`AdvertDataParser` app-data helpers. Its version 8 static
+`AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
+public-group operations from `mesh::Utils`. Its version 9 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -78,11 +82,24 @@ or as a round trip. The production receive path and oracle share a strict
 public key and signature R before the pinned verifier. These close the
 verifier's otherwise malleable `S + L` acceptance and the deterministic
 identity-point forgery. Valid vectors run repeatedly under ASan and UBSan.
+Three crypto-adapter known-answer vectors cover FIPS 180-4 SHA-256 `abc`, RFC
+4231 HMAC-SHA-256 test case 1, and the FIPS 197 AES-128 cipher example. Four
+public-group round trips and twenty-one reject vectors then cover the
+`BaseChatMesh::setChannel` padded-16-secret versus full-32-secret hash rule,
+non-empty group text and data types, one- and two-block plaintext, the 168-byte
+maximum plaintext, AES-128 ECB zero padding, the two-byte HMAC, deterministic
+wire encode/decode, authenticated parsing, and output preservation on every
+rejected input. These group vectors are packet creation/parsing proof only;
+they do not execute Mesh dispatch, delivery, retained history, or radio paths.
+The separate `addChannel` path's explicit decoded key length is not inferred by
+this ABI.
 Seed bytes `00` through `1f` regenerate the keypair and all three fixed
 signatures on every vector run. The source hashes pin the verifier's transitive
 C headers and sources, the keypair/signer recipe, `advert_data.h`, the shared
-canonical scalar/point guard, and the D1L CMake/service binding. No crypto mock or
-invented stub is used. The job emits
+canonical scalar/point guard, the D1L CMake/service binding, pinned
+`BaseChatMesh`/`Utils` source, and the vendored AES source. The functional host
+SHA/HMAC adapter is source-pinned and independently checked; no upstream crypto
+mock is accepted. The job emits
 `meshcore_oracle_manifest_<full-commit>.json` beside the existing conformance
 report.
 
@@ -97,15 +114,15 @@ requires exact equality with both the policy registry and the six-type wire
 vector matrix. Consequently a new local payload type, a duplicate code, a
 missing roadmap surface, or an unknown capability fails before compilation.
 Envelope-vector coverage remains distinct from semantic coverage: the current
-six local types all have envelope vectors, while the policy reports one fully
-implemented roadmap surface, three partial surfaces, and five blocked surfaces.
+six local types all have envelope vectors, while the policy reports two fully
+implemented roadmap surfaces, three partial surfaces, and four blocked surfaces.
 The exact packet registry and blocker receipts are copied into
 `meshcore_oracle_manifest_<full-commit>.json`; `wp04_acceptance_ready` and
 `closure_ready` remain false.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification`.
+`pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification`.
 The new `signed_advert_verification` capability proves only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
@@ -120,18 +137,19 @@ not prevent the strict-point slice or other independent oracle work;
 the new primitive must not be cited as upstream Identity parity or dispatch
 closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
-those remain `route_selection_and_forwarding`. Public and DM semantics,
-production encryption/decryption, expected-ACK hash derivation, encrypted
+those remain `route_selection_and_forwarding`. Public dispatch/delivery and DM semantics,
+expected-ACK hash derivation, encrypted
 ACK+PATH handling, ACK correlation/delivery state, PATH-return behavior, TRACE
 forwarding/path discovery, and login/admin flows also remain pending, so both
 `wp04_closure_eligible` and `closure_ready` remain false. The expected-ACK and
-ACK+PATH remainder is
-explicitly blocked by the unpinned external SHA/AES implementations and missing
-mesh-session fixtures; ACK framing must not be cited as evidence for those
+ACK+PATH remainder is explicitly blocked by missing deterministic identity,
+shared-secret, and mesh-session fixtures; the now source-pinned SHA/AES
+adapters remove the primitive-availability blocker but do not themselves prove
+ACK+PATH semantics. ACK framing must not be cited as evidence for those
 semantics. ACK dispatch, correlation, and delivery state remain a separate
 pending capability blocked on deterministic Mesh dispatch, packet-manager,
-table, and clock fixtures. Path-return creation is separately blocked by the
-unpinned AES/SHA implementation plus RNG, identity, and mesh-session fixtures.
+table, and clock fixtures. Path-return creation is separately blocked by
+deterministic RNG, identity/shared-secret, and mesh-session fixtures.
 TRACE framing does not authenticate `auth_code` or prove discovery; forwarding
 still requires identity matching, duplicate tables, radio SNR, scheduling, and
 clock fixtures. Those stages require deterministic radio, RNG, RTC,
@@ -140,11 +158,12 @@ they must extend the versioned manifest instead of silently widening what this
 artifact claims.
 
 The three previously implicit gaps now have explicit fail-closed receipts.
-DM encrypt/decrypt requires the unpinned AES, SHA, and Ed25519 implementations
-plus identity and mesh-session fixtures. Route selection/forwarding requires a
+DM encrypt/decrypt requires the pinned Ed25519 key-exchange path plus
+deterministic identity and mesh-session fixtures; AES/SHA primitive
+availability is no longer its blocker. Route selection/forwarding requires a
 deterministic dispatcher, packet manager, mesh tables, radio, RNG, and clocks.
-Login/request/response/admin requires the same production crypto boundary plus
-identity and deterministic admin-session fixtures. These receipts describe
+Login/request/response/admin requires identity key exchange/signature handling
+plus deterministic admin-session fixtures. These receipts describe
 missing oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
@@ -195,12 +214,14 @@ the temporary build directory.
 This bounded gate makes no claim about:
 
 - encryption, decryption, MACs, signing/key generation, channel secrets, or
-  full identity semantics. Only the bounded D1L signed-advert message layout
-  and pinned C Ed25519 verification primitive with canonical scalar/point and
-  low-order rejection described above are covered;
+  full identity semantics beyond the bounded exceptions described above. The
+  oracle covers public-group AES/HMAC creation and authenticated parsing plus
+  the D1L signed-advert message layout and pinned C Ed25519 verifier; it does
+  not cover DM/session crypto, key management, dispatch, or retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
-  traffic. Simple/multipart ACK and initial flags-zero TRACE payload framing
-  are covered, but expected hash derivation, encrypted ACK+PATH handling, TRACE
+  traffic. Public-group payload creation/parsing, simple/multipart ACK framing,
+  and initial flags-zero TRACE payload framing are covered, but delivery,
+  expected hash derivation, encrypted ACK+PATH handling, TRACE
   forwarding/SNR/path discovery, correlation, and remaining Dispatcher
   behavior are not;
 - ACK timing, retry/delivery state, duplicate or replay control, packet

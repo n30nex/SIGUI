@@ -1,6 +1,7 @@
 #include "meshcore_oracle.h"
 
 #include "Packet.h"
+#include "Utils.h"
 #include "ed_25519.h"
 #include "helpers/AdvertDataHelpers.h"
 #include "mesh/advert_data.h"
@@ -31,6 +32,17 @@ static_assert(D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES == 9U,
               "Pinned MeshCore TRACE prefix changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES + 1U == MAX_PATH_SIZE,
               "Pinned MeshCore TRACE hop capacity changed");
+static_assert(D1L_MESHCORE_ORACLE_GROUP_HASH_BYTES == PATH_HASH_SIZE,
+              "Pinned MeshCore group hash width changed");
+static_assert(D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES == PUB_KEY_SIZE,
+              "Pinned MeshCore group secret width changed");
+static_assert(D1L_MESHCORE_ORACLE_GROUP_MAC_BYTES == CIPHER_MAC_SIZE,
+              "Pinned MeshCore group MAC width changed");
+static_assert(D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES == CIPHER_BLOCK_SIZE,
+              "Pinned MeshCore group cipher block width changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES ==
+                  MAX_GROUP_DATA_LENGTH + 3U,
+              "Pinned MeshCore group-data plaintext limit changed");
 static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
               "Pinned MeshCore NONE advert type changed");
 static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
@@ -400,6 +412,94 @@ extern "C" bool d1l_meshcore_oracle_verify_signed_advert(
     }
     return ed25519_verify(signature, message.data(), message_len, public_key) ==
            1;
+}
+
+extern "C" bool d1l_meshcore_oracle_group_channel_hash(
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    uint8_t *out_hash)
+{
+    if (secret == nullptr || out_hash == nullptr) {
+        return false;
+    }
+    bool upper_half_zero = true;
+    for (size_t index = CIPHER_KEY_SIZE; index < PUB_KEY_SIZE; ++index) {
+        if (secret[index] != 0U) {
+            upper_half_zero = false;
+            break;
+        }
+    }
+    mesh::Utils::sha256(out_hash, PATH_HASH_SIZE, secret,
+                        upper_half_zero ? CIPHER_KEY_SIZE : PUB_KEY_SIZE);
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_group_packet(
+    uint8_t payload_type,
+    uint8_t channel_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if ((payload_type != PAYLOAD_TYPE_GRP_TXT &&
+         payload_type != PAYLOAD_TYPE_GRP_DATA) ||
+        secret == nullptr || plaintext == nullptr || plaintext_len == 0U ||
+        plaintext_len > D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES ||
+        out_packet == nullptr) {
+        return false;
+    }
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(payload_type << PH_TYPE_SHIFT);
+    result.payload[0] = channel_hash;
+    const int encrypted_len = mesh::Utils::encryptThenMAC(
+        secret, &result.payload[1], plaintext, static_cast<int>(plaintext_len));
+    if (encrypted_len <= 0 ||
+        static_cast<size_t>(encrypted_len) + 1U >
+            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    result.payload_len = static_cast<uint16_t>(encrypted_len + 1);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_group_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t channel_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    uint8_t *out_plaintext,
+    size_t plaintext_capacity,
+    size_t *out_plaintext_len)
+{
+    if (packet == nullptr || secret == nullptr || out_plaintext == nullptr ||
+        out_plaintext_len == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        (upstream.getPayloadType() != PAYLOAD_TYPE_GRP_TXT &&
+         upstream.getPayloadType() != PAYLOAD_TYPE_GRP_DATA) ||
+        upstream.payload_len <
+            1U + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE ||
+        upstream.payload[0] != channel_hash) {
+        return false;
+    }
+    const size_t encrypted_len = upstream.payload_len - 1U - CIPHER_MAC_SIZE;
+    if ((encrypted_len % CIPHER_BLOCK_SIZE) != 0U ||
+        encrypted_len > plaintext_capacity) {
+        return false;
+    }
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> plaintext{};
+    const int decoded_len = mesh::Utils::MACThenDecrypt(
+        secret, plaintext.data(), &upstream.payload[1],
+        upstream.payload_len - 1U);
+    if (decoded_len <= 0 || static_cast<size_t>(decoded_len) != encrypted_len) {
+        return false;
+    }
+    std::memcpy(out_plaintext, plaintext.data(), encrypted_len);
+    *out_plaintext_len = encrypted_len;
+    return true;
 }
 
 extern "C" bool d1l_meshcore_oracle_prepare_flood(

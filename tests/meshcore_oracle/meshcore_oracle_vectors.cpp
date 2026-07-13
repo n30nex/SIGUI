@@ -1,9 +1,12 @@
 #include "meshcore_oracle.h"
 
+#include "AES.h"
 #include "Packet.h"
+#include "SHA256.h"
 #include "ed_25519.h"
 #include "mesh/ed25519_canonical.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -24,6 +27,9 @@ constexpr std::size_t kVerifierKatValidVectors = 1U;
 constexpr std::size_t kVerifierKatInvalidVectors = 3U;
 constexpr std::size_t kPointValidationValidVectors = 4U;
 constexpr std::size_t kPointValidationInvalidVectors = 7U;
+constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
+constexpr std::size_t kGroupRoundtripVectors = 4U;
+constexpr std::size_t kGroupInvalidVectors = 21U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
 constexpr std::size_t kAckRoundtripVectors = 5U;
@@ -729,6 +735,345 @@ int main()
         "noncanonical S+L signature", kSignedAdvertPublicKey.data(),
         signed_advert.timestamp.data(), malleable_signature.data(),
         signed_advert.app_data.data(), signed_advert.app_data.size());
+
+    const std::array<uint8_t, 32U> expected_sha256_abc = {
+        0xBAU, 0x78U, 0x16U, 0xBFU, 0x8FU, 0x01U, 0xCFU, 0xEAU,
+        0x41U, 0x41U, 0x40U, 0xDEU, 0x5DU, 0xAEU, 0x22U, 0x23U,
+        0xB0U, 0x03U, 0x61U, 0xA3U, 0x96U, 0x17U, 0x7AU, 0x9CU,
+        0xB4U, 0x10U, 0xFFU, 0x61U, 0xF2U, 0x00U, 0x15U, 0xADU};
+    std::array<uint8_t, 32U> sha256_abc{};
+    SHA256 sha256;
+    constexpr std::array<uint8_t, 3U> abc = {'a', 'b', 'c'};
+    sha256.update(abc.data(), abc.size());
+    sha256.finalize(sha256_abc.data(), sha256_abc.size());
+    if (sha256_abc != expected_sha256_abc) {
+        failures.push_back("FIPS SHA-256 abc KAT changed");
+    }
+
+    const std::array<uint8_t, 20U> hmac_key = {
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU,
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU,
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU};
+    constexpr std::array<uint8_t, 8U> hmac_data = {
+        'H', 'i', ' ', 'T', 'h', 'e', 'r', 'e'};
+    const std::array<uint8_t, 32U> expected_hmac = {
+        0xB0U, 0x34U, 0x4CU, 0x61U, 0xD8U, 0xDBU, 0x38U, 0x53U,
+        0x5CU, 0xA8U, 0xAFU, 0xCEU, 0xAFU, 0x0BU, 0xF1U, 0x2BU,
+        0x88U, 0x1DU, 0xC2U, 0x00U, 0xC9U, 0x83U, 0x3DU, 0xA7U,
+        0x26U, 0xE9U, 0x37U, 0x6CU, 0x2EU, 0x32U, 0xCFU, 0xF7U};
+    std::array<uint8_t, 32U> hmac_result{};
+    SHA256 hmac_sha256;
+    hmac_sha256.resetHMAC(hmac_key.data(), hmac_key.size());
+    hmac_sha256.update(hmac_data.data(), hmac_data.size());
+    hmac_sha256.finalizeHMAC(hmac_key.data(), hmac_key.size(),
+                             hmac_result.data(), hmac_result.size());
+    if (hmac_result != expected_hmac) {
+        failures.push_back("RFC 4231 HMAC-SHA-256 KAT changed");
+    }
+
+    const std::array<uint8_t, 16U> aes_key = {
+        0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+        0x08U, 0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU};
+    const std::array<uint8_t, 16U> aes_plaintext = {
+        0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U,
+        0x88U, 0x99U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU};
+    const std::array<uint8_t, 16U> expected_aes_ciphertext = {
+        0x69U, 0xC4U, 0xE0U, 0xD8U, 0x6AU, 0x7BU, 0x04U, 0x30U,
+        0xD8U, 0xCDU, 0xB7U, 0x80U, 0x70U, 0xB4U, 0xC5U, 0x5AU};
+    std::array<uint8_t, 16U> aes_ciphertext{};
+    std::array<uint8_t, 16U> aes_roundtrip{};
+    AES128 aes;
+    aes.setKey(aes_key.data(), aes_key.size());
+    aes.encryptBlock(aes_ciphertext.data(), aes_plaintext.data());
+    aes.decryptBlock(aes_roundtrip.data(), aes_ciphertext.data());
+    if (aes_ciphertext != expected_aes_ciphertext ||
+        aes_roundtrip != aes_plaintext) {
+        failures.push_back("FIPS-197 AES-128 KAT changed");
+    }
+
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES>
+        public_secret = {
+            0x8BU, 0x33U, 0x87U, 0xE9U, 0xC5U, 0xCDU, 0xEAU, 0x6AU,
+            0xC9U, 0xE5U, 0xEDU, 0xBAU, 0xA1U, 0x15U, 0xCDU, 0x72U,
+            0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+            0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES> full_secret{};
+    for (std::size_t index = 0U; index < full_secret.size(); ++index) {
+        full_secret[index] = static_cast<uint8_t>(index);
+    }
+    uint8_t public_hash = 0U;
+    uint8_t full_hash = 0U;
+    if (!d1l_meshcore_oracle_group_channel_hash(public_secret.data(),
+                                                 &public_hash) ||
+        public_hash != 0x11U ||
+        !d1l_meshcore_oracle_group_channel_hash(full_secret.data(),
+                                                 &full_hash) ||
+        full_hash != 0x63U) {
+        failures.push_back("BaseChatMesh group channel hash vectors changed");
+    }
+
+    const std::array<uint8_t, 6U> short_group_text = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 'a'};
+    const std::array<uint8_t, 18U> group_text = {
+        0x78U, 0x56U, 0x34U, 0x12U, 0x00U, 'o', 'r', 'a', 'c',
+        'l',   'e',   ':',   ' ',   'h',   'e', 'l', 'l', 'o'};
+    const std::array<uint8_t, 7U> group_data = {
+        0xEFU, 0xBEU, 0x04U, 0xDEU, 0xADU, 0xBEU, 0xEFU};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES>
+        maximum_group_data{};
+    maximum_group_data[0] = 0x12U;
+    maximum_group_data[1] = 0x34U;
+    maximum_group_data[2] = 165U;
+    for (std::size_t index = 3U; index < maximum_group_data.size(); ++index) {
+        maximum_group_data[index] = static_cast<uint8_t>(index - 3U);
+    }
+    const std::array<uint8_t, 19U> expected_short_group_payload = {
+        0x11U, 0x9EU, 0x58U, 0xABU, 0xE5U, 0x62U, 0xD2U,
+        0x9FU, 0x30U, 0xB8U, 0xCAU, 0x23U, 0x5EU, 0xDEU,
+        0x0BU, 0xEAU, 0xF6U, 0xA1U, 0x57U};
+    const std::array<uint8_t, 35U> expected_group_text_payload = {
+        0x11U, 0xEFU, 0x1DU, 0x99U, 0x14U, 0x9EU, 0x82U,
+        0xF4U, 0x7CU, 0x34U, 0x91U, 0x97U, 0x0AU, 0x25U,
+        0xA5U, 0x37U, 0x3EU, 0xC5U, 0x1DU, 0x41U, 0xC9U,
+        0x77U, 0x27U, 0x66U, 0x59U, 0xDDU, 0xB6U, 0xECU,
+        0x63U, 0xA0U, 0x24U, 0x53U, 0xECU, 0xEEU, 0xB1U};
+    const std::array<uint8_t, 19U> expected_group_data_payload = {
+        0x63U, 0x44U, 0x2EU, 0xA7U, 0xEFU, 0xA0U, 0xB0U,
+        0xFEU, 0x3FU, 0x9BU, 0x5AU, 0x57U, 0x74U, 0xDFU,
+        0x21U, 0x19U, 0xC8U, 0x6BU, 0x7EU};
+    const std::array<uint8_t, 32U> expected_max_group_payload_sha256 = {
+        0x30U, 0xB6U, 0x8EU, 0xB0U, 0xFDU, 0x57U, 0xADU, 0x98U,
+        0x29U, 0x35U, 0x73U, 0xB8U, 0xCCU, 0xCDU, 0x48U, 0x7BU,
+        0xD9U, 0x3CU, 0xB3U, 0x2CU, 0xD8U, 0xE2U, 0x00U, 0xA6U,
+        0x4EU, 0x72U, 0x8CU, 0x91U, 0x21U, 0xB5U, 0x3EU, 0xEAU};
+
+    auto verify_group_roundtrip =
+        [&failures](const char *name, uint8_t payload_type,
+                    const uint8_t *secret, uint8_t channel_hash,
+                    const uint8_t *plaintext, std::size_t plaintext_len,
+                    const uint8_t *expected_payload,
+                    std::size_t expected_payload_len,
+                    const std::array<uint8_t, 32U> *expected_payload_sha) {
+            d1l_meshcore_oracle_packet_t packet{};
+            if (!d1l_meshcore_oracle_create_group_packet(
+                    payload_type, channel_hash, secret, plaintext,
+                    plaintext_len, &packet) ||
+                packet.header !=
+                    static_cast<uint8_t>(payload_type << PH_TYPE_SHIFT) ||
+                packet.payload_len != expected_payload_len ||
+                (expected_payload != nullptr &&
+                 std::memcmp(packet.payload, expected_payload,
+                             expected_payload_len) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " group create vector changed");
+                return;
+            }
+            if (expected_payload_sha != nullptr) {
+                std::array<uint8_t, 32U> digest{};
+                SHA256 payload_sha;
+                payload_sha.update(packet.payload, packet.payload_len);
+                payload_sha.finalize(digest.data(), digest.size());
+                if (digest != *expected_payload_sha) {
+                    failures.push_back(std::string(name) +
+                                       " group payload digest changed");
+                    return;
+                }
+            }
+            uint8_t priority = 0U;
+            const bool routed = payload_type == PAYLOAD_TYPE_GRP_TXT
+                                    ? d1l_meshcore_oracle_prepare_flood(
+                                          &packet, 1U, 0U, nullptr, &priority)
+                                    : d1l_meshcore_oracle_prepare_direct(
+                                          &packet, nullptr, 0U, &priority);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!routed ||
+                !d1l_meshcore_oracle_packet_encode(
+                    &packet, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded)) {
+                failures.push_back(std::string(name) +
+                                   " group wire roundtrip failed");
+                return;
+            }
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES +
+                           D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES>
+                parsed{};
+            size_t parsed_len = 0U;
+            if (!d1l_meshcore_oracle_parse_group_packet(
+                    &decoded, channel_hash, secret, parsed.data(),
+                    parsed.size(), &parsed_len) ||
+                parsed_len < plaintext_len ||
+                std::memcmp(parsed.data(), plaintext, plaintext_len) != 0 ||
+                std::any_of(parsed.begin() + plaintext_len,
+                            parsed.begin() + parsed_len,
+                            [](uint8_t value) { return value != 0U; })) {
+                failures.push_back(std::string(name) +
+                                   " group parse vector changed");
+            }
+        };
+    verify_group_roundtrip(
+        "short text", PAYLOAD_TYPE_GRP_TXT, public_secret.data(), public_hash,
+        short_group_text.data(), short_group_text.size(),
+        expected_short_group_payload.data(), expected_short_group_payload.size(),
+        nullptr);
+    verify_group_roundtrip(
+        "two-block text", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        public_hash, group_text.data(), group_text.size(),
+        expected_group_text_payload.data(), expected_group_text_payload.size(),
+        nullptr);
+    verify_group_roundtrip(
+        "group data", PAYLOAD_TYPE_GRP_DATA, full_secret.data(), full_hash,
+        group_data.data(), group_data.size(), expected_group_data_payload.data(),
+        expected_group_data_payload.size(), nullptr);
+    verify_group_roundtrip(
+        "maximum group data", PAYLOAD_TYPE_GRP_DATA, full_secret.data(),
+        full_hash, maximum_group_data.data(), maximum_group_data.size(), nullptr,
+        179U, &expected_max_group_payload_sha256);
+
+    d1l_meshcore_oracle_packet_t valid_group{};
+    if (!d1l_meshcore_oracle_create_group_packet(
+            PAYLOAD_TYPE_GRP_TXT, public_hash, public_secret.data(),
+            group_text.data(), group_text.size(), &valid_group)) {
+        failures.push_back("group negative-vector fixture creation failed");
+    }
+    auto expect_group_create_reject =
+        [&failures, &valid_group](const char *name, uint8_t payload_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *plaintext,
+                                  std::size_t plaintext_len,
+                                  d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_group;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_group_packet(
+                    payload_type, 0x11U, secret, plaintext, plaintext_len,
+                    output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " group create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_group{};
+    expect_group_create_reject(
+        "unsupported type", PAYLOAD_TYPE_ACK, public_secret.data(),
+        group_text.data(), group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "null secret", PAYLOAD_TYPE_GRP_TXT, nullptr, group_text.data(),
+        group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "null plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(), nullptr,
+        group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "empty plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        group_text.data(), 0U, &rejected_group);
+    expect_group_create_reject(
+        "oversized plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        maximum_group_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES + 1U,
+        &rejected_group);
+    expect_group_create_reject(
+        "null output", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        group_text.data(), group_text.size(), nullptr);
+    if (d1l_meshcore_oracle_group_channel_hash(nullptr, &public_hash) ||
+        d1l_meshcore_oracle_group_channel_hash(public_secret.data(), nullptr)) {
+        failures.push_back("invalid group channel hash input accepted");
+    }
+
+    auto expect_group_parse_reject =
+        [&failures, &public_secret, public_hash](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t hash, const uint8_t *secret, uint8_t *output,
+            std::size_t capacity, size_t *output_len) {
+            std::array<uint8_t, 192U> sentinel{};
+            sentinel.fill(0xC7U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), capacity);
+            }
+            if (output_len != nullptr) {
+                *output_len = 0xCAFEU;
+            }
+            if (d1l_meshcore_oracle_parse_group_packet(
+                    packet, hash, secret, output, capacity, output_len) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), capacity) != 0) ||
+                (output_len != nullptr && *output_len != 0xCAFEU)) {
+                failures.push_back(std::string(name) +
+                                   " group parse reject changed output");
+            }
+            (void)public_secret;
+            (void)public_hash;
+        };
+    std::array<uint8_t, 192U> rejected_plaintext{};
+    size_t rejected_plaintext_len = 0U;
+    expect_group_parse_reject(
+        "null packet", nullptr, public_hash, public_secret.data(),
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null parse secret", &valid_group, public_hash, nullptr,
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null plaintext output", &valid_group, public_hash,
+        public_secret.data(), nullptr, rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null plaintext length", &valid_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), nullptr);
+    d1l_meshcore_oracle_packet_t malformed_group = valid_group;
+    malformed_group.header |= 0x40U;
+    expect_group_parse_reject(
+        "future payload version", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.header = static_cast<uint8_t>(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+    expect_group_parse_reject(
+        "non-group payload type", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload_len = 18U;
+    expect_group_parse_reject(
+        "truncated encrypted payload", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload_len -= 1U;
+    expect_group_parse_reject(
+        "non-block encrypted payload", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "wrong channel hash", &valid_group, static_cast<uint8_t>(public_hash ^ 1U),
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "wrong channel secret", &valid_group, public_hash, full_secret.data(),
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload[1] ^= 0x01U;
+    expect_group_parse_reject(
+        "tampered group MAC", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload[3] ^= 0x01U;
+    expect_group_parse_reject(
+        "tampered group ciphertext", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "undersized plaintext output", &valid_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(), 15U,
+        &rejected_plaintext_len);
 
     auto check_prepared_packet =
         [&failures](const char *name,
@@ -1440,22 +1785,24 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
+                  kGroupRoundtripVectors +
                   kRouteRoundtripVectors + kAckRoundtripVectors +
                   kTraceRoundtripVectors)
               << ",\"valid\":"
               << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
-                  kPointValidationValidVectors)
+                  kPointValidationValidVectors + kCryptoAdapterKatValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
+                  kGroupInvalidVectors +
                   kRouteInvalidVectors + kAckInvalidVectors +
                   kTraceInvalidVectors)
               << ",\"semantic\":"
@@ -1464,6 +1811,7 @@ int main()
                   kSignedAdvertInvalidVectors +
                   kPointValidationValidVectors +
                   kPointValidationInvalidVectors +
+                  kGroupRoundtripVectors + kGroupInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1474,6 +1822,8 @@ int main()
                   kVerifierKatValidVectors + kVerifierKatInvalidVectors +
                   kPointValidationValidVectors +
                   kPointValidationInvalidVectors +
+                  kCryptoAdapterKatValidVectors +
+                  kGroupRoundtripVectors + kGroupInvalidVectors +
                   kRouteRoundtripVectors + kRouteInvalidVectors +
                   kAckRoundtripVectors + kAckInvalidVectors +
                   kTraceRoundtripVectors + kTraceInvalidVectors)
@@ -1508,6 +1858,16 @@ int main()
               << (kPointValidationValidVectors +
                   kPointValidationInvalidVectors)
               << "}"
+              << ",\"crypto_adapter_kat\":{\"valid\":"
+              << kCryptoAdapterKatValidVectors
+              << ",\"invalid\":0,\"semantic\":0,\"total\":"
+              << kCryptoAdapterKatValidVectors << "}"
+              << ",\"public_group_packets\":{\"roundtrip\":"
+              << kGroupRoundtripVectors << ",\"invalid\":"
+              << kGroupInvalidVectors << ",\"semantic\":"
+              << (kGroupRoundtripVectors + kGroupInvalidVectors)
+              << ",\"total\":"
+              << (kGroupRoundtripVectors + kGroupInvalidVectors) << "}"
               << ",\"direct_flood_headers\":{\"roundtrip\":"
               << kRouteRoundtripVectors << ",\"invalid\":"
               << kRouteInvalidVectors << ",\"semantic\":"
@@ -1530,6 +1890,7 @@ int main()
               << ",\"advert_data_fields\":true"
               << ",\"signed_advert_verification\":true"
               << ",\"ed25519_point_validation\":true"
+              << ",\"public_group_packets\":true"
               << ",\"direct_flood_headers\":true"
               << ",\"ack_frames\":true"
               << ",\"trace_source_frames\":true}"

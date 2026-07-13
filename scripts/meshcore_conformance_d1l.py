@@ -2,7 +2,8 @@
 """Run the bounded D1L/Pinned-MeshCore host conformance gate.
 
 This covers the wire envelope plus the explicitly versioned oracle capabilities.
-It is not a crypto, retained-state, delivery, RF, or complete MeshCore claim.
+It is not a full crypto/session, retained-state, delivery, RF, or complete
+MeshCore claim.
 """
 
 from __future__ import annotations
@@ -36,6 +37,16 @@ ADVERT_DATA_SOURCE = (
     / "helpers"
     / "AdvertDataHelpers.cpp"
 )
+ORACLE_UTILS_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Utils.cpp"
+ORACLE_AES_ROOT = (
+    ROOT
+    / "third_party"
+    / "sensecap_indicator_esp32"
+    / "components"
+    / "LoRaWAN"
+    / "soft-se"
+)
+ORACLE_AES_SOURCE = ORACLE_AES_ROOT / "aes.c"
 ORACLE_MANIFEST_PATH = ROOT / "tests" / "meshcore_oracle" / "manifest.json"
 ORACLE_COVERAGE_MANIFEST_PATH = (
     ROOT / "tests" / "meshcore_oracle" / "coverage_manifest.json"
@@ -63,9 +74,9 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 8
+ORACLE_CORPUS_VERSION = 9
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification"
+    "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -215,23 +226,50 @@ EXPECTED_ORACLE_CAPABILITIES = [
     },
     {
         "id": "public_group_packets",
-        "status": "pending",
-        "owner": "unassigned",
-        "blocked_by": "external_unpinned_aes_sha_and_channel_fixture",
+        "status": "implemented",
+        "owner": "pinned_upstream_utils_vendored_aes_host_sha",
+        "semantic": True,
+        "scope": (
+            "basechatmesh_setchannel_hash_and_nonempty_group_text_data_encrypt_"
+            "mac_parse_only_no_mesh_dispatch_delivery_or_retained_state"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-PUBLIC-GROUP-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+                "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
+            ],
+            "independent_kats": [
+                "FIPS 180-4 SHA-256 abc",
+                "RFC 4231 HMAC-SHA-256 test case 1",
+                "FIPS 197 AES-128 cipher example",
+            ],
+            "vectors": {
+                "roundtrip": 4,
+                "invalid": 21,
+                "crypto_adapter_kat": 3,
+            },
+        },
     },
     {
         "id": "dm_encrypt_decrypt",
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
+            "pinned_ed25519_key_exchange_identity_and_deterministic_dm_session_fixtures"
         ),
     },
     {
         "id": "expected_ack_hash_and_ack_path",
         "status": "pending",
         "owner": "unassigned",
-        "blocked_by": "external_unpinned_sha_aes_and_mesh_session_fixtures",
+        "blocked_by": (
+            "deterministic_identity_expected_ack_and_ack_path_mesh_session_fixtures"
+        ),
     },
     {
         "id": "ack_dispatch_correlation_and_delivery",
@@ -254,7 +292,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "external_unpinned_aes_sha_rng_identity_and_mesh_session_fixtures"
+            "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
         ),
     },
     {
@@ -270,7 +308,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
+            "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
         ),
     },
 ]
@@ -287,7 +325,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     },
     {
         "id": "public_group_packets",
-        "status": "blocked",
+        "status": "implemented",
         "capabilities": ["public_group_packets"],
     },
     {
@@ -403,7 +441,10 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/src/MeshCore.h",
     "third_party/MeshCore/src/Packet.cpp",
     "third_party/MeshCore/src/Packet.h",
+    "third_party/MeshCore/src/Utils.cpp",
     "third_party/MeshCore/src/Utils.h",
+    "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+    "third_party/MeshCore/src/helpers/BaseChatMesh.h",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp",
     "third_party/MeshCore/src/helpers/AdvertDataHelpers.h",
     "third_party/MeshCore/lib/ed25519/ed_25519.h",
@@ -427,6 +468,10 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/advert_data.h",
     "main/mesh/ed25519_canonical.h",
     "main/mesh/meshcore_service.c",
+}
+EXPECTED_ORACLE_VENDORED_CRYPTO_SOURCE_PATHS = {
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h",
 }
 
 
@@ -555,14 +600,21 @@ def load_oracle_manifest() -> dict[str, Any]:
         != EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS
     ):
         raise GateFailure("oracle production-binding source allowlist drifted")
+    vendored_crypto_sources = manifest.get("vendored_crypto_sources")
+    if (
+        not isinstance(vendored_crypto_sources, dict)
+        or set(vendored_crypto_sources)
+        != EXPECTED_ORACLE_VENDORED_CRYPTO_SOURCE_PATHS
+    ):
+        raise GateFailure("oracle vendored-crypto source allowlist drifted")
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 26,
-        "valid": 8,
-        "invalid": 83,
-        "semantic": 104,
-        "total": 117,
+        "roundtrip": 30,
+        "valid": 11,
+        "invalid": 104,
+        "semantic": 129,
+        "total": 145,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -593,6 +645,18 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 11,
             "total": 11,
         },
+        "crypto_adapter_kat": {
+            "valid": 3,
+            "invalid": 0,
+            "semantic": 0,
+            "total": 3,
+        },
+        "public_group_packets": {
+            "roundtrip": 4,
+            "invalid": 21,
+            "semantic": 25,
+            "total": 25,
+        },
         "direct_flood_headers": {
             "roundtrip": 7,
             "invalid": 10,
@@ -617,9 +681,12 @@ def load_oracle_manifest() -> dict[str, Any]:
     if (
         interface.get("language") != "c_abi"
         or interface.get("upstream_types")
-        != ["mesh::Packet", "AdvertDataBuilder", "AdvertDataParser"]
+        != ["mesh::Packet", "mesh::Utils", "AdvertDataBuilder", "AdvertDataParser"]
         or interface.get("reject_preserves_output") is not True
         or interface.get("crypto_available") is not False
+        or interface.get("group_crypto_available") is not True
+        or interface.get("group_crypto_scope")
+        != "aes128_ecb_zero_padding_truncated_hmac_sha256_and_basechatmesh_setchannel_hash_only"
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
         != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
@@ -649,12 +716,25 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "third_party/MeshCore/lib/ed25519/ge.c"
             ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+            "public_group_channel_hash": (
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+            ),
+            "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+            "public_group_aes": (
+                "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c"
+            ),
+            "public_group_sha_hmac": "tests/meshcore_oracle/stubs/SHA256.h",
+            "public_group_independent_kats": (
+                "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; "
+                "FIPS 197 AES-128 cipher example"
+            ),
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_and_fixed_ed25519_vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_and_public_group_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -679,6 +759,11 @@ def load_oracle_manifest() -> dict[str, Any]:
         "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation"
     ):
         raise GateFailure("oracle identity-point regression provenance drifted")
+    if determinism.get("public_group_recipe") != (
+        "basechatmesh_setchannel_padded16_or_full32_secret_sha256_hash_then_"
+        "utils_aes128_ecb_zero_pad_and_two_byte_hmac_sha256"
+    ):
+        raise GateFailure("oracle public-group vector provenance drifted")
     required_fixtures = determinism.get(
         "future_fixtures_required"
     )
@@ -695,12 +780,13 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle deterministic fixture roadmap drifted")
     oracle_sources = manifest.get("oracle_sources")
     if not isinstance(oracle_sources, dict) or set(oracle_sources) != {
-        "tests/meshcore_conformance/stubs/SHA256.h",
         "tests/meshcore_oracle/coverage_manifest.json",
         "tests/meshcore_oracle/meshcore_oracle.cpp",
         "tests/meshcore_oracle/meshcore_oracle.h",
         "tests/meshcore_oracle/meshcore_oracle_vectors.cpp",
+        "tests/meshcore_oracle/stubs/AES.h",
         "tests/meshcore_oracle/stubs/Arduino.h",
+        "tests/meshcore_oracle/stubs/SHA256.h",
         "tests/meshcore_oracle/stubs/Stream.h",
     }:
         raise GateFailure("oracle source allowlist drifted")
@@ -951,6 +1037,7 @@ def verify_oracle_sources(manifest: dict[str, Any]) -> dict[str, Any]:
     expected_sources = {
         **manifest["upstream"]["sources"],
         **manifest["production_binding_sources"],
+        **manifest["vendored_crypto_sources"],
         **manifest["oracle_sources"],
     }
     root = ROOT.resolve()
@@ -1127,9 +1214,63 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
             "-c",
+            str(PACKET_SOURCE),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_packet.o"),
+        ],
+        [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-I",
+            str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
             str(ADVERT_DATA_SOURCE),
             "-o",
             str(Path(build_dir) / "meshcore_advert_data.o"),
+        ],
+        [
+            cc,
+            "-std=c11",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-D__CORTEX_M=0",
+            "-DAES_DEC_PREKEYED=1",
+            "-I",
+            str(ORACLE_AES_ROOT),
+            "-c",
+            str(ORACLE_AES_SOURCE),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_aes.o"),
+        ],
+        [
+            cxx,
+            "-std=c++17",
+            "-O1",
+            "-g",
+            "-fno-omit-frame-pointer",
+            common_sanitizers,
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-I",
+            str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
+            "-isystem",
+            str(ROOT / "third_party" / "MeshCore" / "src"),
+            "-c",
+            str(ORACLE_UTILS_SOURCE),
+            "-o",
+            str(Path(build_dir) / "meshcore_oracle_utils.o"),
         ],
         [
             cxx,
@@ -1180,8 +1321,6 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-I",
             str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
             "-I",
-            str(ROOT / "tests" / "meshcore_conformance" / "stubs"),
-            "-I",
             str(ED25519_ROOT),
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
@@ -1205,6 +1344,8 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-I",
             str(ROOT / "main"),
             "-I",
+            str(ROOT / "tests" / "meshcore_oracle" / "stubs"),
+            "-I",
             str(ED25519_ROOT),
             "-isystem",
             str(ROOT / "third_party" / "MeshCore" / "src"),
@@ -1216,8 +1357,10 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
         [
             cxx,
             common_sanitizers,
-            str(Path(build_dir) / "meshcore_packet.o"),
+            str(Path(build_dir) / "meshcore_oracle_packet.o"),
             str(Path(build_dir) / "meshcore_advert_data.o"),
+            str(Path(build_dir) / "meshcore_oracle_aes.o"),
+            str(Path(build_dir) / "meshcore_oracle_utils.o"),
             str(Path(build_dir) / "meshcore_oracle_adapter.o"),
             str(Path(build_dir) / "meshcore_oracle_vectors.o"),
             *[
@@ -1368,6 +1511,7 @@ def base_report(
             "fuzz_target": "local_wire_decoder_only",
             "packet_semantics_covered": False,
             "crypto_oracle_available": False,
+            "public_group_crypto_oracle_available": True,
         },
         "requested": {
             "commit": args.commit,
@@ -1540,6 +1684,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "advert_data_fields": True,
                     "signed_advert_verification": True,
                     "ed25519_point_validation": True,
+                    "public_group_packets": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

@@ -23,6 +23,11 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MIN_ACK_BYTES 4U
 #define D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES 9U
 #define D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES 63U
+#define D1L_MESHCORE_ORACLE_GROUP_HASH_BYTES 1U
+#define D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES 32U
+#define D1L_MESHCORE_ORACLE_GROUP_MAC_BYTES 2U
+#define D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES 16U
+#define D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES 168U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -108,6 +113,41 @@ bool d1l_meshcore_oracle_verify_signed_advert(
     const uint8_t signature[D1L_MESHCORE_ORACLE_SIGNATURE_BYTES],
     const uint8_t *app_data,
     size_t app_data_len);
+
+/*
+ * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash
+ * helper reproduces BaseChatMesh::setChannel: a padded 16-byte secret with an
+ * all-zero upper half hashes 16 bytes, while other secrets hash all 32. The
+ * separate addChannel path carries an explicit decoded length and is outside
+ * this inferred-length ABI. Group packet crypto is AES-128 ECB with
+ * zero padding and a leading two-byte truncated HMAC-SHA-256 exactly as in
+ * Utils.cpp. Parsing returns the padded plaintext length because the wire
+ * format carries no original plaintext length. Creation intentionally accepts
+ * only non-empty application datagrams; application-level group text and group
+ * data fields determine their own logical length.
+ *
+ * These functions do not claim channel persistence, dispatcher callbacks,
+ * duplicate suppression, routing, RF delivery, or group-message UI behavior.
+ */
+bool d1l_meshcore_oracle_group_channel_hash(
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    uint8_t *out_hash);
+
+bool d1l_meshcore_oracle_create_group_packet(
+    uint8_t payload_type,
+    uint8_t channel_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_group_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t channel_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES],
+    uint8_t *out_plaintext,
+    size_t plaintext_capacity,
+    size_t *out_plaintext_len);
 
 /*
  * Canonical non-TRACE preparation vectors derived from the pinned Mesh.cpp

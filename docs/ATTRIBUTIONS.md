@@ -27,7 +27,7 @@ MeshCore DeskOS D1L is released under GPL-3.0-or-later. Release packages must in
 - Project: Seeed SenseCAP Indicator ESP32 SDK and examples
 - Repository: https://github.com/Seeed-Solution/SenseCAP_Indicator_ESP32
 - Pinned submodule: `third_party/sensecap_indicator_esp32` at commit `77edb8d2b9a92fc67965c1b2d4a838f0d09a1800` (`v1.1.0`)
-- Use in this project: tracked compatibility/BSP reference for board support, LCD/touch integration patterns, and D1L/GX display configuration. Its documented ESP-IDF v5.1.x baseline does not set the production SDK version; issue #63 separately selects v5.5.4 as the migration target and requires qualification before it becomes the production baseline.
+- Use in this project: tracked compatibility/BSP reference for board support, LCD/touch integration patterns, and D1L/GX display configuration. The WP-04 host-only public-group oracle also compiles `components/LoRaWAN/soft-se/aes.c`; that AES implementation carries the permissive Brian Gladman notice embedded in `aes.c` and `aes.h`. Its documented ESP-IDF v5.1.x baseline does not set the production SDK version; issue #63 separately selects v5.5.4 as the migration target and requires qualification before it becomes the production baseline.
 
 ## SigurdOS-TDeck
 

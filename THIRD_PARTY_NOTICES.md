@@ -30,6 +30,26 @@ The reviewed upstream implementation targets LilyGo T-Deck hardware. MeshCore De
 - License: MIT-style upstream license text
 - Use: MeshCore protocol/library base and feature compatibility target.
 
+## Brian Gladman AES implementation
+
+- Copyright: Copyright (c) 1998-2008, Brian Gladman, Worcester, UK. All rights reserved.
+- Source in this project: `third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c` and `aes.h`
+- Use: host-only WP-04 public-group conformance oracle.
+
+Redistribution and use of this software, with or without changes, is allowed
+without payment of fees or royalties provided that:
+
+1. source distributions include the copyright notice, this list of conditions,
+   and the following disclaimer;
+2. binary distributions include the copyright notice, this list of conditions,
+   and the following disclaimer in their documentation; and
+3. the copyright holder's name is not used to endorse products built with this
+   software without specific written permission.
+
+This software is provided "as is" with no explicit or implied warranties in
+respect of its properties, including, but not limited to, correctness and/or
+fitness for purpose.
+
 ## OpenStreetMap Standard Tiles
 
 - Service/data: OpenStreetMap Standard tile layer and OpenStreetMap geographic data.

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 8,
+  "corpus_version": 9,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_route_ack_trace_and_strict_signed_advert_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_route_ack_trace_and_strict_signed_advert_verification",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -18,9 +18,12 @@
       "third_party/MeshCore/src/MeshCore.h": "51d93fe4c18608efa827625639a68721cedd9c15a83d55e3b86629cd5710ba8a",
       "third_party/MeshCore/src/Packet.cpp": "6f401a4abe57b67aae6ce54172a8cd5cfa64f801c2186894d4bf28aaf30b52e0",
       "third_party/MeshCore/src/Packet.h": "dae1e63021df0b85ccd83bd409993e302daf768509a7a28e8485d02344528d9f",
+      "third_party/MeshCore/src/Utils.cpp": "6600763c74e8a26469d0c452a209222e071d831f27251864a8f2844ac5d0518c",
       "third_party/MeshCore/src/Utils.h": "76b0d60b27610f186dff1765aa4be72de806208f4930f8000bfea3d7b917d885",
       "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp": "39107b26d0ee970b3e936bb32ae348b40d913161d8e355e16d5806ac6d490544",
       "third_party/MeshCore/src/helpers/AdvertDataHelpers.h": "c871a8e7e0e366c357da52e2994e009d4e7c14cd714b06ea5632b82bccf6dc0c",
+      "third_party/MeshCore/src/helpers/BaseChatMesh.cpp": "1d18079bfd44ce4e341203497eb95fa4fd252391220535e808962d5c3d106c3c",
+      "third_party/MeshCore/src/helpers/BaseChatMesh.h": "c111654035f27d805e9a3c5714a9f6e214ca226bb8f2a6d822dedc736ab0e7fc",
       "third_party/MeshCore/lib/ed25519/ed_25519.h": "9022487fe9120bbd4dc35dc717efc2177d22222c275ef46c9463653bf03026b2",
       "third_party/MeshCore/lib/ed25519/fe.c": "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d",
       "third_party/MeshCore/lib/ed25519/fe.h": "0476ae2ebb86978d1e0b9fbeb63dcddd7566d6b74806db47dda7688df74aaafb",
@@ -44,14 +47,19 @@
     "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
     "main/mesh/meshcore_service.c": "b5b2c0cb6a3a316d0d83f61b5c113b6db5cce8583e33b769b652f2e42c20b303"
   },
+  "vendored_crypto_sources": {
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
+  },
   "oracle_sources": {
-    "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
-    "tests/meshcore_oracle/coverage_manifest.json": "1299645b9d2047cfc86039f548ddd56e83b3b16440c9d2bf9487395fee80e028",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "af4443310e607cfcda33e6c34f1cccce49687f0ad010723b8dfe07a863756a20",
-    "tests/meshcore_oracle/meshcore_oracle.h": "aee96eb5b451f58c7de5798dba19b1f4fbc94f24fab1013fc17507b0665ab039",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "c6019a1fb7603ef8768cf27e59414e405c649162ee145b271b5d219097b47ee4",
+    "tests/meshcore_oracle/coverage_manifest.json": "7144bd6def15a725391ebd31da79400d1600722604dbeb314e02bc5f68104b22",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "6021f923ea4b4c6bdfc8f120bfade1e2d7450eb9e9ed7e9aea0d77b56401073b",
+    "tests/meshcore_oracle/meshcore_oracle.h": "62b82ff031f3ab69ab38f2bd1d9dc3f7b1af198762c68de8b23d97fe0c4e876b",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "e391163ed7c1e62d472ef768b5b1a52fd7c4792c934d47a633620b7b8d94db84",
+    "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
-    "tests/meshcore_oracle/stubs/Stream.h": "2232859dc0f15bfe02267eaa405c3da8d525c32d008b96401daffbd3f4d9ea90"
+    "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
+    "tests/meshcore_oracle/stubs/Stream.h": "53d95e4db77aac9088b3b39a5bb0416ca2c4cbca5ab7c2435106bd7212bd20ad"
   },
   "interface": {
     "language": "c_abi",
@@ -59,11 +67,14 @@
     "implementation": "tests/meshcore_oracle/meshcore_oracle.cpp",
     "upstream_types": [
       "mesh::Packet",
+      "mesh::Utils",
       "AdvertDataBuilder",
       "AdvertDataParser"
     ],
     "reject_preserves_output": true,
     "crypto_available": false,
+    "group_crypto_available": true,
+    "group_crypto_scope": "aes128_ecb_zero_padding_truncated_hmac_sha256_and_basechatmesh_setchannel_hash_only",
     "signed_advert_ed25519_available": true,
     "signed_advert_scope": "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch",
     "canonical_advert_data": true,
@@ -79,16 +90,23 @@
       "signed_advert_fixed_seed_signer": "third_party/MeshCore/lib/ed25519/sign.c",
       "signed_advert_verifier": "third_party/MeshCore/lib/ed25519/verify.c",
       "signed_advert_point_decoder": "third_party/MeshCore/lib/ed25519/ge.c",
-      "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1"
+      "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+      "public_group_channel_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+      "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
+      "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
+      "public_group_aes": "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c",
+      "public_group_sha_hmac": "tests/meshcore_oracle/stubs/SHA256.h",
+      "public_group_independent_kats": "FIPS 180-4 SHA-256 abc; RFC 4231 HMAC test 1; FIPS 197 AES-128 cipher example"
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_and_fixed_ed25519_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_and_public_group_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
+    "public_group_recipe": "basechatmesh_setchannel_padded16_or_full32_secret_sha256_hash_then_utils_aes128_ecb_zero_pad_and_two_byte_hmac_sha256",
     "future_fixtures_required": [
       "mock_radio",
       "deterministic_rng",
@@ -101,11 +119,11 @@
     ]
   },
   "vectors": {
-    "roundtrip": 26,
-    "valid": 8,
-    "invalid": 83,
-    "semantic": 104,
-    "total": 117,
+    "roundtrip": 30,
+    "valid": 11,
+    "invalid": 104,
+    "semantic": 129,
+    "total": 145,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -135,6 +153,18 @@
       "invalid": 7,
       "semantic": 11,
       "total": 11
+    },
+    "crypto_adapter_kat": {
+      "valid": 3,
+      "invalid": 0,
+      "semantic": 0,
+      "total": 3
+    },
+    "public_group_packets": {
+      "roundtrip": 4,
+      "invalid": 21,
+      "semantic": 25,
+      "total": 25
     },
     "direct_flood_headers": {
       "roundtrip": 7,
@@ -227,21 +257,43 @@
     },
     {
       "id": "public_group_packets",
-      "status": "pending",
-      "owner": "unassigned",
-      "blocked_by": "external_unpinned_aes_sha_and_channel_fixture"
+      "status": "implemented",
+      "owner": "pinned_upstream_utils_vendored_aes_host_sha",
+      "semantic": true,
+      "scope": "basechatmesh_setchannel_hash_and_nonempty_group_text_data_encrypt_mac_parse_only_no_mesh_dispatch_delivery_or_retained_state",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-PUBLIC-GROUP-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Utils.cpp",
+          "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+          "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c"
+        ],
+        "independent_kats": [
+          "FIPS 180-4 SHA-256 abc",
+          "RFC 4231 HMAC-SHA-256 test case 1",
+          "FIPS 197 AES-128 cipher example"
+        ],
+        "vectors": {
+          "roundtrip": 4,
+          "invalid": 21,
+          "crypto_adapter_kat": 3
+        }
+      }
     },
     {
       "id": "dm_encrypt_decrypt",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "external_unpinned_aes_sha_ed25519_identity_and_mesh_session_fixtures"
+      "blocked_by": "pinned_ed25519_key_exchange_identity_and_deterministic_dm_session_fixtures"
     },
     {
       "id": "expected_ack_hash_and_ack_path",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "external_unpinned_sha_aes_and_mesh_session_fixtures"
+      "blocked_by": "deterministic_identity_expected_ack_and_ack_path_mesh_session_fixtures"
     },
     {
       "id": "ack_dispatch_correlation_and_delivery",
@@ -259,7 +311,7 @@
       "id": "path_return_route_codes",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "external_unpinned_aes_sha_rng_identity_and_mesh_session_fixtures"
+      "blocked_by": "deterministic_rng_identity_shared_secret_and_path_session_fixtures"
     },
     {
       "id": "trace_forwarding_and_path_discovery",
@@ -271,20 +323,22 @@
       "id": "login_request_response_admin",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "external_unpinned_aes_sha_ed25519_identity_and_deterministic_admin_session_fixtures"
+      "blocked_by": "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
     }
   ],
   "production_boundary": {
     "direct_upstream_reuse": [
       "packet envelope encode/decode through mesh::Packet",
       "canonical advert app-data fields through AdvertDataBuilder and AdvertDataParser",
+      "public-group AES-128 ECB encryption, zero padding, two-byte HMAC-SHA-256, and authenticated parsing through mesh::Utils with deterministic host crypto adapters",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
     "pinned_source_golden_vectors": [
       "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp",
       "simple and multipart ACK payload framing from Mesh.cpp",
-      "source TRACE prefix, direct-route payload path and priority framing from Mesh.cpp"
+      "source TRACE prefix, direct-route payload path and priority framing from Mesh.cpp",
+      "BaseChatMesh setChannel padded-16-secret versus full-32-secret channel-hash selection from BaseChatMesh.cpp"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",
