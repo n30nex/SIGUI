@@ -880,6 +880,7 @@ def boot_prepare_payload(
         "format_allowed": False,
         "commands_safe": True,
         "scenario_passed": True,
+        "scenario_prerequisite": {"satisfied": True},
         "classification": classification,
         "storage_file_gate_ready": storage_file_gate_ready,
         "retained_store_gate_ready": retained_store_gate_ready,
@@ -910,6 +911,24 @@ def boot_prepare_payload(
     if commit:
         payload["firmware_commit"] = commit
     return payload
+
+
+def unavailable_storage_status() -> dict:
+    return {
+        "ok": True,
+        "cmd": "storage status",
+        "data_enabled": False,
+        "data_backend": "nvs",
+        "stores": {"messages": "nvs", "dm": "nvs", "routes": "nvs", "packets": "nvs"},
+        "sd": {
+            "state": "rp2040_unavailable",
+            "rp2040_protocol_supported": False,
+            "mounted": False,
+            "data_root_ready": False,
+            "file_ops": False,
+            "atomic_rename": False,
+        },
+    }
 
 
 def write_boot_prepare_evidence(root: Path, commit: str = COMMIT, metadata_commit: str | None = None) -> None:
@@ -979,7 +998,7 @@ def write_boot_prepare_evidence(root: Path, commit: str = COMMIT, metadata_commi
             "rp2040-unavailable",
             "bridge_unavailable_fallback",
             commit=target_commit,
-            storage_after={"ok": True, "sd": {"state": "rp2040_unavailable"}},
+            storage_after=unavailable_storage_status(),
         ),
     }
     for scenario, payload in scenarios.items():
@@ -1801,7 +1820,7 @@ def test_release_gate_audit_blocks_public_release_without_p0_evidence(tmp_path: 
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     for gate_id in STRICT_SD_GATE_IDS:
         assert gates[gate_id]["ok"] is False
-    assert report["p0_failed_count"] == 19
+    assert report["p0_failed_count"] == 20
 
 
 def test_release_gate_audit_accepts_ready_no_format_sd_preflight(tmp_path: Path):
@@ -1834,7 +1853,7 @@ def test_release_gate_audit_accepts_official_seeed_sd_smoke_artifact(tmp_path: P
     assert gates["sd_official_seeed_smoke_passed"]["details"]["fat_type"] == 32
     assert gates["sd_official_seeed_smoke_passed"]["details"]["raw_diagnostics"]["raw_acmd41"] == 0
     assert gates["sd_official_seeed_smoke_passed"]["details"]["power_state"] == "gpio18_commanded_high_not_measured"
-    assert report["p0_failed_count"] == 18
+    assert report["p0_failed_count"] == 19
 
 
 def test_release_gate_audit_surfaces_failed_official_seeed_raw_diagnostics(tmp_path: Path):
@@ -1924,7 +1943,7 @@ def test_release_gate_audit_accepts_strict_sd_artifact_gates(tmp_path: Path):
     assert gates["sd_filecanary_independent"]["details"]["retained_history_sd_ready_before"] is False
     assert gates["sd_32gb_max_matrix_passed"]["details"]["capacities_gb"] == [8.0, 16.0, 32.0]
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 4
+    assert report["p0_failed_count"] == 5
 
 
 def test_release_gate_audit_rejects_stale_sd_status_even_when_cached_ready_fields_pass(tmp_path: Path):
@@ -2177,12 +2196,18 @@ def test_boot_prepare_gate_requires_remount_worker_receipt_except_bridge_unavail
     unavailable = boot_prepare_payload(
         "rp2040-unavailable",
         "bridge_unavailable_fallback",
-        storage_after={"ok": True, "sd": {"state": "rp2040_unavailable"}},
+        storage_after=unavailable_storage_status(),
     )
     assert unavailable["storage_remount"] is None
     assert audit.sd_boot_prepare_artifact_ok(
         unavailable, "rp2040-unavailable", "COM12"
     ) is True
+
+    unsafe_backend = json.loads(json.dumps(unavailable))
+    unsafe_backend["storage_after"]["stores"]["packets"] = "sd"
+    assert audit.sd_boot_prepare_artifact_ok(
+        unsafe_backend, "rp2040-unavailable", "COM12"
+    ) is False
 
 
 def test_release_gate_audit_rejects_dry_run_sd_artifacts_as_release_evidence(tmp_path: Path):
@@ -2285,7 +2310,7 @@ def test_release_gate_audit_recognizes_supplemental_route_probe_without_passing_
     assert gates["full_rf_dm_acceptance"]["ok"] is False
     assert gates["full_rf_dm_acceptance"]["details"]["candidate_count"] == 0
     assert report["ready_for_public_release"] is False
-    assert report["p0_failed_count"] == 19
+    assert report["p0_failed_count"] == 20
 
 
 def passing_full_soak_payload() -> dict:

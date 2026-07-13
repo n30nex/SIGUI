@@ -18,6 +18,25 @@ try:
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.verify_checksums import verify_sha256_manifest
 
+try:
+    from wp01_evidence_aggregate_d1l import (
+        WP01_ARTIFACT_KINDS,
+        WP01_ARTIFACT_PATTERNS,
+        WP01_PROVENANCE_PATTERN,
+        wp01_aggregate_artifact_ok,
+        wp01_artifact_ok,
+        wp01_provenance_receipt_ok,
+    )
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.wp01_evidence_aggregate_d1l import (
+        WP01_ARTIFACT_KINDS,
+        WP01_ARTIFACT_PATTERNS,
+        WP01_PROVENANCE_PATTERN,
+        wp01_aggregate_artifact_ok,
+        wp01_artifact_ok,
+        wp01_provenance_receipt_ok,
+    )
+
 
 RELEASE_UI_CORRUPTION_MIN_ROUNDS = 20
 SUPPORTED_ESP_IDF_IMAGE = "espressif/idf:v5.5.4"
@@ -223,6 +242,10 @@ def default_hardware_dir() -> str:
 
 def default_rp2040_hardware_dir() -> str:
     return str(Path("artifacts") / "hardware" / default_rp2040_port().lower())
+
+
+def default_wp01_dir() -> str:
+    return str(Path("artifacts") / "hardware" / "wp01")
 
 
 @dataclass
@@ -2100,6 +2123,28 @@ def sd_boot_prepare_artifact_ok(data: dict, scenario: str, expected_port: str) -
         format_policy_ok = format_policy_ok and storage_setup_no_format_policy(
             data.get("storage_setup") if isinstance(data.get("storage_setup"), dict) else None
         )
+    if scenario == "rp2040-unavailable":
+        sd = storage_after.get("sd") if isinstance(storage_after.get("sd"), dict) else {}
+        stores = storage_after.get("stores") if isinstance(storage_after.get("stores"), dict) else {}
+        prerequisite = (
+            data.get("scenario_prerequisite")
+            if isinstance(data.get("scenario_prerequisite"), dict)
+            else {}
+        )
+        format_policy_ok = format_policy_ok and (
+            prerequisite.get("satisfied") is True
+            and sd.get("state") in {"rp2040_unavailable", "bridge_unavailable", "protocol_pending"}
+            and sd.get("rp2040_protocol_supported") is False
+            and sd.get("mounted") is False
+            and sd.get("data_root_ready") is False
+            and sd.get("file_ops") is False
+            and sd.get("atomic_rename") is False
+            and storage_after.get("data_enabled") is False
+            and storage_after.get("data_backend") == "nvs"
+            and all(stores.get(name) == "nvs" for name in ("messages", "dm", "routes", "packets"))
+            and data.get("storage_file_gate_ready") is False
+            and data.get("retained_store_gate_ready") is False
+        )
     return (
         data.get("mode") == "hardware"
         and exact_port_ok(data, expected_port)
@@ -2461,6 +2506,115 @@ def sd_reboot_remount_gate(artifact_roots: list[Path], root: Path, commit: str |
             "pre_map_tile_canary_passed": data.get("pre_map_tile_canary_passed") if data else None,
             "post_map_tile_canary_passed": data.get("post_map_tile_canary_passed") if data else None,
         },
+    )
+
+
+def wp01_evidence_gate(
+    wp01_dir: Path,
+    root: Path,
+    github_run_dir: Path | None,
+    commit: str | None,
+    github_run_id: str | None,
+    d1l_port: str,
+    rp2040_port: str,
+) -> GateResult:
+    paths: dict[str, Path | None] = {}
+    checks: dict[str, bool] = {}
+    hashes: dict[str, str] = {}
+    details: dict[str, Any] = {}
+    provenance_path = newest_commit_json(wp01_dir, commit, WP01_PROVENANCE_PATTERN)
+    provenance = read_json(provenance_path)
+    provenance_sha256 = sha256_file(provenance_path) if provenance_path else None
+    provenance_ok = bool(
+        provenance_path
+        and provenance_sha256
+        and github_run_dir
+        and commit
+        and github_run_id
+        and wp01_provenance_receipt_ok(
+            provenance,
+            commit,
+            github_run_id,
+            d1l_port,
+            rp2040_port,
+            root=root,
+            github_run_dir=github_run_dir,
+        )
+    )
+    details["provenance_receipt"] = {
+        "path_found": bool(provenance_path),
+        "artifact_ok": provenance_ok,
+        "path": rel(provenance_path, root) if provenance_path else None,
+        "sha256": provenance_sha256,
+    }
+
+    for kind in WP01_ARTIFACT_KINDS:
+        path = newest_commit_json(wp01_dir, commit, WP01_ARTIFACT_PATTERNS[kind])
+        data = read_json(path)
+        valid = bool(
+            path
+            and commit
+            and github_run_id
+            and wp01_artifact_ok(
+                data,
+                kind,
+                commit,
+                github_run_id,
+                d1l_port,
+                rp2040_port,
+                provenance if provenance_ok else None,
+                provenance_sha256 if provenance_ok else None,
+            )
+        )
+        paths[kind] = path
+        checks[kind] = valid
+        if path:
+            hashes[kind] = sha256_file(path)
+        details[kind] = {
+            "path_found": bool(path),
+            "artifact_ok": valid,
+            "path": rel(path, root) if path else None,
+        }
+
+    aggregate = newest_commit_json(wp01_dir, commit, "wp01_acceptance_*.json")
+    aggregate_data = read_json(aggregate)
+    aggregate_ok = bool(
+        aggregate
+        and commit
+        and github_run_id
+        and all(checks.values())
+        and wp01_aggregate_artifact_ok(
+            aggregate_data,
+            commit,
+            github_run_id,
+            d1l_port,
+            rp2040_port,
+            hashes,
+            provenance_sha256,
+            provenance if provenance_ok else None,
+        )
+    )
+    details["aggregate"] = {
+        "path_found": bool(aggregate),
+        "artifact_ok": aggregate_ok,
+        "path": rel(aggregate, root) if aggregate else None,
+    }
+    ok = provenance_ok and all(checks.values()) and aggregate_ok
+    evidence = [rel(path, root) for path in paths.values() if path]
+    if provenance_path:
+        evidence.insert(0, rel(provenance_path, root))
+    if aggregate:
+        evidence.append(rel(aggregate, root))
+    return GateResult(
+        "wp01_exact_pair_storage_reboot",
+        "P0",
+        ok,
+        "WP-01 exact-pair storage, reboot, removal, and soak qualification",
+        evidence,
+        "All four exact-commit WP-01 physical artifacts and their hash-bound aggregate pass."
+        if ok
+        else "WP-01 remains open; one or more exact-commit physical artifacts or the hash-bound aggregate is missing or invalid.",
+        details,
     )
 
 
@@ -3234,6 +3388,12 @@ def build_audit(args: argparse.Namespace) -> dict:
     hardware_dir = Path(args.hardware_dir).resolve()
     rp2040_hardware_dir = Path(args.rp2040_hardware_dir).resolve()
     soak_dir = Path(args.soak_dir).resolve()
+    wp01_dir_arg = Path(args.wp01_dir)
+    wp01_dir = (
+        wp01_dir_arg.resolve()
+        if wp01_dir_arg.is_absolute()
+        else (root / wp01_dir_arg).resolve()
+    )
     gates: list[GateResult] = []
     smoke_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "smoke")
     ui_corruption_roots = sd_artifact_roots(root, github_run_dir, hardware_dir, "ui-corruption-probe")
@@ -3391,6 +3551,17 @@ def build_audit(args: argparse.Namespace) -> dict:
     gates.append(sd_filecanary_gate(file_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_retained_canary_gate(retained_roots, root, args.commit, args.d1l_port))
     gates.append(sd_reboot_remount_gate(reboot_remount_roots, root, args.commit, args.d1l_port))
+    gates.append(
+        wp01_evidence_gate(
+            wp01_dir,
+            root,
+            github_run_dir,
+            args.commit,
+            args.github_run_id,
+            args.d1l_port,
+            args.rp2040_port,
+        )
+    )
     gates.append(sd_map_tile_canary_gate(map_tile_roots, root, args.commit, args.d1l_port))
     gates.append(sd_export_canary_gate(export_canary_roots, root, args.commit, args.d1l_port))
     gates.append(sd_diagnostic_export_gate(diagnostic_export_roots, root, args.commit, args.d1l_port))
@@ -3415,6 +3586,7 @@ def build_audit(args: argparse.Namespace) -> dict:
         "github_run_dir": str(github_run_dir) if github_run_dir else None,
         "commit": args.commit,
         "hardware_dir": str(hardware_dir),
+        "wp01_dir": str(wp01_dir),
         "rp2040_port": args.rp2040_port,
         "rp2040_hardware_dir": str(rp2040_hardware_dir),
         "ready_for_public_release": not p0_failed,
@@ -3435,6 +3607,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--meshbot-port", default=default_meshbot_port())
     parser.add_argument("--hardware-dir", default=default_hardware_dir())
     parser.add_argument("--rp2040-hardware-dir", default=default_rp2040_hardware_dir())
+    parser.add_argument("--wp01-dir", default=default_wp01_dir())
     parser.add_argument("--soak-dir", default="artifacts/soak")
     parser.add_argument("--out")
     parser.add_argument("--fail-on-open-p0", action="store_true")
