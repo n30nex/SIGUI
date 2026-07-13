@@ -1,6 +1,7 @@
-import hashlib
 import re
 from pathlib import Path
+
+from scripts.completion_pack_manifest import render_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -8,14 +9,6 @@ PACK_DIR = ROOT / "docs" / "completion"
 MANIFEST = PACK_DIR / "SHA256SUMS.txt"
 ATTRIBUTES = ROOT / ".gitattributes"
 ROW_RE = re.compile(r"^([0-9a-f]{64})  ([^/\\]+)$")
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def test_completion_pack_manifest_is_complete_and_current() -> None:
@@ -32,9 +25,7 @@ def test_completion_pack_manifest_is_complete_and_current() -> None:
         path.name for path in PACK_DIR.iterdir() if path.is_file() and path != MANIFEST
     }
     assert set(parsed) == expected_files
-    assert {
-        name: sha256(PACK_DIR / name) for name in sorted(parsed)
-    } == parsed
+    assert MANIFEST.read_text(encoding="ascii") == render_manifest(PACK_DIR)
 
 
 def test_completion_pack_checkout_bytes_are_pinned_to_lf() -> None:

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from scripts import package_release_d1l
+from scripts.verify_checksums import verify_sha256_manifest
 
 
 def run_git(cwd: Path, *args: str) -> str:
@@ -128,8 +129,12 @@ def write_fake_rp2040_artifacts(root: Path) -> Path:
     }.items():
         artifact_dir = artifacts / name
         artifact_dir.mkdir(parents=True)
-        (artifact_dir / f"{name}.uf2").write_bytes(payload)
-        (artifact_dir / "SHA256SUMS.txt").write_text("placeholder\n", encoding="ascii")
+        uf2 = artifact_dir / f"{name}.uf2"
+        uf2.write_bytes(payload)
+        (artifact_dir / "SHA256SUMS.txt").write_text(
+            f"{package_release_d1l.sha256_file(uf2)}  ./{uf2.name}\n",
+            encoding="ascii",
+        )
     return artifacts
 
 
@@ -239,10 +244,17 @@ def test_release_package_contains_flash_set_update_and_full_image(tmp_path, monk
     assert "./manifest.json" in sha_text
     assert "./rp2040/rp2040-sd-bridge-firmware/rp2040-sd-bridge-firmware.uf2" in sha_text
     assert "./rp2040/rp2040-seeed-official-sd-smoke-firmware/rp2040-seeed-official-sd-smoke-firmware.uf2" in sha_text
+    assert "./rp2040/rp2040-sd-bridge-firmware/SHA256SUMS.txt" in sha_text
+    assert "./rp2040/rp2040-sd-smoke-firmware/SHA256SUMS.txt" in sha_text
+    assert "./rp2040/rp2040-seeed-official-sd-smoke-firmware/SHA256SUMS.txt" in sha_text
     assert "./docs/USER_GUIDE_D1L.md" in sha_text
     assert "./notices/LICENSE" in sha_text
     assert "./notices/THIRD_PARTY_NOTICES.md" in sha_text
     assert f"./evidence/meshcore_conformance_{commit}.json" in sha_text
+    assert verify_sha256_manifest(package_dir / "SHA256SUMS.txt")
+    for artifact in manifest["rp2040_artifacts"]:
+        nested_manifest = package_dir / "rp2040" / artifact["name"] / "SHA256SUMS.txt"
+        assert verify_sha256_manifest(nested_manifest)
     readme = (package_dir / "README_RELEASE.md").read_text(encoding="ascii")
     assert "App image: `firmware/meshcore_deskos_d1l.bin`" in readme
     assert "`rp2040/` contains the Actions-built RP2040 SD bridge" in readme
