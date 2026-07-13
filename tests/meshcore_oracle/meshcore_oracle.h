@@ -17,6 +17,7 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_RAW_BYTES 255U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
+#define D1L_MESHCORE_ORACLE_MIN_ACK_BYTES 4U
 
 #define D1L_MESHCORE_ADVERT_TYPE_NONE 0U
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 1U
@@ -110,6 +111,32 @@ bool d1l_meshcore_oracle_prepare_zero_hop(
     uint8_t use_transport,
     const uint16_t transport_codes[2],
     uint8_t *out_priority);
+
+/*
+ * Canonical simple-ACK and multipart-ACK payload framing derived from the
+ * pinned Mesh::createAck/createMultiAck implementations. These functions do
+ * not derive expected ACK hashes, encrypt ACK+PATH responses, correlate an ACK
+ * with a packet, or claim delivery/timing behavior. Creation returns the
+ * canonical pre-route layout; route preparation is required before wire use.
+ */
+bool d1l_meshcore_oracle_create_ack(
+    const uint8_t *ack,
+    size_t ack_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_create_multi_ack(
+    const uint8_t *ack,
+    size_t ack_len,
+    uint8_t remaining,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_ack(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t *out_ack,
+    size_t ack_capacity,
+    size_t *out_ack_len,
+    uint8_t *out_remaining,
+    uint8_t *out_is_multipart);
 
 #ifdef __cplusplus
 }

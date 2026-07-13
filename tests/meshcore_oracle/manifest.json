@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 3,
+  "corpus_version": 4,
   "abi_version": 1,
-  "coverage_boundary": "pinned_upstream_packet_canonical_advert_and_route_headers",
+  "coverage_boundary": "pinned_upstream_packet_advert_route_and_ack_frames",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -23,9 +23,9 @@
   },
   "oracle_sources": {
     "tests/meshcore_conformance/stubs/SHA256.h": "d9a9d9e34a9df50162942241384d281eb6da62dc18cdea1bdfbcdee46e81b9c8",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "658904b264fe0298aec3497d0005229d96dadd94f581c2a69d35989801cf6d06",
-    "tests/meshcore_oracle/meshcore_oracle.h": "270329383d47113083abaaacaa1e7d8c36c0bfa996da38979e7104bc7be9159b",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "1596c9d426e5411364dc5572b75a12f450484c073d23b34e3e8478f3108d56bd",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "85a76308988a4f94ed712e21751d4d33f2db9158369363989a46aabd3564b239",
+    "tests/meshcore_oracle/meshcore_oracle.h": "2ae7827eeeb0d21145c3141d5852efae12b54537dfa0ff317d61499e2d3da28d",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "77821e10f0f000fa356c62a90ff4138d7ae9837543ffb23a960c48741b0e9624",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/Stream.h": "2232859dc0f15bfe02267eaa405c3da8d525c32d008b96401daffbd3f4d9ea90"
   },
@@ -42,8 +42,10 @@
     "crypto_available": false,
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
+    "ack_frame_scope": "simple_and_multipart_payload_framing_only",
     "golden_vector_sources": {
-      "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp"
+      "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
+      "ack_frames": "third_party/MeshCore/src/Mesh.cpp"
     }
   },
   "determinism": {
@@ -60,10 +62,10 @@
     ]
   },
   "vectors": {
-    "roundtrip": 15,
-    "invalid": 26,
-    "semantic": 32,
-    "total": 41,
+    "roundtrip": 20,
+    "invalid": 43,
+    "semantic": 54,
+    "total": 63,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -81,6 +83,12 @@
       "invalid": 10,
       "semantic": 17,
       "total": 17
+    },
+    "ack_frames": {
+      "roundtrip": 5,
+      "invalid": 17,
+      "semantic": 22,
+      "total": 22
     }
   },
   "capabilities": [
@@ -104,6 +112,13 @@
       "scope": "non_trace_direct_flood_and_zero_hop_headers"
     },
     {
+      "id": "ack_frames",
+      "status": "implemented",
+      "owner": "pinned_source_golden_vectors",
+      "semantic": true,
+      "scope": "simple_and_multipart_payload_framing_only"
+    },
+    {
       "id": "identity_signed_advert",
       "status": "pending",
       "owner": "unassigned",
@@ -112,7 +127,8 @@
     {
       "id": "public_group_packets",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "external_unpinned_aes_sha_and_channel_fixture"
     },
     {
       "id": "dm_encrypt_decrypt",
@@ -120,9 +136,16 @@
       "owner": "unassigned"
     },
     {
-      "id": "ack_multiack_ack_path",
+      "id": "expected_ack_hash_and_ack_path",
       "status": "pending",
-      "owner": "unassigned"
+      "owner": "unassigned",
+      "blocked_by": "external_unpinned_sha_aes_and_mesh_session_fixtures"
+    },
+    {
+      "id": "ack_dispatch_correlation_and_delivery",
+      "status": "pending",
+      "owner": "unassigned",
+      "blocked_by": "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
     },
     {
       "id": "route_selection_and_forwarding",
@@ -151,7 +174,8 @@
       "canonical advert app-data fields through AdvertDataBuilder and AdvertDataParser"
     ],
     "pinned_source_golden_vectors": [
-      "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp"
+      "direct/flood/zero-hop header, path and priority preparation from Mesh.cpp",
+      "simple and multipart ACK payload framing from Mesh.cpp"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

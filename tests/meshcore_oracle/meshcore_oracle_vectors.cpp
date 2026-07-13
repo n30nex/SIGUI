@@ -17,6 +17,8 @@ constexpr std::size_t kAdvertRoundtripVectors = 4U;
 constexpr std::size_t kAdvertInvalidVectors = 11U;
 constexpr std::size_t kRouteRoundtripVectors = 7U;
 constexpr std::size_t kRouteInvalidVectors = 10U;
+constexpr std::size_t kAckRoundtripVectors = 5U;
+constexpr std::size_t kAckInvalidVectors = 17U;
 
 struct Vector {
     uint8_t header;
@@ -37,6 +39,12 @@ struct AdvertVector {
     uint8_t has_feat2;
     uint16_t feat2;
     std::string name;
+};
+
+struct AckVector {
+    std::vector<uint8_t> ack;
+    uint8_t remaining;
+    bool multipart;
 };
 
 bool packet_matches(const d1l_meshcore_oracle_packet_t &packet,
@@ -603,30 +611,249 @@ int main()
     zero_hop_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE, 0U,
                                       nullptr);
 
+    std::vector<uint8_t> maximum_simple_ack(
+        D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    for (size_t index = 0U; index < maximum_simple_ack.size(); ++index) {
+        maximum_simple_ack[index] = static_cast<uint8_t>(index ^ 0xA5U);
+    }
+    std::vector<uint8_t> maximum_multi_ack(
+        D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES - 1U);
+    for (size_t index = 0U; index < maximum_multi_ack.size(); ++index) {
+        maximum_multi_ack[index] = static_cast<uint8_t>(index ^ 0x5AU);
+    }
+    const std::array<AckVector, kAckRoundtripVectors> ack_vectors = {{
+        {{0x78U, 0x56U, 0x34U, 0x12U}, 0U, false},
+        {{0xA7U, 0xB8U, 0xC9U, 0xDAU, 0xEBU}, 0U, false},
+        {maximum_simple_ack, 0U, false},
+        {{0xEFU, 0xBEU, 0xADU, 0xDEU}, 1U, true},
+        {maximum_multi_ack, 15U, true},
+    }};
+    for (size_t index = 0U; index < ack_vectors.size(); ++index) {
+        const AckVector &vector = ack_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const bool created = vector.multipart
+            ? d1l_meshcore_oracle_create_multi_ack(
+                  vector.ack.data(), vector.ack.size(), vector.remaining,
+                  &packet)
+            : d1l_meshcore_oracle_create_ack(
+                  vector.ack.data(), vector.ack.size(), &packet);
+        const uint8_t expected_type = vector.multipart
+            ? PAYLOAD_TYPE_MULTIPART
+            : PAYLOAD_TYPE_ACK;
+        const size_t payload_offset = vector.multipart ? 1U : 0U;
+        if (!created ||
+            packet.header !=
+                static_cast<uint8_t>(expected_type << PH_TYPE_SHIFT) ||
+            packet.transport_codes[0] != 0U ||
+            packet.transport_codes[1] != 0U || packet.path_len != 0U ||
+            packet.payload_len != vector.ack.size() + payload_offset ||
+            (vector.multipart &&
+             packet.payload[0] !=
+                 static_cast<uint8_t>((vector.remaining << 4U) |
+                                      PAYLOAD_TYPE_ACK)) ||
+            std::memcmp(&packet.payload[payload_offset], vector.ack.data(),
+                        vector.ack.size()) != 0) {
+            failures.push_back("ACK create changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t route_priority = 0xFFU;
+        if (!d1l_meshcore_oracle_prepare_zero_hop(
+                &routed, 0U, nullptr, &route_priority) ||
+            (routed.header & PH_ROUTE_MASK) != ROUTE_TYPE_DIRECT ||
+            route_priority != 0U) {
+            failures.push_back("ACK route preparation rejected vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &routed, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len, &decoded) ||
+            !packets_equal(routed, decoded)) {
+            failures.push_back("ACK packet did not round trip vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> parsed_ack{};
+        size_t parsed_ack_len = 0U;
+        uint8_t parsed_remaining = 0xFFU;
+        uint8_t parsed_multipart = 0xFFU;
+        if (!d1l_meshcore_oracle_parse_ack(
+                &decoded, parsed_ack.data(), parsed_ack.size(),
+                &parsed_ack_len, &parsed_remaining, &parsed_multipart) ||
+            parsed_ack_len != vector.ack.size() ||
+            std::memcmp(parsed_ack.data(), vector.ack.data(),
+                        vector.ack.size()) != 0 ||
+            parsed_remaining != vector.remaining ||
+            parsed_multipart != (vector.multipart ? 1U : 0U)) {
+            failures.push_back("ACK parse changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t recreated{};
+        const bool recreated_ok = parsed_multipart != 0U
+            ? d1l_meshcore_oracle_create_multi_ack(
+                  parsed_ack.data(), parsed_ack_len, parsed_remaining,
+                  &recreated)
+            : d1l_meshcore_oracle_create_ack(
+                  parsed_ack.data(), parsed_ack_len, &recreated);
+        if (!recreated_ok || !packets_equal(packet, recreated)) {
+            failures.push_back("ACK recreate changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES + 1U> oversized_ack{};
+    d1l_meshcore_oracle_packet_t rejected_ack_packet;
+    std::memset(&rejected_ack_packet, 0xA8, sizeof(rejected_ack_packet));
+    const d1l_meshcore_oracle_packet_t rejected_ack_before =
+        rejected_ack_packet;
+    const std::array<uint8_t, 4> valid_ack = {
+        0x78U, 0x56U, 0x34U, 0x12U};
+    const std::array<uint8_t, 3> short_ack = {0x01U, 0x02U, 0x03U};
+    auto ack_packet_was_preserved = [&]() {
+        return std::memcmp(&rejected_ack_packet, &rejected_ack_before,
+                           sizeof(rejected_ack_packet)) == 0;
+    };
+    if (d1l_meshcore_oracle_create_ack(
+            nullptr, 1U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("null simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            valid_ack.data(), 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("empty simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            short_ack.data(), short_ack.size(), &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("short simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            oversized_ack.data(), oversized_ack.size(),
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("oversized simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            valid_ack.data(), valid_ack.size(), nullptr)) {
+        failures.push_back("null simple ACK packet accepted");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            nullptr, 1U, 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("null multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            valid_ack.data(), 0U, 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("empty multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            short_ack.data(), short_ack.size(), 0U,
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("short multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            oversized_ack.data(), D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES,
+            0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("oversized multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            valid_ack.data(), valid_ack.size(), 16U,
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("overflow multipart remaining changed output");
+    }
+
+    auto expect_ack_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &packet,
+                    size_t ack_capacity) {
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> parsed_ack;
+            parsed_ack.fill(0xE2U);
+            const auto parsed_ack_before = parsed_ack;
+            size_t parsed_ack_len = 0xBEEFU;
+            uint8_t parsed_remaining = 0xA6U;
+            uint8_t parsed_multipart = 0xA7U;
+            if (d1l_meshcore_oracle_parse_ack(
+                    &packet, parsed_ack.data(), ack_capacity, &parsed_ack_len,
+                    &parsed_remaining, &parsed_multipart) ||
+                parsed_ack != parsed_ack_before || parsed_ack_len != 0xBEEFU ||
+                parsed_remaining != 0xA6U || parsed_multipart != 0xA7U) {
+                failures.push_back(std::string(name) +
+                                   " ACK parse changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t malformed_ack =
+        make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    expect_ack_parse_reject("wrong payload type", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    malformed_ack.payload_len = 3U;
+    expect_ack_parse_reject("short simple ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload[0] =
+        static_cast<uint8_t>((1U << 4U) | PAYLOAD_TYPE_GRP_DATA);
+    expect_ack_parse_reject("wrong multipart subtype", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload_len = 1U;
+    malformed_ack.payload[0] = PAYLOAD_TYPE_ACK;
+    expect_ack_parse_reject("empty multipart ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload[0] = PAYLOAD_TYPE_ACK;
+    expect_ack_parse_reject("short multipart ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    malformed_ack.header |= static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_ack_parse_reject("future-version ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    expect_ack_parse_reject("undersized ACK destination", malformed_ack,
+                            malformed_ack.payload_len - 1U);
+
     const bool passed = failures.empty();
     for (const std::string &failure : failures) {
         std::cerr << failure << '\n';
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_canonical_advert_and_route_headers\""
+                 "\"pinned_upstream_packet_advert_route_and_ack_frames\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
-                  kRouteRoundtripVectors)
+                  kRouteRoundtripVectors + kAckRoundtripVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
-                  kRouteInvalidVectors)
+                  kRouteInvalidVectors + kAckInvalidVectors)
               << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
-                  kRouteRoundtripVectors + kRouteInvalidVectors)
+                  kRouteRoundtripVectors + kRouteInvalidVectors +
+                  kAckRoundtripVectors + kAckInvalidVectors)
               << ",\"total\":"
               << (kPacketRoundtripVectors + kPacketInvalidVectors +
                   kAdvertRoundtripVectors + kAdvertInvalidVectors +
-                  kRouteRoundtripVectors + kRouteInvalidVectors)
+                  kRouteRoundtripVectors + kRouteInvalidVectors +
+                  kAckRoundtripVectors + kAckInvalidVectors)
               << ",\"packet_envelope\":{\"roundtrip\":"
               << kPacketRoundtripVectors << ",\"invalid\":"
               << kPacketInvalidVectors << ",\"semantic\":0,\"total\":"
@@ -642,10 +869,17 @@ int main()
               << kRouteInvalidVectors << ",\"semantic\":"
               << (kRouteRoundtripVectors + kRouteInvalidVectors)
               << ",\"total\":"
-              << (kRouteRoundtripVectors + kRouteInvalidVectors) << "}}"
+              << (kRouteRoundtripVectors + kRouteInvalidVectors) << "}"
+              << ",\"ack_frames\":{\"roundtrip\":"
+              << kAckRoundtripVectors << ",\"invalid\":"
+              << kAckInvalidVectors << ",\"semantic\":"
+              << (kAckRoundtripVectors + kAckInvalidVectors)
+              << ",\"total\":"
+              << (kAckRoundtripVectors + kAckInvalidVectors) << "}}"
               << ",\"capabilities\":{\"packet_envelope\":true"
               << ",\"advert_data_fields\":true"
-              << ",\"direct_flood_headers\":true}"
+              << ",\"direct_flood_headers\":true"
+              << ",\"ack_frames\":true}"
               << ",\"failures\":" << failures.size() << "}\n";
     return passed ? 0 : 1;
 }

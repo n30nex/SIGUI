@@ -15,6 +15,8 @@ static_assert(MAX_TRANS_UNIT == D1L_MESHCORE_ORACLE_MAX_RAW_BYTES,
 static_assert(MAX_ADVERT_DATA_SIZE ==
                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES,
               "Pinned MeshCore advert-data limit changed");
+static_assert(D1L_MESHCORE_ORACLE_MIN_ACK_BYTES == sizeof(uint32_t),
+              "Pinned MeshCore ACK CRC width changed");
 static_assert(ADV_TYPE_NONE == D1L_MESHCORE_ADVERT_TYPE_NONE,
               "Pinned MeshCore NONE advert type changed");
 static_assert(ADV_TYPE_CHAT == D1L_MESHCORE_ADVERT_TYPE_CHAT,
@@ -454,5 +456,95 @@ extern "C" bool d1l_meshcore_oracle_prepare_zero_hop(
     upstream.path_len = 0U;
     *in_out_packet = packet_from_upstream(upstream);
     *out_priority = 0U;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_ack(
+    const uint8_t *ack,
+    size_t ack_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (ack == nullptr || out_packet == nullptr ||
+        ack_len < D1L_MESHCORE_ORACLE_MIN_ACK_BYTES ||
+        ack_len > MAX_PACKET_PAYLOAD) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+    result.payload_len = static_cast<uint16_t>(ack_len);
+    std::memcpy(result.payload, ack, ack_len);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_multi_ack(
+    const uint8_t *ack,
+    size_t ack_len,
+    uint8_t remaining,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (ack == nullptr || out_packet == nullptr ||
+        ack_len < D1L_MESHCORE_ORACLE_MIN_ACK_BYTES ||
+        ack_len >= MAX_PACKET_PAYLOAD || remaining > 0x0FU) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_MULTIPART << PH_TYPE_SHIFT);
+    result.payload[0] =
+        static_cast<uint8_t>((remaining << 4U) | PAYLOAD_TYPE_ACK);
+    std::memcpy(&result.payload[1], ack, ack_len);
+    result.payload_len = static_cast<uint16_t>(ack_len + 1U);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_ack(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t *out_ack,
+    size_t ack_capacity,
+    size_t *out_ack_len,
+    uint8_t *out_remaining,
+    uint8_t *out_is_multipart)
+{
+    if (out_ack == nullptr || out_ack_len == nullptr ||
+        out_remaining == nullptr || out_is_multipart == nullptr) {
+        return false;
+    }
+
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1) {
+        return false;
+    }
+
+    const uint8_t payload_type = upstream.getPayloadType();
+    const uint8_t *ack = upstream.payload;
+    size_t ack_len = upstream.payload_len;
+    uint8_t remaining = 0U;
+    uint8_t is_multipart = 0U;
+    if (payload_type == PAYLOAD_TYPE_MULTIPART) {
+        if (ack_len < 2U ||
+            (upstream.payload[0] & 0x0FU) != PAYLOAD_TYPE_ACK) {
+            return false;
+        }
+        remaining = static_cast<uint8_t>(upstream.payload[0] >> 4U);
+        is_multipart = 1U;
+        ++ack;
+        --ack_len;
+    } else if (payload_type != PAYLOAD_TYPE_ACK) {
+        return false;
+    }
+
+    if (ack_len < D1L_MESHCORE_ORACLE_MIN_ACK_BYTES ||
+        ack_len > ack_capacity) {
+        return false;
+    }
+    std::memcpy(out_ack, ack, ack_len);
+    *out_ack_len = ack_len;
+    *out_remaining = remaining;
+    *out_is_multipart = is_multipart;
     return true;
 }

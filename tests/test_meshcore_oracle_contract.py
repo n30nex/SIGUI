@@ -16,7 +16,7 @@ SCRIPT = ROOT / "scripts" / "meshcore_conformance_d1l.py"
 ORACLE_ROOT = ROOT / "tests" / "meshcore_oracle"
 MANIFEST = ORACLE_ROOT / "manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
-BOUNDARY = "pinned_upstream_packet_canonical_advert_and_route_headers"
+BOUNDARY = "pinned_upstream_packet_advert_route_and_ack_frames"
 
 
 def canonical_lf_sha256(path: Path) -> str:
@@ -37,7 +37,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 3
+    assert manifest["corpus_version"] == 4
     assert manifest["abi_version"] == 1
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -55,15 +55,17 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "crypto_available": False,
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
+        "ack_frame_scope": "simple_and_multipart_payload_framing_only",
         "golden_vector_sources": {
             "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
+            "ack_frames": "third_party/MeshCore/src/Mesh.cpp",
         },
     }
     assert manifest["vectors"] == {
-        "roundtrip": 15,
-        "invalid": 26,
-        "semantic": 32,
-        "total": 41,
+        "roundtrip": 20,
+        "invalid": 43,
+        "semantic": 54,
+        "total": 63,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -81,6 +83,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 10,
             "semantic": 17,
             "total": 17,
+        },
+        "ack_frames": {
+            "roundtrip": 5,
+            "invalid": 17,
+            "semantic": 22,
+            "total": 22,
         },
     }
     assert manifest["capabilities"][0] == {
@@ -103,6 +111,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "scope": "non_trace_direct_flood_and_zero_hop_headers",
     }
     assert manifest["capabilities"][3] == {
+        "id": "ack_frames",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "simple_and_multipart_payload_framing_only",
+    }
+    assert manifest["capabilities"][4] == {
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
@@ -110,20 +125,32 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     }
     assert all(
         capability["status"] == "pending"
-        for capability in manifest["capabilities"][3:]
+        for capability in manifest["capabilities"][4:]
     )
     assert [
-        capability["id"] for capability in manifest["capabilities"][3:]
+        capability["id"] for capability in manifest["capabilities"][4:]
     ] == [
         "identity_signed_advert",
         "public_group_packets",
         "dm_encrypt_decrypt",
-        "ack_multiack_ack_path",
+        "expected_ack_hash_and_ack_path",
+        "ack_dispatch_correlation_and_delivery",
         "route_selection_and_forwarding",
         "path_return_route_codes",
         "trace_path_discovery",
         "login_request_response_admin",
     ]
+    pending = {
+        capability["id"]: capability
+        for capability in manifest["capabilities"]
+        if capability["status"] == "pending"
+    }
+    assert pending["expected_ack_hash_and_ack_path"]["blocked_by"] == (
+        "external_unpinned_sha_aes_and_mesh_session_fixtures"
+    )
+    assert pending["ack_dispatch_correlation_and_delivery"]["blocked_by"] == (
+        "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
+    )
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
@@ -151,6 +178,9 @@ def test_oracle_c_abi_wraps_only_pinned_upstream_protocol_helpers():
     assert "d1l_meshcore_oracle_prepare_flood" in header
     assert "d1l_meshcore_oracle_prepare_direct" in header
     assert "d1l_meshcore_oracle_prepare_zero_hop" in header
+    assert "d1l_meshcore_oracle_create_ack" in header
+    assert "d1l_meshcore_oracle_create_multi_ack" in header
+    assert "d1l_meshcore_oracle_parse_ack" in header
     assert "mesh::Packet::copyPath" in adapter
     assert "PAYLOAD_TYPE_TRACE" in adapter
     assert "main/mesh" not in adapter
@@ -210,10 +240,11 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None
-    assert len(artifact["pending_capabilities"]) == 8
+    assert len(artifact["pending_capabilities"]) == 9
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "direct_flood_headers" not in artifact["pending_capabilities"]
+    assert "ack_frames" not in artifact["pending_capabilities"]
 
 
 def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
@@ -269,10 +300,10 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 1,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 15,
-            "invalid": 26,
-            "semantic": 32,
-            "total": 41,
+            "roundtrip": 20,
+            "invalid": 43,
+            "semantic": 54,
+            "total": 63,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -291,11 +322,18 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 17,
                 "total": 17,
             },
+            "ack_frames": {
+                "roundtrip": 5,
+                "invalid": 17,
+                "semantic": 22,
+                "total": 22,
+            },
         },
         "capabilities": {
             "packet_envelope": True,
             "advert_data_fields": True,
             "direct_flood_headers": True,
+            "ack_frames": True,
         },
         "failures": 0,
     }

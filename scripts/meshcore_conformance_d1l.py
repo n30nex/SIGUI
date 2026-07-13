@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Run the bounded D1L/Pinned-MeshCore wire-envelope conformance gate.
+"""Run the bounded D1L/Pinned-MeshCore host conformance gate.
 
-This intentionally covers only packet framing. It is not a crypto, retained-state,
-delivery, RF, or complete MeshCore conformance claim.
+This covers the wire envelope plus the explicitly versioned oracle capabilities.
+It is not a crypto, retained-state, delivery, RF, or complete MeshCore claim.
 """
 
 from __future__ import annotations
@@ -44,9 +44,9 @@ ORACLE_VECTORS_PATH = (
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 1
-ORACLE_CORPUS_VERSION = 3
+ORACLE_CORPUS_VERSION = 4
 ORACLE_COVERAGE_BOUNDARY = (
-    "pinned_upstream_packet_canonical_advert_and_route_headers"
+    "pinned_upstream_packet_advert_route_and_ack_frames"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -139,17 +139,38 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "scope": "non_trace_direct_flood_and_zero_hop_headers",
     },
     {
+        "id": "ack_frames",
+        "status": "implemented",
+        "owner": "pinned_source_golden_vectors",
+        "semantic": True,
+        "scope": "simple_and_multipart_payload_framing_only",
+    },
+    {
         "id": "identity_signed_advert",
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": "external_unpinned_ed25519_verifier_and_mesh_dispatch_fixture",
     },
-    {"id": "public_group_packets", "status": "pending", "owner": "unassigned"},
-    {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
     {
-        "id": "ack_multiack_ack_path",
+        "id": "public_group_packets",
         "status": "pending",
         "owner": "unassigned",
+        "blocked_by": "external_unpinned_aes_sha_and_channel_fixture",
+    },
+    {"id": "dm_encrypt_decrypt", "status": "pending", "owner": "unassigned"},
+    {
+        "id": "expected_ack_hash_and_ack_path",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": "external_unpinned_sha_aes_and_mesh_session_fixtures",
+    },
+    {
+        "id": "ack_dispatch_correlation_and_delivery",
+        "status": "pending",
+        "owner": "unassigned",
+        "blocked_by": (
+            "deterministic_mesh_dispatch_packet_manager_tables_and_clock_fixtures"
+        ),
     },
     {
         "id": "route_selection_and_forwarding",
@@ -303,10 +324,10 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 15,
-        "invalid": 26,
-        "semantic": 32,
-        "total": 41,
+        "roundtrip": 20,
+        "invalid": 43,
+        "semantic": 54,
+        "total": 63,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -325,6 +346,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 17,
             "total": 17,
         },
+        "ack_frames": {
+            "roundtrip": 5,
+            "invalid": 17,
+            "semantic": 22,
+            "total": 22,
+        },
     }:
         raise GateFailure("oracle vector contract drifted")
     interface = manifest.get("interface", {})
@@ -337,9 +364,12 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
+        or interface.get("ack_frame_scope")
+        != "simple_and_multipart_payload_framing_only"
         or interface.get("golden_vector_sources")
         != {
             "direct_flood_headers": "third_party/MeshCore/src/Mesh.cpp",
+            "ack_frames": "third_party/MeshCore/src/Mesh.cpp",
         }
     ):
         raise GateFailure("oracle interface boundary drifted")
@@ -923,6 +953,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "packet_envelope": True,
                     "advert_data_fields": True,
                     "direct_flood_headers": True,
+                    "ack_frames": True,
                 }
                 or oracle_result.get("failures") != 0
             ):
