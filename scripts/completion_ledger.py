@@ -119,7 +119,11 @@ def runnable_work_packages(ledger: dict) -> list:
     result = []
     for package_id in ledger.get("execution_priority", []):
         item = packages.get(package_id)
-        if not item or item.get("status") in ("blocked", "merged", "released"):
+        if (
+            not item
+            or item.get("status") in ("blocked", "merged", "released")
+            or dependency_satisfied(item)
+        ):
             continue
         if any(blocker in blockers for blocker in item.get("blockers", [])):
             continue

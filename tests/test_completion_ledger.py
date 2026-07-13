@@ -12,7 +12,7 @@ from scripts.completion_ledger import (
 
 LEDGER_PATH = Path("docs/COMPLETION_LEDGER.yaml")
 STATUS_PATH = Path("docs/COMPLETION_STATUS.md")
-WP01_COMMIT = "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
+WP01_COMMIT = "092293f2311a24c9899bc9bf343ab014c4ba0411"
 
 
 def ledger_copy() -> dict:
@@ -35,10 +35,10 @@ def bank_wp01_proof(ledger: dict) -> dict:
             "valid": True,
         }
         for filename in (
-            "sd_inserted_stability_07322ed_COM12_COM16.json",
-            "sd_remove_reinsert_07322ed_COM12_COM16.json",
-            "retained_reboot_matrix_07322ed_COM12.json",
-            "storage_active_soak_07322ed_COM12.json",
+            "sd_inserted_stability_092293f_COM12_COM16.json",
+            "sd_remove_reinsert_092293f_COM12_COM16.json",
+            "retained_reboot_matrix_092293f_COM12.json",
+            "storage_active_soak_092293f_COM12_COM16.json",
         )
     )
     return item
@@ -111,6 +111,7 @@ def test_wp01_banked_hardware_proof_unlocks_wp02_before_pr80_merge():
 
     assert wp01["implementation_merged"] is False
     assert dependency_satisfied(wp01) is True
+    assert runnable_work_packages(ledger)[0] == "WP-02"
     assert not any("WP-02" in error and "dependency WP-01" in error for error in errors)
 
 
