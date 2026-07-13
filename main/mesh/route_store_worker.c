@@ -50,6 +50,18 @@ static bool worker_quiesce_requested(void)
     return requested;
 }
 
+bool d1l_route_store_persistence_should_yield(void)
+{
+    const TaskHandle_t current = xTaskGetCurrentTaskHandle();
+    TaskHandle_t requester;
+    TaskHandle_t owner;
+    portENTER_CRITICAL(&s_quiesce_owner_mux);
+    requester = s_quiesce_requester;
+    owner = s_quiesce_owner;
+    portEXIT_CRITICAL(&s_quiesce_owner_mux);
+    return requester != NULL && current != requester && current != owner;
+}
+
 static esp_err_t quiesce_yield_result(bool force, esp_err_t first_error)
 {
     if (first_error != ESP_OK) {

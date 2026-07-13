@@ -797,6 +797,9 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
     bool upgrade = false;
     const esp_err_t read_ret = read_decoded_blob(true, &s_sd_blob_scratch,
                                                 &upgrade);
+    if (read_ret == ESP_ERR_NOT_FINISHED) {
+        return read_ret;
+    }
     if (read_ret != ESP_OK && read_ret != ESP_ERR_NOT_FOUND) {
         return note_sd_reconcile_failure(read_ret);
     }
@@ -960,6 +963,10 @@ static esp_err_t persist_store(bool force)
         const esp_err_t reconcile_ret = reconcile_sd_primary(
             backend_state.generation);
         if (reconcile_ret != ESP_OK) {
+            if (reconcile_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return reconcile_ret;
+            }
             (void)persist_nvs_after_reconcile_failure(sd_primary_required);
             d1l_store_lock_give(&s_persist_io_lock);
             return reconcile_ret;
@@ -984,6 +991,10 @@ static esp_err_t persist_store(bool force)
                 D1L_DM_STORE_ID, D1L_DM_STORE_KEY,
                 &s_persist_snapshot.blob, sizeof(s_persist_snapshot.blob),
                 backend_state.generation);
+            if (sd_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return sd_ret;
+            }
             if (!backend_generation_matches(backend_state.generation)) {
                 sd_ret = ESP_ERR_INVALID_STATE;
             }

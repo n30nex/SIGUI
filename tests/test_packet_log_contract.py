@@ -140,6 +140,17 @@ def test_packet_log_is_bounded_and_retained_blob_store_backed():
     assert persist_body.index("reconcile_sd_primary(") < persist_body.index(
         "flush_journal_for_generation("
     )
+    journal_start = source.index("static esp_err_t flush_journal_for_generation")
+    journal_flush = source[
+        journal_start :
+        source.index("static esp_err_t persist_store(bool flush_primary, bool force)", journal_start)
+    ]
+    assert "d1l_route_store_persistence_should_yield()" in journal_flush
+    assert "return ESP_ERR_NOT_FINISHED;" in journal_flush
+    assert persist_body.count("== ESP_ERR_NOT_FINISHED") >= 3
+    assert persist_body.index("journal_ret == ESP_ERR_NOT_FINISHED") < persist_body.index(
+        "s_journal_fail_count++"
+    )
     assert "s_sd_dirty_count >= D1L_PACKET_LOG_SD_FLUSH_DIRTY_THRESHOLD" in source
     assert "s_sd_history_records < D1L_PACKET_LOG_SD_CAPACITY" in source
     assert "ESP_ERR_NOT_FOUND" in source

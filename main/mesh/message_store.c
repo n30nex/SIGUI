@@ -846,6 +846,9 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
     bool migrated = false;
     const esp_err_t read_ret = read_blob_target(true, &s_sd_blob_scratch,
                                                 &found, &migrated);
+    if (read_ret == ESP_ERR_NOT_FINISHED) {
+        return read_ret;
+    }
     if (read_ret != ESP_OK && read_ret != ESP_ERR_NOT_FOUND) {
         return note_sd_reconcile_failure(read_ret);
     }
@@ -979,6 +982,10 @@ static esp_err_t persist_store(bool force)
     if (reconcile_attempt) {
         const esp_err_t reconcile_ret = reconcile_sd_primary(generation);
         if (reconcile_ret != ESP_OK) {
+            if (reconcile_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return reconcile_ret;
+            }
             d1l_store_lock_take(&s_store_lock);
             const bool nvs_attempt = s_nvs_fallback_dirty;
             if (nvs_attempt) {
@@ -1047,6 +1054,10 @@ static esp_err_t persist_store(bool force)
                 D1L_MESSAGE_STORE_ID, D1L_MESSAGE_STORE_KEY,
                 &s_persist_snapshot.blob, sizeof(s_persist_snapshot.blob),
                 generation);
+            if (sd_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return sd_ret;
+            }
         }
     }
     if (s_persist_snapshot.nvs_attempt) {

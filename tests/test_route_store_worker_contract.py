@@ -170,9 +170,12 @@ def test_serial_remount_owner_safely_quiesces_retained_worker_without_reboot_reo
 
     assert "d1l_route_store_worker_quiesce_begin" in header
     assert "d1l_route_store_worker_quiesce_end" in header
+    assert "#include <stdbool.h>" in header
+    assert "d1l_route_store_persistence_should_yield" in header
     assert "s_flush_mutex" in worker
     assert "s_quiesce_requester" in worker
     assert "worker_quiesce_requested" in worker
+    assert "current != requester && current != owner" in worker
     assert "flush_retained_stores_locked(true)" in worker
     assert "flush_retained_stores_locked(false)" in worker
 

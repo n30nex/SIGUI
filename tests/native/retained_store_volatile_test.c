@@ -42,6 +42,11 @@ static bool s_use_packet_sd;
 static uint32_t s_fail_history_read_seq_min;
 static int64_t s_now_us;
 
+bool d1l_route_store_persistence_should_yield(void)
+{
+    return false;
+}
+
 static void mock_reset(void)
 {
     memset(s_primary, 0, sizeof(s_primary));

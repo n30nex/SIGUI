@@ -80,6 +80,12 @@ static uint32_t s_journal_truncates;
 static uint32_t s_delete_count;
 static uint32_t s_first_mutation_read_count;
 static int64_t s_now_us;
+static bool s_worker_should_yield;
+
+bool d1l_route_store_persistence_should_yield(void)
+{
+    return s_worker_should_yield;
+}
 
 static void mock_reset(void)
 {
@@ -112,6 +118,7 @@ static void mock_reset(void)
     s_delete_count = 0U;
     s_first_mutation_read_count = 0U;
     s_now_us = 1000000LL;
+    s_worker_should_yield = false;
 }
 
 static esp_err_t mock_blob_read(const mock_blob_t *blob, void *dst,
@@ -1158,6 +1165,38 @@ static void test_sequential_journal_write_accepts_exact_empty_eof(void)
     assert(strcmp(records[1].entry.note, "sequential-two") == 0);
 }
 
+static void test_journal_cooperative_yield_keeps_dirty_without_failure(void)
+{
+    mock_reset();
+    s_sd_enabled = true;
+    s_backend_generation = 1U;
+    assert(d1l_packet_log_init() == ESP_OK);
+    const d1l_packet_log_stats_t before = d1l_packet_log_stats();
+
+    s_worker_should_yield = true;
+    d1l_packet_log_entry_t entry = packet_entry(0U, "yield");
+    uint32_t stored_seq = 0U;
+    assert(d1l_packet_log_append_raw_checked(
+               &entry, NULL, 0U, &stored_seq) == ESP_ERR_NOT_FINISHED);
+    const d1l_packet_log_stats_t yielded = d1l_packet_log_stats();
+    assert(yielded.total_written == before.total_written + 1U);
+    assert(yielded.journal_dirty);
+    assert(yielded.journal_fail_count == before.journal_fail_count);
+    assert(yielded.sd_history_failed_writes ==
+           before.sd_history_failed_writes);
+    assert(yielded.persistence_fail_count == before.persistence_fail_count);
+    assert(s_journal_mutations == 0U);
+
+    s_worker_should_yield = false;
+    assert(d1l_packet_log_flush() == ESP_OK);
+    const d1l_packet_log_stats_t recovered = d1l_packet_log_stats();
+    assert(!recovered.persistence_dirty);
+    assert(!recovered.journal_dirty);
+    assert(recovered.journal_fail_count == before.journal_fail_count);
+    assert(recovered.persistence_fail_count == before.persistence_fail_count);
+    assert(s_journal_mutations == 1U);
+}
+
 static void test_gapped_compact_tail_fails_closed(void)
 {
     mock_reset();
@@ -1298,6 +1337,7 @@ int main(void)
     test_corrupt_only_fallback_reports_store_unavailable();
     test_journal_ahead_primary_behind_replay_is_idempotent();
     test_sequential_journal_write_accepts_exact_empty_eof();
+    test_journal_cooperative_yield_keeps_dirty_without_failure();
     test_gapped_compact_tail_fails_closed();
     test_clear_rejects_concurrent_append_and_stops_on_card_edge();
     test_clear_resamples_card_inserted_while_waiting_for_ownership();

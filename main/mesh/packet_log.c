@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 
 #include "hal/rp2040_bridge.h"
+#include "mesh/route_store_worker.h"
 #include "mesh/store_lock.h"
 #include "storage/retained_blob_store.h"
 
@@ -328,6 +329,9 @@ static esp_err_t probe_sd_history_slot(
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
+    }
 
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!history_segment_path(seq, path, sizeof(path))) {
@@ -343,6 +347,9 @@ static esp_err_t probe_sd_history_slot(
         D1L_PACKET_LOG_HISTORY_WRITE_TIMEOUT_MS);
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
     }
     if (ret == ESP_ERR_NOT_FOUND &&
         strcmp(result.err, "not_found") == 0) {
@@ -417,6 +424,9 @@ static esp_err_t append_sd_history_for_generation(
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
+    }
 
     char path[D1L_RP2040_FILE_PATH_MAX + 1U];
     if (!history_segment_path(entry->seq, path, sizeof(path))) {
@@ -478,6 +488,9 @@ static esp_err_t append_sd_history_for_generation(
 
     if (!packet_backend_generation_matches(expected_generation)) {
         return ESP_ERR_INVALID_STATE;
+    }
+    if (d1l_route_store_persistence_should_yield()) {
+        return ESP_ERR_NOT_FINISHED;
     }
     d1l_rp2040_file_result_t result = {0};
     const esp_err_t ret = d1l_rp2040_bridge_file_write(
@@ -1075,6 +1088,9 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
     size_t sd_len = sizeof(s_sd_primary_blob_scratch);
     const esp_err_t sd_ret = packet_read_sd_primary(
         &s_sd_primary_blob_scratch, &sd_len);
+    if (sd_ret == ESP_ERR_NOT_FINISHED) {
+        return sd_ret;
+    }
     bool primary_found = false;
     bool legacy_v2_primary = false;
     if (sd_ret == ESP_OK &&
@@ -1110,6 +1126,9 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
         esp_err_t probe_ret = probe_sd_history_slot(
             s_sd_primary_blob_scratch.next_seq - 1U,
             expected_generation, &tail_state, &journal_tail);
+        if (probe_ret == ESP_ERR_NOT_FINISHED) {
+            return probe_ret;
+        }
         if (probe_ret != ESP_OK) {
             return note_reconcile_failure(probe_ret);
         }
@@ -1122,6 +1141,9 @@ static esp_err_t reconcile_sd_primary(uint32_t expected_generation)
             probe_ret = probe_sd_history_slot(
                 s_sd_primary_blob_scratch.next_seq,
                 expected_generation, &next_state, NULL);
+            if (probe_ret == ESP_ERR_NOT_FINISHED) {
+                return probe_ret;
+            }
             if (probe_ret != ESP_OK) {
                 return note_reconcile_failure(probe_ret);
             }
@@ -1262,6 +1284,9 @@ static esp_err_t flush_journal_for_generation(uint32_t expected_generation,
                                               uint32_t snapshot_next_seq)
 {
     while (true) {
+        if (d1l_route_store_persistence_should_yield()) {
+            return ESP_ERR_NOT_FINISHED;
+        }
         d1l_packet_log_entry_t entry = {0};
         d1l_store_lock_take(&s_store_lock);
         const uint32_t seq = s_journal_next_seq;
@@ -1321,6 +1346,10 @@ static esp_err_t persist_store(bool flush_primary, bool force)
     if (reconcile_attempt) {
         operation_attempted = true;
         const esp_err_t ret = reconcile_sd_primary(backend_state.generation);
+        if (ret == ESP_ERR_NOT_FINISHED) {
+            d1l_store_lock_give(&s_persist_io_lock);
+            return ret;
+        }
         if (ret != ESP_OK) {
             first_error = ret;
         }
@@ -1346,6 +1375,10 @@ static esp_err_t persist_store(bool flush_primary, bool force)
         operation_attempted = true;
         journal_ret = flush_journal_for_generation(
             backend_state.generation, snapshot_next_seq);
+        if (journal_ret == ESP_ERR_NOT_FINISHED) {
+            d1l_store_lock_give(&s_persist_io_lock);
+            return journal_ret;
+        }
         if (journal_ret != ESP_OK && first_error == ESP_OK) {
             first_error = journal_ret;
         }
@@ -1358,6 +1391,10 @@ static esp_err_t persist_store(bool flush_primary, bool force)
             primary_ret = packet_write_sd_primary_guarded(
                 &s_primary_blob_scratch, sizeof(s_primary_blob_scratch),
                 backend_state.generation);
+            if (primary_ret == ESP_ERR_NOT_FINISHED) {
+                d1l_store_lock_give(&s_persist_io_lock);
+                return primary_ret;
+            }
             if (primary_ret == ESP_OK &&
                 !packet_backend_generation_matches(backend_state.generation)) {
                 primary_ret = ESP_ERR_INVALID_STATE;
