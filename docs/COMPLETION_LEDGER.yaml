@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-14T02:33:46Z",
+  "snapshot_at": "2026-07-14T05:23:04Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,35 +12,38 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
-      "actions_run": "29300795502",
+      "commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+      "actions_run": "29307595930",
       "actions_status": "success",
-      "host_tests_passed": 891,
+      "host_tests_passed": 917,
       "checksum_contract_tests_passed": 28,
       "checksum_status": "strict_pass_after_download",
       "checksum_manifests_total": 3,
       "checksum_manifests_verified": 3,
       "checksum_entries_present": 44,
-      "firmware_manifest_sha256": "6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb",
+      "firmware_manifest_sha256": "c92af5856fee1107abba5dd350116d5d81edb517f4bb893a5562b40cdbee123d",
       "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
-      "release_manifest_sha256": "499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18",
-      "release_package_manifest_json_sha256": "8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59",
-      "application_sha256": "a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98",
-      "full_flash_sha256": "1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232",
+      "release_manifest_sha256": "dc5ba0f7dc92ea3dc69d277926fa1acb049e6405b5b222ad6d2dd7d75e1fac4f",
+      "release_package_manifest_json_sha256": "a9fc7c3eb2421ce2e6c534b0decaed99c34ec68e7f91a80e6ff30edf83d8abcf",
+      "application_sha256": "64b393be1bbcdac6e2be3ddbbfb6462bee987236c5820539c1552fb10d5a7d8e",
+      "full_flash_sha256": "1f7b7c6831d74cf9580d4be1803c1f3bcd42d6303dd2283a1e146908f64057ce",
       "rp2040_bridge_uf2_sha256": null,
-      "downloaded_tree_file_count": 214,
-      "downloaded_tree_total_bytes": 72120370,
-      "downloaded_tree_sha256": "f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738",
-      "host_success_marker_sha256": "dd861b665cb6d0ea42aa54aadff8b293f64d0617c059f04790fb98b318a45e84",
-      "release_audit_sha256": "9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d",
+      "downloaded_tree_file_count": 216,
+      "downloaded_tree_total_bytes": 72353618,
+      "downloaded_tree_sha256": "9117424199086903f96138436d686a031cafcfc6636c857f0e25b5e782b68df9",
+      "host_success_marker_sha256": "518acf34e6092279aa45ff876b1b716c8be06a8957951a0a0841810d27abf0e0",
+      "release_audit_sha256": "61ba3c2de288a115538433fe25fce0cf12377667197fcce62e1ef5da7b6be57b",
       "release_audit_p0_failed_count": 32,
       "release_audit_failed_count": 34,
-      "sbom_sha256": "78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037",
-      "provenance_sha256": "7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c",
-      "completion_ledger_validation_sha256": "9437cda36d49e6d3746da266b34296668c6870cf01cbc63e515a5968e2ed6f07",
+      "sbom_sha256": "8292cb457a922d49304def0b330ba702d45041c1732031b780cb62fe23f4f995",
+      "provenance_sha256": "623daea6ae7c01b8b2a3f972c2bfb17f2ab1e1ecdfaf5f24b52a5a7e9c429703",
+      "completion_ledger_validation_sha256": "baebcfcc2910a095e361892300eaabc9b6cd3702e3dfc2cf69fbdc282c5063c9",
       "wp03_reproducibility_aggregate_sha256": "ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264",
+      "wp04_foundations_aggregate_sha256": "0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef",
+      "meshcore_signed_runtime_receipt_sha256": "e2c9de18c96b9f33161b2e60292cce35ff595d0d4913103ea33bf960ea68fc41",
+      "meshcore_conformance_receipt_sha256": "3af1e480bd15f2054908f1ea6cd0bf88a41faeeb3e320a964524d50b8d69cec9",
       "checksum_failure": null,
-      "note": "PR #90 merged the exact-SHA package inventory, immutable tool-byte checks, conformance evidence binding, and independent rebuild comparator. Exact merged-main Actions 29300795502 passed 891 host and 28 checksum-contract tests; downloaded verification passed 3 manifests / 44 entries across 214 files. Full-release dispatches 29300805114 and 29300806682 each passed 9 manifests / 89 entries across 257 files, and exact detached-main comparison is reproducible. WP-03 is merged and proof-banked; release readiness remains false because 32 P0 / 34 overall gates remain.",
+      "note": "PR #94 merged the defined-arithmetic Ed25519 overlay foundation and PR #93 merged real signed-advert Identity/Mesh/Dispatcher/BaseChatMesh execution. Exact merged-main Actions 29307595930 passed 917 host and 28 checksum-contract tests; downloaded verification passed 3 manifests / 44 entries across 216 files. WP-03 remains proof-banked and WP-04 remains in progress for production/oracle overlay integration, ACK, route, TRACE, admin, retained-state, RF, and physical closure; release readiness remains false because 32 P0 / 34 overall gates remain.",
       "previous_artifact_integrity_failure": {
         "commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
         "actions_run": "29286754864",
@@ -54,12 +57,12 @@
       }
     },
     "working_branch": {
-      "name": "codex/wp03-completion-receipt",
-      "base_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
-      "pull_request": null,
-      "head_commit": "47c52a303acc7d70565ed7d7329821afa56f9ae1",
-      "merged_pull_request": 90,
-      "status": "recording_merged_wp03_proof"
+      "name": "codex/wp04-foundation-ledger",
+      "base_commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+      "pull_request": 95,
+      "head_commit": "2acd0f2f01542e7bb5e9638d403fb43e216bfab1",
+      "merged_pull_request": 93,
+      "status": "recording_merged_wp04_foundations"
     },
     "merged_pull_request_receipts": {
       "64": {
@@ -260,6 +263,53 @@
         "comparator_status": "pass",
         "reproducible": true,
         "proof_banked": true
+      },
+      "92": {
+        "head_commit": "a1aa3567567642f8479c64098414a5174359bab4",
+        "pull_request_merge_test_commit": "5fac67ad0619d04867f3eb6e6088f6c87a34a218",
+        "merge_commit": "977cbd2590ddd0b73fe24274ba45f9d1e4051a37",
+        "actions_push_run": "29305643722",
+        "actions_pull_request_run": "29305644969",
+        "merged_main_actions_run": "29306243447",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 906,
+        "merged_main_checksum_contract_tests_passed": 28,
+        "portable_aggregate_path": "docs/completion/evidence/wp04/oracle_foundation_977cbd2590ddd0b73fe24274ba45f9d1e4051a37.json",
+        "portable_aggregate_sha256": "a4ccb0dde40b87fb3646149579a10c78e3778fcf0cf5885a46c02c1ac7f9b2ff",
+        "status": "merged_foundation"
+      },
+      "94": {
+        "head_commit": "be36fe10b1ac34966b83f2a73d43d17df9f7d2c7",
+        "pull_request_merge_test_commit": "4658daa904acf3668ea94a78871f07ed1c2afbdd",
+        "merge_commit": "2b878566d846f4db68ddb40f853cc63148f4a024",
+        "actions_push_run": "29306348780",
+        "actions_pull_request_run": "29306377583",
+        "merged_main_actions_run": "29307225130",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 909,
+        "merged_main_checksum_contract_tests_passed": 28,
+        "overlay_transformations": 215,
+        "overlay_sanitizer_status": "pass_without_exceptions",
+        "status": "merged_foundation"
+      },
+      "93": {
+        "head_commit": "e0f44a20fe52c795189c3bc40f0c17238aa764e2",
+        "pull_request_merge_test_commit": "be85e49b8b78c12b7124b60772d6b8c70d69be63",
+        "merge_commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+        "actions_push_run": "29306794376",
+        "actions_pull_request_run": "29306795470",
+        "merged_main_actions_run": "29307595930",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 917,
+        "merged_main_checksum_contract_tests_passed": 28,
+        "merged_main_downloaded_tree_file_count": 216,
+        "merged_main_downloaded_tree_total_bytes": 72353618,
+        "merged_main_downloaded_tree_sha256": "9117424199086903f96138436d686a031cafcfc6636c857f0e25b5e782b68df9",
+        "signed_runtime_receipt_sha256": "e2c9de18c96b9f33161b2e60292cce35ff595d0d4913103ea33bf960ea68fc41",
+        "conformance_receipt_sha256": "3af1e480bd15f2054908f1ea6cd0bf88a41faeeb3e320a964524d50b8d69cec9",
+        "portable_aggregate_path": "docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json",
+        "portable_aggregate_sha256": "0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef",
+        "status": "merged_foundation"
       }
     },
     "pull_request_receipts": {
@@ -327,20 +377,29 @@
       "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
     },
     "integrated_candidate": {
-      "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+      "commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
       "branch": "main",
-      "actions_run": "29300795502",
+      "actions_run": "29307595930",
       "status": "software_integrated_physical_qualification_open"
     },
     "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "selected_esp_idf": "5.5.4",
     "main_esp_idf": "5.5.4"
   },
-  "active_pull_requests": [],
+  "active_pull_requests": [
+    {
+      "number": 95,
+      "title": "docs(completion): bank WP-04 oracle foundation",
+      "branch": "codex/wp04-foundation-ledger",
+      "head_commit": "2acd0f2f01542e7bb5e9638d403fb43e216bfab1",
+      "status": "draft",
+      "purpose": "Bank exact merged-main WP-04 foundation receipts while implementation continues."
+    }
+  ],
   "reconciliation": [
     {
       "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
-      "resolution": "Use live main e79fb56160914f4483515f4f70998aa2f8961496 after PR #90 merged the remaining WP-03 package-inventory, tool-byte, conformance-binding, and reproducibility work; retain audited and predecessor SHAs as history. Exact merged-main Actions 29300795502 passed 891 host tests, 28 checksum-contract tests, and downloaded strict verification of 3 manifests / 44 entries across 214 files."
+      "resolution": "Use live main b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e after PR #94 merged the Ed25519 overlay foundation and PR #93 merged real signed-advert runtime semantics; retain audited and predecessor SHAs as history. Exact merged-main Actions 29307595930 passed 917 host tests, 28 checksum-contract tests, and downloaded strict verification of 3 manifests / 44 entries across 216 files."
     },
     {
       "conflict": "The audited snapshot and predecessor ledger described PR #80 as open or awaiting refresh.",
@@ -538,6 +597,24 @@
       "blocks_package": true,
       "blocks_execution": false,
       "still_unblocked": ["WP-03", "WP-04"]
+    },
+    {
+      "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+      "work_package": "WP-04",
+      "kind": "production_oracle_defined_arithmetic_integration_missing",
+      "status": "open",
+      "observed_at": "2026-07-14T04:46:00Z",
+      "missing_input": "One exact merged slice selecting the reviewed defined-arithmetic fe.c, ge.c, and sc.c overlays in production and the main host oracle, removing all three shift-base exceptions, reporting full_ubsan_clean=true, and passing Actions firmware/package evidence.",
+      "why_source_work_cannot_close": "PR #94 proves the standalone overlay byte-equivalent and sanitizer-clean, but exact main b49a7b3 still compiles the pinned legacy Ed25519 sources in production and the main oracle. Green standalone differential tests cannot prove the integrated production selection or package/SBOM/provenance boundary.",
+      "last_valid_sha": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+      "last_valid_actions_run": "29307595930",
+      "artifact_state": "overlay_and_signed_runtime_foundations_green_integration_in_progress",
+      "aggregate_artifact": "docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json",
+      "aggregate_sha256": "0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef",
+      "operator_action": "No device action. Merge the host-reviewed production/oracle overlay integration through GitHub Actions, verify downloaded package/checksum/SBOM/provenance artifacts, then close only this blocker.",
+      "blocks_package": true,
+      "blocks_execution": false,
+      "still_unblocked": ["WP-04 ACK dispatch", "WP-04 route/TRACE/admin implementation"]
     }
   ],
   "execution_priority": [
@@ -1045,12 +1122,64 @@
       "tracks": [65],
       "status": "in_progress",
       "dependency_gate": "merged",
-      "implementation_commit": null,
+      "implementation_commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
       "implementation_merged": false,
       "proof_banked": false,
-      "required_evidence": ["meshcore_oracle_manifest_<sha>.json"],
-      "evidence": [],
-      "latest_valid_receipt": null,
+      "required_evidence": ["meshcore_oracle_manifest_<sha>.json", "meshcore_signed_advert_runtime_<sha>.json", "signed_advert_ed25519_foundations_<sha>.json"],
+      "evidence": [
+        {
+          "filename": "signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json",
+          "kind": "merged_signed_advert_and_ed25519_foundations",
+          "commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+          "workflow_run": "29307595930",
+          "valid": true,
+          "closure_required": false,
+          "scope": "signed_advert_runtime_and_defined_arithmetic_overlay_foundation",
+          "sha256": "0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef",
+          "metadata": {
+            "tracked_path": "docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json",
+            "signed_runtime_receipt_sha256": "e2c9de18c96b9f33161b2e60292cce35ff595d0d4913103ea33bf960ea68fc41",
+            "conformance_receipt_sha256": "3af1e480bd15f2054908f1ea6cd0bf88a41faeeb3e320a964524d50b8d69cec9",
+            "full_ubsan_clean": false,
+            "closure_ready": false
+          }
+        }
+      ],
+      "latest_valid_receipt": {
+        "filename": "signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json",
+        "commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+        "scope": "signed_advert_runtime_and_defined_arithmetic_overlay_foundation",
+        "closure_eligible": false
+      },
+      "verification": {
+        "merged_oracle_foundation": {
+          "pull_request": 92,
+          "commit": "977cbd2590ddd0b73fe24274ba45f9d1e4051a37",
+          "actions_run": "29306243447",
+          "host_tests_passed": 906,
+          "status": "strict_pass_after_download"
+        },
+        "merged_ed25519_overlay_foundation": {
+          "pull_request": 94,
+          "commit": "2b878566d846f4db68ddb40f853cc63148f4a024",
+          "actions_run": "29307225130",
+          "host_tests_passed": 909,
+          "overlay_transformations": 215,
+          "sanitizer_status": "pass_without_exceptions",
+          "status": "strict_pass_after_download"
+        },
+        "merged_signed_advert_runtime": {
+          "pull_request": 93,
+          "commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+          "actions_run": "29307595930",
+          "host_tests_passed": 917,
+          "checksum_contract_tests_passed": 28,
+          "checksum_manifests_verified": 3,
+          "checksum_entries_verified": 44,
+          "downloaded_tree_sha256": "9117424199086903f96138436d686a031cafcfc6636c857f0e25b5e782b68df9",
+          "status": "strict_pass_after_download"
+        }
+      },
       "blockers": []
     },
     {
