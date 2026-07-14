@@ -33,13 +33,13 @@
     "preserve_output_on_reject": true
   },
   "vectors": {
-    "payload_types": 6,
+    "payload_types": 7,
     "route_types": 4,
     "path_cases": 9,
     "payload_lengths": 2,
-    "local_to_upstream": 432,
-    "upstream_to_local": 432,
-    "total": 864
+    "local_to_upstream": 504,
+    "upstream_to_local": 504,
+    "total": 1008
   },
   "vector_matrix": {
     "payload_types": [
@@ -48,6 +48,7 @@
       {"name": "ADVERT", "code": 4},
       {"name": "GRP_TXT", "code": 5},
       {"name": "PATH", "code": 8},
+      {"name": "TRACE", "code": 9},
       {"name": "MULTIPART", "code": 10}
     ],
     "route_types": [

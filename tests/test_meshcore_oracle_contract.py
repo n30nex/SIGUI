@@ -1143,12 +1143,12 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert summary["implemented_surface_count"] == 6
     assert summary["partial_surface_count"] == 3
     assert summary["blocked_surface_count"] == 0
-    assert summary["local_packet_type_count"] == 6
-    assert summary["wire_vector_covered_packet_type_count"] == 6
+    assert summary["local_packet_type_count"] == 7
+    assert summary["wire_vector_covered_packet_type_count"] == 7
     assert summary["unknown_packet_type_policy"] == "fail_closed"
     assert len(summary["blocker_receipts"]) == 5
     assert len(summary["unresolved_capabilities"]) == 5
-    assert len(summary["local_packet_types"]) == 6
+    assert len(summary["local_packet_types"]) == 7
     identity_receipt = next(
         item
         for item in summary["blocker_receipts"]
@@ -1464,7 +1464,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["corpus_version"] == 23
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
-    assert artifact["coverage_policy"]["local_packet_type_count"] == 6
+    assert artifact["coverage_policy"]["local_packet_type_count"] == 7
     assert artifact["repository_commit"] == git_head()
     assert artifact["upstream_commit"] == UPSTREAM_COMMIT
     assert artifact["oracle_result"] is None

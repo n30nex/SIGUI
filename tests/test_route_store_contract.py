@@ -114,11 +114,11 @@ def test_meshcore_public_and_advert_paths_feed_routes():
     assert 'route store public tx failed' in source
     assert 'route store advert tx failed' in source
     assert "D1L_MESHCORE_ROUTE_TRANSPORT_DIRECT" in source
-    assert "d1l_meshcore_service_request_trace_probe" in read("main/mesh/meshcore_service.h")
-    assert "D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS 30000U" in source
-    assert '"trace_%08lX"' in source
-    assert '"trace_probe"' in source
-    assert "route store trace probe tx failed" in source
+    assert "d1l_meshcore_service_request_path_discovery_probe" in read("main/mesh/meshcore_service.h")
+    assert "D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U" in source
+    assert '"path_%08lX"' in source
+    assert '"path_probe"' in source
+    assert "route store path probe tx failed" in source
     assert "xQueueReceive(s_service_queue, &cmd, portMAX_DELAY)" in source
     assert "d1l_route_store_flush_if_due()" not in source
 
@@ -148,7 +148,7 @@ def test_ui_console_and_smoke_expose_routes():
     assert 'ok_begin("routes trace")' in console
     assert "d1l_route_store_find_by_seq" in console
     assert "d1l_app_model_copy_route_trace(fingerprint, entries, D1L_ROUTE_STORE_CAPACITY)" in console
-    assert "d1l_app_model_request_trace_probe(fingerprint, token, sizeof(token))" in console
+    assert "d1l_app_model_request_path_discovery_probe(" in console
     assert 'strcmp(line, "routes")' in console
     assert 'strncmp(line, "routes detail ", 14)' in console
     assert 'strncmp(line, "routes trace ", 13)' in console
@@ -158,7 +158,7 @@ def test_ui_console_and_smoke_expose_routes():
     assert "routes trace <fingerprint>" in console
     assert "routes probe <fingerprint>" in console
     assert "Routes are learned from MeshCore path metadata" in console
-    assert "DM-only trace probe queued" in console
+    assert "DM/PATH discovery probe queued" in console
     assert "routes" in SMOKE_COMMANDS
     assert "routes trace 0BF0A701D5AE2DB6" in SMOKE_COMMANDS
     assert "routes clear" in roadmap

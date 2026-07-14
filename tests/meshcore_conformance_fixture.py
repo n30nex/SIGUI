@@ -138,9 +138,9 @@ def completed_report(
             "coverage_boundary": "wire_envelope_only",
             "issue_65_closure_eligible": False,
             "vectors": {
-                "upstream_to_local": 432,
-                "local_to_upstream": 432,
-                "total": 864,
+                "upstream_to_local": 504,
+                "local_to_upstream": 504,
+                "total": 1008,
             },
             "path_length_encodings": {"tested": 256, "valid": 119, "invalid": 137},
             "payload_version_gate": {

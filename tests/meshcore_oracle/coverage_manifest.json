@@ -175,6 +175,16 @@
         ]
       },
       {
+        "symbol": "D1L_MESHCORE_PAYLOAD_TRACE",
+        "code": 9,
+        "wire_vector": "TRACE",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "trace_source_frames",
+          "trace_forwarding_and_path_discovery"
+        ]
+      },
+      {
         "symbol": "D1L_MESHCORE_PAYLOAD_MULTIPART",
         "code": 10,
         "wire_vector": "MULTIPART",

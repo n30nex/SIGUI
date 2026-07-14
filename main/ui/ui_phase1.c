@@ -2797,20 +2797,20 @@ static void close_route_trace_event_cb(lv_event_t *event)
     show_contact_options_sheet();
 }
 
-static void route_trace_probe_event_cb(lv_event_t *event)
+static void route_path_probe_event_cb(lv_event_t *event)
 {
     (void)event;
     if (s_route_trace_contact.fingerprint[0] == '\0') {
-        show_toast("Trace ping", ESP_ERR_INVALID_STATE);
+        show_toast("Path probe", ESP_ERR_INVALID_STATE);
         return;
     }
     char token[D1L_MESSAGE_TEXT_LEN] = {0};
-    esp_err_t ret = d1l_app_model_request_trace_probe(s_route_trace_contact.fingerprint,
-                                                       token, sizeof(token));
+    esp_err_t ret = d1l_app_model_request_path_discovery_probe(
+        s_route_trace_contact.fingerprint, token, sizeof(token));
     if (ret == ESP_OK) {
-        show_toast_text("Trace ping queued", true);
+        show_toast_text("Path probe queued", true);
     } else {
-        show_toast("Trace ping", ret);
+        show_toast("Path probe", ret);
     }
 }
 
@@ -2836,8 +2836,8 @@ static void render_route_trace_sheet(void)
     lv_obj_set_width(title, 260);
     lv_obj_set_pos(title, 100, 10);
 
-    create_button(s_route_trace_sheet, "Ping", 376, 6, 88, 44,
-                  route_trace_probe_event_cb, NULL);
+    create_button(s_route_trace_sheet, "Probe", 376, 6, 88, 44,
+                  route_path_probe_event_cb, NULL);
 
     lv_obj_t *meta = create_label(s_route_trace_sheet, "", 0x8EA0AE);
     label_set_fmt(meta, "Trace %.16s  rows %u/%u",
@@ -2917,7 +2917,7 @@ static void render_route_trace_sheet(void)
     }
 
     lv_obj_t *note = create_label(s_route_trace_sheet,
-                                  "DM-only trace probe; no Public RF",
+                                  "DM/PATH discovery; not TRACE; no Public RF",
                                   0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_DOT);
     lv_obj_set_width(note, 448);

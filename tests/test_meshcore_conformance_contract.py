@@ -39,11 +39,11 @@ def test_conformance_manifest_pins_exact_upstream_and_fixed_scope():
     assert manifest["coverage_boundary"] == "wire_envelope_only"
     assert manifest["issue_65_closure_eligible"] is False
     assert manifest["upstream"]["commit"] == "e8d3c53ba1ea863937081cd0caad759b832f3028"
-    assert manifest["vectors"]["local_to_upstream"] == 432
-    assert manifest["vectors"]["upstream_to_local"] == 432
-    assert manifest["vectors"]["total"] == 864
+    assert manifest["vectors"]["local_to_upstream"] == 504
+    assert manifest["vectors"]["upstream_to_local"] == 504
+    assert manifest["vectors"]["total"] == 1008
     assert [item["name"] for item in manifest["vector_matrix"]["payload_types"]] == [
-        "TXT", "ACK", "ADVERT", "GRP_TXT", "PATH", "MULTIPART"
+        "TXT", "ACK", "ADVERT", "GRP_TXT", "PATH", "TRACE", "MULTIPART"
     ]
     assert len(manifest["vector_matrix"]["route_types"]) == 4
     assert len(manifest["vector_matrix"]["path_cases"]) == 9
@@ -106,9 +106,9 @@ def test_harness_has_fixed_bidirectional_matrix_and_structural_sweeps():
     shim = read("tests/meshcore_conformance/meshcore_packet_checked.hpp")
     sha_stub = read("tests/meshcore_conformance/stubs/SHA256.h")
 
-    assert "kExpectedPerDirection == 432" in harness
-    assert "upstream_to_local == 432U" in harness
-    assert "local_to_upstream == 432U" in harness
+    assert "kExpectedPerDirection == 504" in harness
+    assert "upstream_to_local == 504U" in harness
+    assert "local_to_upstream == 504U" in harness
     assert "value <= 0xFFU" in harness
     assert "result.valid != 119U" in harness
     assert "result.invalid != 137U" in harness
@@ -237,7 +237,7 @@ def test_documented_ci_cli_dry_run_is_fail_closed(tmp_path):
     assert report["corpus"]["verified"] is True
     assert report["scope"]["fuzz_target"] == "local_wire_decoder_only"
     assert report["scope"]["packet_semantics_covered"] is False
-    assert len(report["vector_matrix"]["payload_types"]) == 6
+    assert len(report["vector_matrix"]["payload_types"]) == 7
     assert report["payload_version_gate"] == {
         "permissive_envelope_versions": [0, 1, 2, 3],
         "accepted_v1_versions": [0],

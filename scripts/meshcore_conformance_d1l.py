@@ -146,13 +146,13 @@ EXPECTED_FUZZ_CORPUS = {
 }
 
 EXPECTED_VECTORS = {
-    "payload_types": 6,
+    "payload_types": 7,
     "route_types": 4,
     "path_cases": 9,
     "payload_lengths": 2,
-    "local_to_upstream": 432,
-    "upstream_to_local": 432,
-    "total": 864,
+    "local_to_upstream": 504,
+    "upstream_to_local": 504,
+    "total": 1008,
 }
 EXPECTED_PAYLOAD_VERSION_GATE = {
     "permissive_envelope_versions": [0, 1, 2, 3],
@@ -167,6 +167,7 @@ EXPECTED_VECTOR_MATRIX = {
         {"name": "ADVERT", "code": 4},
         {"name": "GRP_TXT", "code": 5},
         {"name": "PATH", "code": 8},
+        {"name": "TRACE", "code": 9},
         {"name": "MULTIPART", "code": 10},
     ],
     "route_types": [
@@ -931,6 +932,16 @@ EXPECTED_ORACLE_PACKET_TYPES = [
         ],
     },
     {
+        "symbol": "D1L_MESHCORE_PAYLOAD_TRACE",
+        "code": 9,
+        "wire_vector": "TRACE",
+        "wire_vector_covered": True,
+        "semantic_capabilities": [
+            "trace_source_frames",
+            "trace_forwarding_and_path_discovery",
+        ],
+    },
+    {
         "symbol": "D1L_MESHCORE_PAYLOAD_MULTIPART",
         "code": 10,
         "wire_vector": "MULTIPART",
@@ -986,6 +997,7 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/mesh/ed25519_canonical.h",
     "main/mesh/meshcore_route_selection.h",
     "main/mesh/meshcore_service.c",
+    "main/mesh/meshcore_trace.h",
     "overlays/meshcore_ed25519_defined/fe.c",
     "overlays/meshcore_ed25519_defined/ge.c",
     "overlays/meshcore_ed25519_defined/license.txt",
@@ -2657,7 +2669,7 @@ def validate_completed_report(
         and corpus_seeds_complete,
         "vector_passed": vector.get("passed") is True,
         "vector_counts": vector.get("vectors")
-        == {"local_to_upstream": 432, "upstream_to_local": 432, "total": 864},
+        == {"local_to_upstream": 504, "upstream_to_local": 504, "total": 1008},
         "path_counts": vector.get("path_length_encodings")
         == {"tested": 256, "valid": 119, "invalid": 137},
         "version_counts": vector.get("payload_version_gate")
@@ -3024,9 +3036,9 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 vector_result.get("passed") is not True
                 or vector_result.get("coverage_boundary") != "wire_envelope_only"
                 or vector_result.get("issue_65_closure_eligible") is not False
-                or vector_result.get("vectors", {}).get("upstream_to_local") != 432
-                or vector_result.get("vectors", {}).get("local_to_upstream") != 432
-                or vector_result.get("vectors", {}).get("total") != 864
+                or vector_result.get("vectors", {}).get("upstream_to_local") != 504
+                or vector_result.get("vectors", {}).get("local_to_upstream") != 504
+                or vector_result.get("vectors", {}).get("total") != 1008
                 or vector_result.get("path_length_encodings", {}).get("tested") != 256
                 or vector_result.get("path_length_encodings", {}).get("valid") != 119
                 or vector_result.get("path_length_encodings", {}).get("invalid") != 137

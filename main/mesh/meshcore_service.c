@@ -22,6 +22,7 @@
 #include "mesh/meshcore_ack_dispatch.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_route_selection.h"
+#include "mesh/meshcore_trace.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/message_store.h"
 #include "mesh/node_store.h"
@@ -47,7 +48,7 @@
 #define D1L_MESHCORE_ADVERT_TYPE_CHAT 0x01U
 #define D1L_MESHCORE_ADVERT_NAME_MASK 0x80U
 #define D1L_MESHCORE_TXT_TYPE_PLAIN 0U
-#define D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS 30000U
+#define D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS 30000U
 #define D1L_MESHCORE_SERVICE_TASK_STACK_BYTES 4096U
 #define D1L_MESHCORE_SERVICE_QUEUE_LEN 6U
 #define D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS 1500U
@@ -77,10 +78,17 @@ static volatile bool s_tx_busy;
 static volatile bool s_active_tx_ack_response;
 static bool s_pending_public_tx;
 static char s_pending_public_text[D1L_MESSAGE_TEXT_LEN];
-static uint32_t s_last_trace_probe_ms;
-static char s_last_trace_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+static uint32_t s_last_path_probe_ms;
+static char s_last_path_probe_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static bool s_radio_profile_applied;
 static d1l_radio_profile_t s_applied_radio_profile;
+static d1l_meshcore_trace_tracker_t s_trace_tracker;
+static int s_trace_last_rssi_dbm;
+static int s_trace_last_radio_snr_quarter_db;
+static bool s_trace_last_retention_attempted;
+static bool s_trace_last_route_summary_accepted;
+static bool s_trace_last_packet_preview_retained;
+static d1l_store_lock_t s_trace_lock = D1L_STORE_LOCK_INITIALIZER;
 
 typedef struct {
     bool active;
@@ -300,7 +308,7 @@ static bool hex_to_bytes(uint8_t *dest, size_t dest_len, const char *src_hex)
     return src_hex[dest_len * 2U] == '\0';
 }
 
-static void append_packet_log(const char *direction, const char *kind, int rssi, int snr_quarters,
+static bool append_packet_log(const char *direction, const char *kind, int rssi, int snr_quarters,
                               uint8_t path_hash_bytes, uint8_t path_hops, uint16_t payload_len,
                               const uint8_t *raw, size_t raw_len, const char *note)
 {
@@ -314,7 +322,7 @@ static void append_packet_log(const char *direction, const char *kind, int rssi,
     strncpy(entry.direction, direction, sizeof(entry.direction) - 1U);
     strncpy(entry.kind, kind, sizeof(entry.kind) - 1U);
     sanitize_note(entry.note, sizeof(entry.note), note);
-    d1l_packet_log_append_raw(&entry, raw, raw_len);
+    return d1l_packet_log_append_raw(&entry, raw, raw_len);
 }
 
 static void append_public_message_store_rx(const char *message, int rssi, int snr_quarters,
@@ -1624,6 +1632,119 @@ static void parse_rx_path_packet(uint8_t *payload, uint16_t size, int16_t rssi, 
     }
 }
 
+static void parse_rx_trace_packet(uint8_t *payload, uint16_t size,
+                                  int16_t rssi, int8_t snr)
+{
+    if (!payload || size == 0U ||
+        ((payload[0] >> 2U) & 0x0fU) != D1L_MESHCORE_PAYLOAD_TRACE) {
+        return;
+    }
+
+    d1l_meshcore_trace_terminal_t terminal = {0};
+    const d1l_meshcore_trace_frame_kind_t frame_kind =
+        d1l_meshcore_trace_classify(payload, size, &terminal);
+    if (frame_kind != D1L_MESHCORE_TRACE_FRAME_TERMINAL) {
+        status_lock();
+        switch (frame_kind) {
+        case D1L_MESHCORE_TRACE_FRAME_SOURCE:
+            s_status.trace_rx_source_ignored++;
+            break;
+        case D1L_MESHCORE_TRACE_FRAME_IN_FLIGHT:
+            s_status.trace_rx_in_flight_ignored++;
+            break;
+        case D1L_MESHCORE_TRACE_FRAME_UNSUPPORTED:
+            s_status.trace_rx_unsupported++;
+            break;
+        case D1L_MESHCORE_TRACE_FRAME_MALFORMED:
+        default:
+            s_status.trace_rx_malformed++;
+            break;
+        }
+        status_unlock();
+        return;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_trace_lock);
+    const bool pending_expired = s_trace_tracker.pending &&
+        (uint32_t)(now_ms - s_trace_tracker.pending_started_ms) >=
+            D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS;
+    const d1l_meshcore_trace_correlation_t correlation =
+        d1l_meshcore_trace_tracker_consume(&s_trace_tracker, &terminal, now_ms);
+    if (correlation == D1L_MESHCORE_TRACE_CORRELATION_MATCHED) {
+        s_trace_last_rssi_dbm = rssi;
+        s_trace_last_radio_snr_quarter_db = snr;
+        s_trace_last_retention_attempted = false;
+        s_trace_last_route_summary_accepted = false;
+        s_trace_last_packet_preview_retained = false;
+    }
+    d1l_store_lock_give(&s_trace_lock);
+
+    status_lock();
+    if (pending_expired) {
+        s_status.trace_pending_expired++;
+    }
+    switch (correlation) {
+    case D1L_MESHCORE_TRACE_CORRELATION_MATCHED:
+        s_status.trace_rx_matched++;
+        s_status.rx_packets++;
+        break;
+    case D1L_MESHCORE_TRACE_CORRELATION_DUPLICATE:
+        s_status.trace_rx_duplicates++;
+        break;
+    case D1L_MESHCORE_TRACE_CORRELATION_EXPIRED:
+        s_status.trace_rx_expired++;
+        break;
+    case D1L_MESHCORE_TRACE_CORRELATION_AUTH_MISMATCH:
+        s_status.trace_rx_auth_mismatch++;
+        break;
+    case D1L_MESHCORE_TRACE_CORRELATION_PATH_MISMATCH:
+        s_status.trace_rx_path_mismatch++;
+        break;
+    case D1L_MESHCORE_TRACE_CORRELATION_UNMATCHED:
+    default:
+        s_status.trace_rx_unmatched++;
+        break;
+    }
+    status_unlock();
+
+    if (correlation != D1L_MESHCORE_TRACE_CORRELATION_MATCHED) {
+        return;
+    }
+
+    char target[D1L_ROUTE_TARGET_LEN] = {0};
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(target, sizeof(target), "%s",
+             d1l_meshcore_trace_retained_target_for_tag(terminal.tag));
+    snprintf(note, sizeof(note), "tag=%08lX hops=%u",
+             (unsigned long)terminal.tag, terminal.path_hops);
+    const esp_err_t route_ret = d1l_route_store_upsert_observation(
+        target, "Explicit TRACE", "trace_reply", "direct", "rx", rssi,
+        (snr * 10) / 4, 1U, terminal.path_hops, size);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "route store TRACE reply failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    const bool packet_retained = append_packet_log(
+        "rx", "trace_reply", rssi, snr, 1U, terminal.path_hops, size,
+        payload, size, note);
+    if (!packet_retained) {
+        ESP_LOGW(TAG, "packet log TRACE reply retention failed");
+    }
+    d1l_store_lock_take(&s_trace_lock);
+    if (s_trace_tracker.completed &&
+        s_trace_tracker.last_result.tag == terminal.tag &&
+        s_trace_tracker.last_result.auth_code == terminal.auth_code &&
+        d1l_meshcore_trace_path_matches(
+            &terminal, s_trace_tracker.last_result.path_hops,
+            s_trace_tracker.last_result.path_hashes)) {
+        s_trace_last_retention_attempted = true;
+        s_trace_last_route_summary_accepted = route_ret == ESP_OK;
+        s_trace_last_packet_preview_retained = packet_retained;
+    }
+    d1l_store_lock_give(&s_trace_lock);
+}
+
 static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *timestamp,
                                     const uint8_t *signature, const uint8_t *app_data,
                                     size_t app_data_len)
@@ -1854,6 +1975,7 @@ static void on_rx_done(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr
     const bool ack_queued = parse_rx_dm_packet(payload, size, rssi, snr);
     parse_rx_path_packet(payload, size, rssi, snr);
     parse_rx_ack_packet(payload, size, rssi, snr);
+    parse_rx_trace_packet(payload, size, rssi, snr);
     parse_rx_advert_packet(payload, size, rssi, snr);
     if (!ack_queued) {
         meshcore_service_request_rx_async();
@@ -2187,6 +2309,16 @@ void d1l_meshcore_service_init(void)
 {
     const d1l_settings_t *settings = d1l_settings_current();
     const esp_err_t task_ret = meshcore_service_start_task();
+    if (!s_service_initialized) {
+        d1l_store_lock_take(&s_trace_lock);
+        memset(&s_trace_tracker, 0, sizeof(s_trace_tracker));
+        s_trace_last_rssi_dbm = 0;
+        s_trace_last_radio_snr_quarter_db = 0;
+        s_trace_last_retention_attempted = false;
+        s_trace_last_route_summary_accepted = false;
+        s_trace_last_packet_preview_retained = false;
+        d1l_store_lock_give(&s_trace_lock);
+    }
     status_lock();
     // Runtime settings flows reuse init; preserve the live radio and queued work.
     if (s_service_initialized) {
@@ -2266,6 +2398,54 @@ d1l_meshcore_service_status_t d1l_meshcore_service_status(void)
                              radio_profiles_match(&applied_profile, &current_profile);
     snapshot.radio_apply_pending = !snapshot.radio_applied;
     return snapshot;
+}
+
+void d1l_meshcore_service_trace_snapshot(
+    d1l_meshcore_trace_snapshot_t *out_snapshot)
+{
+    if (!out_snapshot) {
+        return;
+    }
+
+    d1l_meshcore_trace_snapshot_t snapshot = {0};
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_trace_lock);
+    if (s_trace_tracker.pending) {
+        snapshot.pending = true;
+        snapshot.pending_tag = s_trace_tracker.pending_tag;
+        snapshot.pending_age_ms =
+            (uint32_t)(now_ms - s_trace_tracker.pending_started_ms);
+        snapshot.pending_expired =
+            snapshot.pending_age_ms >= D1L_MESHCORE_TRACE_PENDING_TIMEOUT_MS;
+        snapshot.pending_path_hops = s_trace_tracker.pending_path_hops;
+        memcpy(snapshot.pending_path_hashes,
+               s_trace_tracker.pending_path_hashes,
+               snapshot.pending_path_hops);
+    }
+    if (s_trace_tracker.completed) {
+        snapshot.last_result_valid = true;
+        snapshot.last_tag = s_trace_tracker.last_result.tag;
+        snapshot.last_age_ms =
+            (uint32_t)(now_ms - s_trace_tracker.completed_at_ms);
+        snapshot.last_path_hops = s_trace_tracker.last_result.path_hops;
+        memcpy(snapshot.last_path_hashes,
+               s_trace_tracker.last_result.path_hashes,
+               snapshot.last_path_hops);
+        memcpy(snapshot.last_path_snrs_quarter_db,
+               s_trace_tracker.last_result.path_snrs_quarter_db,
+               snapshot.last_path_hops);
+        snapshot.last_rssi_dbm = s_trace_last_rssi_dbm;
+        snapshot.last_radio_snr_quarter_db =
+            s_trace_last_radio_snr_quarter_db;
+        snapshot.last_retention_attempted =
+            s_trace_last_retention_attempted;
+        snapshot.last_route_summary_accepted =
+            s_trace_last_route_summary_accepted;
+        snapshot.last_packet_preview_retained =
+            s_trace_last_packet_preview_retained;
+    }
+    d1l_store_lock_give(&s_trace_lock);
+    *out_snapshot = snapshot;
 }
 
 esp_err_t d1l_meshcore_service_request_advert(bool flood)
@@ -2500,25 +2680,27 @@ esp_err_t d1l_meshcore_service_send_dm(const char *fingerprint, const char *text
     return meshcore_service_send_dm_with_result(fingerprint, text, NULL);
 }
 
-esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
-                                                   char *out_token,
-                                                   size_t out_token_size)
+esp_err_t d1l_meshcore_service_request_path_discovery_probe(
+    const char *fingerprint,
+    char *out_token,
+    size_t out_token_size)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
 
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
-    if (s_last_trace_probe_fingerprint[0] != '\0' &&
-        strncmp(s_last_trace_probe_fingerprint, fingerprint,
-                sizeof(s_last_trace_probe_fingerprint)) == 0 &&
-        (uint32_t)(now_ms - s_last_trace_probe_ms) < D1L_MESHCORE_TRACE_PROBE_COOLDOWN_MS) {
+    if (s_last_path_probe_fingerprint[0] != '\0' &&
+        strncmp(s_last_path_probe_fingerprint, fingerprint,
+                sizeof(s_last_path_probe_fingerprint)) == 0 &&
+        (uint32_t)(now_ms - s_last_path_probe_ms) <
+            D1L_MESHCORE_PATH_PROBE_COOLDOWN_MS) {
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
     }
 
     char token[D1L_MESSAGE_TEXT_LEN] = {0};
-    const int written = snprintf(token, sizeof(token), "trace_%08lX",
+    const int written = snprintf(token, sizeof(token), "path_%08lX",
                                  (unsigned long)esp_random());
     if (written <= 0 || (size_t)written >= sizeof(token)) {
         s_status.rejected_commands++;
@@ -2534,19 +2716,97 @@ esp_err_t d1l_meshcore_service_request_trace_probe(const char *fingerprint,
 
     esp_err_t route_ret =
         d1l_route_store_upsert_observation(
-            send_result.fingerprint, send_result.alias, "trace_probe",
+            send_result.fingerprint, send_result.alias, "path_probe",
             route_name(send_result.selection.route), "tx", 0, 0,
             send_result.selection.path_hash_bytes,
             send_result.selection.path_hops, send_result.raw_len);
     if (route_ret != ESP_OK) {
-        ESP_LOGW(TAG, "route store trace probe tx failed: %s", esp_err_to_name(route_ret));
+        ESP_LOGW(TAG, "route store path probe tx failed: %s", esp_err_to_name(route_ret));
     }
 
-    snprintf(s_last_trace_probe_fingerprint, sizeof(s_last_trace_probe_fingerprint),
+    snprintf(s_last_path_probe_fingerprint, sizeof(s_last_path_probe_fingerprint),
              "%s", fingerprint);
-    s_last_trace_probe_ms = now_ms;
+    s_last_path_probe_ms = now_ms;
     if (out_token && out_token_size > 0) {
         snprintf(out_token, out_token_size, "%s", token);
+    }
+    return ESP_OK;
+}
+
+esp_err_t d1l_meshcore_service_send_trace_loop(const uint8_t *path_hashes,
+                                               size_t path_hops,
+                                               uint32_t *out_tag)
+{
+    if (!path_hashes || path_hops == 0U ||
+        path_hops > D1L_MESHCORE_TRACE_MAX_HOPS) {
+        status_lock();
+        s_status.rejected_commands++;
+        status_unlock();
+        return ESP_ERR_INVALID_ARG;
+    }
+    const uint32_t tag = esp_random();
+    const uint32_t auth_code = esp_random();
+    d1l_meshcore_trace_source_t source = {0};
+    if (!d1l_meshcore_trace_build_source(tag, auth_code, path_hashes,
+                                         path_hops, &source)) {
+        status_lock();
+        s_status.rejected_commands++;
+        status_unlock();
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    d1l_store_lock_take(&s_trace_lock);
+    const bool expired = d1l_meshcore_trace_tracker_expire_pending(
+        &s_trace_tracker, now_ms);
+    const bool began = d1l_meshcore_trace_tracker_begin(
+        &s_trace_tracker, tag, auth_code, path_hashes, path_hops, now_ms);
+    d1l_store_lock_give(&s_trace_lock);
+    if (expired) {
+        status_lock();
+        s_status.trace_pending_expired++;
+        status_unlock();
+    }
+    if (!began) {
+        status_lock();
+        s_status.rejected_commands++;
+        status_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const esp_err_t ret = meshcore_service_send_raw(
+        source.raw, source.raw_len, D1L_MESHCORE_SERVICE_COMMAND_TIMEOUT_MS);
+    if (ret != ESP_OK) {
+        d1l_store_lock_take(&s_trace_lock);
+        (void)d1l_meshcore_trace_tracker_cancel(&s_trace_tracker, tag,
+                                                auth_code);
+        d1l_store_lock_give(&s_trace_lock);
+        status_lock();
+        s_status.rejected_commands++;
+        status_unlock();
+        return ret;
+    }
+
+    char target[D1L_ROUTE_TARGET_LEN] = {0};
+    char note[D1L_PACKET_LOG_NOTE_LEN] = {0};
+    snprintf(target, sizeof(target), "trace_%08lX", (unsigned long)tag);
+    snprintf(note, sizeof(note), "tag=%08lX loop_hops=%u",
+             (unsigned long)tag, (unsigned)path_hops);
+    const esp_err_t route_ret = d1l_route_store_upsert_observation_volatile(
+        target, "Explicit TRACE", "trace_request", "direct", "tx", 0, 0,
+        1U, (uint8_t)path_hops, source.raw_len);
+    if (route_ret != ESP_OK) {
+        ESP_LOGW(TAG, "volatile TRACE request route failed: %s",
+                 esp_err_to_name(route_ret));
+    }
+    append_packet_log("tx", "trace_request", 0, 0, 1U,
+                      (uint8_t)path_hops, source.raw_len, source.raw,
+                      source.raw_len, note);
+    status_lock();
+    s_status.trace_tx_queued++;
+    status_unlock();
+    if (out_tag) {
+        *out_tag = tag;
     }
     return ESP_OK;
 }

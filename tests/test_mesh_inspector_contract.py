@@ -201,7 +201,7 @@ def test_mesh_roles_back_paths_and_page_probes_are_non_destructive():
     for forbidden in (
         "d1l_app_model_request",
         "d1l_meshcore",
-        "route_trace_probe_event_cb",
+        "route_path_probe_event_cb",
         "confirm_forget_contact_event_cb",
     ):
         assert forbidden not in probe

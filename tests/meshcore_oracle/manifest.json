@@ -71,7 +71,8 @@
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
     "main/mesh/meshcore_route_selection.h": "a6a340474e46f43ea844a236510b508ed0da524aa3ed7ecdd05b36cafde9cc5d",
-    "main/mesh/meshcore_service.c": "09dba4b8519e2cd9e1f0e5ca1304d51b85cae5f38e4c14d906820e707d2af86f",
+    "main/mesh/meshcore_service.c": "04e8db82e66d6ca22bf49ebdbf848d26760fcdc25d64523cd4d40e3b6679c4b1",
+    "main/mesh/meshcore_trace.h": "efc3a08ffb6adda5310ca57eef31535fe7dadeb993aedda9fdb2814b891d41f7",
     "overlays/meshcore_ed25519_defined/fe.c": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
     "overlays/meshcore_ed25519_defined/ge.c": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",
     "overlays/meshcore_ed25519_defined/license.txt": "f68d76b9c1c2271422e55134ea94cf71f2ac3fc3ed6a7ec6b83a1a0538753214",
@@ -82,7 +83,7 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "36e1329c73bbaec27f9c1e43bba238aaac27cd1eb6fb3480e742fb000a380abf",
+    "tests/meshcore_oracle/coverage_manifest.json": "c3ead67e2edd1d7328e407581ad4a909a0c24ff0a440b08e0cb1261f8218f032",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
     "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
     "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "4215276571af0a1b3241341b00c434b9d9de788f6103cdffe42d7f45795e4bb3",

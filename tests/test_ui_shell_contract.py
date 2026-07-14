@@ -786,7 +786,7 @@ def test_ui_simulator_flow_names_match_lvgl_handlers():
         "close_contact_export": "close_contact_export_event_cb",
         "open_route_trace": "open_route_trace_event_cb",
         "close_route_trace": "close_route_trace_event_cb",
-        "send_trace_probe": "route_trace_probe_event_cb",
+        "send_path_probe": "route_path_probe_event_cb",
         "open_packet_search": "open_packet_search_event_cb",
         "edit_packet_search": "s_packet_search_textarea",
         "apply_packet_search": "apply_packet_search_event_cb",
@@ -1293,11 +1293,11 @@ def test_contact_pages_enforce_progressive_disclosure_and_safe_removal():
     assert "s_contact_action_mute" in source
     assert "open_dm_compose_for_contact(&s_contact_detail_contact)" in source
     assert "d1l_app_model_copy_route_trace(contact->fingerprint, s_route_trace_entries" in source
-    assert "route_trace_probe_event_cb" in source
-    assert "d1l_app_model_request_trace_probe(s_route_trace_contact.fingerprint" in source
-    assert 'create_button(s_route_trace_sheet, "Ping"' in source
+    assert "route_path_probe_event_cb" in source
+    assert "d1l_app_model_request_path_discovery_probe(" in source
+    assert 'create_button(s_route_trace_sheet, "Probe"' in source
     assert '"Alias only; retained history remains"' in source
-    assert '"DM-only trace probe; no Public RF"' in source
+    assert '"DM/PATH discovery; not TRACE; no Public RF"' in source
     assert '"Contact Export"' in source
     assert '"MeshCore QR  %.16s  type %u"' in source
     assert "lv_qrcode_create" in source

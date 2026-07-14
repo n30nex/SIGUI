@@ -188,6 +188,44 @@ static void print_hex_bytes_json(const uint8_t *bytes, size_t len)
     putchar('"');
 }
 
+static int console_hex_nibble(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool parse_trace_loop_path(const char *text, uint8_t *out_hashes,
+                                  size_t *out_hops)
+{
+    if (!text || !out_hashes || !out_hops) {
+        return false;
+    }
+    const size_t hex_len = strlen(text);
+    if (hex_len < 2U || (hex_len & 1U) != 0U ||
+        hex_len > D1L_MESHCORE_TRACE_MAX_HOPS * 2U) {
+        return false;
+    }
+    const size_t hops = hex_len / 2U;
+    for (size_t i = 0; i < hops; ++i) {
+        const int hi = console_hex_nibble(text[i * 2U]);
+        const int lo = console_hex_nibble(text[i * 2U + 1U]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        out_hashes[i] = (uint8_t)((hi << 4) | lo);
+    }
+    *out_hops = hops;
+    return true;
+}
+
 static void print_retained_sd_store_json(const d1l_retained_blob_store_sd_stats_t *stats)
 {
     const d1l_retained_blob_store_sd_stats_t empty = {0};
@@ -1103,7 +1141,7 @@ static void cmd_mesh_status(void)
 {
     d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
     ok_begin("mesh status");
-    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled\"}\n",
+    printf(",\"phase\":\"phase2_public_rf\",\"state\":\"%s\",\"radio_profile\":\"uscan-meshcore-default\",\"identity_ready\":%s,\"radio_ready\":%s,\"companion_framing_ready\":%s,\"path_hash_bytes\":%u,\"rx_packets\":%lu,\"rx_adverts\":%lu,\"tx_packets\":%lu,\"rejected_commands\":%lu,\"ack_tx\":{\"queued\":%lu,\"done\":%lu,\"failed\":%lu,\"duplicate_rows_suppressed\":%lu,\"last_hash\":%lu,\"last_error\":\"%s\"},\"dm_route\":{\"direct_selected\":%lu,\"flood_selected\":%lu,\"missing_fallback\":%lu,\"preboot_fallback\":%lu,\"stale_fallback\":%lu,\"malformed_fallback\":%lu,\"last_reason\":\"%s\",\"last_path_age_ms\":%lu}",
            d1l_meshcore_service_state_name(status.state), bool_json(status.identity_ready),
            bool_json(status.radio_ready), bool_json(status.companion_framing_ready),
            status.path_hash_bytes, (unsigned long)status.rx_packets,
@@ -1124,6 +1162,19 @@ static void cmd_mesh_status(void)
            d1l_meshcore_route_selection_reason_name(
                (d1l_meshcore_route_selection_reason_t)status.dm_route_last_reason),
            (unsigned long)status.dm_route_last_path_age_ms);
+    printf(",\"trace\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu,\"flags_zero_direct_only\":true,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"hardware_verified\":false},\"note\":\"Public group text TX/RX and signed advert TX/RX enabled; inbound DM ACK dispatch and route selection enabled; TRACE is bounded to host-verified explicit-loop source, terminal parsing, and correlation\"}\n",
+           (unsigned long)status.trace_tx_queued,
+           (unsigned long)status.trace_rx_matched,
+           (unsigned long)status.trace_rx_duplicates,
+           (unsigned long)status.trace_pending_expired,
+           (unsigned long)status.trace_rx_expired,
+           (unsigned long)status.trace_rx_unmatched,
+           (unsigned long)status.trace_rx_auth_mismatch,
+           (unsigned long)status.trace_rx_path_mismatch,
+           (unsigned long)status.trace_rx_malformed,
+           (unsigned long)status.trace_rx_source_ignored,
+           (unsigned long)status.trace_rx_in_flight_ignored,
+           (unsigned long)status.trace_rx_unsupported);
 }
 
 static void cmd_mesh_advert(const char *cmd, bool flood)
@@ -4414,6 +4465,92 @@ static size_t route_trace_best_index(const d1l_route_entry_t *entries, size_t co
     return best;
 }
 
+static void cmd_routes_trace_send(const char *line)
+{
+    const char *arg = line + strlen("routes trace send ");
+    while (*arg == ' ') {
+        arg++;
+    }
+    uint8_t path_hashes[D1L_MESHCORE_TRACE_MAX_HOPS] = {0};
+    size_t path_hops = 0U;
+    if (!parse_trace_loop_path(arg, path_hashes, &path_hops)) {
+        err_result("routes trace send", "INVALID_LOOP_PATH",
+                   "usage: routes trace send <2-126 hex chars>; path must explicitly return to this node");
+        return;
+    }
+
+    uint32_t tag = 0U;
+    const esp_err_t ret = d1l_meshcore_service_send_trace_loop(
+        path_hashes, path_hops, &tag);
+    if (ret != ESP_OK) {
+        err_result("routes trace send", esp_err_to_name(ret),
+                   ret == ESP_ERR_INVALID_STATE ?
+                   "another TRACE is pending or the radio is busy" :
+                   "could not queue the flags-zero direct TRACE");
+        return;
+    }
+
+    ok_begin("routes trace send");
+    printf(",\"queued\":true,\"tag\":%lu,\"tag_hex\":\"%08lX\",\"path_hops\":%u,\"path_hashes_hex\":",
+           (unsigned long)tag, (unsigned long)tag, (unsigned)path_hops);
+    print_hex_bytes_json(path_hashes, path_hops);
+    printf(",\"route\":\"direct\",\"flags\":0,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"generic_reply_packet\":false,\"hardware_verified\":false,\"note\":\"TRACE accepted for transmit; completion requires the same tag, opaque auth code, and immutable explicit loop path\"}\n");
+}
+
+static void cmd_routes_trace_status(void)
+{
+    d1l_meshcore_service_status_t status = d1l_meshcore_service_status();
+    d1l_meshcore_trace_snapshot_t trace = {0};
+    d1l_meshcore_service_trace_snapshot(&trace);
+    const char *retention_note =
+        !trace.last_result_valid ?
+            "No matched TRACE result is available" :
+        !trace.last_retention_attempted ?
+            "Matched TRACE retention outcome is pending" :
+        trace.last_route_summary_accepted && trace.last_packet_preview_retained ?
+            "Route summary accepted for deferred flush and packet preview retention succeeded" :
+        trace.last_route_summary_accepted ?
+            "Route summary accepted for deferred flush but packet preview retention failed" :
+        trace.last_packet_preview_retained ?
+            "Route summary store rejected the result but packet preview retention succeeded" :
+            "Route summary and packet preview retention both failed";
+
+    ok_begin("routes trace status");
+    printf(",\"counters\":{\"tx_queued\":%lu,\"rx_matched\":%lu,\"rx_duplicates\":%lu,\"pending_expired\":%lu,\"rx_expired\":%lu,\"rx_unmatched\":%lu,\"rx_auth_mismatch\":%lu,\"rx_path_mismatch\":%lu,\"rx_malformed\":%lu,\"rx_source_ignored\":%lu,\"rx_in_flight_ignored\":%lu,\"rx_unsupported\":%lu},\"pending\":{\"active\":%s,\"expired\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hops\":%u,\"path_hashes_hex\":",
+           (unsigned long)status.trace_tx_queued,
+           (unsigned long)status.trace_rx_matched,
+           (unsigned long)status.trace_rx_duplicates,
+           (unsigned long)status.trace_pending_expired,
+           (unsigned long)status.trace_rx_expired,
+           (unsigned long)status.trace_rx_unmatched,
+           (unsigned long)status.trace_rx_auth_mismatch,
+           (unsigned long)status.trace_rx_path_mismatch,
+           (unsigned long)status.trace_rx_malformed,
+           (unsigned long)status.trace_rx_source_ignored,
+           (unsigned long)status.trace_rx_in_flight_ignored,
+           (unsigned long)status.trace_rx_unsupported,
+           bool_json(trace.pending), bool_json(trace.pending_expired),
+           (unsigned long)trace.pending_tag,
+           (unsigned long)trace.pending_age_ms,
+           trace.pending_path_hops);
+    print_hex_bytes_json(trace.pending_path_hashes, trace.pending_path_hops);
+    printf("},\"last_result\":{\"valid\":%s,\"tag\":%lu,\"age_ms\":%lu,\"path_hops\":%u,\"path_hashes_hex\":",
+           bool_json(trace.last_result_valid), (unsigned long)trace.last_tag,
+           (unsigned long)trace.last_age_ms, trace.last_path_hops);
+    print_hex_bytes_json(trace.last_path_hashes, trace.last_path_hops);
+    printf(",\"path_snrs_quarter_db\":[");
+    for (size_t i = 0; i < trace.last_path_hops; ++i) {
+        printf("%s%d", i ? "," : "",
+               (int)trace.last_path_snrs_quarter_db[i]);
+    }
+    printf("],\"radio_rssi_dbm\":%d,\"radio_snr_quarter_db\":%d},\"retention\":{\"attempted\":%s,\"route_summary_accepted\":%s,\"route_summary_durable_verified\":false,\"packet_preview_retained\":%s,\"per_hop_complete\":false,\"packet_preview_bytes\":%u},\"correlation_scope\":\"tag_auth_immutable_explicit_loop\",\"last_detail_scope\":\"boot_local\",\"flags_zero_direct_only\":true,\"requires_explicit_loop\":true,\"contact_trace_supported\":false,\"hardware_verified\":false,\"note\":\"%s; full per-hop detail is boot-local and TRACE forwarding/RF remain unverified\"}\n",
+           trace.last_rssi_dbm, trace.last_radio_snr_quarter_db,
+           bool_json(trace.last_retention_attempted),
+           bool_json(trace.last_route_summary_accepted),
+           bool_json(trace.last_packet_preview_retained),
+           D1L_PACKET_LOG_RAW_PREVIEW_BYTES, retention_note);
+}
+
 static void cmd_routes_trace(const char *line)
 {
     const char *arg = line + strlen("routes trace ");
@@ -4460,7 +4597,7 @@ static void cmd_routes_trace(const char *line)
         printf("%s", i ? "," : "");
         print_route_entry_json(&entries[i]);
     }
-    printf("],\"active_probe_supported\":true,\"active_probe_command\":\"routes probe <fingerprint>\",\"note\":\"Trace combines retained route/contact evidence with optional DM-only active probes\"}\n");
+    printf("],\"path_discovery_probe_supported\":true,\"path_discovery_probe_command\":\"routes probe <fingerprint>\",\"real_trace_contact_supported\":false,\"explicit_trace_command\":\"routes trace send <loop-path-hex>\",\"note\":\"This view combines retained route/contact evidence; routes probe sends a DM token that may elicit ACK/PATH evidence, not a TRACE packet\"}\n");
 }
 
 static void cmd_routes_probe(const char *line)
@@ -4484,17 +4621,18 @@ static void cmd_routes_probe(const char *line)
     }
 
     char token[D1L_MESSAGE_TEXT_LEN] = {0};
-    esp_err_t ret = d1l_app_model_request_trace_probe(fingerprint, token, sizeof(token));
+    esp_err_t ret = d1l_app_model_request_path_discovery_probe(
+        fingerprint, token, sizeof(token));
     if (ret != ESP_OK) {
         err_result("routes probe", esp_err_to_name(ret),
                    ret == ESP_ERR_INVALID_STATE ?
-                   "trace probe is cooling down or radio is busy" :
-                   "could not queue DM-only trace probe");
+                   "path discovery probe is cooling down or radio is busy" :
+                   "could not queue DM/PATH discovery probe");
         return;
     }
 
     ok_begin("routes probe");
-    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"token\":\"%s\",\"dm_rf_tx\":true,\"public_rf_tx\":false,\"active_probe_supported\":true,\"note\":\"DM-only trace probe queued; ACK/PATH evidence will appear in messages, packets, and routes trace when received\"}\n",
+    printf(",\"fingerprint\":\"%s\",\"queued\":true,\"token\":\"%s\",\"dm_rf_tx\":true,\"public_rf_tx\":false,\"path_discovery_probe_supported\":true,\"real_trace_packet\":false,\"note\":\"DM/PATH discovery probe queued; ACK/PATH evidence will appear in messages, packets, and the retained route view when received\"}\n",
            fingerprint, token);
 }
 
@@ -4907,6 +5045,7 @@ static void cmd_help(void)
            "\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\","
            "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
            "\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\","
+           "\"routes trace send <loop-path-hex>\",\"routes trace status\","
            "\"routes probe <fingerprint>\",\"routes clear\",\"packets\","
            "\"packets filter <any|rx|tx> <any|text|kind>\",\"packets search <text>\","
            "\"packets detail <seq>\",\"packets raw <seq>\",\"packets clear\",\"signal\","
@@ -5107,6 +5246,10 @@ static void handle_line(const char *line)
         cmd_routes();
     } else if (strncmp(line, "routes detail ", 14) == 0) {
         cmd_routes_detail(line);
+    } else if (strncmp(line, "routes trace send ", 18) == 0) {
+        cmd_routes_trace_send(line);
+    } else if (strcmp(line, "routes trace status") == 0) {
+        cmd_routes_trace_status();
     } else if (strncmp(line, "routes trace ", 13) == 0) {
         cmd_routes_trace(line);
     } else if (strncmp(line, "routes probe ", 13) == 0) {
