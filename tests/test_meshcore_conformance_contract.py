@@ -319,7 +319,7 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     unverified_sanitizer_policy["sanitizer_policy_passed"] = False
     mutations.append((unverified_sanitizer_policy, "sanitizer_policy_passed"))
     unscoped_sanitizer_exception = copy.deepcopy(report)
-    unscoped_sanitizer_exception["commands"][5] = ["clang-18", "step-5"]
+    unscoped_sanitizer_exception["commands"][6] = ["clang-18", "step-6"]
     mutations.append(
         (unscoped_sanitizer_exception, "sanitizer_exception_command")
     )

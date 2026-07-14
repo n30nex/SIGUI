@@ -84,7 +84,11 @@ ED25519_ORACLE_SOURCES = [
     *ED25519_VERIFY_SOURCES,
     *ED25519_VECTOR_PROVENANCE_SOURCES,
 ]
-ED25519_SHIFT_BASE_EXCEPTION_SOURCE = ED25519_ROOT / "fe.c"
+ED25519_SHIFT_BASE_EXCEPTION_SOURCES = (
+    ED25519_ROOT / "fe.c",
+    ED25519_ROOT / "ge.c",
+    ED25519_ROOT / "sc.c",
+)
 ED25519_SHIFT_BASE_EXCEPTION_FLAG = "-fno-sanitize=shift-base"
 ED25519_SANITIZER_POLICY = {
     "requested_sanitizers": ["address", "undefined"],
@@ -98,12 +102,44 @@ ED25519_SANITIZER_POLICY = {
             "disabled_check": "shift-base",
             "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
             "scope": "host_oracle_object_only",
-            "observed_failure": "fe.c:714 carry0=-1 left shift 26",
+            "trigger_evidence": "CI: fe.c:714 carry0=-1 left shift 26",
             "reason": (
                 "pinned source contains negative signed left shifts; keep the "
                 "upstream bytes unchanged and report that full UBSan is not clean"
             ),
-        }
+        },
+        {
+            "source": "third_party/MeshCore/lib/ed25519/ge.c",
+            "source_sha256": (
+                "c3bb834817edea83d843828a75af19867b93144d15140eadfd9784d40cf11409"
+            ),
+            "disabled_check": "shift-base",
+            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+            "scope": "host_oracle_object_only",
+            "trigger_evidence": "CI: ge.c:359 b=-7 signed left shift 1",
+            "reason": (
+                "pinned source contains negative signed left shifts; keep the "
+                "upstream bytes unchanged and report that full UBSan is not clean"
+            ),
+        },
+        {
+            "source": "third_party/MeshCore/lib/ed25519/sc.c",
+            "source_sha256": (
+                "c1bdb840416b34e79ceb7472d1a4ac4b1407c47b4c982cad981c72142ef42407"
+            ),
+            "disabled_check": "shift-base",
+            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+            "scope": "host_oracle_object_only",
+            "trigger_evidence": (
+                "static: signed carry values are left-shifted by 21 starting "
+                "at sc.c:122"
+            ),
+            "reason": (
+                "pinned source contains the same negative signed-carry left-shift "
+                "family; keep the upstream bytes unchanged and expose the exact "
+                "exception instead of claiming full UBSan coverage"
+            ),
+        },
     ],
     "source_level_remediation": {
         "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
@@ -2448,7 +2484,7 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             common_sanitizers,
             *(
                 [ED25519_SHIFT_BASE_EXCEPTION_FLAG]
-                if source == ED25519_SHIFT_BASE_EXCEPTION_SOURCE
+                if source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
                 else []
             ),
             "-Wall",
@@ -2595,14 +2631,24 @@ def validate_completed_report(
         if isinstance(command, list)
         and ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
     ]
-    exception_command_is_scoped = (
-        len(exception_commands) == 1
-        and any(
+    exception_command_sources = {
+        f"third_party/MeshCore/lib/ed25519/{source.name}"
+        for command in exception_commands
+        for argument in command
+        for source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
+        if (
             str(argument).replace("\\", "/").endswith(
-                "/third_party/MeshCore/lib/ed25519/fe.c"
+                f"/third_party/MeshCore/lib/ed25519/{source.name}"
             )
-            for argument in exception_commands[0]
         )
+    }
+    expected_exception_sources = {
+        f"third_party/MeshCore/lib/ed25519/{source.name}"
+        for source in ED25519_SHIFT_BASE_EXCEPTION_SOURCES
+    }
+    exception_command_is_scoped = (
+        len(exception_commands) == len(ED25519_SHIFT_BASE_EXCEPTION_SOURCES)
+        and exception_command_sources == expected_exception_sources
     )
     required = {
         "schema_version": report.get("schema_version") == 1,

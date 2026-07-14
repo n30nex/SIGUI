@@ -488,15 +488,17 @@ unchanged. Any libFuzzer crash/timeout input is written beside the JSON under
 the uploaded `artifacts/meshcore-conformance` tree rather than discarded with
 the temporary build directory.
 
-The unchanged pinned `third_party/MeshCore/lib/ed25519/fe.c` contains negative
-signed left shifts (first observed at line 714 with `carry0 == -1`). Clang
-UBSan correctly reports that as `shift-base` undefined behavior. The host
-oracle disables only the `shift-base` check for that exact source/hash while
-retaining ASan, the rest of UBSan (including shift-count checks), source pins,
-and the Ed25519 KAT/vector matrix. Every receipt exposes the exception and sets
-`full_ubsan_clean` to false. This is a declared vendored-source exception, not
-a source-level fix or an unqualified sanitizer-clean claim; source-level
-defined-arithmetic remediation remains open.
+The unchanged pinned Ed25519 ref10 arithmetic sources `fe.c`, `ge.c`, and
+`sc.c` contain negative signed left shifts. CI observed `fe.c:714` with
+`carry0 == -1` and `ge.c:359` with `b == -7`; static inspection also finds the
+same signed-carry family in `sc.c`, starting at line 122. Clang UBSan correctly
+reports these as `shift-base` undefined behavior. The host oracle disables only
+the `shift-base` check for those three exact source hashes while retaining
+ASan, the rest of UBSan (including shift-count checks), source pins, and the
+Ed25519 KAT/vector matrix. Every receipt exposes all three exceptions and sets
+`full_ubsan_clean` to false. These are declared vendored-source exceptions,
+not source-level fixes or an unqualified sanitizer-clean claim; source-level
+defined-arithmetic remediation remains open and release-blocking.
 
 ## Explicit Non-Coverage
 

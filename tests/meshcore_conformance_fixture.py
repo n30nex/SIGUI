@@ -70,13 +70,17 @@ def completed_report(
         ["clang-18", f"step-{index}"]
         for index in range(len(conformance.command_plan("cc", "cxx")))
     ]
-    commands[5] = [
-        "clang-18",
-        "-fsanitize=address,undefined",
-        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
-        "-c",
-        str(conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCE),
-    ]
+    for index, source in enumerate(
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES,
+        start=5,
+    ):
+        commands[index] = [
+            "clang-18",
+            "-fsanitize=address,undefined",
+            conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+            "-c",
+            str(source),
+        ]
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",

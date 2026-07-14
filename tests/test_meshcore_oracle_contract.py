@@ -1400,7 +1400,7 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
         assert len(source_commands) == 1
         assert "-fsanitize=address,undefined" in source_commands[0]
         assert f"meshcore_ed25519_{source.stem}.o" in source_commands[0]
-        if source == conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCE:
+        if source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES:
             assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in source_commands[0]
         else:
             assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG not in source_commands[0]
@@ -1409,8 +1409,18 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
         for command in flattened
         if conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
     ]
-    assert len(exception_commands) == 1
-    assert str(conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCE) in exception_commands[0]
+    assert len(exception_commands) == len(
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
+    )
+    matched_exception_sources = {
+        str(source)
+        for command in exception_commands
+        for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
+        if str(source) in command
+    }
+    assert matched_exception_sources == {
+        str(source) for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES
+    }
     oracle_link = next(
         command
         for command in flattened

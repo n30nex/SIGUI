@@ -17,8 +17,26 @@
         "disabled_check": "shift-base",
         "compiler_flag": "-fno-sanitize=shift-base",
         "scope": "host_oracle_object_only",
-        "observed_failure": "fe.c:714 carry0=-1 left shift 26",
+        "trigger_evidence": "CI: fe.c:714 carry0=-1 left shift 26",
         "reason": "pinned source contains negative signed left shifts; keep the upstream bytes unchanged and report that full UBSan is not clean"
+      },
+      {
+        "source": "third_party/MeshCore/lib/ed25519/ge.c",
+        "source_sha256": "c3bb834817edea83d843828a75af19867b93144d15140eadfd9784d40cf11409",
+        "disabled_check": "shift-base",
+        "compiler_flag": "-fno-sanitize=shift-base",
+        "scope": "host_oracle_object_only",
+        "trigger_evidence": "CI: ge.c:359 b=-7 signed left shift 1",
+        "reason": "pinned source contains negative signed left shifts; keep the upstream bytes unchanged and report that full UBSan is not clean"
+      },
+      {
+        "source": "third_party/MeshCore/lib/ed25519/sc.c",
+        "source_sha256": "c1bdb840416b34e79ceb7472d1a4ac4b1407c47b4c982cad981c72142ef42407",
+        "disabled_check": "shift-base",
+        "compiler_flag": "-fno-sanitize=shift-base",
+        "scope": "host_oracle_object_only",
+        "trigger_evidence": "static: signed carry values are left-shifted by 21 starting at sc.c:122",
+        "reason": "pinned source contains the same negative signed-carry left-shift family; keep the upstream bytes unchanged and expose the exact exception instead of claiming full UBSan coverage"
       }
     ],
     "source_level_remediation": {
