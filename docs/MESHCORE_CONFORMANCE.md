@@ -39,7 +39,8 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
-public-group, plain-DM, DM ACK+PATH, and general PATH-return operations. Its version 14 static
+public-group, anonymous-login, regular REQ/RESPONSE, plain-DM, DM ACK+PATH,
+and general PATH-return operations. Its version 15 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -118,6 +119,23 @@ no room-mode or logical-length field, so the caller supplies room mode and the
 canonical parser returns bytes before the first zero. Shared-secret derivation,
 contact lookup, authorization, replay policy, response generation, admin or
 session mutation, dispatch, route choice, scheduling, and RF remain excluded.
+The regular request/response capability adds six authenticated round trips and
+thirty rejects. REQ plaintext lengths 1, 15, 16, and 17 plus RESPONSE lengths
+16 and the upstream 167-byte maximum pin both packet types, one-byte
+destination/source hashes, AES block boundaries, and the conservative
+`Mesh::createDatagram` size limit. Independently generated exact REQ and
+RESPONSE payloads, a maximum-payload SHA-256 digest, and a six-payload matrix
+digest pin the AES-128 ECB and two-byte HMAC-SHA-256 result. Every accepted
+packet receives a deterministic flood or direct wire round trip before an
+authenticated parse. Rejects cover unsupported types, nulls, empty/oversized
+plaintext, output capacity and preservation, future/mismatched types, envelope
+and block lengths, wrong hashes or secret, MAC/ciphertext tampering, invalid
+paths, nonzero padding, and redundant blocks. Because the wire carries no
+logical plaintext length, parsing requires a caller-supplied schema length and
+accepts only its minimal AES block count with zero padding. Empty datagrams are
+excluded because the pinned receive path rejects their MAC-only form. Request
+tags/types, response schemas, identity or secret derivation, authorization,
+replay/session/admin state, dispatch, route choice, and RF remain excluded.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -190,7 +208,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_crypto`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -232,10 +250,12 @@ derivation and deterministic identity/contact/session fixtures remain outside
 its boundary. Route selection/forwarding requires a
 deterministic dispatcher, packet manager, mesh tables, radio, RNG, and clocks.
 Anonymous login-request framing is implemented with caller-supplied outer
-identity, secret, time, and room mode. Login response, authorization, replay,
-session, and admin behavior still require identity key exchange/signature
-handling plus deterministic admin-session fixtures. These receipts describe
-missing oracle prerequisites; they are not evidence that those semantics ran.
+identity, secret, time, and room mode. Regular REQ/RESPONSE datagram crypto is
+also implemented with caller-supplied type, hashes, secret, and logical length.
+Login response schemas, request tags/types, authorization, replay, session, and
+admin behavior still require identity key exchange/signature handling plus
+deterministic admin-session fixtures. These receipts describe missing oracle
+prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
 
@@ -286,12 +306,14 @@ This bounded gate makes no claim about:
 
 - encryption, decryption, MACs, signing/key generation, channel secrets, or
   full identity semantics beyond the bounded exceptions described above. The
-  oracle covers public-group and caller-secret plain-DM AES/HMAC creation and
-  authenticated parsing, expected-ACK derivation, ACK-specific and general
+  oracle covers public-group, regular REQ/RESPONSE, and caller-secret plain-DM
+  AES/HMAC creation and authenticated parsing, expected-ACK derivation,
+  ACK-specific and general
   encrypted PATH creation/parsing, caller-selected PATH route-code preparation,
   and the D1L signed-advert message layout and pinned C
   Ed25519 verifier; it does not cover key exchange/management, DM sessions,
-  dispatch, ACK correlation/delivery, or retained state;
+  request/response schemas or tags, dispatch, ACK correlation/delivery, or
+  retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart
   traffic. Public-group payload creation/parsing, plain-DM layout/crypto,
   simple/multipart ACK framing, expected-ACK/ACK-specific PATH layout, general

@@ -74,11 +74,11 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 14
+ORACLE_CORPUS_VERSION = 15
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
-    "and_anonymous_login_request_crypto"
+    "and_anonymous_login_request_and_regular_request_response_crypto"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -449,6 +449,32 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"roundtrip": 6, "invalid": 35},
         },
     },
+    {
+        "id": "regular_request_response_packets",
+        "status": "implemented",
+        "owner": "pinned_mesh_regular_datagram_vendored_crypto",
+        "semantic": True,
+        "scope": (
+            "authenticated_nonempty_req_response_create_parse_with_caller_"
+            "supplied_type_hashes_secret_and_logical_length_only_no_schema_"
+            "tag_authorization_replay_session_dispatch_route_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-REGULAR-REQUEST-RESPONSE-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+            ],
+            "independent_golden": (
+                "two_exact_payloads_maximum_payload_sha256_and_six_case_"
+                "payload_matrix_sha256_from_independent_aes128_ecb_hmac_"
+                "sha256_generation"
+            ),
+            "vectors": {"roundtrip": 6, "invalid": 30},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -505,6 +531,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
         "status": "partial",
         "capabilities": [
             "anonymous_login_request_packets",
+            "regular_request_response_packets",
             "login_request_response_admin",
         ],
     },
@@ -753,11 +780,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 317,
+        "roundtrip": 323,
         "valid": 20,
-        "invalid": 261,
-        "semantic": 582,
-        "total": 598,
+        "invalid": 291,
+        "semantic": 618,
+        "total": 634,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -811,6 +838,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 35,
             "semantic": 41,
             "total": 41,
+        },
+        "regular_request_response_packets": {
+            "roundtrip": 6,
+            "invalid": 30,
+            "semantic": 36,
+            "total": 36,
         },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
@@ -879,6 +912,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("anonymous_login_request_available") is not True
         or interface.get("anonymous_login_request_scope")
         != "canonical_room_nonroom_login_request_create_authenticated_parse_with_caller_supplied_hash_public_key_secret_time_and_room_mode_only_no_key_exchange_authorization_replay_response_session_dispatch_route_or_rf"
+        or interface.get("regular_request_response_available") is not True
+        or interface.get("regular_request_response_scope")
+        != "authenticated_nonempty_req_response_create_parse_with_caller_supplied_type_hashes_secret_and_logical_length_only_no_schema_tag_authorization_replay_session_dispatch_route_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -913,6 +949,17 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "anonymous_login_independent_golden": (
                     "two exact payloads and six-vector matrix from independent "
                     "AES-128 ECB and HMAC-SHA-256 generation"
+                ),
+                "regular_request_response_datagram": (
+                    "third_party/MeshCore/src/Mesh.cpp"
+                ),
+                "regular_request_response_crypto": (
+                    "third_party/MeshCore/src/Utils.cpp"
+                ),
+                "regular_request_response_independent_golden": (
+                    "two exact payloads plus maximum-payload and six-vector "
+                    "matrix SHA-256 from independent AES-128 ECB and "
+                    "HMAC-SHA-256 generation"
                 ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
@@ -958,7 +1005,8 @@ def load_oracle_manifest() -> dict[str, Any]:
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
         "fixed_bytes_ed25519_signed_advert_packets_public_group_anonymous_"
-        "login_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock"
+        "login_regular_request_response_dm_ack_path_and_general_path_return_"
+        "vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -980,6 +1028,15 @@ def load_oracle_manifest() -> dict[str, Any]:
         "nonroom_empty_exact12_max15_and_room_empty_exact8_max15"
     ):
         raise GateFailure("oracle anonymous-login matrix drifted")
+    if determinism.get("regular_request_response_recipe") != (
+        "mesh_req_response_hash_prefix_then_utils_aes128_ecb_zero_pad_and_two_"
+        "byte_hmac_sha256_with_caller_logical_length"
+    ):
+        raise GateFailure("oracle request/response recipe drifted")
+    if determinism.get("regular_request_response_matrix") != (
+        "request_lengths_1_15_16_17_and_response_lengths_16_167"
+    ):
+        raise GateFailure("oracle request/response matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -1970,6 +2027,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "ed25519_point_validation": True,
                     "public_group_packets": True,
                     "anonymous_login_request_packets": True,
+                    "regular_request_response_packets": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

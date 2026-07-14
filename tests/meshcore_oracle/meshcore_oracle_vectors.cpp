@@ -36,6 +36,8 @@ constexpr std::size_t kGroupRoundtripVectors = 4U;
 constexpr std::size_t kGroupInvalidVectors = 21U;
 constexpr std::size_t kLoginRequestRoundtripVectors = 6U;
 constexpr std::size_t kLoginRequestInvalidVectors = 35U;
+constexpr std::size_t kRequestResponseRoundtripVectors = 6U;
+constexpr std::size_t kRequestResponseInvalidVectors = 30U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -1759,6 +1761,394 @@ int main()
         redundant_room_login_plaintext.size());
     expect_standard_login_parse_reject("redundant room login zero block",
                                        &malformed_login, 1U);
+
+    struct RequestResponseVector {
+        const char *name;
+        uint8_t payload_type;
+        std::vector<uint8_t> plaintext;
+    };
+    std::vector<uint8_t> maximum_response_plaintext(
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES);
+    for (std::size_t index = 0U; index < maximum_response_plaintext.size();
+         ++index) {
+        maximum_response_plaintext[index] =
+            static_cast<uint8_t>(index * 7U + 3U);
+    }
+    const std::array<RequestResponseVector, kRequestResponseRoundtripVectors>
+        request_response_vectors = {{
+            {"one-byte request", PAYLOAD_TYPE_REQ, {0x00U}},
+            {"15-byte request", PAYLOAD_TYPE_REQ,
+             {0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U,
+              0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU}},
+            {"exact-block request", PAYLOAD_TYPE_REQ,
+             {0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U,
+              0x18U, 0x19U, 0x1AU, 0x1BU, 0x1CU, 0x1DU, 0x1EU, 0x1FU}},
+            {"two-block request", PAYLOAD_TYPE_REQ,
+             {0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U,
+              0x28U, 0x29U, 0x2AU, 0x2BU, 0x2CU, 0x2DU, 0x2EU, 0x2FU,
+              0x30U}},
+            {"exact-block response", PAYLOAD_TYPE_RESPONSE,
+             {0x80U, 0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+              0x88U, 0x89U, 0x8AU, 0x8BU, 0x8CU, 0x8DU, 0x8EU, 0x8FU}},
+            {"maximum response", PAYLOAD_TYPE_RESPONSE,
+             maximum_response_plaintext},
+        }};
+    const std::array<uint8_t, 36U> expected_two_block_request_payload = {
+        0xA1U, 0xB2U, 0xCAU, 0xFCU, 0x5BU, 0xE8U, 0x7EU, 0x2EU, 0x5BU,
+        0x44U, 0x7CU, 0x94U, 0x4BU, 0x21U, 0xC9U, 0xAFU, 0x77U, 0x56U,
+        0xC0U, 0xD8U, 0x01U, 0x7AU, 0x8BU, 0xD9U, 0xECU, 0xD1U, 0x02U,
+        0xBAU, 0x4BU, 0xB7U, 0x94U, 0x6DU, 0x3DU, 0x87U, 0x07U, 0xE0U};
+    const std::array<uint8_t, 20U> expected_exact_block_response_payload = {
+        0xA1U, 0xB2U, 0xABU, 0xB6U, 0xACU, 0x26U, 0x59U, 0x1CU, 0x0FU,
+        0x8BU, 0xD8U, 0x0EU, 0xE7U, 0xC7U, 0xE3U, 0xA2U, 0xD1U, 0x4EU,
+        0x2BU, 0x22U};
+    const std::array<uint8_t, 32U> expected_maximum_response_sha256 = {
+        0xE0U, 0xE6U, 0x17U, 0xB0U, 0xC2U, 0x60U, 0x1CU, 0x15U,
+        0xAFU, 0x7BU, 0x56U, 0x05U, 0x6DU, 0x14U, 0x7CU, 0x47U,
+        0xCBU, 0x4FU, 0xD6U, 0x86U, 0xE1U, 0x93U, 0x8AU, 0x37U,
+        0x5AU, 0x8BU, 0x6AU, 0xC8U, 0x1EU, 0x17U, 0x47U, 0xA5U};
+    const std::array<uint8_t, 32U> expected_request_response_matrix_sha256 = {
+        0x77U, 0x22U, 0x70U, 0x76U, 0x61U, 0x3AU, 0xD0U, 0xFFU,
+        0xEAU, 0x7BU, 0x58U, 0xABU, 0x90U, 0x3FU, 0x06U, 0xD8U,
+        0x16U, 0xA0U, 0x5AU, 0x37U, 0xF1U, 0xE5U, 0x0EU, 0x9BU,
+        0x85U, 0x98U, 0x22U, 0x2CU, 0xBEU, 0xF5U, 0xC2U, 0x9CU};
+    constexpr uint8_t request_response_destination_hash = 0xA1U;
+    constexpr uint8_t request_response_source_hash = 0xB2U;
+    constexpr std::array<uint8_t, 3U> request_response_direct_path = {
+        0x12U, 0x34U, 0x56U};
+    SHA256 request_response_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_request_response{};
+    for (std::size_t index = 0U; index < request_response_vectors.size();
+         ++index) {
+        const RequestResponseVector &vector = request_response_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const std::size_t expected_ciphertext_len =
+            ((vector.plaintext.size() + CIPHER_BLOCK_SIZE - 1U) /
+             CIPHER_BLOCK_SIZE) *
+            CIPHER_BLOCK_SIZE;
+        if (!d1l_meshcore_oracle_create_request_response_packet(
+                vector.payload_type, request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                vector.plaintext.data(), vector.plaintext.size(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(vector.payload_type << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U ||
+            packet.payload_len != 2U + CIPHER_MAC_SIZE + expected_ciphertext_len) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response creation changed");
+            continue;
+        }
+        if ((index == 3U &&
+             (packet.payload_len != expected_two_block_request_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_two_block_request_payload.data(),
+                          expected_two_block_request_payload.size()) != 0)) ||
+            (index == 4U &&
+             (packet.payload_len !=
+                  expected_exact_block_response_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_exact_block_response_payload.data(),
+                          expected_exact_block_response_payload.size()) != 0))) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response golden payload changed");
+        }
+        if (index == 5U) {
+            std::array<uint8_t, 32U> maximum_response_digest{};
+            mesh::Utils::sha256(maximum_response_digest.data(),
+                                maximum_response_digest.size(), packet.payload,
+                                packet.payload_len);
+            if (maximum_response_digest != expected_maximum_response_sha256) {
+                failures.push_back("maximum response payload digest changed");
+            }
+        }
+        request_response_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 3U) {
+            valid_request_response = packet;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, request_response_direct_path.data(), 0x03U,
+                  &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+            parsed_plaintext{};
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded) ||
+            !d1l_meshcore_oracle_parse_request_response_packet(
+                &decoded, vector.payload_type,
+                request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                vector.plaintext.size(), parsed_plaintext.data(),
+                parsed_plaintext.size()) ||
+            std::memcmp(parsed_plaintext.data(), vector.plaintext.data(),
+                        vector.plaintext.size()) != 0) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response authenticated wire roundtrip changed");
+        }
+    }
+    std::array<uint8_t, 32U> request_response_matrix_digest{};
+    request_response_matrix_sha.finalize(request_response_matrix_digest.data(),
+                                         request_response_matrix_digest.size());
+    if (request_response_matrix_digest !=
+        expected_request_response_matrix_sha256) {
+        failures.push_back("request/response packet matrix digest changed");
+    }
+
+    auto expect_request_response_create_reject =
+        [&failures, &full_secret](const char *name, uint8_t payload_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *plaintext,
+                                  std::size_t plaintext_len,
+                                  bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_request_response_packet(
+                    payload_type, request_response_destination_hash,
+                    request_response_source_hash, secret, plaintext,
+                    plaintext_len, null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " request/response creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " request/response creation mutated output");
+            }
+            (void)full_secret;
+        };
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U>
+        oversized_request_response_plaintext{};
+    constexpr std::array<uint8_t, 1U> one_byte_request = {0x42U};
+    expect_request_response_create_reject(
+        "unsupported request/response type", PAYLOAD_TYPE_TXT_MSG,
+        full_secret.data(), one_byte_request.data(), one_byte_request.size(),
+        false);
+    expect_request_response_create_reject(
+        "null request/response secret", PAYLOAD_TYPE_REQ, nullptr,
+        one_byte_request.data(), one_byte_request.size(), false);
+    expect_request_response_create_reject(
+        "null request/response plaintext", PAYLOAD_TYPE_REQ,
+        full_secret.data(), nullptr, one_byte_request.size(), false);
+    expect_request_response_create_reject(
+        "empty request/response plaintext", PAYLOAD_TYPE_REQ,
+        full_secret.data(), one_byte_request.data(), 0U, false);
+    expect_request_response_create_reject(
+        "oversized request/response plaintext", PAYLOAD_TYPE_RESPONSE,
+        full_secret.data(), oversized_request_response_plaintext.data(),
+        oversized_request_response_plaintext.size(), false);
+    expect_request_response_create_reject(
+        "null request/response output", PAYLOAD_TYPE_REQ, full_secret.data(),
+        one_byte_request.data(), one_byte_request.size(), true);
+
+    auto expect_request_response_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t payload_type, uint8_t destination_hash,
+                    uint8_t source_hash, const uint8_t *secret,
+                    std::size_t expected_plaintext_len, uint8_t *plaintext,
+                    std::size_t plaintext_capacity) {
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+                sentinel{};
+            sentinel.fill(0xD7U);
+            if (plaintext != nullptr) {
+                std::memcpy(plaintext, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_parse_request_response_packet(
+                    packet, payload_type, destination_hash, source_hash, secret,
+                    expected_plaintext_len, plaintext, plaintext_capacity) ||
+                (plaintext != nullptr &&
+                 std::memcmp(plaintext, sentinel.data(), sentinel.size()) !=
+                     0)) {
+                failures.push_back(std::string(name) +
+                                   " request/response parse changed output");
+            }
+        };
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+        rejected_request_response_plaintext{};
+    const std::size_t valid_request_response_len = 17U;
+    auto expect_standard_request_response_parse_reject =
+        [&](const char *name,
+            const d1l_meshcore_oracle_packet_t *packet = nullptr) {
+            expect_request_response_parse_reject(
+                name, packet == nullptr ? &valid_request_response : packet,
+                PAYLOAD_TYPE_REQ, request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                valid_request_response_len,
+                rejected_request_response_plaintext.data(),
+                rejected_request_response_plaintext.size());
+        };
+    expect_request_response_parse_reject(
+        "null request/response packet", nullptr, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "unsupported expected request/response type", &valid_request_response,
+        PAYLOAD_TYPE_TXT_MSG, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "null request/response parse secret", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, nullptr, valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "zero expected request/response length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(), 0U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "oversized expected request/response length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "null request/response plaintext output", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, nullptr,
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "undersized request/response plaintext output", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        valid_request_response_len - 1U);
+    expect_request_response_parse_reject(
+        "wrong expected request/response type", &valid_request_response,
+        PAYLOAD_TYPE_RESPONSE, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    d1l_meshcore_oracle_packet_t malformed_request_response =
+        valid_request_response;
+    malformed_request_response.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_request_response_parse_reject(
+        "future request/response version", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+    expect_standard_request_response_parse_reject(
+        "unsupported packet request/response type",
+        &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len = 3U;
+    expect_standard_request_response_parse_reject(
+        "truncated request/response payload", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len -= 1U;
+    expect_standard_request_response_parse_reject(
+        "non-block request/response ciphertext", &malformed_request_response);
+    expect_request_response_parse_reject(
+        "wrong expected request/response destination", &valid_request_response,
+        PAYLOAD_TYPE_REQ,
+        static_cast<uint8_t>(request_response_destination_hash ^ 1U),
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "wrong expected request/response source", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        static_cast<uint8_t>(request_response_source_hash ^ 1U),
+        full_secret.data(), valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "wrong request/response secret", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, public_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[0] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered outer request/response destination",
+        &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[1] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered outer request/response source", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[2] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered request/response MAC", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[4] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered request/response ciphertext", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.path_len = 0xFFU;
+    expect_standard_request_response_parse_reject(
+        "invalid request/response path length", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len = 0U;
+    expect_standard_request_response_parse_reject(
+        "empty request/response payload", &malformed_request_response);
+    expect_request_response_parse_reject(
+        "wrong request/response logical block length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(), 16U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    auto make_raw_request_response_packet =
+        [&full_secret](const uint8_t *plaintext, std::size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+            packet.payload[0] = request_response_destination_hash;
+            packet.payload[1] = request_response_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    std::array<uint8_t, 16U> noncanonical_request_response_plaintext{};
+    noncanonical_request_response_plaintext[0] = 0x42U;
+    noncanonical_request_response_plaintext[1] = 0x24U;
+    malformed_request_response = make_raw_request_response_packet(
+        noncanonical_request_response_plaintext.data(),
+        noncanonical_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "authenticated nonzero request/response padding",
+        &malformed_request_response, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), 1U, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    std::array<uint8_t, 17U> redundant_request_response_plaintext{};
+    redundant_request_response_plaintext[0] = 0x42U;
+    malformed_request_response = make_raw_request_response_packet(
+        redundant_request_response_plaintext.data(),
+        redundant_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "authenticated redundant request/response block",
+        &malformed_request_response, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), 1U, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
 
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
@@ -3892,7 +4282,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_crypto\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -3900,7 +4290,8 @@ int main()
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
                   kSignedAdvertPacketRoundtripVectors +
-                  kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
+                   kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
+                   kRequestResponseRoundtripVectors +
                   kDmRoundtripVectors +
                   kExpectedAckPathRoundtripVectors +
                   kPathReturnRoundtripVectors +
@@ -3915,7 +4306,8 @@ int main()
                   kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
-                  kGroupInvalidVectors + kLoginRequestInvalidVectors +
+                   kGroupInvalidVectors + kLoginRequestInvalidVectors +
+                   kRequestResponseInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -3930,8 +4322,10 @@ int main()
                   kPointValidationValidVectors +
                   kPointValidationInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
-                  kLoginRequestRoundtripVectors +
-                  kLoginRequestInvalidVectors +
+                   kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors +
+                   kRequestResponseRoundtripVectors +
+                   kRequestResponseInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -3952,8 +4346,10 @@ int main()
                   kPointValidationInvalidVectors +
                   kCryptoAdapterKatValidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
-                  kLoginRequestRoundtripVectors +
-                  kLoginRequestInvalidVectors +
+                   kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors +
+                   kRequestResponseRoundtripVectors +
+                   kRequestResponseInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -4019,9 +4415,18 @@ int main()
               << (kLoginRequestRoundtripVectors +
                   kLoginRequestInvalidVectors)
               << ",\"total\":"
-              << (kLoginRequestRoundtripVectors +
-                  kLoginRequestInvalidVectors)
-              << "}"
+               << (kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors)
+               << "}"
+               << ",\"regular_request_response_packets\":{\"roundtrip\":"
+               << kRequestResponseRoundtripVectors << ",\"invalid\":"
+               << kRequestResponseInvalidVectors << ",\"semantic\":"
+               << (kRequestResponseRoundtripVectors +
+                   kRequestResponseInvalidVectors)
+               << ",\"total\":"
+               << (kRequestResponseRoundtripVectors +
+                   kRequestResponseInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -4069,7 +4474,8 @@ int main()
               << ",\"signed_advert_verification\":true"
               << ",\"ed25519_point_validation\":true"
               << ",\"public_group_packets\":true"
-              << ",\"anonymous_login_request_packets\":true"
+               << ",\"anonymous_login_request_packets\":true"
+               << ",\"regular_request_response_packets\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

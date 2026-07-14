@@ -18,6 +18,7 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
 #define D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES 15U
+#define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
 #define D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES 32U
 #define D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES 32U
 #define D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES 4U
@@ -193,6 +194,40 @@ bool d1l_meshcore_oracle_parse_login_request_packet(
     uint8_t *out_password,
     size_t password_capacity,
     size_t *out_password_len);
+
+/*
+ * Pinned Mesh::createDatagram crypto/framing for regular REQ and RESPONSE
+ * packets. The caller supplies the one-byte destination/source hashes, the
+ * already-derived shared secret, the payload type, and the logical plaintext.
+ * The supported logical length is explicit because MeshCore AES padding does
+ * not carry an authenticated length field. Parsing authenticates first,
+ * requires the exact minimal block count for expected_plaintext_len, and
+ * rejects non-zero padding before publishing output.
+ *
+ * Empty plaintext is excluded because the pinned receive path rejects the
+ * resulting MAC-only datagram. Creation returns the upstream pre-route layout.
+ * These functions do not compose or interpret BaseChat request tags, request
+ * types, response schemas, authorization, replay/session state, contact or
+ * shared-secret derivation, dispatch, route selection, or RF delivery.
+ */
+bool d1l_meshcore_oracle_create_request_response_packet(
+    uint8_t payload_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_request_response_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t payload_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    size_t expected_plaintext_len,
+    uint8_t *out_plaintext,
+    size_t plaintext_capacity);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

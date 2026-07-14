@@ -54,6 +54,10 @@ static_assert(D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES == MAX_TEXT_LEN,
               "Pinned BaseChatMesh DM text limit changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES == 15U,
               "Pinned BaseChatMesh login-password limit changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES +
+                      CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE - 1U ==
+                  MAX_PACKET_PAYLOAD,
+              "Pinned MeshCore request/response plaintext limit changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 2U ==
                   D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES,
               "Pinned BaseChatMesh extended-attempt text limit changed");
@@ -869,6 +873,96 @@ extern "C" bool d1l_meshcore_oracle_parse_login_request_packet(
         std::memcpy(out_password, password.data(), password_len);
     }
     *out_password_len = password_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_request_response_packet(
+    uint8_t payload_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    const uint8_t *plaintext,
+    size_t plaintext_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if ((payload_type != PAYLOAD_TYPE_REQ &&
+         payload_type != PAYLOAD_TYPE_RESPONSE) ||
+        secret == nullptr || plaintext == nullptr || plaintext_len == 0U ||
+        plaintext_len >
+            D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES ||
+        out_packet == nullptr) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(payload_type << PH_TYPE_SHIFT);
+    result.payload[0] = destination_hash;
+    result.payload[1] = source_hash;
+    const int encrypted_len = mesh::Utils::encryptThenMAC(
+        secret, &result.payload[2], plaintext, static_cast<int>(plaintext_len));
+    if (encrypted_len <= 0 ||
+        static_cast<size_t>(encrypted_len) + 2U >
+            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    result.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_request_response_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t payload_type,
+    uint8_t destination_hash,
+    uint8_t source_hash,
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    size_t expected_plaintext_len,
+    uint8_t *out_plaintext,
+    size_t plaintext_capacity)
+{
+    if (packet == nullptr ||
+        (payload_type != PAYLOAD_TYPE_REQ &&
+         payload_type != PAYLOAD_TYPE_RESPONSE) ||
+        secret == nullptr || expected_plaintext_len == 0U ||
+        expected_plaintext_len >
+            D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES ||
+        out_plaintext == nullptr || expected_plaintext_len > plaintext_capacity) {
+        return false;
+    }
+    mesh::Packet upstream;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != payload_type ||
+        upstream.payload[0] != destination_hash ||
+        upstream.payload[1] != source_hash) {
+        return false;
+    }
+    const size_t expected_encrypted_len =
+        ((expected_plaintext_len + CIPHER_BLOCK_SIZE - 1U) /
+         CIPHER_BLOCK_SIZE) *
+        CIPHER_BLOCK_SIZE;
+    constexpr size_t outer_len = 2U;
+    if (upstream.payload_len !=
+        outer_len + CIPHER_MAC_SIZE + expected_encrypted_len) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> plaintext{};
+    const int decoded_len = mesh::Utils::MACThenDecrypt(
+        secret, plaintext.data(), &upstream.payload[outer_len],
+        upstream.payload_len - outer_len);
+    if (decoded_len <= 0 ||
+        static_cast<size_t>(decoded_len) != expected_encrypted_len) {
+        return false;
+    }
+    for (size_t index = expected_plaintext_len;
+         index < expected_encrypted_len; ++index) {
+        if (plaintext[index] != 0U) {
+            return false;
+        }
+    }
+
+    std::memcpy(out_plaintext, plaintext.data(), expected_plaintext_len);
     return true;
 }
 
