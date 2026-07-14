@@ -22,12 +22,13 @@ struct PathCase {
     uint8_t hash_count;
 };
 
-constexpr std::array<uint8_t, 6> kPayloadTypes = {
+constexpr std::array<uint8_t, 7> kPayloadTypes = {
     PAYLOAD_TYPE_TXT_MSG,
     PAYLOAD_TYPE_ACK,
     PAYLOAD_TYPE_ADVERT,
     PAYLOAD_TYPE_GRP_TXT,
     PAYLOAD_TYPE_PATH,
+    PAYLOAD_TYPE_TRACE,
     PAYLOAD_TYPE_MULTIPART,
 };
 constexpr std::array<uint8_t, 4> kRouteTypes = {
@@ -45,7 +46,7 @@ constexpr std::array<uint16_t, 2> kPayloadLengths = {1, 184};
 constexpr std::size_t kExpectedPerDirection =
     kPayloadTypes.size() * kRouteTypes.size() * kPathCases.size() *
     kPayloadLengths.size();
-static_assert(kExpectedPerDirection == 432, "The required vector matrix changed");
+static_assert(kExpectedPerDirection == 504, "The required vector matrix changed");
 
 template <std::size_t Capacity>
 class GuardedBuffer {
@@ -530,8 +531,8 @@ int main()
         verify_payload_version_gate(failures);
     const std::size_t undersized_capacities =
         verify_undersized_capacity_sweep(failures);
-    const bool passed = failures.empty() && upstream_to_local == 432U &&
-                        local_to_upstream == 432U &&
+    const bool passed = failures.empty() && upstream_to_local == 504U &&
+                        local_to_upstream == 504U &&
                         version_gate.tested == 4U &&
                         version_gate.accepted_v1 == 1U &&
                         version_gate.rejected_future == 3U &&

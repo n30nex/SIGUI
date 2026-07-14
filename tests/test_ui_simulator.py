@@ -385,7 +385,7 @@ def test_ui_simulator_covers_current_touch_surfaces(tmp_path):
     assert "Read" not in labels_by_view["dm_thread_sheet"]
     assert "DM Thread" not in labels_by_view["dm_thread_sheet"]
     assert "new" not in labels_by_view["dm_thread_sheet"]
-    assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Ping"} <= labels_by_view["route_trace_sheet"]
+    assert {"Route Trace", "YKF Corebot", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"} <= labels_by_view["route_trace_sheet"]
     assert {"Route Detail", "Packet Detail", "Advanced", "Raw Hex"} <= (labels_by_view["route_detail_sheet"] | labels_by_view["packet_detail_sheet"])
     assert {"First boot setup", "Node name", "Start", "Use Defaults"} <= labels_by_view["onboarding_sheet"]
 
@@ -552,9 +552,9 @@ def test_ui_simulator_reports_touch_targets_and_flows(tmp_path):
     assert actions_by_view["contact_edit_sheet"]["save_contact_alias"]["destination"] == "contact_options_page"
     assert set(actions_by_view["contact_export_sheet"]) == {"close_contact_export"}
     assert actions_by_view["contact_export_sheet"]["close_contact_export"]["destination"] == "contact_options_page"
-    assert set(actions_by_view["route_trace_sheet"]) == {"close_route_trace", "send_trace_probe"}
+    assert set(actions_by_view["route_trace_sheet"]) == {"close_route_trace", "send_path_probe"}
     assert actions_by_view["route_trace_sheet"]["close_route_trace"]["destination"] == "contact_options_page"
-    assert actions_by_view["route_trace_sheet"]["send_trace_probe"]["dm_tx"] is True
+    assert actions_by_view["route_trace_sheet"]["send_path_probe"]["dm_tx"] is True
     assert set(actions_by_view["forget_contact_confirm_page"]) == {
         "close_forget_contact_confirm",
         "cancel_forget_contact",

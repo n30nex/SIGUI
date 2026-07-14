@@ -3508,8 +3508,8 @@ def render_route_trace_sheet(s: Surface, snap: Snapshot):
         rendered += 1
     if not contact_routes:
         s.text("No recent trace evidence", (28, 322, 452, 348), 13, MUTED)
-    s.text("DM-only trace probe", (28, 378, 452, 400), 11, MUTED, False, "center")
-    draw_button(s, (16, 420, 464, 472), "Ping", BLUE, action="send_trace_probe", dm_tx=True)
+    s.text("DM/PATH discovery; not TRACE", (28, 378, 452, 400), 11, MUTED, False, "center")
+    draw_button(s, (16, 420, 464, 472), "Probe", BLUE, action="send_path_probe", dm_tx=True)
     s.metrics.update(
         {
             "route_trace_source_count": len(contact_routes),
@@ -3992,7 +3992,7 @@ REQUIRED_LABELS: dict[str, tuple[str, ...]] = {
     ),
     "dm_thread_sheet": ("Back", "Reply"),
     "route_detail_sheet": ("Route Detail", "Target", "Path", "Confidence", "Close"),
-    "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Ping"),
+    "route_trace_sheet": ("Route Trace", "Back", "Fingerprint", "Contact Path", "Best Evidence", "Probe"),
     "packet_detail_sheet": ("Packet Detail", "Kind", "Signal", "Payload", "Advanced", "Raw Hex", "Close"),
     "packet_search_sheet": ("Packet Search", "Search kind, note, raw hex", "Apply", "Clear", "Close"),
     "mesh_roles_sheet": ("Mesh Roles", "Back", "Rooms", "Repeaters", "Large meshes stay bounded"),
@@ -4175,7 +4175,7 @@ EXPECTED_FLOWS: tuple[dict[str, object], ...] = (
                 "destination": "contact_options_page",
             },
             {"view": "contact_options_page", "action": "open_route_trace", "destination": "route_trace_sheet"},
-            {"view": "route_trace_sheet", "action": "send_trace_probe", "dm_tx": True},
+            {"view": "route_trace_sheet", "action": "send_path_probe", "dm_tx": True},
             {"view": "route_trace_sheet", "action": "close_route_trace", "destination": "contact_options_page"},
             {"view": "contact_options_page", "action": "open_contact_edit", "destination": "contact_edit_sheet"},
             {"view": "contact_edit_sheet", "action": "close_contact_edit", "destination": "contact_options_page"},

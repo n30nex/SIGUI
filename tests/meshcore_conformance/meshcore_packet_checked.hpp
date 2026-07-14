@@ -40,6 +40,8 @@ static_assert(PAYLOAD_TYPE_GRP_TXT == 0x05,
               "Pinned MeshCore group-text payload type changed");
 static_assert(PAYLOAD_TYPE_PATH == 0x08,
               "Pinned MeshCore path payload type changed");
+static_assert(PAYLOAD_TYPE_TRACE == 0x09,
+              "Pinned MeshCore TRACE payload type changed");
 static_assert(PAYLOAD_TYPE_MULTIPART == 0x0A,
               "Pinned MeshCore multipart payload type changed");
 static_assert(D1L_MESHCORE_PAYLOAD_VER_1 == PAYLOAD_VER_1,
@@ -68,6 +70,8 @@ static_assert(D1L_MESHCORE_PAYLOAD_GROUP_TEXT == PAYLOAD_TYPE_GRP_TXT,
               "Production group-text payload type differs");
 static_assert(D1L_MESHCORE_PAYLOAD_PATH == PAYLOAD_TYPE_PATH,
               "Production PATH payload type differs");
+static_assert(D1L_MESHCORE_PAYLOAD_TRACE == PAYLOAD_TYPE_TRACE,
+              "Production TRACE payload type differs");
 static_assert(D1L_MESHCORE_PAYLOAD_MULTIPART == PAYLOAD_TYPE_MULTIPART,
               "Production multipart payload type differs");
 

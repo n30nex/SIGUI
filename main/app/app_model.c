@@ -414,11 +414,12 @@ esp_err_t d1l_app_model_send_dm_text(const char *fingerprint, const char *text)
     return d1l_meshcore_service_send_dm(fingerprint, text);
 }
 
-esp_err_t d1l_app_model_request_trace_probe(const char *fingerprint,
-                                            char *out_token,
-                                            size_t out_token_size)
+esp_err_t d1l_app_model_request_path_discovery_probe(const char *fingerprint,
+                                                     char *out_token,
+                                                     size_t out_token_size)
 {
-    return d1l_meshcore_service_request_trace_probe(fingerprint, out_token, out_token_size);
+    return d1l_meshcore_service_request_path_discovery_probe(
+        fingerprint, out_token, out_token_size);
 }
 
 size_t d1l_app_model_copy_dm_thread_page(const char *fingerprint,

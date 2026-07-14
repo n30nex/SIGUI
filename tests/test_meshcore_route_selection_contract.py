@@ -22,7 +22,7 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
         "static esp_err_t meshcore_service_send_dm_with_result", 1
     )[1].split("esp_err_t d1l_meshcore_service_send_dm", 1)[0]
     wrapper = service.split("esp_err_t d1l_meshcore_service_send_dm", 1)[1].split(
-        "esp_err_t d1l_meshcore_service_request_trace_probe", 1
+        "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
     )[0]
     path_rx = service.split("static void parse_rx_path_packet", 1)[1].split(
         "static bool verify_advert_signature", 1
@@ -61,11 +61,11 @@ def test_production_dm_send_consumes_one_boot_proven_fail_closed_route_plan():
     assert "clear_boot_routes();" in initialization
 
 
-def test_trace_records_only_the_immutable_actual_send_result():
+def test_path_probe_records_only_the_immutable_actual_send_result():
     service = read("main/mesh/meshcore_service.c")
     trace = service.split(
-        "esp_err_t d1l_meshcore_service_request_trace_probe", 1
-    )[1].split("const char *d1l_meshcore_service_state_name", 1)[0]
+        "esp_err_t d1l_meshcore_service_request_path_discovery_probe", 1
+    )[1].split("esp_err_t d1l_meshcore_service_send_trace_loop", 1)[0]
 
     assert "d1l_dm_send_result_t send_result" in trace
     assert "meshcore_service_send_dm_with_result(" in trace
