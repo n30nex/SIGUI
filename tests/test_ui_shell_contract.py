@@ -1554,6 +1554,7 @@ def test_settings_screen_renderer_has_an_owned_action_boundary():
 def test_settings_screen_reports_companion_wireless_state():
     source = read("main/ui/ui_phase1.c")
     settings_module = read("main/ui/ui_settings.c")
+    connectivity = read("main/ui/ui_connectivity.c")
     header = read("main/app/app_model.h")
     assert "wifi_state" in header
     assert "ble_state" in header
@@ -1610,17 +1611,17 @@ def test_settings_screen_reports_companion_wireless_state():
     assert "d1l_app_model_set_wifi_enabled(!s_snapshot.wifi_enabled)" in source
     assert "D1L_BLE_COMPANION_TRANSPORT_SUPPORTED false" in header
     assert "snapshot->ble_transport_supported = D1L_BLE_COMPANION_TRANSPORT_SUPPORTED" in read("main/app/app_model.c")
-    assert "if (ble_transport_supported)" in source
+    assert "if (view.controls_available)" in source
     assert "lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U)" in source
     assert "lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U)" in source
     assert '"Network name"' in source
     assert '"Password"' in source
-    assert '"Scan to list nearby 2.4 GHz networks"' in source
+    assert '"Scan to list nearby 2.4 GHz networks"' in connectivity
     assert '"Connect"' in source
     assert "wifi_scan_event_cb" in source
     assert "wifi_connect_event_cb" in source
-    assert '"BLE companion transport is unavailable in this release."' in source
-    assert '"No BLE pairing or transport artifact is present for public release."' in source
+    assert '"BLE companion transport is unavailable in this release."' in connectivity
+    assert '"No BLE pairing or transport artifact is present for public release."' in connectivity
     assert '"Enable unavailable"' in source
     assert '"Pair unavailable"' in source
     assert '"Forget unavailable"' in source

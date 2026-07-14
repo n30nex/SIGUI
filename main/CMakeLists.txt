@@ -52,6 +52,7 @@ idf_component_register(
         "storage/storage_status.c"
         "storage/storage_status_policy.c"
         "ui/ui_chrome.c"
+        "ui/ui_connectivity.c"
         "ui/ui_home.c"
         "ui/ui_keyboard.c"
         "ui/ui_map.c"
