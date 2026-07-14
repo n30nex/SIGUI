@@ -210,6 +210,18 @@ esp_err_t nvs_set_blob(nvs_handle_t handle, const char *key, const void *value,
     return ESP_OK;
 }
 
+esp_err_t nvs_get_u32(nvs_handle_t handle, const char *key, uint32_t *out_value)
+{
+    size_t length = sizeof(*out_value);
+    return out_value ? nvs_get_blob(handle, key, out_value, &length)
+                     : ESP_ERR_INVALID_ARG;
+}
+
+esp_err_t nvs_set_u32(nvs_handle_t handle, const char *key, uint32_t value)
+{
+    return nvs_set_blob(handle, key, &value, sizeof(value));
+}
+
 esp_err_t nvs_erase_key(nvs_handle_t handle, const char *key)
 {
     mock_nvs_slot_t *slot = slot_for_handle(handle);

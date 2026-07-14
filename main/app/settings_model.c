@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "ed_25519.h"
 #include "nvs.h"
 
 #include "d1l_config.h"
@@ -15,6 +16,100 @@
 static d1l_settings_t s_current;
 static bool s_loaded;
 static uint32_t s_mesh_timestamp_last = D1L_SETTINGS_MESH_TIMESTAMP_BASE;
+
+_Static_assert(D1L_IDENTITY_PUBLIC_KEY_LEN == D1L_IDENTITY_STATE_PUBLIC_KEY_LEN,
+               "identity public key lengths must match");
+_Static_assert(D1L_IDENTITY_PRIVATE_KEY_LEN == D1L_IDENTITY_STATE_PRIVATE_KEY_LEN,
+               "identity private key lengths must match");
+
+static bool identity_bytes_all_zero(const uint8_t *bytes, size_t length)
+{
+    if (!bytes) {
+        return false;
+    }
+    uint8_t combined = 0U;
+    for (size_t i = 0; i < length; ++i) {
+        combined |= bytes[i];
+    }
+    return combined == 0U;
+}
+
+static bool identity_bytes_uniform(const uint8_t *bytes, size_t length)
+{
+    if (!bytes || length == 0U) {
+        return false;
+    }
+    uint8_t differences = 0U;
+    for (size_t i = 1U; i < length; ++i) {
+        differences |= (uint8_t)(bytes[i] ^ bytes[0]);
+    }
+    return differences == 0U;
+}
+
+static void wipe_derived_identity_key(
+    uint8_t key[D1L_IDENTITY_STATE_PUBLIC_KEY_LEN])
+{
+    volatile uint8_t *cursor = key;
+    for (size_t i = 0; i < D1L_IDENTITY_STATE_PUBLIC_KEY_LEN; ++i) {
+        cursor[i] = 0U;
+    }
+}
+
+d1l_identity_state_t d1l_identity_state_classify(
+    bool identity_ready,
+    const uint8_t public_key[D1L_IDENTITY_STATE_PUBLIC_KEY_LEN],
+    const uint8_t private_key[D1L_IDENTITY_STATE_PRIVATE_KEY_LEN])
+{
+    if (!public_key || !private_key) {
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+
+    const bool public_absent = identity_bytes_all_zero(
+        public_key, D1L_IDENTITY_STATE_PUBLIC_KEY_LEN);
+    const bool private_absent = identity_bytes_all_zero(
+        private_key, D1L_IDENTITY_STATE_PRIVATE_KEY_LEN);
+    if (!identity_ready) {
+        return public_absent && private_absent
+                   ? D1L_IDENTITY_STATE_ABSENT
+                   : D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+    if (public_absent || private_absent) {
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+    if ((private_key[0] & 0x07U) != 0U ||
+        (private_key[31] & 0xc0U) != 0x40U) {
+        /* ECDH reclamps the scalar; reject state whose stored scalar would
+         * represent a different key after that operation. */
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+    if (identity_bytes_uniform(
+            &private_key[32], D1L_IDENTITY_STATE_PRIVATE_KEY_LEN - 32U)) {
+        /* Signing derives its nonce from this prefix. Uniform persisted data
+         * is fail-closed because a predictable nonce can expose the scalar. */
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+
+    uint8_t derived_public[D1L_IDENTITY_STATE_PUBLIC_KEY_LEN] = {0};
+    ed25519_derive_pub(derived_public, private_key);
+    const bool exact_match = memcmp(
+        public_key, derived_public, sizeof(derived_public)) == 0;
+    wipe_derived_identity_key(derived_public);
+    return exact_match ? D1L_IDENTITY_STATE_CONSISTENT
+                       : D1L_IDENTITY_STATE_INCONSISTENT;
+}
+
+const char *d1l_identity_state_name(d1l_identity_state_t state)
+{
+    switch (state) {
+        case D1L_IDENTITY_STATE_ABSENT:
+            return "absent";
+        case D1L_IDENTITY_STATE_CONSISTENT:
+            return "consistent";
+        case D1L_IDENTITY_STATE_INCONSISTENT:
+        default:
+            return "inconsistent";
+    }
+}
 
 typedef struct {
     uint32_t schema_version;
@@ -284,23 +379,22 @@ void d1l_settings_sanitize(d1l_settings_t *settings)
         settings->map_lon_e7 = 0;
     }
     settings->map_tile_zoom = D1L_MAP_TILE_DEFAULT_ZOOM;
-    if (settings->identity_ready) {
-        bool pub_all_zero = true;
-        bool prv_all_zero = true;
-        for (size_t i = 0; i < sizeof(settings->identity_public_key); ++i) {
-            pub_all_zero = pub_all_zero && settings->identity_public_key[i] == 0;
-        }
-        for (size_t i = 0; i < sizeof(settings->identity_private_key); ++i) {
-            prv_all_zero = prv_all_zero && settings->identity_private_key[i] == 0;
-        }
-        if (pub_all_zero || prv_all_zero ||
-            settings->identity_public_key[0] == 0x00 ||
-            settings->identity_public_key[0] == 0xff) {
-            settings->identity_ready = false;
-            memset(settings->identity_public_key, 0, sizeof(settings->identity_public_key));
-            memset(settings->identity_private_key, 0, sizeof(settings->identity_private_key));
-        }
+    settings->identity_ready = settings->identity_ready ? true : false;
+    if (d1l_settings_identity_state(settings) != D1L_IDENTITY_STATE_CONSISTENT) {
+        /* Fail closed without destroying forensic/recovery evidence. */
+        settings->identity_ready = false;
     }
+}
+
+d1l_identity_state_t d1l_settings_identity_state(const d1l_settings_t *settings)
+{
+    if (!settings) {
+        return D1L_IDENTITY_STATE_INCONSISTENT;
+    }
+    return d1l_identity_state_classify(
+        settings->identity_ready,
+        settings->identity_public_key,
+        settings->identity_private_key);
 }
 
 static void migrate_v2_settings(d1l_settings_t *dest, const d1l_settings_v2_t *src)
