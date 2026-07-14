@@ -348,6 +348,14 @@ void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot)
     snapshot->route_count = routes.count;
     snapshot->packet_total_written = packets.total_written;
     snapshot->packet_count = packets.count;
+    d1l_channel_store_stats_t channel_stats = {0};
+    (void)d1l_app_model_copy_channels(
+        snapshot->channels, D1L_APP_SNAPSHOT_CHANNEL_PREVIEW,
+        &snapshot->channel_count, &snapshot->active_channel_id,
+        &channel_stats);
+    snapshot->channel_store_revision = channel_stats.revision;
+    snapshot->channel_store_load_status = channel_stats.load_status;
+    snapshot->channel_store_loaded = channel_stats.loaded;
     d1l_mesh_inspector_signal_summary(&snapshot->signal_summary);
     snapshot->recent_room_count =
         d1l_mesh_inspector_copy_room_servers(snapshot->recent_rooms, D1L_APP_SNAPSHOT_ROOM_PREVIEW);
@@ -390,6 +398,44 @@ esp_err_t d1l_app_model_send_public_test(void)
 esp_err_t d1l_app_model_send_public_text(const char *text)
 {
     return d1l_meshcore_service_send_public(text);
+}
+
+esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
+                                      size_t max_channels,
+                                      size_t *out_count,
+                                      uint64_t *out_active_channel_id,
+                                      d1l_channel_store_stats_t *out_stats)
+{
+    return d1l_channel_store_snapshot(
+        out_channels, max_channels, out_count, out_active_channel_id,
+        out_stats);
+}
+
+esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
+                                       d1l_channel_info_t *out_channel)
+{
+    if (channel_id == 0U) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (out_channel) {
+        memset(out_channel, 0, sizeof(*out_channel));
+    }
+
+    d1l_channel_mutation_result_t result = D1L_CHANNEL_MUTATION_NONE;
+    d1l_channel_info_t selected = {0};
+    const esp_err_t ret = d1l_channel_store_select(
+        channel_id, &result, &selected);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    if (result != D1L_CHANNEL_MUTATION_UPDATED &&
+        result != D1L_CHANNEL_MUTATION_EXISTS) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (out_channel) {
+        *out_channel = selected;
+    }
+    return ESP_OK;
 }
 
 size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,

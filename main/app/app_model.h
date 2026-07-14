@@ -8,6 +8,7 @@
 
 #include "app/settings_model.h"
 #include "comms/connectivity_manager.h"
+#include "mesh/channel_store.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
 #include "mesh/message_store.h"
@@ -17,6 +18,7 @@
 #include "mesh/route_store.h"
 
 #define D1L_APP_SNAPSHOT_PACKET_PREVIEW 4U
+#define D1L_APP_SNAPSHOT_CHANNEL_PREVIEW D1L_CHANNEL_STORE_CAPACITY
 #define D1L_APP_SNAPSHOT_MESSAGE_PREVIEW 5U
 #define D1L_APP_SNAPSHOT_DM_PREVIEW 5U
 #define D1L_APP_SNAPSHOT_NODE_PREVIEW 4U
@@ -191,6 +193,12 @@ typedef struct {
     size_t route_count;
     uint32_t packet_total_written;
     size_t packet_count;
+    uint32_t channel_store_revision;
+    esp_err_t channel_store_load_status;
+    bool channel_store_loaded;
+    uint64_t active_channel_id;
+    d1l_channel_info_t channels[D1L_APP_SNAPSHOT_CHANNEL_PREVIEW];
+    size_t channel_count;
     d1l_mesh_signal_summary_t signal_summary;
     d1l_mesh_room_server_t recent_rooms[D1L_APP_SNAPSHOT_ROOM_PREVIEW];
     size_t recent_room_count;
@@ -220,6 +228,13 @@ d1l_app_model_t *d1l_app_model_get(void);
 void d1l_app_model_snapshot(d1l_app_snapshot_t *snapshot);
 esp_err_t d1l_app_model_send_public_test(void);
 esp_err_t d1l_app_model_send_public_text(const char *text);
+esp_err_t d1l_app_model_copy_channels(d1l_channel_info_t *out_channels,
+                                      size_t max_channels,
+                                      size_t *out_count,
+                                      uint64_t *out_active_channel_id,
+                                      d1l_channel_store_stats_t *out_stats);
+esp_err_t d1l_app_model_select_channel(uint64_t channel_id,
+                                       d1l_channel_info_t *out_channel);
 size_t d1l_app_model_query_public_messages_page(d1l_message_entry_t *out_entries,
                                                 size_t max_entries,
                                                 size_t skip_newest,

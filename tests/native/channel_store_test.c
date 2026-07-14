@@ -216,12 +216,55 @@ static void test_collisions_capacity_defaults_and_rollback(void)
     assert(d1l_channel_store_find_unique_hash(one_key.channel_hash, &unique) ==
            ESP_ERR_INVALID_STATE);
 
+    assert(d1l_channel_store_select(one_id, &result, &info) == ESP_OK);
+    assert(result == D1L_CHANNEL_MUTATION_UPDATED);
+    assert(info.is_default);
+    d1l_channel_info_t snapshot[D1L_CHANNEL_STORE_CAPACITY];
+    memset(snapshot, 0, sizeof(snapshot));
+    size_t snapshot_count = 0U;
+    uint64_t active_channel_id = 0U;
+    d1l_channel_store_stats_t snapshot_stats;
+    memset(&snapshot_stats, 0, sizeof(snapshot_stats));
+    assert(d1l_channel_store_snapshot(
+               snapshot, D1L_CHANNEL_STORE_CAPACITY, &snapshot_count,
+               &active_channel_id, &snapshot_stats) == ESP_OK);
+    assert(snapshot_count == snapshot_stats.count);
+    assert(active_channel_id == one_id);
+    size_t selected_count = 0U;
+    for (size_t i = 0U; i < snapshot_count; ++i) {
+        if (snapshot[i].is_default) {
+            selected_count++;
+            assert(snapshot[i].channel_id == active_channel_id);
+        }
+    }
+    assert(selected_count == 1U);
+
+    const uint32_t selected_revision = snapshot_stats.revision;
+    assert(d1l_channel_store_select(one_id, &result, &info) == ESP_OK);
+    assert(result == D1L_CHANNEL_MUTATION_EXISTS);
+    assert(d1l_channel_store_stats().revision == selected_revision);
+
+    mock_nvs_fail_next_set(ESP_FAIL);
+    assert(d1l_channel_store_select(D1L_CHANNEL_PUBLIC_ID, &result, &info) ==
+           ESP_FAIL);
+    assert(result == D1L_CHANNEL_MUTATION_NONE);
+    assert(find_channel(one_id).is_default);
+    assert(!find_channel(D1L_CHANNEL_PUBLIC_ID).is_default);
+    assert(d1l_channel_store_stats().revision == selected_revision);
+    assert(d1l_channel_store_select(D1L_CHANNEL_PUBLIC_ID, &result, &info) ==
+           ESP_OK);
+    assert(result == D1L_CHANNEL_MUTATION_UPDATED);
+    assert(info.is_default);
+
     assert(d1l_channel_store_update(one_id, "One renamed", true, true,
                                     &result, &info) == ESP_OK);
     assert(info.is_default);
     assert(d1l_channel_store_update(one_id, "One renamed", false, false,
                                     &result, &info) == ESP_OK);
     assert(!info.enabled);
+    assert(d1l_channel_store_select(one_id, &result, &info) ==
+           ESP_ERR_INVALID_STATE);
+    assert(result == D1L_CHANNEL_MUTATION_NONE);
     assert_public_default();
     memset(&unique, 0, sizeof(unique));
     assert(d1l_channel_store_copy_protocol_key(one_id, &unique) ==
