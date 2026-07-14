@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "work_package": "WP-04",
+  "capability": "identity_signed_advert_semantic_runtime",
+  "coverage_boundary": "pinned_meshcore_host_signed_advert_create_send_radio_wire_receive_filter_signature_dispatch_basechat_contact_promotion_storage_callback_duplicate_self_ownership_and_deterministic_replay",
+  "wp04_closure_eligible": false,
+  "closure_ready": false,
+  "source_hash_mode": "canonical_lf_text_sha256",
+  "upstream": {
+    "name": "MeshCore",
+    "path": "third_party/MeshCore",
+    "commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+    "sources": {
+      "third_party/MeshCore/src/MeshCore.h": "51d93fe4c18608efa827625639a68721cedd9c15a83d55e3b86629cd5710ba8a",
+      "third_party/MeshCore/src/Identity.h": "d5ec3c37606c636776571419282d845f2bcc1f3996b271eb4141558eaf0a15fc",
+      "third_party/MeshCore/src/Identity.cpp": "21e7b533928f2d7dd5b016c048b5c4971db6d475077c793947c17574dd057bd0",
+      "third_party/MeshCore/src/Packet.h": "dae1e63021df0b85ccd83bd409993e302daf768509a7a28e8485d02344528d9f",
+      "third_party/MeshCore/src/Packet.cpp": "6f401a4abe57b67aae6ce54172a8cd5cfa64f801c2186894d4bf28aaf30b52e0",
+      "third_party/MeshCore/src/Dispatcher.h": "70eef11430c3aebb86e4e329978744bf20e8138ac27053045ad11aa7fc2a47bf",
+      "third_party/MeshCore/src/Dispatcher.cpp": "30b8e49a94a281e7d0c60c037d3e68d3d8882b4c82c6c98b15df981a2ce0116e",
+      "third_party/MeshCore/src/Mesh.h": "98c1f1a2261f30fbc619dcc0209adc4e79e65a063bc807d3c01c654ccf997714",
+      "third_party/MeshCore/src/Mesh.cpp": "e39aa2ca27cc4d6b1d19c43aeccb5915098aeb5b6a5fc9be98d9fa557a54fd7e",
+      "third_party/MeshCore/src/Utils.h": "76b0d60b27610f186dff1765aa4be72de806208f4930f8000bfea3d7b917d885",
+      "third_party/MeshCore/src/Utils.cpp": "6600763c74e8a26469d0c452a209222e071d831f27251864a8f2844ac5d0518c",
+      "third_party/MeshCore/src/helpers/AdvertDataHelpers.h": "c871a8e7e0e366c357da52e2994e009d4e7c14cd714b06ea5632b82bccf6dc0c",
+      "third_party/MeshCore/src/helpers/AdvertDataHelpers.cpp": "39107b26d0ee970b3e936bb32ae348b40d913161d8e355e16d5806ac6d490544",
+      "third_party/MeshCore/src/helpers/TxtDataHelpers.h": "1800f4167dccbb4e105ccd4733ea992420a835782870f1d5898fd948bed1ef41",
+      "third_party/MeshCore/src/helpers/TxtDataHelpers.cpp": "b848b13f665a976980d4b6dc8262e400033fbac726c519c606fa8e46f06228d5",
+      "third_party/MeshCore/src/helpers/ContactInfo.h": "9ec3c199d73871174c73a1cecfd3c4293fda3be2628b96370d6063c107484e18",
+      "third_party/MeshCore/src/helpers/ChannelDetails.h": "e2d894feb97311b7dc887311acb0884860f3d4b2c59ff4c7005697a524a82d76",
+      "third_party/MeshCore/src/helpers/BaseChatMesh.h": "c111654035f27d805e9a3c5714a9f6e214ca226bb8f2a6d822dedc736ab0e7fc",
+      "third_party/MeshCore/src/helpers/BaseChatMesh.cpp": "1d18079bfd44ce4e341203497eb95fa4fd252391220535e808962d5c3d106c3c"
+    }
+  },
+  "external_dependency": {
+    "name": "rweather/Crypto",
+    "version": "0.4.0",
+    "registry_version_id": 43204,
+    "repository": "https://github.com/rweather/arduinolibs.git",
+    "release_commit": "61e84b220fc8dfe83c2e04716d0fa88cfaddadf6",
+    "archive_url": "https://dl.registry.platformio.org/download/rweather/library/Crypto/0.4.0/Crypto-0.4.0.tar.gz",
+    "archive_size": 162696,
+    "archive_sha256": "1867740aad0d61bdcbac25f6dbc8eefe6eed9e7b37f48d9d0b9d80500ad431e0",
+    "sources": {
+      "Ed25519.h": "d516f3031db80537f84003c7d72ad57313cd4483d152cc9329f8176810d9ca6f",
+      "Ed25519.cpp": "f7e86fe25962408a623eeb5a92cc16c2e180fec29883738b00ad2006916892be",
+      "Curve25519.h": "d6ed0d64501fdf43cac826fa3af687fcc827343caf20ee9f0f0967a10864bac0",
+      "Curve25519.cpp": "f68e22f4e3aa4a81c9091abbf03969728b0e3702fe5de8bd63e57099703fbc83",
+      "BigNumberUtil.h": "f09ff6316582ed456018d44c972ef8b05536abb2cad3267daecd9ae41f9024e5",
+      "BigNumberUtil.cpp": "fb832ff438d9f6eeee86b3be0496e1875cbdc3ddc371f053f5193f53e0e68c0c",
+      "SHA512.h": "db2b1c807056cfa0022857dfcded93afcbb779aec8d0ceb78e58bd15e9a22ed8",
+      "SHA512.cpp": "e519c4be0713efd51fc880b718ec66df4fe42aaead20176ecce9c6f6d0da8691",
+      "Hash.h": "f15a140cc06ae2b7bead192e5d08c86e6a8c4f6d3fc42147666e7d40cfd2407b",
+      "Hash.cpp": "e194af2180148e815f4852f1ba90ad98aa0cad469fb79b077846d2641c24aaae",
+      "Crypto.h": "9fa162c8380948d9e5d5e1b05ccb238119333bb2277ed9568c5484e8b99c26bb",
+      "Crypto.cpp": "ee661a18648ccf5e04bb62b4a012e29f1ad214d08e7897fa73fd7c2c317d8ff7",
+      "RNG.h": "85531d911fd7edc5846ba83a5d721b205a36e32b8fd32327f865fd3ff73a2ccd",
+      "utility/EndianUtil.h": "00b98849950847786f2fba9c94c4da3e5a2f1785440455f618c4b775b86fc1d0",
+      "utility/LimbUtil.h": "6360e30ed0168411cd84c58bba71ab918b5541317d51ecbd50eb1ef7e1a50f11",
+      "utility/ProgMemUtil.h": "b540e8494892f13ceafb77d3b982f678510a3f41258d1a7517b7d4ac409c3ec8",
+      "utility/RotateUtil.h": "8c134e9afa92b28793bc65160a38bb013a31eff9155adcc7371ec8c40cfd0a23"
+    }
+  },
+  "vendored_crypto_sources": {
+    "third_party/MeshCore/lib/ed25519/fe.c": "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d",
+    "third_party/MeshCore/lib/ed25519/ge.c": "c3bb834817edea83d843828a75af19867b93144d15140eadfd9784d40cf11409",
+    "third_party/MeshCore/lib/ed25519/sc.c": "c1bdb840416b34e79ceb7472d1a4ac4b1407c47b4c982cad981c72142ef42407",
+    "third_party/MeshCore/lib/ed25519/sha512.c": "b34128b950036777c299943d624bd830a234a65932c394fdf455e4948258fb6d",
+    "third_party/MeshCore/lib/ed25519/verify.c": "18c43d45e99ec4a922f3ed3b13eeb0309df62324c7ee9ca707eb5d65d8b66ad7",
+    "third_party/MeshCore/lib/ed25519/key_exchange.c": "885157d0d3a635e405669f621a2c6ee24d48d8ee2b39f097f9a642681fe164a4",
+    "third_party/MeshCore/lib/ed25519/keypair.c": "9639f460c01191b738a4e3e206c5ee6bd232591b68f920ba3b097de7b80bbf77",
+    "third_party/MeshCore/lib/ed25519/sign.c": "1f28f5864ee084c9d624d73f00f45b2b82c093c1e775306ffe43671e3b76d425"
+  },
+  "host_sources": {
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0",
+    "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
+    "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
+    "tests/meshcore_signed_advert_runtime/stubs/Arduino.h": "2b02ba45c9ec15830247979ef00ae93daf3be978010cc0d01bedca07db7184dc",
+    "tests/meshcore_signed_advert_runtime/stubs/Stream.h": "5d5e04dea74d8c19be8b2f0b0d89a609c5e1b83f479a3d26179048a9a41a4d28",
+    "tests/meshcore_signed_advert_runtime/crypto_rng_stub.cpp": "b9a9c03d140c3958185df182f69b0304c0124ed1e979179a25c51551a96dac9d",
+    "tests/meshcore_signed_advert_runtime/meshcore_signed_advert_runtime.cpp": "d45f4feadb3b230a9f214146126d5b00908f6fea17a5d5502388a4115f78437b"
+  },
+  "sanitizer_policy": {
+    "requested": [
+      "address",
+      "undefined"
+    ],
+    "full_ubsan_clean": false,
+    "shift_base_exceptions": [
+      "third_party/MeshCore/lib/ed25519/fe.c",
+      "third_party/MeshCore/lib/ed25519/ge.c",
+      "third_party/MeshCore/lib/ed25519/sc.c"
+    ],
+    "exception_flag": "-fno-sanitize=shift-base",
+    "release_blocker": "BLK-WP04-ED25519-SHIFT-UB-20260714"
+  },
+  "assertions": [
+    "real_BaseChatMesh_createSelfAdvert_Mesh_createAdvert_and_LocalIdentity_sign",
+    "real_Mesh_sendFlood_Dispatcher_queue_radio_serialization_and_release",
+    "real_Dispatcher_receive_parse_Mesh_filter_signature_dispatch_and_BaseChatMesh_contact_promotion",
+    "valid_contact_callback_and_raw_advert_storage",
+    "duplicate_suppression",
+    "bad_signature_rejection",
+    "self_suppression",
+    "balanced_packet_ownership_and_contact_lifetime",
+    "two_run_determinism"
+  ],
+  "expected_result": {
+    "status": "pass",
+    "runtime": "pinned_meshcore_signed_advert",
+    "wire_hex": "1100f99c8c1fd6a0e85db09adf2ebd858a426e5547080a091624df11f2ba361a048bfbe14e6857de3d198a84436f58058d497e4dfc611b6824d35489375085261c562ada17faf48611d947f63339bb9251e0716da6f7745abd28eda7d2d80b1caff14189c6059150189a0260b544fb73656d616e7469632d6e6f6465",
+    "sender_public_key_hex": "f99c8c1fd6a0e85db09adf2ebd858a426e5547080a091624df11f2ba361a048b",
+    "contact_name": "semantic-node",
+    "contact_type": 1,
+    "advert_timestamp": 1750000123,
+    "latitude_e6": 43653200,
+    "longitude_e6": -79383200,
+    "upstream_callback_is_new": false,
+    "filter_calls": 3,
+    "table_lookups": 3,
+    "allocations": 5,
+    "releases": 5,
+    "duplicate_suppressed": true,
+    "bad_signature_rejected": true,
+    "self_suppressed": true,
+    "ownership_balanced": true,
+    "deterministic_replay": true
+  },
+  "residual_gaps": [
+    "firmware_runtime_binding_and_real_peer_interoperability",
+    "ack_dispatch_correlation_and_delivery",
+    "route_selection_and_forwarding",
+    "trace_forwarding_and_path_discovery",
+    "login_request_response_admin",
+    "retained_contact_recovery_and_hardware_RF_evidence",
+    "pinned_BaseChatMesh_reports_is_new_false_for_a_new_auto_added_contact",
+    "defined_arithmetic_remediation_for_the_vendored_ed25519_shift_UB_family"
+  ]
+}

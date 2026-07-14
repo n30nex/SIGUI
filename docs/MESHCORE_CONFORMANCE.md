@@ -363,24 +363,45 @@ This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
 `pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
-capabilities prove only D1L's bounded
+capabilities in the version-23 oracle prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
 separate external `Ed25519::verify` implementation whose `Ed25519.h` is absent
-from the pinned gitlink. Signed-advert receive/send ordering is now projected.
+from the pinned gitlink. Signed-advert receive/send ordering is projected there.
 The receive projection starts only after `filterRecvFloodPacket()` has returned
 false; region/filter table behavior is not modeled or claimed. Concrete
 replay/timestamp policy, contact/table/path mutation, packet-pool,
-queue, and dispatch execution remain inside `Mesh`/`Dispatcher`. Therefore
-`identity_signed_advert` stays pending under
-`BLK-WP04-IDENTITY-DISPATCH-20260713`, which pins `Identity.cpp` and
-`Dispatcher.cpp`/`Mesh.cpp` and names the missing external verifier plus
-concrete packet-manager, table, contact, encoded-path, queue, delay, clock, and
-dispatch fixtures. It also records the missing persisted-keypair consistency
-guard. That blocker does
-not prevent the strict-point or deterministic signed-packet slices or other independent oracle work;
-the new primitive must not be cited as upstream Identity parity or dispatch
-closure. It also fails closed for a one-byte path at count 63: pinned upstream
+queue, and dispatch execution remain inside `Mesh`/`Dispatcher`.
+
+The separate
+`tests/meshcore_signed_advert_runtime/meshcore_signed_advert_runtime.cpp` gate
+now executes that host semantic slice instead of projecting it. It compiles the
+exact pinned `Identity`, `Packet`, `Dispatcher`, `Mesh`, `Utils`,
+`AdvertDataHelpers`, `TxtDataHelpers`, and `BaseChatMesh` production sources.
+The external verifier is the exact `rweather/Crypto` 0.4.0 PlatformIO registry
+archive (version ID 43204, 162696 bytes, SHA-256
+`1867740aad0d61bdcbac25f6dbc8eefe6eed9e7b37f48d9d0b9d80500ad431e0`),
+with every compiled transitive source independently hash-checked before
+extraction. Deterministic radio, clock, RNG, packet-manager, and seen-table
+doubles drive the real create/sign, flood queue, wire serialization, receive
+filter, external signature verification, dispatch, `BaseChatMesh` contact
+promotion, callback, and raw-advert storage paths. The executable asserts a
+valid contact, duplicate suppression, forged-signature rejection, self
+suppression, balanced packet ownership, contact lifetime after packet release,
+and byte-identical two-run replay. It does not call an oracle projection helper.
+The receipt also preserves a pinned-upstream quirk instead of hiding it:
+`BaseChatMesh::onAdvertRecv` reports `is_new=false` to the discovery callback
+for a newly auto-added contact even though the contact count advances from zero
+to one. Firmware/UI integration must not treat that callback flag as truthful
+until the upstream behavior is reconciled.
+
+This clears only `identity_signed_advert_semantic_runtime`. The broader
+`identity_signed_advert` aggregate and `BLK-WP04-IDENTITY-DISPATCH-20260713`
+remain open for persisted public/private-key consistency, firmware runtime
+binding, retained-contact recovery, exact peer/RF evidence, and final-candidate
+hardware proof. The gate explicitly reports those residuals, keeps
+`wp04_closure_eligible=false` and `closure_ready=false`, and cannot close WP-04
+or issue #65. The oracle also fails closed for a one-byte path at count 63: pinned upstream
 wraps the six-bit count to the two-byte/zero-count encoding and drops the path
 bytes when serialized. That explicit D1L divergence prevents the foundation
 oracle from presenting the upstream overflow boundary as a valid append;
@@ -525,8 +546,10 @@ This bounded gate makes no claim about:
   flags-zero TRACE payload framing are covered, but delivery, PATH dispatch,
   stored route choice/reciprocal decisions, TRACE forwarding/SNR/path discovery,
   correlation, and remaining Dispatcher behavior are not;
-- ACK timing, retry/delivery state, duplicate or replay control, packet
-  lifetime, route selection/fallback, or self-message behavior;
+- ACK timing, retry/delivery state, general duplicate or replay control,
+  route selection/fallback, or non-advert self-message behavior. The separate
+  signed-advert runtime gate covers duplicate suppression, self suppression,
+  packet lifetime, and contact lifetime only for its exact advert scenario;
 - persisted/retained state, schema migration, reboot recovery, or write
   durability;
 - radio behavior, interoperability with an official client or second radio,
@@ -551,6 +574,13 @@ python ./scripts/meshcore_conformance_d1l.py \
   --seed 13746277 \
   --runs 100000 \
   --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
+
+python ./scripts/meshcore_signed_advert_runtime_d1l.py \
+  --cc clang-18 \
+  --cxx clang++-18 \
+  --commit "$GITHUB_SHA" \
+  --sanitize \
+  --out "artifacts/meshcore-conformance/meshcore_signed_advert_runtime_${GITHUB_SHA}.json"
 ```
 
 The firmware job depends on this job succeeding. That dependency prevents a
