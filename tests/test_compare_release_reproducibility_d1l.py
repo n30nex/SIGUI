@@ -8,6 +8,7 @@ import pytest
 
 from scripts import (
     compare_release_reproducibility_d1l,
+    meshcore_conformance_d1l as conformance,
     package_release_d1l,
     sbom_d1l,
 )
@@ -193,23 +194,29 @@ def write_conformance(
         root / package_release_d1l.BUILD_INPUTS_SOURCE,
         generated_at=generated_at,
     )
-    report["commands"] = [
-                    [
-                        "clang-18",
-                        "-c",
-                        f"/actions/run-{run_index}/checkout/main/mesh/meshcore_wire.c",
-                        "-o",
-                        f"{temporary}/wire.o",
-                    ],
-                    [
-                        "clang++-18",
-                        "-c",
-                        f"/actions/run-{run_index}/checkout/third_party/MeshCore/src/Packet.cpp",
-                        "-o",
-                        f"{temporary}/packet.o",
-                    ],
-                    *[["clang-18", f"step-{index}"] for index in range(5)],
-                ]
+    report["commands"][0] = [
+        "clang-18",
+        "-c",
+        f"/actions/run-{run_index}/checkout/main/mesh/meshcore_wire.c",
+        "-o",
+        f"{temporary}/wire.o",
+    ]
+    report["commands"][1] = [
+        "clang++-18",
+        "-c",
+        f"/actions/run-{run_index}/checkout/third_party/MeshCore/src/Packet.cpp",
+        "-o",
+        f"{temporary}/packet.o",
+    ]
+    report["commands"][5] = [
+        "clang-18",
+        "-fsanitize=address,undefined",
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+        "-c",
+        f"/actions/run-{run_index}/checkout/third_party/MeshCore/lib/ed25519/fe.c",
+        "-o",
+        f"{temporary}/meshcore_ed25519_fe.o",
+    ]
     report["fuzz_command"] = [
                     f"{temporary}/meshcore_wire_fuzz",
                     "-runs=100000",

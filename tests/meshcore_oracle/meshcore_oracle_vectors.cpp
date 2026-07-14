@@ -4544,9 +4544,9 @@ int main()
         1U, 1U, 2U, 31U, 1U, 1U, 1U, 1U, 1U, 1U,
         D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
     expect_signed_advert_dispatch(
-        "one-byte maximum appended path fits", 1U, 1U, 0U, 0U, 1U, 0U,
-        1U, 1U, 1U, 63U, 1U, 1U, 1U, 1U, 1U, 1U,
-        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+        "one-byte count wrap rejected by D1L", 1U, 1U, 0U, 0U, 1U, 0U,
+        1U, 1U, 1U, 63U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
     if (signed_advert_dispatch_valid_count !=
         kSignedAdvertDispatchValidVectors) {
         failures.push_back(

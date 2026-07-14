@@ -53,6 +53,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
+    assert manifest["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
     assert manifest["upstream"]["commit"] == UPSTREAM_COMMIT
     assert manifest["interface"] == {
         "language": "c_abi",
@@ -169,9 +170,11 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         ),
         "signed_advert_dispatch_transition_available": True,
         "signed_advert_dispatch_transition_scope": (
-            "mesh_post_decode_complete_self_seen_caller_supplied_identity_"
+            "mesh_post_decode_and_flood_filter_pass_complete_self_seen_"
+            "caller_supplied_identity_"
             "result_callback_and_canonical_flood_route_capacity_projection_"
-            "with_direct_nonzero_intercept_and_d1l_overlong_reject_only_"
+            "with_direct_nonzero_intercept_and_d1l_overlong_and_path_count_"
+            "wrap_reject_only_"
             "upstream_identity_parity_false_no_external_verifier_tables_path_"
             "copy_clock_queue_dispatch_or_rf"
         ),
@@ -476,13 +479,15 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "success_failure_room_push_delay_and_unknown_path_cases"
     )
     assert manifest["determinism"]["signed_advert_dispatch_recipe"] == (
-        "mesh_post_decode_complete_self_seen_gate_then_caller_supplied_"
+        "mesh_post_decode_and_flood_filter_pass_complete_self_seen_gate_then_"
+        "caller_supplied_"
         "identity_result_callback_and_canonical_flood_route_capacity_forward_"
         "policy_projection"
     )
     assert manifest["determinism"]["signed_advert_dispatch_matrix"] == (
         "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_"
-        "not_retransmit_forward_policy_and_path_capacity_cases_plus_nineteen_"
+        "not_retransmit_forward_policy_path_capacity_and_one_byte_count_wrap_"
+        "reject_cases_plus_nineteen_"
         "fail_closed_boundaries"
     )
     assert manifest["determinism"]["signed_advert_send_recipe"] == (
@@ -1059,6 +1064,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert signed_advert_dispatch["implementation_receipt"][
         "upstream_identity_parity_proven"
     ] is False
+    assert signed_advert_dispatch["implementation_receipt"][
+        "d1l_path_count_wrap_reject_diverges_from_upstream"
+    ] is True
     assert signed_advert_dispatch["implementation_receipt"]["vectors"] == {
         "valid": 12,
         "invalid": 19,
@@ -1392,6 +1400,17 @@ def test_conformance_plan_builds_the_oracle_as_a_separate_target():
         assert len(source_commands) == 1
         assert "-fsanitize=address,undefined" in source_commands[0]
         assert f"meshcore_ed25519_{source.stem}.o" in source_commands[0]
+        if source == conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCE:
+            assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in source_commands[0]
+        else:
+            assert conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG not in source_commands[0]
+    exception_commands = [
+        command
+        for command in flattened
+        if conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
+    ]
+    assert len(exception_commands) == 1
+    assert str(conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCE) in exception_commands[0]
     oracle_link = next(
         command
         for command in flattened
@@ -1437,6 +1456,9 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert report["oracle"]["artifact_path"] == str(oracle_output)
     assert report["oracle"]["source_verification"]["verified"] is True
     assert report["oracle"]["result"] is None
+    assert report["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
+    assert report["full_ubsan_clean"] is False
+    assert report["sanitizer_policy_passed"] is None
     assert artifact["artifact_type"] == "meshcore_oracle_manifest"
     assert artifact["status"] == "dry_run"
     assert artifact["passed"] is False
@@ -1445,6 +1467,9 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
+    assert artifact["sanitizer_policy"] == conformance.ED25519_SANITIZER_POLICY
+    assert artifact["full_ubsan_clean"] is False
+    assert artifact["sanitizer_policy_passed"] is None
     assert artifact["corpus_version"] == 23
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True

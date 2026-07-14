@@ -1640,6 +1640,7 @@ extern "C" bool d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
     const size_t appended_path_bytes =
         (static_cast<size_t>(path_hash_count) + 1U) * path_hash_size;
     if (is_route_flood == 1U && do_not_retransmit == 0U &&
+        path_hash_count < 63U &&
         appended_path_bytes <= D1L_MESHCORE_ORACLE_MAX_PATH_BYTES &&
         allow_forward == 1U) {
         transition.path_append_eligible = 1U;

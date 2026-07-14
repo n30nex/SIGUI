@@ -596,10 +596,12 @@ bool d1l_meshcore_oracle_apply_login_response_dispatch_transition(
 
 /*
  * Deterministic Mesh::onRecvPacket signed-ADVERT gate and route projection.
- * It pins the exact source order after packet-envelope decode and the direct
- * nonzero-path pre-switch branch: complete payload, self and duplicate gates;
+ * It pins the exact source order after packet-envelope decode and after
+ * filterRecvFloodPacket has returned false, plus the direct nonzero-path
+ * pre-switch branch: complete payload, self and duplicate gates;
  * Identity::verify result; onAdvertRecv callback; then routeRecvPacket flood
- * capacity/forward policy. Direct packets with a nonzero encoded path are
+ * capacity/forward policy. The region/filter decision itself is outside this
+ * projection. Direct packets with a nonzero encoded path are
  * rejected by this ABI because Mesh intercepts them before ADVERT verification
  * and the forwarding decision needs additional table/identity state.
  * A caller-supplied signature result is accepted only when the source would
@@ -610,6 +612,10 @@ bool d1l_meshcore_oracle_apply_login_response_dispatch_transition(
  * The D1L boundary rejects app data beyond 32 bytes; pinned upstream receive
  * truncates such input to 32 before verification. That stricter behavior is an
  * explicit fail-closed D1L divergence, not an upstream-acceptance parity claim.
+ * D1L also rejects a one-byte path with count 63 before append: upstream's
+ * six-bit count wraps to a two-byte/zero-count encoding and drops the path
+ * bytes on serialization. This is an explicit fail-closed divergence; route
+ * mutation remains pending concrete runtime fixtures.
  * This function does not execute Identity::verify, contact mutation, table
  * lookup/mutation, path copying, clocks/RNG, packet queues, dispatch, or RF.
  */

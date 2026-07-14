@@ -4,6 +4,31 @@
   "abi_version": 2,
   "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures",
   "wp04_closure_eligible": false,
+  "sanitizer_policy": {
+    "requested_sanitizers": [
+      "address",
+      "undefined"
+    ],
+    "full_ubsan_clean": false,
+    "exceptions": [
+      {
+        "source": "third_party/MeshCore/lib/ed25519/fe.c",
+        "source_sha256": "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d",
+        "disabled_check": "shift-base",
+        "compiler_flag": "-fno-sanitize=shift-base",
+        "scope": "host_oracle_object_only",
+        "observed_failure": "fe.c:714 carry0=-1 left shift 26",
+        "reason": "pinned source contains negative signed left shifts; keep the upstream bytes unchanged and report that full UBSan is not clean"
+      }
+    ],
+    "source_level_remediation": {
+      "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+      "status": "open",
+      "blocks_execution": false,
+      "blocks_release": true,
+      "required_closure": "defined-arithmetic source remediation with exact vector/KAT equivalence and full enabled UBSan replay"
+    }
+  },
   "upstream": {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -60,9 +85,9 @@
   },
   "oracle_sources": {
     "tests/meshcore_oracle/coverage_manifest.json": "36e1329c73bbaec27f9c1e43bba238aaac27cd1eb6fb3480e742fb000a380abf",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "896d301ffffa4dc88928572e3b4bdcd4a9573f434f6c2660b72ea3904eb5bc47",
-    "tests/meshcore_oracle/meshcore_oracle.h": "28305dee6f53bcee6ff70d602e924b1c7d450d0dac721c9801ea7052c1521d95",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "cfff076230dd102999e1eec80615ff917d89d81cac4a8c963d6cb44ab7a5c65d",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "97407abe920de643c9e70394ee5857bbbc95632cfd7a4794040a65cf899ccd07",
+    "tests/meshcore_oracle/meshcore_oracle.h": "c8b4e43786c921595f0446fa724f9b020153faae17d0f3520b6668de196c44a8",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "4215276571af0a1b3241341b00c434b9d9de788f6103cdffe42d7f45795e4bb3",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -113,7 +138,7 @@
     "login_response_dispatch_transition_available": true,
     "login_response_dispatch_transition_scope": "repeater_room_canonical_response_ready_encoded_path_creation_kind_secret_source_exact_2000ms_room_push_and_300ms_coarse_dispatch_projection_only_flood_transport_scope_required_no_packet_pool_path_copy_clock_queue_dispatch_execution_storage_or_rf",
     "signed_advert_dispatch_transition_available": true,
-    "signed_advert_dispatch_transition_scope": "mesh_post_decode_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf",
+    "signed_advert_dispatch_transition_scope": "mesh_post_decode_and_flood_filter_pass_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_and_path_count_wrap_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf",
     "signed_advert_send_transition_available": true,
     "signed_advert_send_transition_scope": "mesh_createadvert_length_pool_error_rtc_sign_then_flood_transport_direct_zero_hop_ownership_queue_order_projection_only_signature_bytes_covered_separately_no_keypair_consistency_self_verify_packet_pool_clock_table_path_copy_queue_dispatch_or_rf",
     "canonical_advert_data": true,
@@ -220,8 +245,8 @@
     "authenticated_text_transition_matrix": "twenty_repeater_room_plain_cli_newer_equal_older_role_empty_max_timestamp_creation_failure_ack_multiplicity_and_path_cases",
     "login_response_dispatch_recipe": "ready_canonical_response_repeater_caller_secret_room_stored_secret_flood_path_return_or_direct_datagram_then_creation_outcome_exact_delays_and_coarse_dispatch_selection",
     "login_response_dispatch_matrix": "seventeen_absent_repeater_room_flood_direct_encoded_path_creation_success_failure_room_push_delay_and_unknown_path_cases",
-    "signed_advert_dispatch_recipe": "mesh_post_decode_complete_self_seen_gate_then_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_forward_policy_projection",
-    "signed_advert_dispatch_matrix": "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_not_retransmit_forward_policy_and_path_capacity_cases_plus_nineteen_fail_closed_boundaries",
+    "signed_advert_dispatch_recipe": "mesh_post_decode_and_flood_filter_pass_complete_self_seen_gate_then_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_forward_policy_projection",
+    "signed_advert_dispatch_matrix": "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_not_retransmit_forward_policy_path_capacity_and_one_byte_count_wrap_reject_cases_plus_nineteen_fail_closed_boundaries",
     "signed_advert_send_recipe": "createadvert_length_then_pool_error_or_rtc_and_vendored_sign_then_caller_selected_flood_transport_flood_direct_or_zero_hop_ownership_and_queue_projection",
     "signed_advert_send_matrix": "sixteen_oversize_pool_empty_flood_transport_direct_zero_hop_valid_encoded_path_invalid_route_retention_release_and_queue_cases",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
@@ -896,7 +921,7 @@
       "status": "implemented",
       "owner": "pinned_mesh_signed_advert_gate_and_route_rules",
       "semantic": true,
-      "scope": "canonical_post_decode_complete_self_seen_gate_caller_supplied_identity_result_callback_and_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_contact_table_path_queue_dispatch_execution_or_rf",
+      "scope": "canonical_post_decode_and_flood_filter_pass_complete_self_seen_gate_caller_supplied_identity_result_callback_and_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_and_path_count_wrap_reject_only_upstream_identity_parity_false_no_external_verifier_contact_table_path_queue_dispatch_execution_or_rf",
       "implementation_receipt": {
         "id": "RCPT-WP04-SIGNED-ADVERT-DISPATCH-20260713",
         "status": "implemented",
@@ -908,6 +933,7 @@
         ],
         "upstream_identity_parity_proven": false,
         "d1l_overlong_reject_diverges_from_upstream_truncation": true,
+        "d1l_path_count_wrap_reject_diverges_from_upstream": true,
         "vectors": {
           "valid": 12,
           "invalid": 19

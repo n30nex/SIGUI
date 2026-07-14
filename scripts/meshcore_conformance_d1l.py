@@ -84,6 +84,38 @@ ED25519_ORACLE_SOURCES = [
     *ED25519_VERIFY_SOURCES,
     *ED25519_VECTOR_PROVENANCE_SOURCES,
 ]
+ED25519_SHIFT_BASE_EXCEPTION_SOURCE = ED25519_ROOT / "fe.c"
+ED25519_SHIFT_BASE_EXCEPTION_FLAG = "-fno-sanitize=shift-base"
+ED25519_SANITIZER_POLICY = {
+    "requested_sanitizers": ["address", "undefined"],
+    "full_ubsan_clean": False,
+    "exceptions": [
+        {
+            "source": "third_party/MeshCore/lib/ed25519/fe.c",
+            "source_sha256": (
+                "71082937da43def6ecaf7811c23410bd8ea763969dfec67383f8129b12b1926d"
+            ),
+            "disabled_check": "shift-base",
+            "compiler_flag": ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+            "scope": "host_oracle_object_only",
+            "observed_failure": "fe.c:714 carry0=-1 left shift 26",
+            "reason": (
+                "pinned source contains negative signed left shifts; keep the "
+                "upstream bytes unchanged and report that full UBSan is not clean"
+            ),
+        }
+    ],
+    "source_level_remediation": {
+        "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+        "status": "open",
+        "blocks_execution": False,
+        "blocks_release": True,
+        "required_closure": (
+            "defined-arithmetic source remediation with exact vector/KAT "
+            "equivalence and full enabled UBSan replay"
+        ),
+    },
+}
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
@@ -737,9 +769,11 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "owner": "pinned_mesh_signed_advert_gate_and_route_rules",
         "semantic": True,
         "scope": (
-            "canonical_post_decode_complete_self_seen_gate_caller_supplied_"
+            "canonical_post_decode_and_flood_filter_pass_complete_self_seen_"
+            "gate_caller_supplied_"
             "identity_result_callback_and_flood_route_capacity_projection_"
-            "with_direct_nonzero_intercept_and_d1l_overlong_reject_only_"
+            "with_direct_nonzero_intercept_and_d1l_overlong_and_path_count_"
+            "wrap_reject_only_"
             "upstream_identity_parity_false_no_external_verifier_contact_"
             "table_path_queue_dispatch_execution_or_rf"
         ),
@@ -754,6 +788,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             ],
             "upstream_identity_parity_proven": False,
             "d1l_overlong_reject_diverges_from_upstream_truncation": True,
+            "d1l_path_count_wrap_reject_diverges_from_upstream": True,
             "vectors": {"valid": 12, "invalid": 19},
         },
     },
@@ -1074,6 +1109,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle coverage boundary drifted")
     if manifest.get("wp04_closure_eligible") is not False:
         raise GateFailure("oracle manifest must not claim WP-04 closure")
+    if manifest.get("sanitizer_policy") != ED25519_SANITIZER_POLICY:
+        raise GateFailure("oracle sanitizer exception policy drifted")
     upstream = manifest.get("upstream")
     if not isinstance(upstream, dict) or upstream.get("commit") != EXPECTED_UPSTREAM["commit"]:
         raise GateFailure("oracle upstream commit does not match the pinned MeshCore pin")
@@ -1330,7 +1367,7 @@ def load_oracle_manifest() -> dict[str, Any]:
         != "repeater_room_canonical_response_ready_encoded_path_creation_kind_secret_source_exact_2000ms_room_push_and_300ms_coarse_dispatch_projection_only_flood_transport_scope_required_no_packet_pool_path_copy_clock_queue_dispatch_execution_storage_or_rf"
         or interface.get("signed_advert_dispatch_transition_available") is not True
         or interface.get("signed_advert_dispatch_transition_scope")
-        != "mesh_post_decode_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf"
+        != "mesh_post_decode_and_flood_filter_pass_complete_self_seen_caller_supplied_identity_result_callback_and_canonical_flood_route_capacity_projection_with_direct_nonzero_intercept_and_d1l_overlong_and_path_count_wrap_reject_only_upstream_identity_parity_false_no_external_verifier_tables_path_copy_clock_queue_dispatch_or_rf"
         or interface.get("signed_advert_send_transition_available") is not True
         or interface.get("signed_advert_send_transition_scope")
         != "mesh_createadvert_length_pool_error_rtc_sign_then_flood_transport_direct_zero_hop_ownership_queue_order_projection_only_signature_bytes_covered_separately_no_keypair_consistency_self_verify_packet_pool_clock_table_path_copy_queue_dispatch_or_rf"
@@ -1664,14 +1701,16 @@ def load_oracle_manifest() -> dict[str, Any]:
     ):
         raise GateFailure("oracle login-response dispatch matrix drifted")
     if determinism.get("signed_advert_dispatch_recipe") != (
-        "mesh_post_decode_complete_self_seen_gate_then_caller_supplied_"
+        "mesh_post_decode_and_flood_filter_pass_complete_self_seen_gate_then_"
+        "caller_supplied_"
         "identity_result_callback_and_canonical_flood_route_capacity_forward_"
         "policy_projection"
     ):
         raise GateFailure("oracle signed-advert dispatch recipe drifted")
     if determinism.get("signed_advert_dispatch_matrix") != (
         "twelve_valid_invalid_self_seen_incomplete_direct_zero_hop_flood_do_"
-        "not_retransmit_forward_policy_and_path_capacity_cases_plus_nineteen_"
+        "not_retransmit_forward_policy_path_capacity_and_one_byte_count_wrap_"
+        "reject_cases_plus_nineteen_"
         "fail_closed_boundaries"
     ):
         raise GateFailure("oracle signed-advert dispatch matrix drifted")
@@ -2407,6 +2446,11 @@ def command_plan(cc: str, cxx: str, build_dir: str = "$BUILD_DIR") -> list[list[
             "-g",
             "-fno-omit-frame-pointer",
             common_sanitizers,
+            *(
+                [ED25519_SHIFT_BASE_EXCEPTION_FLAG]
+                if source == ED25519_SHIFT_BASE_EXCEPTION_SOURCE
+                else []
+            ),
             "-Wall",
             "-Wextra",
             "-Werror",
@@ -2543,6 +2587,23 @@ def validate_completed_report(
         )
     )
     compiler_identities = (compiler.get("cc"), compiler.get("cxx"))
+    commands = report.get("commands")
+    commands = commands if isinstance(commands, list) else []
+    exception_commands = [
+        command
+        for command in commands
+        if isinstance(command, list)
+        and ED25519_SHIFT_BASE_EXCEPTION_FLAG in command
+    ]
+    exception_command_is_scoped = (
+        len(exception_commands) == 1
+        and any(
+            str(argument).replace("\\", "/").endswith(
+                "/third_party/MeshCore/lib/ed25519/fe.c"
+            )
+            for argument in exception_commands[0]
+        )
+    )
     required = {
         "schema_version": report.get("schema_version") == 1,
         "artifact_type": report.get("artifact_type")
@@ -2598,10 +2659,14 @@ def validate_completed_report(
             isinstance(identity, str) and "clang version 18.1.3" in identity
             for identity in compiler_identities
         ),
-        "commands": isinstance(report.get("commands"), list)
-        and len(report["commands"]) == 7
+        "commands": len(commands) == len(command_plan("cc", "cxx"))
         and isinstance(report.get("fuzz_command"), list),
-        "sanitizers_clean": report.get("sanitizer_errors") == 0
+        "sanitizer_exception_command": exception_command_is_scoped,
+        "sanitizer_policy": report.get("sanitizer_policy")
+        == ED25519_SANITIZER_POLICY,
+        "full_ubsan_clean_false": report.get("full_ubsan_clean") is False,
+        "sanitizer_policy_passed": report.get("sanitizer_policy_passed") is True,
+        "enabled_sanitizers_clean": report.get("sanitizer_errors") == 0
         and report.get("memory_errors") == 0
         and report.get("zero_overrun") is True
         and report.get("zero_corruption") is True,
@@ -2714,6 +2779,9 @@ def base_report(
             "fuzz_runs": args.runs,
             "sanitizers": ["address", "undefined"],
         },
+        "sanitizer_policy": oracle_manifest["sanitizer_policy"],
+        "full_ubsan_clean": False,
+        "sanitizer_policy_passed": None,
         "manifest": {
             "path": str(MANIFEST_PATH.relative_to(ROOT)).replace("\\", "/"),
             "sha256": sha256_file(MANIFEST_PATH),
@@ -2784,6 +2852,9 @@ def build_oracle_artifact(report: dict[str, Any]) -> dict[str, Any]:
         "wp04_closure_eligible": False,
         "closure_ready": False,
         "wp04_acceptance_ready": False,
+        "sanitizer_policy": report["sanitizer_policy"],
+        "full_ubsan_clean": report["full_ubsan_clean"],
+        "sanitizer_policy_passed": report.get("sanitizer_policy_passed"),
         "coverage_policy": oracle["coverage_policy"],
         "repository_commit": (report.get("source_verification") or {}).get(
             "repository_commit"
@@ -3009,6 +3080,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
 
         report["compiler"] = {"cc": cc_identity, "cxx": cxx_identity}
         report["sanitizer_errors"] = 0
+        report["sanitizer_policy_passed"] = True
         report["memory_errors"] = 0
         report["zero_overrun"] = True
         report["zero_corruption"] = True

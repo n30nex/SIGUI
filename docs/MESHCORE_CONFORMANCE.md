@@ -367,8 +367,10 @@ capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
 separate external `Ed25519::verify` implementation whose `Ed25519.h` is absent
-from the pinned gitlink. Signed-advert receive/send ordering is now projected,
-but concrete replay/timestamp policy, contact/table/path mutation, packet-pool,
+from the pinned gitlink. Signed-advert receive/send ordering is now projected.
+The receive projection starts only after `filterRecvFloodPacket()` has returned
+false; region/filter table behavior is not modeled or claimed. Concrete
+replay/timestamp policy, contact/table/path mutation, packet-pool,
 queue, and dispatch execution remain inside `Mesh`/`Dispatcher`. Therefore
 `identity_signed_advert` stays pending under
 `BLK-WP04-IDENTITY-DISPATCH-20260713`, which pins `Identity.cpp` and
@@ -378,7 +380,11 @@ dispatch fixtures. It also records the missing persisted-keypair consistency
 guard. That blocker does
 not prevent the strict-point or deterministic signed-packet slices or other independent oracle work;
 the new primitive must not be cited as upstream Identity parity or dispatch
-closure. The route-header capability likewise
+closure. It also fails closed for a one-byte path at count 63: pinned upstream
+wraps the six-bit count to the two-byte/zero-count encoding and drops the path
+bytes when serialized. That explicit D1L divergence prevents the foundation
+oracle from presenting the upstream overflow boundary as a valid append;
+concrete route/path mutation remains pending. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
@@ -437,7 +443,8 @@ package and the resolved `clang-18`/`clang++-18` bytes before the gate runs,
 then embeds that exact-commit tool-byte receipt in the conformance report. The
 runner builds the local wire codec and
 the pinned upstream packet-envelope code into a structural vector harness with
-AddressSanitizer and UndefinedBehaviorSanitizer. It separately builds the local
+AddressSanitizer and the enabled UndefinedBehaviorSanitizer checks. It
+separately builds the local
 wire decoder as the libFuzzer target, then:
 
 1. exercises valid packet envelopes in both directions;
@@ -476,10 +483,20 @@ The job writes
 uploads it as `d1l-meshcore-wire-conformance`. Evidence is acceptable only
 when it identifies the tested project commit and upstream gitlink, retains the
 seed/run/vector/malformed counts plus observed fuzz duration, reports zero
-sanitizer or canary failures, and keeps the two boundary fields above
+enabled-sanitizer or canary failures, and keeps the two boundary fields above
 unchanged. Any libFuzzer crash/timeout input is written beside the JSON under
 the uploaded `artifacts/meshcore-conformance` tree rather than discarded with
 the temporary build directory.
+
+The unchanged pinned `third_party/MeshCore/lib/ed25519/fe.c` contains negative
+signed left shifts (first observed at line 714 with `carry0 == -1`). Clang
+UBSan correctly reports that as `shift-base` undefined behavior. The host
+oracle disables only the `shift-base` check for that exact source/hash while
+retaining ASan, the rest of UBSan (including shift-count checks), source pins,
+and the Ed25519 KAT/vector matrix. Every receipt exposes the exception and sets
+`full_ubsan_clean` to false. This is a declared vendored-source exception, not
+a source-level fix or an unqualified sanitizer-clean claim; source-level
+defined-arithmetic remediation remains open.
 
 ## Explicit Non-Coverage
 

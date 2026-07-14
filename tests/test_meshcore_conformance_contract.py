@@ -309,6 +309,20 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     unverified_compiler = copy.deepcopy(report)
     unverified_compiler["toolchain"]["clang"]["bytes_verified"] = False
     mutations.append((unverified_compiler, "toolchain_bytes"))
+    hidden_sanitizer_exception = copy.deepcopy(report)
+    hidden_sanitizer_exception["sanitizer_policy"]["exceptions"] = []
+    mutations.append((hidden_sanitizer_exception, "sanitizer_policy"))
+    false_full_ubsan_claim = copy.deepcopy(report)
+    false_full_ubsan_claim["full_ubsan_clean"] = True
+    mutations.append((false_full_ubsan_claim, "full_ubsan_clean_false"))
+    unverified_sanitizer_policy = copy.deepcopy(report)
+    unverified_sanitizer_policy["sanitizer_policy_passed"] = False
+    mutations.append((unverified_sanitizer_policy, "sanitizer_policy_passed"))
+    unscoped_sanitizer_exception = copy.deepcopy(report)
+    unscoped_sanitizer_exception["commands"][5] = ["clang-18", "step-5"]
+    mutations.append(
+        (unscoped_sanitizer_exception, "sanitizer_exception_command")
+    )
 
     for payload, failure in mutations:
         with pytest.raises(ValueError, match=failure):
