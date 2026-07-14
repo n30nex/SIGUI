@@ -39,7 +39,7 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
-public-group, plain-DM, DM ACK+PATH, and general PATH-return operations. Its version 12 static
+public-group, plain-DM, DM ACK+PATH, and general PATH-return operations. Its version 13 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -82,6 +82,16 @@ or as a round trip. The production receive path and oracle share a strict
 public key and signature R before the pinned verifier. These close the
 verifier's otherwise malleable `S + L` acceptance and the deterministic
 identity-point forgery. Valid vectors run repeatedly under ASan and UBSan.
+Three signed-advert packet round trips additionally reproduce the exact
+`Mesh::createAdvert` pre-route payload for empty, named, and maximum app data
+from the fixed seed and caller-supplied timestamp, apply flood preparation,
+wire encode/decode, and authenticate before parsing. Twenty-three rejects cover
+constructor/parser nulls, size and capacity limits, type/version/length/path
+errors, public-key/timestamp/signature/app-data tampering, low-order points,
+non-canonical `S`, and output preservation. This is deterministic packet
+creation and authenticated parsing only; RTC/RNG ownership, upstream
+`Identity::verify` parity, replay policy, dispatch, contact mutation, duplicate
+suppression, and RF remain excluded.
 Three crypto-adapter known-answer vectors cover FIPS 180-4 SHA-256 `abc`, RFC
 4231 HMAC-SHA-256 test case 1, and the FIPS 197 AES-128 cipher example. Four
 public-group round trips and twenty-one reject vectors then cover the
@@ -165,8 +175,9 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_strict_signed_advert_verification`.
-The new `signed_advert_verification` capability proves only D1L's bounded
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification`.
+The `signed_advert_verification` and `signed_advert_packet_creation`
+capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
 vendored C verifier. Upstream `Identity.cpp` deliberately delegates to a
 separate external `Ed25519::verify` implementation whose `Ed25519.h` is absent
@@ -176,7 +187,7 @@ mutation, and duplicate suppression remain inside `Mesh`. Therefore
 `BLK-WP04-IDENTITY-DISPATCH-20260713`, which pins `Identity.cpp` and
 `Dispatcher.cpp` and names the missing external verifier plus deterministic
 packet-manager, table, contact, replay, and clock fixtures. That blocker does
-not prevent the strict-point slice or other independent oracle work;
+not prevent the strict-point or deterministic signed-packet slices or other independent oracle work;
 the new primitive must not be cited as upstream Identity parity or dispatch
 closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;

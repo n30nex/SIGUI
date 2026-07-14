@@ -25,6 +25,8 @@ static_assert(D1L_ADVERT_DATA_MAX_LEN ==
               "D1L production advert-data limit changed");
 static_assert(PUB_KEY_SIZE == D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES,
               "Pinned MeshCore public-key width changed");
+static_assert(SEED_SIZE == D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES,
+              "Pinned MeshCore identity-seed width changed");
 static_assert(SIGNATURE_SIZE == D1L_MESHCORE_ORACLE_SIGNATURE_BYTES,
               "Pinned MeshCore signature width changed");
 static_assert(D1L_MESHCORE_ORACLE_MIN_ACK_BYTES == sizeof(uint32_t),
@@ -574,6 +576,140 @@ extern "C" bool d1l_meshcore_oracle_verify_signed_advert(
     }
     return ed25519_verify(signature, message.data(), message_len, public_key) ==
            1;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_signed_advert_packet(
+    const uint8_t seed[D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES],
+    uint32_t timestamp,
+    const uint8_t *app_data,
+    size_t app_data_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (seed == nullptr || out_packet == nullptr ||
+        app_data_len > D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES ||
+        (app_data_len > 0U && app_data == nullptr)) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> public_key{};
+    std::array<uint8_t, PRV_KEY_SIZE> private_key{};
+    ed25519_create_keypair(public_key.data(), private_key.data(), seed);
+    if (!d1l_ed25519_encoded_point_is_strict(public_key.data())) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES>
+        timestamp_bytes = {
+            static_cast<uint8_t>(timestamp),
+            static_cast<uint8_t>(timestamp >> 8U),
+            static_cast<uint8_t>(timestamp >> 16U),
+            static_cast<uint8_t>(timestamp >> 24U),
+        };
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+        message{};
+    size_t message_len = 0U;
+    std::memcpy(message.data(), public_key.data(), public_key.size());
+    message_len += public_key.size();
+    std::memcpy(&message[message_len], timestamp_bytes.data(),
+                timestamp_bytes.size());
+    message_len += timestamp_bytes.size();
+    if (app_data_len > 0U) {
+        std::memcpy(&message[message_len], app_data, app_data_len);
+        message_len += app_data_len;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header = static_cast<uint8_t>(PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT);
+    size_t payload_len = 0U;
+    std::memcpy(&result.payload[payload_len], public_key.data(),
+                public_key.size());
+    payload_len += public_key.size();
+    std::memcpy(&result.payload[payload_len], timestamp_bytes.data(),
+                timestamp_bytes.size());
+    payload_len += timestamp_bytes.size();
+    uint8_t *signature = &result.payload[payload_len];
+    payload_len += D1L_MESHCORE_ORACLE_SIGNATURE_BYTES;
+    if (app_data_len > 0U) {
+        std::memcpy(&result.payload[payload_len], app_data, app_data_len);
+        payload_len += app_data_len;
+    }
+    ed25519_sign(signature, message.data(), message_len, public_key.data(),
+                 private_key.data());
+    if (!d1l_meshcore_oracle_verify_signed_advert(
+            public_key.data(), timestamp_bytes.data(), signature, app_data,
+            app_data_len)) {
+        return false;
+    }
+    result.payload_len = static_cast<uint16_t>(payload_len);
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_signed_advert_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t out_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    uint32_t *out_timestamp,
+    uint8_t *out_app_data,
+    size_t app_data_capacity,
+    size_t *out_app_data_len)
+{
+    if (packet == nullptr || out_public_key == nullptr ||
+        out_timestamp == nullptr || out_app_data == nullptr ||
+        out_app_data_len == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    constexpr size_t fixed_payload_len =
+        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+        D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+        D1L_MESHCORE_ORACLE_SIGNATURE_BYTES;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_ADVERT ||
+        upstream.payload_len < fixed_payload_len ||
+        upstream.payload_len >
+            fixed_payload_len + D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES) {
+        return false;
+    }
+
+    const uint8_t *public_key = upstream.payload;
+    const uint8_t *timestamp =
+        &upstream.payload[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES];
+    const uint8_t *signature =
+        &timestamp[D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES];
+    const uint8_t *app_data =
+        &signature[D1L_MESHCORE_ORACLE_SIGNATURE_BYTES];
+    const size_t app_data_len = upstream.payload_len - fixed_payload_len;
+    if (app_data_len > app_data_capacity ||
+        !d1l_meshcore_oracle_verify_signed_advert(
+            public_key, timestamp, signature, app_data, app_data_len)) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+        parsed_public_key{};
+    std::memcpy(parsed_public_key.data(), public_key, parsed_public_key.size());
+    const uint32_t parsed_timestamp =
+        static_cast<uint32_t>(timestamp[0]) |
+        (static_cast<uint32_t>(timestamp[1]) << 8U) |
+        (static_cast<uint32_t>(timestamp[2]) << 16U) |
+        (static_cast<uint32_t>(timestamp[3]) << 24U);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+        parsed_app_data{};
+    if (app_data_len > 0U) {
+        std::memcpy(parsed_app_data.data(), app_data, app_data_len);
+    }
+    std::memcpy(out_public_key, parsed_public_key.data(),
+                parsed_public_key.size());
+    *out_timestamp = parsed_timestamp;
+    if (app_data_len > 0U) {
+        std::memcpy(out_app_data, parsed_app_data.data(), app_data_len);
+    }
+    *out_app_data_len = app_data_len;
+    return true;
 }
 
 extern "C" bool d1l_meshcore_oracle_group_channel_hash(

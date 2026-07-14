@@ -74,10 +74,10 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 12
+ORACLE_CORPUS_VERSION = 13
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
-    "route_codes_ack_trace_and_strict_signed_advert_verification"
+    "route_codes_ack_trace_and_signed_advert_creation_strict_verification"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -222,7 +222,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
                 "deterministic Dispatcher packet-manager, mesh-table, contact, replay, and clock fixtures",
             ],
             "blocks_execution": False,
-            "unblocked_slice": "ed25519_point_validation",
+            "unblocked_slice": "signed_advert_packet_creation",
         },
     },
     {
@@ -394,6 +394,33 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
         ),
     },
+    {
+        "id": "signed_advert_packet_creation",
+        "status": "implemented",
+        "owner": "pinned_mesh_createadvert_vendored_ed25519",
+        "semantic": True,
+        "scope": (
+            "deterministic_seed_keypair_pre_route_packet_creation_and_"
+            "authenticated_parse_only_no_identity_verifier_dispatch_replay_"
+            "contact_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-SIGNED-ADVERT-PACKETS-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/lib/ed25519/keypair.c",
+                "third_party/MeshCore/lib/ed25519/sign.c",
+                "third_party/MeshCore/lib/ed25519/verify.c",
+            ],
+            "golden_vectors": (
+                "empty_named_and_maximum_app_data_exact_payloads_with_flood_"
+                "wire_roundtrip_and_authenticated_parse"
+            ),
+            "vectors": {"roundtrip": 3, "invalid": 23},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -401,6 +428,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
         "status": "partial",
         "capabilities": [
             "advert_data_fields",
+            "signed_advert_packet_creation",
             "signed_advert_verification",
             "ed25519_point_validation",
             "identity_signed_advert",
@@ -481,6 +509,7 @@ EXPECTED_ORACLE_PACKET_TYPES = [
         "wire_vector_covered": True,
         "semantic_capabilities": [
             "advert_data_fields",
+            "signed_advert_packet_creation",
             "signed_advert_verification",
             "ed25519_point_validation",
             "identity_signed_advert",
@@ -693,11 +722,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 308,
+        "roundtrip": 311,
         "valid": 20,
-        "invalid": 203,
-        "semantic": 515,
-        "total": 531,
+        "invalid": 226,
+        "semantic": 541,
+        "total": 557,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -709,6 +738,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 11,
             "semantic": 15,
             "total": 15,
+        },
+        "signed_advert_packet_creation": {
+            "roundtrip": 3,
+            "invalid": 23,
+            "semantic": 26,
+            "total": 26,
         },
         "signed_advert_verification": {
             "valid": 3,
@@ -801,6 +836,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("signed_advert_ed25519_available") is not True
         or interface.get("signed_advert_scope")
         != "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch"
+        or interface.get("signed_advert_packet_creation_available") is not True
+        or interface.get("signed_advert_packet_creation_scope")
+        != "deterministic_seed_keypair_pre_route_creation_and_authenticated_parse_only_no_identity_verifier_dispatch_replay_contact_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -870,8 +908,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_public_group_dm_ack_path_and_general_path_return_"
-        "vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_signed_advert_packets_public_group_dm_ack_path_"
+        "and_general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -1869,11 +1907,13 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                 != {
                     "packet_envelope": True,
                     "advert_data_fields": True,
+                    "signed_advert_packet_creation": True,
                     "signed_advert_verification": True,
                     "ed25519_point_validation": True,
                     "public_group_packets": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
+                    "path_return_route_codes": True,
                     "direct_flood_headers": True,
                     "ack_frames": True,
                     "trace_source_frames": True,

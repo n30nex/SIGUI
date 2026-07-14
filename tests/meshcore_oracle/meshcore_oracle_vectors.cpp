@@ -13,6 +13,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -22,6 +23,8 @@ constexpr std::size_t kPacketInvalidVectors = 5U;
 constexpr std::size_t kAdvertRoundtripVectors = 4U;
 constexpr std::size_t kAdvertInvalidVectors = 11U;
 constexpr std::size_t kSignedAdvertProductionVectors = 3U;
+constexpr std::size_t kSignedAdvertPacketRoundtripVectors = 3U;
+constexpr std::size_t kSignedAdvertPacketInvalidVectors = 23U;
 constexpr std::size_t kSignedAdvertValidVectors = 3U;
 constexpr std::size_t kSignedAdvertInvalidVectors = 11U;
 constexpr std::size_t kVerifierKatValidVectors = 1U;
@@ -585,7 +588,264 @@ int main()
                 break;
             }
         }
+
+        const uint32_t timestamp_value =
+            static_cast<uint32_t>(vector.timestamp[0]) |
+            (static_cast<uint32_t>(vector.timestamp[1]) << 8U) |
+            (static_cast<uint32_t>(vector.timestamp[2]) << 16U) |
+            (static_cast<uint32_t>(vector.timestamp[3]) << 24U);
+        d1l_meshcore_oracle_packet_t advert_packet{};
+        if (!d1l_meshcore_oracle_create_signed_advert_packet(
+                kSignedAdvertSeed.data(), timestamp_value, app_data,
+                vector.app_data.size(), &advert_packet) ||
+            advert_packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT) ||
+            advert_packet.path_len != 0U ||
+            advert_packet.payload_len !=
+                kSignedAdvertPublicKey.size() + vector.timestamp.size() +
+                    vector.signature.size() + vector.app_data.size() ||
+            std::memcmp(advert_packet.payload, kSignedAdvertPublicKey.data(),
+                        kSignedAdvertPublicKey.size()) != 0 ||
+            std::memcmp(&advert_packet.payload[kSignedAdvertPublicKey.size()],
+                        vector.timestamp.data(), vector.timestamp.size()) != 0 ||
+            std::memcmp(&advert_packet.payload[kSignedAdvertPublicKey.size() +
+                                               vector.timestamp.size()],
+                        vector.signature.data(), vector.signature.size()) != 0 ||
+            (!vector.app_data.empty() &&
+             std::memcmp(
+                 &advert_packet.payload[kSignedAdvertPublicKey.size() +
+                                        vector.timestamp.size() +
+                                        vector.signature.size()],
+                 vector.app_data.data(), vector.app_data.size()) != 0)) {
+            failures.push_back("signed advert packet creation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        constexpr std::array<uint16_t, 2U> transport_codes = {0x1357U,
+                                                               0x2468U};
+        uint8_t priority = 0U;
+        const uint8_t use_transport = index == 2U ? 1U : 0U;
+        if (!d1l_meshcore_oracle_prepare_flood(
+                &advert_packet, static_cast<uint8_t>(index + 1U),
+                use_transport, transport_codes.data(), &priority) ||
+            priority != 3U) {
+            failures.push_back("signed advert flood preparation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded_packet{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &advert_packet, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded_packet)) {
+            failures.push_back("signed advert wire roundtrip failed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+            parsed_public_key{};
+        uint32_t parsed_timestamp = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+            parsed_app_data{};
+        size_t parsed_app_data_len = 0U;
+        if (!d1l_meshcore_oracle_parse_signed_advert_packet(
+                &decoded_packet, parsed_public_key.data(), &parsed_timestamp,
+                parsed_app_data.data(), parsed_app_data.size(),
+                &parsed_app_data_len) ||
+            parsed_public_key != kSignedAdvertPublicKey ||
+            parsed_timestamp != timestamp_value ||
+            parsed_app_data_len != vector.app_data.size() ||
+            (!vector.app_data.empty() &&
+             std::memcmp(parsed_app_data.data(), vector.app_data.data(),
+                         vector.app_data.size()) != 0)) {
+            failures.push_back("signed advert authenticated parse changed vector " +
+                               std::to_string(index));
+        }
     }
+
+    const SignedAdvertVector &packet_vector = signed_advert_vectors[1];
+    const uint32_t packet_timestamp =
+        static_cast<uint32_t>(packet_vector.timestamp[0]) |
+        (static_cast<uint32_t>(packet_vector.timestamp[1]) << 8U) |
+        (static_cast<uint32_t>(packet_vector.timestamp[2]) << 16U) |
+        (static_cast<uint32_t>(packet_vector.timestamp[3]) << 24U);
+    d1l_meshcore_oracle_packet_t valid_advert_packet{};
+    if (!d1l_meshcore_oracle_create_signed_advert_packet(
+            kSignedAdvertSeed.data(), packet_timestamp,
+            packet_vector.app_data.data(), packet_vector.app_data.size(),
+            &valid_advert_packet)) {
+        failures.push_back("signed advert invalid-vector fixture creation failed");
+    }
+    auto expect_signed_advert_create_reject =
+        [&failures, &packet_vector, packet_timestamp](
+            const char *name, const uint8_t *seed, const uint8_t *app_data,
+            size_t app_data_len, bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_signed_advert_packet(
+                    seed, packet_timestamp, app_data, app_data_len,
+                    null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " signed advert creation mutated output");
+            }
+        };
+    expect_signed_advert_create_reject(
+        "null seed", nullptr, packet_vector.app_data.data(),
+        packet_vector.app_data.size(), false);
+    expect_signed_advert_create_reject("null app data", kSignedAdvertSeed.data(),
+                                       nullptr, 1U, false);
+    expect_signed_advert_create_reject(
+        "oversized app data", kSignedAdvertSeed.data(),
+        packet_vector.app_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, false);
+    expect_signed_advert_create_reject(
+        "null packet output", kSignedAdvertSeed.data(),
+        packet_vector.app_data.data(), packet_vector.app_data.size(), true);
+
+    auto expect_signed_advert_packet_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    size_t app_data_capacity) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+                public_key{};
+            public_key.fill(0xA5U);
+            const auto public_key_before = public_key;
+            uint32_t timestamp = 0xA5A5A5A5U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+                app_data{};
+            app_data.fill(0xA5U);
+            const auto app_data_before = app_data;
+            size_t app_data_len = 0xA5A5U;
+            if (d1l_meshcore_oracle_parse_signed_advert_packet(
+                    packet, public_key.data(), &timestamp, app_data.data(),
+                    app_data_capacity, &app_data_len)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert packet accepted");
+            } else if (public_key != public_key_before ||
+                       timestamp != 0xA5A5A5A5U ||
+                       app_data != app_data_before ||
+                       app_data_len != 0xA5A5U) {
+                failures.push_back(std::string(name) +
+                                   " signed advert parse mutated output");
+            }
+        };
+    expect_signed_advert_packet_reject(
+        "null packet", nullptr, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    {
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> public_key{};
+        uint32_t timestamp = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES> app_data{};
+        size_t app_data_len = 0U;
+        if (d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, nullptr, &timestamp, app_data.data(),
+                app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), nullptr,
+                app_data.data(), app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), &timestamp, nullptr,
+                app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), &timestamp,
+                app_data.data(), app_data.size(), nullptr)) {
+            failures.push_back("signed advert parser accepted null output");
+        }
+    }
+    expect_signed_advert_packet_reject(
+        "undersized app output", &valid_advert_packet,
+        packet_vector.app_data.size() - 1U);
+    auto wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
+    expect_signed_advert_packet_reject(
+        "wrong payload type", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.header |= static_cast<uint8_t>(PAYLOAD_VER_2
+                                                       << PH_VER_SHIFT);
+    expect_signed_advert_packet_reject(
+        "future payload version", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len =
+        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+        D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+        D1L_MESHCORE_ORACLE_SIGNATURE_BYTES - 1U;
+    expect_signed_advert_packet_reject(
+        "short payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len =
+        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+        D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+        D1L_MESHCORE_ORACLE_SIGNATURE_BYTES +
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U;
+    expect_signed_advert_packet_reject(
+        "oversized payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    for (const auto &mutation :
+         std::array<std::pair<const char *, size_t>, 4U>{
+             {{"tampered public key", 0U},
+              {"tampered timestamp", D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES},
+              {"tampered signature",
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES},
+              {"tampered app data",
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_SIGNATURE_BYTES}}}) {
+        wrong_advert_packet = valid_advert_packet;
+        wrong_advert_packet.payload[mutation.second] ^= 0x01U;
+        expect_signed_advert_packet_reject(
+            mutation.first, &wrong_advert_packet,
+            D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    }
+    wrong_advert_packet = valid_advert_packet;
+    std::memset(wrong_advert_packet.payload, 0,
+                D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
+    wrong_advert_packet.payload[0] = 0x01U;
+    expect_signed_advert_packet_reject(
+        "low-order public key", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    std::memset(&wrong_advert_packet.payload[
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                    D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+                0, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES);
+    wrong_advert_packet.payload[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                                D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES] =
+        0x01U;
+    expect_signed_advert_packet_reject(
+        "low-order signature R", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    const auto noncanonical_signature =
+        signature_plus_group_order(packet_vector.signature);
+    std::memcpy(&wrong_advert_packet.payload[
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                    D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+                noncanonical_signature.data(), noncanonical_signature.size());
+    expect_signed_advert_packet_reject(
+        "noncanonical signature S", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.path_len = 0xFFU;
+    expect_signed_advert_packet_reject(
+        "invalid path length", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len = 0U;
+    expect_signed_advert_packet_reject(
+        "empty payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
     const uint8_t empty_message = 0U;
     if (!d1l_ed25519_signature_s_is_canonical(
             kRfc8032EmptyMessageSignature.data())) {
@@ -3216,13 +3476,14 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_strict_signed_advert_verification\""
+                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
+                  kSignedAdvertPacketRoundtripVectors +
                   kGroupRoundtripVectors +
                   kDmRoundtripVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -3235,6 +3496,7 @@ int main()
                   kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
                   kGroupInvalidVectors +
@@ -3245,6 +3507,8 @@ int main()
                   kTraceInvalidVectors)
               << ",\"semantic\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertValidVectors +
                   kSignedAdvertInvalidVectors +
                   kPointValidationValidVectors +
@@ -3262,6 +3526,8 @@ int main()
               << ",\"total\":"
               << (kPacketRoundtripVectors + kPacketInvalidVectors +
                   kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertValidVectors + kSignedAdvertInvalidVectors +
                   kVerifierKatValidVectors + kVerifierKatInvalidVectors +
                   kPointValidationValidVectors +
@@ -3287,6 +3553,15 @@ int main()
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors)
               << ",\"total\":"
               << (kAdvertRoundtripVectors + kAdvertInvalidVectors) << "}"
+              << ",\"signed_advert_packet_creation\":{\"roundtrip\":"
+              << kSignedAdvertPacketRoundtripVectors << ",\"invalid\":"
+              << kSignedAdvertPacketInvalidVectors << ",\"semantic\":"
+              << (kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors)
+              << ",\"total\":"
+              << (kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors)
+              << "}"
               << ",\"signed_advert_verification\":{\"valid\":"
               << kSignedAdvertValidVectors << ",\"invalid\":"
               << kSignedAdvertInvalidVectors << ",\"semantic\":"
@@ -3361,6 +3636,7 @@ int main()
               << (kTraceRoundtripVectors + kTraceInvalidVectors) << "}}"
               << ",\"capabilities\":{\"packet_envelope\":true"
               << ",\"advert_data_fields\":true"
+              << ",\"signed_advert_packet_creation\":true"
               << ",\"signed_advert_verification\":true"
               << ",\"ed25519_point_validation\":true"
               << ",\"public_group_packets\":true"

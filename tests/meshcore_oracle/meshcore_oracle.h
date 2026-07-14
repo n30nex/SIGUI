@@ -17,6 +17,7 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_RAW_BYTES 255U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
+#define D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES 32U
 #define D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES 32U
 #define D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES 4U
 #define D1L_MESHCORE_ORACLE_SIGNATURE_BYTES 64U
@@ -123,6 +124,33 @@ bool d1l_meshcore_oracle_verify_signed_advert(
     const uint8_t signature[D1L_MESHCORE_ORACLE_SIGNATURE_BYTES],
     const uint8_t *app_data,
     size_t app_data_len);
+
+/*
+ * Deterministic Mesh::createAdvert packet construction with the pinned
+ * LocalIdentity seed-to-keypair and Ed25519 signer. The numeric timestamp is
+ * encoded little-endian, matching the supported ESP32/RP2040 targets. The
+ * parser authenticates the complete packet payload before returning fields.
+ * Creation returns the upstream pre-route layout; prepare_flood must be
+ * applied before a production-equivalent wire send.
+ *
+ * This boundary does not claim upstream Identity::verify parity, RTC/RNG
+ * ownership, replay/timestamp policy, dispatch, contact mutation, duplicate
+ * suppression, canonical advert app-data fields, or RF delivery.
+ */
+bool d1l_meshcore_oracle_create_signed_advert_packet(
+    const uint8_t seed[D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES],
+    uint32_t timestamp,
+    const uint8_t *app_data,
+    size_t app_data_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_signed_advert_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t out_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    uint32_t *out_timestamp,
+    uint8_t *out_app_data,
+    size_t app_data_capacity,
+    size_t *out_app_data_len);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash
