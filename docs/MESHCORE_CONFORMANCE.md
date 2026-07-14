@@ -42,7 +42,8 @@ around the pinned upstream `mesh::Packet` envelope reader/writer and the
 public-group, anonymous-login, regular REQ/RESPONSE, canonical repeater/room
 login-response, repeater/room ACL-miss password authorization, blank-password
 existing-ACL reuse, authorized-login ACL record transitions, plain-DM, DM
-ACK+PATH, and general PATH-return operations. Its version 20 static
+ACK+PATH, authenticated-request replay transitions, and general PATH-return
+operations. Its version 21 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -216,6 +217,22 @@ capacity, and output preservation. This is an immutable input-to-output
 bytes, unchanged room scheduling fields, identity signatures, secret derivation,
 password comparison, response creation, persistence execution, dispatch,
 routing, scheduling, and RF remain excluded.
+The authenticated-request replay capability adds fifteen accepted/rejected
+state fixtures and twelve structural rejects. It pins the source difference
+between repeater and room servers after authenticated request decryption: a
+repeater accepts only a strictly newer timestamp and advances timestamp and
+activity only after a successful handler result, while a room accepts an equal
+timestamp and commits timestamp, activity, and cleared push failures before
+handler execution. Direct room keep-alive requests bypass the ordinary handler,
+optionally advance `sync_since`, clear `pending_ack`, and are response-eligible
+only with a known out path; flooded keep-alives retain the ordinary handler
+path. Older requests leave state unchanged, and equality is explicitly marked
+as a duplicate even where the room source accepts it. Boundary cases cover
+timestamp zero and `UINT32_MAX`, direct/flood routing, handler success/failure,
+force-since presence, and unknown out paths. This projection begins after a
+validated 5-to-167-byte logical request and does not execute request schemas or
+handlers, create response hashes or packets, access storage, derive identity or
+secrets, dispatch, route, schedule, or claim RF behavior.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -290,7 +307,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -309,8 +326,8 @@ does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
 TRACE forwarding/path discovery, and login identity-signature, authenticated
-request replay, retained session, response, and admin dispatch flows also remain
-pending, so
+text replay, retained response orchestration, and admin dispatch flows also
+remain pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
 caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
@@ -341,10 +358,11 @@ and deterministic valid-input identity shared-secret derivation is pinned to
 the vendored ladder. The canonical repeater/room login-success response schema,
 ACL-miss password authorization/denial rules, and blank-password existing-ACL
 reuse boundary are implemented. Authorized-login reuse, insertion/eviction,
-replay gating, and modeled record-field transitions are also pinned, but
-request tags/types, authenticated-request replay, retained session/response
-orchestration, and admin dispatch still require identity signature handling
-plus deterministic state fixtures. These receipts describe missing
+replay gating, and modeled record-field transitions are also pinned.
+Authenticated-request replay and bounded record/session transitions are now
+pinned, but request tags/types beyond keep-alive, authenticated text replay,
+retained response orchestration, and admin dispatch still require identity
+signature handling plus deterministic state fixtures. These receipts describe missing
 oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers

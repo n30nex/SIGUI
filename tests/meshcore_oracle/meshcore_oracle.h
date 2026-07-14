@@ -24,6 +24,8 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER 1U
 #define D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL 2U
 #define D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH 0x01U
+#define D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE 0x02U
+#define D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN 0xFFU
 #define D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES 167U
 #define D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES 13U
 #define D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES 4U
@@ -97,6 +99,16 @@ typedef struct {
     uint8_t evicted;
     uint8_t contacts_dirty;
 } d1l_meshcore_oracle_login_acl_transition_t;
+
+typedef struct {
+    d1l_meshcore_oracle_login_acl_record_t record;
+    uint8_t replay_accepted;
+    uint8_t duplicate;
+    uint8_t handler_invoked;
+    uint8_t state_committed;
+    uint8_t direct_keep_alive;
+    uint8_t response_attempt_eligible;
+} d1l_meshcore_oracle_authenticated_request_transition_t;
 
 /*
  * Canonical field representation for upstream AdvertDataBuilder/Parser.
@@ -402,6 +414,34 @@ bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
     const d1l_meshcore_oracle_login_acl_record_t *records,
     size_t record_count,
     d1l_meshcore_oracle_login_acl_transition_t *out_transition);
+
+/*
+ * Deterministic replay/session projection for authenticated REQ handling after
+ * canonical decryption and a validated 5..167-byte logical request. Repeater
+ * requests require a strictly newer timestamp and commit timestamp/activity
+ * only after a caller-supplied successful handler result. Room requests accept
+ * equality, commit timestamp/activity and clear push failures before dispatch,
+ * and therefore retain those changes even when the handler yields no response.
+ * Direct room keep-alive requests bypass the handler, optionally advance
+ * sync_since, clear pending_ack, and are response-attempt eligible only with a
+ * known out-path. Structurally valid replay denial returns true with an
+ * unchanged record and explicit acceptance/duplicate flags.
+ *
+ * This function does not parse request schemas beyond the pinned keep-alive
+ * discriminator, execute a handler, hash or create a response, mutate storage,
+ * derive identity/secret state, dispatch, route, schedule, or claim RF.
+ */
+bool d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_direct,
+    uint8_t request_type,
+    uint8_t handler_succeeded,
+    size_t request_len,
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    uint32_t force_since,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_authenticated_request_transition_t *out_transition);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

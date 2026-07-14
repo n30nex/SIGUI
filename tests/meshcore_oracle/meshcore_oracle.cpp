@@ -1293,7 +1293,7 @@ extern "C" bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
         inserted = {};
         std::memcpy(inserted.public_key, sender_public_key,
                     D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
-        inserted.out_path_len = 0xFFU;
+        inserted.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
     }
 
     transition.client_index = static_cast<uint8_t>(selected_index);
@@ -1317,7 +1317,7 @@ extern "C" bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
         selected.room_push_failures = 0U;
     }
     if (is_route_flood == 1U) {
-        selected.out_path_len = 0xFFU;
+        selected.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
     }
     transition.accepted = 1U;
     transition.contacts_dirty =
@@ -1325,6 +1325,84 @@ extern "C" bool d1l_meshcore_oracle_apply_authorized_login_acl_transition(
                 authorized_permissions != 0U
             ? 1U
             : 0U;
+    *out_transition = transition;
+    return true;
+}
+
+extern "C" bool
+d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+    uint8_t server_advert_type,
+    uint8_t is_route_direct,
+    uint8_t request_type,
+    uint8_t handler_succeeded,
+    size_t request_len,
+    uint32_t sender_timestamp,
+    uint32_t current_time,
+    uint32_t force_since,
+    const d1l_meshcore_oracle_login_acl_record_t *record,
+    d1l_meshcore_oracle_authenticated_request_transition_t *out_transition)
+{
+    const bool direct_room_keep_alive =
+        server_advert_type == D1L_MESHCORE_ADVERT_TYPE_ROOM &&
+        request_type == D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE &&
+        is_route_direct == 1U;
+    if ((server_advert_type != D1L_MESHCORE_ADVERT_TYPE_REPEATER &&
+         server_advert_type != D1L_MESHCORE_ADVERT_TYPE_ROOM) ||
+        is_route_direct > 1U || handler_succeeded > 1U || request_len < 5U ||
+        request_len >
+            D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES ||
+        (request_type == D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE &&
+         handler_succeeded != 0U) ||
+        (force_since != 0U &&
+         (!direct_room_keep_alive || request_len < 9U)) ||
+        record == nullptr || out_transition == nullptr) {
+        return false;
+    }
+
+    d1l_meshcore_oracle_authenticated_request_transition_t transition{};
+    transition.record = *record;
+    if (server_advert_type == D1L_MESHCORE_ADVERT_TYPE_REPEATER) {
+        transition.duplicate = sender_timestamp == record->last_timestamp ? 1U : 0U;
+        if (sender_timestamp <= record->last_timestamp) {
+            *out_transition = transition;
+            return true;
+        }
+        transition.replay_accepted = 1U;
+        transition.handler_invoked = 1U;
+        if (handler_succeeded == 1U) {
+            transition.record.last_timestamp = sender_timestamp;
+            transition.record.last_activity = current_time;
+            transition.state_committed = 1U;
+            transition.response_attempt_eligible = 1U;
+        }
+        *out_transition = transition;
+        return true;
+    }
+
+    if (sender_timestamp < record->last_timestamp) {
+        *out_transition = transition;
+        return true;
+    }
+    transition.replay_accepted = 1U;
+    transition.duplicate = sender_timestamp == record->last_timestamp ? 1U : 0U;
+    transition.state_committed = 1U;
+    transition.record.last_timestamp = sender_timestamp;
+    transition.record.last_activity = current_time;
+    transition.record.room_push_failures = 0U;
+    if (direct_room_keep_alive) {
+        transition.direct_keep_alive = 1U;
+        if (request_len >= 9U && force_since > 0U) {
+            transition.record.room_sync_since = force_since;
+        }
+        transition.record.room_pending_ack = 0U;
+        transition.response_attempt_eligible =
+            record->out_path_len != D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN
+            ? 1U
+            : 0U;
+    } else {
+        transition.handler_invoked = 1U;
+        transition.response_attempt_eligible = handler_succeeded;
+    }
     *out_transition = transition;
     return true;
 }

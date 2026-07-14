@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 20,
+  "corpus_version": 21,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -58,10 +58,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "d0450c0537bbeee0941a914574ad2cd5f15c77dadc4721cc558db3707876afa8",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "8e15f875a172bdf2363f5002dce568e0f864f1b47a626093bae9219ce7ce0b3b",
-    "tests/meshcore_oracle/meshcore_oracle.h": "a4e605deb945fee7876fc5cd233ca4f70a9f928f574d1ab2bbdb2f32c4374c45",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "cbbea7a3c77859a850ebda2633ce9f8e79b4485fdad0a93dcb04be1760bbf05b",
+    "tests/meshcore_oracle/coverage_manifest.json": "5b72b7d6633eedfc7a3c21f3dbe6730be6748d1e6f9f8fc2475eb2a3b33c1ed5",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "a3960de48a1041fc0f6e6efda4c0c13a5ec5bb385ba857c88efa775abe0468fd",
+    "tests/meshcore_oracle/meshcore_oracle.h": "ec022160549efe58ff80bbc74c10cff285c216a7ea7962bfcb53b709e08c86af",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "9e54b8e9e6cc27b60fbf6209d86dce474bef108e335c23c8e6d068f8b7b19141",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -105,6 +105,8 @@
     "existing_acl_blank_login_reuse_scope": "repeater_room_blank_password_full_public_key_first_match_acl_reuse_response_secret_selection_and_client_out_path_mutation_boundary_only_no_storage_load_save_insert_evict_permissions_secret_timestamp_activity_replay_session_response_creation_dispatch_route_or_rf",
     "authorized_login_acl_transition_available": true,
     "authorized_login_acl_transition_scope": "clientacl_putclient_full_key_reuse_append_least_active_non_admin_evict_and_repeater_room_authorized_login_record_transition_projection_only_no_filesystem_full_path_bytes_unmodified_room_scheduling_identity_signature_secret_derivation_password_response_dispatch_route_or_rf",
+    "authenticated_request_replay_transition_available": true,
+    "authenticated_request_replay_transition_scope": "repeater_room_prevalidated_authenticated_request_timestamp_duplicate_handler_result_keep_alive_and_record_session_transition_projection_only_no_request_schema_handler_execution_response_hash_creation_storage_identity_secret_dispatch_route_schedule_or_rf",
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
     "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -148,6 +150,9 @@
       "authorized_login_acl_record": "third_party/MeshCore/src/helpers/ClientACL.h",
       "authorized_login_acl_repeater_transition": "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
       "authorized_login_acl_room_transition": "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+      "authenticated_request_replay_repeater": "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+      "authenticated_request_replay_room": "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+      "authenticated_request_replay_record": "third_party/MeshCore/src/helpers/ClientACL.h",
       "public_group_channel_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
       "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
       "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
@@ -169,7 +174,7 @@
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_canonical_login_response_login_password_authorization_existing_acl_blank_login_reuse_authorized_login_acl_transition_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_group_anonymous_login_regular_request_response_canonical_login_response_login_password_authorization_existing_acl_blank_login_reuse_authorized_login_acl_transition_authenticated_request_replay_transition_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
     "anonymous_login_recipe": "basechatmesh_timestamp_optional_room_sync_password_then_mesh_anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret",
@@ -186,6 +191,8 @@
     "existing_acl_blank_login_matrix": "twelve_empty_first_middle_last_duplicate_prefix_full_capacity_match_miss_route_and_server_cases",
     "authorized_login_acl_transition_recipe": "clientacl_putclient_full_key_reuse_append_or_strict_least_active_non_admin_evict_then_replay_gate_and_server_record_field_updates",
     "authorized_login_acl_transition_matrix": "sixteen_append_existing_replay_capacity_eviction_tie_all_admin_role_secret_time_room_state_dirty_and_flood_cases",
+    "authenticated_request_replay_transition_recipe": "prevalidated_request_repeater_strict_newer_and_handler_commit_vs_room_equal_accept_prehandler_commit_and_direct_keep_alive_session_update",
+    "authenticated_request_replay_transition_matrix": "fifteen_repeater_room_newer_equal_older_handler_success_failure_keep_alive_force_since_path_and_timestamp_boundary_cases",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
@@ -223,10 +230,10 @@
   },
   "vectors": {
     "roundtrip": 338,
-    "valid": 64,
-    "invalid": 378,
-    "semantic": 764,
-    "total": 780,
+    "valid": 79,
+    "invalid": 390,
+    "semantic": 791,
+    "total": 807,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -316,6 +323,12 @@
       "invalid": 13,
       "semantic": 29,
       "total": 29
+    },
+    "authenticated_request_replay_transition_fixtures": {
+      "valid": 15,
+      "invalid": 12,
+      "semantic": 27,
+      "total": 27
     },
     "dm_encrypt_decrypt": {
       "roundtrip": 268,
@@ -564,7 +577,7 @@
       "id": "login_request_response_admin",
       "status": "pending",
       "owner": "unassigned",
-      "blocked_by": "identity_signature_and_authenticated_request_replay_retained_session_response_dispatch_fixtures",
+      "blocked_by": "identity_signature_and_authenticated_text_replay_retained_response_dispatch_fixtures",
       "implemented_prerequisites": [
         "anonymous_login_request_packets",
         "regular_request_response_packets",
@@ -572,7 +585,8 @@
         "canonical_login_response_packets",
         "login_password_authorization_fixtures",
         "existing_acl_blank_login_reuse_fixtures",
-        "authorized_login_acl_transition_fixtures"
+        "authorized_login_acl_transition_fixtures",
+        "authenticated_request_replay_transition_fixtures"
       ]
     },
     {
@@ -752,6 +766,27 @@
           "invalid": 13
         }
       }
+    },
+    {
+      "id": "authenticated_request_replay_transition_fixtures",
+      "status": "implemented",
+      "owner": "pinned_repeater_room_authenticated_request_replay_rules",
+      "semantic": true,
+      "scope": "canonical_repeater_room_prevalidated_authenticated_request_newer_equal_older_handler_commit_and_direct_keep_alive_record_session_transition_projection_only_no_request_schema_handler_execution_response_hash_creation_storage_identity_secret_dispatch_route_schedule_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-AUTHENTICATED-REQUEST-REPLAY-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+          "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+          "third_party/MeshCore/src/helpers/ClientACL.h"
+        ],
+        "vectors": {
+          "valid": 15,
+          "invalid": 12
+        }
+      }
     }
   ],
   "production_boundary": {
@@ -770,6 +805,7 @@
       "canonical repeater/room ACL-miss password authorization and denial rules, including admin-first precedence, guest roles, and room read-only fallback",
       "canonical repeater/room blank-password existing-ACL first-match reuse, response-secret selection, and client out-path mutation boundary",
       "canonical ClientACL full-key reuse, append or eviction selection plus repeater/room authorized-login record transition projection",
+      "canonical repeater/room authenticated-request replay, handler-result commit, and direct keep-alive record/session transition projection",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -788,7 +824,8 @@
       "repeater/room canonical login-success response role, permissions, uniqueness, and firmware schemas with exact payloads and matrix digest, without password authorization, ACL mutation, replay, retained session transition, dispatch, routing, or RF",
       "repeater/room ACL-miss password authorization and denial decisions, including empty and maximum passwords, admin-first precedence, guest roles, and room read-only fallback, without existing ACL lookup, contact mutation, replay, secret derivation, retained session transition, response creation, dispatch, routing, or RF",
       "repeater/room blank-password full-public-key first-match ACL lookup and reuse decisions, including caller-versus-stored response secret selection and flood-only client out-path invalidation, without storage load/save, ACL insertion/eviction, permission/secret/timestamp/activity mutation, replay, retained session transition, response creation, dispatch, routing, or RF",
-      "ClientACL full-public-key reuse, append, strict least-active non-admin eviction and last-slot fallback plus repeater/room authorized-login replay and record-field transition projection, without filesystem execution, full path bytes, unmodified room scheduling fields, identity signature/secret derivation, password comparison, response creation, dispatch, routing, or RF"
+      "ClientACL full-public-key reuse, append, strict least-active non-admin eviction and last-slot fallback plus repeater/room authorized-login replay and record-field transition projection, without filesystem execution, full path bytes, unmodified room scheduling fields, identity signature/secret derivation, password comparison, response creation, dispatch, routing, or RF",
+      "repeater/room authenticated-request newer/equal/older replay, handler-result commit, and direct keep-alive force-since/pending-ack record/session transitions, without request schema, handler execution, response creation, dispatch, routing, scheduling, or RF"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

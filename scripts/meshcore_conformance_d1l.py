@@ -75,14 +75,15 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 20
+ORACLE_CORPUS_VERSION = 21
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
     "and_anonymous_login_request_and_regular_request_response_crypto_and_"
     "strict_identity_shared_secret_derivation_and_canonical_login_response_"
     "packets_and_login_password_authorization_fixtures_and_existing_acl_"
-    "blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures"
+    "blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_"
+    "and_authenticated_request_replay_transition_fixtures"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -396,8 +397,8 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "status": "pending",
         "owner": "unassigned",
         "blocked_by": (
-            "identity_signature_and_authenticated_request_replay_retained_"
-            "session_response_dispatch_fixtures"
+            "identity_signature_and_authenticated_text_replay_retained_"
+            "response_dispatch_fixtures"
         ),
         "implemented_prerequisites": [
             "anonymous_login_request_packets",
@@ -407,6 +408,7 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "login_password_authorization_fixtures",
             "existing_acl_blank_login_reuse_fixtures",
             "authorized_login_acl_transition_fixtures",
+            "authenticated_request_replay_transition_fixtures",
         ],
     },
     {
@@ -619,6 +621,30 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"valid": 16, "invalid": 13},
         },
     },
+    {
+        "id": "authenticated_request_replay_transition_fixtures",
+        "status": "implemented",
+        "owner": "pinned_repeater_room_authenticated_request_replay_rules",
+        "semantic": True,
+        "scope": (
+            "canonical_repeater_room_prevalidated_authenticated_request_newer_"
+            "equal_older_handler_commit_and_direct_keep_alive_record_session_"
+            "transition_projection_only_no_request_schema_handler_execution_"
+            "response_hash_creation_storage_identity_secret_dispatch_route_"
+            "schedule_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-AUTHENTICATED-REQUEST-REPLAY-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp",
+                "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp",
+                "third_party/MeshCore/src/helpers/ClientACL.h",
+            ],
+            "vectors": {"valid": 15, "invalid": 12},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -681,6 +707,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
             "login_password_authorization_fixtures",
             "existing_acl_blank_login_reuse_fixtures",
             "authorized_login_acl_transition_fixtures",
+            "authenticated_request_replay_transition_fixtures",
             "login_request_response_admin",
         ],
     },
@@ -936,10 +963,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
         "roundtrip": 338,
-        "valid": 64,
-        "invalid": 378,
-        "semantic": 764,
-        "total": 780,
+        "valid": 79,
+        "invalid": 390,
+        "semantic": 791,
+        "total": 807,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -1030,6 +1057,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "semantic": 29,
             "total": 29,
         },
+        "authenticated_request_replay_transition_fixtures": {
+            "valid": 15,
+            "invalid": 12,
+            "semantic": 27,
+            "total": 27,
+        },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
             "invalid": 29,
@@ -1115,6 +1148,10 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("authorized_login_acl_transition_available") is not True
         or interface.get("authorized_login_acl_transition_scope")
         != "clientacl_putclient_full_key_reuse_append_least_active_non_admin_evict_and_repeater_room_authorized_login_record_transition_projection_only_no_filesystem_full_path_bytes_unmodified_room_scheduling_identity_signature_secret_derivation_password_response_dispatch_route_or_rf"
+        or interface.get("authenticated_request_replay_transition_available")
+        is not True
+        or interface.get("authenticated_request_replay_transition_scope")
+        != "repeater_room_prevalidated_authenticated_request_timestamp_duplicate_handler_result_keep_alive_and_record_session_transition_projection_only_no_request_schema_handler_execution_response_hash_creation_storage_identity_secret_dispatch_route_schedule_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -1230,6 +1267,15 @@ def load_oracle_manifest() -> dict[str, Any]:
                 "authorized_login_acl_room_transition": (
                     "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
                 ),
+                "authenticated_request_replay_repeater": (
+                    "third_party/MeshCore/examples/simple_repeater/MyMesh.cpp"
+                ),
+                "authenticated_request_replay_room": (
+                    "third_party/MeshCore/examples/simple_room_server/MyMesh.cpp"
+                ),
+                "authenticated_request_replay_record": (
+                    "third_party/MeshCore/src/helpers/ClientACL.h"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -1276,7 +1322,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_"
         "group_anonymous_login_regular_request_response_canonical_login_"
         "response_login_password_authorization_existing_acl_blank_login_"
-        "reuse_authorized_login_acl_transition_dm_ack_path_and_"
+        "reuse_authorized_login_acl_transition_authenticated_request_replay_"
+        "transition_dm_ack_path_and_"
         "general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
@@ -1358,6 +1405,17 @@ def load_oracle_manifest() -> dict[str, Any]:
         "secret_time_room_state_dirty_and_flood_cases"
     ):
         raise GateFailure("oracle authorized login ACL transition matrix drifted")
+    if determinism.get("authenticated_request_replay_transition_recipe") != (
+        "prevalidated_request_repeater_strict_newer_and_handler_commit_vs_"
+        "room_equal_accept_prehandler_commit_and_direct_keep_alive_session_"
+        "update"
+    ):
+        raise GateFailure("oracle authenticated-request replay recipe drifted")
+    if determinism.get("authenticated_request_replay_transition_matrix") != (
+        "fifteen_repeater_room_newer_equal_older_handler_success_failure_keep_"
+        "alive_force_since_path_and_timestamp_boundary_cases"
+    ):
+        raise GateFailure("oracle authenticated-request replay matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -2354,6 +2412,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "login_password_authorization_fixtures": True,
                     "existing_acl_blank_login_reuse_fixtures": True,
                     "authorized_login_acl_transition_fixtures": True,
+                    "authenticated_request_replay_transition_fixtures": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

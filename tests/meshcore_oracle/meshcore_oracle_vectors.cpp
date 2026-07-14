@@ -48,6 +48,8 @@ constexpr std::size_t kExistingAclBlankLoginValidVectors = 12U;
 constexpr std::size_t kExistingAclBlankLoginInvalidVectors = 14U;
 constexpr std::size_t kLoginAclTransitionValidVectors = 16U;
 constexpr std::size_t kLoginAclTransitionInvalidVectors = 13U;
+constexpr std::size_t kAuthenticatedRequestReplayValidVectors = 15U;
+constexpr std::size_t kAuthenticatedRequestReplayInvalidVectors = 12U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -3529,6 +3531,226 @@ int main()
         failures.push_back("login ACL transition invalid vector count drifted");
     }
 
+    using AuthenticatedRequestTransition =
+        d1l_meshcore_oracle_authenticated_request_transition_t;
+    size_t authenticated_request_replay_valid_count = 0U;
+    auto expect_authenticated_request_replay =
+        [&failures, &login_acl_record_matches,
+         &authenticated_request_replay_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_direct,
+            uint8_t request_type, uint8_t handler_succeeded,
+            size_t request_len, uint32_t sender_timestamp,
+            uint32_t current_time, uint32_t force_since,
+            const LoginAclRecord &input, const LoginAclRecord &expected_record,
+            uint8_t replay_accepted, uint8_t duplicate,
+            uint8_t handler_invoked, uint8_t state_committed,
+            uint8_t direct_keep_alive, uint8_t response_attempt_eligible) {
+            AuthenticatedRequestTransition transition{};
+            ++authenticated_request_replay_valid_count;
+            if (!d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+                    server_type, is_route_direct, request_type,
+                    handler_succeeded, request_len, sender_timestamp,
+                    current_time, force_since, &input, &transition) ||
+                !login_acl_record_matches(transition.record,
+                                          expected_record) ||
+                transition.replay_accepted != replay_accepted ||
+                transition.duplicate != duplicate ||
+                transition.handler_invoked != handler_invoked ||
+                transition.state_committed != state_committed ||
+                transition.direct_keep_alive != direct_keep_alive ||
+                transition.response_attempt_eligible !=
+                    response_attempt_eligible) {
+                failures.push_back(std::string(name) +
+                                   " authenticated request replay changed");
+            }
+        };
+    LoginAclRecord request_record = make_login_acl_record(
+        0x41U, 0xA3U, 5U, 0x44U, 10U, 20U, 30U, 40U, 5U);
+    LoginAclRecord request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    expect_authenticated_request_replay(
+        "repeater newer successful request",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x01U, 1U, 5U, 11U, 21U,
+        0U, request_record, request_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "repeater handler failure preserves watermark",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 0U, 5U, 11U, 21U,
+        0U, request_record, request_record, 1U, 0U, 1U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater equal timestamp duplicate",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 1U, 5U, 10U, 21U,
+        0U, request_record, request_record, 0U, 1U, 0U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater older timestamp replay",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x01U, 1U, 5U, 9U, 21U, 0U,
+        request_record, request_record, 0U, 0U, 0U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater keep-alive handler miss",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_record, 1U, 0U, 1U, 0U, 0U, 0U);
+
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room newer successful request", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x01U, 1U, 5U, 11U, 21U, 0U, request_record, request_expected, 1U,
+        0U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "room handler failure still commits", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        1U, 0x01U, 0U, 5U, 11U, 21U, 0U, request_record,
+        request_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+    request_expected = request_record;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room equal timestamp reexecutes handler",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U, 5U, 10U, 21U, 0U,
+        request_record, request_expected, 1U, 1U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "room older timestamp replay", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U, 5U, 9U, 21U, 0U, request_record, request_record, 0U, 0U,
+        0U, 0U, 0U, 0U);
+
+    request_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_pending_ack = 0U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room short direct keep-alive unknown path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 0U);
+    request_record.out_path_len = 3U;
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_sync_since = 99U;
+    request_expected.room_pending_ack = 0U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room direct keep-alive force since",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 9U, 11U, 21U, 99U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 1U);
+    request_expected.room_sync_since = request_record.room_sync_since;
+    expect_authenticated_request_replay(
+        "room direct keep-alive zero force since",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 9U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 1U);
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room flood keep-alive invokes handler",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+
+    request_record.last_timestamp = 0U;
+    request_record.last_activity = 7U;
+    request_record.room_push_failures = 5U;
+    request_expected = request_record;
+    request_expected.last_activity = 8U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room zero timestamp duplicate accepted",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U, 5U, 0U, 8U, 0U,
+        request_record, request_expected, 1U, 1U, 1U, 1U, 0U, 1U);
+    request_record.last_timestamp = UINT32_MAX - 1U;
+    request_expected = request_record;
+    request_expected.last_timestamp = UINT32_MAX;
+    request_expected.last_activity = 9U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room maximum timestamp accepted", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U,
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES,
+        UINT32_MAX, 9U, 0U, request_record, request_expected, 1U, 0U, 1U,
+        1U, 0U, 1U);
+    if (authenticated_request_replay_valid_count !=
+        kAuthenticatedRequestReplayValidVectors) {
+        failures.push_back(
+            "authenticated request replay valid vector count drifted");
+    }
+
+    size_t authenticated_request_replay_invalid_count = 0U;
+    auto expect_authenticated_request_replay_reject =
+        [&failures, &authenticated_request_replay_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_direct,
+            uint8_t request_type, uint8_t handler_succeeded,
+            size_t request_len, uint32_t force_since,
+            const LoginAclRecord *input,
+            AuthenticatedRequestTransition *output) {
+            AuthenticatedRequestTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++authenticated_request_replay_invalid_count;
+            if (d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+                    server_type, is_route_direct, request_type,
+                    handler_succeeded, request_len, 11U, 21U, force_since,
+                    input, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " request replay reject changed output");
+            }
+        };
+    AuthenticatedRequestTransition rejected_request_transition{};
+    expect_authenticated_request_replay_reject(
+        "none request server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "chat request server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "sensor request server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "noncanonical request route", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        0x01U, 1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "noncanonical handler result", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x01U, 2U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "short request", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 1U,
+        4U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "overlong request", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U,
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U, 0U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "ordinary request force since", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U, 9U, 1U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "short keep-alive force since", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 1U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "keep-alive successful handler", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 1U, 5U, 0U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "null request record", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U,
+        5U, 0U, nullptr, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "null request transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, nullptr);
+    if (authenticated_request_replay_invalid_count !=
+        kAuthenticatedRequestReplayInvalidVectors) {
+        failures.push_back(
+            "authenticated request replay invalid vector count drifted");
+    }
+
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
     const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
@@ -5661,7 +5883,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -5684,6 +5906,7 @@ int main()
                    kLoginPasswordAuthorizationValidVectors +
                    kExistingAclBlankLoginValidVectors +
                    kLoginAclTransitionValidVectors +
+                   kAuthenticatedRequestReplayValidVectors +
                    kExpectedAckValidVectors)
               << ",\"invalid\":"
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
@@ -5697,6 +5920,7 @@ int main()
                    kLoginPasswordAuthorizationInvalidVectors +
                    kExistingAclBlankLoginInvalidVectors +
                    kLoginAclTransitionInvalidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -5725,6 +5949,8 @@ int main()
                     kExistingAclBlankLoginInvalidVectors +
                     kLoginAclTransitionValidVectors +
                     kLoginAclTransitionInvalidVectors +
+                    kAuthenticatedRequestReplayValidVectors +
+                    kAuthenticatedRequestReplayInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5759,6 +5985,8 @@ int main()
                     kExistingAclBlankLoginInvalidVectors +
                     kLoginAclTransitionValidVectors +
                     kLoginAclTransitionInvalidVectors +
+                    kAuthenticatedRequestReplayValidVectors +
+                    kAuthenticatedRequestReplayInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -5882,6 +6110,16 @@ int main()
                << (kLoginAclTransitionValidVectors +
                    kLoginAclTransitionInvalidVectors)
                << "}"
+               << ",\"authenticated_request_replay_transition_fixtures\":{\"valid\":"
+               << kAuthenticatedRequestReplayValidVectors << ",\"invalid\":"
+               << kAuthenticatedRequestReplayInvalidVectors
+               << ",\"semantic\":"
+               << (kAuthenticatedRequestReplayValidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors)
+               << ",\"total\":"
+               << (kAuthenticatedRequestReplayValidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors)
+               << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -5936,6 +6174,7 @@ int main()
                 << ",\"login_password_authorization_fixtures\":true"
                 << ",\"existing_acl_blank_login_reuse_fixtures\":true"
                 << ",\"authorized_login_acl_transition_fixtures\":true"
+                << ",\"authenticated_request_replay_transition_fixtures\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"
