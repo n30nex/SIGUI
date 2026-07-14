@@ -984,6 +984,7 @@ EXPECTED_ORACLE_PRODUCTION_BINDING_SOURCE_PATHS = {
     "main/CMakeLists.txt",
     "main/mesh/advert_data.h",
     "main/mesh/ed25519_canonical.h",
+    "main/mesh/meshcore_route_selection.h",
     "main/mesh/meshcore_service.c",
     "overlays/meshcore_ed25519_defined/fe.c",
     "overlays/meshcore_ed25519_defined/ge.c",

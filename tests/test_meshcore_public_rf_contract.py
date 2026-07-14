@@ -37,10 +37,12 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
         "static void parse_rx_public_packet", 1
     )[0]
     public_sender = source.split("esp_err_t d1l_meshcore_service_send_public", 1)[1].split(
-        "esp_err_t d1l_meshcore_service_send_dm", 1
+        "static esp_err_t meshcore_service_send_dm_with_result", 1
     )[0]
-    dm_sender = source.split("esp_err_t d1l_meshcore_service_send_dm", 1)[1].split(
-        "esp_err_t d1l_meshcore_service_request_trace_probe", 1
+    dm_sender = source.split(
+        "static esp_err_t meshcore_service_send_dm_with_result", 1
+    )[1].split(
+        "esp_err_t d1l_meshcore_service_send_dm", 1
     )[0]
 
     assert "validate_user_text(text)" in public_builder
