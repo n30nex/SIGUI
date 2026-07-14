@@ -921,7 +921,7 @@
         },
         {
           "filename": "provenance_e79fb56160914f4483515f4f70998aa2f8961496.json",
-          "kind": "exact_merged_main_slsa_provenance",
+          "kind": "exact_merged_main_unsigned_slsa_v1_provenance",
           "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
           "workflow_run": "29300795502",
           "valid": true,
