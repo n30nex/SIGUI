@@ -128,6 +128,25 @@ def test_unknown_state_is_rejected():
     assert any("unknown status" in error for error in validate_ledger(ledger))
 
 
+def test_open_package_blocker_must_be_referenced_by_its_owner():
+    ledger = ledger_copy()
+    blocker = next(
+        item
+        for item in ledger["blockers"]
+        if item.get("status") == "open"
+        and item.get("blocks_package", item.get("blocks_execution", True)) is True
+    )
+    owner = package(ledger, blocker["work_package"])
+    owner["blockers"] = [
+        blocker_id for blocker_id in owner.get("blockers", []) if blocker_id != blocker["id"]
+    ]
+
+    assert any(
+        blocker["id"] in error and "is not referenced" in error
+        for error in validate_ledger(ledger)
+    )
+
+
 def test_valid_evidence_must_match_declared_exact_commit():
     ledger = ledger_copy()
     package(ledger, "WP-01")["evidence"][0]["commit"] = (

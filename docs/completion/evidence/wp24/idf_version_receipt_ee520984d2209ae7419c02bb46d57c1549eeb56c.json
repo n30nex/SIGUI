@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "artifact_type": "wp24_idf_version_receipt_aggregate",
+  "repository": "n30nex/SIGUI",
+  "work_package": "WP-24",
+  "capability": "exact_fail_closed_esp_idf_version_receipt",
+  "identities": {
+    "base_commit": "83a811247aa79a379ee810da7489c90c62112fee",
+    "pull_request": 97,
+    "head_commit": "27c7a32e3ad51313f96d7e678dadef4a24101e75",
+    "merge_commit": "ee520984d2209ae7419c02bb46d57c1549eeb56c",
+    "merge_tree": "d4717f592e3e7ff08c01911426039df6786f7921"
+  },
+  "pull_request_gate": {
+    "push_run": 29311854987,
+    "pull_request_run": 29311857208,
+    "status": "success",
+    "host_tests_passed_per_run": 935,
+    "checksum_contract_tests_passed_per_run": 32,
+    "actions_only_esp32_build": true,
+    "rp2040_status": "skipped_include_sd_bridge_false",
+    "artifact_archives_verified": 10,
+    "checksum_manifests_verified": 6,
+    "checksum_entries_verified": 92,
+    "extracted_files_per_run": 219,
+    "idf_version_receipt_sha256": "b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea"
+  },
+  "merged_main": {
+    "commit": "ee520984d2209ae7419c02bb46d57c1549eeb56c",
+    "workflow_run": 29313013731,
+    "status": "success",
+    "host_tests_passed": 935,
+    "checksum_contract_tests_passed": 32,
+    "actions_only_esp32_build": true,
+    "rp2040_status": "skipped_include_sd_bridge_false",
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "downloaded_tree_file_count": 219,
+    "downloaded_tree_total_bytes": 72428299,
+    "downloaded_tree_sha256": "b3eac68f12ab9fd7192319a3bfdfac56c9104f8d0a5a5f8b7c416e8e838cc606",
+    "operator_receipt": "F:/SIGUI-artifacts/main-ee52098/merged-main-gate-receipt.json",
+    "operator_receipt_sha256": "e69176684dbe76b54e72f9cb062ce5319b08269f75fbf9e66a00ff7a88260492",
+    "artifact_archives": [
+      {
+        "name": "d1l-release-package",
+        "artifact_id": 8302972288,
+        "archive_sha256": "611ead60fbf6f4b995c9c93a90c5130833812433c8a5ea579a8e296babcc922e"
+      },
+      {
+        "name": "d1l-firmware-artifacts",
+        "artifact_id": 8302971599,
+        "archive_sha256": "d8152eaa32297adee09194950f23ddea50d7c02d2ceb34a690bcb4f892d275fc"
+      },
+      {
+        "name": "d1l-idf55-migration-state",
+        "artifact_id": 8302969910,
+        "archive_sha256": "419d0b0a0ba7e527fdef1fc6191f33be4e2e0e640d4cd40acc0d6790ab028ff4"
+      },
+      {
+        "name": "d1l-host-artifacts",
+        "artifact_id": 8302902849,
+        "archive_sha256": "875e80bc3e43c872ed9e0e7d0262d989ac9b6688637b27147d4f4ef29329025b"
+      },
+      {
+        "name": "d1l-meshcore-wire-conformance",
+        "artifact_id": 8302834631,
+        "archive_sha256": "a2287ec1aca42efff8fd945d117f991799ad826215ce62711dabcdcd6da4a860"
+      }
+    ]
+  },
+  "idf_version_receipt": {
+    "path": "d1l-idf55-migration-state/idf-version.txt",
+    "expected": "ESP-IDF v5.5.4\n",
+    "byte_length": 15,
+    "line_count": 1,
+    "sha256": "b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea",
+    "exact": true,
+    "activation_chatter_absent": true,
+    "nonzero_capture_truncates_receipt": true,
+    "real_shell_exit_23_mutation_rejected": true,
+    "focused_mutation_tests_passed": 6
+  },
+  "release_inputs": {
+    "firmware_sha256s_sha256": "63bff13c1a2a581e508c1a4be5da6dfd984cd2efef9b61ec521fb612fe1dbc03",
+    "build_inputs_sha256s_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_sha256s_sha256": "3f73a7ea93e03ef16cd5b40733adb9e43848af5aa14d5fc90d70b093a4fc0d6c",
+    "release_package_manifest_sha256": "88b214cd6c8a9c6188284e6c138360843fc288516aabefc17d11a540f25811b7",
+    "application_sha256": "29a7c29e4d1c0368feab2bd803de83003ec046d49cbe72167ead6561a81377ef",
+    "full_flash_sha256": "7fd595c36c3c0fcb2464ee31e145208a0734b45466d9d77da069a38db23e3826",
+    "host_success_marker_sha256": "ac0e581d9d28d1d450a830c65d3467d1b8e8a0c4a147534bc2a25b370fa63b6f",
+    "sbom_sha256": "ff4b529791bf9980be09e1e18eea09aaae75a89ab9e2afa153c837d230529fb5",
+    "provenance_sha256": "fbff02bff487ed3048de41a26cdcdd8e93d065e4df0b8b61e653d1a43758b433",
+    "orlp_notice_sha256": "f68d76b9c1c2271422e55134ea94cf71f2ac3fc3ed6a7ec6b83a1a0538753214",
+    "official_sbom_validator": true,
+    "official_provenance_validator": true,
+    "provenance_authenticated": false,
+    "slsa_build_level_claimed": false
+  },
+  "runtime_and_oracle_continuity": {
+    "wire_vectors": 864,
+    "fuzz_runs": 100000,
+    "fuzz_findings": 0,
+    "full_ubsan_clean": true,
+    "sanitizer_exception_count": 0,
+    "sanitizer_error_count": 0,
+    "memory_error_count": 0,
+    "raw_signed_runtime_sha256": "6682e80532d523495cd03613caf854e947d73c5258d97e328c9d1aaefa50a8db",
+    "canonical_signed_runtime_sha256": "8131ecda0cd8bcd385550ec9e16881bbfe89be30ef9947ce9c1650e0ac7bcaee",
+    "raw_conformance_sha256": "7914683b29878567d577a64eddb8488faffb2df14c1e9211f28e79700eb9ca58",
+    "canonical_conformance_sha256": "55c0ee45d3b88bd3d141e5ac54f8dd4a1e4510f6cd95b54b4fb02537fba30b37",
+    "raw_canonical_projection_match": true
+  },
+  "release_audit": {
+    "actions_dry_run": {
+      "sha256": "27f0ced55c2b9dcb3b1a63bf4183a124c44944b641e7ef3e7b5b7e92d7366b6b",
+      "gate_count": 36,
+      "passed_count": 1,
+      "failed_count": 35,
+      "p0_failed_count": 33,
+      "ready_for_public_release": false
+    },
+    "downloaded_exact_input_recheck": {
+      "sha256": "2c5cd0fa2fc2ae819930edca9c454e15be6e01d4708cee4e5015def99e9dbd05",
+      "gate_count": 36,
+      "passed_count": 6,
+      "failed_count": 30,
+      "p0_failed_count": 28,
+      "idf_version_exact": true,
+      "applicable_host_and_idf_checks_passed": 16,
+      "applicable_host_and_idf_checks_total": 16,
+      "ready_for_public_release": false,
+      "remaining_immutable_input_gap": "RP2040 and Arduino receipts were correctly absent because include_sd_bridge=false"
+    }
+  },
+  "closed_blocker": {
+    "id": "BLK-RELEASE-IDF-VERSION-RECEIPT-20260714",
+    "closed_by": "ee520984d2209ae7419c02bb46d57c1549eeb56c",
+    "closure_basis": "Exact PR and merged-main Actions artifacts contain one canonical ESP-IDF v5.5.4 line, and nonzero capture mutations truncate the receipt so the immutable-input consumer rejects it."
+  },
+  "residual_gaps": [
+    "RP2040 and Arduino immutable-input receipts on the frozen bridge-inclusive candidate",
+    "all remaining protocol, UI, storage, RF, physical, soak, update, recovery, and release gates"
+  ],
+  "checks": {
+    "exact_merge_identity": true,
+    "pull_request_actions_success": true,
+    "merged_main_actions_success": true,
+    "all_github_archive_digests_verified": true,
+    "all_available_checksum_manifests_verified": true,
+    "idf_version_exact": true,
+    "nonzero_capture_fail_closed": true,
+    "sbom_provenance_bindings_verified": true,
+    "broader_release_gaps_fail_closed": true
+  },
+  "proof_banked": false,
+  "wp24_closure_eligible": false,
+  "valid": true,
+  "release_ready": false,
+  "release_note": "This closes only the noisy/non-fail-closed ESP-IDF version receipt defect. WP-24 and Full Release remain open."
+}

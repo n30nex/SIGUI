@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "evidence_type": "wp04_dm_ack_durability_aggregate",
+  "generated_utc": "2026-07-14T08:05:00Z",
+  "claim_scope": "Software-only durability, retry-budget, reconciliation, and retained-outcome evidence for the schema-v5 direct-message ACK slice.",
+  "exact_pair": {
+    "pull_request": 98,
+    "pull_request_head_sha": "d44e9c95f8e2b5a03366ab905782e6170057d606",
+    "pull_request_base_sha": "ee520984d2209ae7419c02bb46d57c1549eeb56c",
+    "synthetic_merge_sha": "9a81c37bd6cb41eff0d12e13f1c9b56f7e19df60",
+    "merged_main_sha": "76b07f28918b338bf896d5a1a8a0207b5a112677",
+    "verified_tree_sha": "771681ba909c64b8c4d5fc11f5ee198063c04b94",
+    "tree_identity": {
+      "pull_request_head_matches_synthetic_merge": true,
+      "pull_request_head_matches_merged_main": true
+    }
+  },
+  "gate_receipts": {
+    "pull_request": {
+      "push_actions_run": 29314565078,
+      "pull_request_actions_run": 29314577934,
+      "receipt_filename": "pr98-gate-receipt.json",
+      "receipt_sha256": "77e3f024effd2599931fc7ea53ec367b74944ccbe383b30ebdf5d9133d0425d5",
+      "verdict": "approve"
+    },
+    "merged_main": {
+      "actions_run": 29315805803,
+      "receipt_filename": "merged-main-gate-receipt.json",
+      "receipt_sha256": "6cf9cabf22cb747eff1264ce094075a1fe24ea45a99d5981a95eb81f931c5b1d",
+      "verdict": "approve"
+    }
+  },
+  "schema_v5_semantics": {
+    "identity_digest_bytes": 32,
+    "ack_states": [
+      "legacy_unverified",
+      "pending",
+      "sent",
+      "retryable",
+      "terminal"
+    ],
+    "per_row_fields": [
+      "identity_digest",
+      "ack_dispatch_count",
+      "ack_dispatch_kind",
+      "ack_state",
+      "ack_last_error"
+    ],
+    "guarantees_verified_by_source_and_host_tests": [
+      "Schema-v1-v4 rows are grandfathered and boot normalization does not transmit RF traffic.",
+      "Cache hydration preserves persisted ACK state.",
+      "Partial-backend durability and reservations do not double-increment dispatch count.",
+      "The physical dispatch budget is capped at two attempts.",
+      "Initial delivery uses direct ACK and fallback uses flood ACK plus PATH.",
+      "TxDone and timeout outcomes are retained for storage, UI, and console reporting.",
+      "Same-digest records reconcile across backends and pending route kind can be rebound.",
+      "INVALID_STATE telemetry remains truthful.",
+      "The full identity digest is the primary correlation key; row sequence is only a stale-safe hint.",
+      "Active sends are suppressed by digest.",
+      "Higher-epoch reconciliation preserves pending rows without a reservation while resequencing and recounting.",
+      "Deterministic mutation tests prove TxDone persists SENT and physical sends never exceed two."
+    ],
+    "compile_time_contracts": {
+      "D1L_MESHCORE_DM_ACK_DEDUPE_DIGEST_BYTES": 32,
+      "D1L_MESHCORE_DM_ACK_MAX_DISPATCHES": 2
+    }
+  },
+  "source_bindings_sha256": {
+    "main/mesh/meshcore_service.c": "644ef3a4ca24c51b211c24bbdb2614c686cad6fd6dce56488b290d1f2d490532",
+    "main/mesh/dm_store.c": "c4678bcd0d2b82a078b239507eb3184e85bde0ae3460c36893e5bb1e89a9a49e",
+    "main/mesh/dm_store.h": "d943a6d3a8216c624b10ed8de4e1d457ef63a7c0ee5dabdc8b6d502bae310db9",
+    "main/mesh/meshcore_ack_dispatch.h": "e3dd5b6e28213a6a3beb9e00bdcdca8236d1b6c5415d9ed79bc836269126fcaa",
+    "tests/test_meshcore_ack_dispatch_native.py": "987f3fafae0e342bcef01e3a1e556834b9f5c580298784f09500dc40df314eaa",
+    "tests/test_dm_store_native.py": "b752b2cbcc109c06d03ac96a4c0972e4a01221795a1319e09d00416901012648"
+  },
+  "verification": {
+    "focused_host_rerun": {
+      "command": "python -m pytest -q tests/test_meshcore_ack_dispatch_native.py tests/test_dm_store_native.py tests/test_dm_store_contract.py",
+      "passed": 9,
+      "failed": 0
+    },
+    "merged_main_ci": {
+      "host_tests_passed": 938,
+      "checksum_tests_passed": 32,
+      "wire_vectors": 864,
+      "wire_failures": 0,
+      "oracle_vectors": 931,
+      "oracle_failures": 0,
+      "fuzz_cases": 100000,
+      "fuzz_findings": 0,
+      "overlay_transforms": 215,
+      "differential_vectors": 256,
+      "differential_mismatches": 0,
+      "ubsan_clean": true
+    },
+    "merged_main_artifact_archives_sha256": {
+      "conformance-oracle": "15b05bb5a548a2688c8c167c0d32b5c8b6cdb43f1ae12f7533ae91a28ba8855b",
+      "host-checks": "5b5d18b935d87b1a34416338b1a1c0b763c8e66f94bcdf43d76d80cd2a6b5caa",
+      "esp-idf-build-context": "00faa485062768502be467a535257a2b51c058f2acf6cc6c899fea1234a37ed8",
+      "firmware": "b26d75b89310714ae63b33f9b140f6ff10385597aa70ead145aa3133304df770",
+      "release-bundle": "315f086429a72ab03ab3bcaa02f8a117d2a8f7a655704222cc66dec56261964f"
+    },
+    "internal_manifests": {
+      "entries_verified": 46,
+      "entries_total": 46,
+      "missing": 0,
+      "uncovered": 0,
+      "malformed": 0
+    },
+    "release_integrity": {
+      "firmware_checksum_manifest_sha256": "e3a17164833ad893e3d100fdd23b4ced48c6fc0f90fbb4c058054a6067be473e",
+      "release_checksum_manifest_sha256": "a6d35a339c3a17171ca5708a1223f4a43ca6cabbc6341b18eea3fe4c7bbdb51a",
+      "release_package_manifest_sha256": "f3a4e3cb6e184e2357716cf8243e328acf158a843798d9b088c755ecba5cfd7c",
+      "sbom_sha256": "5b4a72955d305664f825725d02cf92b631278fea4e2d2c13f1dabaa7d91b3855",
+      "provenance_sha256": "bb522645ef424f30854c5b2bdba1f51d31c1f9e4f85f1fa31130aab506d8d0ae",
+      "provenance_subjects_verified": 26,
+      "provenance_subjects_total": 26,
+      "provenance_materials_verified": 37,
+      "provenance_materials_total": 37,
+      "provenance_authentication_claimed": false
+    }
+  },
+  "residual_release_gates": [
+    "Merge and verify the route-package selection and fallback integration slice.",
+    "Capture exact-candidate official-peer RF evidence for direct ACK, flood ACK plus PATH fallback, correlation, delivery, the two-attempt retry budget, and duplicate suppression.",
+    "Capture exact-candidate physical D1L reboot and power-loss evidence for retained state and truthful UI and console outcomes.",
+    "Close the broader WP-04 persisted-key, identity, contact, and dispatcher integration residuals."
+  ],
+  "claims": {
+    "software_ack_durability_evidence_banked": true,
+    "physical_or_rf_closure_claimed": false,
+    "wp04_closure_eligible": false,
+    "release_ready": false,
+    "valid": true
+  }
+}
