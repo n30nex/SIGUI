@@ -3,8 +3,8 @@ generated_at: '2026-07-13'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 4ee07caf09906abdcebe8faccd95790dceb5fe88
-  integrated_candidate: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  merged_baseline: 17a948cf1ad23a5d2a89419039897943028f9bce
+  integrated_candidate: 17a948cf1ad23a5d2a89419039897943028f9bce
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -41,24 +41,32 @@ project:
     merge_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
     merged_main_actions_run: 29290978741
     merged_main_actions_status: success
+  pr84_merge:
+    head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+    pr_merge_test_commit: a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8
+    merge_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
+    push_run: 29294131381
+    pr_run: 29294132563
+    merged_main_actions_run: 29294553135
+    merged_main_actions_status: success
   live_main_artifact_integrity:
-    run: 29290978741
+    run: 29294553135
     status: success
-    host_tests_passed: 795
+    host_tests_passed: 823
     checksum_contract_tests_passed: 24
-    manifests_total: 8
-    manifests_verified: 8
-    checksum_entries_verified: 78
-    firmware_manifest_sha256: 5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9
-    release_manifest_sha256: 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64
-    release_package_manifest_json_sha256: cef679f861b1e91bd648520ea3901b717d2a7a81b4a39c9af1f68de12b776111
-    application_sha256: 44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a
-    full_flash_sha256: ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd
-    rp2040_bridge_uf2_sha256: ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096
-    downloaded_tree_file_count: 244
-    downloaded_tree_sha256: 8a80700b90f7a77c868fbc6ef721c4dbd8936364aa50ab3439fb533184cc5efa
-    host_success_marker_sha256: 32566016625de5eb3bd8644df11bba918055d7cc0c9923e7bf9f71127e62e481
-    note: Exact merged-main Actions and downloaded recursive verification strict-passed.
+    manifests_total: 2
+    manifests_verified: 2
+    checksum_entries_verified: 36
+    firmware_manifest_sha256: 67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8
+    release_manifest_sha256: 74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a
+    release_package_manifest_json_sha256: 9acf685d42fad8b01968cbe9314d47fdc270dba6ea3c6661d78151aca3bc4140
+    application_sha256: fa3b6ac29f5fdc8beb604bccbc3abe19456543dbda1ae0563a3d5c98bfe3441c
+    full_flash_sha256: e787b63383af7b49da147a8d45bc8af54fa88801a1dd400ba45d8956ef128e1c
+    rp2040_bridge_uf2_sha256: null
+    downloaded_tree_file_count: 203
+    downloaded_tree_sha256: ad70fab2b72bc79fb2f0031f850152836904347fa15500e11ba6bcf4e52f738f
+    host_success_marker_sha256: 8b794723852e571c55abea036c306e7630ffa6e70dc59f1b1e9200ec96c16dac
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed both emitted manifests; RP2040 correctly skipped for the host/docs-only PR84 slice. The full integrated 8-manifest baseline remains bound to 4ee07caf.
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -94,15 +102,15 @@ project:
       focused_tests_passed: 302
       evidence_scope: local_only
   latest_wp02_baseline_refresh:
-    head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
-    merged_main: 4ee07caf09906abdcebe8faccd95790dceb5fe88
-    merged_main_actions_run: 29290978741
+    head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+    merged_main: 17a948cf1ad23a5d2a89419039897943028f9bce
+    merged_main_actions_run: 29294553135
     focused_tests_passed: 50
     focused_tests_skipped: 2
     full_tests_passed: 820
     full_tests_skipped: 3
     ruff_status: pass
-    evidence_scope: exact_merged_main_actions_and_local_post_merge_baseline_refresh
+    evidence_scope: tracked_4ee07caf_baseline_plus_exact_pr84_merged_main_actions_and_downloaded_artifacts
   active_pr_stack: []
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
@@ -261,7 +269,7 @@ work_packages:
   - 63
   - 78
   status: in_progress
-  implementation_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  implementation_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
   implementation_merged: true
   proof_banked: false
   required_artifacts:
@@ -300,6 +308,21 @@ work_packages:
       merged_main_checksum_entries_verified: 78
       merged_main_firmware_manifest_sha256: 5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9
       merged_main_root_manifest_sha256: 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64
+    pr84:
+      head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+      pr_merge_test_commit: a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8
+      merge_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
+      actions_push_run: 29294131381
+      actions_pr_run: 29294132563
+      merged_main_actions_run: 29294553135
+      merged_main_actions_status: success
+      merged_main_host_tests_passed: 823
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 2
+      merged_main_checksum_entries_verified: 36
+      merged_main_firmware_manifest_sha256: 67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8
+      merged_main_root_manifest_sha256: 74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a
+      rp2040_job_status: skipped_no_relevant_change
   closed_receipts:
   - id: BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713
     status: closed
@@ -332,12 +355,12 @@ work_packages:
     blocks_execution: false
     last_valid_sha: 092293f2311a24c9899bc9bf343ab014c4ba0411
     last_valid_actions_run: 29272708844
-    operator_action: Install the checksum-verified exact 4ee07caf ESP32/RP2040 pair and collect the five narrow role receipts on COM12/COM16; do not use forbidden ports, transmit Public or DM RF, or format SD.
+    operator_action: No device action now. Freeze the final candidate first, then install its checksum-verified exact ESP32/RP2040 pair and collect the five narrow role receipts on COM12/COM16; do not use forbidden ports, transmit Public or DM RF, or format SD.
   local_rehearsals:
     predecessor_pr64: c5886de1e2988b2097034183d5e39bb3aec88344
     predecessor_pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
     current_pr80_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
-  evidence_scope: PR62, PR64, and PR80 are merged. Exact main Actions and downloaded checksums are green; the integration baseline fails closed only because five exact-main physical role receipts are absent. Predecessor 092293f evidence cannot close successor 4ee07caf roles.
+  evidence_scope: PR62, PR64, PR80, and PR84 are merged. Exact 17a948cf main Actions and both emitted checksum manifests are green; the tracked 4ee07caf integration baseline fails closed only because five physical role receipts are absent. Those roles are deferred to the frozen final candidate, and no predecessor evidence can close them.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
