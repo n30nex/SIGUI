@@ -3,8 +3,8 @@ generated_at: '2026-07-14'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e
-  integrated_candidate: b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e
+  merged_baseline: ee520984d2209ae7419c02bb46d57c1549eeb56c
+  integrated_candidate: ee520984d2209ae7419c02bb46d57c1549eeb56c
   proof_ledger_pr: 83
   proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
   proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
@@ -192,35 +192,108 @@ project:
     portable_aggregate_path: docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json
     portable_aggregate_sha256: 0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef
     rp2040_status: skipped_esp32_only
+  pr95_merge:
+    head: 9356d808eb50d9f2b2895879ccbd6a8a50d29dad
+    merge_commit: 728edfc65d1831e4f802586558cdb0044747fdc3
+    push_run: 29308743880
+    pr_run: 29308745816
+    merged_main_actions_run: 29309192229
+    merged_main_actions_status: success
+    merged_main_host_tests_passed: 917
+    merged_main_checksum_contract_tests_passed: 28
+    purpose: bank merged WP-04 foundations and refresh the live completion ledger
+  pr96_merge:
+    base: 728edfc65d1831e4f802586558cdb0044747fdc3
+    head: 8afe6cf3fae799b6685bd7abe8da032e31d91dd3
+    pr_merge_test_commit: 98ef9a03b5f4fca86c843535f80132bec5286ff9
+    merge_commit: 83a811247aa79a379ee810da7489c90c62112fee
+    merge_tree: a5663e42365832d2ddf03c00bd09b7ae45610abf
+    push_run: 29310422653
+    pr_run: 29310424258
+    merged_main_actions_run: 29311228360
+    push_status: success
+    pr_status: success
+    merged_main_actions_status: success
+    host_tests_passed_per_pr_run: 929
+    checksum_contract_tests_passed_per_pr_run: 32
+    pr_archive_digests_verified: 10
+    pr_checksum_entries_verified: 92
+    pr_gate_receipt_sha256: b406ec5cac2728d55b19150d3f1d725732b88caeb52c8399146b567d336d3301
+    merged_main_host_tests_passed: 929
+    merged_main_checksum_contract_tests_passed: 32
+    merged_main_archive_digests_verified: 5
+    merged_main_checksum_manifests_verified: 3
+    merged_main_checksum_entries_verified: 46
+    merged_main_extracted_files_hashed: 219
+    merged_main_downloaded_tree_sha256: d5d25e7521181009080125a532b4773fd7ca8514b98349796ab397f1d480aeef
+    merged_main_gate_receipt_sha256: 369433a0a27510ec9e450890a37e0966c823003a3c18a41abc86b47a600c7c28
+    full_ubsan_clean: true
+    sanitizer_exception_count: 0
+    portable_aggregate_path: docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json
+    portable_aggregate_sha256: d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2
+    rp2040_status: skipped_esp32_only
+  pr97_merge:
+    base: 83a811247aa79a379ee810da7489c90c62112fee
+    head: 27c7a32e3ad51313f96d7e678dadef4a24101e75
+    merge_commit: ee520984d2209ae7419c02bb46d57c1549eeb56c
+    merge_tree: d4717f592e3e7ff08c01911426039df6786f7921
+    push_run: 29311854987
+    pr_run: 29311857208
+    merged_main_actions_run: 29313013731
+    push_status: success
+    pr_status: success
+    merged_main_actions_status: success
+    host_tests_passed_per_pr_run: 935
+    checksum_contract_tests_passed_per_pr_run: 32
+    pr_archive_digests_verified: 10
+    pr_checksum_entries_verified: 92
+    merged_main_host_tests_passed: 935
+    merged_main_checksum_contract_tests_passed: 32
+    merged_main_archive_digests_verified: 5
+    merged_main_checksum_manifests_verified: 3
+    merged_main_checksum_entries_verified: 46
+    merged_main_extracted_files_hashed: 219
+    merged_main_downloaded_tree_sha256: b3eac68f12ab9fd7192319a3bfdfac56c9104f8d0a5a5f8b7c416e8e838cc606
+    merged_main_gate_receipt_sha256: e69176684dbe76b54e72f9cb062ce5319b08269f75fbf9e66a00ff7a88260492
+    idf_version_receipt_sha256: b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea
+    idf_version_exact: true
+    nonzero_capture_fail_closed: true
+    portable_aggregate_path: docs/completion/evidence/wp24/idf_version_receipt_ee520984d2209ae7419c02bb46d57c1549eeb56c.json
+    portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
+    rp2040_status: skipped_esp32_only
   live_main_artifact_integrity:
-    run: 29307595930
+    run: 29313013731
     status: success
-    host_tests_passed: 917
-    checksum_contract_tests_passed: 28
+    host_tests_passed: 935
+    checksum_contract_tests_passed: 32
     manifests_total: 3
     manifests_verified: 3
-    checksum_entries_verified: 44
-    firmware_manifest_sha256: c92af5856fee1107abba5dd350116d5d81edb517f4bb893a5562b40cdbee123d
+    checksum_entries_verified: 46
+    firmware_manifest_sha256: 63bff13c1a2a581e508c1a4be5da6dfd984cd2efef9b61ec521fb612fe1dbc03
     build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
-    release_manifest_sha256: dc5ba0f7dc92ea3dc69d277926fa1acb049e6405b5b222ad6d2dd7d75e1fac4f
-    release_package_manifest_json_sha256: a9fc7c3eb2421ce2e6c534b0decaed99c34ec68e7f91a80e6ff30edf83d8abcf
-    application_sha256: 64b393be1bbcdac6e2be3ddbbfb6462bee987236c5820539c1552fb10d5a7d8e
-    full_flash_sha256: 1f7b7c6831d74cf9580d4be1803c1f3bcd42d6303dd2283a1e146908f64057ce
+    release_manifest_sha256: 3f73a7ea93e03ef16cd5b40733adb9e43848af5aa14d5fc90d70b093a4fc0d6c
+    release_package_manifest_json_sha256: 88b214cd6c8a9c6188284e6c138360843fc288516aabefc17d11a540f25811b7
+    application_sha256: 29a7c29e4d1c0368feab2bd803de83003ec046d49cbe72167ead6561a81377ef
+    full_flash_sha256: 7fd595c36c3c0fcb2464ee31e145208a0734b45466d9d77da069a38db23e3826
     rp2040_bridge_uf2_sha256: null
-    downloaded_tree_file_count: 216
-    downloaded_tree_total_bytes: 72353618
-    downloaded_tree_sha256: 9117424199086903f96138436d686a031cafcfc6636c857f0e25b5e782b68df9
-    host_success_marker_sha256: 518acf34e6092279aa45ff876b1b716c8be06a8957951a0a0841810d27abf0e0
-    completion_ledger_validation_sha256: baebcfcc2910a095e361892300eaabc9b6cd3702e3dfc2cf69fbdc282c5063c9
-    release_audit_sha256: 61ba3c2de288a115538433fe25fce0cf12377667197fcce62e1ef5da7b6be57b
-    sbom_sha256: 8292cb457a922d49304def0b330ba702d45041c1732031b780cb62fe23f4f995
-    provenance_sha256: 623daea6ae7c01b8b2a3f972c2bfb17f2ab1e1ecdfaf5f24b52a5a7e9c429703
-    meshcore_receipt_sha256: 3af1e480bd15f2054908f1ea6cd0bf88a41faeeb3e320a964524d50b8d69cec9
-    meshcore_signed_runtime_receipt_sha256: e2c9de18c96b9f33161b2e60292cce35ff595d0d4913103ea33bf960ea68fc41
-    meshcore_oracle_manifest_sha256: aa110fb4aee057629abcc4ff967bf4b520409c59a8fbbed016994b1ef7ace250
-    portable_aggregate_path: docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json
-    portable_aggregate_sha256: 0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef
-    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests after PR #93. Signed-advert runtime is merged; production/oracle Ed25519 integration plus ACK, route, TRACE, admin, retained-state, RF, and physical closure remain fail-closed. RP2040 correctly skipped on merged main.
+    downloaded_tree_file_count: 219
+    downloaded_tree_total_bytes: 72428299
+    downloaded_tree_sha256: b3eac68f12ab9fd7192319a3bfdfac56c9104f8d0a5a5f8b7c416e8e838cc606
+    host_success_marker_sha256: ac0e581d9d28d1d450a830c65d3467d1b8e8a0c4a147534bc2a25b370fa63b6f
+    completion_ledger_validation_sha256: a743ea3f1d548de35f52216517f636cd76c38ae8743a323def80e01d3d1f0da8
+    release_audit_sha256: 27f0ced55c2b9dcb3b1a63bf4183a124c44944b641e7ef3e7b5b7e92d7366b6b
+    sbom_sha256: ff4b529791bf9980be09e1e18eea09aaae75a89ab9e2afa153c837d230529fb5
+    provenance_sha256: fbff02bff487ed3048de41a26cdcdd8e93d065e4df0b8b61e653d1a43758b433
+    meshcore_receipt_sha256: 7914683b29878567d577a64eddb8488faffb2df14c1e9211f28e79700eb9ca58
+    meshcore_signed_runtime_receipt_sha256: 6682e80532d523495cd03613caf854e947d73c5258d97e328c9d1aaefa50a8db
+    portable_aggregate_path: docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json
+    portable_aggregate_sha256: d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2
+    idf_version_receipt_sha256: b0481060ce29846f2d489adc6179cec007b75a203ca89ea63c3f84c774e340ea
+    idf_version_portable_aggregate_path: docs/completion/evidence/wp24/idf_version_receipt_ee520984d2209ae7419c02bb46d57c1549eeb56c.json
+    idf_version_portable_aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
+    full_ubsan_clean: true
+    sanitizer_exception_count: 0
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests after PR #97. Production, oracle, runtime, package, SBOM, provenance, and notices retain the reviewed defined-arithmetic Ed25519 overlay with zero exceptions. The exact IDF-version receipt is one 15-byte LF-terminated line and nonzero capture remains fail-closed. ACK, route, TRACE, admin, retained-state, RF, and physical closure remain open. RP2040 correctly skipped on merged main.
     previous_failed_receipt:
       commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
       run: 29286754864
@@ -237,10 +310,10 @@ project:
     checksum_entries_verified: 78
   release_audit:
     ready_for_public_release: false
-    exact_main_run: 29307595930
-    receipt_sha256: 61ba3c2de288a115538433fe25fce0cf12377667197fcce62e1ef5da7b6be57b
-    remaining_p0_failures: 32
-    failures_overall_including_p1: 34
+    exact_main_run: 29313013731
+    receipt_sha256: 27f0ced55c2b9dcb3b1a63bf4183a124c44944b641e7ef3e7b5b7e92d7366b6b
+    remaining_p0_failures: 33
+    failures_overall_including_p1: 35
   local_merge_rehearsals:
     pr62:
       commit: 7648611c412e7f4658f5d14b43ba530744d96160
@@ -268,10 +341,14 @@ project:
     ruff_status: pass
     evidence_scope: tracked_4ee07caf_baseline_plus_exact_pr84_merged_main_actions_and_downloaded_artifacts
   active_pr_stack:
-  - number: 95
-    head: 2acd0f2f01542e7bb5e9638d403fb43e216bfab1
-    status: draft
-    purpose: bank exact WP-04 merged-main receipts and keep the completion ledger resumable
+  - number: 98
+    branch: codex/wp04-ack-dispatch
+    base: ee520984d2209ae7419c02bb46d57c1549eeb56c
+    head: d44e9c95f8e2b5a03366ab905782e6170057d606
+    status: draft_actions_in_progress
+    actions_push_run: 29314565078
+    actions_pr_run: 29314577934
+    purpose: persist truthful schema-v5 inbound-DM ACK reservation, correlation, bounded retry, and retained outcome
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
   target: seeed-sensecap-indicator-d1l
@@ -715,30 +792,78 @@ work_packages:
     portable_aggregate_path: docs/completion/evidence/wp04/signed_advert_ed25519_foundations_b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e.json
     portable_aggregate_sha256: 0203d464868d46fde17cde13b391ac12af4f5089bae32db6cf2898776f192cef
     rp2040_status: skipped_esp32_only
+  - pull_request: 96
+    base: 728edfc65d1831e4f802586558cdb0044747fdc3
+    head: 8afe6cf3fae799b6685bd7abe8da032e31d91dd3
+    pr_merge_test_commit: 98ef9a03b5f4fca86c843535f80132bec5286ff9
+    merge_commit: 83a811247aa79a379ee810da7489c90c62112fee
+    actions_push_run: 29310422653
+    actions_pr_run: 29310424258
+    actions_merged_main_run: 29311228360
+    host_tests_passed_per_pr_run: 929
+    checksum_contract_tests_passed_per_pr_run: 32
+    pull_request_archive_digests_verified: 10
+    pull_request_checksum_entries_verified: 92
+    pull_request_gate_receipt_sha256: b406ec5cac2728d55b19150d3f1d725732b88caeb52c8399146b567d336d3301
+    merged_main_actions_status: success
+    merged_main_host_tests_passed: 929
+    merged_main_checksum_contract_tests_passed: 32
+    merged_main_archive_digests_verified: 5
+    merged_main_checksum_manifests_verified: 3
+    merged_main_checksum_entries_verified: 46
+    merged_main_extracted_files_hashed: 219
+    merged_main_downloaded_tree_sha256: d5d25e7521181009080125a532b4773fd7ca8514b98349796ab397f1d480aeef
+    merged_main_gate_receipt_sha256: 369433a0a27510ec9e450890a37e0966c823003a3c18a41abc86b47a600c7c28
+    full_ubsan_clean: true
+    sanitizer_exception_count: 0
+    portable_aggregate_path: docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json
+    portable_aggregate_sha256: d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2
+    rp2040_status: skipped_esp32_only
   active_slices:
-  - branch: codex/wp04-ed25519-integration
-    base: b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e
-    capability: ed25519_defined_arithmetic_production_and_oracle_integration
   - branch: codex/wp04-ack-dispatch
-    base: b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e
+    base: ee520984d2209ae7419c02bb46d57c1549eeb56c
+    head: d44e9c95f8e2b5a03366ab905782e6170057d606
+    pull_request: 98
+    actions_push_run: 29314565078
+    actions_pr_run: 29314577934
+    status: draft_actions_in_progress
     capability: ack_dispatch_correlation_and_delivery
+  - branch: codex/wp04-route-selection
+    base: d44e9c95f8e2b5a03366ab905782e6170057d606
+    head: a7a2bdca8f1e01977e2afe860883deb65bf982b9
+    status: local_independent_review
+    capability: route_selection_and_forwarding
   open_receipts:
-  - id: BLK-WP04-ED25519-SHIFT-UB-20260714
+  - id: BLK-WP04-IDENTITY-DISPATCH-20260713
     status: open
     blocks_execution: false
     blocks_release: true
-    current_exception_sources:
-    - third_party/MeshCore/lib/ed25519/fe.c
-    - third_party/MeshCore/lib/ed25519/ge.c
-    - third_party/MeshCore/lib/ed25519/sc.c
-    required_closure: Production and host oracle use reviewed defined arithmetic, all three shift-base exceptions are removed, full_ubsan_clean is true, and exact Actions firmware/package evidence passes.
+    blocks_package: false
+    last_valid_sha: 83a811247aa79a379ee810da7489c90c62112fee
+    last_valid_actions_run: 29311228360
+    aggregate_path: docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json
+    aggregate_sha256: d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2
+    superseded_scope: PR 93 supplies the pinned verifier and real create/sign/send/filter/verify/dispatch host fixture.
+    required_closure: Prove firmware/persisted-key consistency, retained-contact and truthful callback semantics, full route/contact/queue dispatch integration, official-peer RF, and exact-candidate hardware behavior.
+  closed_receipts:
+  - id: BLK-WP04-ED25519-SHIFT-UB-20260714
+    status: closed
+    blocks_execution: false
+    blocks_release: false
+    closed_by: 83a811247aa79a379ee810da7489c90c62112fee
+    actions_run: 29311228360
+    aggregate_path: docs/completion/evidence/wp04/production_oracle_ed25519_integration_83a811247aa79a379ee810da7489c90c62112fee.json
+    aggregate_sha256: d75c1f948784faecb07b49ed423732542e91bc3947f68e76f831dad0413521f2
+    resolution: Production, oracle, signed runtime, and package use the reviewed defined-arithmetic overlay; full_ubsan_clean is true and zero exceptions remain.
   residual_capabilities:
+  - identity_firmware_keypair_retained_contact_and_peer_closure
   - ack_dispatch_correlation_and_delivery
   - route_selection_and_forwarding
   - trace_forwarding_and_path_discovery
   - login_request_response_admin
   required_artifacts:
   - meshcore_oracle_manifest_<sha>.json
+  - production_oracle_ed25519_integration_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-05
   title: Semantic conformance and fuzzing
@@ -1046,6 +1171,16 @@ work_packages:
   - 71
   - 78
   status: blocked
+  closed_receipts:
+  - id: BLK-RELEASE-IDF-VERSION-RECEIPT-20260714
+    status: closed
+    blocks_execution: false
+    blocks_release: false
+    closed_by: ee520984d2209ae7419c02bb46d57c1549eeb56c
+    actions_run: 29313013731
+    aggregate_path: docs/completion/evidence/wp24/idf_version_receipt_ee520984d2209ae7419c02bb46d57c1549eeb56c.json
+    aggregate_sha256: f21abb17403f432c17bf19cc052cd185b05a39c705a3a984e73f5fcb6a547fa5
+    resolution: PR 97 exact push, PR, and merged-main artifacts contain only the LF-terminated ESP-IDF v5.5.4 line; real nonzero capture truncates the receipt and the exact consumer rejects it. WP-24 and Full Release remain open for their other gates.
   required_artifacts:
   - release_gate_<sha>.json
   - release_validation_report_<sha>.md
@@ -1072,14 +1207,14 @@ work_packages:
   profile_behavior: Run once for Stable Core and again for Full Feature; each publication requires its own exact-SHA WP-24
     evidence.
 current_priority:
+- WP-04
+- WP-05
+- WP-06
+- WP-07
+- WP-00
 - WP-02
 - WP-01
 - WP-03
-- WP-04
-- WP-06
-- WP-05
-- WP-07
-- WP-00
 forbidden_port_policy:
   forbidden:
   - COM8

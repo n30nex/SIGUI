@@ -1,0 +1,177 @@
+{
+  "schema": 1,
+  "artifact_type": "wp04_production_oracle_ed25519_integration_aggregate",
+  "repository": "n30nex/SIGUI",
+  "work_package": "WP-04",
+  "capability": "ed25519_defined_arithmetic_production_and_oracle_integration",
+  "identities": {
+    "base_commit": "728edfc65d1831e4f802586558cdb0044747fdc3",
+    "pull_request": 96,
+    "head_commit": "8afe6cf3fae799b6685bd7abe8da032e31d91dd3",
+    "pull_request_merge_test_commit": "98ef9a03b5f4fca86c843535f80132bec5286ff9",
+    "merge_commit": "83a811247aa79a379ee810da7489c90c62112fee",
+    "merge_tree": "a5663e42365832d2ddf03c00bd09b7ae45610abf"
+  },
+  "pull_request_gate": {
+    "push_run": 29310422653,
+    "pull_request_run": 29310424258,
+    "status": "success",
+    "host_tests_passed_per_run": 929,
+    "checksum_contract_tests_passed_per_run": 32,
+    "actions_only_esp32_build": true,
+    "rp2040_status": "skipped_include_sd_bridge_false",
+    "artifact_archives_verified": 10,
+    "checksum_entries_verified": 92,
+    "extracted_files_per_run": 219,
+    "push_extracted_bytes": 72428930,
+    "pull_request_extracted_bytes": 72428688,
+    "operator_receipt": "F:/SIGUI-artifacts/qa-pr96-8afe6cf/merge-gate-receipt.json",
+    "operator_receipt_sha256": "b406ec5cac2728d55b19150d3f1d725732b88caeb52c8399146b567d336d3301",
+    "archives": {
+      "push": {
+        "firmware_sha256": "178310dc6cbff3d88b6f26fd2c8f34afb75ec122978cc506f95d4ecc3862c2cd",
+        "host_sha256": "f171f3a91c4d785c628aa195c461180c03a66364497a2803038cca1620aabf98",
+        "idf_state_sha256": "e204cf58a3b33b13d720fbe28539006024fe57eb2061388f531b55825fd32394",
+        "conformance_sha256": "e91aa65c78aaba88d8b955a32ea11a776ddb98ae6eadb166e122f245f91486bc",
+        "release_sha256": "afadfc1d48f9495df662e08984077472e940ba7eea395a8d0fb8bba3920839b8"
+      },
+      "pull_request": {
+        "firmware_sha256": "9a24187ce0a860bf3bc708fcf4f11254a3a2d8a0e5a8c3e6e088044b713da4c4",
+        "host_sha256": "5a72a2ecf75662dcbc963b5f2fda3d79d21edf02f7d2a18fb8937b161804c229",
+        "idf_state_sha256": "7b1e8aff5f87c2116b67a1a3a5d2d616b7d65821e7de0c2f9199b1764244d048",
+        "conformance_sha256": "94de4df80b1d8364c85689cc6651909c86e344381ae9c3096fa8a6451bc57d1b",
+        "release_sha256": "bbc9fe98c8ae1d0a957f30f39eeccd777af79717e7970c847549273d5e330fdf"
+      }
+    }
+  },
+  "merged_main": {
+    "commit": "83a811247aa79a379ee810da7489c90c62112fee",
+    "workflow_run": 29311228360,
+    "status": "success",
+    "host_tests_passed": 929,
+    "checksum_contract_tests_passed": 32,
+    "actions_only_esp32_build": true,
+    "rp2040_status": "skipped_include_sd_bridge_false",
+    "artifact_archives_verified": 5,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 46,
+    "downloaded_tree_file_count": 219,
+    "downloaded_tree_total_bytes": 72428696,
+    "downloaded_tree_sha256": "d5d25e7521181009080125a532b4773fd7ca8514b98349796ab397f1d480aeef",
+    "operator_receipt": "F:/SIGUI-artifacts/main-83a8112/merged-main-gate-receipt.json",
+    "operator_receipt_sha256": "369433a0a27510ec9e450890a37e0966c823003a3c18a41abc86b47a600c7c28",
+    "artifact_archives": [
+      {
+        "name": "d1l-firmware-artifacts",
+        "artifact_id": 8302260204,
+        "archive_sha256": "491d3987be99fe5d9dee70e3b94da3720fa3b2adfa56090c9149db00a223003c"
+      },
+      {
+        "name": "d1l-host-artifacts",
+        "artifact_id": 8302201040,
+        "archive_sha256": "165f852d7d6e9f8babae53ee03cb24e700d7a0203409b02a902785e86762486c"
+      },
+      {
+        "name": "d1l-idf55-migration-state",
+        "artifact_id": 8302258834,
+        "archive_sha256": "252cd4d61c81e2165c75d76ab10652582adb4a85225340625c170e15501e02c0"
+      },
+      {
+        "name": "d1l-meshcore-wire-conformance",
+        "artifact_id": 8302148805,
+        "archive_sha256": "af875b9768d06b9fa4aad7e373c35d6c10e9d74f2ae97b9bdd595207fda061b0"
+      },
+      {
+        "name": "d1l-release-package",
+        "artifact_id": 8302260751,
+        "archive_sha256": "13491860b48bcfd68d190bb8e336da1038ea0b5530fed71796bbdaee28dc12cc"
+      }
+    ]
+  },
+  "runtime_and_oracle": {
+    "wire_vectors": 864,
+    "fuzz_runs": 100000,
+    "fuzz_findings": 0,
+    "overlay_transformations": 215,
+    "differential_cases": 256,
+    "byte_for_byte_equal": true,
+    "full_ubsan_clean": true,
+    "sanitizer_exception_count": 0,
+    "sanitizer_error_count": 0,
+    "memory_error_count": 0,
+    "raw_signed_runtime_sha256": "1bdc6b416665d80244d613ce3549ada0518869b64426157c5c24773b02c24f7b",
+    "canonical_signed_runtime_sha256": "7eb76a01bb93c14617059e633dcdce255312854633fc08194913fb2419b2f902",
+    "raw_canonical_projection_match": true,
+    "raw_conformance_sha256": "59e59140cdd9296a5e13eb4753630bbd57d3c817311b86787f07d07171e44916",
+    "canonical_conformance_sha256": "268ba89b7fc8cf8f75fa721c246190fee8aaa747f681fdce38cc56aa95bac178"
+  },
+  "release_inputs": {
+    "release_package_manifest_sha256": "27a6f706779defeb74b7213231fdf7a9e427b287f6cb37b92c1d807f273db60f",
+    "sbom_sha256": "762bf41ad8ea23daf8149d1eccd0a775717cafd991a0d18629410177facb2c9c",
+    "provenance_sha256": "2a4995a9af3a444807d1806f5f2b24b4bdf0acde4faa72d1d48b5d1dd0ef01aa",
+    "orlp_notice_sha256": "f68d76b9c1c2271422e55134ea94cf71f2ac3fc3ed6a7ec6b83a1a0538753214",
+    "orlp_zlib_sbom_record_count": 5,
+    "official_sbom_validator": true,
+    "official_provenance_validator": true
+  },
+  "release_audit": {
+    "actions_dry_run": {
+      "sha256": "a2a507d79c52c0b397e2612dbfea72512658c2d24a89c73261a00ca3a01ad2ba",
+      "gate_count": 36,
+      "passed_count": 1,
+      "failed_count": 35,
+      "p0_failed_count": 33,
+      "ready_for_public_release": false
+    },
+    "downloaded_exact_input_recheck": {
+      "passed_count": 6,
+      "failed_count": 30,
+      "p0_failed_count": 28,
+      "ready_for_public_release": false
+    }
+  },
+  "closed_blocker": {
+    "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+    "closed_by": "83a811247aa79a379ee810da7489c90c62112fee",
+    "closure_basis": "Production, the host oracle, and the signed-advert runtime select the reviewed defined-arithmetic overlay; all three shift-base exceptions are removed and exact merged-main Actions/package evidence passes."
+  },
+  "open_blocker": {
+    "id": "BLK-WP04-IDENTITY-DISPATCH-20260713",
+    "status": "open",
+    "superseded_inputs": [
+      "the independently pinned rweather/Crypto verifier now supplies the external verifier boundary",
+      "the real Identity/Mesh/Dispatcher/BaseChatMesh signed-advert semantic runtime now executes create, sign, send, filter, verify, dispatch, and contact promotion"
+    ],
+    "remaining_scope": [
+      "firmware binding and persisted public/private key consistency before advert signing",
+      "retained-contact recovery and truthful new-contact callback semantics",
+      "concrete contact-table, route, queue, clock, and dispatch integration beyond the bounded host fixture",
+      "official-peer RF interoperability and exact-candidate hardware proof"
+    ],
+    "closure_ready": false
+  },
+  "residual_capabilities": [
+    "identity_firmware_keypair_retained_contact_and_peer_closure",
+    "ack_dispatch_correlation_and_delivery",
+    "route_selection_and_forwarding",
+    "trace_forwarding_and_path_discovery",
+    "login_request_response_admin",
+    "retained_state_recovery",
+    "official_peer_rf_and_final_hardware_evidence"
+  ],
+  "checks": {
+    "exact_merge_identity": true,
+    "merged_main_actions_success": true,
+    "all_github_archive_digests_verified": true,
+    "all_available_checksum_manifests_verified": true,
+    "signed_runtime_raw_canonical_binding_verified": true,
+    "sbom_provenance_notice_bindings_verified": true,
+    "ed25519_shift_ub_blocker_closed": true,
+    "residual_gaps_fail_closed": true
+  },
+  "proof_banked": false,
+  "wp04_closure_eligible": false,
+  "valid": true,
+  "release_ready": false,
+  "release_note": "This closes only the production/oracle defined-arithmetic Ed25519 prerequisite. WP-04 and Full Release remain open for the remaining identity/dispatch boundary, ACK, route, TRACE, admin, retained-state, RF, and physical qualification."
+}

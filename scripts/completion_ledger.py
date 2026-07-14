@@ -360,6 +360,22 @@ def validate_ledger(ledger: dict) -> list:
                 "%s is %s but implementation_merged is not true" % (package_id, status)
             )
 
+    for blocker_id, blocker in blockers.items():
+        if blocker.get("status") != "open" or blocker.get(
+            "blocks_package", blocker.get("blocks_execution", True)
+        ) is not True:
+            continue
+        owner_id = blocker.get("work_package")
+        owner = packages.get(owner_id)
+        if owner is None:
+            continue
+        owner_refs = owner.get("blockers", [])
+        if not isinstance(owner_refs, list) or blocker_id not in owner_refs:
+            errors.append(
+                "%s is an open package blocker but is not referenced by %s"
+                % (blocker_id, owner_id)
+            )
+
     for package_id, item in packages.items():
         if item.get("status") == "blocked":
             continue
