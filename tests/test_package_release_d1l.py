@@ -625,6 +625,33 @@ def test_release_package_rejects_signed_advert_receipt_from_other_commit(
         )
 
 
+def test_release_package_rejects_signed_advert_receipt_without_sanitizer_commands(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "b" * 40
+    install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
+    report = json.loads(signed_advert.read_text(encoding="utf-8"))
+    report["commands"] = [
+        [argument for argument in command if argument != "-fsanitize=address,undefined"]
+        for command in report["commands"]
+    ]
+    signed_advert.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="commands"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "artifacts" / "release",
+            package_name="signed-advert-without-sanitizers",
+            full_size=0x20000,
+            meshcore_signed_advert_runtime_json=signed_advert,
+        )
+
+
 def test_exact_sha_package_metadata_contract_rejects_missing_stale_and_mismatched(
     tmp_path,
 ):

@@ -517,37 +517,39 @@ def validate_completed_report(
     )
 
     commands = report.get("commands")
-    commands_valid = isinstance(commands, list)
-    if commands_valid:
-        commands_valid = all(
-            isinstance(command, list)
-            and command
-            and all(isinstance(argument, str) for argument in command)
-            for command in commands
-        )
-    flattened = [
-        " ".join(command).replace("\\", "/")
+    commands_valid = isinstance(commands, list) and all(
+        isinstance(command, list)
+        and command
+        and all(isinstance(argument, str) for argument in command)
         for command in commands
-        if isinstance(command, list)
-    ] if isinstance(commands, list) else []
-    if require_commands:
-        commands_valid = (
-            commands_valid
-            and len(commands) == len(command_plan("cc", "cxx", sanitize=True))
-            and not any(
-                argument.startswith("-fno-sanitize=")
-                for command in commands
-                for argument in command
+    )
+    if require_commands and commands_valid:
+        c_source_count = len(ED25519_C_SOURCES) + 1  # plus the pinned AES source
+        try:
+            first_c = commands[0]
+            first_cpp = commands[c_source_count]
+            include_indexes = [
+                index for index, argument in enumerate(first_c) if argument == "-I"
+            ]
+            output_index = first_c.index("-o")
+            external_root = first_c[include_indexes[2] + 1]
+            build_root = str(Path(first_c[output_index + 1]).parent)
+            expected_commands = command_plan(
+                "clang-18",
+                "clang++-18",
+                external_root,
+                build_root,
+                sanitize=True,
             )
-            and all(
-                sum(
-                    str(source.relative_to(ROOT)).replace("\\", "/") in command
-                    for command in flattened
-                )
-                == 1
-                for source in ED25519_C_SOURCES
+            commands_valid = (
+                first_c[0] == "clang-18"
+                and first_cpp[0] == "clang++-18"
+                and commands == expected_commands
             )
-        )
+        except (IndexError, ValueError):
+            commands_valid = False
+    elif require_commands:
+        commands_valid = False
     else:
         commands_valid = commands is None
 
