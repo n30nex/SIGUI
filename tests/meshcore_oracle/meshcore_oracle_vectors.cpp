@@ -704,7 +704,7 @@ int main()
         failures.push_back("signed advert invalid-vector fixture creation failed");
     }
     auto expect_signed_advert_create_reject =
-        [&failures, &packet_vector, packet_timestamp](
+        [&failures, packet_timestamp](
             const char *name, const uint8_t *seed, const uint8_t *app_data,
             size_t app_data_len, bool null_output) {
             d1l_meshcore_oracle_packet_t output{};
@@ -2839,8 +2839,8 @@ int main()
     uint8_t rejected_authorized = 0U;
     uint8_t rejected_permissions = 0U;
     auto expect_standard_login_password_authorization_reject =
-        [&expect_login_password_authorization_reject, &auth_password,
-         &auth_guest_password, &rejected_authorized, &rejected_permissions](
+        [&expect_login_password_authorization_reject, &rejected_authorized,
+         &rejected_permissions](
             const char *name, uint8_t server_type, uint8_t allow_read_only,
             const uint8_t *password, std::size_t password_len,
             const uint8_t *admin_password, std::size_t admin_password_len,

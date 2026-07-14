@@ -62,7 +62,7 @@
     "tests/meshcore_oracle/coverage_manifest.json": "36e1329c73bbaec27f9c1e43bba238aaac27cd1eb6fb3480e742fb000a380abf",
     "tests/meshcore_oracle/meshcore_oracle.cpp": "896d301ffffa4dc88928572e3b4bdcd4a9573f434f6c2660b72ea3904eb5bc47",
     "tests/meshcore_oracle/meshcore_oracle.h": "28305dee6f53bcee6ff70d602e924b1c7d450d0dac721c9801ea7052c1521d95",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "8ec2fa119f13c144a441b94f8429e3c09da7365afff23365a0e2f96670f0c92c",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "cfff076230dd102999e1eec80615ff917d89d81cac4a8c963d6cb44ab7a5c65d",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
