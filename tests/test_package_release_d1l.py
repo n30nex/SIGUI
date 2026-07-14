@@ -652,6 +652,95 @@ def test_release_package_rejects_signed_advert_receipt_without_sanitizer_command
         )
 
 
+def test_release_package_accepts_signed_advert_commands_from_other_checkout_root(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "b" * 40
+    install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
+    report = json.loads(signed_advert.read_text(encoding="utf-8"))
+    local_root = str(signed_runtime.ROOT).replace("\\", "/").rstrip("/")
+    producer_root = "/home/runner/work/SIGUI/SIGUI"
+    first_command = [argument.replace("\\", "/") for argument in report["commands"][0]]
+    include_indexes = [
+        index for index, argument in enumerate(first_command) if argument == "-I"
+    ]
+    local_external = first_command[include_indexes[2] + 1].rstrip("/")
+    local_build = first_command[first_command.index("-o") + 1].rsplit("/", 1)[0]
+    relocated_roots = (
+        (local_root, producer_root),
+        (local_external, "/tmp/sigui-producer/crypto"),
+        (local_build, "/tmp/sigui-producer/build"),
+    )
+
+    def relocate(argument: str) -> str:
+        normalized = argument.replace("\\", "/")
+        for local, producer in sorted(
+            relocated_roots, key=lambda item: len(item[0]), reverse=True
+        ):
+            if normalized == local or normalized.startswith(f"{local}/"):
+                return f"{producer}{normalized[len(local):]}"
+        return normalized
+
+    report["commands"] = [
+        [relocate(argument) for argument in command]
+        for command in report["commands"]
+    ]
+    executable = report["commands"][-1][0]
+    relocated_executable = (
+        executable.removesuffix(".exe")
+        if executable.endswith(".exe")
+        else f"{executable}.exe"
+    )
+    link_output_index = report["commands"][-2].index("-o") + 1
+    report["commands"][-2][link_output_index] = relocated_executable
+    report["commands"][-1][0] = relocated_executable
+    signed_advert.write_text(json.dumps(report), encoding="utf-8")
+
+    manifest = package_release_d1l.create_release_package(
+        root=tmp_path,
+        build_dir=build,
+        out_dir=tmp_path / "artifacts" / "release",
+        package_name="signed-advert-relocated-checkout",
+        full_size=0x20000,
+        meshcore_signed_advert_runtime_json=signed_advert,
+    )
+
+    assert manifest["meshcore_signed_advert_runtime"]["passed"] is True
+
+
+def test_release_package_rejects_mismatched_runtime_link_and_execution_paths(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "b" * 40
+    install_fake_source_identity(monkeypatch, commit)
+    signed_advert = write_meshcore_signed_advert_runtime(tmp_path, commit)
+    report = json.loads(signed_advert.read_text(encoding="utf-8"))
+    executable = report["commands"][-1][0]
+    report["commands"][-1][0] = (
+        executable.removesuffix(".exe")
+        if executable.endswith(".exe")
+        else f"{executable}.exe"
+    )
+    signed_advert.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="commands"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "artifacts" / "release",
+            package_name="signed-advert-mismatched-runtime-output",
+            full_size=0x20000,
+            meshcore_signed_advert_runtime_json=signed_advert,
+        )
+
+
 def test_exact_sha_package_metadata_contract_rejects_missing_stale_and_mismatched(
     tmp_path,
 ):

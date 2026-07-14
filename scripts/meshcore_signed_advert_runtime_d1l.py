@@ -421,6 +421,100 @@ def command_plan(
     return commands
 
 
+def canonical_command_plan(commands: object) -> list[list[str]] | None:
+    """Project an exact command plan onto relocatable root tokens.
+
+    The Actions producer, firmware consumer, and later release auditor can use
+    different absolute checkout and temporary paths. Only those three roots
+    are relocatable; every compiler, source-relative path, flag, argument,
+    command ordering decision, and output-relative path remains exact.
+    """
+
+    if not isinstance(commands, list) or not commands or not all(
+        isinstance(command, list)
+        and command
+        and all(isinstance(argument, str) for argument in command)
+        for command in commands
+    ):
+        return None
+
+    c_source_count = len(ED25519_C_SOURCES) + 1  # plus the pinned AES source
+    try:
+        first_c = commands[0]
+        first_cpp = commands[c_source_count]
+        source_index = first_c.index("-c") + 1
+        output_index = first_c.index("-o") + 1
+        include_indexes = [
+            index for index, argument in enumerate(first_c) if argument == "-I"
+        ]
+        if len(include_indexes) < 3:
+            return None
+
+        first_relative = str(ED25519_C_SOURCES[0].relative_to(ROOT)).replace(
+            "\\", "/"
+        )
+        first_source = first_c[source_index].replace("\\", "/")
+        suffix = f"/{first_relative}"
+        if not first_source.endswith(suffix):
+            return None
+        repository_root = first_source[: -len(suffix)]
+        external_root = first_c[include_indexes[2] + 1].replace("\\", "/").rstrip(
+            "/"
+        )
+        first_output = first_c[output_index].replace("\\", "/")
+        if "/" not in first_output:
+            return None
+        build_root = first_output.rsplit("/", 1)[0]
+    except (IndexError, ValueError):
+        return None
+
+    def absolute_root(value: str) -> bool:
+        return bool(
+            value
+            and (value.startswith("/") or re.fullmatch(r"[A-Za-z]:/.*", value))
+        )
+
+    roots = {
+        "$REPOSITORY": repository_root.rstrip("/"),
+        "$EXTERNAL": external_root,
+        "$BUILD": build_root.rstrip("/"),
+    }
+    if (
+        not all(absolute_root(value) for value in roots.values())
+        or len(set(roots.values())) != len(roots)
+        or first_c[0] != "clang-18"
+        or first_cpp[0] != "clang++-18"
+    ):
+        return None
+
+    try:
+        link_output = commands[-2][commands[-2].index("-o") + 1].replace(
+            "\\", "/"
+        )
+        executed_output = commands[-1][0].replace("\\", "/")
+    except (IndexError, ValueError):
+        return None
+    if len(commands[-1]) != 1 or link_output != executed_output:
+        return None
+
+    ordered_roots = sorted(roots.items(), key=lambda item: len(item[1]), reverse=True)
+
+    def project(argument: str) -> str:
+        normalized = argument.replace("\\", "/")
+        for token, root in ordered_roots:
+            if normalized == root:
+                normalized = token
+                break
+            if normalized.startswith(f"{root}/"):
+                normalized = f"{token}{normalized[len(root):]}"
+                break
+        if normalized == "$BUILD/meshcore_signed_advert_runtime.exe":
+            return "$BUILD/meshcore_signed_advert_runtime"
+        return normalized
+
+    return [[project(argument) for argument in command] for command in commands]
+
+
 def run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -517,39 +611,21 @@ def validate_completed_report(
     )
 
     commands = report.get("commands")
-    commands_valid = isinstance(commands, list) and all(
-        isinstance(command, list)
-        and command
-        and all(isinstance(argument, str) for argument in command)
-        for command in commands
-    )
-    if require_commands and commands_valid:
-        c_source_count = len(ED25519_C_SOURCES) + 1  # plus the pinned AES source
-        try:
-            first_c = commands[0]
-            first_cpp = commands[c_source_count]
-            include_indexes = [
-                index for index, argument in enumerate(first_c) if argument == "-I"
-            ]
-            output_index = first_c.index("-o")
-            external_root = first_c[include_indexes[2] + 1]
-            build_root = str(Path(first_c[output_index + 1]).parent)
-            expected_commands = command_plan(
-                "clang-18",
-                "clang++-18",
-                external_root,
-                build_root,
-                sanitize=True,
-            )
-            commands_valid = (
-                first_c[0] == "clang-18"
-                and first_cpp[0] == "clang++-18"
-                and commands == expected_commands
-            )
-        except (IndexError, ValueError):
-            commands_valid = False
-    elif require_commands:
-        commands_valid = False
+    if require_commands:
+        expected_commands = command_plan(
+            "clang-18",
+            "clang++-18",
+            "/d1l-external-root",
+            "/d1l-build-root",
+            sanitize=True,
+        )
+        actual_plan = canonical_command_plan(commands)
+        expected_plan = canonical_command_plan(expected_commands)
+        commands_valid = (
+            actual_plan is not None
+            and expected_plan is not None
+            and actual_plan == expected_plan
+        )
     else:
         commands_valid = commands is None
 
