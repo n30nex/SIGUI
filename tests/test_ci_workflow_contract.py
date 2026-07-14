@@ -1,4 +1,6 @@
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -213,6 +215,9 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
 
 def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     job = job_block("firmware-build")
+    idf_capture = job.split("- name: Capture ESP-IDF migration state", 1)[1].split(
+        "- uses: actions/upload-artifact@", 1
+    )[0]
 
     assert "needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]" in job
     assert "needs.host-checks.result == 'success'" in job
@@ -227,6 +232,16 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "name: Capture ESP-IDF migration state" in job
     assert "name: d1l-idf55-migration-state" in job
     assert "path: artifacts/idf-migration/**" in job
+    assert (
+        "(. /opt/esp/idf/export.sh >/dev/null 2>&1 && idf.py --version)"
+        in idf_capture
+    )
+    assert "export.sh >/dev/null && idf.py --version" not in idf_capture
+    assert (
+        "> artifacts/idf-migration/idf-version.txt 2>&1 "
+        "|| : > artifacts/idf-migration/idf-version.txt"
+    ) in idf_capture
+    assert "> artifacts/idf-migration/idf-version.txt 2>&1 || true" not in idf_capture
     assert "dependencies.lock.patch" in job
     assert "build/config/sdkconfig.json" in job
     assert "git diff --exit-code -- dependencies.lock" in job
@@ -258,6 +273,50 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/" in job
     assert "--port" not in job
     assert not re.search(r"\bCOM\d+\b", job, re.IGNORECASE)
+
+
+def test_ci_clears_exact_idf_version_output_when_version_command_fails(tmp_path: Path):
+    bash = shutil.which("bash")
+    assert bash is not None, "bash is required to mutation-test the workflow shell contract"
+    job = job_block("firmware-build")
+    idf_capture = job.split("- name: Capture ESP-IDF migration state", 1)[1].split(
+        "- uses: actions/upload-artifact@", 1
+    )[0]
+    command_lines = [
+        line.strip()
+        for line in idf_capture.splitlines()
+        if "idf.py --version" in line
+        or line.strip().startswith("> artifacts/idf-migration/idf-version.txt")
+    ]
+    assert len(command_lines) == 2
+    assert command_lines[0].endswith("\\")
+    command = command_lines[0][:-1] + command_lines[1]
+    command = command.replace("/opt/esp/idf/export.sh", "./export.sh")
+    command = command.replace(
+        "artifacts/idf-migration/idf-version.txt", "idf-version.txt"
+    )
+    (tmp_path / "export.sh").write_text(
+        "printf '%s\\n' 'activation stdout'\n"
+        "printf '%s\\n' 'activation stderr' >&2\n"
+        "idf.py() {\n"
+        "  printf '%s\\n' 'ESP-IDF v5.5.4'\n"
+        "  return 23\n"
+        "}\n",
+        encoding="ascii",
+    )
+
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-c", command],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert (tmp_path / "idf-version.txt").read_bytes() == b""
 
 
 def test_ci_records_exact_host_success_only_after_all_host_checks_pass():
