@@ -370,6 +370,115 @@ static bool is_hex_char(char c)
            (c >= 'A' && c <= 'F');
 }
 
+static char lower_hex_char(char c)
+{
+    return (c >= 'A' && c <= 'F') ? (char)(c + ('a' - 'A')) : c;
+}
+
+static bool fixed_hex_string_valid(const char *value, size_t hex_chars)
+{
+    if (!value) {
+        return false;
+    }
+    for (size_t i = 0; i < hex_chars; ++i) {
+        if (!is_hex_char(value[i])) {
+            return false;
+        }
+    }
+    return value[hex_chars] == '\0';
+}
+
+static bool fixed_hex_strings_equal(const char *left, const char *right,
+                                    size_t hex_chars)
+{
+    if (!left || !right) {
+        return false;
+    }
+    for (size_t i = 0; i < hex_chars; ++i) {
+        if (lower_hex_char(left[i]) != lower_hex_char(right[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void copy_lower_hex(char *dest, size_t dest_size, const char *src,
+                           size_t hex_chars)
+{
+    if (!dest || !src || dest_size <= hex_chars) {
+        return;
+    }
+    for (size_t i = 0; i < hex_chars; ++i) {
+        dest[i] = lower_hex_char(src[i]);
+    }
+    dest[hex_chars] = '\0';
+}
+
+static void sanitize_ascii_bounded(char *dest, size_t dest_size, const char *src,
+                                   size_t src_size)
+{
+    if (!dest || dest_size == 0U) {
+        return;
+    }
+    size_t out = 0U;
+    while (src && out + 1U < dest_size && out < src_size && src[out] != '\0') {
+        unsigned char c = (unsigned char)src[out];
+        if (c < 32U || c > 126U || c == '"' || c == '\\') {
+            c = '_';
+        }
+        dest[out++] = (char)c;
+    }
+    dest[out] = '\0';
+}
+
+static int find_unique_index_by_fingerprint_hex(const char *fingerprint,
+                                                bool *out_ambiguous)
+{
+    int found = -1;
+    bool ambiguous = false;
+    for (size_t i = 0; i < s_count; ++i) {
+        if (!fixed_hex_string_valid(s_entries[i].fingerprint,
+                                    D1L_NODE_FINGERPRINT_LEN - 1U) ||
+            !fixed_hex_strings_equal(s_entries[i].fingerprint, fingerprint,
+                                     D1L_NODE_FINGERPRINT_LEN - 1U)) {
+            continue;
+        }
+        if (found >= 0) {
+            ambiguous = true;
+            break;
+        }
+        found = (int)i;
+    }
+    if (out_ambiguous) {
+        *out_ambiguous = ambiguous;
+    }
+    return found;
+}
+
+static int find_unique_index_by_public_key_hex(const char *public_key_hex,
+                                               bool *out_ambiguous)
+{
+    int found = -1;
+    bool ambiguous = false;
+    for (size_t i = 0; i < s_count; ++i) {
+        if (!fixed_hex_string_valid(s_entries[i].public_key_hex,
+                                    D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U) ||
+            !fixed_hex_strings_equal(s_entries[i].public_key_hex, public_key_hex,
+                                     D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U)) {
+            continue;
+        }
+        if (found >= 0) {
+            ambiguous = true;
+            break;
+        }
+        found = (int)i;
+    }
+    if (out_ambiguous) {
+        *out_ambiguous = ambiguous;
+    }
+    return found;
+}
+
 static size_t url_encode_component(char *dest, size_t dest_size, const char *src)
 {
     static const char hex[] = "0123456789ABCDEF";
@@ -570,6 +679,128 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
 
     s_total_written++;
     esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
+}
+
+esp_err_t d1l_contact_store_upsert_verified_advert(
+    const char *fingerprint, const d1l_node_entry_t *verified_node,
+    d1l_contact_verified_advert_result_t *out_result,
+    d1l_contact_entry_t *out_entry)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    if (out_entry) {
+        memset(out_entry, 0, sizeof(*out_entry));
+    }
+    if (!verified_node ||
+        !fixed_hex_string_valid(fingerprint, D1L_NODE_FINGERPRINT_LEN - 1U) ||
+        !fixed_hex_string_valid(verified_node->public_key_hex,
+                                D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U) ||
+        !fixed_hex_strings_equal(fingerprint, verified_node->public_key_hex,
+                                 D1L_NODE_FINGERPRINT_LEN - 1U)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_loaded) {
+        esp_err_t ret = d1l_contact_store_init();
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    bool fingerprint_ambiguous = false;
+    bool public_key_ambiguous = false;
+    const int fingerprint_index = find_unique_index_by_fingerprint_hex(
+        fingerprint, &fingerprint_ambiguous);
+    const int public_key_index = find_unique_index_by_public_key_hex(
+        verified_node->public_key_hex, &public_key_ambiguous);
+    if (fingerprint_ambiguous || public_key_ambiguous ||
+        (public_key_index >= 0 && fingerprint_index != public_key_index)) {
+        *out_result = D1L_CONTACT_VERIFIED_ADVERT_COLLISION;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t index = 0U;
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    if (public_key_index >= 0) {
+        index = (size_t)public_key_index;
+        result = D1L_CONTACT_VERIFIED_ADVERT_UPDATED;
+    } else if (fingerprint_index >= 0) {
+        index = (size_t)fingerprint_index;
+        if (s_entries[index].public_key_hex[0] != '\0') {
+            *out_result = D1L_CONTACT_VERIFIED_ADVERT_COLLISION;
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_INVALID_STATE;
+        }
+        result = D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER;
+    } else if (s_count >= D1L_CONTACT_STORE_CAPACITY) {
+        *out_result = D1L_CONTACT_VERIFIED_ADVERT_FULL;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_NO_MEM;
+    } else {
+        index = s_count;
+        result = D1L_CONTACT_VERIFIED_ADVERT_CREATED;
+    }
+
+    fill_blob(&s_rollback_scratch);
+    if (result == D1L_CONTACT_VERIFIED_ADVERT_CREATED) {
+        s_count++;
+    }
+    d1l_contact_entry_t *entry = &s_entries[index];
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if (result == D1L_CONTACT_VERIFIED_ADVERT_CREATED) {
+        memset(entry, 0, sizeof(*entry));
+        entry->created_ms = now_ms;
+    }
+    entry->seq = s_next_seq++;
+    entry->updated_ms = now_ms;
+    copy_lower_hex(entry->fingerprint, sizeof(entry->fingerprint), fingerprint,
+                   D1L_NODE_FINGERPRINT_LEN - 1U);
+    copy_lower_hex(entry->public_key_hex, sizeof(entry->public_key_hex),
+                   verified_node->public_key_hex,
+                   D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U);
+    if (verified_node->name[0] != '\0') {
+        sanitize_ascii_bounded(entry->heard_name, sizeof(entry->heard_name),
+                               verified_node->name, sizeof(verified_node->name));
+    }
+    if (verified_node->type[0] != '\0') {
+        sanitize_ascii_bounded(entry->type, sizeof(entry->type),
+                               verified_node->type, sizeof(verified_node->type));
+    }
+    entry->last_rssi_dbm = verified_node->rssi_dbm;
+    entry->last_snr_tenths = verified_node->snr_tenths;
+    entry->path_hash_bytes = verified_node->path_hash_bytes;
+    entry->path_hops = verified_node->path_hops;
+
+    if (entry->alias[0] == '\0') {
+        if (verified_node->name[0] != '\0') {
+            sanitize_ascii_bounded(entry->alias, sizeof(entry->alias),
+                                   verified_node->name, sizeof(verified_node->name));
+        } else {
+            copy_lower_hex(entry->alias, sizeof(entry->alias), fingerprint,
+                           D1L_NODE_FINGERPRINT_LEN - 1U);
+        }
+    }
+    if (entry->heard_name[0] == '\0') {
+        sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), entry->alias);
+    }
+    if (entry->type[0] == '\0') {
+        sanitize_ascii(entry->type, sizeof(entry->type), "unknown");
+    }
+
+    s_total_written++;
+    const esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    if (ret == ESP_OK) {
+        *out_result = result;
+        if (out_entry) {
+            *out_entry = s_entries[index];
+        }
+    }
     d1l_store_lock_give(&s_store_lock);
     return ret;
 }
@@ -840,6 +1071,29 @@ bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_
     }
     if (out_entry) {
         *out_entry = s_entries[index];
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return true;
+}
+
+bool d1l_contact_store_find_by_public_key(const char *public_key_hex,
+                                          d1l_contact_entry_t *out_entry)
+{
+    if (!fixed_hex_string_valid(public_key_hex,
+                                D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U) ||
+        (!s_loaded && d1l_contact_store_init() != ESP_OK)) {
+        return false;
+    }
+    d1l_store_lock_take(&s_store_lock);
+    bool ambiguous = false;
+    const int index = find_unique_index_by_public_key_hex(
+        public_key_hex, &ambiguous);
+    if (index < 0 || ambiguous) {
+        d1l_store_lock_give(&s_store_lock);
+        return false;
+    }
+    if (out_entry) {
+        *out_entry = s_entries[(size_t)index];
     }
     d1l_store_lock_give(&s_store_lock);
     return true;

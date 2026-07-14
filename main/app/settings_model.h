@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "identity_state.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "storage/map_tile_store.h"
 
@@ -59,6 +60,7 @@ typedef struct {
 
 void d1l_settings_defaults(d1l_settings_t *settings);
 void d1l_settings_sanitize(d1l_settings_t *settings);
+d1l_identity_state_t d1l_settings_identity_state(const d1l_settings_t *settings);
 esp_err_t d1l_settings_load(void);
 esp_err_t d1l_settings_save(const d1l_settings_t *settings);
 esp_err_t d1l_settings_reset(void);

@@ -402,6 +402,241 @@ static d1l_node_entry_t make_heard_node(const char *name, const char *type)
     return node;
 }
 
+static void make_public_key(char key[D1L_NODE_PUBLIC_KEY_HEX_LEN], uint32_t id)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U; ++i) {
+        key[i] = hex[(i + id) & 0x0fU];
+    }
+    for (size_t i = 0; i < 8U; ++i) {
+        key[15U - i] = hex[(id >> (i * 4U)) & 0x0fU];
+    }
+    key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U] = '\0';
+}
+
+static void fingerprint_from_key(
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN],
+    const char key[D1L_NODE_PUBLIC_KEY_HEX_LEN])
+{
+    memcpy(fingerprint, key, D1L_NODE_FINGERPRINT_LEN - 1U);
+    fingerprint[D1L_NODE_FINGERPRINT_LEN - 1U] = '\0';
+}
+
+static void uppercase_hex(char *dest, size_t dest_size, const char *src)
+{
+    size_t i = 0U;
+    for (; i + 1U < dest_size && src[i] != '\0'; ++i) {
+        dest[i] = (src[i] >= 'a' && src[i] <= 'f')
+                      ? (char)(src[i] - ('a' - 'A'))
+                      : src[i];
+    }
+    dest[i] = '\0';
+}
+
+static d1l_node_entry_t make_verified_node(const char *public_key_hex,
+                                           const char *name,
+                                           const char *type)
+{
+    d1l_node_entry_t node = make_heard_node(name, type);
+    copy_field(node.public_key_hex, sizeof(node.public_key_hex), public_key_hex);
+    return node;
+}
+
+static void test_verified_contact_create_reload_update_preserves_preferences(void)
+{
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 1U);
+    fingerprint_from_key(fingerprint, key);
+    d1l_node_entry_t node = make_verified_node(key, "Verified One", "chat");
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &node, &result, &contact) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    assert(strcmp(contact.public_key_hex, key) == 0);
+    assert(strcmp(contact.alias, "Verified One") == 0);
+
+    assert(d1l_contact_store_rename(fingerprint, "Pinned Alias", NULL) == ESP_OK);
+    assert(d1l_contact_store_set_flags(fingerprint, true, true, NULL) == ESP_OK);
+    const uint8_t path[] = {0xa5U, 0x5aU};
+    assert(d1l_contact_store_update_path(fingerprint, path, 2U) == ESP_OK);
+    d1l_contact_entry_t preferred = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &preferred));
+
+    assert(d1l_contact_store_init() == ESP_OK);
+    char upper_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char upper_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    uppercase_hex(upper_key, sizeof(upper_key), key);
+    uppercase_hex(upper_fingerprint, sizeof(upper_fingerprint), fingerprint);
+    node = make_verified_node(upper_key, "Fresh Heard Name", "repeater");
+    node.rssi_dbm = -44;
+    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    memset(&contact, 0, sizeof(contact));
+    assert(d1l_contact_store_upsert_verified_advert(
+               upper_fingerprint, &node, &result, &contact) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_UPDATED);
+    assert(strcmp(contact.public_key_hex, key) == 0);
+    assert(strcmp(contact.fingerprint, fingerprint) == 0);
+    assert(strcmp(contact.alias, preferred.alias) == 0);
+    assert(contact.favorite == preferred.favorite);
+    assert(contact.muted == preferred.muted);
+    assert(contact.out_path_valid == preferred.out_path_valid);
+    assert(contact.out_path_len == preferred.out_path_len);
+    assert(memcmp(contact.out_path, preferred.out_path,
+                  sizeof(contact.out_path)) == 0);
+    assert(strcmp(contact.heard_name, "Fresh Heard Name") == 0);
+    assert(strcmp(contact.type, "repeater") == 0);
+    assert(contact.last_rssi_dbm == -44);
+    assert(d1l_contact_store_find_by_public_key(upper_key, &contact));
+    assert(strcmp(contact.alias, "Pinned Alias") == 0);
+    assert(d1l_contact_store_stats().count == 1U);
+}
+
+static void test_verified_contact_promotes_placeholder_without_losing_preferences(void)
+{
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 2U);
+    fingerprint_from_key(fingerprint, key);
+    assert(d1l_contact_store_upsert_from_node(
+               fingerprint, "Manual Alias", NULL) == ESP_OK);
+    assert(d1l_contact_store_set_flags(fingerprint, true, true, NULL) == ESP_OK);
+    const uint8_t path[] = {0x11U, 0x22U, 0x33U};
+    assert(d1l_contact_store_update_path(fingerprint, path, 3U) == ESP_OK);
+
+    d1l_node_entry_t node = make_verified_node(key, "Signed Name", "room");
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    d1l_contact_entry_t contact = {0};
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &node, &result, &contact) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER);
+    assert(strcmp(contact.public_key_hex, key) == 0);
+    assert(strcmp(contact.alias, "Manual Alias") == 0);
+    assert(contact.favorite && contact.muted);
+    assert(contact.out_path_valid && contact.out_path_len == 3U);
+    assert(memcmp(contact.out_path, path, sizeof(path)) == 0);
+    assert(strcmp(contact.heard_name, "Signed Name") == 0);
+    assert(d1l_contact_store_stats().count == 1U);
+}
+
+static void test_verified_contact_refuses_collision_and_rolls_back_nvs_failure(void)
+{
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(key, 3U);
+    fingerprint_from_key(fingerprint, key);
+    d1l_node_entry_t node = make_verified_node(key, "Original", "chat");
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &node, &result, NULL) == ESP_OK);
+
+    d1l_contact_entry_t baseline = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &baseline));
+    const d1l_contact_store_stats_t baseline_stats = d1l_contact_store_stats();
+    node = make_verified_node(key, "Failed Update", "repeater");
+    mock_nvs_fail_next_set(ESP_FAIL);
+    result = D1L_CONTACT_VERIFIED_ADVERT_CREATED;
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &node, &result, NULL) == ESP_FAIL);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    d1l_contact_entry_t after = {0};
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
+    assert(memcmp(&after, &baseline, sizeof(after)) == 0);
+    assert_contact_stats_equal(d1l_contact_store_stats(), baseline_stats);
+    assert(d1l_contact_store_init() == ESP_OK);
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
+    assert(memcmp(&after, &baseline, sizeof(after)) == 0);
+
+    char colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    copy_field(colliding_key, sizeof(colliding_key), key);
+    colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] =
+        colliding_key[D1L_NODE_PUBLIC_KEY_HEX_LEN - 2U] == 'f' ? 'e' : 'f';
+    node = make_verified_node(colliding_key, "Collision", "room");
+    d1l_contact_entry_t rejected = baseline;
+    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    assert(d1l_contact_store_upsert_verified_advert(
+               fingerprint, &node, &result, &rejected) == ESP_ERR_INVALID_STATE);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_COLLISION);
+    memset(&after, 0, sizeof(after));
+    assert(d1l_contact_store_find_by_fingerprint(fingerprint, &after));
+    assert(memcmp(&after, &baseline, sizeof(after)) == 0);
+    assert_contact_stats_equal(d1l_contact_store_stats(), baseline_stats);
+    d1l_contact_entry_t empty = {0};
+    assert(memcmp(&rejected, &empty, sizeof(rejected)) == 0);
+
+    char retry_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char retry_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(retry_key, 4U);
+    fingerprint_from_key(retry_fingerprint, retry_key);
+    node = make_verified_node(retry_key, "Retry", "sensor");
+    mock_nvs_fail_next_set(ESP_FAIL);
+    result = D1L_CONTACT_VERIFIED_ADVERT_UPDATED;
+    assert(d1l_contact_store_upsert_verified_advert(
+               retry_fingerprint, &node, &result, NULL) == ESP_FAIL);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_NONE);
+    assert(!d1l_contact_store_find_by_public_key(retry_key, NULL));
+    assert_contact_stats_equal(d1l_contact_store_stats(), baseline_stats);
+    assert(d1l_contact_store_init() == ESP_OK);
+    result = D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    assert(d1l_contact_store_upsert_verified_advert(
+               retry_fingerprint, &node, &result, NULL) == ESP_OK);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+}
+
+static void test_verified_contact_full_store_never_evicts(void)
+{
+    mock_nvs_reset();
+    assert(d1l_contact_store_init() == ESP_OK);
+    char first_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char first_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    for (uint32_t id = 20U;
+         id < 20U + D1L_CONTACT_STORE_CAPACITY; ++id) {
+        char key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+        char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+        make_public_key(key, id);
+        fingerprint_from_key(fingerprint, key);
+        if (id == 20U) {
+            copy_field(first_key, sizeof(first_key), key);
+            copy_field(first_fingerprint, sizeof(first_fingerprint), fingerprint);
+        }
+        d1l_node_entry_t node = make_verified_node(key, "Capacity", "chat");
+        d1l_contact_verified_advert_result_t result =
+            D1L_CONTACT_VERIFIED_ADVERT_NONE;
+        assert(d1l_contact_store_upsert_verified_advert(
+                   fingerprint, &node, &result, NULL) == ESP_OK);
+        assert(result == D1L_CONTACT_VERIFIED_ADVERT_CREATED);
+    }
+    const d1l_contact_store_stats_t full_stats = d1l_contact_store_stats();
+    assert(full_stats.count == D1L_CONTACT_STORE_CAPACITY);
+    assert(full_stats.dropped_oldest == 0U);
+
+    char overflow_key[D1L_NODE_PUBLIC_KEY_HEX_LEN] = {0};
+    char overflow_fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    make_public_key(overflow_key, 99U);
+    fingerprint_from_key(overflow_fingerprint, overflow_key);
+    d1l_node_entry_t overflow = make_verified_node(
+        overflow_key, "Overflow", "chat");
+    d1l_contact_verified_advert_result_t result =
+        D1L_CONTACT_VERIFIED_ADVERT_NONE;
+    assert(d1l_contact_store_upsert_verified_advert(
+               overflow_fingerprint, &overflow, &result, NULL) == ESP_ERR_NO_MEM);
+    assert(result == D1L_CONTACT_VERIFIED_ADVERT_FULL);
+    assert_contact_stats_equal(d1l_contact_store_stats(), full_stats);
+    assert(d1l_contact_store_find_by_public_key(first_key, NULL));
+    assert(d1l_contact_store_find_by_fingerprint(first_fingerprint, NULL));
+    assert(!d1l_contact_store_find_by_public_key(overflow_key, NULL));
+}
+
 static void test_contact_nvs_failure_rolls_back_and_retry_succeeds(void)
 {
     mock_nvs_reset();
@@ -490,6 +725,10 @@ int main(void)
     test_stale_advert_and_location_preservation();
     test_node_nvs_failure_rolls_back_and_retry_succeeds();
     test_contact_nvs_failure_rolls_back_and_retry_succeeds();
+    test_verified_contact_create_reload_update_preserves_preferences();
+    test_verified_contact_promotes_placeholder_without_losing_preferences();
+    test_verified_contact_refuses_collision_and_rolls_back_nvs_failure();
+    test_verified_contact_full_store_never_evicts();
     test_contact_export_role_mapping();
     puts("native node/contact store behavior: ok");
     return 0;

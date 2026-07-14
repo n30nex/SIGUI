@@ -42,10 +42,28 @@ typedef struct {
     size_t capacity;
 } d1l_contact_store_stats_t;
 
+typedef enum {
+    D1L_CONTACT_VERIFIED_ADVERT_NONE = 0,
+    D1L_CONTACT_VERIFIED_ADVERT_CREATED,
+    D1L_CONTACT_VERIFIED_ADVERT_UPDATED,
+    D1L_CONTACT_VERIFIED_ADVERT_PROMOTED_PLACEHOLDER,
+    D1L_CONTACT_VERIFIED_ADVERT_COLLISION,
+    D1L_CONTACT_VERIFIED_ADVERT_FULL,
+} d1l_contact_verified_advert_result_t;
+
 esp_err_t d1l_contact_store_init(void);
 esp_err_t d1l_contact_store_clear(void);
 esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char *alias,
                                              const d1l_node_entry_t *heard_node);
+/*
+ * Stores identity metadata only after the caller has verified the signed
+ * advert. Exact full public keys are authoritative; the short fingerprint is
+ * only an index hint and can never authorize replacement or eviction.
+ */
+esp_err_t d1l_contact_store_upsert_verified_advert(
+    const char *fingerprint, const d1l_node_entry_t *verified_node,
+    d1l_contact_verified_advert_result_t *out_result,
+    d1l_contact_entry_t *out_entry);
 esp_err_t d1l_contact_store_update_path(const char *fingerprint, const uint8_t *path,
                                         uint8_t path_len);
 esp_err_t d1l_contact_store_set_flags(const char *fingerprint, bool favorite, bool muted,
@@ -59,4 +77,6 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
                                        size_t dest_size);
 d1l_contact_store_stats_t d1l_contact_store_stats(void);
 bool d1l_contact_store_find_by_fingerprint(const char *fingerprint, d1l_contact_entry_t *out_entry);
+bool d1l_contact_store_find_by_public_key(const char *public_key_hex,
+                                          d1l_contact_entry_t *out_entry);
 size_t d1l_contact_store_copy_recent(d1l_contact_entry_t *out_entries, size_t max_entries);
