@@ -22,6 +22,7 @@
 #include "diagnostics/health_monitor.h"
 #include "hal/indicator_board.h"
 #include "ui_chrome.h"
+#include "ui_connectivity.h"
 #include "ui_home.h"
 #include "ui_keyboard.h"
 #include "ui_map.h"
@@ -5689,6 +5690,28 @@ static void render_wifi_sheet(void)
     s_wifi_ssid_textarea = NULL;
     s_wifi_password_textarea = NULL;
     s_wifi_keyboard = NULL;
+    const char *strongest_ssid = s_wifi_scan_result.returned_count > 0U ?
+        s_wifi_scan_result.aps[0].ssid : NULL;
+    const d1l_ui_wifi_view_input_t view_input = {
+        .build_enabled = s_snapshot.wifi_build_enabled,
+        .enabled = s_snapshot.wifi_enabled,
+        .connected = s_snapshot.wifi_connected,
+        .profile_saved = s_snapshot.wifi_profile_saved,
+        .password_saved = s_snapshot.wifi_password_saved,
+        .scan_loaded = s_wifi_scan_loaded,
+        .state = s_snapshot.wifi_state,
+        .ip = s_snapshot.wifi_ip,
+        .last_error = s_snapshot.wifi_last_error,
+        .ssid = s_snapshot.wifi_ssid,
+        .scan_reason = s_wifi_scan_result.reason,
+        .strongest_ssid = strongest_ssid,
+        .rssi_dbm = s_snapshot.wifi_rssi_dbm,
+        .channel = s_snapshot.wifi_channel,
+        .scan_returned_count = s_wifi_scan_result.returned_count,
+        .scan_total_count = s_wifi_scan_result.total_count,
+    };
+    d1l_ui_wifi_view_model_t view;
+    d1l_ui_connectivity_wifi_view(&view_input, &view);
 
     lv_obj_t *title = create_label(s_wifi_sheet, "Wi-Fi Setup", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
@@ -5699,33 +5722,27 @@ static void render_wifi_sheet(void)
     lv_obj_t *subtitle = create_label(s_wifi_sheet, "Profile and state", 0x8EA0AE);
     lv_obj_set_pos(subtitle, 16, 36);
 
-    lv_obj_t *state = create_label(s_wifi_sheet, "", s_snapshot.wifi_enabled ? 0x5EEAD4 : 0xFBBF24);
-    label_set_fmt(state, "State %s  build %s",
-                  s_snapshot.wifi_state ? s_snapshot.wifi_state : "off",
-                  s_snapshot.wifi_build_enabled ? "enabled" : "not built");
+    lv_obj_t *state = create_label(s_wifi_sheet, view.state_line,
+                                   view.state_color);
     label_set_dot_width(state, 448);
     lv_obj_set_pos(state, 16, 58);
 
-    lv_obj_t *link = create_label(s_wifi_sheet, "", 0x8EA0AE);
-    if (s_snapshot.wifi_connected && s_snapshot.wifi_ip[0]) {
-        label_set_fmt(link, "IP %s  RSSI %d  ch %u",
-                      s_snapshot.wifi_ip,
-                      s_snapshot.wifi_rssi_dbm,
-                      (unsigned)s_snapshot.wifi_channel);
-    } else {
-        label_set_fmt(link, "Last %s",
-                      s_snapshot.wifi_last_error ? s_snapshot.wifi_last_error : "none");
-    }
+    lv_obj_t *link = create_label(s_wifi_sheet, view.link_line, 0x8EA0AE);
     label_set_dot_width(link, 448);
     lv_obj_set_pos(link, 16, 80);
 
-    lv_obj_t *profile = create_label(s_wifi_sheet, "", 0xE5EDF5);
-    label_set_fmt(profile, "Profile %s  password %s",
-                  s_snapshot.wifi_profile_saved ?
-                  (s_snapshot.wifi_ssid[0] ? s_snapshot.wifi_ssid : "saved") : "not saved",
-                  s_snapshot.wifi_password_saved ? "saved" : "open/empty");
+    lv_obj_t *profile = create_label(s_wifi_sheet, view.profile_line,
+                                     0xE5EDF5);
     label_set_dot_width(profile, 448);
     lv_obj_set_pos(profile, 16, 102);
+
+    if (!view.controls_available) {
+        lv_obj_t *unavailable = create_label(
+            s_wifi_sheet, view.scan_line, 0xFBBF24);
+        label_set_dot_width(unavailable, 448);
+        lv_obj_set_pos(unavailable, 16, 150);
+        return;
+    }
 
     lv_obj_t *ssid_label = create_label(s_wifi_sheet, "Network name", 0x5EEAD4);
     lv_obj_set_pos(ssid_label, 16, 130);
@@ -5736,7 +5753,7 @@ static void render_wifi_sheet(void)
         lv_textarea_set_one_line(s_wifi_ssid_textarea, true);
         lv_textarea_set_max_length(s_wifi_ssid_textarea, D1L_WIFI_SSID_LEN - 1U);
         lv_textarea_set_placeholder_text(s_wifi_ssid_textarea, "SSID");
-        lv_textarea_set_text(s_wifi_ssid_textarea, s_snapshot.wifi_ssid);
+        lv_textarea_set_text(s_wifi_ssid_textarea, view.ssid);
         lv_obj_set_style_radius(s_wifi_ssid_textarea, 8, 0);
         lv_obj_set_style_bg_color(s_wifi_ssid_textarea, lv_color_hex(0x071018), 0);
         lv_obj_set_style_border_color(s_wifi_ssid_textarea, lv_color_hex(0x263241), 0);
@@ -5755,7 +5772,7 @@ static void render_wifi_sheet(void)
         lv_textarea_set_password_mode(s_wifi_password_textarea, true);
         lv_textarea_set_max_length(s_wifi_password_textarea, D1L_WIFI_PASSWORD_LEN - 1U);
         lv_textarea_set_placeholder_text(s_wifi_password_textarea,
-                                         s_snapshot.wifi_password_saved ? "Saved; enter to replace" : "Optional");
+                                         view.password_placeholder);
         lv_textarea_set_text(s_wifi_password_textarea, "");
         lv_obj_set_style_radius(s_wifi_password_textarea, 8, 0);
         lv_obj_set_style_bg_color(s_wifi_password_textarea, lv_color_hex(0x071018), 0);
@@ -5769,21 +5786,10 @@ static void render_wifi_sheet(void)
     create_button(s_wifi_sheet, "Clear", 86, 258, 66, 38, wifi_clear_event_cb, NULL);
     create_button(s_wifi_sheet, "Scan", 160, 258, 62, 38, wifi_scan_event_cb, NULL);
     create_button(s_wifi_sheet, "Connect", 230, 258, 86, 38, wifi_connect_event_cb, NULL);
-    create_button(s_wifi_sheet, s_snapshot.wifi_enabled ? "Disable" : "Enable",
+    create_button(s_wifi_sheet, view.toggle_label,
                   324, 258, 86, 38, wifi_toggle_event_cb, NULL);
 
-    lv_obj_t *scan = create_label(s_wifi_sheet, "", 0x8EA0AE);
-    if (s_wifi_scan_loaded) {
-        const char *first = s_wifi_scan_result.returned_count > 0U ?
-            s_wifi_scan_result.aps[0].ssid : "none";
-        label_set_fmt(scan, "Scan %s  %u/%u networks  strongest %s",
-                      s_wifi_scan_result.reason ? s_wifi_scan_result.reason : "unknown",
-                      (unsigned)s_wifi_scan_result.returned_count,
-                      (unsigned)s_wifi_scan_result.total_count,
-                      first);
-    } else {
-        label_set_fmt(scan, "Scan to list nearby 2.4 GHz networks");
-    }
+    lv_obj_t *scan = create_label(s_wifi_sheet, view.scan_line, 0x8EA0AE);
     label_set_dot_width(scan, 448);
     lv_obj_set_pos(scan, 16, 304);
 
@@ -5802,41 +5808,39 @@ static void render_ble_sheet(void)
         return;
     }
     lv_obj_clean(s_ble_sheet);
+    const d1l_ui_ble_view_input_t view_input = {
+        .build_enabled = s_snapshot.ble_build_enabled,
+        .transport_supported = s_snapshot.ble_transport_supported,
+        .companion_enabled = s_snapshot.ble_companion_enabled,
+        .state = s_snapshot.ble_state,
+    };
+    d1l_ui_ble_view_model_t view;
+    d1l_ui_connectivity_ble_view(&view_input, &view);
 
     lv_obj_t *title = create_label(s_ble_sheet, "BLE Setup", 0xF4F7FB);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
     lv_obj_set_pos(title, 8, 4);
     create_button(s_ble_sheet, "Close", 340, 0, 76, 40, close_ble_sheet_event_cb, NULL);
 
-    lv_obj_t *state = create_label(s_ble_sheet, "", s_snapshot.ble_companion_enabled ? 0xA7F3D0 : 0xFBBF24);
-    label_set_fmt(state, "State %s  build %s",
-                  s_snapshot.ble_state ? s_snapshot.ble_state : "off",
-                  s_snapshot.ble_build_enabled ? "enabled" : "not built");
+    lv_obj_t *state = create_label(s_ble_sheet, view.state_line,
+                                   view.state_color);
     label_set_dot_width(state, 408);
     lv_obj_set_pos(state, 8, 54);
 
-    const bool ble_transport_supported = s_snapshot.ble_transport_supported;
-    lv_obj_t *purpose = create_label(s_ble_sheet,
-                                     ble_transport_supported ?
-                                     "Companion BLE is available for measured local setup." :
-                                     "BLE companion transport is unavailable in this release.",
-                                     0xE5EDF5);
+    lv_obj_t *purpose = create_label(s_ble_sheet, view.purpose, 0xE5EDF5);
     lv_label_set_long_mode(purpose, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(purpose, 408);
     lv_obj_set_pos(purpose, 8, 88);
 
-    lv_obj_t *runtime = create_label(s_ble_sheet,
-                                     ble_transport_supported ?
-                                     "Pairing controls require a measured BLE runtime artifact." :
-                                     "No BLE pairing or transport artifact is present for public release.",
+    lv_obj_t *runtime = create_label(s_ble_sheet, view.runtime_note,
                                      0xFBBF24);
     lv_label_set_long_mode(runtime, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(runtime, 408);
     lv_obj_set_pos(runtime, 8, 144);
 
-    if (ble_transport_supported) {
+    if (view.controls_available) {
         lv_obj_t *enable = create_button(s_ble_sheet,
-                                         s_snapshot.ble_companion_enabled ? "Disable" : "Enable",
+                                         view.toggle_label,
                                          8, 206, 98, 40, ble_toggle_event_cb, NULL);
         lv_obj_t *pair = create_button(s_ble_sheet, "Pair", 116, 206, 98, 40, NULL, NULL);
         lv_obj_t *forget = create_button(s_ble_sheet, "Forget", 224, 206, 98, 40, NULL, NULL);
@@ -5856,9 +5860,7 @@ static void render_ble_sheet(void)
         lv_obj_set_pos(forget, 210, 232);
     }
 
-    lv_obj_t *note = create_label(s_ble_sheet,
-                                  "USB remains the reliable companion path for production validation.",
-                                  0x8EA0AE);
+    lv_obj_t *note = create_label(s_ble_sheet, view.production_note, 0x8EA0AE);
     lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(note, 408);
     lv_obj_set_pos(note, 8, 278);
