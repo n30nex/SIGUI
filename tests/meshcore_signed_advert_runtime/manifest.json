@@ -5,7 +5,7 @@
   "coverage_boundary": "pinned_meshcore_host_signed_advert_create_send_radio_wire_receive_filter_signature_dispatch_basechat_contact_promotion_storage_callback_duplicate_self_ownership_and_deterministic_replay",
   "wp04_closure_eligible": false,
   "closure_ready": false,
-  "source_hash_mode": "raw_file_sha256",
+  "source_hash_mode": "canonical_lf_text_sha256",
   "upstream": {
     "name": "MeshCore",
     "path": "third_party/MeshCore",
@@ -72,8 +72,8 @@
     "third_party/MeshCore/lib/ed25519/sign.c": "1f28f5864ee084c9d624d73f00f45b2b82c093c1e775306ffe43671e3b76d425"
   },
   "host_sources": {
-    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "2df5ac4cd77b9f4506557c86c9bdbd6e65454afd35edbf84725aa39742d2da46",
-    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "f280316bf130e1d673e52d50f0c7ea781cca55d91490c0f40fd8673475fbab76",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.c": "9a6805014fd65d805a58a3ab5b91c0b419f4dd0424f2b57bcd014612abdda097",
+    "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
     "tests/meshcore_signed_advert_runtime/stubs/Arduino.h": "2b02ba45c9ec15830247979ef00ae93daf3be978010cc0d01bedca07db7184dc",

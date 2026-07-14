@@ -35,6 +35,7 @@ def test_signed_advert_runtime_manifest_is_bounded_and_pinned():
     assert manifest["capability"] == "identity_signed_advert_semantic_runtime"
     assert manifest["wp04_closure_eligible"] is False
     assert manifest["closure_ready"] is False
+    assert manifest["source_hash_mode"] == "canonical_lf_text_sha256"
     assert manifest["upstream"]["commit"] == (
         "e8d3c53ba1ea863937081cd0caad759b832f3028"
     )
@@ -66,8 +67,49 @@ def test_signed_advert_runtime_repository_sources_match_exact_pins():
     assert receipt["verified"] is True
     assert receipt["upstream_commit"] == manifest["upstream"]["commit"]
     assert receipt["gitlink_commit"] == manifest["upstream"]["commit"]
+    assert receipt["source_hash_mode"] == "canonical_lf_text_sha256"
     assert len(receipt["files"]) == 35
     assert all(item["matched"] for item in receipt["files"].values())
+
+
+def test_repository_source_hashing_normalizes_windows_crlf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    module = load_module()
+    source = tmp_path / "sample.cpp"
+    source.write_bytes(b"line one\nline two\n")
+    expected = module.sha256_lf_text_file(source)
+    source.write_bytes(b"line one\r\nline two\r\n")
+    assert module.sha256_file(source) != expected
+
+    commit = "1" * 40
+    repository_commit = "2" * 40
+    manifest = {
+        "source_hash_mode": "canonical_lf_text_sha256",
+        "upstream": {
+            "path": "third_party/MeshCore",
+            "commit": commit,
+            "sources": {"sample.cpp": expected},
+        },
+        "vendored_crypto_sources": {},
+        "host_sources": {},
+    }
+
+    def fake_git_output(*args: str) -> str:
+        if args[0] == "-C":
+            return commit
+        if args[0] == "ls-tree":
+            return f"160000 commit {commit}\tthird_party/MeshCore"
+        assert args == ("rev-parse", "HEAD")
+        return repository_commit
+
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setattr(module, "git_output", fake_git_output)
+    receipt = module.verify_repository_sources(manifest, repository_commit)
+
+    assert receipt["verified"] is True
+    assert receipt["files"]["sample.cpp"]["actual_sha256"] == expected
+    assert receipt["files"]["sample.cpp"]["matched"] is True
 
 
 def test_signed_advert_runtime_command_plan_compiles_real_sources():

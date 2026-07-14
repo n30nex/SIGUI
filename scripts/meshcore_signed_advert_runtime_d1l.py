@@ -103,6 +103,11 @@ def sha256_file(path: Path) -> str:
     return sha256_bytes(path.read_bytes())
 
 
+def sha256_lf_text_file(path: Path) -> str:
+    """Hash tracked text using the repository's canonical LF representation."""
+    return sha256_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
+
+
 def git_output(*args: str) -> str:
     try:
         completed = subprocess.run(
@@ -133,7 +138,7 @@ def load_manifest(path: Path = MANIFEST_PATH) -> dict[str, Any]:
         raise GateFailure("signed-advert runtime must not close WP-04")
     if manifest.get("closure_ready") is not False:
         raise GateFailure("signed-advert runtime must remain fail closed")
-    if manifest.get("source_hash_mode") != "raw_file_sha256":
+    if manifest.get("source_hash_mode") != "canonical_lf_text_sha256":
         raise GateFailure("signed-advert runtime source hash mode drifted")
     dependency = manifest.get("external_dependency", {})
     if (
@@ -198,7 +203,7 @@ def verify_repository_sources(
                 source.relative_to(root)
             except ValueError as exc:
                 raise GateFailure(f"source escapes repository root: {relative}") from exc
-            actual_hash = sha256_file(source) if source.is_file() else None
+            actual_hash = sha256_lf_text_file(source) if source.is_file() else None
             matched = actual_hash == expected_hash
             files[relative] = {
                 "expected_sha256": expected_hash,
@@ -231,6 +236,7 @@ def verify_repository_sources(
         "expected_repository_commit": expected_commit,
         "upstream_commit": upstream_head,
         "gitlink_commit": gitlink_commit,
+        "source_hash_mode": manifest["source_hash_mode"],
         "files": files,
     }
 
