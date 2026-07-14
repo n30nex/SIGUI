@@ -50,6 +50,7 @@ REQUIRED_NOTICE_SOURCES = (
 
 REQUIRED_SOURCE_INPUTS = (
     ".gitmodules",
+    ".github/d1l-build-inputs.json",
     ".github/workflows/d1l-ci.yml",
     "CMakeLists.txt",
     "LICENSE",
@@ -57,14 +58,20 @@ REQUIRED_SOURCE_INPUTS = (
     "dependencies.lock",
     "docs/ATTRIBUTIONS.md",
     "docs/BUILD_PROVENANCE_D1L.md",
+    "docs/COMPLETION_LEDGER.yaml",
     "docs/SOURCE_AUDIT_AND_ATTRIBUTION.md",
     "main/CMakeLists.txt",
     "partitions_d1l.csv",
     "patches/sensecap_indicator_idf55_compat.patch",
     "patches/sensecap_indicator_touch_fix.patch",
+    "scripts/compare_release_reproducibility_d1l.py",
+    "scripts/meshcore_conformance_d1l.py",
     "scripts/package_release_d1l.py",
     "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
+    "scripts/verify_arduino_build_inputs.py",
+    "scripts/verify_ci_tool_inputs.py",
+    "requirements/ci-host-windows.txt",
     "sdkconfig.defaults",
 )
 
@@ -312,7 +319,14 @@ def manifest_claims(manifest: dict) -> dict[str, tuple[str, int | None]]:
         if isinstance(values, list):
             for value in values:
                 add(value)
-    for name in ("update_image", "full_flash_image", "meshcore_conformance"):
+    for name in (
+        "update_image",
+        "full_flash_image",
+        "meshcore_conformance",
+        "build_inputs",
+        "capability_manifest",
+        "release_evidence_index",
+    ):
         add(manifest.get(name))
     groups = manifest.get("rp2040_artifacts")
     if isinstance(groups, list):
@@ -365,7 +379,10 @@ def collect_package_files(
     validate_manifest_inputs(manifest, package_dir, source_commit)
     excluded_names = {name[2:] for name in PACKAGE_VERIFICATION_EXCLUSIONS}
     files = []
-    for path in sorted(package_dir.rglob("*")):
+    for path in sorted(
+        package_dir.rglob("*"),
+        key=lambda item: item.relative_to(package_dir).as_posix(),
+    ):
         if not path.is_file():
             continue
         relative = path.relative_to(package_dir).as_posix()

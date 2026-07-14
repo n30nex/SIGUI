@@ -74,10 +74,6 @@ LOCAL_BUILDER = (
 )
 WORKFLOW_PATH = ".github/workflows/d1l-ci.yml"
 PROFILE = "SIGUI deterministic unsigned D1L provenance profile v1"
-OPTIONAL_MATERIAL_INPUTS = (
-    ".github/d1l-build-inputs.json",
-    "requirements/ci-host-windows.txt",
-)
 PACKAGE_EXCLUSIONS = {
     "README_RELEASE.md",
     "SHA256SUMS.txt",
@@ -211,15 +207,11 @@ def file_material(root: Path, relative: str, source_commit: str) -> dict[str, An
 def collect_materials(
     root: Path, source_identity: dict, source_reference: str
 ) -> list[dict[str, Any]]:
-    required = list(REQUIRED_SOURCE_INPUTS)
-    for relative in OPTIONAL_MATERIAL_INPUTS:
-        if (root / relative).is_file():
-            required.append(relative)
     materials = [source_material(source_identity, source_reference)]
     materials.extend(submodule_material(module) for module in source_identity["submodules"])
     materials.extend(
         file_material(root, relative, source_identity["commit"])
-        for relative in sorted(set(required))
+        for relative in sorted(REQUIRED_SOURCE_INPUTS)
     )
     return sorted(materials, key=lambda item: (item["uri"], item["name"]))
 

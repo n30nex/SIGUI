@@ -167,15 +167,24 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "timeout-minutes: 10" in job
     assert CHECKOUT_ACTION_PIN in job
     assert "submodules: recursive" in job
-    assert "sudo apt-get install -y clang-18" in job
-    assert "clang-18 --version" in job
-    assert "clang++-18 --version" in job
+    assert "clang-18_18.1.3-1ubuntu1_amd64.deb" in job
+    assert "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-18/" in job
+    assert "628b16701014ef7ad648380b20ea74b90dd543857f933b3e34d2fc042783de25" in job
+    assert "sha256sum --check --strict" in job
+    assert 'sudo apt-get install -y "$clang_package"' in job
+    assert "python scripts/verify_ci_tool_inputs.py" in job
+    assert '--cc "$(command -v clang-18)"' in job
+    assert '--cxx "$(command -v clang++-18)"' in job
+    assert job.index("sha256sum --check --strict") < job.index(
+        'sudo apt-get install -y "$clang_package"'
+    ) < job.index("python scripts/verify_ci_tool_inputs.py")
     assert "ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1" in job
     assert 'D1L_MESHCORE_CONFORMANCE_CI: "1"' in job
     assert "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1" in job
     assert "python ./scripts/meshcore_conformance_d1l.py" in job
     assert "--cc clang-18" in job
     assert "--cxx clang++-18" in job
+    assert "--toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json" in job
     assert '--commit "$GITHUB_SHA"' in job
     assert "--seed 13746277" in job
     assert "--runs 100000" in job
@@ -197,11 +206,8 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "name: d1l-meshcore-wire-conformance" in firmware
     assert "path: artifacts/meshcore-conformance-input" in firmware
     assert "name: Verify exact MeshCore conformance evidence" in firmware
-    assert 'source.get("repository_commit") == os.environ["GITHUB_SHA"]' in firmware
-    assert 'report.get("coverage_boundary") == "wire_envelope_only"' in firmware
-    assert 'report.get("coverage_level") == "wire_envelope_only"' in firmware
-    assert 'report.get("closure_ready") is False' in firmware
-    assert 'report.get("issue_65_closure_eligible") is False' in firmware
+    assert "from scripts.meshcore_conformance_d1l import validate_completed_report" in firmware
+    assert 'validate_completed_report(report, os.environ["GITHUB_SHA"])' in firmware
     assert "D1L_MESHCORE_CONFORMANCE_JSON=" in firmware
 
 
