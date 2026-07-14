@@ -29,6 +29,7 @@
 #include "ui_modal.h"
 #include "ui_navigation.h"
 #include "ui_nodes.h"
+#include "ui_packets.h"
 #include "ui_screen.h"
 #include "ui_settings.h"
 #include "sdkconfig.h"
@@ -126,6 +127,8 @@ static bool s_compose_dm;
 static bool s_messages_show_dms;
 static d1l_ui_messages_controller_t s_messages_controller;
 static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
+static d1l_ui_packets_controller_t s_packets_controller EXT_RAM_BSS_ATTR;
+static d1l_packet_log_entry_t s_packet_query_rows[D1L_PACKET_LOG_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_location_lat_e7;
@@ -140,8 +143,6 @@ static d1l_route_entry_t s_route_detail_route;
 static d1l_contact_entry_t s_route_trace_contact;
 static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
-static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_PACKET_LOG_CAPACITY];
-static size_t s_packet_filtered_count;
 static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
@@ -151,7 +152,6 @@ static char s_public_search_text[D1L_MESSAGE_TEXT_LEN];
 static char s_dm_thread_fingerprint[D1L_NODE_FINGERPRINT_LEN];
 static char s_dm_thread_alias[D1L_CONTACT_ALIAS_LEN];
 static char s_contact_export_uri[D1L_CONTACT_EXPORT_URI_LEN];
-static char s_packet_search_text[D1L_PACKET_LOG_QUERY_TEXT_LEN];
 static const char s_contact_action_favorite[] = "favorite";
 static const char s_contact_action_mute[] = "mute";
 static const uint32_t D1L_UI_TIMER_MIN_SLEEP_MS = 20U;
@@ -162,14 +162,8 @@ static const uint32_t D1L_UI_MAP_VIEWPORT_REFRESH_MS = 500U;
  * populated device into a false timeout. */
 static const uint32_t D1L_UI_SCROLL_PROBE_TIMEOUT_MS = 5000U;
 static const uint32_t D1L_UI_COMPOSE_PROBE_TIMEOUT_MS = 1500U;
-static const size_t D1L_PACKET_UI_INITIAL_ROWS = 100U;
-static const size_t D1L_PACKET_UI_LOAD_OLDER_STEP = 100U;
 static size_t s_public_history_limit = D1L_PUBLIC_HISTORY_UI_INITIAL_ROWS;
 static size_t s_dm_thread_limit = D1L_DM_THREAD_UI_INITIAL_ROWS;
-static size_t s_packet_row_limit = 100U;
-static size_t s_packet_skip_newest;
-static size_t s_packet_total_matches;
-static bool s_packet_sd_history_page;
 typedef struct {
     uint32_t next_id;
     uint32_t pending_id;
@@ -289,13 +283,6 @@ typedef struct {
 } d1l_ui_map_render_input_t;
 
 typedef enum {
-    D1L_PACKET_FILTER_ALL = 0,
-    D1L_PACKET_FILTER_RX,
-    D1L_PACKET_FILTER_TX,
-    D1L_PACKET_FILTER_TEXT,
-} d1l_packet_filter_mode_t;
-
-typedef enum {
     D1L_RADIO_EDIT_FREQ_DOWN = 0,
     D1L_RADIO_EDIT_FREQ_UP,
     D1L_RADIO_EDIT_BW,
@@ -325,8 +312,6 @@ static d1l_ui_content_generation_t s_rendered_content_generation;
 static bool s_rendered_content_generation_valid = false;
 static d1l_ui_map_render_input_t s_rendered_map_input;
 static bool s_rendered_map_input_valid = false;
-static d1l_packet_filter_mode_t s_packet_filter_mode = D1L_PACKET_FILTER_ALL;
-static bool s_packets_paused;
 static bool s_packet_detail_advanced;
 static bool s_message_detail_advanced;
 static d1l_mesh_roles_page_t s_mesh_roles_page = D1L_MESH_ROLES_PAGE_ROOT;
@@ -674,8 +659,6 @@ static void map_location_textarea_event_cb(lv_event_t *event);
 static void map_location_save_event_cb(lv_event_t *event);
 static void map_location_clear_event_cb(lv_event_t *event);
 static void close_map_options_sheet_event_cb(lv_event_t *event);
-static const char *packet_filter_direction(void);
-static const char *packet_filter_kind(void);
 static void message_detail_mode_event_cb(lv_event_t *event);
 static void map_location_keyboard_event_cb(lv_event_t *event);
 static void process_pending_content_refresh(void);
@@ -1849,119 +1832,24 @@ static void render_health_line(lv_obj_t *parent, int y, const d1l_app_snapshot_t
     obj_set_pos_if(line, 0, y);
 }
 
-static char packet_lower_ascii(char c)
-{
-    return (c >= 'A' && c <= 'Z') ? (char)(c + ('a' - 'A')) : c;
-}
-
-static bool packet_text_has_token(const char *text, const char *token)
-{
-    if (!text || !token || token[0] == '\0') {
-        return false;
-    }
-    for (const char *cursor = text; *cursor; ++cursor) {
-        const char *left = cursor;
-        const char *right = token;
-        while (*left && *right && packet_lower_ascii(*left) == packet_lower_ascii(*right)) {
-            ++left;
-            ++right;
-        }
-        if (*right == '\0') {
-            return true;
-        }
-    }
-    return false;
-}
-
-static uint32_t packet_entry_color(const d1l_packet_log_entry_t *entry)
-{
-    if (!entry) {
-        return 0x8EA0AE;
-    }
-    if (packet_text_has_token(entry->kind, "fail") ||
-        packet_text_has_token(entry->note, "fail") ||
-        packet_text_has_token(entry->kind, "error") ||
-        packet_text_has_token(entry->note, "error")) {
-        return 0xF87171;
-    }
-    if (packet_text_has_token(entry->kind, "raw") ||
-        packet_text_has_token(entry->kind, "control")) {
-        return 0xFBBF24;
-    }
-    if (packet_text_has_token(entry->direction, "tx")) {
-        return 0x93C5FD;
-    }
-    if (packet_text_has_token(entry->direction, "rx")) {
-        return 0x5EEAD4;
-    }
-    return 0xA7F3D0;
-}
-
-static const char *packet_entry_status(const d1l_packet_log_entry_t *entry)
-{
-    if (!entry) {
-        return "UNK";
-    }
-    if (packet_text_has_token(entry->kind, "fail") ||
-        packet_text_has_token(entry->note, "fail")) {
-        return "FAIL";
-    }
-    if (packet_text_has_token(entry->kind, "error") ||
-        packet_text_has_token(entry->note, "error")) {
-        return "ERR";
-    }
-    if (packet_text_has_token(entry->direction, "tx")) {
-        return "TX";
-    }
-    if (packet_text_has_token(entry->direction, "rx")) {
-        return "RX";
-    }
-    return "LOG";
-}
-
 static size_t refresh_packet_terminal_rows(void)
 {
-    if (s_packets_paused) {
-        return s_packet_filtered_count;
+    d1l_ui_packets_query_request_t query;
+    for (size_t attempt = 0U; attempt < 2U; ++attempt) {
+        if (!d1l_ui_packets_query_request(&s_packets_controller, &query)) {
+            break;
+        }
+        size_t total_matches = 0U;
+        bool sd_used = false;
+        const size_t row_count = d1l_packet_log_query_page(
+            s_packet_query_rows, query.row_limit, query.skip_newest, query.direction,
+            query.kind, query.search_text, &total_matches, &sd_used);
+        if (!d1l_ui_packets_accept_query(&s_packets_controller, s_packet_query_rows, row_count,
+                                         total_matches, sd_used)) {
+            break;
+        }
     }
-    if (s_packet_row_limit < D1L_PACKET_UI_INITIAL_ROWS) {
-        s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
-    }
-    if (s_packet_row_limit > D1L_PACKET_LOG_CAPACITY) {
-        s_packet_row_limit = D1L_PACKET_LOG_CAPACITY;
-    }
-    size_t total_matches = 0;
-    bool sd_used = false;
-    s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
-                                                        s_packet_row_limit,
-                                                        s_packet_skip_newest,
-                                                        packet_filter_direction(),
-                                                        packet_filter_kind(),
-                                                        s_packet_search_text,
-                                                        &total_matches, &sd_used);
-    if (s_packet_filtered_count == 0 && s_packet_skip_newest > 0) {
-        s_packet_skip_newest = 0;
-        s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
-                                                            s_packet_row_limit,
-                                                            s_packet_skip_newest,
-                                                            packet_filter_direction(),
-                                                            packet_filter_kind(),
-                                                            s_packet_search_text,
-                                                            &total_matches, &sd_used);
-    }
-    s_packet_total_matches = total_matches;
-    s_packet_sd_history_page = sd_used;
-    return s_packet_filtered_count;
-}
-
-static bool packet_feed_can_load_older(size_t packet_rows)
-{
-    return packet_rows > 0 && s_packet_total_matches > s_packet_skip_newest + packet_rows;
-}
-
-static bool packet_feed_can_load_newer(void)
-{
-    return s_packet_skip_newest > 0;
+    return s_packets_controller.row_count;
 }
 
 static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entry_t *entry)
@@ -1969,7 +1857,7 @@ static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entr
     if (!entry) {
         return;
     }
-    const uint32_t accent_color = packet_entry_color(entry);
+    const uint32_t accent_color = d1l_ui_packets_entry_color(entry);
     char snr[16];
     format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
 
@@ -1992,7 +1880,7 @@ static void render_packet_row(lv_obj_t *parent, int y, const d1l_packet_log_entr
         lv_obj_set_style_border_width(accent, 0, 0);
     }
 
-    lv_obj_t *status = create_label(row, packet_entry_status(entry), accent_color);
+    lv_obj_t *status = create_label(row, d1l_ui_packets_entry_status(entry), accent_color);
     label_set_dot_width(status, 38);
     obj_align_if(status, LV_ALIGN_TOP_LEFT, 8, 0);
     lv_obj_t *kind = create_label(row, entry->kind[0] ? entry->kind : "packet", 0xF4F7FB);
@@ -3361,7 +3249,7 @@ static void render_packet_detail_sheet(void)
     lv_obj_clean(s_packet_detail_sheet);
 
     const d1l_packet_log_entry_t *entry = &s_packet_detail_packet;
-    const uint32_t accent_color = packet_entry_color(entry);
+    const uint32_t accent_color = d1l_ui_packets_entry_color(entry);
     char snr[16];
     format_snr_tenths(snr, sizeof(snr), entry->snr_tenths);
 
@@ -3381,7 +3269,7 @@ static void render_packet_detail_sheet(void)
     lv_obj_t *kind = create_label(s_packet_detail_sheet, "", accent_color);
     label_set_fmt(kind, "%s  %s  #%lu",
                   entry->kind[0] ? entry->kind : "packet",
-                  packet_entry_status(entry),
+                  d1l_ui_packets_entry_status(entry),
                   (unsigned long)entry->seq);
     label_set_dot_width(kind, 392);
     lv_obj_set_pos(kind, 8, 76);
@@ -3467,55 +3355,33 @@ static void open_packet_detail_event_cb(lv_event_t *event)
 
 static void packet_filter_event_cb(lv_event_t *event)
 {
-    s_packet_filter_mode = (d1l_packet_filter_mode_t)(uintptr_t)lv_event_get_user_data(event);
-    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
-    s_packet_skip_newest = 0;
-    s_packets_paused = false;
+    d1l_ui_packets_select_filter(
+        &s_packets_controller,
+        (d1l_ui_packet_filter_t)(uintptr_t)lv_event_get_user_data(event));
     request_content_refresh();
 }
 
 static void packet_pause_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_packets_paused) {
-        s_packets_paused = false;
-    } else {
-        size_t total_matches = 0;
-        bool sd_used = false;
-        s_packet_filtered_count = d1l_packet_log_query_page(s_packet_filtered_packets,
-                                                            s_packet_row_limit,
-                                                            s_packet_skip_newest,
-                                                            packet_filter_direction(),
-                                                            packet_filter_kind(),
-                                                            s_packet_search_text,
-                                                            &total_matches, &sd_used);
-        s_packet_total_matches = total_matches;
-        s_packet_sd_history_page = sd_used;
-        s_packets_paused = true;
+    if (!s_packets_controller.paused) {
+        refresh_packet_terminal_rows();
     }
+    d1l_ui_packets_toggle_pause(&s_packets_controller);
     request_content_refresh();
 }
 
 static void packet_load_older_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_packet_filtered_count > 0 &&
-        s_packet_total_matches > s_packet_skip_newest + s_packet_filtered_count) {
-        s_packet_skip_newest += s_packet_filtered_count;
-    }
-    s_packets_paused = false;
+    d1l_ui_packets_load_older(&s_packets_controller);
     request_content_refresh();
 }
 
 static void packet_load_newer_event_cb(lv_event_t *event)
 {
     (void)event;
-    if (s_packet_skip_newest > D1L_PACKET_UI_LOAD_OLDER_STEP) {
-        s_packet_skip_newest -= D1L_PACKET_UI_LOAD_OLDER_STEP;
-    } else {
-        s_packet_skip_newest = 0;
-    }
-    s_packets_paused = false;
+    d1l_ui_packets_load_newer(&s_packets_controller);
     request_content_refresh();
 }
 
@@ -3528,13 +3394,10 @@ static void close_packet_search_event_cb(lv_event_t *event)
 static void clear_packet_search_event_cb(lv_event_t *event)
 {
     (void)event;
-    s_packet_search_text[0] = '\0';
+    d1l_ui_packets_clear_search(&s_packets_controller);
     if (s_packet_search_textarea) {
         lv_textarea_set_text(s_packet_search_textarea, "");
     }
-    s_packets_paused = false;
-    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
-    s_packet_skip_newest = 0;
     hide_packet_search_sheet();
     request_content_refresh();
 }
@@ -3542,16 +3405,12 @@ static void clear_packet_search_event_cb(lv_event_t *event)
 static void apply_packet_search_event_cb(lv_event_t *event)
 {
     (void)event;
-    s_packet_search_text[0] = '\0';
+    const char *text = "";
     if (s_packet_search_textarea) {
-        const char *text = lv_textarea_get_text(s_packet_search_textarea);
-        if (text) {
-            snprintf(s_packet_search_text, sizeof(s_packet_search_text), "%s", text);
-        }
+        const char *textarea_text = lv_textarea_get_text(s_packet_search_textarea);
+        text = textarea_text ? textarea_text : "";
     }
-    s_packets_paused = false;
-    s_packet_row_limit = D1L_PACKET_UI_INITIAL_ROWS;
-    s_packet_skip_newest = 0;
+    d1l_ui_packets_set_search(&s_packets_controller, text);
     hide_packet_search_sheet();
     request_content_refresh();
 }
@@ -3586,7 +3445,7 @@ static void open_packet_search_event_cb(lv_event_t *event)
     hide_packet_detail_sheet();
     hide_mesh_roles_sheet();
     if (s_packet_search_textarea && s_packet_search_keyboard) {
-        lv_textarea_set_text(s_packet_search_textarea, s_packet_search_text);
+        lv_textarea_set_text(s_packet_search_textarea, s_packets_controller.search_text);
         lv_keyboard_set_textarea(s_packet_search_keyboard, s_packet_search_textarea);
     }
     show_modal(s_packet_search_sheet);
@@ -4776,29 +4635,12 @@ static void render_map(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
     d1l_ui_map_render(content, snapshot, &callbacks);
 }
 
-static const char *packet_filter_direction(void)
-{
-    switch (s_packet_filter_mode) {
-    case D1L_PACKET_FILTER_RX:
-        return "rx";
-    case D1L_PACKET_FILTER_TX:
-        return "tx";
-    default:
-        return "any";
-    }
-}
-
-static const char *packet_filter_kind(void)
-{
-    return s_packet_filter_mode == D1L_PACKET_FILTER_TEXT ? "text" : "any";
-}
-
 static lv_obj_t *render_packet_filter_button(lv_obj_t *parent, const char *label, int x,
-                                             d1l_packet_filter_mode_t mode)
+                                             d1l_ui_packet_filter_t mode)
 {
     lv_obj_t *button = create_button(parent, label, x, 112, 58, 34, packet_filter_event_cb,
                                      (void *)(uintptr_t)mode);
-    if (button && s_packet_filter_mode == mode) {
+    if (button && s_packets_controller.filter == mode) {
         lv_obj_set_style_bg_color(button, lv_color_hex(0x12362F), 0);
         lv_obj_set_style_border_color(button, lv_color_hex(0x5EEAD4), 0);
         lv_obj_set_style_border_width(button, 1, 0);
@@ -4821,7 +4663,7 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         lv_obj_set_style_border_color(terminal, lv_color_hex(0x334155), 0);
         lv_obj_t *line1 = create_label(terminal, "", 0x5EEAD4);
         label_set_fmt(line1, "live %s  rssi %d  snr %s  avg %d",
-                      s_packets_paused ? "paused" : "tail",
+                      s_packets_controller.paused ? "paused" : "tail",
                       snapshot->signal_summary.latest_rssi_dbm,
                       snr,
                       snapshot->signal_summary.avg_rssi_dbm);
@@ -4836,38 +4678,38 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         obj_align_if(line2, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     }
 
-    render_packet_filter_button(content, "All", 18, D1L_PACKET_FILTER_ALL);
-    render_packet_filter_button(content, "RX", 82, D1L_PACKET_FILTER_RX);
-    render_packet_filter_button(content, "TX", 146, D1L_PACKET_FILTER_TX);
-    render_packet_filter_button(content, "Text", 210, D1L_PACKET_FILTER_TEXT);
+    render_packet_filter_button(content, "All", 18, D1L_UI_PACKET_FILTER_ALL);
+    render_packet_filter_button(content, "RX", 82, D1L_UI_PACKET_FILTER_RX);
+    render_packet_filter_button(content, "TX", 146, D1L_UI_PACKET_FILTER_TX);
+    render_packet_filter_button(content, "Text", 210, D1L_UI_PACKET_FILTER_TEXT);
     create_button(content, "Search", 278, 112, 74, 34, open_packet_search_event_cb, NULL);
-    create_button(content, s_packets_paused ? "Resume" : "Pause", 362, 112, 80, 34,
+    create_button(content, s_packets_controller.paused ? "Resume" : "Pause", 362, 112, 80, 34,
                   packet_pause_event_cb, NULL);
-    if (s_packet_search_text[0]) {
+    if (s_packets_controller.search_text[0]) {
         lv_obj_t *search = create_label(content, "", 0xFBBF24);
-        label_set_fmt(search, "find %.18s", s_packet_search_text);
+        label_set_fmt(search, "find %.18s", s_packets_controller.search_text);
         lv_label_set_long_mode(search, LV_LABEL_LONG_DOT);
         lv_obj_set_width(search, 408);
         lv_obj_set_pos(search, 26, 152);
     }
 
     lv_obj_t *feed_title = create_label(content, "Packet Feed", 0x8EA0AE);
-    obj_set_pos_if(feed_title, 26, s_packet_search_text[0] ? 176 : 156);
+    obj_set_pos_if(feed_title, 26, s_packets_controller.search_text[0] ? 176 : 156);
 
     size_t packet_rows = refresh_packet_terminal_rows();
-    int y = s_packet_search_text[0] ? 204 : 184;
+    int y = s_packets_controller.search_text[0] ? 204 : 184;
     lv_obj_t *feed_count = create_label(content, "", 0x8EA0AE);
-    const size_t page_first = packet_rows > 0 ? s_packet_skip_newest + 1U : 0;
-    const size_t page_last = s_packet_skip_newest + packet_rows;
+    const size_t page_first = packet_rows > 0 ? s_packets_controller.skip_newest + 1U : 0;
+    const size_t page_last = s_packets_controller.skip_newest + packet_rows;
     label_set_fmt(feed_count, "page %u-%u/%u%s",
                   (unsigned)page_first, (unsigned)page_last,
-                  (unsigned)s_packet_total_matches,
-                  s_packet_sd_history_page ? " SD" : "");
+                  (unsigned)s_packets_controller.total_matches,
+                  s_packets_controller.sd_history_page ? " SD" : "");
     lv_label_set_long_mode(feed_count, LV_LABEL_LONG_DOT);
     lv_obj_set_width(feed_count, 210);
-    lv_obj_set_pos(feed_count, 218, s_packet_search_text[0] ? 176 : 156);
+    lv_obj_set_pos(feed_count, 218, s_packets_controller.search_text[0] ? 176 : 156);
     for (size_t i = 0; i < packet_rows; ++i) {
-        render_packet_row(content, y, &s_packet_filtered_packets[i]);
+        render_packet_row(content, y, &s_packets_controller.rows[i]);
         y += 52;
     }
     if (packet_rows == 0 && snapshot->recent_packet_count > 0) {
@@ -4880,15 +4722,15 @@ static void render_packets(lv_obj_t *content, const d1l_app_snapshot_t *snapshot
         y += 34;
     }
 
-    if (packet_feed_can_load_older(packet_rows)) {
+    if (d1l_ui_packets_can_load_older(&s_packets_controller)) {
         create_button(content, "Load Older", 18, y + 4, 128, 40,
                       packet_load_older_event_cb, NULL);
-        if (packet_feed_can_load_newer()) {
+        if (d1l_ui_packets_can_load_newer(&s_packets_controller)) {
             create_button(content, "Newer", 154, y + 4, 92, 40,
                           packet_load_newer_event_cb, NULL);
         }
         y += 54;
-    } else if (packet_feed_can_load_newer()) {
+    } else if (d1l_ui_packets_can_load_newer(&s_packets_controller)) {
         create_button(content, "Newer", 18, y + 4, 92, 40,
                       packet_load_newer_event_cb, NULL);
         y += 54;
@@ -8337,6 +8179,7 @@ esp_err_t d1l_ui_phase1_start(void)
     }
 
     lv_init();
+    d1l_ui_packets_init(&s_packets_controller);
     d1l_health_monitor_set_lvgl_ready(true);
     ESP_RETURN_ON_ERROR(init_capture_buffers(), TAG, "capture buffer init failed");
 
