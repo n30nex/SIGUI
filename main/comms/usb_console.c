@@ -4088,26 +4088,74 @@ static void cmd_contacts(void)
            (unsigned long)stats.total_written, (unsigned long)stats.dropped_oldest);
     for (size_t i = 0; i < copied; ++i) {
         const d1l_contact_entry_t *e = &entries[i];
-        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\",\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"out_path_known\":%s,\"out_path_len\":%u,\"out_path_updated_ms\":%lu,\"favorite\":%s,\"muted\":%s}",
+        printf("%s{\"seq\":%lu,\"created_ms\":%lu,\"updated_ms\":%lu,\"fingerprint\":",
                i ? "," : "", (unsigned long)e->seq, (unsigned long)e->created_ms,
-               (unsigned long)e->updated_ms, e->fingerprint, e->public_key_hex,
-               e->alias, e->heard_name, e->type, e->last_rssi_dbm,
+               (unsigned long)e->updated_ms);
+        print_json_string(e->fingerprint);
+        printf(",\"public_key\":");
+        print_json_string(e->public_key_hex);
+        printf(",\"alias\":");
+        print_json_string(e->alias);
+        printf(",\"heard_name\":");
+        print_json_string(e->heard_name);
+        printf(",\"type\":");
+        print_json_string(e->type);
+        printf(",\"verification_source\":");
+        print_json_string(
+            d1l_contact_store_verification_source_name(e->verification_source));
+        printf(",\"verified_at_ms\":%lu,\"signed_advert_timestamp\":%lu,\"last_heard_ms\":%lu,\"canonical\":%s,\"can_dm\":%s,\"can_admin\":%s,\"last_rssi_dbm\":%d,\"last_snr_tenths\":%d,\"path_hash_bytes\":%u,\"path_hops\":%u,\"out_path_known\":%s,\"out_path_len\":%u,\"out_path_updated_ms\":%lu,\"favorite\":%s,\"muted\":%s}",
+               (unsigned long)e->verified_at_ms,
+               (unsigned long)e->signed_advert_timestamp,
+               (unsigned long)e->last_heard_ms,
+               bool_json(d1l_contact_store_is_canonical(e)),
+               bool_json(d1l_contact_store_can_dm(e)),
+               bool_json(d1l_contact_store_can_admin(e)), e->last_rssi_dbm,
                e->last_snr_tenths, e->path_hash_bytes, e->path_hops,
                bool_json(e->out_path_valid), e->out_path_len,
                (unsigned long)e->out_path_updated_ms, bool_json(e->favorite),
                bool_json(e->muted));
     }
-    printf("],\"persisted\":true,\"note\":\"Contacts are promoted from heard nodes into a bounded NVS store\"}\n");
+    printf("],\"persisted\":true,\"note\":\"Canonical contacts require a full-key signed advert or validated MeshCore URI import; heard-only placeholders cannot DM\"}\n");
+}
+
+static const char *contact_import_result_name(d1l_contact_import_result_t result)
+{
+    switch (result) {
+    case D1L_CONTACT_IMPORT_CREATED:
+        return "created";
+    case D1L_CONTACT_IMPORT_UPDATED:
+        return "updated";
+    case D1L_CONTACT_IMPORT_PROMOTED_PLACEHOLDER:
+        return "promoted";
+    case D1L_CONTACT_IMPORT_COLLISION:
+        return "collision";
+    case D1L_CONTACT_IMPORT_ROLE_CONFLICT:
+        return "role_conflict";
+    case D1L_CONTACT_IMPORT_FULL:
+        return "full";
+    case D1L_CONTACT_IMPORT_NONE:
+    default:
+        return "none";
+    }
 }
 
 static void print_contact_export_json(const d1l_contact_entry_t *e, bool leading_comma)
 {
     char uri[D1L_CONTACT_EXPORT_URI_LEN] = {0};
     esp_err_t ret = d1l_contact_store_export_uri(e, uri, sizeof(uri));
-    printf("%s{\"seq\":%lu,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"type\":\"%s\",\"type_id\":%u,\"public_key\":\"%s\",\"shareable\":%s,\"meshcore_uri\":\"%s\"}",
-           leading_comma ? "," : "", (unsigned long)e->seq, e->fingerprint, e->alias,
-           e->type, (unsigned)d1l_contact_store_meshcore_type_id(e->type),
-           e->public_key_hex, bool_json(ret == ESP_OK), ret == ESP_OK ? uri : "");
+    printf("%s{\"seq\":%lu,\"fingerprint\":",
+           leading_comma ? "," : "", (unsigned long)e->seq);
+    print_json_string(e->fingerprint);
+    printf(",\"alias\":");
+    print_json_string(e->alias);
+    printf(",\"type\":");
+    print_json_string(e->type);
+    printf(",\"type_id\":%u,\"public_key\":",
+           (unsigned)d1l_contact_store_meshcore_type_id(e->type));
+    print_json_string(e->public_key_hex);
+    printf(",\"shareable\":%s,\"meshcore_uri\":", bool_json(ret == ESP_OK));
+    print_json_string(ret == ESP_OK ? uri : "");
+    printf("}");
 }
 
 static void cmd_contacts_export(const char *line)
@@ -4153,10 +4201,69 @@ static void cmd_contacts_export(const char *line)
     }
 
     ok_begin("contacts export");
-    printf(",\"fingerprint\":\"%s\",\"alias\":\"%s\",\"type\":\"%s\",\"type_id\":%u,\"public_key\":\"%s\",\"meshcore_uri\":\"%s\",\"format\":\"meshcore://contact/add\",\"qr_compatible\":true}\n",
-           contact.fingerprint, contact.alias, contact.type,
-           (unsigned)d1l_contact_store_meshcore_type_id(contact.type),
-           contact.public_key_hex, uri);
+    printf(",\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"alias\":");
+    print_json_string(contact.alias);
+    printf(",\"type\":");
+    print_json_string(contact.type);
+    printf(",\"type_id\":%u,\"public_key\":",
+           (unsigned)d1l_contact_store_meshcore_type_id(contact.type));
+    print_json_string(contact.public_key_hex);
+    printf(",\"meshcore_uri\":");
+    print_json_string(uri);
+    printf(",\"format\":\"meshcore://contact/add\",\"qr_compatible\":true}\n");
+}
+
+static void cmd_contacts_import(const char *line)
+{
+    const char *uri = line + strlen("contacts import ");
+    while (*uri == ' ') {
+        uri++;
+    }
+    const size_t uri_len = strlen(uri);
+    if (uri_len == 0U || uri_len > D1L_CONTACT_EXPORT_URI_LEN - 1U) {
+        err_result("contacts import", "INVALID_URI",
+                   "usage: contacts import <meshcore://contact/add?...>");
+        return;
+    }
+
+    d1l_contact_import_result_t result = D1L_CONTACT_IMPORT_NONE;
+    d1l_contact_entry_t contact = {0};
+    const esp_err_t ret = d1l_contact_store_import_uri(
+        uri, uri_len, &result, &contact);
+    if (ret != ESP_OK) {
+        const char *code = ret == ESP_ERR_INVALID_ARG ? "INVALID_URI" :
+                           (result == D1L_CONTACT_IMPORT_COLLISION ?
+                                "KEY_COLLISION" :
+                            (result == D1L_CONTACT_IMPORT_ROLE_CONFLICT ?
+                                 "ROLE_CONFLICT" :
+                             (result == D1L_CONTACT_IMPORT_FULL ?
+                                  "CONTACT_STORE_FULL" :
+                                  esp_err_to_name(ret))));
+        err_result("contacts import", code,
+                   "URI must contain one bounded name, 64-hex public_key, and type 1..4");
+        return;
+    }
+
+    ok_begin("contacts import");
+    printf(",\"persisted\":true,\"result\":");
+    print_json_string(contact_import_result_name(result));
+    printf(",\"verification_source\":");
+    print_json_string(
+        d1l_contact_store_verification_source_name(contact.verification_source));
+    printf(",\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"public_key\":");
+    print_json_string(contact.public_key_hex);
+    printf(",\"alias\":");
+    print_json_string(contact.alias);
+    printf(",\"type\":");
+    print_json_string(contact.type);
+    printf(",\"canonical\":%s,\"can_dm\":%s,\"can_admin\":%s}\n",
+           bool_json(d1l_contact_store_is_canonical(&contact)),
+           bool_json(d1l_contact_store_can_dm(&contact)),
+           bool_json(d1l_contact_store_can_admin(&contact)));
 }
 
 static void cmd_contacts_clear(void)
@@ -4197,9 +4304,19 @@ static void cmd_contacts_add(const char *line)
     d1l_contact_entry_t contact = {0};
     d1l_contact_store_find_by_fingerprint(fingerprint, &contact);
     ok_begin("contacts add");
-    printf(",\"persisted\":true,\"source\":\"%s\",\"fingerprint\":\"%s\",\"public_key\":\"%s\",\"alias\":\"%s\",\"heard_name\":\"%s\",\"type\":\"%s\"}\n",
-           heard_found ? "heard_node" : "manual", contact.fingerprint,
-           contact.public_key_hex, contact.alias, contact.heard_name, contact.type);
+    printf(",\"persisted\":true,\"source\":");
+    print_json_string(heard_found ? "heard_node" : "manual");
+    printf(",\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"public_key\":");
+    print_json_string(contact.public_key_hex);
+    printf(",\"alias\":");
+    print_json_string(contact.alias);
+    printf(",\"heard_name\":");
+    print_json_string(contact.heard_name);
+    printf(",\"type\":");
+    print_json_string(contact.type);
+    printf("}\n");
 }
 
 static void cmd_contacts_set(const char *line)
@@ -4270,8 +4387,10 @@ static void cmd_contacts_set(const char *line)
     }
 
     ok_begin("contacts set");
-    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"favorite\":%s,\"muted\":%s}\n",
-           contact.fingerprint, bool_json(contact.favorite), bool_json(contact.muted));
+    printf(",\"persisted\":true,\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"favorite\":%s,\"muted\":%s}\n",
+           bool_json(contact.favorite), bool_json(contact.muted));
 }
 
 static void cmd_contacts_rename(const char *line)
@@ -4304,8 +4423,11 @@ static void cmd_contacts_rename(const char *line)
     }
 
     ok_begin("contacts rename");
-    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"updated_ms\":%lu}\n",
-           contact.fingerprint, contact.alias, (unsigned long)contact.updated_ms);
+    printf(",\"persisted\":true,\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"alias\":");
+    print_json_string(contact.alias);
+    printf(",\"updated_ms\":%lu}\n", (unsigned long)contact.updated_ms);
 }
 
 static void cmd_contacts_delete(const char *line)
@@ -4330,8 +4452,12 @@ static void cmd_contacts_delete(const char *line)
 
     d1l_contact_store_stats_t stats = d1l_contact_store_stats();
     ok_begin("contacts delete");
-    printf(",\"persisted\":true,\"fingerprint\":\"%s\",\"alias\":\"%s\",\"count\":%u,\"history_retained\":true}\n",
-           contact.fingerprint, contact.alias, (unsigned)stats.count);
+    printf(",\"persisted\":true,\"fingerprint\":");
+    print_json_string(contact.fingerprint);
+    printf(",\"alias\":");
+    print_json_string(contact.alias);
+    printf(",\"count\":%u,\"history_retained\":true}\n",
+           (unsigned)stats.count);
 }
 
 static void cmd_mesh_send_dm(const char *line)
@@ -5051,7 +5177,7 @@ static void cmd_help(void)
            "\"messages dm [offset <n>]\",\"messages dm <fingerprint> [offset <n>]\","
            "\"messages unread\",\"messages read <public|dm|dm <fingerprint>|all>\","
            "\"messages clear\",\"messages dm clear\",\"nodes\",\"nodes clear\",\"contacts\","
-           "\"contacts export [fingerprint]\",\"contacts add <fingerprint> [alias]\","
+           "\"contacts export [fingerprint]\",\"contacts import <meshcore-uri>\",\"contacts add <fingerprint> [alias]\","
            "\"contacts rename <fingerprint> <alias>\",\"contacts delete <fingerprint>\","
            "\"contacts set <fingerprint> <favorite|mute> <0|1>\",\"contacts clear\","
            "\"routes\",\"routes detail <seq>\",\"routes trace <fingerprint>\","
@@ -5242,6 +5368,8 @@ static void handle_line(const char *line)
     } else if (strcmp(line, "contacts export") == 0 ||
                strncmp(line, "contacts export ", 16) == 0) {
         cmd_contacts_export(line);
+    } else if (strncmp(line, "contacts import ", 16) == 0) {
+        cmd_contacts_import(line);
     } else if (strcmp(line, "contacts clear") == 0) {
         cmd_contacts_clear();
     } else if (strncmp(line, "contacts add ", 13) == 0) {

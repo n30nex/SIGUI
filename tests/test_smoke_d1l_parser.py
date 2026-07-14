@@ -180,6 +180,7 @@ def test_storage_utility_commands_map_to_console_responses():
 
 def test_contact_mutation_commands_map_to_console_responses():
     assert expected_command_name("contacts add A1B2C3D4E5F60789 CodexTemp") == "contacts add"
+    assert expected_command_name("contacts import meshcore://contact/add?name=A&public_key=00&type=1") == "contacts import"
     assert expected_command_name("contacts rename A1B2C3D4E5F60789 CodexTemp2") == "contacts rename"
     assert expected_command_name("contacts delete A1B2C3D4E5F60789") == "contacts delete"
 
