@@ -1,0 +1,226 @@
+{
+  "schema": 1,
+  "artifact_type": "wp04_signed_advert_ed25519_foundations_aggregate",
+  "repository": "n30nex/SIGUI",
+  "work_package": "WP-04",
+  "source_commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+  "merged_slices": [
+    {
+      "pull_request": 94,
+      "capability": "ed25519_defined_arithmetic_overlay_foundation",
+      "head_commit": "be36fe10b1ac34966b83f2a73d43d17df9f7d2c7",
+      "pr_merge_test_commit": "4658daa904acf3668ea94a78871f07ed1c2afbdd",
+      "merge_commit": "2b878566d846f4db68ddb40f853cc63148f4a024",
+      "parent": "977cbd2590ddd0b73fe24274ba45f9d1e4051a37",
+      "tree": "83bffd3fca39e66aba4dd951c53c249c58d01996",
+      "actions": {
+        "push_run": "29306348780",
+        "pull_request_run": "29306377583",
+        "merged_main_run": "29307225130",
+        "status": "success",
+        "host_tests_passed_per_pr_run": 909,
+        "checksum_contract_tests_passed_per_pr_run": 28
+      },
+      "pull_request_artifact_qa": {
+        "artifact_archives_verified": 10,
+        "checksum_manifests_verified": 6,
+        "checksum_entries_verified": 88,
+        "extracted_files_hashed": 430,
+        "report_sha256": "8896ba9d3bcfd52a1a17f10360de8710df7adbcc3183522e6a09d03be0548da5"
+      },
+      "overlay": {
+        "transformations": 215,
+        "fe_transformations": 74,
+        "ge_transformations": 6,
+        "sc_transformations": 135,
+        "differential_cases": 256,
+        "byte_identical_output_bytes": 150541,
+        "byte_identical_output_sha256": "c37ccb9a5b8a7805dbe0afe44c170eec994e6748f08b2b5296caa67cd8ca4ecb",
+        "fe_sha256": "1d5040487ff44538e9a03164e8bbe3a9d3446d0efc9669578f20ba4a8751bdfc",
+        "ge_sha256": "b17611fd0b5d8bb3bae2dca3926150a6a2f9f579a7357dcf7feb296779d9d653",
+        "sc_sha256": "4a955511f222bf501b16220ad077b4fc5c668bb8c66c82bc51deff1f850754ae",
+        "windows_gcc_report_sha256": "0a312be15c95c037401ae628aa472da813062ed1c02f735ab5846cbcdf7d510b",
+        "ubuntu_clang18_report_sha256": "39f1939682bf383651cb94c43da06623e8a3e48b4a86c8bd31fd175984f2474c",
+        "exception_flags": [],
+        "sanitizer_status": "pass"
+      },
+      "boundary": "The overlay is merged and independently validated, but production and the main host oracle still select the pinned legacy fe.c, ge.c, and sc.c sources at this commit."
+    },
+    {
+      "pull_request": 93,
+      "capability": "identity_signed_advert_runtime",
+      "head_commit": "e0f44a20fe52c795189c3bc40f0c17238aa764e2",
+      "pr_merge_test_commit": "be85e49b8b78c12b7124b60772d6b8c70d69be63",
+      "merge_commit": "b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e",
+      "parent": "2b878566d846f4db68ddb40f853cc63148f4a024",
+      "tree": "6903faf6696b64a834f9a9841c75048b1b1b4dae",
+      "actions": {
+        "push_run": "29306794376",
+        "pull_request_run": "29306795470",
+        "merged_main_run": "29307595930",
+        "status": "success",
+        "host_tests_passed_per_pr_run": 914,
+        "checksum_contract_tests_passed_per_pr_run": 28
+      },
+      "pull_request_artifact_qa": {
+        "artifact_archives_verified": 10,
+        "checksum_manifests_verified": 6,
+        "checksum_entries_verified": 88,
+        "extracted_files_hashed": 432,
+        "push_signed_runtime_receipt_sha256": "a987442d9085ee5c5bfc9418577db7032b0cda6cb07abcbc0d17598914cdce5e",
+        "pull_request_signed_runtime_receipt_sha256": "b595f9dbde221058f98d7fa2246fdf6a1560e2d5c7fd2676367a2a96493e6ff6",
+        "push_conformance_receipt_sha256": "19621d17f756740b5a9283e4398abc3c487d5285ad61d2962cc10052900269ce",
+        "pull_request_conformance_receipt_sha256": "a7018d6625353e5a0cebd1d84f7411fcb1d0754663b135f6cbd9fd54ac9a1e46"
+      },
+      "runtime_semantics": {
+        "assertions": 9,
+        "commands": 27,
+        "repository_source_pins": 35,
+        "external_sources": 17,
+        "packet_allocations": 5,
+        "packet_releases": 5,
+        "duplicate_suppression": true,
+        "bad_signature_rejection": true,
+        "self_advert_suppression": true,
+        "deterministic_replay": true
+      },
+      "boundary": "This executes the real signed-advert Identity, Mesh, Dispatcher, and BaseChatMesh path; it does not close ACK, route, TRACE, admin, retained-state, RF, or physical behavior."
+    }
+  ],
+  "merged_main": {
+    "workflow_run": "29307595930",
+    "status": "success",
+    "jobs": {
+      "change_filter": "success",
+      "meshcore_conformance": "success",
+      "host_checks": "success",
+      "firmware_build": "success",
+      "rp2040_sd_bridge_build": "skipped_include_sd_bridge_false"
+    },
+    "host_tests_passed": 917,
+    "checksum_contract_tests_passed": 28,
+    "artifact_archives": [
+      {
+        "name": "d1l-release-package",
+        "artifact_id": 8300917599,
+        "archive_bytes": 10516377,
+        "archive_sha256": "738ce1463e0477c68c3e2fd62ba2d59fafde0bb4f9916c10d029fb69644208cd",
+        "extracted_files": 28,
+        "extracted_bytes": 38258734
+      },
+      {
+        "name": "d1l-firmware-artifacts",
+        "artifact_id": 8300916853,
+        "archive_bytes": 8546819,
+        "archive_sha256": "a7b497ad8d5ff4f2792b961821e2e6a70997d8687edc998a3edafdea1b044872",
+        "extracted_files": 15,
+        "extracted_bytes": 29321734
+      },
+      {
+        "name": "d1l-idf55-migration-state",
+        "artifact_id": 8300915375,
+        "archive_bytes": 33771,
+        "archive_sha256": "a519375f51df0cbaf58d4af3bb9a6b13ca79d48f6a2a3aafc0e75e0f94d2bdca",
+        "extracted_files": 9,
+        "extracted_bytes": 148710
+      },
+      {
+        "name": "d1l-host-artifacts",
+        "artifact_id": 8300857932,
+        "archive_bytes": 3330427,
+        "archive_sha256": "348f4612432d85e3ac29457beb7fc1d87d7d3c3ecc48ecb67113add51a666dd8",
+        "extracted_files": 160,
+        "extracted_bytes": 4455322
+      },
+      {
+        "name": "d1l-meshcore-wire-conformance",
+        "artifact_id": 8300807867,
+        "archive_bytes": 28310,
+        "archive_sha256": "94335ff6e048e8999692b6e629297b93c380ccd463ea140df455cfd3df27c1ad",
+        "extracted_files": 4,
+        "extracted_bytes": 169118
+      }
+    ],
+    "all_archive_digests_match_github_api": true,
+    "checksum_manifests_verified": 3,
+    "checksum_entries_verified": 44,
+    "firmware_manifest_entries": 14,
+    "firmware_manifest_sha256": "c92af5856fee1107abba5dd350116d5d81edb517f4bb893a5562b40cdbee123d",
+    "build_inputs_manifest_entries": 3,
+    "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+    "release_manifest_entries": 27,
+    "release_manifest_sha256": "dc5ba0f7dc92ea3dc69d277926fa1acb049e6405b5b222ad6d2dd7d75e1fac4f",
+    "downloaded_tree_file_count": 216,
+    "downloaded_tree_total_bytes": 72353618,
+    "downloaded_tree_inventory_sha256": "9117424199086903f96138436d686a031cafcfc6636c857f0e25b5e782b68df9",
+    "release_package_manifest_json_sha256": "a9fc7c3eb2421ce2e6c534b0decaed99c34ec68e7f91a80e6ff30edf83d8abcf",
+    "application_sha256": "64b393be1bbcdac6e2be3ddbbfb6462bee987236c5820539c1552fb10d5a7d8e",
+    "full_flash_sha256": "1f7b7c6831d74cf9580d4be1803c1f3bcd42d6303dd2283a1e146908f64057ce",
+    "host_success_marker_sha256": "518acf34e6092279aa45ff876b1b716c8be06a8957951a0a0841810d27abf0e0",
+    "completion_ledger_validation_sha256": "baebcfcc2910a095e361892300eaabc9b6cd3702e3dfc2cf69fbdc282c5063c9",
+    "release_audit_sha256": "61ba3c2de288a115538433fe25fce0cf12377667197fcce62e1ef5da7b6be57b",
+    "sbom_sha256": "8292cb457a922d49304def0b330ba702d45041c1732031b780cb62fe23f4f995",
+    "provenance_sha256": "623daea6ae7c01b8b2a3f972c2bfb17f2ab1e1ecdfaf5f24b52a5a7e9c429703",
+    "release_evidence_index_sha256": "0fc39ffac06cfea40062cbeb1b512b0aba422b52605075a2ca695530e4553e44"
+  },
+  "meshcore_runtime_and_oracle": {
+    "signed_advert_receipt_sha256": "e2c9de18c96b9f33161b2e60292cce35ff595d0d4913103ea33bf960ea68fc41",
+    "raw_conformance_receipt_sha256": "3af1e480bd15f2054908f1ea6cd0bf88a41faeeb3e320a964524d50b8d69cec9",
+    "packaged_conformance_receipt_sha256": "2b9272d60f59d33af28214f063641bc3a73c13f8e44a40e3b06cbbc669764b8c",
+    "oracle_manifest_sha256": "aa110fb4aee057629abcc4ff967bf4b520409c59a8fbbed016994b1ef7ace250",
+    "signed_advert_receipt_in_release_package": false,
+    "fuzz_runs": 100000,
+    "fuzz_findings": 0,
+    "bidirectional_packet_vectors": 864,
+    "wire_failures": 0,
+    "sanitizer_errors": 0,
+    "memory_errors": 0,
+    "full_ubsan_clean": false,
+    "shift_base_exception_count": 3,
+    "closure_ready": false
+  },
+  "release_audit": {
+    "sha256": "61ba3c2de288a115538433fe25fce0cf12377667197fcce62e1ef5da7b6be57b",
+    "gates_total": 35,
+    "gates_passed": 1,
+    "gates_failed": 34,
+    "p0_total": 33,
+    "p0_failed": 32,
+    "p1_total": 2,
+    "p1_failed": 2,
+    "ready_for_public_release": false
+  },
+  "open_release_blockers": [
+    {
+      "id": "BLK-WP04-ED25519-SHIFT-UB-20260714",
+      "reason": "Production and the main host oracle still select pinned legacy fe.c, ge.c, and sc.c and retain three scoped shift-base sanitizer exceptions.",
+      "blocks_execution": false,
+      "blocks_release": true
+    }
+  ],
+  "active_implementation": [
+    "ed25519_defined_arithmetic_production_and_oracle_integration",
+    "ack_dispatch_correlation_and_delivery"
+  ],
+  "residual_capabilities": [
+    "route_selection_and_forwarding",
+    "trace_forwarding_and_path_discovery",
+    "login_request_response_admin",
+    "retained_state_recovery",
+    "official_peer_rf_and_final_hardware_evidence"
+  ],
+  "checks": {
+    "exact_merge_identity": true,
+    "merged_main_actions_success": true,
+    "all_github_archive_digests_verified": true,
+    "all_available_checksum_manifests_verified": true,
+    "signed_advert_runtime_receipt_bound_to_exact_commit": true,
+    "package_sbom_provenance_bindings_verified": true,
+    "residual_gaps_fail_closed": true
+  },
+  "proof_banked": false,
+  "closure_eligible": false,
+  "valid": true,
+  "release_ready": false,
+  "release_note": "This banks the merged Ed25519 overlay foundation and signed-advert runtime only. WP-04, issue #65, and the public release remain open."
+}

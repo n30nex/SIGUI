@@ -2,7 +2,7 @@
 
 ## Phase 1
 
-- [x] Exact merged `main` `e79fb56160914f4483515f4f70998aa2f8961496` passed 891 host tests plus 28 checksum-contract tests in Actions `29300795502`; all five downloaded artifacts strict-verified across 3 manifests / 44 entries and 214 files. RP2040 correctly skipped on merged main; the earlier exact-head Actions dispatch `29296995585` executed the pinned Arduino action, built all three RP2040 variants, and strict-verified 9 manifests / 81 entries without device interaction.
+- [x] Exact merged `main` `b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e` passed 917 host tests plus 28 checksum-contract tests in Actions `29307595930`; all five downloaded artifacts strict-verified across 3 manifests / 44 entries and 216 files / 72,353,618 bytes. RP2040 correctly skipped for this ESP32-only change; the earlier exact-head Actions dispatch `29296995585` executed the pinned Arduino action, built all three RP2040 variants, and strict-verified 9 manifests / 81 entries without device interaction.
 - [x] The current integration-candidate firmware builds with ESP-IDF v5.5.4 in GitHub Actions; local firmware builds are not part of validation.
 - [x] Standalone Map/Wi-Fi and ESP-IDF 5.5.4 branch host suites pass.
 - [x] The bounded `727bd23` platform base passed all 461 host tests, including Map simulator, network-suppressed dry-run, strict native SD reply/state, and host-reference wire checks. The current Stage 3 stack requires its own complete host and Actions results below.
@@ -33,10 +33,24 @@
 - [x] Issue #65 has a separate Ubuntu 24.04, recursively checked-out,
   Clang-18 ASan+UBSan/libFuzzer wire-envelope job that gates firmware build
   and uploads a commit-named JSON artifact.
-- [ ] The current commit's wire-envelope artifact passes with
+- [x] Merged PR #92's current-commit wire-envelope artifact passes with
   `coverage_level="wire_envelope_only"`, `closure_ready=false`, the exact
   upstream gitlink, 100,000 deterministic fuzz inputs, and zero sanitizer or
-  canary failures. This is structural evidence only.
+  canary failures. Its bounded 931-case upstream oracle and exact 22-command
+  receipt plan also pass. This is foundation evidence only.
+- [x] PR #93 merges an exact-source real signed-advert
+  Identity/Mesh/Dispatcher/BaseChatMesh runtime with duplicate, bad-signature,
+  and self-advert suppression plus balanced packet allocation/release. Its
+  push/PR Actions `29306794376` / `29306795470` each pass 914 host tests and 28
+  checksum-contract tests. This closes only the signed-advert runtime slice.
+- [x] PR #94 merges the 215-expression defined-arithmetic Ed25519 overlay and
+  exception-free Clang 18 differential/RFC 8032 proof. Exact merged-main run
+  `29307225130` passes 909 host tests, 28 checksum-contract tests, all five
+  archive digests, and all 44 manifest entries. This is an integration-ready
+  foundation; production and the main oracle still select the legacy sources.
+- [ ] Remove the exact `shift-base` sanitizer exceptions for pinned Ed25519
+  `fe.c`, `ge.c`, and `sc.c`; production and the host oracle must use reviewed
+  defined arithmetic and report `full_ubsan_clean=true` on exact Actions.
 - [ ] Issue #65 full conformance closes only after semantic,
   production-cryptography, duplicate/replay/lifetime, retained-state, and
   real-peer coverage passes for the entire declared MeshCore 1.0 surface; the
@@ -195,7 +209,7 @@
 - [x] WP-01 exact-pair source qualification is merged / `proof_banked=true`. Physical evidence remains bound to `092293f2311a24c9899bc9bf343ab014c4ba0411`; Actions `29272708844` / `29272709642` are green and all 8 manifests / 78 entries verify. Canonical SHA-256 receipts: provenance `2decf8ad60b73e71bbb09b489adba8fd827856a8daf00c376c5a9ba5354e451e`; inserted stability `a038ee7ca371c4ee404493c721a343ef54e7bbd55b08273c8dc833d9d0203aef`; 10/10 removal/reinsert `3a3882038fec2497529d281f3c2b9b7468c1e62dcca7962ca3b9492125f0fad1`; 5/5 reboot matrix `db6cab3020bfa8ef575bd6a59c61d1277a8e72e1e73eb987248817199797a986`; active soak `caf19395d0e1a175f6fa13c2550bc8693297661756bf339ba4acec63da2699b9`; aggregate `994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277`.
 - [x] PR #83 merged the refreshed completion ledger and banked WP-01 proof on `c3f9106ea9b88c491889cd8dea9ad883a0d72180`. Actions `29285852443` passed 388 host tests; both downloaded checksum manifests and all 35 entries verify, and the ledger receipt selected WP-02 as runnable. PR #62 merged as `570a94ad6ead0941f7acb7d9c9812c63df869e33`; PR #64 later advanced live `main` to `12d5470eca45ef6e86b6e15cf1822716e563a78e`.
 - [x] `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed. PR #64 push `29289247092` verified 2 manifests / 36 entries; PR `29289250956` verified 8 / 75 with root manifest `0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379`; exact merged-main `29289683188` strict-verified 8 / 75 with root manifest `23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed`.
-- [x] WP-02 software stack landing and fail-closed baseline tooling are complete. PRs #62, #64, #80, and #84 are merged; later ledger/release-security PRs through #90 advance exact main to `e79fb56160914f4483515f4f70998aa2f8961496`. Actions `29300795502` and downloaded checksums pass.
+- [x] WP-02 software stack landing and fail-closed baseline tooling are complete. PRs #62, #64, #80, and #84 are merged; later release-security and WP-04 slices through #94 advance exact main to `b49a7b3a18379fdb6e4fe95c46784e8e2ea79d2e`. Actions `29307595930` and downloaded checksums pass.
 - [ ] WP-02 physical qualification remains open. The tracked portable integration baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) fails closed only for board, UI, SD, reboot, and Map-open receipts. Collect them once the final candidate is frozen; each receipt must bind that exact candidate and use canonical boolean fields (`physical_observed=true`; `dry_run=false`; `simulated=false`; `simulation=false`; `source_inspection=false`). Evidence from `092293f`, `4ee07caf`, `17a948cf`, `14182d3f`, or any other predecessor cannot close those roles; the blocker does not stop WP-03/WP-04.
 - [x] WP-03 release-surface ownership, immutable inputs, deterministic SPDX SBOM, unsigned SLSA v1 provenance, and canonical POSIX-order reproducibility are merged through PRs #86-#90 at exact `main` `e79fb56160914f4483515f4f70998aa2f8961496`. Exact-main root manifests are firmware `6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb`, build inputs `521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233`, and release `499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18`; SBOM is `78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037` and provenance is `7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c`.
 - [x] WP-03 is `merged` / `proof_banked=true`. Exact-source full-release runs `29300805114` and `29300806682` each strict-verified 9 manifests / 89 entries / 257 files; comparator receipt `babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f` passed with no failures. Portable aggregate `docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json` has SHA-256 `ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264`. The preserved `a03bdb8...` `invalid_sbom` receipt is fixed negative history, not closure evidence.
