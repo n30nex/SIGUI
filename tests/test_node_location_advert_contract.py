@@ -337,8 +337,8 @@ def test_dm_service_rejects_non_chat_roles_before_identity_or_radio_side_effects
     service = read("main/mesh/meshcore_service.c")
     sender = function_slice(
         service,
+        "static esp_err_t meshcore_service_send_dm_with_result",
         "esp_err_t d1l_meshcore_service_send_dm",
-        "esp_err_t d1l_meshcore_service_request_trace",
     )
 
     lookup = sender.index("d1l_contact_store_find_by_fingerprint")

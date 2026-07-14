@@ -129,8 +129,10 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
 
 def test_meshcore_service_retains_dm_when_queued_not_only_tx_done():
     source = read("main/mesh/meshcore_service.c")
-    send_start = source.index("esp_err_t d1l_meshcore_service_send_dm")
-    send_body = source[send_start:source.index("const char *d1l_meshcore_service_state_name", send_start)]
+    send_start = source.index("static esp_err_t meshcore_service_send_dm_with_result")
+    send_body = source[
+        send_start:source.index("esp_err_t d1l_meshcore_service_send_dm", send_start)
+    ]
 
     remember_at = send_body.index("remember_pending_dm_tx(&contact, text")
     service_send_at = send_body.index("meshcore_service_send_raw(raw, raw_len")

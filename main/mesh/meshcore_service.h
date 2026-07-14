@@ -26,6 +26,14 @@ typedef struct {
     uint32_t ack_tx_duplicate_rows_suppressed;
     uint32_t ack_tx_last_hash;
     esp_err_t ack_tx_last_error;
+    uint32_t dm_route_direct_selected;
+    uint32_t dm_route_flood_selected;
+    uint32_t dm_route_missing_fallback;
+    uint32_t dm_route_preboot_fallback;
+    uint32_t dm_route_stale_fallback;
+    uint32_t dm_route_malformed_fallback;
+    uint32_t dm_route_last_path_age_ms;
+    uint8_t dm_route_last_reason;
     uint8_t path_hash_bytes;
     bool identity_ready;
     bool radio_ready;
