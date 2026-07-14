@@ -11,7 +11,8 @@
 
 #define D1L_DM_STORE_ID D1L_RETAINED_BLOB_STORE_DM_MESSAGES
 #define D1L_DM_STORE_KEY "threads"
-#define D1L_DM_STORE_SCHEMA 5U
+#define D1L_DM_STORE_SCHEMA 6U
+#define D1L_DM_STORE_SCHEMA_V5 5U
 #define D1L_DM_STORE_SCHEMA_V4 4U
 #define D1L_DM_STORE_SCHEMA_V3 3U
 #define D1L_DM_STORE_SCHEMA_V2 2U
@@ -64,6 +65,45 @@ typedef struct {
     d1l_dm_entry_v4_t entries[D1L_DM_STORE_CAPACITY];
 } d1l_dm_store_blob_v4_t;
 
+/* Schema v5 added durable inbound ACK-dispatch metadata.  Keep its exact
+ * entry layout frozen now that schema v6 extends the live row with outbound
+ * delivery state. */
+typedef struct {
+    uint32_t seq;
+    uint32_t uptime_ms;
+    char contact_fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char contact_alias[D1L_CONTACT_ALIAS_LEN];
+    char direction[D1L_DM_DIRECTION_LEN];
+    char text[D1L_MESSAGE_TEXT_LEN];
+    int rssi_dbm;
+    int snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    uint8_t attempt;
+    bool delivered;
+    bool acked;
+    uint32_t ack_hash;
+    uint8_t identity_digest[D1L_DM_IDENTITY_DIGEST_BYTES];
+    uint8_t ack_dispatch_count;
+    uint8_t ack_dispatch_kind;
+    d1l_dm_ack_state_t ack_state;
+    esp_err_t ack_last_error;
+    bool identity_digest_valid;
+} d1l_dm_entry_v5_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t head;
+    uint32_t count;
+    uint32_t epoch;
+    uint32_t content_revision;
+    uint64_t clear_lineage;
+    d1l_dm_entry_v5_t entries[D1L_DM_STORE_CAPACITY];
+} d1l_dm_store_blob_v5_t;
+
 typedef struct {
     uint32_t schema;
     uint32_t next_seq;
@@ -115,7 +155,8 @@ typedef struct {
 
 typedef union {
     uint32_t schema;
-    d1l_dm_store_blob_t v5;
+    d1l_dm_store_blob_t v6;
+    d1l_dm_store_blob_v5_t v5;
     d1l_dm_store_blob_v4_t v4;
     d1l_dm_store_blob_v3_t v3;
     d1l_dm_store_blob_v2_t v2;
@@ -184,6 +225,73 @@ static esp_err_t persist_store(bool force);
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
+
+static uint64_t fnv1a64_bytes(uint64_t hash, const void *data, size_t len)
+{
+    const uint8_t *bytes = (const uint8_t *)data;
+    for (size_t i = 0U; bytes && i < len; ++i) {
+        hash ^= bytes[i];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static uint64_t fnv1a64_u32_le(uint64_t hash, uint32_t value)
+{
+    const uint8_t bytes[4] = {
+        (uint8_t)value,
+        (uint8_t)(value >> 8U),
+        (uint8_t)(value >> 16U),
+        (uint8_t)(value >> 24U),
+    };
+    return fnv1a64_bytes(hash, bytes, sizeof(bytes));
+}
+
+static uint64_t mix64(uint64_t value)
+{
+    value ^= value >> 30U;
+    value *= UINT64_C(0xbf58476d1ce4e5b9);
+    value ^= value >> 27U;
+    value *= UINT64_C(0x94d049bb133111eb);
+    return value ^ (value >> 31U);
+}
+
+static bool delivery_session_id_exists_locked(uint64_t session_id)
+{
+    if (session_id == 0U) {
+        return true;
+    }
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].delivery_session_id == session_id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static uint64_t new_delivery_session_id_locked(void)
+{
+    for (size_t attempt = 0U; attempt < 8U; ++attempt) {
+        const uint64_t candidate = ((uint64_t)esp_random() << 32U) |
+                                   (uint64_t)esp_random();
+        if (!delivery_session_id_exists_locked(candidate)) {
+            return candidate;
+        }
+    }
+    const uint64_t seed = s_clear_lineage ^
+        ((uint64_t)s_epoch << 32U) ^ (uint64_t)s_next_seq ^
+        UINT64_C(0xd1d34e5e55100101);
+    for (uint64_t probe = 0U; probe <= D1L_DM_STORE_CAPACITY; ++probe) {
+        uint64_t candidate = mix64(seed + probe);
+        if (candidate == 0U) {
+            candidate = UINT64_C(0xd1d34e5e55100101) ^ probe;
+        }
+        if (!delivery_session_id_exists_locked(candidate)) {
+            return candidate;
+        }
+    }
+    return 0U;
 }
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
@@ -315,6 +423,98 @@ static bool ack_metadata_is_valid(const d1l_dm_entry_t *entry)
     }
 }
 
+static bool delivery_state_is_failure(d1l_dm_delivery_state_t state)
+{
+    return state == D1L_DM_DELIVERY_FAILED_RADIO ||
+           state == D1L_DM_DELIVERY_FAILED_TIMEOUT ||
+           state == D1L_DM_DELIVERY_FAILED_QUEUE ||
+           state == D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
+}
+
+static uint64_t migration_delivery_session_id(const d1l_dm_entry_t *entry)
+{
+    static const uint8_t domain[] = "SIGUI-DM-DELIVERY-MIGRATION-V1";
+    uint64_t hash = UINT64_C(14695981039346656037);
+    hash = fnv1a64_bytes(hash, domain, sizeof(domain));
+    hash = fnv1a64_bytes(hash, entry->contact_fingerprint,
+                         strlen(entry->contact_fingerprint) + 1U);
+    hash = fnv1a64_bytes(hash, entry->direction,
+                         strlen(entry->direction) + 1U);
+    hash = fnv1a64_bytes(hash, entry->text, strlen(entry->text) + 1U);
+    hash = fnv1a64_u32_le(hash, entry->uptime_ms);
+    hash = fnv1a64_u32_le(hash, entry->ack_hash);
+    hash = mix64(hash);
+    return hash == 0U ? UINT64_C(0xd1d34e5e55100001) : hash;
+}
+
+static bool delivery_reason_matches_target(
+    d1l_dm_delivery_state_t state, d1l_dm_delivery_reason_t reason);
+
+static bool delivery_metadata_is_valid(const d1l_dm_entry_t *entry)
+{
+    if (!entry || !d1l_dm_delivery_state_valid(entry->delivery_state) ||
+        !d1l_dm_delivery_reason_valid(entry->delivery_reason)) {
+        return false;
+    }
+    const bool outbound =
+        strncmp(entry->direction, "tx", sizeof(entry->direction)) == 0;
+    if (!outbound) {
+        return entry->delivery_session_id == 0U &&
+               entry->delivery_state == D1L_DM_DELIVERY_NOT_APPLICABLE &&
+               entry->delivery_reason == D1L_DM_DELIVERY_REASON_NONE &&
+               entry->delivery_last_error == ESP_OK &&
+               entry->delivery_retry_count == 0U &&
+               entry->delivery_revision == 0U;
+    }
+    const bool acknowledged =
+        entry->delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED;
+    if (entry->delivery_session_id == 0U ||
+        entry->delivery_state == D1L_DM_DELIVERY_NOT_APPLICABLE ||
+        entry->delivery_reason == D1L_DM_DELIVERY_REASON_NONE ||
+        !delivery_reason_matches_target(entry->delivery_state,
+                                        entry->delivery_reason) ||
+        entry->delivery_revision == 0U ||
+        entry->delivery_retry_count > entry->attempt ||
+        entry->delivered != acknowledged || entry->acked != acknowledged) {
+        return false;
+    }
+    return !delivery_state_is_failure(entry->delivery_state) ||
+           entry->delivery_last_error != ESP_OK;
+}
+
+static bool v5_ack_metadata_is_valid(const d1l_dm_entry_v5_t *entry)
+{
+    if (!entry) {
+        return false;
+    }
+    d1l_dm_entry_t current = {0};
+    memcpy(current.direction, entry->direction, sizeof(current.direction));
+    memcpy(current.identity_digest, entry->identity_digest,
+           sizeof(current.identity_digest));
+    current.ack_dispatch_count = entry->ack_dispatch_count;
+    current.ack_dispatch_kind = entry->ack_dispatch_kind;
+    current.ack_state = entry->ack_state;
+    current.ack_last_error = entry->ack_last_error;
+    current.identity_digest_valid = entry->identity_digest_valid;
+    return ack_metadata_is_valid(&current);
+}
+
+static bool v5_entry_is_valid(const d1l_dm_entry_v5_t *entry,
+                              uint32_t next_seq)
+{
+    return entry && entry->seq > 0U && entry->seq < next_seq &&
+           persisted_text_is_valid(entry->contact_fingerprint,
+                                   sizeof(entry->contact_fingerprint), false) &&
+           persisted_text_is_valid(entry->contact_alias,
+                                   sizeof(entry->contact_alias), false) &&
+           persisted_text_is_valid(entry->direction,
+                                   sizeof(entry->direction), false) &&
+           persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
+           entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
+           (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U &&
+           v5_ack_metadata_is_valid(entry);
+}
+
 static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
                                      uint32_t next_seq)
 {
@@ -328,7 +528,8 @@ static bool persisted_entry_is_valid(const d1l_dm_entry_t *entry,
            persisted_text_is_valid(entry->text, sizeof(entry->text), false) &&
            entry->path_hash_bytes <= 3U && entry->path_hops <= 63U &&
            (uint16_t)entry->path_hash_bytes * entry->path_hops <= 64U &&
-           ack_metadata_is_valid(entry);
+           ack_metadata_is_valid(entry) &&
+           delivery_metadata_is_valid(entry);
 }
 
 static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
@@ -352,8 +553,46 @@ static bool blob_is_valid(const d1l_dm_store_blob_t *blob, size_t len)
                                             &blob->entries[i])) {
                 return false;
             }
+            if (blob->entries[i].delivery_session_id != 0U &&
+                blob->entries[previous].delivery_session_id ==
+                    blob->entries[i].delivery_session_id) {
+                return false;
+            }
         }
         previous_seq = blob->entries[i].seq;
+    }
+    return true;
+}
+
+static bool blob_v5_is_valid(const d1l_dm_store_blob_v5_t *blob, size_t len)
+{
+    if (!blob || len != sizeof(*blob) ||
+        blob->schema != D1L_DM_STORE_SCHEMA_V5 || blob->epoch == 0U ||
+        blob->content_revision == 0U ||
+        blob->head >= D1L_DM_STORE_CAPACITY ||
+        blob->count > D1L_DM_STORE_CAPACITY || blob->next_seq == 0U ||
+        blob->total_written < blob->count ||
+        blob->head != blob->count % D1L_DM_STORE_CAPACITY) {
+        return false;
+    }
+    uint32_t previous_seq = 0U;
+    for (size_t i = 0U; i < blob->count; ++i) {
+        const d1l_dm_entry_v5_t *entry = &blob->entries[i];
+        if (!v5_entry_is_valid(entry, blob->next_seq) ||
+            entry->seq <= previous_seq) {
+            return false;
+        }
+        if (entry->identity_digest_valid) {
+            for (size_t previous = 0U; previous < i; ++previous) {
+                if (blob->entries[previous].identity_digest_valid &&
+                    memcmp(blob->entries[previous].identity_digest,
+                           entry->identity_digest,
+                           D1L_DM_IDENTITY_DIGEST_BYTES) == 0) {
+                    return false;
+                }
+            }
+        }
+        previous_seq = entry->seq;
     }
     return true;
 }
@@ -427,6 +666,87 @@ static uint32_t migration_revision(uint32_t total_written)
     return total_written == UINT32_MAX ? UINT32_MAX : total_written + 1U;
 }
 
+static void initialize_legacy_delivery_metadata(d1l_dm_entry_t *entry)
+{
+    if (!entry ||
+        strncmp(entry->direction, "tx", sizeof(entry->direction)) != 0) {
+        if (entry) {
+            entry->delivery_session_id = 0U;
+            entry->delivery_state = D1L_DM_DELIVERY_NOT_APPLICABLE;
+            entry->delivery_reason = D1L_DM_DELIVERY_REASON_NONE;
+            entry->delivery_last_error = ESP_OK;
+            entry->delivery_retry_count = 0U;
+            entry->delivery_revision = 0U;
+        }
+        return;
+    }
+    entry->delivery_session_id = migration_delivery_session_id(entry);
+    entry->delivery_state = entry->acked ?
+        D1L_DM_DELIVERY_ACKNOWLEDGED :
+        D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
+    entry->delivery_reason = D1L_DM_DELIVERY_REASON_LEGACY_IMPORT;
+    entry->delivery_last_error = entry->acked ? ESP_OK :
+        D1L_DM_DELIVERY_INTERRUPTED_ERROR;
+    entry->delivery_retry_count = 0U;
+    entry->delivery_revision = 1U;
+    entry->acked = entry->delivery_state ==
+        D1L_DM_DELIVERY_ACKNOWLEDGED;
+    entry->delivered = entry->acked;
+}
+
+static void convert_v5_entry(const d1l_dm_entry_v5_t *old,
+                             d1l_dm_entry_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->seq = old->seq;
+    out->uptime_ms = old->uptime_ms;
+    memcpy(out->contact_fingerprint, old->contact_fingerprint,
+           sizeof(out->contact_fingerprint));
+    memcpy(out->contact_alias, old->contact_alias,
+           sizeof(out->contact_alias));
+    memcpy(out->direction, old->direction, sizeof(out->direction));
+    memcpy(out->text, old->text, sizeof(out->text));
+    out->rssi_dbm = old->rssi_dbm;
+    out->snr_tenths = old->snr_tenths;
+    out->path_hash_bytes = old->path_hash_bytes;
+    out->path_hops = old->path_hops;
+    out->attempt = old->attempt;
+    out->delivered = old->delivered;
+    out->acked = old->acked;
+    out->ack_hash = old->ack_hash;
+    memcpy(out->identity_digest, old->identity_digest,
+           sizeof(out->identity_digest));
+    out->ack_dispatch_count = old->ack_dispatch_count;
+    out->ack_dispatch_kind = old->ack_dispatch_kind;
+    out->ack_state = old->ack_state;
+    out->ack_last_error = old->ack_last_error;
+    out->identity_digest_valid = old->identity_digest_valid;
+    initialize_legacy_delivery_metadata(out);
+}
+
+static void convert_v5_blob(const d1l_dm_store_blob_v5_t *old,
+                            d1l_dm_store_blob_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->schema = D1L_DM_STORE_SCHEMA;
+    out->epoch = old->epoch;
+    out->content_revision = old->content_revision;
+    out->clear_lineage = old->clear_lineage;
+    out->next_seq = old->next_seq;
+    out->total_written = old->total_written;
+    out->dropped_oldest = old->dropped_oldest;
+    out->head = old->count % D1L_DM_STORE_CAPACITY;
+    out->count = old->count;
+    const size_t oldest = old->count == 0U ? 0U :
+        (old->head + D1L_DM_STORE_CAPACITY - old->count) %
+        D1L_DM_STORE_CAPACITY;
+    for (size_t i = 0U; i < old->count; ++i) {
+        convert_v5_entry(&old->entries[
+                             (oldest + i) % D1L_DM_STORE_CAPACITY],
+                         &out->entries[i]);
+    }
+}
+
 static void convert_v4_entry(const d1l_dm_entry_v4_t *old,
                              d1l_dm_entry_t *out)
 {
@@ -449,6 +769,7 @@ static void convert_v4_entry(const d1l_dm_entry_v4_t *old,
     out->ack_hash = old->ack_hash;
     out->ack_state = D1L_DM_ACK_STATE_LEGACY_UNVERIFIED;
     out->ack_last_error = ESP_OK;
+    initialize_legacy_delivery_metadata(out);
 }
 
 static void convert_v4_blob(const d1l_dm_store_blob_v4_t *old,
@@ -560,6 +881,9 @@ static void convert_v1_blob(const d1l_dm_store_blob_v1_t *old,
         dest->delivered = source->delivered;
         dest->acked = source->acked;
         dest->ack_hash = source->ack_hash;
+        dest->ack_state = D1L_DM_ACK_STATE_LEGACY_UNVERIFIED;
+        dest->ack_last_error = ESP_OK;
+        initialize_legacy_delivery_metadata(dest);
     }
 }
 
@@ -571,10 +895,21 @@ static esp_err_t decode_raw_blob(const d1l_dm_store_raw_blob_t *raw, size_t len,
     }
     *out_upgrade = false;
     if (raw->schema == D1L_DM_STORE_SCHEMA) {
-        if (!blob_is_valid(&raw->v5, len)) {
+        if (!blob_is_valid(&raw->v6, len)) {
             return ESP_ERR_INVALID_STATE;
         }
-        *out = raw->v5;
+        *out = raw->v6;
+        return ESP_OK;
+    }
+    if (raw->schema == D1L_DM_STORE_SCHEMA_V5) {
+        if (!blob_v5_is_valid(&raw->v5, len)) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        convert_v5_blob(&raw->v5, out);
+        if (!blob_is_valid(out, sizeof(*out))) {
+            return ESP_ERR_INVALID_STATE;
+        }
+        *out_upgrade = true;
         return ESP_OK;
     }
     if (raw->schema == D1L_DM_STORE_SCHEMA_V4) {
@@ -750,10 +1085,58 @@ static bool normalize_interrupted_ack_locked(void)
     return changed;
 }
 
+static bool normalize_interrupted_delivery_locked(void)
+{
+    bool changed = false;
+    for (size_t i = 0U; i < s_count; ++i) {
+        d1l_dm_entry_t *entry = &s_entries[i];
+        if (strncmp(entry->direction, "tx", sizeof(entry->direction)) != 0 ||
+            !d1l_dm_delivery_interrupted_by_reboot(entry->delivery_state)) {
+            continue;
+        }
+        entry->delivery_state = D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT;
+        entry->delivery_reason = D1L_DM_DELIVERY_REASON_REBOOT_RECOVERY;
+        entry->delivery_last_error = D1L_DM_DELIVERY_INTERRUPTED_ERROR;
+        entry->acked = false;
+        entry->delivered = false;
+        if (entry->delivery_revision < UINT32_MAX) {
+            entry->delivery_revision++;
+        }
+        changed = true;
+    }
+    if (changed) {
+        if (s_content_revision < UINT32_MAX) {
+            s_content_revision++;
+        }
+        s_state_revision++;
+    }
+    return changed;
+}
+
 static bool blobs_equal(const d1l_dm_store_blob_t *left,
                         const d1l_dm_store_blob_t *right)
 {
     return left && right && memcmp(left, right, sizeof(*left)) == 0;
+}
+
+static bool outbound_delivery_identity_material_equal(
+    const d1l_dm_entry_t *left, const d1l_dm_entry_t *right)
+{
+    return left && right && left->uptime_ms == right->uptime_ms &&
+           left->ack_hash == right->ack_hash &&
+           strncmp(left->contact_fingerprint, right->contact_fingerprint,
+                   sizeof(left->contact_fingerprint)) == 0 &&
+           strncmp(left->direction, right->direction,
+                   sizeof(left->direction)) == 0 &&
+           strncmp(left->text, right->text, sizeof(left->text)) == 0;
+}
+
+static bool delivery_session_id_conflicts(const d1l_dm_entry_t *left,
+                                          const d1l_dm_entry_t *right)
+{
+    return left && right && left->delivery_session_id != 0U &&
+           left->delivery_session_id == right->delivery_session_id &&
+           !outbound_delivery_identity_material_equal(left, right);
 }
 
 static bool entry_identity_equal(const d1l_dm_entry_t *left,
@@ -761,6 +1144,13 @@ static bool entry_identity_equal(const d1l_dm_entry_t *left,
 {
     if (valid_identity_digest_equal(left, right)) {
         return true;
+    }
+    if (left && right &&
+        (left->delivery_session_id != 0U ||
+         right->delivery_session_id != 0U)) {
+        return left->delivery_session_id != 0U &&
+               left->delivery_session_id == right->delivery_session_id &&
+               outbound_delivery_identity_material_equal(left, right);
     }
     if (!left || !right ||
         (left->identity_digest_valid && right->identity_digest_valid) ||
@@ -826,6 +1216,34 @@ static void merge_ack_metadata(d1l_dm_entry_t *dest,
             ack_state_merge_rank(dest->ack_state) ||
         (source_newer && source->ack_state == dest->ack_state)) {
         copy_ack_metadata(dest, source);
+    }
+}
+
+static void copy_delivery_metadata(d1l_dm_entry_t *dest,
+                                   const d1l_dm_entry_t *source)
+{
+    dest->delivery_state = source->delivery_state;
+    dest->delivery_reason = source->delivery_reason;
+    dest->delivery_last_error = source->delivery_last_error;
+    dest->delivery_retry_count = source->delivery_retry_count;
+    dest->delivery_revision = source->delivery_revision;
+    dest->delivered = source->delivered;
+    dest->acked = source->acked;
+}
+
+static void merge_delivery_metadata(d1l_dm_entry_t *dest,
+                                    const d1l_dm_entry_t *source,
+                                    bool source_newer)
+{
+    if (!dest || !source ||
+        strncmp(dest->direction, "tx", sizeof(dest->direction)) != 0 ||
+        strncmp(source->direction, "tx", sizeof(source->direction)) != 0) {
+        return;
+    }
+    if (source->delivery_revision > dest->delivery_revision ||
+        (source_newer &&
+         source->delivery_revision == dest->delivery_revision)) {
+        copy_delivery_metadata(dest, source);
     }
 }
 
@@ -907,6 +1325,10 @@ static esp_err_t merge_same_epoch_locked(const d1l_dm_store_blob_t *primary,
         size_t identity_match = 0U;
         bool identity_match_set = false;
         for (size_t current = 0U; current < merged_count; ++current) {
+            if (delivery_session_id_conflicts(&s_merge_entries[current],
+                                              &candidate)) {
+                return ESP_ERR_INVALID_STATE;
+            }
             if (entry_identity_equal(&s_merge_entries[current], &candidate)) {
                 identity_match = current;
                 identity_match_set = true;
@@ -914,15 +1336,23 @@ static esp_err_t merge_same_epoch_locked(const d1l_dm_store_blob_t *primary,
             }
         }
         if (identity_match_set) {
-            s_merge_entries[identity_match].delivered =
-                s_merge_entries[identity_match].delivered || candidate.delivered;
-            s_merge_entries[identity_match].acked =
-                s_merge_entries[identity_match].acked || candidate.acked;
+            const bool outbound = strncmp(
+                s_merge_entries[identity_match].direction, "tx",
+                sizeof(s_merge_entries[identity_match].direction)) == 0;
+            if (!outbound) {
+                s_merge_entries[identity_match].delivered =
+                    s_merge_entries[identity_match].delivered ||
+                    candidate.delivered;
+                s_merge_entries[identity_match].acked =
+                    s_merge_entries[identity_match].acked || candidate.acked;
+            }
             if (candidate.attempt > s_merge_entries[identity_match].attempt) {
                 s_merge_entries[identity_match].attempt = candidate.attempt;
             }
             merge_ack_metadata(&s_merge_entries[identity_match], &candidate,
                                primary_newer);
+            merge_delivery_metadata(&s_merge_entries[identity_match],
+                                    &candidate, primary_newer);
             continue;
         }
         size_t seq_match = 0U;
@@ -1049,6 +1479,11 @@ static esp_err_t merge_primary_locked(const d1l_dm_store_blob_t *primary,
     for (size_t i = 0U; i < overlay_count; ++i) {
         d1l_dm_entry_t *identity_match = NULL;
         for (size_t current = 0U; current < s_count; ++current) {
+            if (delivery_session_id_conflicts(&s_entries[current],
+                                              &s_overlay_entries[i])) {
+                load_blob_locked(&s_compare_blob_scratch);
+                return ESP_ERR_INVALID_STATE;
+            }
             if (entry_identity_equal(&s_entries[current],
                                      &s_overlay_entries[i])) {
                 identity_match = &s_entries[current];
@@ -1057,14 +1492,21 @@ static esp_err_t merge_primary_locked(const d1l_dm_store_blob_t *primary,
         }
         if (identity_match) {
             const d1l_dm_entry_t before = *identity_match;
-            identity_match->delivered = identity_match->delivered ||
-                                        s_overlay_entries[i].delivered;
-            identity_match->acked = identity_match->acked ||
-                                    s_overlay_entries[i].acked;
+            const bool outbound = strncmp(
+                identity_match->direction, "tx",
+                sizeof(identity_match->direction)) == 0;
+            if (!outbound) {
+                identity_match->delivered = identity_match->delivered ||
+                                            s_overlay_entries[i].delivered;
+                identity_match->acked = identity_match->acked ||
+                                        s_overlay_entries[i].acked;
+            }
             if (s_overlay_entries[i].attempt > identity_match->attempt) {
                 identity_match->attempt = s_overlay_entries[i].attempt;
             }
             merge_ack_metadata(identity_match, &s_overlay_entries[i], true);
+            merge_delivery_metadata(identity_match, &s_overlay_entries[i],
+                                    true);
             result_differs_primary = result_differs_primary ||
                 memcmp(&before, identity_match, sizeof(before)) != 0;
             continue;
@@ -1499,6 +1941,7 @@ esp_err_t d1l_dm_store_init(void)
         }
     }
     (void)normalize_interrupted_ack_locked();
+    (void)normalize_interrupted_delivery_locked();
     const bool effective_sd_problem = sd_problem ||
         init_merge_ret != ESP_OK || init_generation_changed;
     fill_blob_locked(&s_compare_blob_scratch);
@@ -1652,6 +2095,23 @@ static esp_err_t append_internal(const char *contact_fingerprint,
     sanitize_ascii(entry.direction, sizeof(entry.direction),
                    direction && direction[0] ? direction : "rx");
     sanitize_ascii(entry.text, sizeof(entry.text), text);
+    if (strncmp(entry.direction, "tx", sizeof(entry.direction)) == 0) {
+        entry.delivery_state = acked ? D1L_DM_DELIVERY_ACKNOWLEDGED :
+                                       D1L_DM_DELIVERY_QUEUED;
+        entry.delivery_reason = acked ? D1L_DM_DELIVERY_REASON_ACK_RECEIVED :
+                                        D1L_DM_DELIVERY_REASON_ENQUEUED;
+        entry.delivery_last_error = ESP_OK;
+        entry.delivery_retry_count = 0U;
+        entry.delivery_revision = 1U;
+        entry.acked = acked;
+        entry.delivered = acked;
+    } else {
+        entry.delivery_state = D1L_DM_DELIVERY_NOT_APPLICABLE;
+        entry.delivery_reason = D1L_DM_DELIVERY_REASON_NONE;
+        entry.delivery_last_error = ESP_OK;
+        entry.delivery_retry_count = 0U;
+        entry.delivery_revision = 0U;
+    }
 
     if (!persist) {
         s_volatile_entry = entry;
@@ -1671,6 +2131,16 @@ static esp_err_t append_internal(const char *contact_fingerprint,
             outcome->error = ESP_ERR_INVALID_STATE;
         }
         return ESP_ERR_INVALID_STATE;
+    }
+    if (strncmp(entry.direction, "tx", sizeof(entry.direction)) == 0) {
+        entry.delivery_session_id = new_delivery_session_id_locked();
+        if (entry.delivery_session_id == 0U) {
+            d1l_store_lock_give(&s_store_lock);
+            if (outcome) {
+                outcome->error = ESP_ERR_INVALID_STATE;
+            }
+            return ESP_ERR_INVALID_STATE;
+        }
     }
     s_volatile_valid = false;
     s_next_seq++;
@@ -1697,6 +2167,7 @@ static esp_err_t append_internal(const char *contact_fingerprint,
     if (outcome) {
         outcome->inserted = true;
         outcome->row_seq = entry.seq;
+        outcome->delivery_session_id = entry.delivery_session_id;
     }
     ret = d1l_dm_store_flush();
     if (outcome) {
@@ -1718,6 +2189,21 @@ esp_err_t d1l_dm_store_append(const char *contact_fingerprint,
                            rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
                            attempt, delivered, acked, ack_hash, true, NULL,
                            NULL);
+}
+
+esp_err_t d1l_dm_store_append_tx(
+    const char *contact_fingerprint, const char *contact_alias,
+    const char *text, int rssi_dbm, int snr_tenths,
+    uint8_t path_hash_bytes, uint8_t path_hops, uint8_t attempt,
+    uint32_t ack_hash, d1l_dm_store_append_outcome_t *outcome)
+{
+    if (!outcome) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return append_internal(contact_fingerprint, contact_alias, "tx", text,
+                           rssi_dbm, snr_tenths, path_hash_bytes, path_hops,
+                           attempt, false, false, ack_hash, true, NULL,
+                           outcome);
 }
 
 esp_err_t d1l_dm_store_append_rx_identity(
@@ -1976,6 +2462,170 @@ const char *d1l_dm_ack_dispatch_kind_name(uint8_t dispatch_kind)
     }
 }
 
+static bool delivery_reason_matches_target(
+    d1l_dm_delivery_state_t state, d1l_dm_delivery_reason_t reason)
+{
+    switch (state) {
+    case D1L_DM_DELIVERY_QUEUED:
+        return reason == D1L_DM_DELIVERY_REASON_ENQUEUED ||
+               reason == D1L_DM_DELIVERY_REASON_USER_RETRY;
+    case D1L_DM_DELIVERY_WAITING_RADIO:
+        return reason == D1L_DM_DELIVERY_REASON_RADIO_RESERVED;
+    case D1L_DM_DELIVERY_TX_ACTIVE:
+        return reason == D1L_DM_DELIVERY_REASON_RADIO_STARTED;
+    case D1L_DM_DELIVERY_TX_DONE:
+        return reason == D1L_DM_DELIVERY_REASON_RADIO_COMPLETED;
+    case D1L_DM_DELIVERY_AWAITING_ACK:
+        return reason == D1L_DM_DELIVERY_REASON_ACK_EXPECTED;
+    case D1L_DM_DELIVERY_ACKNOWLEDGED:
+        return reason == D1L_DM_DELIVERY_REASON_ACK_RECEIVED ||
+               reason == D1L_DM_DELIVERY_REASON_LEGACY_IMPORT;
+    case D1L_DM_DELIVERY_RETRY_WAIT:
+        return reason == D1L_DM_DELIVERY_REASON_RETRY_SCHEDULED;
+    case D1L_DM_DELIVERY_RETRY_TX:
+        return reason == D1L_DM_DELIVERY_REASON_RETRY_STARTED;
+    case D1L_DM_DELIVERY_FAILED_RADIO:
+        return reason == D1L_DM_DELIVERY_REASON_RADIO_ERROR;
+    case D1L_DM_DELIVERY_FAILED_TIMEOUT:
+        return reason == D1L_DM_DELIVERY_REASON_ACK_TIMEOUT;
+    case D1L_DM_DELIVERY_FAILED_QUEUE:
+        return reason == D1L_DM_DELIVERY_REASON_QUEUE_REJECTED;
+    case D1L_DM_DELIVERY_INTERRUPTED_BY_REBOOT:
+        return reason == D1L_DM_DELIVERY_REASON_REBOOT_RECOVERY ||
+               reason == D1L_DM_DELIVERY_REASON_LEGACY_IMPORT;
+    case D1L_DM_DELIVERY_CANCELLED:
+        return reason == D1L_DM_DELIVERY_REASON_USER_CANCELLED;
+    default:
+        return false;
+    }
+}
+
+static esp_err_t apply_delivery_transition_locked(
+    d1l_dm_entry_t *entry, d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error)
+{
+    const bool advances_attempt =
+        next_state == D1L_DM_DELIVERY_RETRY_TX ||
+        (next_state == D1L_DM_DELIVERY_QUEUED &&
+         reason == D1L_DM_DELIVERY_REASON_USER_RETRY);
+    if (!entry ||
+        strncmp(entry->direction, "tx", sizeof(entry->direction)) != 0 ||
+        entry->delivery_state != expected_state ||
+        entry->delivery_revision != expected_delivery_revision ||
+        reason == D1L_DM_DELIVERY_REASON_LEGACY_IMPORT ||
+        (next_state == D1L_DM_DELIVERY_QUEUED &&
+         reason != D1L_DM_DELIVERY_REASON_USER_RETRY) ||
+        !d1l_dm_delivery_transition_allowed(expected_state, next_state) ||
+        !delivery_reason_matches_target(next_state, reason) ||
+        (delivery_state_is_failure(next_state) && error == ESP_OK) ||
+        (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED && error != ESP_OK) ||
+        entry->delivery_revision == UINT32_MAX ||
+        (advances_attempt &&
+         (entry->delivery_retry_count == UINT8_MAX ||
+          entry->attempt == UINT8_MAX))) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    entry->delivery_state = next_state;
+    entry->delivery_reason = reason;
+    entry->delivery_last_error = error;
+    entry->delivery_revision++;
+    if (advances_attempt) {
+        entry->delivery_retry_count++;
+        entry->attempt++;
+    }
+    entry->acked = next_state == D1L_DM_DELIVERY_ACKNOWLEDGED;
+    entry->delivered = entry->acked;
+    return ESP_OK;
+}
+
+esp_err_t d1l_dm_store_transition_delivery(
+    uint64_t delivery_session_id,
+    d1l_dm_delivery_state_t expected_state,
+    uint32_t expected_delivery_revision,
+    d1l_dm_delivery_state_t next_state,
+    d1l_dm_delivery_reason_t reason, esp_err_t error,
+    d1l_dm_delivery_transition_outcome_t *outcome)
+{
+    if (outcome) {
+        memset(outcome, 0, sizeof(*outcome));
+        outcome->delivery_session_id = delivery_session_id;
+        outcome->previous_state = expected_state;
+        outcome->current_state = expected_state;
+        outcome->error = ESP_ERR_INVALID_ARG;
+    }
+    if (delivery_session_id == 0U || expected_delivery_revision == 0U ||
+        !d1l_dm_delivery_state_valid(expected_state) ||
+        !d1l_dm_delivery_state_valid(next_state) ||
+        !d1l_dm_delivery_reason_valid(reason)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_err_t ret = ensure_store_initialized();
+    if (ret != ESP_OK) {
+        if (outcome) {
+            outcome->error = ret;
+        }
+        return ret;
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    d1l_dm_entry_t *entry = NULL;
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].delivery_session_id == delivery_session_id) {
+            entry = &s_entries[i];
+            break;
+        }
+    }
+    if (!entry) {
+        d1l_store_lock_give(&s_store_lock);
+        if (outcome) {
+            outcome->error = ESP_ERR_NOT_FOUND;
+        }
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (outcome) {
+        outcome->row_seq = entry->seq;
+        outcome->previous_state = entry->delivery_state;
+        outcome->current_state = entry->delivery_state;
+        outcome->retry_count = entry->delivery_retry_count;
+        outcome->delivery_revision = entry->delivery_revision;
+    }
+    ret = apply_delivery_transition_locked(
+        entry, expected_state, expected_delivery_revision, next_state,
+        reason, error);
+    if (ret != ESP_OK) {
+        d1l_store_lock_give(&s_store_lock);
+        if (outcome) {
+            outcome->error = ret;
+        }
+        return ret;
+    }
+    if (s_content_revision < UINT32_MAX) {
+        s_content_revision++;
+    }
+    s_state_revision++;
+    s_mutated_since_init = true;
+    s_device_lineage_authoritative = true;
+    s_sd_primary_dirty = true;
+    s_nvs_fallback_dirty = true;
+    if (outcome) {
+        outcome->changed = true;
+        outcome->current_state = entry->delivery_state;
+        outcome->retry_count = entry->delivery_retry_count;
+        outcome->delivery_revision = entry->delivery_revision;
+    }
+    d1l_store_lock_give(&s_store_lock);
+
+    ret = d1l_dm_store_flush();
+    if (outcome) {
+        outcome->durable = ret == ESP_OK;
+        outcome->error = ret;
+    }
+    return ret;
+}
+
 esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,
                                   d1l_dm_entry_t *out_entry)
 {
@@ -1993,9 +2643,19 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,
         d1l_dm_entry_t *entry = &s_entries[i];
         if (entry->ack_hash == ack_hash &&
             strncmp(entry->direction, "tx", sizeof(entry->direction)) == 0) {
-            changed = !entry->delivered || !entry->acked;
-            entry->delivered = true;
-            entry->acked = true;
+            changed = entry->delivery_state !=
+                D1L_DM_DELIVERY_ACKNOWLEDGED;
+            if (changed) {
+                ret = apply_delivery_transition_locked(
+                    entry, entry->delivery_state,
+                    entry->delivery_revision,
+                    D1L_DM_DELIVERY_ACKNOWLEDGED,
+                    D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
+                if (ret != ESP_OK) {
+                    d1l_store_lock_give(&s_store_lock);
+                    return ret;
+                }
+            }
             if (out_entry) {
                 *out_entry = *entry;
             }
