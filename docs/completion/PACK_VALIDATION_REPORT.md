@@ -1,8 +1,8 @@
 # SIGUI Audit Pack Validation Report
 
-**Validated:** 2026-07-13 19:00 EDT
+**Validated:** 2026-07-13 20:04 EDT
 
-**Live `main`:** `4ee07caf09906abdcebe8faccd95790dceb5fe88`
+**Live `main`:** `17a948cf1ad23a5d2a89419039897943028f9bce`
 
 **WP-01 exact source:** `092293f2311a24c9899bc9bf343ab014c4ba0411`
 
@@ -14,9 +14,9 @@
 - Exact push/PR Actions `29272708844` / `29272709642` are green; the host job reports 773 passed and 8 manifests / 78 checksum entries verify.
 - Canonical WP-01 aggregate SHA-256 is `994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277`.
 - WP-02 is `in_progress`.
-- PRs #62, #64, and #80 are merged. PR #80 head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as exact main `4ee07caf09906abdcebe8faccd95790dceb5fe88`.
-- Merged-main Actions `29290978741` passed 795 host plus 24 checksum-contract tests and strict-verified 8 manifests / 78 entries. The earlier 7/8 negative receipt remains preserved; `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed.
-- WP-02 software integration is complete. Tracked portable baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) fails closed only for five exact-main physical roles, so WP-02 remains `in_progress` while WP-03/WP-04 continue and release readiness remains false.
+- PRs #62, #64, #80, and #84 are merged. PR #84 head `e5d2f8a21a0cb32713a7c0b3796f1660abda788d` merged as exact main `17a948cf1ad23a5d2a89419039897943028f9bce`.
+- Full integration-baseline Actions `29290978741` on `4ee07caf` passed 795 host plus 24 checksum-contract tests and strict-verified 8 manifests / 78 entries. The earlier 7/8 negative receipt remains preserved; `BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713` is closed.
+- WP-02 software integration is complete. Exact PR #84 merged-main Actions `29294553135` passed 823 host plus 24 checksum-contract tests, and both emitted downloaded manifests / all 36 entries strict-verified; RP2040 correctly skipped for this host/docs-only slice. Tracked portable integration baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) fails closed only for five physical roles. They are deferred to the frozen final candidate, so WP-02 remains `in_progress` while WP-03/WP-04 continue and release readiness remains false.
 - The exact release audit remains fail-closed with 15 P0 failures and 16 failures overall including P1.
 
 ## Structural checks
