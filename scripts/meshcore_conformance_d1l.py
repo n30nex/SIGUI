@@ -2637,6 +2637,40 @@ def validate_completed_report(
     cxx_receipt = cxx_receipt if isinstance(cxx_receipt, dict) else {}
     cc_command = cc_receipt.get("command")
     cxx_command = cxx_receipt.get("command")
+    commands_are_argv = (
+        len(commands) == len(command_plan("cc", "cxx"))
+        and all(
+            isinstance(command, list)
+            and bool(command)
+            and all(isinstance(argument, str) for argument in command)
+            for command in commands
+        )
+    )
+    observed_command_plan = (
+        [
+            json.dumps(
+                [_canonical_command_argument(argument) for argument in command],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            for command in commands
+        ]
+        if commands_are_argv
+        else []
+    )
+    expected_command_plan: list[str] = []
+    if isinstance(cc_command, str) and isinstance(cxx_command, str):
+        expected_command_plan = [
+            json.dumps(
+                [_canonical_command_argument(argument) for argument in command],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            )
+            for command in command_plan(cc_command, cxx_command, "$BUILD_DIR")
+        ]
+    command_plan_is_exact = (
+        commands_are_argv and observed_command_plan == expected_command_plan
+    )
     exception_commands = [
         command
         for command in commands
@@ -2746,7 +2780,7 @@ def validate_completed_report(
             isinstance(identity, str) and "clang version 18.1.3" in identity
             for identity in compiler_identities
         ),
-        "commands": len(commands) == len(command_plan("cc", "cxx"))
+        "commands": command_plan_is_exact
         and isinstance(report.get("fuzz_command"), list),
         "sanitizer_exception_command": exception_command_is_scoped,
         "sanitizer_policy": report.get("sanitizer_policy")

@@ -66,16 +66,11 @@ def completed_report(
         for index in range(conformance.EXPECTED_FUZZ_CORPUS["seed_count"])
     ]
     temporary = "/tmp/d1l-meshcore-conformance-fixture"
-    commands = [
-        ["clang-18", f"step-{index}"]
-        for index in range(len(conformance.command_plan("cc", "cxx")))
-    ]
-    planned_commands = conformance.command_plan(
+    commands = conformance.command_plan(
         "clang-18",
         "clang++-18",
         temporary,
     )
-    commands[5:8] = planned_commands[5:8]
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",

@@ -347,6 +347,21 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     mutations.append(
         (unrelated_sanitizer_suppression, "sanitizer_exception_command")
     )
+    string_form_sanitizer_suppression = copy.deepcopy(report)
+    string_form_sanitizer_suppression["commands"][0] = (
+        "clang-18 -fno-sanitize=undefined source.c"
+    )
+    mutations.append((string_form_sanitizer_suppression, "commands"))
+    weakened_non_exception_sanitizers = copy.deepcopy(report)
+    weakened_non_exception_sanitizers["commands"][0] = [
+        (
+            "-fsanitize=address"
+            if argument == "-fsanitize=address,undefined"
+            else argument
+        )
+        for argument in weakened_non_exception_sanitizers["commands"][0]
+    ]
+    mutations.append((weakened_non_exception_sanitizers, "commands"))
 
     for payload, failure in mutations:
         with pytest.raises(ValueError, match=failure):
