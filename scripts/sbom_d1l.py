@@ -70,6 +70,7 @@ REQUIRED_SOURCE_INPUTS = (
     "partitions_d1l.csv",
     "patches/sensecap_indicator_idf55_compat.patch",
     "patches/sensecap_indicator_touch_fix.patch",
+    "patches/sensecap_indicator_tx_origin.patch",
     "scripts/compare_release_reproducibility_d1l.py",
     "scripts/meshcore_conformance_d1l.py",
     "scripts/meshcore_signed_advert_runtime_d1l.py",

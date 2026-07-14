@@ -1,0 +1,412 @@
+import hashlib
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8")
+
+
+def body(source: str, start: str, end: str) -> str:
+    return source.split(start, 1)[1].split(end, 1)[0]
+
+
+def test_dm_command_is_authorized_owned_and_persisted_before_radio_admission():
+    source = read("main/mesh/meshcore_service.c")
+    task = body(
+        source,
+        "static void meshcore_service_task(void *arg)",
+        "static esp_err_t meshcore_service_start_task(void)",
+    )
+    handler = body(
+        source,
+        "static esp_err_t meshcore_service_handle_send_dm",
+        "static void meshcore_service_reply",
+    )
+    adapter = body(
+        source,
+        "static esp_err_t meshcore_service_send_dm_command",
+        "esp_err_t d1l_meshcore_service_send_dm",
+    )
+
+    assert "D1L_MESHCORE_SERVICE_CMD_SEND_DM" in source
+    assert "case D1L_MESHCORE_SERVICE_CMD_SEND_DM:" in task
+    assert "meshcore_service_handle_send_dm(&cmd)" in task
+    assert ".type = D1L_MESHCORE_SERVICE_CMD_SEND_DM" in adapter
+    assert "meshcore_service_send_command(" in adapter
+    preflight_lookup = adapter.index("d1l_contact_store_find_by_fingerprint")
+    preflight_gate = adapter.index("d1l_contact_store_can_dm(&contact)")
+    queue_at = adapter.index("meshcore_service_send_command(")
+    assert preflight_lookup < preflight_gate < queue_at
+    for forbidden in (
+        "d1l_dm_store_append_tx",
+        "d1l_dm_store_transition_delivery",
+        "build_dm_text_packet",
+        "Radio.Send",
+    ):
+        assert forbidden not in adapter
+
+    owner_lookup = handler.index("d1l_contact_store_find_by_fingerprint")
+    owner_gate = handler.index("d1l_contact_store_can_dm(&contact)")
+    identity_at = handler.index("d1l_meshcore_service_ensure_identity()")
+    timestamp_at = handler.index("d1l_settings_next_mesh_timestamp")
+    append_at = handler.index("d1l_dm_store_append_tx(")
+    begin_at = handler.index("begin_pending_dm_tx(")
+    waiting_at = handler.index("D1L_DM_DELIVERY_WAITING_RADIO", begin_at)
+    active_at = handler.index("D1L_DM_DELIVERY_TX_ACTIVE", waiting_at)
+    radio_at = handler.index("Radio.SendWithOrigin(")
+    assert (
+        owner_lookup
+        < owner_gate
+        < identity_at
+        < timestamp_at
+        < append_at
+        < begin_at
+        < waiting_at
+        < active_at
+        < radio_at
+    )
+    assert "if (s_pending_dm_tx.delivery.active)" in handler
+    assert handler.index("if (s_pending_dm_tx.delivery.active)") < append_at
+    assert "if (s_tx_busy)" in handler
+    assert handler.index("if (s_tx_busy)", append_at) > append_at
+    assert "record_detached_dm_queue_failure(" in handler
+
+
+def test_dm_contact_provenance_gate_has_zero_unproven_side_effects():
+    service = read("main/mesh/meshcore_service.c")
+    contact_store = read("main/mesh/contact_store.c")
+    native = read("tests/native/store_behavior_test.c")
+    handler = body(
+        service,
+        "static esp_err_t meshcore_service_handle_send_dm",
+        "static void meshcore_service_reply",
+    )
+    adapter = body(
+        service,
+        "static esp_err_t meshcore_service_send_dm_command",
+        "esp_err_t d1l_meshcore_service_send_dm",
+    )
+    can_dm = body(
+        contact_store,
+        "bool d1l_contact_store_can_dm",
+        "bool d1l_contact_store_can_admin",
+    )
+
+    # Both the caller boundary and the sole runtime owner fail closed. The
+    # owner re-check precedes identity creation, timestamp consumption,
+    # retained-message mutation, and physical radio admission.
+    assert adapter.index("d1l_contact_store_can_dm(&contact)") < adapter.index(
+        "meshcore_service_send_command("
+    )
+    gate = handler.index("d1l_contact_store_can_dm(&contact)")
+    for side_effect in (
+        "d1l_meshcore_service_ensure_identity()",
+        "d1l_settings_next_mesh_timestamp",
+        "d1l_dm_store_append_tx(",
+        "ensure_radio_started()",
+        "Radio.SendWithOrigin(",
+    ):
+        assert gate < handler.index(side_effect)
+    assert "d1l_contact_store_is_canonical(entry)" in can_dm
+    assert 'strcmp(entry->type, "chat") == 0' in can_dm
+
+    # Native contact fixtures exercise each provenance class feeding this
+    # exact predicate: passive/unproven is denied; signed and URI-imported
+    # canonical chat contacts are admitted.
+    unproven = body(
+        native,
+        "static void test_full_key_chat_without_provenance_is_not_dm_capable",
+        "static void test_contact_export_role_mapping",
+    )
+    imported = body(
+        native,
+        "static void test_uri_import_promotes_placeholder_and_preserves_preferences",
+        "static void test_uri_import_conflicts_and_nvs_failure_are_non_mutating",
+    )
+    verified = body(
+        native,
+        "static void test_verified_contact_create_reload_update_preserves_preferences",
+        "static void test_verified_contact_promotes_placeholder_without_losing_preferences",
+    )
+    assert "D1L_CONTACT_VERIFICATION_NONE" in unproven
+    assert "!d1l_contact_store_can_dm(&contact)" in unproven
+    assert "D1L_CONTACT_VERIFICATION_URI_IMPORT" in imported
+    assert "d1l_contact_store_can_dm(&contact)" in imported
+    assert "D1L_CONTACT_VERIFICATION_SIGNED_ADVERT" in verified
+    assert "d1l_contact_store_can_dm(&contact)" in verified
+
+
+def test_tx_callbacks_advance_the_exact_session_and_never_claim_delivery():
+    source = read("main/mesh/meshcore_service.c")
+    done = body(
+        source,
+        "static void meshcore_service_handle_radio_tx_done",
+        "static void meshcore_service_handle_radio_tx_timeout",
+    )
+    timeout = body(
+        source,
+        "static void meshcore_service_handle_radio_tx_timeout",
+        "static void meshcore_service_handle_radio_rx_done",
+    )
+    transition = body(
+        source,
+        "static esp_err_t transition_pending_dm_tx",
+        "static esp_err_t record_detached_dm_queue_failure",
+    )
+
+    assert done.index("d1l_meshcore_start_rx();") < done.index(
+        "D1L_DM_DELIVERY_TX_DONE"
+    )
+    assert done.index("D1L_DM_DELIVERY_TX_DONE") < done.index(
+        "D1L_DM_DELIVERY_AWAITING_ACK"
+    )
+    assert "D1L_DM_DELIVERY_ACKNOWLEDGED" not in done
+    assert "D1L_DM_DELIVERY_FAILED_RADIO" in timeout
+    assert "D1L_DM_DELIVERY_REASON_RADIO_ERROR" in timeout
+
+    assert "s_pending_dm_tx.delivery.session_id" in transition
+    assert "s_pending_dm_tx.delivery.revision" in transition
+    assert "s_pending_dm_tx.delivery.state" in transition
+    assert "outcome.row_seq" not in transition
+    assert "d1l_dm_delivery_owner_apply(" in transition
+    assert "outcome.changed || outcome.persistence_retry" in transition
+    durable_gate = transition.index(
+        "next_state != D1L_DM_DELIVERY_ACKNOWLEDGED || outcome.durable"
+    )
+    owner_apply = transition.index("d1l_dm_delivery_owner_apply(")
+    assert durable_gate < owner_apply
+
+
+def test_terminal_events_must_match_the_exact_active_operation_and_dm_revision():
+    source = read("main/mesh/meshcore_service.c")
+    matcher = body(
+        source,
+        "static bool meshcore_radio_terminal_matches",
+        "static void runtime_note_queue_drop",
+    )
+    done = body(
+        source,
+        "static void meshcore_service_handle_radio_tx_done",
+        "static void meshcore_service_handle_radio_tx_timeout",
+    )
+    timeout = body(
+        source,
+        "static void meshcore_service_handle_radio_tx_timeout",
+        "static void meshcore_service_handle_radio_rx_done",
+    )
+
+    assert "d1l_mesh_tx_operation_identity_equal(" in matcher
+    assert "event->tx_operation" in matcher
+    assert "s_active_radio_tx" in matcher
+    assert "s_pending_dm_tx.delivery.session_id" in matcher
+    assert "event->tx_operation.dm_session_id" in matcher
+    assert "s_pending_dm_tx.delivery.revision" in matcher
+    assert "event->tx_operation.dm_revision" in matcher
+    assert "D1L_DM_DELIVERY_TX_ACTIVE" in matcher
+
+    for handler in (done, timeout):
+        match_at = handler.index("meshcore_radio_terminal_matches(event)")
+        clear_at = handler.index("meshcore_radio_tx_operation_clear()")
+        busy_at = handler.index("s_tx_busy = false")
+        rx_at = handler.index("d1l_meshcore_start_rx();")
+        assert match_at < clear_at < busy_at < rx_at
+
+
+def test_request_timeout_and_completion_are_correlated_to_one_slot_generation():
+    source = read("main/mesh/meshcore_service.c")
+    guard = read("main/mesh/meshcore_runtime_guard.h")
+    task = body(
+        source,
+        "static void meshcore_service_task(void *arg)",
+        "static esp_err_t meshcore_service_start_task(void)",
+    )
+    send = body(
+        source,
+        "static esp_err_t meshcore_service_send_command",
+        "esp_err_t d1l_meshcore_service_start_rx_async",
+    )
+    wait = body(
+        source,
+        "static esp_err_t meshcore_request_wait",
+        "static void meshcore_request_abort_unqueued",
+    )
+    admit = body(
+        source,
+        "static bool meshcore_request_admit",
+        "static void meshcore_request_complete",
+    )
+    complete = body(
+        source,
+        "static void meshcore_request_complete",
+        "static void publish_callback_tx_operation",
+    )
+
+    assert "D1L_MESHCORE_REQUEST_SLOT_COUNT" in source
+    assert "StaticSemaphore_t completion_storage" in source
+    assert "s_request_slots[D1L_MESHCORE_REQUEST_SLOT_COUNT]" in source
+    assert "request_id" in source
+    assert "request_deadline_us" in source
+    assert "volatile uint32_t word;" in guard
+    assert "volatile uint32_t state;" not in guard
+    assert "volatile uint32_t request_id;" not in guard
+    assert "&guard->word" in guard
+    assert "D1L_MESH_REQUEST_ID_MAX" in source
+    for forbidden in (
+        "reply_task",
+        "xTaskNotifyWait",
+        "xTaskNotifyStateClear",
+        "eSetValueWithOverwrite",
+    ):
+        assert forbidden not in source
+
+    assert send.index("meshcore_request_claim(cmd, timeout_ms)") < send.index(
+        "xQueueSend(s_service_queue, cmd, timeout_ticks)"
+    )
+    assert "meshcore_request_abort_unqueued(cmd)" in send
+    assert "meshcore_request_wait(cmd, timeout_ticks)" in send
+    assert task.index("meshcore_request_admit(&cmd)") < task.index(
+        "switch (cmd.type)"
+    )
+
+    assert "D1L_MESH_REQUEST_PENDING" in wait
+    assert "D1L_MESH_REQUEST_CALLER_CANCELLED" in wait
+    assert "D1L_MESH_REQUEST_ADMITTED" in wait
+    assert "xSemaphoreTake(slot->completion, portMAX_DELAY)" in wait
+    assert admit.index("request_deadline_us") < admit.index(
+        "D1L_MESH_REQUEST_ADMITTED"
+    )
+    assert "D1L_MESH_REQUEST_OWNER_EXPIRED" in admit
+    assert "D1L_MESH_REQUEST_CALLER_CANCELLED" in admit
+    assert "d1l_mesh_request_guard_transition(" in complete
+    assert "cmd->request_id" in complete
+    assert "D1L_MESH_REQUEST_ADMITTED" in complete
+    assert "D1L_MESH_REQUEST_COMPLETED" in complete
+
+
+def test_callback_terminal_snapshot_is_immutable_and_monotonically_identified():
+    source = read("main/mesh/meshcore_service.c")
+    begin = body(
+        source,
+        "static bool meshcore_radio_tx_operation_begin",
+        "static void meshcore_radio_tx_operation_clear",
+    )
+    callbacks = source.split(
+        "/* SX1262 callbacks are deliberately bounded", 1
+    )[1].split("static RadioEvents_t s_radio_events", 1)[0]
+    enqueue = body(
+        source,
+        "static void enqueue_radio_event",
+        "/* SX1262 callbacks are deliberately bounded",
+    )
+
+    assert ".operation_id = ++s_next_radio_tx_operation_id" in begin
+    assert "identity.dm_session_id = dm_delivery->session_id" in begin
+    assert "identity.dm_revision = dm_delivery->revision" in begin
+    assert "publish_callback_tx_operation(&identity)" in begin
+    assert callbacks.count(
+        "capture_callback_tx_operation(origin, &identity)"
+    ) == 2
+    assert "event.tx_operation = *tx_operation" in enqueue
+
+
+def test_only_the_expected_ack_closes_the_awaiting_owner_session():
+    source = read("main/mesh/meshcore_service.c")
+    ack = source.rsplit("static void record_dm_ack", 1)[1].split(
+        "static void parse_rx_ack_packet", 1
+    )[0]
+
+    matches_at = ack.index("d1l_dm_delivery_owner_ack_matches(")
+    acknowledged_at = ack.index("D1L_DM_DELIVERY_ACKNOWLEDGED")
+    persistence_check = ack.index("if (ret != ESP_OK)")
+    clear_at = ack.index("clear_pending_dm_tx();")
+    assert matches_at < acknowledged_at < persistence_check < clear_at
+    assert "D1L_DM_DELIVERY_REASON_ACK_RECEIVED" in ack
+    assert "d1l_dm_store_mark_acked" not in ack
+    assert '"dm_ack_persistence_pending"' in ack
+    assert "return;" in ack[persistence_check:clear_at]
+    assert '"dm_ack_unmatched"' in ack
+
+
+def test_ack_store_masks_failed_persistence_until_same_revision_retry_is_durable():
+    store = read("main/mesh/dm_store.c")
+    header = read("main/mesh/dm_store.h")
+    transition = body(
+        store,
+        "esp_err_t d1l_dm_store_transition_delivery",
+        "esp_err_t d1l_dm_store_mark_acked",
+    )
+
+    assert "bool persistence_retry;" in header
+    assert "reserve_ack_persistence_pending_locked(entry)" in transition
+    assert "outcome->persistence_retry = true" in transition
+    assert "outcome->durable = ret == ESP_OK" in transition
+    assert "expected_delivery_revision + 1U" in transition
+    assert "find_ack_persistence_pending_locked(" in store
+    assert "project_ack_persistence_truth_locked" in store
+    assert "entry->acked = false" in store
+    assert "entry->delivered = false" in store
+
+
+def test_owner_automatically_reconciles_background_durable_ack():
+    source = read("main/mesh/meshcore_service.c")
+    header = read("main/mesh/dm_store.h")
+    transition = body(
+        source,
+        "static esp_err_t transition_pending_dm_tx",
+        "static void reconcile_pending_dm_ack_persistence",
+    )
+    reconcile = body(
+        source,
+        "static void reconcile_pending_dm_ack_persistence",
+        "static esp_err_t record_detached_dm_queue_failure",
+    )
+    task = body(
+        source,
+        "static void meshcore_service_task(void *arg)",
+        "static esp_err_t meshcore_service_start_task(void)",
+    )
+
+    assert "bool ack_persistence_pending;" in source
+    assert "accepted &&\n        !outcome.durable" in transition
+    assert "s_pending_dm_tx.ack_persistence_pending = true" in transition
+    assert "d1l_dm_store_find_delivery_session" in header
+    query = reconcile.index("d1l_dm_store_find_delivery_session")
+    state = reconcile.index("D1L_DM_DELIVERY_ACKNOWLEDGED")
+    revision = reconcile.index("durable.delivery_revision != owner->revision + 1U")
+    delivered = reconcile.index("!durable.acked || !durable.delivered")
+    publish = reconcile.index("d1l_dm_delivery_owner_apply(")
+    clear = reconcile.index("clear_pending_dm_tx();")
+    assert query < state < revision < delivered < publish < clear
+    assert "transition_pending_dm_tx(" not in reconcile
+    assert task.count("meshcore_service_run_owner_maintenance();") == 2
+    assert "pdMS_TO_TICKS(D1L_MESHCORE_OWNER_POLL_MS)" in task
+
+
+def test_actual_radio_callbacks_remain_storage_free_and_bounded():
+    source = read("main/mesh/meshcore_service.c")
+    callbacks = source.split(
+        "/* SX1262 callbacks are deliberately bounded", 1
+    )[1].split("static RadioEvents_t s_radio_events", 1)[0]
+
+    assert callbacks.count("enqueue_radio_event(") == 5
+    for forbidden in (
+        "d1l_dm_store_",
+        "transition_pending_dm_tx",
+        "d1l_packet_log_",
+        "d1l_route_store_",
+        "Radio.",
+    ):
+        assert forbidden not in callbacks
+
+
+def test_delivery_owner_service_keeps_the_exact_oracle_binding_pin():
+    relative = "main/mesh/meshcore_service.c"
+    payload = (ROOT / relative).read_bytes().replace(b"\r\n", b"\n")
+    manifest = json.loads(read("tests/meshcore_oracle/manifest.json"))
+    assert manifest["production_binding_sources"][relative] == hashlib.sha256(
+        payload
+    ).hexdigest()

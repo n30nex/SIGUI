@@ -20,18 +20,21 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
             "main/mesh/message_store.c",
             "static esp_err_t append_public_internal",
             "d1l_message_entry_t",
+            "s_entries[s_head] = entry;",
             ["d1l_message_store_copy_recent", "d1l_message_store_query_page"],
         ),
         (
             "main/mesh/dm_store.c",
             "static esp_err_t append_internal",
             "d1l_dm_entry_t",
+            "s_entries[s_head] = entry;",
             ["d1l_dm_store_copy_recent_page", "d1l_dm_store_copy_thread_page"],
         ),
         (
             "main/mesh/packet_log.c",
             "static esp_err_t append_raw_internal",
             "d1l_packet_log_entry_t",
+            "s_entries[s_head] = copy;",
             [
                 "d1l_packet_log_copy_recent",
                 "query_ram_locked",
@@ -40,7 +43,7 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
         ),
     ]
 
-    for path, append_anchor, entry_type, readers in cases:
+    for path, append_anchor, entry_type, durable_write, readers in cases:
         source = read(path)
         assert f"static {entry_type} s_volatile_entry;" in source
         assert "static bool s_volatile_valid;" in source
@@ -53,7 +56,7 @@ def test_volatile_canaries_have_preview_slots_outside_durable_rings():
         assert "s_dropped_oldest++" not in branch
         assert "persist_store" not in branch
         assert source.index("s_volatile_valid = false;", source.index(append_anchor)) < source.index(
-            "s_entries[s_head]", source.index(append_anchor)
+            durable_write, source.index(append_anchor)
         )
         for reader in readers:
             reader_body = source.split(reader, 1)[1]

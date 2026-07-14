@@ -170,6 +170,16 @@ typedef struct {
     d1l_dm_store_blob_t blob;
 } d1l_dm_persist_snapshot_t;
 
+typedef struct {
+    bool active;
+    uint64_t delivery_session_id;
+    uint32_t previous_revision;
+    uint32_t target_revision;
+    d1l_dm_delivery_state_t previous_state;
+    d1l_dm_delivery_reason_t previous_reason;
+    esp_err_t previous_error;
+} d1l_dm_ack_persistence_pending_t;
+
 static d1l_dm_entry_t s_entries[D1L_DM_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static size_t s_head;
 static size_t s_count;
@@ -205,6 +215,8 @@ static esp_err_t s_sd_primary_last_error;
 static uint32_t s_nvs_fallback_commit_count;
 static uint32_t s_nvs_fallback_fail_count;
 static esp_err_t s_nvs_fallback_last_error;
+static d1l_dm_ack_persistence_pending_t
+    s_ack_persistence_pending[D1L_DM_STORE_CAPACITY];
 
 static d1l_dm_store_raw_blob_t s_raw_scratch EXT_RAM_BSS_ATTR;
 static d1l_dm_store_blob_t s_sd_blob_scratch EXT_RAM_BSS_ATTR;
@@ -225,6 +237,81 @@ static esp_err_t persist_store(bool force);
 static uint32_t now_ms(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
+}
+
+static d1l_dm_ack_persistence_pending_t *find_ack_persistence_pending_locked(
+    uint64_t delivery_session_id, uint32_t target_revision)
+{
+    for (size_t i = 0U; i < D1L_DM_STORE_CAPACITY; ++i) {
+        d1l_dm_ack_persistence_pending_t *pending =
+            &s_ack_persistence_pending[i];
+        if (pending->active &&
+            pending->delivery_session_id == delivery_session_id &&
+            (target_revision == 0U ||
+             pending->target_revision == target_revision)) {
+            return pending;
+        }
+    }
+    return NULL;
+}
+
+static d1l_dm_ack_persistence_pending_t *reserve_ack_persistence_pending_locked(
+    const d1l_dm_entry_t *entry)
+{
+    if (!entry || entry->delivery_session_id == 0U ||
+        entry->delivery_revision == UINT32_MAX) {
+        return NULL;
+    }
+    d1l_dm_ack_persistence_pending_t *available = NULL;
+    for (size_t i = 0U; i < D1L_DM_STORE_CAPACITY; ++i) {
+        d1l_dm_ack_persistence_pending_t *pending =
+            &s_ack_persistence_pending[i];
+        if (pending->active &&
+            pending->delivery_session_id == entry->delivery_session_id) {
+            return NULL;
+        }
+        if (!pending->active && !available) {
+            available = pending;
+        }
+    }
+    if (!available) {
+        return NULL;
+    }
+    *available = (d1l_dm_ack_persistence_pending_t) {
+        .active = true,
+        .delivery_session_id = entry->delivery_session_id,
+        .previous_revision = entry->delivery_revision,
+        .target_revision = entry->delivery_revision + 1U,
+        .previous_state = entry->delivery_state,
+        .previous_reason = entry->delivery_reason,
+        .previous_error = entry->delivery_last_error,
+    };
+    return available;
+}
+
+static void project_ack_persistence_truth_locked(d1l_dm_entry_t *entry)
+{
+    if (!entry || entry->delivery_state != D1L_DM_DELIVERY_ACKNOWLEDGED) {
+        return;
+    }
+    const d1l_dm_ack_persistence_pending_t *pending =
+        find_ack_persistence_pending_locked(
+            entry->delivery_session_id, entry->delivery_revision);
+    if (!pending) {
+        return;
+    }
+    entry->delivery_state = pending->previous_state;
+    entry->delivery_reason = pending->previous_reason;
+    entry->delivery_last_error = pending->previous_error;
+    entry->delivery_revision = pending->previous_revision;
+    entry->acked = false;
+    entry->delivered = false;
+}
+
+static void acknowledge_persisted_delivery_truth_locked(void)
+{
+    memset(s_ack_persistence_pending, 0,
+           sizeof(s_ack_persistence_pending));
 }
 
 static uint64_t fnv1a64_bytes(uint64_t hash, const void *data, size_t len)
@@ -978,6 +1065,7 @@ static esp_err_t read_decoded_blob(bool sd_primary, d1l_dm_store_blob_t *out,
 static void clear_history_locked(void)
 {
     memset(s_entries, 0, sizeof(s_entries));
+    acknowledge_persisted_delivery_truth_locked();
     s_head = 0U;
     s_count = 0U;
     s_next_seq = 1U;
@@ -1726,6 +1814,7 @@ static esp_err_t persist_store(bool force)
     }
     s_last_sd_primary_required = sd_primary_required;
     if (!persistence_dirty_locked(sd_primary_required)) {
+        acknowledge_persisted_delivery_truth_locked();
         d1l_store_lock_give(&s_store_lock);
         d1l_store_lock_give(&s_persist_io_lock);
         return ESP_OK;
@@ -1836,6 +1925,7 @@ static esp_err_t persist_store(bool force)
         s_retry_pending = true;
     }
     if (!still_dirty) {
+        acknowledge_persisted_delivery_truth_locked();
         s_retry_pending = false;
         s_persistence_commit_count++;
         if (!s_sd_reconcile_pending &&
@@ -2123,6 +2213,34 @@ static esp_err_t append_internal(const char *contact_fingerprint,
         return ESP_OK;
     }
 
+    if (s_count == D1L_DM_STORE_CAPACITY) {
+        const d1l_dm_entry_t *oldest = &s_entries[s_head];
+        const bool oldest_is_tx =
+            strncmp(oldest->direction, "tx", sizeof(oldest->direction)) == 0;
+        d1l_dm_delivery_state_t oldest_delivery_state =
+            oldest->delivery_state;
+        if (oldest_is_tx) {
+            const d1l_dm_ack_persistence_pending_t *pending =
+                find_ack_persistence_pending_locked(
+                    oldest->delivery_session_id,
+                    oldest->delivery_revision);
+            if (pending) {
+                oldest_delivery_state = pending->previous_state;
+            }
+        }
+        if (oldest_is_tx &&
+            !d1l_dm_delivery_state_terminal(oldest_delivery_state)) {
+            /* Preserve ring order and the stable delivery-session owner.  A
+             * later append may evict this row only after its exact transition
+             * makes the oldest TX terminal. */
+            d1l_store_lock_give(&s_store_lock);
+            if (outcome) {
+                outcome->error = ESP_ERR_NO_MEM;
+            }
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     if (s_next_seq == UINT32_MAX || s_total_written == UINT32_MAX ||
         (s_count == D1L_DM_STORE_CAPACITY &&
          s_dropped_oldest == UINT32_MAX)) {
@@ -2276,9 +2394,35 @@ bool d1l_dm_store_find_rx_identity(
         find_rx_identity_locked(identity_digest, 0U);
     if (entry && out_entry) {
         *out_entry = *entry;
+        project_ack_persistence_truth_locked(out_entry);
     }
     d1l_store_lock_give(&s_store_lock);
     return entry != NULL;
+}
+
+bool d1l_dm_store_find_delivery_session(
+    uint64_t delivery_session_id, d1l_dm_entry_t *out_entry)
+{
+    if (out_entry) {
+        memset(out_entry, 0, sizeof(*out_entry));
+    }
+    if (delivery_session_id == 0U || !out_entry ||
+        ensure_store_initialized() != ESP_OK) {
+        return false;
+    }
+    bool found = false;
+    d1l_store_lock_take(&s_store_lock);
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].delivery_session_id != delivery_session_id) {
+            continue;
+        }
+        *out_entry = s_entries[i];
+        project_ack_persistence_truth_locked(out_entry);
+        found = true;
+        break;
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return found;
 }
 
 static void note_ack_metadata_mutation_locked(void)
@@ -2592,10 +2736,48 @@ esp_err_t d1l_dm_store_transition_delivery(
         outcome->retry_count = entry->delivery_retry_count;
         outcome->delivery_revision = entry->delivery_revision;
     }
+    const bool persistence_retry =
+        next_state == D1L_DM_DELIVERY_ACKNOWLEDGED &&
+        reason == D1L_DM_DELIVERY_REASON_ACK_RECEIVED && error == ESP_OK &&
+        expected_delivery_revision != UINT32_MAX &&
+        entry->delivery_state == D1L_DM_DELIVERY_ACKNOWLEDGED &&
+        entry->delivery_reason == D1L_DM_DELIVERY_REASON_ACK_RECEIVED &&
+        entry->delivery_last_error == ESP_OK &&
+        entry->delivery_revision == expected_delivery_revision + 1U &&
+        entry->acked && entry->delivered &&
+        d1l_dm_delivery_transition_allowed(expected_state, next_state);
+    if (persistence_retry) {
+        if (outcome) {
+            outcome->persistence_retry = true;
+            outcome->previous_state = expected_state;
+        }
+        d1l_store_lock_give(&s_store_lock);
+        ret = d1l_dm_store_flush();
+        if (outcome) {
+            outcome->durable = ret == ESP_OK;
+            outcome->error = ret;
+        }
+        return ret;
+    }
+
+    d1l_dm_ack_persistence_pending_t *ack_pending = NULL;
+    if (next_state == D1L_DM_DELIVERY_ACKNOWLEDGED) {
+        ack_pending = reserve_ack_persistence_pending_locked(entry);
+        if (!ack_pending) {
+            d1l_store_lock_give(&s_store_lock);
+            if (outcome) {
+                outcome->error = ESP_ERR_NO_MEM;
+            }
+            return ESP_ERR_NO_MEM;
+        }
+    }
     ret = apply_delivery_transition_locked(
         entry, expected_state, expected_delivery_revision, next_state,
         reason, error);
     if (ret != ESP_OK) {
+        if (ack_pending) {
+            memset(ack_pending, 0, sizeof(*ack_pending));
+        }
         d1l_store_lock_give(&s_store_lock);
         if (outcome) {
             outcome->error = ret;
@@ -2637,44 +2819,54 @@ esp_err_t d1l_dm_store_mark_acked(uint32_t ack_hash,
         return ret;
     }
 
-    bool changed = false;
+    uint64_t delivery_session_id = 0U;
+    uint32_t delivery_revision = 0U;
+    d1l_dm_delivery_state_t delivery_state =
+        D1L_DM_DELIVERY_NOT_APPLICABLE;
     d1l_store_lock_take(&s_store_lock);
     for (size_t i = 0U; i < s_count; ++i) {
-        d1l_dm_entry_t *entry = &s_entries[i];
+        const d1l_dm_entry_t *entry = &s_entries[i];
         if (entry->ack_hash == ack_hash &&
             strncmp(entry->direction, "tx", sizeof(entry->direction)) == 0) {
-            changed = entry->delivery_state !=
-                D1L_DM_DELIVERY_ACKNOWLEDGED;
-            if (changed) {
-                ret = apply_delivery_transition_locked(
-                    entry, entry->delivery_state,
-                    entry->delivery_revision,
-                    D1L_DM_DELIVERY_ACKNOWLEDGED,
-                    D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK);
-                if (ret != ESP_OK) {
-                    d1l_store_lock_give(&s_store_lock);
-                    return ret;
-                }
+            delivery_session_id = entry->delivery_session_id;
+            delivery_revision = entry->delivery_revision;
+            delivery_state = entry->delivery_state;
+            const d1l_dm_ack_persistence_pending_t *pending =
+                find_ack_persistence_pending_locked(
+                    entry->delivery_session_id, entry->delivery_revision);
+            if (pending) {
+                delivery_revision = pending->previous_revision;
+                delivery_state = pending->previous_state;
             }
-            if (out_entry) {
-                *out_entry = *entry;
-            }
-            if (changed) {
-                if (s_content_revision < UINT32_MAX) {
-                    s_content_revision++;
-                }
-                s_state_revision++;
-                s_mutated_since_init = true;
-                s_device_lineage_authoritative = true;
-                s_sd_primary_dirty = true;
-                s_nvs_fallback_dirty = true;
-            }
-            d1l_store_lock_give(&s_store_lock);
-            return changed ? d1l_dm_store_flush() : ESP_OK;
+            break;
         }
     }
     d1l_store_lock_give(&s_store_lock);
-    return ESP_ERR_NOT_FOUND;
+    if (delivery_session_id == 0U) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (delivery_state != D1L_DM_DELIVERY_ACKNOWLEDGED) {
+        d1l_dm_delivery_transition_outcome_t outcome = {0};
+        ret = d1l_dm_store_transition_delivery(
+            delivery_session_id, delivery_state, delivery_revision,
+            D1L_DM_DELIVERY_ACKNOWLEDGED,
+            D1L_DM_DELIVERY_REASON_ACK_RECEIVED, ESP_OK, &outcome);
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_dm_entry_t *entry = &s_entries[i];
+        if (entry->delivery_session_id == delivery_session_id) {
+            if (out_entry) {
+                *out_entry = *entry;
+                project_ack_persistence_truth_locked(out_entry);
+            }
+            break;
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
 }
 
 d1l_dm_store_stats_t d1l_dm_store_stats(void)
@@ -2750,6 +2942,7 @@ size_t d1l_dm_store_copy_recent_page(d1l_dm_entry_t *out_entries,
         out_entries[i] = visible_index < s_count ?
             s_entries[(oldest + visible_index) % D1L_DM_STORE_CAPACITY] :
             s_volatile_entry;
+        project_ack_persistence_truth_locked(&out_entries[i]);
     }
     d1l_store_lock_give(&s_store_lock);
     return copied;
@@ -2820,12 +3013,16 @@ size_t d1l_dm_store_copy_thread_page(const char *contact_fingerprint,
         }
         if (match_index >= first_match && match_index < last_match) {
             out_entries[out_index++] = *entry;
+            project_ack_persistence_truth_locked(
+                &out_entries[out_index - 1U]);
         }
         match_index++;
     }
     if (volatile_matches && out_index < copied &&
         match_index >= first_match && match_index < last_match) {
         out_entries[out_index++] = s_volatile_entry;
+        project_ack_persistence_truth_locked(
+            &out_entries[out_index - 1U]);
     }
     d1l_store_lock_give(&s_store_lock);
     return out_index;

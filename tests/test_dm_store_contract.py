@@ -166,6 +166,23 @@ def test_outbound_delivery_state_is_persisted_cas_guarded_and_reboot_safe():
     assert '"mesh/dm_delivery_state.c"' in cmake
 
 
+def test_full_ring_never_evicts_a_nonterminal_outbound_delivery():
+    source = read("main/mesh/dm_store.c")
+    append = source.split("static esp_err_t append_internal(", 1)[1].split(
+        "esp_err_t d1l_dm_store_append(", 1
+    )[0]
+
+    full = append.index("s_count == D1L_DM_STORE_CAPACITY")
+    head = append.index("&s_entries[s_head]", full)
+    outbound = append.index('strncmp(oldest->direction, "tx"', head)
+    terminal = append.index("d1l_dm_delivery_state_terminal", outbound)
+    no_mem = append.index("return ESP_ERR_NO_MEM", terminal)
+    session = append.index("new_delivery_session_id_locked", no_mem)
+    insert = append.index("s_entries[s_head] = entry", session)
+    assert full < head < outbound < terminal < no_mem < session < insert
+    assert "outcome->error = ESP_ERR_NO_MEM" in append[terminal:no_mem]
+
+
 def test_meshcore_service_builds_private_text_packets_from_contacts():
     source = read("main/mesh/meshcore_service.c")
     wire = read("main/mesh/meshcore_wire.h")
@@ -186,32 +203,33 @@ def test_meshcore_service_builds_private_text_packets_from_contacts():
     assert "d1l_contact_store_find_by_fingerprint" in source
     assert "d1l_contact_store_update_path" in source
     assert "d1l_dm_store_append" in source
-    assert "d1l_dm_store_mark_acked" in source
+    assert "d1l_dm_store_transition_delivery" in source
     assert "contact.out_path_valid" in source
-    assert 'append_packet_log("tx", "dm_text"' in source
+    assert '"tx", "dm_text", 0, 0' in source
     assert 'append_packet_log("rx", "dm_text"' in source
     assert 'append_packet_log("rx", "dm_ack"' in source
     assert 'append_packet_log("rx", "path_return"' in source
     assert "../third_party/MeshCore/lib/ed25519/key_exchange.c" in cmake
 
 
-def test_meshcore_service_retains_dm_when_queued_not_only_tx_done():
+def test_meshcore_service_durably_enqueues_dm_before_radio_start():
     source = read("main/mesh/meshcore_service.c")
-    send_start = source.index("static esp_err_t meshcore_service_send_dm_with_result")
+    send_start = source.index("static esp_err_t meshcore_service_handle_send_dm")
     send_body = source[
-        send_start:source.index("esp_err_t d1l_meshcore_service_send_dm", send_start)
+        send_start:source.index("static void meshcore_service_reply", send_start)
     ]
 
-    remember_at = send_body.index("remember_pending_dm_tx(&contact, text")
-    service_send_at = send_body.index("meshcore_service_send_raw(raw, raw_len")
-    append_at = send_body.index("append_dm_store_tx(&s_pending_dm_tx)")
-    clear_at = send_body.index("clear_pending_dm_tx()", append_at)
+    append_at = send_body.index("d1l_dm_store_append_tx(")
+    begin_at = send_body.index("begin_pending_dm_tx(")
+    waiting_at = send_body.index("D1L_DM_DELIVERY_WAITING_RADIO", begin_at)
+    active_at = send_body.index("D1L_DM_DELIVERY_TX_ACTIVE", waiting_at)
+    radio_at = send_body.index("Radio.SendWithOrigin(")
 
-    assert remember_at < service_send_at < append_at < clear_at
-    assert "(void)append_dm_store_tx(&s_pending_dm_tx);\n    clear_pending_dm_tx();" in send_body
-    assert "if (append_dm_store_tx(&s_pending_dm_tx))" not in send_body
-    assert "Radio.Send(raw, raw_len)" not in send_body
-    assert "static bool append_dm_store_tx" in source
+    assert append_at < begin_at < waiting_at < active_at < radio_at
+    assert "append_outcome->durable" in source
+    assert "record_detached_dm_queue_failure" in send_body
+    assert "d1l_dm_store_append(" not in send_body
+    assert "meshcore_service_send_raw(" not in send_body
     assert "static void clear_pending_dm_tx" in source
 
 
@@ -243,7 +261,11 @@ def test_inbound_dm_ack_is_correlated_and_dispatched_by_service_queue():
     assert "if (!ack_queued)" in source
     assert "complete_pending_ack_tx(true, ESP_OK)" in source
     assert "complete_pending_ack_tx(false, ESP_ERR_TIMEOUT)" in source
-    assert "if (s_active_tx_ack_response)" in source
+    assert (
+        "event->tx_operation.kind == D1L_MESH_TX_OPERATION_ACK_RESPONSE"
+        in source
+    )
+    assert "const bool ack_response = s_active_tx_ack_response" not in source
     assert "s_active_tx_ack_response = cmd->ack_response" in source
     assert "d1l_meshcore_dm_identity_material" in planner
     assert "out[index++] = (uint8_t)(plain[4] >> 2U)" in planner

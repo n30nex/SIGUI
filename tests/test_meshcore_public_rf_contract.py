@@ -17,7 +17,8 @@ def test_meshcore_service_builds_public_group_text_packets():
     assert "mbedtls_aes_crypt_ecb" in source
     assert "mbedtls_md_hmac" in source
     assert "meshcore_service_send_raw(raw, raw_len" in source
-    assert "Radio.Send(cmd->raw, cmd->raw_len)" in source
+    assert "Radio.SendWithOrigin(" in source
+    assert "cmd->raw, cmd->raw_len," in source
 
 
 def test_meshcore_service_rejects_139_char_user_text_without_truncation():
@@ -37,13 +38,11 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
         "static void parse_rx_public_packet", 1
     )[0]
     public_sender = source.split("esp_err_t d1l_meshcore_service_send_public", 1)[1].split(
-        "static esp_err_t meshcore_service_send_dm_with_result", 1
+        "static esp_err_t meshcore_service_send_dm_command", 1
     )[0]
     dm_sender = source.split(
-        "static esp_err_t meshcore_service_send_dm_with_result", 1
-    )[1].split(
-        "esp_err_t d1l_meshcore_service_send_dm", 1
-    )[0]
+        "static esp_err_t meshcore_service_handle_send_dm", 1
+    )[1].split("static void meshcore_service_reply", 1)[0]
 
     assert "validate_user_text(text)" in public_builder
     assert "validate_user_text(text)" in dm_builder
@@ -55,8 +54,8 @@ def test_meshcore_service_rejects_139_char_user_text_without_truncation():
     assert public_sender.index("validate_user_text(text)") < public_sender.index(
         "meshcore_service_send_command(&start_cmd"
     )
-    assert "validate_user_text(text)" in dm_sender
-    assert dm_sender.index("validate_user_text(text)") < dm_sender.index(
+    assert "validate_user_text(cmd->dm_text)" in dm_sender
+    assert dm_sender.index("validate_user_text(cmd->dm_text)") < dm_sender.index(
         "d1l_meshcore_service_ensure_identity()"
     )
 
