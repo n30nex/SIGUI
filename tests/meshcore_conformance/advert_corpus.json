@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "encoding": "hex",
+  "coverage_boundary": "local_advert_parser",
+  "seeds": [
+    {
+      "name": "minimal_chat",
+      "description": "Minimal accepted chat advert application data",
+      "hex": "01",
+      "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a"
+    },
+    {
+      "name": "exact_cambridge",
+      "description": "Observed repeater advert with signed coordinates and name",
+      "hex": "9289a89602c27736fb546f64646d6173",
+      "sha256": "c9e0dbe430caf3aab4000ac36d1081ebd07788706e15a57bf5682167ea47f921"
+    },
+    {
+      "name": "all_optional_named",
+      "description": "All optional field flags plus a bounded name",
+      "hex": "f189a89602c27736fb123456784e6f6465",
+      "sha256": "2de8835bd4406f17693f3cd7b55fdfe0fb1df39754843c61a5dca3918c0bd815"
+    },
+    {
+      "name": "truncated_location",
+      "description": "Rejected advert truncated inside the location pair",
+      "hex": "11010203",
+      "sha256": "a64b1b0e32b6714e3b538145ec05e8299d1fca6194fc99ace039040cab3e506f"
+    },
+    {
+      "name": "latitude_out_of_range",
+      "description": "Rejected advert with a latitude above the valid bound",
+      "hex": "1181d05d0500000000",
+      "sha256": "b84f5f38f9ba5df28b0b8b7b924dbff4f765d0078e725bd8e07d2c52f2a48f9d"
+    },
+    {
+      "name": "dirty_name",
+      "description": "Accepted name containing control, DEL, quote, and backslash bytes",
+      "hex": "84411f207e7f225c42",
+      "sha256": "c879d38b68ebe60371458c0db0123bd95640f6a4ffcc6fd5f94ab87dd9c63f68"
+    },
+    {
+      "name": "max_name",
+      "description": "Maximum accepted application-data length with a truncated name",
+      "hex": "8141414141414141414141414141414141414141414141414141414141414141",
+      "sha256": "1294c101d2612abf9de52c771568b15c86c150066e49a2ad7492351cee46ad60"
+    },
+    {
+      "name": "oversize",
+      "description": "Rejected application data one byte above the production limit",
+      "hex": "814242424242424242424242424242424242424242424242424242424242424242",
+      "sha256": "eedf825674ddf62366d1717072bd917fd37b53048647bd38f8443ba0648343ba"
+    }
+  ]
+}

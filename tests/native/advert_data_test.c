@@ -48,6 +48,18 @@ static d1l_advert_data_t parse_ok(const uint8_t *data, size_t len)
     return parsed;
 }
 
+static void assert_rejected_canonically(const uint8_t *data, size_t len)
+{
+    d1l_advert_data_t parsed;
+    memset(&parsed, 0xa5, sizeof(parsed));
+    assert(!d1l_advert_data_parse(data, len, &parsed));
+    assert(parsed.type_code == 'N');
+    assert(parsed.name[0] == '\0');
+    assert(!parsed.location_valid);
+    assert(parsed.lat_e6 == 0);
+    assert(parsed.lon_e6 == 0);
+}
+
 static void test_exact_cambridge_vector(void)
 {
     const uint8_t data[] = {
@@ -118,8 +130,7 @@ static void test_every_optional_field_truncation_boundary(void)
         const size_t full_len = append_optional_fields(
             optional_flags(combination), data, 43427977, -80316478);
         for (size_t truncated_len = 1U; truncated_len < full_len; ++truncated_len) {
-            memset(&parsed, 0, sizeof(parsed));
-            assert(!d1l_advert_data_parse(data, truncated_len, &parsed));
+            assert_rejected_canonically(data, truncated_len);
         }
         assert(d1l_advert_data_parse(data, full_len, &parsed));
     }
@@ -163,10 +174,7 @@ static void test_null_oversize_and_maximum_length(void)
     assert(parsed.name[D1L_ADVERT_DATA_NAME_LEN - 1U] == '\0');
 
     uint8_t oversize[D1L_ADVERT_DATA_MAX_LEN + 1U] = {0};
-    memset(&parsed, 0xa5, sizeof(parsed));
-    assert(!d1l_advert_data_parse(oversize, sizeof(oversize), &parsed));
-    assert(parsed.type_code == 'N');
-    assert(parsed.name[0] == '\0');
+    assert_rejected_canonically(oversize, sizeof(oversize));
 
     memset(&parsed, 0xa5, sizeof(parsed));
     assert(d1l_advert_data_parse(NULL, 0U, &parsed));
@@ -174,9 +182,7 @@ static void test_null_oversize_and_maximum_length(void)
     assert(parsed.name[0] == '\0');
     assert(!parsed.location_valid);
 
-    memset(&parsed, 0xa5, sizeof(parsed));
-    assert(!d1l_advert_data_parse(NULL, 1U, &parsed));
-    assert(parsed.type_code == 'N');
+    assert_rejected_canonically(NULL, 1U);
     assert(!d1l_advert_data_parse(maximum, sizeof(maximum), NULL));
     assert(!d1l_advert_data_parse(NULL, 0U, NULL));
 }

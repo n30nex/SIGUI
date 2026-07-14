@@ -65,6 +65,16 @@ def completed_report(
         }
         for index in range(conformance.EXPECTED_FUZZ_CORPUS["seed_count"])
     ]
+    advert_seeds = [
+        {
+            "name": f"advert_seed_{index}",
+            "size": index + 1,
+            "sha256": f"{index + 101:064x}",
+        }
+        for index in range(
+            conformance.EXPECTED_ADVERT_FUZZ_CORPUS["seed_count"]
+        )
+    ]
     temporary = "/tmp/d1l-meshcore-conformance-fixture"
     commands = conformance.command_plan(
         "clang-18",
@@ -94,6 +104,8 @@ def completed_report(
         "scope": {
             "vector_oracle": "pinned_Packet_wire_read_write_only",
             "fuzz_target": "local_wire_decoder_only",
+            "semantic_fuzz_targets": ["local_advert_parser"],
+            "advert_parser_fuzz_covered": True,
             "packet_semantics_covered": False,
             "crypto_oracle_available": False,
         },
@@ -101,6 +113,7 @@ def completed_report(
             "commit": commit,
             "seed": conformance.DEFAULT_SEED,
             "fuzz_runs": conformance.DEFAULT_RUNS,
+            "advert_fuzz_runs": conformance.DEFAULT_RUNS,
             "sanitizers": ["address", "undefined"],
         },
         "sanitizer_policy": conformance.ED25519_SANITIZER_POLICY,
@@ -131,8 +144,22 @@ def completed_report(
             "seeds": seeds,
             "verified": True,
         },
+        "advert_corpus": {
+            "path": conformance.EXPECTED_ADVERT_FUZZ_CORPUS["manifest"],
+            "manifest_sha256": conformance.EXPECTED_ADVERT_FUZZ_CORPUS[
+                "sha256"
+            ],
+            "coverage_boundary": "local_advert_parser",
+            "seed_count": len(advert_seeds),
+            "seeds": advert_seeds,
+            "verified": True,
+        },
         "commands": commands,
         "fuzz_command": [f"{temporary}/meshcore_wire_fuzz", "-runs=100000"],
+        "advert_fuzz_command": [
+            f"{temporary}/meshcore_advert_fuzz",
+            "-runs=100000",
+        ],
         "vector_result": {
             "passed": True,
             "coverage_boundary": "wire_envelope_only",
@@ -162,6 +189,21 @@ def completed_report(
             "max_input_bytes": 255,
             "sanitizers": ["address", "undefined"],
             "artifact_prefix": "/tmp/findings-fixture",
+            "finding_files": [],
+            "findings": 0,
+        },
+        "advert_fuzz_result": {
+            "passed": True,
+            "engine": "libFuzzer",
+            "target": "local_advert_parser",
+            "invalid_output_policy": "canonical_zeroed_with_type_N",
+            "seed": conformance.DEFAULT_SEED,
+            "requested_runs": conformance.DEFAULT_RUNS,
+            "completed_runs": conformance.DEFAULT_RUNS,
+            "duration_ms": 500,
+            "max_input_bytes": 33,
+            "sanitizers": ["address", "undefined"],
+            "artifact_prefix": "/tmp/advert-findings-fixture",
             "finding_files": [],
             "findings": 0,
         },

@@ -54,8 +54,11 @@ bool d1l_advert_data_parse(const uint8_t *app_data, size_t app_data_len,
     if (!out) {
         return false;
     }
-    memset(out, 0, sizeof(*out));
-    out->type_code = 'N';
+
+    d1l_advert_data_t parsed;
+    memset(&parsed, 0, sizeof(parsed));
+    parsed.type_code = 'N';
+    *out = parsed;
     if (app_data_len > D1L_ADVERT_DATA_MAX_LEN || (!app_data && app_data_len > 0U)) {
         return false;
     }
@@ -64,18 +67,18 @@ bool d1l_advert_data_parse(const uint8_t *app_data, size_t app_data_len,
     }
 
     const uint8_t flags = app_data[0];
-    out->type_code = advert_type_code(flags);
+    parsed.type_code = advert_type_code(flags);
     size_t i = 1U;
     if ((flags & D1L_ADVERT_LOCATION_MASK) != 0U) {
         if (app_data_len - i < 8U) {
             return false;
         }
-        out->lat_e6 = read_le_i32(&app_data[i]);
-        out->lon_e6 = read_le_i32(&app_data[i + 4U]);
-        if (!advert_location_in_bounds(out->lat_e6, out->lon_e6)) {
+        parsed.lat_e6 = read_le_i32(&app_data[i]);
+        parsed.lon_e6 = read_le_i32(&app_data[i + 4U]);
+        if (!advert_location_in_bounds(parsed.lat_e6, parsed.lon_e6)) {
             return false;
         }
-        out->location_valid = true;
+        parsed.location_valid = true;
         i += 8U;
     }
     if ((flags & D1L_ADVERT_FEATURE1_MASK) != 0U) {
@@ -91,17 +94,19 @@ bool d1l_advert_data_parse(const uint8_t *app_data, size_t app_data_len,
         i += 2U;
     }
     if ((flags & D1L_ADVERT_NAME_MASK) == 0U || i == app_data_len) {
+        *out = parsed;
         return true;
     }
 
     size_t name_len = 0U;
-    while (i < app_data_len && name_len + 1U < sizeof(out->name)) {
+    while (i < app_data_len && name_len + 1U < sizeof(parsed.name)) {
         unsigned char c = app_data[i++];
         if (c < 32U || c > 126U || c == '"' || c == '\\') {
             c = '_';
         }
-        out->name[name_len++] = (char)c;
+        parsed.name[name_len++] = (char)c;
     }
-    out->name[name_len] = '\0';
+    parsed.name[name_len] = '\0';
+    *out = parsed;
     return true;
 }
