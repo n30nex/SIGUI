@@ -18,6 +18,7 @@
 #include "mesh/advert_data.h"
 #include "mesh/contact_store.h"
 #include "mesh/dm_store.h"
+#include "mesh/ed25519_canonical.h"
 #include "mesh/meshcore_radio_profile.h"
 #include "mesh/meshcore_wire.h"
 #include "mesh/message_store.h"
@@ -982,7 +983,10 @@ static bool verify_advert_signature(const uint8_t *pub_key, const uint8_t *times
                                     const uint8_t *signature, const uint8_t *app_data,
                                     size_t app_data_len)
 {
-    if (!pub_key || !timestamp || !signature || app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA) {
+    if (!pub_key || !timestamp || !signature || app_data_len > D1L_MESHCORE_MAX_ADVERT_DATA ||
+        !d1l_ed25519_encoded_point_is_strict(pub_key) ||
+        !d1l_ed25519_encoded_point_is_strict(signature) ||
+        !d1l_ed25519_signature_s_is_canonical(signature)) {
         return false;
     }
     uint8_t message[D1L_MESHCORE_PUB_KEY_SIZE + 4U + D1L_MESHCORE_MAX_ADVERT_DATA];

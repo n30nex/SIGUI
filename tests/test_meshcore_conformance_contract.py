@@ -309,10 +309,70 @@ def test_completed_report_validator_rejects_semantically_incomplete_green_receip
     unverified_compiler = copy.deepcopy(report)
     unverified_compiler["toolchain"]["clang"]["bytes_verified"] = False
     mutations.append((unverified_compiler, "toolchain_bytes"))
+    hidden_sanitizer_exception = copy.deepcopy(report)
+    hidden_sanitizer_exception["sanitizer_policy"]["exceptions"] = []
+    mutations.append((hidden_sanitizer_exception, "sanitizer_policy"))
+    false_full_ubsan_claim = copy.deepcopy(report)
+    false_full_ubsan_claim["full_ubsan_clean"] = True
+    mutations.append((false_full_ubsan_claim, "full_ubsan_clean_false"))
+    unverified_sanitizer_policy = copy.deepcopy(report)
+    unverified_sanitizer_policy["sanitizer_policy_passed"] = False
+    mutations.append((unverified_sanitizer_policy, "sanitizer_policy_passed"))
+    unscoped_sanitizer_exception = copy.deepcopy(report)
+    unscoped_sanitizer_exception["commands"][6] = ["clang-18", "step-6"]
+    mutations.append(
+        (unscoped_sanitizer_exception, "sanitizer_exception_command")
+    )
+    bundled_sanitizer_exceptions = copy.deepcopy(report)
+    bundled_sanitizer_exceptions["commands"][5].extend(
+        str(source)
+        for source in conformance.ED25519_SHIFT_BASE_EXCEPTION_SOURCES[1:]
+    )
+    bundled_sanitizer_exceptions["commands"][6] = [
+        "clang-18",
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+    ]
+    bundled_sanitizer_exceptions["commands"][7] = [
+        "clang-18",
+        conformance.ED25519_SHIFT_BASE_EXCEPTION_FLAG,
+    ]
+    mutations.append(
+        (bundled_sanitizer_exceptions, "sanitizer_exception_command")
+    )
+    unrelated_sanitizer_suppression = copy.deepcopy(report)
+    unrelated_sanitizer_suppression["commands"][5].insert(
+        1,
+        "-fno-sanitize=undefined",
+    )
+    mutations.append(
+        (unrelated_sanitizer_suppression, "sanitizer_exception_command")
+    )
+    string_form_sanitizer_suppression = copy.deepcopy(report)
+    string_form_sanitizer_suppression["commands"][0] = (
+        "clang-18 -fno-sanitize=undefined source.c"
+    )
+    mutations.append((string_form_sanitizer_suppression, "commands"))
+    weakened_non_exception_sanitizers = copy.deepcopy(report)
+    weakened_non_exception_sanitizers["commands"][0] = [
+        (
+            "-fsanitize=address"
+            if argument == "-fsanitize=address,undefined"
+            else argument
+        )
+        for argument in weakened_non_exception_sanitizers["commands"][0]
+    ]
+    mutations.append((weakened_non_exception_sanitizers, "commands"))
 
     for payload, failure in mutations:
         with pytest.raises(ValueError, match=failure):
             conformance.validate_completed_report(payload, commit)
+        canonical_payload = conformance.canonicalize_release_report(payload)
+        with pytest.raises(ValueError, match=failure):
+            conformance.validate_completed_report(
+                canonical_payload,
+                commit,
+                require_generated_at=False,
+            )
 
 
 def test_runner_persists_fuzzer_reproducers_and_records_elapsed_time():

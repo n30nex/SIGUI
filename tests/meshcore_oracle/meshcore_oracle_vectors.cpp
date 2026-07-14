@@ -1,0 +1,7351 @@
+#include "meshcore_oracle.h"
+
+#include "AES.h"
+#include "Packet.h"
+#include "SHA256.h"
+#include "Utils.h"
+#include "ed_25519.h"
+#include "mesh/ed25519_canonical.h"
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace {
+
+constexpr std::size_t kPacketRoundtripVectors = 4U;
+constexpr std::size_t kPacketInvalidVectors = 5U;
+constexpr std::size_t kAdvertRoundtripVectors = 4U;
+constexpr std::size_t kAdvertInvalidVectors = 11U;
+constexpr std::size_t kSignedAdvertProductionVectors = 3U;
+constexpr std::size_t kSignedAdvertPacketRoundtripVectors = 3U;
+constexpr std::size_t kSignedAdvertPacketInvalidVectors = 23U;
+constexpr std::size_t kSignedAdvertValidVectors = 3U;
+constexpr std::size_t kSignedAdvertInvalidVectors = 11U;
+constexpr std::size_t kVerifierKatValidVectors = 1U;
+constexpr std::size_t kVerifierKatInvalidVectors = 3U;
+constexpr std::size_t kPointValidationValidVectors = 4U;
+constexpr std::size_t kPointValidationInvalidVectors = 7U;
+constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
+constexpr std::size_t kIdentityExchangeRoundtripVectors = 5U;
+constexpr std::size_t kIdentityExchangeInvalidVectors = 9U;
+constexpr std::size_t kGroupRoundtripVectors = 4U;
+constexpr std::size_t kGroupInvalidVectors = 21U;
+constexpr std::size_t kLoginRequestRoundtripVectors = 6U;
+constexpr std::size_t kLoginRequestInvalidVectors = 35U;
+constexpr std::size_t kRequestResponseRoundtripVectors = 6U;
+constexpr std::size_t kRequestResponseInvalidVectors = 30U;
+constexpr std::size_t kLoginResponseRoundtripVectors = 10U;
+constexpr std::size_t kLoginResponseInvalidVectors = 34U;
+constexpr std::size_t kLoginPasswordAuthorizationValidVectors = 16U;
+constexpr std::size_t kLoginPasswordAuthorizationInvalidVectors = 17U;
+constexpr std::size_t kExistingAclBlankLoginValidVectors = 12U;
+constexpr std::size_t kExistingAclBlankLoginInvalidVectors = 14U;
+constexpr std::size_t kLoginAclTransitionValidVectors = 16U;
+constexpr std::size_t kLoginAclTransitionInvalidVectors = 13U;
+constexpr std::size_t kAuthenticatedRequestReplayValidVectors = 15U;
+constexpr std::size_t kAuthenticatedRequestReplayInvalidVectors = 12U;
+constexpr std::size_t kAuthenticatedTextTransitionValidVectors = 20U;
+constexpr std::size_t kAuthenticatedTextTransitionInvalidVectors = 17U;
+constexpr std::size_t kLoginResponseDispatchValidVectors = 17U;
+constexpr std::size_t kLoginResponseDispatchInvalidVectors = 14U;
+constexpr std::size_t kSignedAdvertDispatchValidVectors = 12U;
+constexpr std::size_t kSignedAdvertDispatchInvalidVectors = 19U;
+constexpr std::size_t kSignedAdvertSendValidVectors = 16U;
+constexpr std::size_t kSignedAdvertSendInvalidVectors = 9U;
+constexpr std::size_t kDmRoundtripVectors = 268U;
+constexpr std::size_t kDmInvalidVectors = 29U;
+constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
+constexpr std::size_t kExpectedAckValidVectors = 9U;
+constexpr std::size_t kExpectedAckPathRoundtripVectors = 4U;
+constexpr std::size_t kExpectedAckInvalidVectors = 35U;
+constexpr std::size_t kPathReturnRoundtripVectors = 6U;
+constexpr std::size_t kPathReturnInvalidVectors = 35U;
+constexpr std::size_t kRouteRoundtripVectors = 7U;
+constexpr std::size_t kRouteInvalidVectors = 10U;
+constexpr std::size_t kAckRoundtripVectors = 5U;
+constexpr std::size_t kAckInvalidVectors = 17U;
+constexpr std::size_t kTraceRoundtripVectors = 6U;
+constexpr std::size_t kTraceInvalidVectors = 19U;
+
+struct Vector {
+    uint8_t header;
+    uint16_t transport_0;
+    uint16_t transport_1;
+    uint8_t path_len;
+    std::vector<uint8_t> path;
+    std::vector<uint8_t> payload;
+};
+
+struct AdvertVector {
+    uint8_t type;
+    uint8_t has_lat_lon;
+    int32_t latitude_e6;
+    int32_t longitude_e6;
+    uint8_t has_feat1;
+    uint16_t feat1;
+    uint8_t has_feat2;
+    uint16_t feat2;
+    std::string name;
+};
+
+struct AckVector {
+    std::vector<uint8_t> ack;
+    uint8_t remaining;
+    bool multipart;
+};
+
+struct SignedAdvertVector {
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES> timestamp;
+    std::vector<uint8_t> app_data;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES> signature;
+};
+
+struct SignedAdvertMessage {
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+        bytes{};
+    std::size_t length = 0U;
+};
+
+constexpr std::array<uint8_t, 32U> kSignedAdvertSeed = {
+    0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+    0x08U, 0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU,
+    0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U,
+    0x18U, 0x19U, 0x1AU, 0x1BU, 0x1CU, 0x1DU, 0x1EU, 0x1FU};
+
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+    kSignedAdvertPublicKey = {
+        0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U,
+        0x67U, 0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU,
+        0x1DU, 0xDCU, 0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U};
+
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+    kRfc8032PublicKey = {
+        0xD7U, 0x5AU, 0x98U, 0x01U, 0x82U, 0xB1U, 0x0AU, 0xB7U,
+        0xD5U, 0x4BU, 0xFEU, 0xD3U, 0xC9U, 0x64U, 0x07U, 0x3AU,
+        0x0EU, 0xE1U, 0x72U, 0xF3U, 0xDAU, 0xA6U, 0x23U, 0x25U,
+        0xAFU, 0x02U, 0x1AU, 0x68U, 0xF7U, 0x07U, 0x51U, 0x1AU};
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+    kRfc8032EmptyMessageSignature = {
+        0xE5U, 0x56U, 0x43U, 0x00U, 0xC3U, 0x60U, 0xACU, 0x72U,
+        0x90U, 0x86U, 0xE2U, 0xCCU, 0x80U, 0x6EU, 0x82U, 0x8AU,
+        0x84U, 0x87U, 0x7FU, 0x1EU, 0xB8U, 0xE5U, 0xD9U, 0x74U,
+        0xD8U, 0x73U, 0xE0U, 0x65U, 0x22U, 0x49U, 0x01U, 0x55U,
+        0x5FU, 0xB8U, 0x82U, 0x15U, 0x90U, 0xA3U, 0x3BU, 0xACU,
+        0xC6U, 0x1EU, 0x39U, 0x70U, 0x1CU, 0xF9U, 0xB4U, 0x6BU,
+        0xD2U, 0x5BU, 0xF5U, 0xF0U, 0x59U, 0x5BU, 0xBEU, 0x24U,
+        0x65U, 0x51U, 0x41U, 0x43U, 0x8EU, 0x7AU, 0x10U, 0x0BU};
+constexpr std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+    kRfc8032EmptyMessageSignaturePlusOrder = {
+        0xE5U, 0x56U, 0x43U, 0x00U, 0xC3U, 0x60U, 0xACU, 0x72U,
+        0x90U, 0x86U, 0xE2U, 0xCCU, 0x80U, 0x6EU, 0x82U, 0x8AU,
+        0x84U, 0x87U, 0x7FU, 0x1EU, 0xB8U, 0xE5U, 0xD9U, 0x74U,
+        0xD8U, 0x73U, 0xE0U, 0x65U, 0x22U, 0x49U, 0x01U, 0x55U,
+        0x4CU, 0x8CU, 0x78U, 0x72U, 0xAAU, 0x06U, 0x4EU, 0x04U,
+        0x9DU, 0xBBU, 0x30U, 0x13U, 0xFBU, 0xF2U, 0x93U, 0x80U,
+        0xD2U, 0x5BU, 0xF5U, 0xF0U, 0x59U, 0x5BU, 0xBEU, 0x24U,
+        0x65U, 0x51U, 0x41U, 0x43U, 0x8EU, 0x7AU, 0x10U, 0x1BU};
+
+SignedAdvertMessage make_signed_advert_message(
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> &public_key,
+    const SignedAdvertVector &vector)
+{
+    SignedAdvertMessage message{};
+    std::memcpy(message.bytes.data(), public_key.data(), public_key.size());
+    message.length += public_key.size();
+    std::memcpy(&message.bytes[message.length], vector.timestamp.data(),
+                vector.timestamp.size());
+    message.length += vector.timestamp.size();
+    if (!vector.app_data.empty()) {
+        std::memcpy(&message.bytes[message.length], vector.app_data.data(),
+                    vector.app_data.size());
+        message.length += vector.app_data.size();
+    }
+    return message;
+}
+
+std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+signature_plus_group_order(
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES> &signature)
+{
+    constexpr std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> group_order = {
+        0xEDU, 0xD3U, 0xF5U, 0x5CU, 0x1AU, 0x63U, 0x12U, 0x58U,
+        0xD6U, 0x9CU, 0xF7U, 0xA2U, 0xDEU, 0xF9U, 0xDEU, 0x14U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x10U};
+    auto result = signature;
+    unsigned int carry = 0U;
+    for (std::size_t index = 0; index < group_order.size(); ++index) {
+        const unsigned int sum =
+            static_cast<unsigned int>(result[32U + index]) +
+            static_cast<unsigned int>(group_order[index]) + carry;
+        result[32U + index] = static_cast<uint8_t>(sum & 0xFFU);
+        carry = sum >> 8U;
+    }
+    return result;
+}
+
+struct TraceVector {
+    uint32_t tag;
+    uint32_t auth_code;
+    uint8_t flags;
+    std::vector<uint8_t> path_hashes;
+};
+
+bool packet_matches(const d1l_meshcore_oracle_packet_t &packet,
+                    const Vector &vector)
+{
+    const bool transport =
+        (vector.header & PH_ROUTE_MASK) == ROUTE_TYPE_TRANSPORT_FLOOD ||
+        (vector.header & PH_ROUTE_MASK) == ROUTE_TYPE_TRANSPORT_DIRECT;
+    return packet.header == vector.header &&
+           (!transport ||
+            (packet.transport_codes[0] == vector.transport_0 &&
+             packet.transport_codes[1] == vector.transport_1)) &&
+           packet.path_len == vector.path_len &&
+           packet.payload_len == vector.payload.size() &&
+           (vector.path.empty() ||
+            std::memcmp(packet.path, vector.path.data(), vector.path.size()) == 0) &&
+           std::memcmp(packet.payload, vector.payload.data(), vector.payload.size()) == 0;
+}
+
+void append_le16(std::vector<uint8_t> &bytes, uint16_t value)
+{
+    bytes.push_back(static_cast<uint8_t>(value));
+    bytes.push_back(static_cast<uint8_t>(value >> 8U));
+}
+
+void append_le32(std::vector<uint8_t> &bytes, int32_t value)
+{
+    const uint32_t encoded = static_cast<uint32_t>(value);
+    bytes.push_back(static_cast<uint8_t>(encoded));
+    bytes.push_back(static_cast<uint8_t>(encoded >> 8U));
+    bytes.push_back(static_cast<uint8_t>(encoded >> 16U));
+    bytes.push_back(static_cast<uint8_t>(encoded >> 24U));
+}
+
+std::vector<uint8_t> expected_advert_bytes(const AdvertVector &vector)
+{
+    uint8_t flags = vector.type;
+    flags |= vector.has_lat_lon != 0U ? D1L_MESHCORE_ADVERT_LATLON_MASK : 0U;
+    flags |= vector.has_feat1 != 0U ? D1L_MESHCORE_ADVERT_FEAT1_MASK : 0U;
+    flags |= vector.has_feat2 != 0U ? D1L_MESHCORE_ADVERT_FEAT2_MASK : 0U;
+    flags |= !vector.name.empty() ? D1L_MESHCORE_ADVERT_NAME_MASK : 0U;
+    std::vector<uint8_t> expected = {flags};
+    if (vector.has_lat_lon != 0U) {
+        append_le32(expected, vector.latitude_e6);
+        append_le32(expected, vector.longitude_e6);
+    }
+    if (vector.has_feat1 != 0U) {
+        append_le16(expected, vector.feat1);
+    }
+    if (vector.has_feat2 != 0U) {
+        append_le16(expected, vector.feat2);
+    }
+    expected.insert(expected.end(), vector.name.begin(), vector.name.end());
+    return expected;
+}
+
+d1l_meshcore_oracle_advert_data_t make_advert(const AdvertVector &vector)
+{
+    d1l_meshcore_oracle_advert_data_t advert{};
+    advert.type = vector.type;
+    advert.has_lat_lon = vector.has_lat_lon;
+    advert.latitude_e6 = vector.latitude_e6;
+    advert.longitude_e6 = vector.longitude_e6;
+    advert.has_feat1 = vector.has_feat1;
+    advert.feat1 = vector.feat1;
+    advert.has_feat2 = vector.has_feat2;
+    advert.feat2 = vector.feat2;
+    advert.has_name = vector.name.empty() ? 0U : 1U;
+    advert.name_len = static_cast<uint8_t>(vector.name.size());
+    if (!vector.name.empty()) {
+        std::memcpy(advert.name, vector.name.data(), vector.name.size());
+    }
+    return advert;
+}
+
+bool advert_matches(const d1l_meshcore_oracle_advert_data_t &advert,
+                    const AdvertVector &vector)
+{
+    return advert.type == vector.type &&
+           advert.has_lat_lon == vector.has_lat_lon &&
+           advert.latitude_e6 == vector.latitude_e6 &&
+           advert.longitude_e6 == vector.longitude_e6 &&
+           advert.has_feat1 == vector.has_feat1 &&
+           advert.feat1 == vector.feat1 &&
+           advert.has_feat2 == vector.has_feat2 &&
+           advert.feat2 == vector.feat2 &&
+           advert.has_name == (vector.name.empty() ? 0U : 1U) &&
+           advert.name_len == vector.name.size() &&
+           (vector.name.empty() ||
+            std::memcmp(advert.name, vector.name.data(), vector.name.size()) == 0);
+}
+
+size_t encoded_path_bytes(uint8_t path_len)
+{
+    return static_cast<size_t>((path_len >> 6U) + 1U) * (path_len & 63U);
+}
+
+bool packets_equal(const d1l_meshcore_oracle_packet_t &left,
+                   const d1l_meshcore_oracle_packet_t &right)
+{
+    const size_t left_path_bytes = encoded_path_bytes(left.path_len);
+    return left.header == right.header &&
+           left.transport_codes[0] == right.transport_codes[0] &&
+           left.transport_codes[1] == right.transport_codes[1] &&
+           left.path_len == right.path_len &&
+           left_path_bytes == encoded_path_bytes(right.path_len) &&
+           (left_path_bytes == 0U ||
+            std::memcmp(left.path, right.path, left_path_bytes) == 0) &&
+           left.payload_len == right.payload_len &&
+           std::memcmp(left.payload, right.payload, left.payload_len) == 0;
+}
+
+d1l_meshcore_oracle_packet_t make_route_packet(uint8_t payload_type)
+{
+    d1l_meshcore_oracle_packet_t packet{};
+    packet.header = static_cast<uint8_t>((payload_type << PH_TYPE_SHIFT) |
+                                         ROUTE_TYPE_TRANSPORT_DIRECT);
+    packet.transport_codes[0] = 0xAAAAU;
+    packet.transport_codes[1] = 0x5555U;
+    packet.path_len = 0x01U;
+    packet.path[0] = 0xEEU;
+    packet.payload_len = 4U;
+    packet.payload[0] = 0x10U;
+    packet.payload[1] = 0x20U;
+    packet.payload[2] = 0x30U;
+    packet.payload[3] = 0x40U;
+    return packet;
+}
+
+}  // namespace
+
+int main()
+{
+    std::vector<std::string> failures;
+    if (d1l_meshcore_oracle_abi_version() != D1L_MESHCORE_ORACLE_ABI_VERSION) {
+        failures.push_back("ABI version mismatch");
+    }
+    if (std::strcmp(d1l_meshcore_oracle_upstream_commit(),
+                    D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT) != 0) {
+        failures.push_back("upstream commit mismatch");
+    }
+
+    const std::array<Vector, kPacketRoundtripVectors> vectors = {{
+        {static_cast<uint8_t>((PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT) |
+                              ROUTE_TYPE_FLOOD),
+         0U, 0U, 0x00U, {}, {0x11U, 0x22U, 0x33U}},
+        {static_cast<uint8_t>((PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) |
+                              ROUTE_TYPE_DIRECT),
+         0U, 0U, 0x01U, {0xA1U}, {0xDEU, 0xADU, 0xBEU, 0xEFU}},
+        {static_cast<uint8_t>((PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) |
+                              ROUTE_TYPE_TRANSPORT_DIRECT),
+         0x1234U, 0xABCDU, 0x42U,
+         {0x10U, 0x11U, 0x20U, 0x21U},
+         {0x01U, 0x02U, 0x03U, 0x04U, 0x05U}},
+        {static_cast<uint8_t>((PAYLOAD_VER_4 << PH_VER_SHIFT) |
+                              (PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) |
+                              ROUTE_TYPE_TRANSPORT_FLOOD),
+         0x0102U, 0x0304U, 0x81U,
+         {0x31U, 0x32U, 0x33U},
+         {0xF0U, 0x0DU}},
+    }};
+
+    for (std::size_t index = 0; index < vectors.size(); ++index) {
+        const Vector &vector = vectors[index];
+        d1l_meshcore_oracle_packet_t input{};
+        input.header = vector.header;
+        input.transport_codes[0] = vector.transport_0;
+        input.transport_codes[1] = vector.transport_1;
+        input.path_len = vector.path_len;
+        if (!vector.path.empty()) {
+            std::memcpy(input.path, vector.path.data(), vector.path.size());
+        }
+        input.payload_len = static_cast<uint16_t>(vector.payload.size());
+        std::memcpy(input.payload, vector.payload.data(), vector.payload.size());
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        if (!d1l_meshcore_oracle_packet_encode(&input, raw.data(), raw.size(),
+                                               &raw_len)) {
+            failures.push_back("encode rejected roundtrip vector " +
+                               std::to_string(index));
+            continue;
+        }
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!d1l_meshcore_oracle_packet_decode(raw.data(), raw_len, &decoded) ||
+            !packet_matches(decoded, vector)) {
+            failures.push_back("decode changed roundtrip vector " +
+                               std::to_string(index));
+        }
+    }
+
+    d1l_meshcore_oracle_packet_t sentinel;
+    std::memset(&sentinel, 0xA5, sizeof(sentinel));
+    d1l_meshcore_oracle_packet_t before = sentinel;
+    const std::array<uint8_t, 2> short_raw = {0x09U, 0x00U};
+    if (d1l_meshcore_oracle_packet_decode(short_raw.data(), short_raw.size(),
+                                          &sentinel) ||
+        std::memcmp(&sentinel, &before, sizeof(sentinel)) != 0) {
+        failures.push_back("short decode did not fail without output mutation");
+    }
+
+    const std::array<uint8_t, 3> reserved_path = {0x09U, 0xC0U, 0x42U};
+    if (d1l_meshcore_oracle_packet_decode(reserved_path.data(), reserved_path.size(),
+                                          &sentinel) ||
+        std::memcmp(&sentinel, &before, sizeof(sentinel)) != 0) {
+        failures.push_back("reserved path did not fail without output mutation");
+    }
+
+    d1l_meshcore_oracle_packet_t invalid{};
+    invalid.header = static_cast<uint8_t>((PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) |
+                                          ROUTE_TYPE_FLOOD);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> output;
+    output.fill(0xD7U);
+    const auto output_before = output;
+    size_t output_len = 0xBEEFU;
+    if (d1l_meshcore_oracle_packet_encode(&invalid, output.data(), output.size(),
+                                          &output_len) ||
+        output_len != 0xBEEFU || output != output_before) {
+        failures.push_back("zero-payload encode changed output");
+    }
+
+    invalid.payload_len = 1U;
+    invalid.payload[0] = 0x42U;
+    if (d1l_meshcore_oracle_packet_encode(&invalid, output.data(), 2U,
+                                          &output_len) ||
+        output_len != 0xBEEFU || output != output_before) {
+        failures.push_back("undersized encode changed output");
+    }
+    if (d1l_meshcore_oracle_packet_encode(&invalid, nullptr, output.size(),
+                                          &output_len) ||
+        output_len != 0xBEEFU) {
+        failures.push_back("null-destination encode changed output length");
+    }
+
+    const std::array<AdvertVector, kAdvertRoundtripVectors> advert_vectors = {{
+        {D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0, 0, 0U, 0U, 0U, 0U, ""},
+        {D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0, 0, 0U, 0U, 0U, 0U,
+         "Alpha"},
+        {D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 43653200, -79383200,
+         0U, 0U, 0U, 0U, "Relay"},
+        {D1L_MESHCORE_ADVERT_TYPE_SENSOR, 1U, 45678901, -123456789,
+         1U, 0x1234U, 1U, 0xBEEFU, "sensor-west-0000001"},
+    }};
+    for (std::size_t index = 0; index < advert_vectors.size(); ++index) {
+        const AdvertVector &vector = advert_vectors[index];
+        const d1l_meshcore_oracle_advert_data_t input = make_advert(vector);
+        const std::vector<uint8_t> expected = expected_advert_bytes(vector);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES> raw{};
+        size_t raw_len = 0U;
+        if (!d1l_meshcore_oracle_advert_data_encode(
+                &input, raw.data(), raw.size(), &raw_len) ||
+            raw_len != expected.size() ||
+            std::memcmp(raw.data(), expected.data(), expected.size()) != 0) {
+            failures.push_back("advert encode changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        d1l_meshcore_oracle_advert_data_t decoded{};
+        if (!d1l_meshcore_oracle_advert_data_decode(raw.data(), raw_len,
+                                                    &decoded) ||
+            !advert_matches(decoded, vector)) {
+            failures.push_back("advert decode changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES> reraw{};
+        size_t reraw_len = 0U;
+        if (!d1l_meshcore_oracle_advert_data_encode(
+                &decoded, reraw.data(), reraw.size(), &reraw_len) ||
+            reraw_len != raw_len ||
+            std::memcmp(reraw.data(), raw.data(), raw_len) != 0) {
+            failures.push_back("advert re-encode changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    auto expect_advert_decode_reject =
+        [&failures](const char *name, const uint8_t *raw, size_t raw_len) {
+            d1l_meshcore_oracle_advert_data_t output;
+            std::memset(&output, 0xA6, sizeof(output));
+            const d1l_meshcore_oracle_advert_data_t before = output;
+            if (d1l_meshcore_oracle_advert_data_decode(raw, raw_len, &output) ||
+                std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " advert decode changed output");
+            }
+        };
+    const std::array<uint8_t, 1> truncated_lat = {
+        D1L_MESHCORE_ADVERT_LATLON_MASK};
+    const std::array<uint8_t, 2> truncated_feat1 = {
+        D1L_MESHCORE_ADVERT_FEAT1_MASK, 0x01U};
+    const std::array<uint8_t, 2> truncated_feat2 = {
+        D1L_MESHCORE_ADVERT_FEAT2_MASK, 0x01U};
+    const std::array<uint8_t, 2> trailing_without_name = {0x00U, 0x41U};
+    const std::array<uint8_t, 1> empty_name = {D1L_MESHCORE_ADVERT_NAME_MASK};
+    const std::array<uint8_t, 3> zero_feat1 = {
+        D1L_MESHCORE_ADVERT_FEAT1_MASK, 0x00U, 0x00U};
+    expect_advert_decode_reject("empty", nullptr, 0U);
+    expect_advert_decode_reject("truncated location", truncated_lat.data(),
+                                truncated_lat.size());
+    expect_advert_decode_reject("truncated feature 1", truncated_feat1.data(),
+                                truncated_feat1.size());
+    expect_advert_decode_reject("truncated feature 2", truncated_feat2.data(),
+                                truncated_feat2.size());
+    expect_advert_decode_reject("unnamed trailing bytes",
+                                trailing_without_name.data(),
+                                trailing_without_name.size());
+    expect_advert_decode_reject("empty flagged name", empty_name.data(),
+                                empty_name.size());
+    expect_advert_decode_reject("zero flagged feature", zero_feat1.data(),
+                                zero_feat1.size());
+
+    auto expect_advert_encode_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_advert_data_t &advert,
+                    size_t capacity) {
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES> output;
+            output.fill(0xC7U);
+            const auto before = output;
+            size_t output_len = 0xCAFEU;
+            if (d1l_meshcore_oracle_advert_data_encode(
+                    &advert, output.data(), capacity, &output_len) ||
+                output != before || output_len != 0xCAFEU) {
+                failures.push_back(std::string(name) +
+                                   " advert encode changed output");
+            }
+        };
+    d1l_meshcore_oracle_advert_data_t invalid_advert =
+        make_advert(advert_vectors[1]);
+    invalid_advert.type = 0x10U;
+    expect_advert_encode_reject("invalid type", invalid_advert,
+                                D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    invalid_advert = make_advert(advert_vectors[1]);
+    invalid_advert.name_len = 2U;
+    invalid_advert.name[1] = 0U;
+    expect_advert_encode_reject("embedded null", invalid_advert,
+                                D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    invalid_advert = make_advert(advert_vectors[3]);
+    invalid_advert.name_len = 20U;
+    std::memset(invalid_advert.name, 'X', invalid_advert.name_len);
+    expect_advert_encode_reject("oversized layout", invalid_advert,
+                                D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    invalid_advert = make_advert(advert_vectors[1]);
+    expect_advert_encode_reject("undersized destination", invalid_advert, 5U);
+
+    const std::array<SignedAdvertVector, kSignedAdvertProductionVectors>
+        signed_advert_vectors = {{
+            {{0x00U, 0x00U, 0x00U, 0x00U}, {},
+              {0x60U, 0xB4U, 0x4AU, 0x2DU, 0xD6U, 0x91U, 0xC6U, 0xEFU,
+               0xF0U, 0xE2U, 0x6DU, 0xF8U, 0x30U, 0xA8U, 0x90U, 0xE2U,
+               0xB4U, 0x3DU, 0xCDU, 0x9FU, 0x75U, 0xE0U, 0xA0U, 0x7BU,
+               0x51U, 0xECU, 0xE1U, 0x69U, 0x8EU, 0xB6U, 0x07U, 0x4DU,
+               0xB0U, 0x49U, 0x1EU, 0x57U, 0xB5U, 0x1FU, 0xFEU, 0xD4U,
+               0x24U, 0x2DU, 0x77U, 0x03U, 0x0FU, 0x40U, 0xE7U, 0xDFU,
+               0x07U, 0x59U, 0x33U, 0xF0U, 0xA8U, 0x98U, 0x38U, 0x13U,
+               0x17U, 0xC8U, 0x9CU, 0x56U, 0x99U, 0x0FU, 0xE3U, 0x00U}},
+            {{0x78U, 0x56U, 0x34U, 0x12U},
+             {0x81U, 'o', 'r', 'a', 'c', 'l', 'e'},
+             {0x1FU, 0xB3U, 0x44U, 0x55U, 0x10U, 0xADU, 0x9DU, 0xAEU,
+              0x26U, 0x30U, 0x64U, 0x27U, 0x43U, 0x47U, 0x78U, 0xEDU,
+              0x55U, 0x45U, 0x99U, 0x06U, 0x83U, 0x46U, 0x15U, 0x52U,
+              0x20U, 0x0AU, 0xE5U, 0xBDU, 0x09U, 0x9DU, 0xACU, 0x88U,
+              0x6DU, 0x8DU, 0x61U, 0xB3U, 0x2CU, 0x45U, 0x7DU, 0x7CU,
+              0xCBU, 0x2FU, 0x56U, 0x24U, 0x35U, 0x0BU, 0x81U, 0x4DU,
+              0x47U, 0xEAU, 0xC6U, 0x06U, 0xAFU, 0x77U, 0xAAU, 0x97U,
+              0x63U, 0xB9U, 0xEBU, 0x90U, 0x34U, 0x97U, 0x73U, 0x0AU}},
+            {{0xEFU, 0xBEU, 0xADU, 0xDEU},
+             {0x81U, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j',
+              'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u',
+              'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E'},
+             {0x34U, 0xD8U, 0xCDU, 0xE6U, 0x24U, 0x0DU, 0xD7U, 0xFEU,
+              0x87U, 0xFBU, 0x71U, 0xBBU, 0x33U, 0x9FU, 0x6BU, 0x11U,
+              0x70U, 0x6DU, 0x09U, 0xE0U, 0x83U, 0x5AU, 0x0FU, 0x71U,
+              0x1CU, 0xFBU, 0xA2U, 0xBCU, 0x2EU, 0x3CU, 0xCFU, 0x17U,
+              0xEFU, 0xA6U, 0x26U, 0xABU, 0x89U, 0x4AU, 0xD0U, 0xF9U,
+              0x78U, 0x2FU, 0x19U, 0x71U, 0x28U, 0x07U, 0x3EU, 0xEDU,
+              0x3BU, 0x6BU, 0x77U, 0xBBU, 0x75U, 0xADU, 0x1EU, 0xB6U,
+              0x5BU, 0xC4U, 0xC0U, 0x67U, 0x59U, 0x1FU, 0xB1U, 0x04U}},
+        }};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+        regenerated_public_key{};
+    std::array<uint8_t, 64U> regenerated_private_key{};
+    ed25519_create_keypair(regenerated_public_key.data(),
+                           regenerated_private_key.data(),
+                           kSignedAdvertSeed.data());
+    if (regenerated_public_key != kSignedAdvertPublicKey) {
+        failures.push_back("fixed-seed signed advert public key changed");
+    }
+    for (std::size_t index = 0; index < signed_advert_vectors.size(); ++index) {
+        const SignedAdvertVector &vector = signed_advert_vectors[index];
+        const SignedAdvertMessage message =
+            make_signed_advert_message(kSignedAdvertPublicKey, vector);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+            regenerated_signature{};
+        ed25519_sign(regenerated_signature.data(), message.bytes.data(),
+                     message.length, regenerated_public_key.data(),
+                     regenerated_private_key.data());
+        if (regenerated_signature != vector.signature) {
+            failures.push_back("fixed-seed signed advert signature changed vector " +
+                               std::to_string(index));
+        }
+        const uint8_t *app_data =
+            vector.app_data.empty() ? nullptr : vector.app_data.data();
+        for (std::size_t repetition = 0; repetition < 64U; ++repetition) {
+            if (!d1l_meshcore_oracle_verify_signed_advert(
+                    kSignedAdvertPublicKey.data(), vector.timestamp.data(),
+                    vector.signature.data(), app_data, vector.app_data.size())) {
+                failures.push_back("signed advert verification changed vector " +
+                                   std::to_string(index));
+                break;
+            }
+        }
+
+        const uint32_t timestamp_value =
+            static_cast<uint32_t>(vector.timestamp[0]) |
+            (static_cast<uint32_t>(vector.timestamp[1]) << 8U) |
+            (static_cast<uint32_t>(vector.timestamp[2]) << 16U) |
+            (static_cast<uint32_t>(vector.timestamp[3]) << 24U);
+        d1l_meshcore_oracle_packet_t advert_packet{};
+        if (!d1l_meshcore_oracle_create_signed_advert_packet(
+                kSignedAdvertSeed.data(), timestamp_value, app_data,
+                vector.app_data.size(), &advert_packet) ||
+            advert_packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT) ||
+            advert_packet.path_len != 0U ||
+            advert_packet.payload_len !=
+                kSignedAdvertPublicKey.size() + vector.timestamp.size() +
+                    vector.signature.size() + vector.app_data.size() ||
+            std::memcmp(advert_packet.payload, kSignedAdvertPublicKey.data(),
+                        kSignedAdvertPublicKey.size()) != 0 ||
+            std::memcmp(&advert_packet.payload[kSignedAdvertPublicKey.size()],
+                        vector.timestamp.data(), vector.timestamp.size()) != 0 ||
+            std::memcmp(&advert_packet.payload[kSignedAdvertPublicKey.size() +
+                                               vector.timestamp.size()],
+                        vector.signature.data(), vector.signature.size()) != 0 ||
+            (!vector.app_data.empty() &&
+             std::memcmp(
+                 &advert_packet.payload[kSignedAdvertPublicKey.size() +
+                                        vector.timestamp.size() +
+                                        vector.signature.size()],
+                 vector.app_data.data(), vector.app_data.size()) != 0)) {
+            failures.push_back("signed advert packet creation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        constexpr std::array<uint16_t, 2U> transport_codes = {0x1357U,
+                                                               0x2468U};
+        uint8_t priority = 0U;
+        const uint8_t use_transport = index == 2U ? 1U : 0U;
+        if (!d1l_meshcore_oracle_prepare_flood(
+                &advert_packet, static_cast<uint8_t>(index + 1U),
+                use_transport, transport_codes.data(), &priority) ||
+            priority != 3U) {
+            failures.push_back("signed advert flood preparation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded_packet{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &advert_packet, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded_packet)) {
+            failures.push_back("signed advert wire roundtrip failed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+            parsed_public_key{};
+        uint32_t parsed_timestamp = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+            parsed_app_data{};
+        size_t parsed_app_data_len = 0U;
+        if (!d1l_meshcore_oracle_parse_signed_advert_packet(
+                &decoded_packet, parsed_public_key.data(), &parsed_timestamp,
+                parsed_app_data.data(), parsed_app_data.size(),
+                &parsed_app_data_len) ||
+            parsed_public_key != kSignedAdvertPublicKey ||
+            parsed_timestamp != timestamp_value ||
+            parsed_app_data_len != vector.app_data.size() ||
+            (!vector.app_data.empty() &&
+             std::memcmp(parsed_app_data.data(), vector.app_data.data(),
+                         vector.app_data.size()) != 0)) {
+            failures.push_back("signed advert authenticated parse changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    const SignedAdvertVector &packet_vector = signed_advert_vectors[1];
+    const uint32_t packet_timestamp =
+        static_cast<uint32_t>(packet_vector.timestamp[0]) |
+        (static_cast<uint32_t>(packet_vector.timestamp[1]) << 8U) |
+        (static_cast<uint32_t>(packet_vector.timestamp[2]) << 16U) |
+        (static_cast<uint32_t>(packet_vector.timestamp[3]) << 24U);
+    d1l_meshcore_oracle_packet_t valid_advert_packet{};
+    if (!d1l_meshcore_oracle_create_signed_advert_packet(
+            kSignedAdvertSeed.data(), packet_timestamp,
+            packet_vector.app_data.data(), packet_vector.app_data.size(),
+            &valid_advert_packet)) {
+        failures.push_back("signed advert invalid-vector fixture creation failed");
+    }
+    auto expect_signed_advert_create_reject =
+        [&failures, packet_timestamp](
+            const char *name, const uint8_t *seed, const uint8_t *app_data,
+            size_t app_data_len, bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_signed_advert_packet(
+                    seed, packet_timestamp, app_data, app_data_len,
+                    null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " signed advert creation mutated output");
+            }
+        };
+    expect_signed_advert_create_reject(
+        "null seed", nullptr, packet_vector.app_data.data(),
+        packet_vector.app_data.size(), false);
+    expect_signed_advert_create_reject("null app data", kSignedAdvertSeed.data(),
+                                       nullptr, 1U, false);
+    expect_signed_advert_create_reject(
+        "oversized app data", kSignedAdvertSeed.data(),
+        packet_vector.app_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, false);
+    expect_signed_advert_create_reject(
+        "null packet output", kSignedAdvertSeed.data(),
+        packet_vector.app_data.data(), packet_vector.app_data.size(), true);
+
+    auto expect_signed_advert_packet_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    size_t app_data_capacity) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>
+                public_key{};
+            public_key.fill(0xA5U);
+            const auto public_key_before = public_key;
+            uint32_t timestamp = 0xA5A5A5A5U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES>
+                app_data{};
+            app_data.fill(0xA5U);
+            const auto app_data_before = app_data;
+            size_t app_data_len = 0xA5A5U;
+            if (d1l_meshcore_oracle_parse_signed_advert_packet(
+                    packet, public_key.data(), &timestamp, app_data.data(),
+                    app_data_capacity, &app_data_len)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert packet accepted");
+            } else if (public_key != public_key_before ||
+                       timestamp != 0xA5A5A5A5U ||
+                       app_data != app_data_before ||
+                       app_data_len != 0xA5A5U) {
+                failures.push_back(std::string(name) +
+                                   " signed advert parse mutated output");
+            }
+        };
+    expect_signed_advert_packet_reject(
+        "null packet", nullptr, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    {
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> public_key{};
+        uint32_t timestamp = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES> app_data{};
+        size_t app_data_len = 0U;
+        if (d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, nullptr, &timestamp, app_data.data(),
+                app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), nullptr,
+                app_data.data(), app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), &timestamp, nullptr,
+                app_data.size(), &app_data_len) ||
+            d1l_meshcore_oracle_parse_signed_advert_packet(
+                &valid_advert_packet, public_key.data(), &timestamp,
+                app_data.data(), app_data.size(), nullptr)) {
+            failures.push_back("signed advert parser accepted null output");
+        }
+    }
+    expect_signed_advert_packet_reject(
+        "undersized app output", &valid_advert_packet,
+        packet_vector.app_data.size() - 1U);
+    auto wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
+    expect_signed_advert_packet_reject(
+        "wrong payload type", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.header |= static_cast<uint8_t>(PAYLOAD_VER_2
+                                                       << PH_VER_SHIFT);
+    expect_signed_advert_packet_reject(
+        "future payload version", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len =
+        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+        D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+        D1L_MESHCORE_ORACLE_SIGNATURE_BYTES - 1U;
+    expect_signed_advert_packet_reject(
+        "short payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len =
+        D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+        D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+        D1L_MESHCORE_ORACLE_SIGNATURE_BYTES +
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U;
+    expect_signed_advert_packet_reject(
+        "oversized payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    for (const auto &mutation :
+         std::array<std::pair<const char *, size_t>, 4U>{
+             {{"tampered public key", 0U},
+              {"tampered timestamp", D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES},
+              {"tampered signature",
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES},
+              {"tampered app data",
+               D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                   D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES +
+                   D1L_MESHCORE_ORACLE_SIGNATURE_BYTES}}}) {
+        wrong_advert_packet = valid_advert_packet;
+        wrong_advert_packet.payload[mutation.second] ^= 0x01U;
+        expect_signed_advert_packet_reject(
+            mutation.first, &wrong_advert_packet,
+            D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    }
+    wrong_advert_packet = valid_advert_packet;
+    std::memset(wrong_advert_packet.payload, 0,
+                D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
+    wrong_advert_packet.payload[0] = 0x01U;
+    expect_signed_advert_packet_reject(
+        "low-order public key", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    std::memset(&wrong_advert_packet.payload[
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                    D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+                0, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES);
+    wrong_advert_packet.payload[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                                D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES] =
+        0x01U;
+    expect_signed_advert_packet_reject(
+        "low-order signature R", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    const auto noncanonical_signature =
+        signature_plus_group_order(packet_vector.signature);
+    std::memcpy(&wrong_advert_packet.payload[
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES +
+                    D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES],
+                noncanonical_signature.data(), noncanonical_signature.size());
+    expect_signed_advert_packet_reject(
+        "noncanonical signature S", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.path_len = 0xFFU;
+    expect_signed_advert_packet_reject(
+        "invalid path length", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    wrong_advert_packet = valid_advert_packet;
+    wrong_advert_packet.payload_len = 0U;
+    expect_signed_advert_packet_reject(
+        "empty payload", &wrong_advert_packet,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES);
+    const uint8_t empty_message = 0U;
+    if (!d1l_ed25519_signature_s_is_canonical(
+            kRfc8032EmptyMessageSignature.data())) {
+        failures.push_back("canonical RFC 8032 signature rejected by S guard");
+    }
+    for (std::size_t repetition = 0; repetition < 64U; ++repetition) {
+        if (ed25519_verify(kRfc8032EmptyMessageSignature.data(), &empty_message,
+                          0U, kRfc8032PublicKey.data()) != 1) {
+            failures.push_back("RFC 8032 empty-message vector rejected");
+            break;
+        }
+    }
+    auto tampered_rfc_signature = kRfc8032EmptyMessageSignature;
+    tampered_rfc_signature[0] ^= 0x01U;
+    if (ed25519_verify(tampered_rfc_signature.data(), &empty_message, 0U,
+                       kRfc8032PublicKey.data()) != 0) {
+        failures.push_back("tampered RFC 8032 signature accepted");
+    }
+    auto high_bit_rfc_signature = kRfc8032EmptyMessageSignature;
+    high_bit_rfc_signature[63] |= 0xE0U;
+    if (ed25519_verify(high_bit_rfc_signature.data(), &empty_message, 0U,
+                       kRfc8032PublicKey.data()) != 0) {
+        failures.push_back("high-bit RFC 8032 signature accepted");
+    }
+    if (ed25519_verify(kRfc8032EmptyMessageSignaturePlusOrder.data(),
+                       &empty_message, 0U, kRfc8032PublicKey.data()) != 1 ||
+        d1l_ed25519_signature_s_is_canonical(
+            kRfc8032EmptyMessageSignaturePlusOrder.data())) {
+        failures.push_back(
+            "RFC 8032 S+L regression did not exercise the canonical-S guard");
+    }
+
+    auto expect_strict_point =
+        [&failures](const char *name, const uint8_t *point, bool expected) {
+            if (d1l_ed25519_encoded_point_is_strict(point) != expected) {
+                failures.push_back(std::string(name) +
+                                   " strict point validation mismatch");
+            }
+        };
+    expect_strict_point("fixed-seed public key",
+                        kSignedAdvertPublicKey.data(), true);
+    expect_strict_point("RFC 8032 public key", kRfc8032PublicKey.data(), true);
+    expect_strict_point("fixed-seed signature R",
+                        signed_advert_vectors[1].signature.data(), true);
+    expect_strict_point("RFC 8032 signature R",
+                        kRfc8032EmptyMessageSignature.data(), true);
+
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> identity_point{};
+    identity_point[0] = 0x01U;
+    auto negative_zero_identity = identity_point;
+    negative_zero_identity[31] = 0x80U;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> zero_point{};
+    auto signed_zero_point = zero_point;
+    signed_zero_point[31] = 0x80U;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> minus_one_point{};
+    minus_one_point.fill(0xFFU);
+    minus_one_point[0] = 0xECU;
+    minus_one_point[31] = 0x7FU;
+    std::array<uint8_t, D1L_ED25519_SCALAR_BYTES> noncanonical_y{};
+    noncanonical_y.fill(0xFFU);
+    noncanonical_y[0] = 0xEDU;
+    noncanonical_y[31] = 0x7FU;
+    expect_strict_point("null point", nullptr, false);
+    expect_strict_point("identity point", identity_point.data(), false);
+    expect_strict_point("negative-zero identity point",
+                        negative_zero_identity.data(), false);
+    expect_strict_point("zero point", zero_point.data(), false);
+    expect_strict_point("signed zero point", signed_zero_point.data(), false);
+    expect_strict_point("minus-one point", minus_one_point.data(), false);
+    expect_strict_point("noncanonical field encoding",
+                        noncanonical_y.data(), false);
+
+    using IdentityBytes =
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    const IdentityBytes exchange_seed_b = {
+        0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U,
+        0x28U, 0x29U, 0x2AU, 0x2BU, 0x2CU, 0x2DU, 0x2EU, 0x2FU,
+        0x30U, 0x31U, 0x32U, 0x33U, 0x34U, 0x35U, 0x36U, 0x37U,
+        0x38U, 0x39U, 0x3AU, 0x3BU, 0x3CU, 0x3DU, 0x3EU, 0x3FU};
+    const IdentityBytes exchange_public_b = {
+        0x29U, 0xACU, 0xBAU, 0xE1U, 0x41U, 0xBCU, 0xCAU, 0xF0U,
+        0xB2U, 0x2EU, 0x1AU, 0x94U, 0xD3U, 0x4DU, 0x0BU, 0xC7U,
+        0x36U, 0x1EU, 0x52U, 0x6DU, 0x0BU, 0xFEU, 0x12U, 0xC8U,
+        0x97U, 0x94U, 0xBCU, 0x93U, 0x22U, 0x96U, 0x6DU, 0xD7U};
+    const IdentityBytes exchange_seed_c = {
+        0x80U, 0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+        0x88U, 0x89U, 0x8AU, 0x8BU, 0x8CU, 0x8DU, 0x8EU, 0x8FU,
+        0x90U, 0x91U, 0x92U, 0x93U, 0x94U, 0x95U, 0x96U, 0x97U,
+        0x98U, 0x99U, 0x9AU, 0x9BU, 0x9CU, 0x9DU, 0x9EU, 0x9FU};
+    const IdentityBytes exchange_public_c = {
+        0xCDU, 0x14U, 0xB3U, 0x7FU, 0x95U, 0x6EU, 0x95U, 0x31U,
+        0x94U, 0xFFU, 0x7FU, 0xB7U, 0x3BU, 0x3DU, 0x81U, 0xDCU,
+        0xC5U, 0x61U, 0xD6U, 0x1AU, 0x75U, 0x38U, 0x09U, 0x4BU,
+        0x7CU, 0x3EU, 0x1AU, 0x64U, 0x3EU, 0xE5U, 0xF3U, 0xAAU};
+    const IdentityBytes exchange_seed_d = {
+        0xFFU, 0xFEU, 0xFDU, 0xFCU, 0xFBU, 0xFAU, 0xF9U, 0xF8U,
+        0xF7U, 0xF6U, 0xF5U, 0xF4U, 0xF3U, 0xF2U, 0xF1U, 0xF0U,
+        0xEFU, 0xEEU, 0xEDU, 0xECU, 0xEBU, 0xEAU, 0xE9U, 0xE8U,
+        0xE7U, 0xE6U, 0xE5U, 0xE4U, 0xE3U, 0xE2U, 0xE1U, 0xE0U};
+    const IdentityBytes exchange_public_d = {
+        0xBAU, 0xFCU, 0x71U, 0xBEU, 0xADU, 0x3AU, 0xC5U, 0xE4U,
+        0xB6U, 0x3EU, 0x9CU, 0x82U, 0x16U, 0xEEU, 0x71U, 0xA3U,
+        0x4AU, 0xAEU, 0xC6U, 0x57U, 0x22U, 0xEEU, 0xDBU, 0xCAU,
+        0x72U, 0x8BU, 0x4EU, 0x9BU, 0x3CU, 0xCCU, 0xE3U, 0x96U};
+    const IdentityBytes exchange_zero_seed{};
+    const IdentityBytes exchange_zero_seed_public = {
+        0x3BU, 0x6AU, 0x27U, 0xBCU, 0xCEU, 0xB6U, 0xA4U, 0x2DU,
+        0x62U, 0xA3U, 0xA8U, 0xD0U, 0x2AU, 0x6FU, 0x0DU, 0x73U,
+        0x65U, 0x32U, 0x15U, 0x77U, 0x1DU, 0xE2U, 0x43U, 0xA6U,
+        0x3AU, 0xC0U, 0x48U, 0xA1U, 0x8BU, 0x59U, 0xDAU, 0x29U};
+    const IdentityBytes exchange_secret_ab = {
+        0xF6U, 0xF9U, 0x2EU, 0xFBU, 0x32U, 0x94U, 0x5AU, 0xFFU,
+        0x68U, 0x33U, 0x24U, 0xA1U, 0xC9U, 0x84U, 0xC5U, 0x00U,
+        0x1FU, 0x46U, 0xAAU, 0xEAU, 0x51U, 0x3FU, 0x34U, 0x53U,
+        0x13U, 0x8DU, 0x74U, 0x0BU, 0x3AU, 0x60U, 0x4BU, 0x7DU};
+    const IdentityBytes exchange_secret_ac = {
+        0x41U, 0xF2U, 0xB5U, 0x80U, 0x30U, 0x67U, 0x90U, 0xD9U,
+        0x25U, 0x30U, 0xE0U, 0xA8U, 0xE8U, 0x48U, 0xC5U, 0xEBU,
+        0xB5U, 0x70U, 0xAAU, 0x41U, 0x2AU, 0xD9U, 0x08U, 0xB9U,
+        0x71U, 0x3AU, 0x0DU, 0x11U, 0x22U, 0x5BU, 0x27U, 0x58U};
+    const IdentityBytes exchange_secret_bd = {
+        0x1DU, 0x8FU, 0xB5U, 0x86U, 0x85U, 0xEBU, 0xA3U, 0xDAU,
+        0x89U, 0xDDU, 0x6BU, 0x1BU, 0xBAU, 0xE2U, 0xD4U, 0x0EU,
+        0xBBU, 0x19U, 0x21U, 0x3BU, 0xD4U, 0xA4U, 0xEEU, 0x05U,
+        0x4DU, 0xF5U, 0xBDU, 0x24U, 0x5DU, 0xF6U, 0x1CU, 0x13U};
+    const IdentityBytes exchange_secret_cd = {
+        0x99U, 0xA0U, 0x9AU, 0x47U, 0xDBU, 0xA2U, 0x7DU, 0xC9U,
+        0xA3U, 0x3CU, 0xEFU, 0xECU, 0xC0U, 0xFEU, 0x7DU, 0x04U,
+        0xA9U, 0x2BU, 0x5CU, 0x87U, 0xE6U, 0x43U, 0xC5U, 0x9DU,
+        0x06U, 0xA0U, 0x2AU, 0xBBU, 0xDAU, 0xDFU, 0x59U, 0x24U};
+    const IdentityBytes exchange_secret_zero_b = {
+        0x92U, 0x40U, 0x1AU, 0xD8U, 0x90U, 0x6CU, 0x37U, 0xD8U,
+        0x59U, 0x0EU, 0x88U, 0xF5U, 0x8DU, 0x33U, 0xDBU, 0xA1U,
+        0xBEU, 0xC1U, 0x65U, 0x71U, 0x96U, 0xDCU, 0x83U, 0x45U,
+        0x8EU, 0x67U, 0xE6U, 0xC2U, 0x0AU, 0x0CU, 0x3DU, 0x12U};
+    const IdentityBytes expected_exchange_matrix_sha256 = {
+        0x6BU, 0x1BU, 0x1EU, 0xA7U, 0xE3U, 0x8EU, 0x11U, 0xFCU,
+        0xDFU, 0x4AU, 0x7BU, 0xD7U, 0x56U, 0x89U, 0x66U, 0xEFU,
+        0xD2U, 0xDDU, 0xC2U, 0x74U, 0xB2U, 0xF8U, 0xD8U, 0xABU,
+        0x57U, 0xF8U, 0xEDU, 0x75U, 0x65U, 0x0BU, 0xD1U, 0xB9U};
+    struct IdentityExchangeVector {
+        const char *name;
+        const IdentityBytes *seed_a;
+        const IdentityBytes *public_a;
+        const IdentityBytes *seed_b;
+        const IdentityBytes *public_b;
+        const IdentityBytes *shared_secret;
+    };
+    const std::array<IdentityExchangeVector,
+                     kIdentityExchangeRoundtripVectors>
+        identity_exchange_vectors = {{
+            {"sequential A/B", &kSignedAdvertSeed,
+             &kSignedAdvertPublicKey, &exchange_seed_b, &exchange_public_b,
+             &exchange_secret_ab},
+            {"sequential A/C", &kSignedAdvertSeed,
+             &kSignedAdvertPublicKey, &exchange_seed_c, &exchange_public_c,
+             &exchange_secret_ac},
+            {"sequential B/descending D", &exchange_seed_b,
+             &exchange_public_b, &exchange_seed_d, &exchange_public_d,
+             &exchange_secret_bd},
+            {"sequential C/descending D", &exchange_seed_c,
+             &exchange_public_c, &exchange_seed_d, &exchange_public_d,
+             &exchange_secret_cd},
+            {"all-zero seed/B", &exchange_zero_seed,
+             &exchange_zero_seed_public, &exchange_seed_b, &exchange_public_b,
+             &exchange_secret_zero_b},
+        }};
+    SHA256 identity_exchange_matrix_sha;
+    for (const IdentityExchangeVector &vector : identity_exchange_vectors) {
+        d1l_meshcore_oracle_identity_exchange_t exchange_a{};
+        d1l_meshcore_oracle_identity_exchange_t exchange_b{};
+        if (!d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                vector.seed_a->data(), vector.public_b->data(), &exchange_a) ||
+            !d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                vector.seed_b->data(), vector.public_a->data(), &exchange_b) ||
+            std::memcmp(exchange_a.public_key, vector.public_a->data(),
+                        vector.public_a->size()) != 0 ||
+            std::memcmp(exchange_b.public_key, vector.public_b->data(),
+                        vector.public_b->size()) != 0 ||
+            std::memcmp(exchange_a.shared_secret,
+                        vector.shared_secret->data(),
+                        vector.shared_secret->size()) != 0 ||
+            std::memcmp(exchange_b.shared_secret,
+                        vector.shared_secret->data(),
+                        vector.shared_secret->size()) != 0) {
+            failures.push_back(std::string(vector.name) +
+                               " identity exchange KAT changed");
+            continue;
+        }
+        identity_exchange_matrix_sha.update(exchange_a.shared_secret,
+                                            sizeof(exchange_a.shared_secret));
+    }
+    IdentityBytes identity_exchange_matrix_digest{};
+    identity_exchange_matrix_sha.finalize(identity_exchange_matrix_digest.data(),
+                                          identity_exchange_matrix_digest.size());
+    if (identity_exchange_matrix_digest != expected_exchange_matrix_sha256) {
+        failures.push_back("identity exchange matrix digest changed");
+    }
+
+    auto expect_identity_exchange_reject =
+        [&failures](const char *name, const uint8_t *seed,
+                    const uint8_t *peer_public_key, bool null_output) {
+            d1l_meshcore_oracle_identity_exchange_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_identity_exchange_t before = output;
+            if (d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                    seed, peer_public_key, null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " identity exchange accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " identity exchange mutated output");
+            }
+        };
+    expect_identity_exchange_reject(
+        "null exchange seed", nullptr, exchange_public_b.data(), false);
+    expect_identity_exchange_reject(
+        "null exchange peer", kSignedAdvertSeed.data(), nullptr, false);
+    expect_identity_exchange_reject(
+        "null exchange output", kSignedAdvertSeed.data(),
+        exchange_public_b.data(), true);
+    expect_identity_exchange_reject(
+        "identity exchange peer", kSignedAdvertSeed.data(),
+        identity_point.data(), false);
+    expect_identity_exchange_reject(
+        "negative-zero exchange peer", kSignedAdvertSeed.data(),
+        negative_zero_identity.data(), false);
+    expect_identity_exchange_reject(
+        "zero exchange peer", kSignedAdvertSeed.data(), zero_point.data(),
+        false);
+    expect_identity_exchange_reject(
+        "signed-zero exchange peer", kSignedAdvertSeed.data(),
+        signed_zero_point.data(), false);
+    expect_identity_exchange_reject(
+        "minus-one exchange peer", kSignedAdvertSeed.data(),
+        minus_one_point.data(), false);
+    expect_identity_exchange_reject(
+        "noncanonical exchange peer", kSignedAdvertSeed.data(),
+        noncanonical_y.data(), false);
+
+    auto expect_signed_advert_reject =
+        [&failures](const char *name, const uint8_t *public_key,
+                    const uint8_t *timestamp, const uint8_t *signature,
+                    const uint8_t *app_data, size_t app_data_len) {
+            if (d1l_meshcore_oracle_verify_signed_advert(
+                    public_key, timestamp, signature, app_data, app_data_len)) {
+                failures.push_back(std::string(name) +
+                                   " signed advert accepted");
+            }
+        };
+    const SignedAdvertVector &signed_advert = signed_advert_vectors[1];
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_SIGNATURE_BYTES>
+        identity_forgery{};
+    identity_forgery[0] = 0x01U;
+    const SignedAdvertMessage identity_forgery_message =
+        make_signed_advert_message(identity_point, signed_advert);
+    if (ed25519_verify(identity_forgery.data(),
+                       identity_forgery_message.bytes.data(),
+                       identity_forgery_message.length,
+                       identity_point.data()) != 1) {
+        failures.push_back(
+            "identity-point forgery no longer exercises the pinned verifier");
+    }
+    expect_signed_advert_reject(
+        "identity-point forgery", identity_point.data(),
+        signed_advert.timestamp.data(), identity_forgery.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null public key", nullptr, signed_advert.timestamp.data(),
+        signed_advert.signature.data(), signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null timestamp", kSignedAdvertPublicKey.data(), nullptr,
+        signed_advert.signature.data(), signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), nullptr, signed_advert.app_data.data(),
+        signed_advert.app_data.size());
+    expect_signed_advert_reject(
+        "null app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(), nullptr,
+        1U);
+    expect_signed_advert_reject(
+        "oversized app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U);
+    auto tampered_signature = signed_advert.signature;
+    tampered_signature[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), tampered_signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_public_key = kSignedAdvertPublicKey;
+    tampered_public_key[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered public key", tampered_public_key.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_timestamp = signed_advert.timestamp;
+    tampered_timestamp[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered timestamp", kSignedAdvertPublicKey.data(),
+        tampered_timestamp.data(), signed_advert.signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+    auto tampered_app_data = signed_advert.app_data;
+    tampered_app_data[0] ^= 0x01U;
+    expect_signed_advert_reject(
+        "tampered app data", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), signed_advert.signature.data(),
+        tampered_app_data.data(), tampered_app_data.size());
+    const auto malleable_signature =
+        signature_plus_group_order(signed_advert.signature);
+    const SignedAdvertMessage malleable_message =
+        make_signed_advert_message(kSignedAdvertPublicKey, signed_advert);
+    if (ed25519_verify(malleable_signature.data(), malleable_message.bytes.data(),
+                       malleable_message.length,
+                       kSignedAdvertPublicKey.data()) != 1) {
+        failures.push_back(
+            "production S+L regression no longer exercises the pinned verifier");
+    }
+    expect_signed_advert_reject(
+        "noncanonical S+L signature", kSignedAdvertPublicKey.data(),
+        signed_advert.timestamp.data(), malleable_signature.data(),
+        signed_advert.app_data.data(), signed_advert.app_data.size());
+
+    const std::array<uint8_t, 32U> expected_sha256_abc = {
+        0xBAU, 0x78U, 0x16U, 0xBFU, 0x8FU, 0x01U, 0xCFU, 0xEAU,
+        0x41U, 0x41U, 0x40U, 0xDEU, 0x5DU, 0xAEU, 0x22U, 0x23U,
+        0xB0U, 0x03U, 0x61U, 0xA3U, 0x96U, 0x17U, 0x7AU, 0x9CU,
+        0xB4U, 0x10U, 0xFFU, 0x61U, 0xF2U, 0x00U, 0x15U, 0xADU};
+    std::array<uint8_t, 32U> sha256_abc{};
+    SHA256 sha256;
+    constexpr std::array<uint8_t, 3U> abc = {'a', 'b', 'c'};
+    sha256.update(abc.data(), abc.size());
+    sha256.finalize(sha256_abc.data(), sha256_abc.size());
+    if (sha256_abc != expected_sha256_abc) {
+        failures.push_back("FIPS SHA-256 abc KAT changed");
+    }
+
+    const std::array<uint8_t, 20U> hmac_key = {
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU,
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU,
+        0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU, 0x0BU};
+    constexpr std::array<uint8_t, 8U> hmac_data = {
+        'H', 'i', ' ', 'T', 'h', 'e', 'r', 'e'};
+    const std::array<uint8_t, 32U> expected_hmac = {
+        0xB0U, 0x34U, 0x4CU, 0x61U, 0xD8U, 0xDBU, 0x38U, 0x53U,
+        0x5CU, 0xA8U, 0xAFU, 0xCEU, 0xAFU, 0x0BU, 0xF1U, 0x2BU,
+        0x88U, 0x1DU, 0xC2U, 0x00U, 0xC9U, 0x83U, 0x3DU, 0xA7U,
+        0x26U, 0xE9U, 0x37U, 0x6CU, 0x2EU, 0x32U, 0xCFU, 0xF7U};
+    std::array<uint8_t, 32U> hmac_result{};
+    SHA256 hmac_sha256;
+    hmac_sha256.resetHMAC(hmac_key.data(), hmac_key.size());
+    hmac_sha256.update(hmac_data.data(), hmac_data.size());
+    hmac_sha256.finalizeHMAC(hmac_key.data(), hmac_key.size(),
+                             hmac_result.data(), hmac_result.size());
+    if (hmac_result != expected_hmac) {
+        failures.push_back("RFC 4231 HMAC-SHA-256 KAT changed");
+    }
+
+    const std::array<uint8_t, 16U> aes_key = {
+        0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+        0x08U, 0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU};
+    const std::array<uint8_t, 16U> aes_plaintext = {
+        0x00U, 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U,
+        0x88U, 0x99U, 0xAAU, 0xBBU, 0xCCU, 0xDDU, 0xEEU, 0xFFU};
+    const std::array<uint8_t, 16U> expected_aes_ciphertext = {
+        0x69U, 0xC4U, 0xE0U, 0xD8U, 0x6AU, 0x7BU, 0x04U, 0x30U,
+        0xD8U, 0xCDU, 0xB7U, 0x80U, 0x70U, 0xB4U, 0xC5U, 0x5AU};
+    std::array<uint8_t, 16U> aes_ciphertext{};
+    std::array<uint8_t, 16U> aes_roundtrip{};
+    AES128 aes;
+    aes.setKey(aes_key.data(), aes_key.size());
+    aes.encryptBlock(aes_ciphertext.data(), aes_plaintext.data());
+    aes.decryptBlock(aes_roundtrip.data(), aes_ciphertext.data());
+    if (aes_ciphertext != expected_aes_ciphertext ||
+        aes_roundtrip != aes_plaintext) {
+        failures.push_back("FIPS-197 AES-128 KAT changed");
+    }
+
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES>
+        public_secret = {
+            0x8BU, 0x33U, 0x87U, 0xE9U, 0xC5U, 0xCDU, 0xEAU, 0x6AU,
+            0xC9U, 0xE5U, 0xEDU, 0xBAU, 0xA1U, 0x15U, 0xCDU, 0x72U,
+            0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+            0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_GROUP_SECRET_BYTES> full_secret{};
+    for (std::size_t index = 0U; index < full_secret.size(); ++index) {
+        full_secret[index] = static_cast<uint8_t>(index);
+    }
+    uint8_t public_hash = 0U;
+    uint8_t full_hash = 0U;
+    if (!d1l_meshcore_oracle_group_channel_hash(public_secret.data(),
+                                                 &public_hash) ||
+        public_hash != 0x11U ||
+        !d1l_meshcore_oracle_group_channel_hash(full_secret.data(),
+                                                 &full_hash) ||
+        full_hash != 0x63U) {
+        failures.push_back("BaseChatMesh group channel hash vectors changed");
+    }
+
+    const std::array<uint8_t, 6U> short_group_text = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 'a'};
+    const std::array<uint8_t, 18U> group_text = {
+        0x78U, 0x56U, 0x34U, 0x12U, 0x00U, 'o', 'r', 'a', 'c',
+        'l',   'e',   ':',   ' ',   'h',   'e', 'l', 'l', 'o'};
+    const std::array<uint8_t, 7U> group_data = {
+        0xEFU, 0xBEU, 0x04U, 0xDEU, 0xADU, 0xBEU, 0xEFU};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES>
+        maximum_group_data{};
+    maximum_group_data[0] = 0x12U;
+    maximum_group_data[1] = 0x34U;
+    maximum_group_data[2] = 165U;
+    for (std::size_t index = 3U; index < maximum_group_data.size(); ++index) {
+        maximum_group_data[index] = static_cast<uint8_t>(index - 3U);
+    }
+    const std::array<uint8_t, 19U> expected_short_group_payload = {
+        0x11U, 0x9EU, 0x58U, 0xABU, 0xE5U, 0x62U, 0xD2U,
+        0x9FU, 0x30U, 0xB8U, 0xCAU, 0x23U, 0x5EU, 0xDEU,
+        0x0BU, 0xEAU, 0xF6U, 0xA1U, 0x57U};
+    const std::array<uint8_t, 35U> expected_group_text_payload = {
+        0x11U, 0xEFU, 0x1DU, 0x99U, 0x14U, 0x9EU, 0x82U,
+        0xF4U, 0x7CU, 0x34U, 0x91U, 0x97U, 0x0AU, 0x25U,
+        0xA5U, 0x37U, 0x3EU, 0xC5U, 0x1DU, 0x41U, 0xC9U,
+        0x77U, 0x27U, 0x66U, 0x59U, 0xDDU, 0xB6U, 0xECU,
+        0x63U, 0xA0U, 0x24U, 0x53U, 0xECU, 0xEEU, 0xB1U};
+    const std::array<uint8_t, 19U> expected_group_data_payload = {
+        0x63U, 0x44U, 0x2EU, 0xA7U, 0xEFU, 0xA0U, 0xB0U,
+        0xFEU, 0x3FU, 0x9BU, 0x5AU, 0x57U, 0x74U, 0xDFU,
+        0x21U, 0x19U, 0xC8U, 0x6BU, 0x7EU};
+    const std::array<uint8_t, 32U> expected_max_group_payload_sha256 = {
+        0x30U, 0xB6U, 0x8EU, 0xB0U, 0xFDU, 0x57U, 0xADU, 0x98U,
+        0x29U, 0x35U, 0x73U, 0xB8U, 0xCCU, 0xCDU, 0x48U, 0x7BU,
+        0xD9U, 0x3CU, 0xB3U, 0x2CU, 0xD8U, 0xE2U, 0x00U, 0xA6U,
+        0x4EU, 0x72U, 0x8CU, 0x91U, 0x21U, 0xB5U, 0x3EU, 0xEAU};
+
+    auto verify_group_roundtrip =
+        [&failures](const char *name, uint8_t payload_type,
+                    const uint8_t *secret, uint8_t channel_hash,
+                    const uint8_t *plaintext, std::size_t plaintext_len,
+                    const uint8_t *expected_payload,
+                    std::size_t expected_payload_len,
+                    const std::array<uint8_t, 32U> *expected_payload_sha) {
+            d1l_meshcore_oracle_packet_t packet{};
+            if (!d1l_meshcore_oracle_create_group_packet(
+                    payload_type, channel_hash, secret, plaintext,
+                    plaintext_len, &packet) ||
+                packet.header !=
+                    static_cast<uint8_t>(payload_type << PH_TYPE_SHIFT) ||
+                packet.payload_len != expected_payload_len ||
+                (expected_payload != nullptr &&
+                 std::memcmp(packet.payload, expected_payload,
+                             expected_payload_len) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " group create vector changed");
+                return;
+            }
+            if (expected_payload_sha != nullptr) {
+                std::array<uint8_t, 32U> digest{};
+                SHA256 payload_sha;
+                payload_sha.update(packet.payload, packet.payload_len);
+                payload_sha.finalize(digest.data(), digest.size());
+                if (digest != *expected_payload_sha) {
+                    failures.push_back(std::string(name) +
+                                       " group payload digest changed");
+                    return;
+                }
+            }
+            uint8_t priority = 0U;
+            const bool routed = payload_type == PAYLOAD_TYPE_GRP_TXT
+                                    ? d1l_meshcore_oracle_prepare_flood(
+                                          &packet, 1U, 0U, nullptr, &priority)
+                                    : d1l_meshcore_oracle_prepare_direct(
+                                          &packet, nullptr, 0U, &priority);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!routed ||
+                !d1l_meshcore_oracle_packet_encode(
+                    &packet, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded)) {
+                failures.push_back(std::string(name) +
+                                   " group wire roundtrip failed");
+                return;
+            }
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES +
+                           D1L_MESHCORE_ORACLE_GROUP_BLOCK_BYTES>
+                parsed{};
+            size_t parsed_len = 0U;
+            if (!d1l_meshcore_oracle_parse_group_packet(
+                    &decoded, channel_hash, secret, parsed.data(),
+                    parsed.size(), &parsed_len) ||
+                parsed_len < plaintext_len ||
+                std::memcmp(parsed.data(), plaintext, plaintext_len) != 0 ||
+                std::any_of(parsed.begin() + plaintext_len,
+                            parsed.begin() + parsed_len,
+                            [](uint8_t value) { return value != 0U; })) {
+                failures.push_back(std::string(name) +
+                                   " group parse vector changed");
+            }
+        };
+    verify_group_roundtrip(
+        "short text", PAYLOAD_TYPE_GRP_TXT, public_secret.data(), public_hash,
+        short_group_text.data(), short_group_text.size(),
+        expected_short_group_payload.data(), expected_short_group_payload.size(),
+        nullptr);
+    verify_group_roundtrip(
+        "two-block text", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        public_hash, group_text.data(), group_text.size(),
+        expected_group_text_payload.data(), expected_group_text_payload.size(),
+        nullptr);
+    verify_group_roundtrip(
+        "group data", PAYLOAD_TYPE_GRP_DATA, full_secret.data(), full_hash,
+        group_data.data(), group_data.size(), expected_group_data_payload.data(),
+        expected_group_data_payload.size(), nullptr);
+    verify_group_roundtrip(
+        "maximum group data", PAYLOAD_TYPE_GRP_DATA, full_secret.data(),
+        full_hash, maximum_group_data.data(), maximum_group_data.size(), nullptr,
+        179U, &expected_max_group_payload_sha256);
+
+    d1l_meshcore_oracle_packet_t valid_group{};
+    if (!d1l_meshcore_oracle_create_group_packet(
+            PAYLOAD_TYPE_GRP_TXT, public_hash, public_secret.data(),
+            group_text.data(), group_text.size(), &valid_group)) {
+        failures.push_back("group negative-vector fixture creation failed");
+    }
+    auto expect_group_create_reject =
+        [&failures, &valid_group](const char *name, uint8_t payload_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *plaintext,
+                                  std::size_t plaintext_len,
+                                  d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_group;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_group_packet(
+                    payload_type, 0x11U, secret, plaintext, plaintext_len,
+                    output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " group create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_group{};
+    expect_group_create_reject(
+        "unsupported type", PAYLOAD_TYPE_ACK, public_secret.data(),
+        group_text.data(), group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "null secret", PAYLOAD_TYPE_GRP_TXT, nullptr, group_text.data(),
+        group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "null plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(), nullptr,
+        group_text.size(), &rejected_group);
+    expect_group_create_reject(
+        "empty plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        group_text.data(), 0U, &rejected_group);
+    expect_group_create_reject(
+        "oversized plaintext", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        maximum_group_data.data(),
+        D1L_MESHCORE_ORACLE_MAX_GROUP_PLAINTEXT_BYTES + 1U,
+        &rejected_group);
+    expect_group_create_reject(
+        "null output", PAYLOAD_TYPE_GRP_TXT, public_secret.data(),
+        group_text.data(), group_text.size(), nullptr);
+    if (d1l_meshcore_oracle_group_channel_hash(nullptr, &public_hash) ||
+        d1l_meshcore_oracle_group_channel_hash(public_secret.data(), nullptr)) {
+        failures.push_back("invalid group channel hash input accepted");
+    }
+
+    auto expect_group_parse_reject =
+        [&failures, &public_secret, public_hash](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t hash, const uint8_t *secret, uint8_t *output,
+            std::size_t capacity, size_t *output_len) {
+            std::array<uint8_t, 192U> sentinel{};
+            sentinel.fill(0xC7U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), capacity);
+            }
+            if (output_len != nullptr) {
+                *output_len = 0xCAFEU;
+            }
+            if (d1l_meshcore_oracle_parse_group_packet(
+                    packet, hash, secret, output, capacity, output_len) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), capacity) != 0) ||
+                (output_len != nullptr && *output_len != 0xCAFEU)) {
+                failures.push_back(std::string(name) +
+                                   " group parse reject changed output");
+            }
+            (void)public_secret;
+            (void)public_hash;
+        };
+    std::array<uint8_t, 192U> rejected_plaintext{};
+    size_t rejected_plaintext_len = 0U;
+    expect_group_parse_reject(
+        "null packet", nullptr, public_hash, public_secret.data(),
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null parse secret", &valid_group, public_hash, nullptr,
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null plaintext output", &valid_group, public_hash,
+        public_secret.data(), nullptr, rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "null plaintext length", &valid_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), nullptr);
+    d1l_meshcore_oracle_packet_t malformed_group = valid_group;
+    malformed_group.header |= 0x40U;
+    expect_group_parse_reject(
+        "future payload version", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.header = static_cast<uint8_t>(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+    expect_group_parse_reject(
+        "non-group payload type", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload_len = 18U;
+    expect_group_parse_reject(
+        "truncated encrypted payload", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload_len -= 1U;
+    expect_group_parse_reject(
+        "non-block encrypted payload", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "wrong channel hash", &valid_group, static_cast<uint8_t>(public_hash ^ 1U),
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "wrong channel secret", &valid_group, public_hash, full_secret.data(),
+        rejected_plaintext.data(), rejected_plaintext.size(),
+        &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload[1] ^= 0x01U;
+    expect_group_parse_reject(
+        "tampered group MAC", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    malformed_group = valid_group;
+    malformed_group.payload[3] ^= 0x01U;
+    expect_group_parse_reject(
+        "tampered group ciphertext", &malformed_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(),
+        rejected_plaintext.size(), &rejected_plaintext_len);
+    expect_group_parse_reject(
+        "undersized plaintext output", &valid_group, public_hash,
+        public_secret.data(), rejected_plaintext.data(), 15U,
+        &rejected_plaintext_len);
+
+    struct LoginRequestVector {
+        const char *name;
+        uint32_t timestamp;
+        uint8_t is_room;
+        uint32_t sync_since;
+        std::vector<uint8_t> password;
+    };
+    constexpr uint8_t login_destination_hash = 0xA1U;
+    const std::array<LoginRequestVector, kLoginRequestRoundtripVectors>
+        login_vectors = {{
+            {"non-room empty", 0x00000000U, 0U, 0U, {}},
+            {"non-room exact block", 0x12345678U, 0U, 0U,
+             {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'}},
+            {"non-room maximum", 0xFFFFFFFFU, 0U, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'}},
+            {"room empty", 0x01020304U, 1U, 0x05060708U, {}},
+            {"room exact block", 0x89ABCDEFU, 1U, 0x10203040U,
+             {'r', 'o', 'o', 'm', 'p', 'a', 's', 's'}},
+            {"room maximum", 0x0BADF00DU, 1U, 0x55667788U,
+             {'g', 'u', 'e', 's', 't', '-', 'p', 'a', 's', 's', 'w', 'o',
+              'r', 'd', '!'}},
+        }};
+    const std::array<uint8_t, 51U> expected_login_nonroom_exact_payload = {
+        0xA1U, 0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U, 0x67U,
+        0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU, 0x1DU, 0xDCU,
+        0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U, 0x4AU, 0x2EU, 0x26U,
+        0x78U, 0x14U, 0xE2U, 0xBCU, 0x35U, 0x32U, 0x5AU, 0xC2U, 0xF1U,
+        0x79U, 0xDAU, 0xCAU, 0x89U, 0x84U, 0xAFU};
+    const std::array<uint8_t, 67U> expected_login_room_max_payload = {
+        0xA1U, 0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U, 0x67U,
+        0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU, 0x1DU, 0xDCU,
+        0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U, 0x65U, 0xC8U, 0x1FU,
+        0xF0U, 0xD3U, 0xDDU, 0xCAU, 0x08U, 0xEBU, 0x2DU, 0xA2U, 0x4AU,
+        0x30U, 0xBFU, 0x63U, 0xE5U, 0xFAU, 0x92U, 0xA7U, 0x3BU, 0x4DU,
+        0x17U, 0x79U, 0x1AU, 0x8BU, 0x8BU, 0x21U, 0x71U, 0xE5U, 0x98U,
+        0xB7U, 0x60U, 0xC0U, 0xECU};
+    const std::array<uint8_t, 32U> expected_login_matrix_sha256 = {
+        0xDEU, 0x98U, 0x16U, 0x70U, 0xDEU, 0xAEU, 0x0CU, 0x0BU,
+        0x17U, 0xA3U, 0xB4U, 0x7BU, 0x72U, 0xBDU, 0xC9U, 0xBAU,
+        0x45U, 0x5BU, 0x49U, 0xD6U, 0x97U, 0xA1U, 0x93U, 0x91U,
+        0x7DU, 0x7DU, 0xD5U, 0xEAU, 0x2DU, 0x83U, 0x64U, 0x14U};
+    constexpr std::array<uint8_t, 2U> login_direct_path = {0x21U, 0x43U};
+    std::array<uint8_t, 1U> empty_login_password{};
+    SHA256 login_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_login{};
+    for (std::size_t index = 0U; index < login_vectors.size(); ++index) {
+        const LoginRequestVector &vector = login_vectors[index];
+        const uint8_t *password = vector.password.empty()
+            ? empty_login_password.data()
+            : vector.password.data();
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_login_request_packet(
+                login_destination_hash, kSignedAdvertPublicKey.data(),
+                full_secret.data(), vector.timestamp, vector.is_room,
+                vector.sync_since, password, vector.password.size(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_ANON_REQ << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U ||
+            (packet.payload_len != 51U && packet.payload_len != 67U)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request creation changed");
+            continue;
+        }
+        if ((index == 1U &&
+             (packet.payload_len != expected_login_nonroom_exact_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_login_nonroom_exact_payload.data(),
+                          expected_login_nonroom_exact_payload.size()) != 0)) ||
+            (index == 5U &&
+             (packet.payload_len != expected_login_room_max_payload.size() ||
+              std::memcmp(packet.payload, expected_login_room_max_payload.data(),
+                          expected_login_room_max_payload.size()) != 0))) {
+            failures.push_back(std::string(vector.name) +
+                               " login request golden payload changed");
+        }
+        login_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 1U) {
+            valid_login = packet;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, login_direct_path.data(), 0x02U, &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request wire roundtrip changed");
+            continue;
+        }
+        uint32_t parsed_timestamp = 0U;
+        uint32_t parsed_sync_since = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+            parsed_password{};
+        size_t parsed_password_len = 0U;
+        if (!d1l_meshcore_oracle_parse_login_request_packet(
+                &decoded, login_destination_hash,
+                kSignedAdvertPublicKey.data(), full_secret.data(),
+                vector.is_room, &parsed_timestamp, &parsed_sync_since,
+                parsed_password.data(), parsed_password.size(),
+                &parsed_password_len) ||
+            parsed_timestamp != vector.timestamp ||
+            parsed_sync_since != vector.sync_since ||
+            parsed_password_len != vector.password.size() ||
+            (!vector.password.empty() &&
+             std::memcmp(parsed_password.data(), vector.password.data(),
+                         vector.password.size()) != 0)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request authenticated parse changed");
+        }
+    }
+    std::array<uint8_t, 32U> login_matrix_digest{};
+    login_matrix_sha.finalize(login_matrix_digest.data(),
+                              login_matrix_digest.size());
+    if (login_matrix_digest != expected_login_matrix_sha256) {
+        failures.push_back("anonymous login request matrix digest changed");
+    }
+
+    auto expect_login_create_reject =
+        [&failures, &full_secret, &empty_login_password](
+            const char *name, const uint8_t *sender_public_key,
+            const uint8_t *secret, uint8_t is_room, uint32_t sync_since,
+            const uint8_t *password, size_t password_len, bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_login_request_packet(
+                    login_destination_hash, sender_public_key, secret,
+                    0x12345678U, is_room, sync_since, password, password_len,
+                    null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " login request creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " login request creation mutated output");
+            }
+            (void)full_secret;
+            (void)empty_login_password;
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES + 1U>
+        oversized_login_password{};
+    oversized_login_password.fill('x');
+    constexpr std::array<uint8_t, 3U> embedded_nul_password = {'a', 0U, 'b'};
+    expect_login_create_reject(
+        "null login sender", nullptr, full_secret.data(), 0U, 0U,
+        empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login secret", kSignedAdvertPublicKey.data(), nullptr, 0U, 0U,
+        empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, nullptr, 0U, false);
+    expect_login_create_reject(
+        "embedded NUL login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, embedded_nul_password.data(),
+        embedded_nul_password.size(), false);
+    expect_login_create_reject(
+        "oversized login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, oversized_login_password.data(),
+        oversized_login_password.size(), false);
+    expect_login_create_reject(
+        "invalid login room flag", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 2U, 0U, empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "non-room login sync", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 1U, empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login output", kSignedAdvertPublicKey.data(), full_secret.data(),
+        0U, 0U, empty_login_password.data(), 0U, true);
+
+    auto expect_login_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, const uint8_t *sender_public_key,
+                    const uint8_t *secret, uint8_t is_room,
+                    uint32_t *timestamp, uint32_t *sync_since,
+                    uint8_t *password, size_t password_capacity,
+                    size_t *password_len) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+                password_sentinel{};
+            password_sentinel.fill(0xD7U);
+            if (timestamp != nullptr) {
+                *timestamp = 0xAAAAAAAAU;
+            }
+            if (sync_since != nullptr) {
+                *sync_since = 0xBBBBBBBBU;
+            }
+            if (password != nullptr) {
+                std::memcpy(password, password_sentinel.data(),
+                            password_sentinel.size());
+            }
+            if (password_len != nullptr) {
+                *password_len = 0xBEEFU;
+            }
+            if (d1l_meshcore_oracle_parse_login_request_packet(
+                    packet, destination_hash, sender_public_key, secret, is_room,
+                    timestamp, sync_since, password, password_capacity,
+                    password_len) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (sync_since != nullptr && *sync_since != 0xBBBBBBBBU) ||
+                (password != nullptr &&
+                 std::memcmp(password, password_sentinel.data(),
+                             password_sentinel.size()) != 0) ||
+                (password_len != nullptr && *password_len != 0xBEEFU)) {
+                failures.push_back(std::string(name) +
+                                   " login request parse changed output");
+            }
+        };
+    uint32_t rejected_login_timestamp = 0U;
+    uint32_t rejected_login_sync_since = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+        rejected_login_password{};
+    size_t rejected_login_password_len = 0U;
+    expect_login_parse_reject(
+        "null login packet", nullptr, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null expected login sender", &valid_login, login_destination_hash,
+        nullptr, full_secret.data(), 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login parse secret", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), nullptr, 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "invalid login parse room flag", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 2U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login timestamp output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U, nullptr,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login sync output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, nullptr, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login password output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since, nullptr,
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login password length", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(), nullptr);
+    expect_login_parse_reject(
+        "undersized login password output", &valid_login,
+        login_destination_hash, kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(), 11U,
+        &rejected_login_password_len);
+
+    auto make_raw_login_packet =
+        [&full_secret](const uint8_t *plaintext, size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_ANON_REQ << PH_TYPE_SHIFT);
+            packet.payload[0] = login_destination_hash;
+            std::memcpy(&packet.payload[1], kSignedAdvertPublicKey.data(),
+                        kSignedAdvertPublicKey.size());
+            constexpr size_t outer_len =
+                1U + D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[outer_len], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(
+                outer_len + static_cast<size_t>(encrypted_len));
+            return packet;
+        };
+    auto expect_standard_login_parse_reject =
+        [&](const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t is_room = 0U) {
+            expect_login_parse_reject(
+                name, packet, login_destination_hash,
+                kSignedAdvertPublicKey.data(), full_secret.data(), is_room,
+                &rejected_login_timestamp, &rejected_login_sync_since,
+                rejected_login_password.data(), rejected_login_password.size(),
+                &rejected_login_password_len);
+        };
+    d1l_meshcore_oracle_packet_t malformed_login = valid_login;
+    malformed_login.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+    expect_standard_login_parse_reject("wrong login payload type",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_login_parse_reject("future login payload version",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload_len = 50U;
+    expect_standard_login_parse_reject("short login payload",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[malformed_login.payload_len++] = 0U;
+    expect_standard_login_parse_reject("non-block login ciphertext",
+                                       &malformed_login);
+    std::array<uint8_t, 33U> three_block_login_plaintext{};
+    malformed_login = make_raw_login_packet(three_block_login_plaintext.data(),
+                                             three_block_login_plaintext.size());
+    expect_standard_login_parse_reject("three-block login ciphertext",
+                                       &malformed_login);
+    expect_login_parse_reject(
+        "wrong expected login destination", &valid_login,
+        static_cast<uint8_t>(login_destination_hash ^ 1U),
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    auto wrong_login_sender = kSignedAdvertPublicKey;
+    wrong_login_sender[0] ^= 0x01U;
+    expect_login_parse_reject(
+        "wrong expected login sender", &valid_login, login_destination_hash,
+        wrong_login_sender.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "wrong login secret", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), public_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    malformed_login = valid_login;
+    malformed_login.payload[0] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login destination",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[1] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered outer login sender",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[33] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login MAC",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[35] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login ciphertext",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.path_len = 0xFFU;
+    expect_standard_login_parse_reject("invalid login path length",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload_len = 0U;
+    expect_standard_login_parse_reject("empty login payload",
+                                       &malformed_login);
+    std::array<uint8_t, 32U> redundant_login_plaintext{};
+    redundant_login_plaintext[0] = 0x78U;
+    redundant_login_plaintext[1] = 0x56U;
+    redundant_login_plaintext[2] = 0x34U;
+    redundant_login_plaintext[3] = 0x12U;
+    malformed_login = make_raw_login_packet(redundant_login_plaintext.data(),
+                                             redundant_login_plaintext.size());
+    expect_standard_login_parse_reject("redundant login zero block",
+                                       &malformed_login);
+    std::array<uint8_t, 16U> noncanonical_login_plaintext{};
+    noncanonical_login_plaintext[4] = 'a';
+    noncanonical_login_plaintext[6] = 'b';
+    malformed_login = make_raw_login_packet(
+        noncanonical_login_plaintext.data(),
+        noncanonical_login_plaintext.size());
+    expect_standard_login_parse_reject("nonzero login padding",
+                                       &malformed_login);
+    std::array<uint8_t, 20U> overlong_login_plaintext{};
+    overlong_login_plaintext.fill('x');
+    overlong_login_plaintext[0] = 0x78U;
+    overlong_login_plaintext[1] = 0x56U;
+    overlong_login_plaintext[2] = 0x34U;
+    overlong_login_plaintext[3] = 0x12U;
+    malformed_login = make_raw_login_packet(overlong_login_plaintext.data(),
+                                             overlong_login_plaintext.size());
+    expect_standard_login_parse_reject("overlong authenticated login password",
+                                       &malformed_login);
+    std::array<uint8_t, 32U> redundant_room_login_plaintext{};
+    redundant_room_login_plaintext[0] = 0x04U;
+    redundant_room_login_plaintext[1] = 0x03U;
+    redundant_room_login_plaintext[2] = 0x02U;
+    redundant_room_login_plaintext[3] = 0x01U;
+    redundant_room_login_plaintext[4] = 0x08U;
+    redundant_room_login_plaintext[5] = 0x07U;
+    redundant_room_login_plaintext[6] = 0x06U;
+    redundant_room_login_plaintext[7] = 0x05U;
+    malformed_login = make_raw_login_packet(
+        redundant_room_login_plaintext.data(),
+        redundant_room_login_plaintext.size());
+    expect_standard_login_parse_reject("redundant room login zero block",
+                                       &malformed_login, 1U);
+
+    struct RequestResponseVector {
+        const char *name;
+        uint8_t payload_type;
+        std::vector<uint8_t> plaintext;
+    };
+    std::vector<uint8_t> maximum_response_plaintext(
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES);
+    for (std::size_t index = 0U; index < maximum_response_plaintext.size();
+         ++index) {
+        maximum_response_plaintext[index] =
+            static_cast<uint8_t>(index * 7U + 3U);
+    }
+    const std::array<RequestResponseVector, kRequestResponseRoundtripVectors>
+        request_response_vectors = {{
+            {"one-byte request", PAYLOAD_TYPE_REQ, {0x00U}},
+            {"15-byte request", PAYLOAD_TYPE_REQ,
+             {0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U,
+              0x09U, 0x0AU, 0x0BU, 0x0CU, 0x0DU, 0x0EU, 0x0FU}},
+            {"exact-block request", PAYLOAD_TYPE_REQ,
+             {0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U,
+              0x18U, 0x19U, 0x1AU, 0x1BU, 0x1CU, 0x1DU, 0x1EU, 0x1FU}},
+            {"two-block request", PAYLOAD_TYPE_REQ,
+             {0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U,
+              0x28U, 0x29U, 0x2AU, 0x2BU, 0x2CU, 0x2DU, 0x2EU, 0x2FU,
+              0x30U}},
+            {"exact-block response", PAYLOAD_TYPE_RESPONSE,
+             {0x80U, 0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+              0x88U, 0x89U, 0x8AU, 0x8BU, 0x8CU, 0x8DU, 0x8EU, 0x8FU}},
+            {"maximum response", PAYLOAD_TYPE_RESPONSE,
+             maximum_response_plaintext},
+        }};
+    const std::array<uint8_t, 36U> expected_two_block_request_payload = {
+        0xA1U, 0xB2U, 0xCAU, 0xFCU, 0x5BU, 0xE8U, 0x7EU, 0x2EU, 0x5BU,
+        0x44U, 0x7CU, 0x94U, 0x4BU, 0x21U, 0xC9U, 0xAFU, 0x77U, 0x56U,
+        0xC0U, 0xD8U, 0x01U, 0x7AU, 0x8BU, 0xD9U, 0xECU, 0xD1U, 0x02U,
+        0xBAU, 0x4BU, 0xB7U, 0x94U, 0x6DU, 0x3DU, 0x87U, 0x07U, 0xE0U};
+    const std::array<uint8_t, 20U> expected_exact_block_response_payload = {
+        0xA1U, 0xB2U, 0xABU, 0xB6U, 0xACU, 0x26U, 0x59U, 0x1CU, 0x0FU,
+        0x8BU, 0xD8U, 0x0EU, 0xE7U, 0xC7U, 0xE3U, 0xA2U, 0xD1U, 0x4EU,
+        0x2BU, 0x22U};
+    const std::array<uint8_t, 32U> expected_maximum_response_sha256 = {
+        0xE0U, 0xE6U, 0x17U, 0xB0U, 0xC2U, 0x60U, 0x1CU, 0x15U,
+        0xAFU, 0x7BU, 0x56U, 0x05U, 0x6DU, 0x14U, 0x7CU, 0x47U,
+        0xCBU, 0x4FU, 0xD6U, 0x86U, 0xE1U, 0x93U, 0x8AU, 0x37U,
+        0x5AU, 0x8BU, 0x6AU, 0xC8U, 0x1EU, 0x17U, 0x47U, 0xA5U};
+    const std::array<uint8_t, 32U> expected_request_response_matrix_sha256 = {
+        0x77U, 0x22U, 0x70U, 0x76U, 0x61U, 0x3AU, 0xD0U, 0xFFU,
+        0xEAU, 0x7BU, 0x58U, 0xABU, 0x90U, 0x3FU, 0x06U, 0xD8U,
+        0x16U, 0xA0U, 0x5AU, 0x37U, 0xF1U, 0xE5U, 0x0EU, 0x9BU,
+        0x85U, 0x98U, 0x22U, 0x2CU, 0xBEU, 0xF5U, 0xC2U, 0x9CU};
+    constexpr uint8_t request_response_destination_hash = 0xA1U;
+    constexpr uint8_t request_response_source_hash = 0xB2U;
+    constexpr std::array<uint8_t, 3U> request_response_direct_path = {
+        0x12U, 0x34U, 0x56U};
+    SHA256 request_response_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_request_response{};
+    for (std::size_t index = 0U; index < request_response_vectors.size();
+         ++index) {
+        const RequestResponseVector &vector = request_response_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const std::size_t expected_ciphertext_len =
+            ((vector.plaintext.size() + CIPHER_BLOCK_SIZE - 1U) /
+             CIPHER_BLOCK_SIZE) *
+            CIPHER_BLOCK_SIZE;
+        if (!d1l_meshcore_oracle_create_request_response_packet(
+                vector.payload_type, request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                vector.plaintext.data(), vector.plaintext.size(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(vector.payload_type << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U ||
+            packet.payload_len != 2U + CIPHER_MAC_SIZE + expected_ciphertext_len) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response creation changed");
+            continue;
+        }
+        if ((index == 3U &&
+             (packet.payload_len != expected_two_block_request_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_two_block_request_payload.data(),
+                          expected_two_block_request_payload.size()) != 0)) ||
+            (index == 4U &&
+             (packet.payload_len !=
+                  expected_exact_block_response_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_exact_block_response_payload.data(),
+                          expected_exact_block_response_payload.size()) != 0))) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response golden payload changed");
+        }
+        if (index == 5U) {
+            std::array<uint8_t, 32U> maximum_response_digest{};
+            mesh::Utils::sha256(maximum_response_digest.data(),
+                                maximum_response_digest.size(), packet.payload,
+                                packet.payload_len);
+            if (maximum_response_digest != expected_maximum_response_sha256) {
+                failures.push_back("maximum response payload digest changed");
+            }
+        }
+        request_response_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 3U) {
+            valid_request_response = packet;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, request_response_direct_path.data(), 0x03U,
+                  &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+            parsed_plaintext{};
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded) ||
+            !d1l_meshcore_oracle_parse_request_response_packet(
+                &decoded, vector.payload_type,
+                request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                vector.plaintext.size(), parsed_plaintext.data(),
+                parsed_plaintext.size()) ||
+            std::memcmp(parsed_plaintext.data(), vector.plaintext.data(),
+                        vector.plaintext.size()) != 0) {
+            failures.push_back(std::string(vector.name) +
+                               " request/response authenticated wire roundtrip changed");
+        }
+    }
+    std::array<uint8_t, 32U> request_response_matrix_digest{};
+    request_response_matrix_sha.finalize(request_response_matrix_digest.data(),
+                                         request_response_matrix_digest.size());
+    if (request_response_matrix_digest !=
+        expected_request_response_matrix_sha256) {
+        failures.push_back("request/response packet matrix digest changed");
+    }
+
+    auto expect_request_response_create_reject =
+        [&failures, &full_secret](const char *name, uint8_t payload_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *plaintext,
+                                  std::size_t plaintext_len,
+                                  bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_request_response_packet(
+                    payload_type, request_response_destination_hash,
+                    request_response_source_hash, secret, plaintext,
+                    plaintext_len, null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " request/response creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " request/response creation mutated output");
+            }
+            (void)full_secret;
+        };
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U>
+        oversized_request_response_plaintext{};
+    constexpr std::array<uint8_t, 1U> one_byte_request = {0x42U};
+    expect_request_response_create_reject(
+        "unsupported request/response type", PAYLOAD_TYPE_TXT_MSG,
+        full_secret.data(), one_byte_request.data(), one_byte_request.size(),
+        false);
+    expect_request_response_create_reject(
+        "null request/response secret", PAYLOAD_TYPE_REQ, nullptr,
+        one_byte_request.data(), one_byte_request.size(), false);
+    expect_request_response_create_reject(
+        "null request/response plaintext", PAYLOAD_TYPE_REQ,
+        full_secret.data(), nullptr, one_byte_request.size(), false);
+    expect_request_response_create_reject(
+        "empty request/response plaintext", PAYLOAD_TYPE_REQ,
+        full_secret.data(), one_byte_request.data(), 0U, false);
+    expect_request_response_create_reject(
+        "oversized request/response plaintext", PAYLOAD_TYPE_RESPONSE,
+        full_secret.data(), oversized_request_response_plaintext.data(),
+        oversized_request_response_plaintext.size(), false);
+    expect_request_response_create_reject(
+        "null request/response output", PAYLOAD_TYPE_REQ, full_secret.data(),
+        one_byte_request.data(), one_byte_request.size(), true);
+
+    auto expect_request_response_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t payload_type, uint8_t destination_hash,
+                    uint8_t source_hash, const uint8_t *secret,
+                    std::size_t expected_plaintext_len, uint8_t *plaintext,
+                    std::size_t plaintext_capacity) {
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+                sentinel{};
+            sentinel.fill(0xD7U);
+            if (plaintext != nullptr) {
+                std::memcpy(plaintext, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_parse_request_response_packet(
+                    packet, payload_type, destination_hash, source_hash, secret,
+                    expected_plaintext_len, plaintext, plaintext_capacity) ||
+                (plaintext != nullptr &&
+                 std::memcmp(plaintext, sentinel.data(), sentinel.size()) !=
+                     0)) {
+                failures.push_back(std::string(name) +
+                                   " request/response parse changed output");
+            }
+        };
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES>
+        rejected_request_response_plaintext{};
+    const std::size_t valid_request_response_len = 17U;
+    auto expect_standard_request_response_parse_reject =
+        [&](const char *name,
+            const d1l_meshcore_oracle_packet_t *packet = nullptr) {
+            expect_request_response_parse_reject(
+                name, packet == nullptr ? &valid_request_response : packet,
+                PAYLOAD_TYPE_REQ, request_response_destination_hash,
+                request_response_source_hash, full_secret.data(),
+                valid_request_response_len,
+                rejected_request_response_plaintext.data(),
+                rejected_request_response_plaintext.size());
+        };
+    expect_request_response_parse_reject(
+        "null request/response packet", nullptr, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "unsupported expected request/response type", &valid_request_response,
+        PAYLOAD_TYPE_TXT_MSG, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "null request/response parse secret", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, nullptr, valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "zero expected request/response length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(), 0U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "oversized expected request/response length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "null request/response plaintext output", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, nullptr,
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "undersized request/response plaintext output", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        valid_request_response_len - 1U);
+    expect_request_response_parse_reject(
+        "wrong expected request/response type", &valid_request_response,
+        PAYLOAD_TYPE_RESPONSE, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    d1l_meshcore_oracle_packet_t malformed_request_response =
+        valid_request_response;
+    malformed_request_response.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_request_response_parse_reject(
+        "future request/response version", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT);
+    expect_standard_request_response_parse_reject(
+        "unsupported packet request/response type",
+        &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len = 3U;
+    expect_standard_request_response_parse_reject(
+        "truncated request/response payload", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len -= 1U;
+    expect_standard_request_response_parse_reject(
+        "non-block request/response ciphertext", &malformed_request_response);
+    expect_request_response_parse_reject(
+        "wrong expected request/response destination", &valid_request_response,
+        PAYLOAD_TYPE_REQ,
+        static_cast<uint8_t>(request_response_destination_hash ^ 1U),
+        request_response_source_hash, full_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "wrong expected request/response source", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        static_cast<uint8_t>(request_response_source_hash ^ 1U),
+        full_secret.data(), valid_request_response_len,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "wrong request/response secret", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, public_secret.data(),
+        valid_request_response_len, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[0] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered outer request/response destination",
+        &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[1] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered outer request/response source", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[2] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered request/response MAC", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload[4] ^= 0x01U;
+    expect_standard_request_response_parse_reject(
+        "tampered request/response ciphertext", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.path_len = 0xFFU;
+    expect_standard_request_response_parse_reject(
+        "invalid request/response path length", &malformed_request_response);
+    malformed_request_response = valid_request_response;
+    malformed_request_response.payload_len = 0U;
+    expect_standard_request_response_parse_reject(
+        "empty request/response payload", &malformed_request_response);
+    expect_request_response_parse_reject(
+        "wrong request/response logical block length", &valid_request_response,
+        PAYLOAD_TYPE_REQ, request_response_destination_hash,
+        request_response_source_hash, full_secret.data(), 16U,
+        rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    auto make_raw_request_response_packet =
+        [&full_secret](const uint8_t *plaintext, std::size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+            packet.payload[0] = request_response_destination_hash;
+            packet.payload[1] = request_response_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    std::array<uint8_t, 16U> noncanonical_request_response_plaintext{};
+    noncanonical_request_response_plaintext[0] = 0x42U;
+    noncanonical_request_response_plaintext[1] = 0x24U;
+    malformed_request_response = make_raw_request_response_packet(
+        noncanonical_request_response_plaintext.data(),
+        noncanonical_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "authenticated nonzero request/response padding",
+        &malformed_request_response, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), 1U, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+    std::array<uint8_t, 17U> redundant_request_response_plaintext{};
+    redundant_request_response_plaintext[0] = 0x42U;
+    malformed_request_response = make_raw_request_response_packet(
+        redundant_request_response_plaintext.data(),
+        redundant_request_response_plaintext.size());
+    expect_request_response_parse_reject(
+        "authenticated redundant request/response block",
+        &malformed_request_response, PAYLOAD_TYPE_REQ,
+        request_response_destination_hash, request_response_source_hash,
+        full_secret.data(), 1U, rejected_request_response_plaintext.data(),
+        rejected_request_response_plaintext.size());
+
+    struct LoginResponseVector {
+        const char *name;
+        uint8_t server_type;
+        uint32_t timestamp;
+        uint8_t permissions;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES> uniqueness;
+    };
+    constexpr uint8_t login_response_destination_hash = 0x03U;
+    constexpr uint8_t login_response_source_hash = 0xA1U;
+    const std::array<LoginResponseVector, kLoginResponseRoundtripVectors>
+        login_response_vectors = {{
+            {"repeater guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x00000000U, 0x00U, {0x00U, 0x00U, 0x00U, 0x00U}},
+            {"repeater read-only", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x11111111U, 0x01U, {0x01U, 0x02U, 0x03U, 0x04U}},
+            {"repeater read-write", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x22222222U, 0x02U, {0x05U, 0x06U, 0x07U, 0x08U}},
+            {"repeater admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0x12345678U, 0x03U, {0x01U, 0x02U, 0x03U, 0x04U}},
+            {"repeater flagged admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0xFFFFFFFFU, 0x83U, {0xFFU, 0x00U, 0xAAU, 0x55U}},
+            {"room exact guest", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x01020304U, 0x00U, {0x10U, 0x20U, 0x30U, 0x40U}},
+            {"room read-only", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x33333333U, 0x01U, {0x09U, 0x0AU, 0x0BU, 0x0CU}},
+            {"room read-write", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x44444444U, 0x02U, {0x0DU, 0x0EU, 0x0FU, 0x10U}},
+            {"room admin", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0x55555555U, 0x03U, {0x11U, 0x12U, 0x13U, 0x14U}},
+            {"room flagged guest", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+             0xABCDEF01U, 0x80U, {0x21U, 0x43U, 0x65U, 0x87U}},
+        }};
+    const std::array<uint8_t, 20U> expected_repeater_admin_payload = {
+        0x03U, 0xA1U, 0xFCU, 0xD0U, 0xB3U, 0x4CU, 0xA0U, 0xF5U, 0xD6U,
+        0xD4U, 0x59U, 0xF6U, 0x0AU, 0x59U, 0x4AU, 0x5CU, 0x80U, 0x96U,
+        0xD7U, 0xE4U};
+    const std::array<uint8_t, 20U> expected_room_guest_payload = {
+        0x03U, 0xA1U, 0xACU, 0x7FU, 0x42U, 0xB2U, 0x77U, 0x61U, 0xA5U,
+        0x1AU, 0xEEU, 0x3CU, 0x1EU, 0xFDU, 0x2BU, 0x7FU, 0xDAU, 0x8BU,
+        0x5EU, 0x39U};
+    const std::array<uint8_t, 32U> expected_login_response_matrix_sha256 = {
+        0x80U, 0xE9U, 0x78U, 0xC0U, 0xFEU, 0x08U, 0x14U, 0xE4U,
+        0xB3U, 0xB3U, 0x06U, 0xEEU, 0xB7U, 0x73U, 0x75U, 0x5BU,
+        0xAFU, 0x8AU, 0x67U, 0x9DU, 0xAFU, 0xDFU, 0xE2U, 0x6AU,
+        0x90U, 0x7AU, 0x51U, 0x75U, 0x4FU, 0x79U, 0x87U, 0xF4U};
+    constexpr std::array<uint8_t, 2U> login_response_direct_path = {
+        0x21U, 0x43U};
+    SHA256 login_response_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_repeater_guest_response{};
+    for (std::size_t index = 0U; index < login_response_vectors.size();
+         ++index) {
+        const LoginResponseVector &vector = login_response_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_login_response_packet(
+                vector.server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(),
+                vector.timestamp, vector.permissions, vector.uniqueness.data(),
+                &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U || packet.payload_len != 20U) {
+            failures.push_back(std::string(vector.name) +
+                               " login response creation changed");
+            continue;
+        }
+        if ((index == 3U &&
+             std::memcmp(packet.payload, expected_repeater_admin_payload.data(),
+                         expected_repeater_admin_payload.size()) != 0) ||
+            (index == 5U &&
+             std::memcmp(packet.payload, expected_room_guest_payload.data(),
+                         expected_room_guest_payload.size()) != 0)) {
+            failures.push_back(std::string(vector.name) +
+                               " login response golden payload changed");
+        }
+        login_response_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 0U) valid_repeater_guest_response = packet;
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, login_response_direct_path.data(), 0x02U,
+                  &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        uint32_t parsed_timestamp = 0U;
+        uint8_t parsed_permissions = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+            parsed_uniqueness{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded) ||
+            !d1l_meshcore_oracle_parse_login_response_packet(
+                &decoded, vector.server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(),
+                &parsed_timestamp, &parsed_permissions,
+                parsed_uniqueness.data()) ||
+            parsed_timestamp != vector.timestamp ||
+            parsed_permissions != vector.permissions ||
+            parsed_uniqueness != vector.uniqueness) {
+            failures.push_back(std::string(vector.name) +
+                               " login response authenticated wire roundtrip changed");
+        }
+    }
+    std::array<uint8_t, 32U> login_response_matrix_digest{};
+    login_response_matrix_sha.finalize(login_response_matrix_digest.data(),
+                                       login_response_matrix_digest.size());
+    if (login_response_matrix_digest != expected_login_response_matrix_sha256) {
+        failures.push_back("login response payload matrix digest changed");
+    }
+
+    auto expect_login_response_create_reject =
+        [&failures, &full_secret](const char *name, uint8_t server_type,
+                                  const uint8_t *secret,
+                                  const uint8_t *uniqueness,
+                                  d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA7, sizeof(*output));
+                before = *output;
+            }
+            if (d1l_meshcore_oracle_create_login_response_packet(
+                    server_type, login_response_destination_hash,
+                    login_response_source_hash, secret, 0x12345678U, 0x03U,
+                    uniqueness, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(before)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login response create reject changed output");
+            }
+            (void)full_secret;
+        };
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+        login_response_uniqueness = {0x01U, 0x02U, 0x03U, 0x04U};
+    d1l_meshcore_oracle_packet_t rejected_login_response{};
+    expect_login_response_create_reject(
+        "none server", D1L_MESHCORE_ADVERT_TYPE_NONE, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "chat server", D1L_MESHCORE_ADVERT_TYPE_CHAT, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "sensor server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, full_secret.data(),
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "null secret", D1L_MESHCORE_ADVERT_TYPE_REPEATER, nullptr,
+        login_response_uniqueness.data(), &rejected_login_response);
+    expect_login_response_create_reject(
+        "null uniqueness", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        full_secret.data(), nullptr, &rejected_login_response);
+    expect_login_response_create_reject(
+        "null output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, full_secret.data(),
+        login_response_uniqueness.data(), nullptr);
+
+    auto expect_login_response_parse_reject =
+        [&failures, &full_secret](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t server_type, uint8_t destination_hash, uint8_t source_hash,
+            const uint8_t *secret, uint32_t *timestamp, uint8_t *permissions,
+            uint8_t *uniqueness) {
+            if (timestamp != nullptr) *timestamp = 0xAAAAAAAAU;
+            if (permissions != nullptr) *permissions = 0xBBU;
+            if (uniqueness != nullptr) {
+                std::memset(uniqueness, 0xCC,
+                            D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES);
+            }
+            if (d1l_meshcore_oracle_parse_login_response_packet(
+                    packet, server_type, destination_hash, source_hash, secret,
+                    timestamp, permissions, uniqueness) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (permissions != nullptr && *permissions != 0xBBU) ||
+                (uniqueness != nullptr &&
+                 !std::all_of(
+                     uniqueness,
+                     uniqueness + D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES,
+                     [](uint8_t value) { return value == 0xCCU; }))) {
+                failures.push_back(std::string(name) +
+                                   " login response parse reject changed output");
+            }
+            (void)full_secret;
+        };
+    auto expect_standard_login_response_parse_reject =
+        [&expect_login_response_parse_reject, &full_secret](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t server_type = D1L_MESHCORE_ADVERT_TYPE_REPEATER) {
+            uint32_t timestamp = 0U;
+            uint8_t permissions = 0U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+                uniqueness{};
+            expect_login_response_parse_reject(
+                name, packet, server_type, login_response_destination_hash,
+                login_response_source_hash, full_secret.data(), &timestamp,
+                &permissions, uniqueness.data());
+        };
+    uint32_t rejected_login_response_timestamp = 0U;
+    uint8_t rejected_login_response_permissions = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_LOGIN_RANDOM_BYTES>
+        rejected_login_response_uniqueness{};
+    expect_login_response_parse_reject(
+        "null packet", nullptr, D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        login_response_destination_hash, login_response_source_hash,
+        full_secret.data(), &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "none server", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_NONE, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "sensor server", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_SENSOR, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null secret", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, nullptr,
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null timestamp", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(), nullptr,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null permissions", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp, nullptr,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "null uniqueness", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions, nullptr);
+    expect_login_response_parse_reject(
+        "wrong destination", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        static_cast<uint8_t>(login_response_destination_hash ^ 1U),
+        login_response_source_hash, full_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "wrong source", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        static_cast<uint8_t>(login_response_source_hash ^ 1U),
+        full_secret.data(), &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+    expect_login_response_parse_reject(
+        "wrong secret", &valid_repeater_guest_response,
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, login_response_destination_hash,
+        login_response_source_hash, public_secret.data(),
+        &rejected_login_response_timestamp,
+        &rejected_login_response_permissions,
+        rejected_login_response_uniqueness.data());
+
+    d1l_meshcore_oracle_packet_t malformed_login_response =
+        valid_repeater_guest_response;
+    malformed_login_response.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_login_response_parse_reject("future version",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+    expect_standard_login_response_parse_reject("request packet",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload_len -= 1U;
+    expect_standard_login_response_parse_reject("truncated payload",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload_len += 1U;
+    expect_standard_login_response_parse_reject("extra payload byte",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload[2] ^= 0x01U;
+    expect_standard_login_response_parse_reject("tampered MAC",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.payload[4] ^= 0x01U;
+    expect_standard_login_response_parse_reject("tampered ciphertext",
+                                                &malformed_login_response);
+    malformed_login_response = valid_repeater_guest_response;
+    malformed_login_response.path_len = 0xFFU;
+    expect_standard_login_response_parse_reject("invalid path length",
+                                                &malformed_login_response);
+
+    auto make_raw_login_response_packet =
+        [&full_secret](const uint8_t *plaintext, std::size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT);
+            packet.payload[0] = login_response_destination_hash;
+            packet.payload[1] = login_response_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    auto authenticated_schema_reject =
+        [&make_raw_login_response_packet,
+         &expect_standard_login_response_parse_reject](
+            const char *name, std::array<uint8_t, 16U> plaintext,
+            uint8_t server_type) {
+            const d1l_meshcore_oracle_packet_t packet =
+                make_raw_login_response_packet(plaintext.data(),
+                                               plaintext.size());
+            expect_standard_login_response_parse_reject(name, &packet,
+                                                        server_type);
+        };
+    const std::array<uint8_t, 16U> repeater_guest_plaintext = {
+        0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,
+        0x00U, 0x00U, 0x00U, 0x00U, 0x02U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> repeater_admin_plaintext = {
+        0x78U, 0x56U, 0x34U, 0x12U, 0x00U, 0x00U, 0x01U, 0x03U,
+        0x01U, 0x02U, 0x03U, 0x04U, 0x02U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_guest_plaintext = {
+        0x04U, 0x03U, 0x02U, 0x01U, 0x00U, 0x00U, 0x02U, 0x00U,
+        0x10U, 0x20U, 0x30U, 0x40U, 0x01U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_flagged_guest_plaintext = {
+        0x01U, 0xEFU, 0xCDU, 0xABU, 0x00U, 0x00U, 0x00U, 0x80U,
+        0x21U, 0x43U, 0x65U, 0x87U, 0x01U, 0x00U, 0x00U, 0x00U};
+    const std::array<uint8_t, 16U> room_admin_plaintext = {
+        0x55U, 0x55U, 0x55U, 0x55U, 0x00U, 0x00U, 0x01U, 0x03U,
+        0x11U, 0x12U, 0x13U, 0x14U, 0x01U, 0x00U, 0x00U, 0x00U};
+    auto invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[4] = 1U;
+    authenticated_schema_reject("nonzero response code", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[5] = 1U;
+    authenticated_schema_reject("nonzero legacy keepalive", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[6] = 1U;
+    authenticated_schema_reject("repeater guest admin marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = repeater_admin_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("repeater admin guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = room_guest_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("room exact guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = room_flagged_guest_plaintext;
+    invalid_plaintext[6] = 2U;
+    authenticated_schema_reject("room flagged guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = room_admin_plaintext;
+    invalid_plaintext[6] = 0U;
+    authenticated_schema_reject("room admin guest marker", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[12] = 1U;
+    authenticated_schema_reject("room firmware on repeater", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    invalid_plaintext = room_guest_plaintext;
+    invalid_plaintext[12] = 2U;
+    authenticated_schema_reject("repeater firmware on room", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_ROOM);
+    invalid_plaintext = repeater_guest_plaintext;
+    invalid_plaintext[13] = 1U;
+    authenticated_schema_reject("nonzero canonical padding", invalid_plaintext,
+                                D1L_MESHCORE_ADVERT_TYPE_REPEATER);
+    const std::array<uint8_t, 4U> legacy_ok_plaintext = {'O', 'K', 0U, 0U};
+    malformed_login_response = make_raw_login_response_packet(
+        legacy_ok_plaintext.data(), legacy_ok_plaintext.size());
+    expect_standard_login_response_parse_reject("legacy OK response",
+                                                &malformed_login_response);
+
+    struct LoginPasswordAuthorizationVector {
+        const char *name;
+        uint8_t server_type;
+        uint8_t allow_read_only;
+        std::vector<uint8_t> password;
+        std::vector<uint8_t> admin_password;
+        std::vector<uint8_t> guest_password;
+        uint8_t authorized;
+        uint8_t permissions;
+    };
+    const std::array<LoginPasswordAuthorizationVector,
+                     kLoginPasswordAuthorizationValidVectors>
+        login_password_authorization_vectors = {{
+            {"repeater admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'a', 'd', 'm', 'i', 'n'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 1U, 0x03U},
+            {"repeater guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'g', 'u', 'e', 's', 't'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 1U, 0x00U},
+            {"repeater denial", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'g', 'u', 'e', 's', 't'}, 0U, 0x00U},
+            {"repeater admin precedence", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+             0U, {'s', 'a', 'm', 'e'}, {'s', 'a', 'm', 'e'},
+             {'s', 'a', 'm', 'e'}, 1U, 0x03U},
+            {"repeater maximum admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'g'}, 1U, 0x03U},
+            {"repeater empty admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {}, {}, {'g'}, 1U, 0x03U},
+            {"repeater empty guest", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+             {}, {'a'}, {}, 1U, 0x00U},
+            {"room admin", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'a', 'd', 'm', 'i', 'n'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x03U},
+            {"room read-write", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'r', 'o', 'o', 'm'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x02U},
+            {"room denial", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 0U, 0x00U},
+            {"room read-only fallback", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+             {'n', 'o'}, {'a', 'd', 'm', 'i', 'n'},
+             {'r', 'o', 'o', 'm'}, 1U, 0x00U},
+            {"room admin precedence", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+             {'s', 'a', 'm', 'e'}, {'s', 'a', 'm', 'e'},
+             {'s', 'a', 'm', 'e'}, 1U, 0x03U},
+            {"room maximum guest", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             {'a'},
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'},
+             1U, 0x02U},
+            {"room empty admin", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {}, {}, {'g'}, 1U, 0x03U},
+            {"room empty guest", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+             {}, {'a'}, {}, 1U, 0x02U},
+            {"room empty-config read-only fallback",
+             D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, {'o', 't', 'h', 'e', 'r'},
+             {}, {}, 1U, 0x00U},
+        }};
+    auto span_data = [&empty_login_password](const std::vector<uint8_t> &span) {
+        return span.empty() ? empty_login_password.data() : span.data();
+    };
+    for (const LoginPasswordAuthorizationVector &vector :
+         login_password_authorization_vectors) {
+        uint8_t authorized = 0xAAU;
+        uint8_t permissions = 0xBBU;
+        if (!d1l_meshcore_oracle_classify_unmatched_login_password(
+                vector.server_type, vector.allow_read_only,
+                span_data(vector.password), vector.password.size(),
+                span_data(vector.admin_password), vector.admin_password.size(),
+                span_data(vector.guest_password), vector.guest_password.size(),
+                &authorized, &permissions) ||
+            authorized != vector.authorized ||
+            permissions != vector.permissions) {
+            failures.push_back(std::string(vector.name) +
+                               " password authorization changed");
+        }
+    }
+
+    const std::array<uint8_t, 5U> auth_password = {'a', 'd', 'm', 'i', 'n'};
+    const std::array<uint8_t, 5U> auth_guest_password = {
+        'g', 'u', 'e', 's', 't'};
+    auto expect_login_password_authorization_reject =
+        [&failures](const char *name, uint8_t server_type,
+                    uint8_t allow_read_only, const uint8_t *password,
+                    std::size_t password_len, const uint8_t *admin_password,
+                    std::size_t admin_password_len, const uint8_t *guest_password,
+                    std::size_t guest_password_len, uint8_t *authorized,
+                    uint8_t *permissions) {
+            if (authorized != nullptr) *authorized = 0xAAU;
+            if (permissions != nullptr) *permissions = 0xBBU;
+            if (d1l_meshcore_oracle_classify_unmatched_login_password(
+                    server_type, allow_read_only, password, password_len,
+                    admin_password, admin_password_len, guest_password,
+                    guest_password_len, authorized, permissions) ||
+                (authorized != nullptr && *authorized != 0xAAU) ||
+                (permissions != nullptr && *permissions != 0xBBU)) {
+                failures.push_back(std::string(name) +
+                                   " password authorization reject changed output");
+            }
+        };
+    uint8_t rejected_authorized = 0U;
+    uint8_t rejected_permissions = 0U;
+    auto expect_standard_login_password_authorization_reject =
+        [&expect_login_password_authorization_reject, &rejected_authorized,
+         &rejected_permissions](
+            const char *name, uint8_t server_type, uint8_t allow_read_only,
+            const uint8_t *password, std::size_t password_len,
+            const uint8_t *admin_password, std::size_t admin_password_len,
+            const uint8_t *guest_password, std::size_t guest_password_len) {
+            expect_login_password_authorization_reject(
+                name, server_type, allow_read_only, password, password_len,
+                admin_password, admin_password_len, guest_password,
+                guest_password_len, &rejected_authorized,
+                &rejected_permissions);
+        };
+    expect_standard_login_password_authorization_reject(
+        "none server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "chat server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "sensor server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "noncanonical room read-only", D1L_MESHCORE_ADVERT_TYPE_ROOM, 2U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "ignored repeater read-only", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, nullptr,
+        auth_password.size(), auth_password.data(), auth_password.size(),
+        auth_guest_password.data(), auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), nullptr,
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "null guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), nullptr, auth_guest_password.size());
+    expect_login_password_authorization_reject(
+        "null authorized output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size(), nullptr, &rejected_permissions);
+    expect_login_password_authorization_reject(
+        "null permissions output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size(), &rejected_authorized, nullptr);
+    const std::array<uint8_t, 16U> overlong_login_password = {
+        '0', '1', '2', '3', '4', '5', '6', '7',
+        '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
+    expect_standard_login_password_authorization_reject(
+        "overlong password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        overlong_login_password.data(), overlong_login_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "overlong admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), overlong_login_password.data(),
+        overlong_login_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "overlong guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), overlong_login_password.data(),
+        overlong_login_password.size());
+    const std::array<uint8_t, 3U> auth_embedded_nul_password = {'a', 0U, 'b'};
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_embedded_nul_password.data(), auth_embedded_nul_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL admin password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(),
+        auth_embedded_nul_password.data(), auth_embedded_nul_password.size(),
+        auth_guest_password.data(),
+        auth_guest_password.size());
+    expect_standard_login_password_authorization_reject(
+        "embedded NUL guest password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        auth_password.data(), auth_password.size(), auth_password.data(),
+        auth_password.size(), auth_embedded_nul_password.data(),
+        auth_embedded_nul_password.size());
+    const std::array<uint8_t, 1U> control_login_password = {0x01U};
+    expect_standard_login_password_authorization_reject(
+        "non-login control password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        control_login_password.data(), control_login_password.size(),
+        auth_password.data(), auth_password.size(), auth_guest_password.data(),
+        auth_guest_password.size());
+
+    using LoginAclKey =
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    using LoginAclTable = std::array<
+        uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES *
+                     D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    LoginAclKey acl_key_a{};
+    LoginAclKey acl_key_b{};
+    LoginAclKey acl_key_c{};
+    LoginAclKey acl_key_zero{};
+    LoginAclKey acl_key_ff{};
+    acl_key_a.fill(0x11U);
+    acl_key_b = acl_key_a;
+    acl_key_b.back() = 0x12U;
+    acl_key_c.fill(0x33U);
+    acl_key_ff.fill(0xFFU);
+    auto set_acl_entry = [](LoginAclTable &table, size_t index,
+                            const LoginAclKey &key) {
+        std::memcpy(table.data() +
+                        index * D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES,
+                    key.data(), key.size());
+    };
+    LoginAclTable acl_table{};
+    set_acl_entry(acl_table, 0U, acl_key_a);
+    set_acl_entry(acl_table, 1U, acl_key_b);
+    set_acl_entry(acl_table, 2U, acl_key_c);
+    LoginAclTable duplicate_acl_table{};
+    set_acl_entry(duplicate_acl_table, 0U, acl_key_b);
+    set_acl_entry(duplicate_acl_table, 1U, acl_key_b);
+    LoginAclTable zero_acl_table{};
+    set_acl_entry(zero_acl_table, 0U, acl_key_zero);
+    LoginAclTable ff_acl_table{};
+    set_acl_entry(ff_acl_table, 0U, acl_key_ff);
+    LoginAclTable maximum_acl_table{};
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        LoginAclKey key{};
+        key.fill(static_cast<uint8_t>(index + 1U));
+        set_acl_entry(maximum_acl_table, index, key);
+    }
+    LoginAclKey maximum_last_key{};
+    maximum_last_key.fill(D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES);
+    LoginAclKey maximum_missing_key{};
+    maximum_missing_key.fill(0xFEU);
+    const std::array<uint8_t, 1U> canonical_blank_password = {0U};
+    size_t existing_acl_valid_vector_count = 0U;
+    auto expect_existing_acl_blank_login =
+        [&failures, &canonical_blank_password,
+         &existing_acl_valid_vector_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            const LoginAclKey &sender_key, const uint8_t *acl_keys,
+            size_t acl_count, uint8_t expected_found,
+            uint8_t expected_client_index, uint8_t expected_secret_source,
+            uint8_t expected_mutation_mask) {
+            uint8_t found = 0xAAU;
+            uint8_t client_index = 0xBBU;
+            uint8_t secret_source = 0xCCU;
+            uint8_t mutation_mask = 0xDDU;
+            ++existing_acl_valid_vector_count;
+            if (!d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+                    server_type, is_route_flood,
+                    canonical_blank_password.data(), 0U, sender_key.data(),
+                    acl_keys, acl_count, &found, &client_index, &secret_source,
+                    &mutation_mask) ||
+                found != expected_found ||
+                client_index != expected_client_index ||
+                secret_source != expected_secret_source ||
+                mutation_mask != expected_mutation_mask) {
+                failures.push_back(std::string(name) +
+                                   " existing ACL resolution changed");
+            }
+        };
+    expect_existing_acl_blank_login(
+        "empty repeater ACL direct", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_a, acl_table.data(), 0U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    expect_existing_acl_blank_login(
+        "empty room ACL flood", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, acl_key_a,
+        acl_table.data(), 0U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    expect_existing_acl_blank_login(
+        "repeater first match direct", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_a, acl_table.data(), 3U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U);
+    expect_existing_acl_blank_login(
+        "repeater first match flood", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        acl_key_a, acl_table.data(), 3U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "room middle match direct", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        acl_key_b, acl_table.data(), 3U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "room last match flood", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, acl_key_c,
+        acl_table.data(), 3U, 1U, 2U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "full key distinguishes shared prefix", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        0U, acl_key_b, acl_table.data(), 2U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "duplicate returns first", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        acl_key_b, duplicate_acl_table.data(), 2U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U);
+    expect_existing_acl_blank_login(
+        "zero key exact match", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        acl_key_zero, zero_acl_table.data(), 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "ff key exact match", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        acl_key_ff, ff_acl_table.data(), 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER,
+        D1L_MESHCORE_ORACLE_LOGIN_CLIENT_MUTATE_OUT_PATH);
+    expect_existing_acl_blank_login(
+        "maximum ACL last match", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        maximum_last_key, maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES, 1U,
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES - 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 0U);
+    expect_existing_acl_blank_login(
+        "maximum ACL miss", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        maximum_missing_key, maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES, 0U,
+        D1L_MESHCORE_ORACLE_LOGIN_ACL_INDEX_NOT_FOUND,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U);
+    if (existing_acl_valid_vector_count !=
+        kExistingAclBlankLoginValidVectors) {
+        failures.push_back("existing ACL valid vector count drifted");
+    }
+
+    size_t existing_acl_invalid_vector_count = 0U;
+    auto expect_existing_acl_blank_login_reject =
+        [&failures, &existing_acl_invalid_vector_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            const uint8_t *password, size_t password_len,
+            const uint8_t *sender_key, const uint8_t *acl_keys,
+            size_t acl_count, uint8_t *found, uint8_t *client_index,
+            uint8_t *secret_source, uint8_t *mutation_mask) {
+            if (found != nullptr) *found = 0xAAU;
+            if (client_index != nullptr) *client_index = 0xBBU;
+            if (secret_source != nullptr) *secret_source = 0xCCU;
+            if (mutation_mask != nullptr) *mutation_mask = 0xDDU;
+            ++existing_acl_invalid_vector_count;
+            if (d1l_meshcore_oracle_resolve_existing_acl_blank_login(
+                    server_type, is_route_flood, password, password_len,
+                    sender_key, acl_keys, acl_count, found, client_index,
+                    secret_source, mutation_mask) ||
+                (found != nullptr && *found != 0xAAU) ||
+                (client_index != nullptr && *client_index != 0xBBU) ||
+                (secret_source != nullptr && *secret_source != 0xCCU) ||
+                (mutation_mask != nullptr && *mutation_mask != 0xDDU)) {
+                failures.push_back(std::string(name) +
+                                   " existing ACL reject changed output");
+            }
+        };
+    uint8_t rejected_acl_found = 0U;
+    uint8_t rejected_acl_client_index = 0U;
+    uint8_t rejected_acl_secret_source = 0U;
+    uint8_t rejected_acl_mutation_mask = 0U;
+    auto expect_standard_existing_acl_reject =
+        [&expect_existing_acl_blank_login_reject, &rejected_acl_found,
+         &rejected_acl_client_index, &rejected_acl_secret_source,
+         &rejected_acl_mutation_mask](const char *name, uint8_t server_type,
+                                     uint8_t is_route_flood,
+                                     const uint8_t *password,
+                                     size_t password_len,
+                                     const uint8_t *sender_key,
+                                     const uint8_t *acl_keys,
+                                     size_t acl_count) {
+            expect_existing_acl_blank_login_reject(
+                name, server_type, is_route_flood, password, password_len,
+                sender_key, acl_keys, acl_count,
+                &rejected_acl_found, &rejected_acl_client_index,
+                &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+        };
+    expect_standard_existing_acl_reject(
+        "none ACL server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "chat ACL server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "sensor ACL server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "noncanonical flood flag", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null blank password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nullptr, 0U, acl_key_a.data(), acl_table.data(), 3U);
+    const std::array<uint8_t, 1U> nonblank_acl_password = {'x'};
+    expect_standard_existing_acl_reject(
+        "nonblank password", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nonblank_acl_password.data(), nonblank_acl_password.size(),
+        acl_key_a.data(), acl_table.data(), 3U);
+    const std::array<uint8_t, 1U> nonzero_blank_terminator = {1U};
+    expect_standard_existing_acl_reject(
+        "nonzero blank terminator", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        nonzero_blank_terminator.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null ACL sender", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, nullptr, acl_table.data(), 3U);
+    expect_standard_existing_acl_reject(
+        "null ACL table", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(), nullptr, 3U);
+    expect_standard_existing_acl_reject(
+        "overfull ACL table", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        maximum_acl_table.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES + 1U);
+    expect_existing_acl_blank_login_reject(
+        "null ACL found output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, nullptr, &rejected_acl_client_index,
+        &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL index output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found, nullptr,
+        &rejected_acl_secret_source, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL secret output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found,
+        &rejected_acl_client_index, nullptr, &rejected_acl_mutation_mask);
+    expect_existing_acl_blank_login_reject(
+        "null ACL mutation output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        canonical_blank_password.data(), 0U, acl_key_a.data(),
+        acl_table.data(), 3U, &rejected_acl_found,
+        &rejected_acl_client_index, &rejected_acl_secret_source, nullptr);
+    if (existing_acl_invalid_vector_count !=
+        kExistingAclBlankLoginInvalidVectors) {
+        failures.push_back("existing ACL invalid vector count drifted");
+    }
+
+    using LoginAclRecord = d1l_meshcore_oracle_login_acl_record_t;
+    using LoginAclRecords = std::array<
+        LoginAclRecord, D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES>;
+    using LoginAclTransition = d1l_meshcore_oracle_login_acl_transition_t;
+    auto make_login_acl_record = [](uint8_t key_byte, uint8_t permissions,
+                                    uint8_t out_path_len,
+                                    uint8_t secret_byte,
+                                    uint32_t last_timestamp,
+                                    uint32_t last_activity,
+                                    uint32_t room_sync_since,
+                                    uint32_t room_pending_ack,
+                                    uint8_t room_push_failures) {
+        LoginAclRecord record{};
+        std::memset(record.public_key, key_byte, sizeof(record.public_key));
+        record.permissions = permissions;
+        record.out_path_len = out_path_len;
+        std::memset(record.shared_secret, secret_byte,
+                    sizeof(record.shared_secret));
+        record.last_timestamp = last_timestamp;
+        record.last_activity = last_activity;
+        record.room_sync_since = room_sync_since;
+        record.room_pending_ack = room_pending_ack;
+        record.room_push_failures = room_push_failures;
+        return record;
+    };
+    auto login_acl_record_matches = [](const LoginAclRecord &left,
+                                       const LoginAclRecord &right) {
+        return std::memcmp(left.public_key, right.public_key,
+                           sizeof(left.public_key)) == 0 &&
+            left.permissions == right.permissions &&
+            left.out_path_len == right.out_path_len &&
+            std::memcmp(left.shared_secret, right.shared_secret,
+                        sizeof(left.shared_secret)) == 0 &&
+            left.last_timestamp == right.last_timestamp &&
+            left.last_activity == right.last_activity &&
+            left.room_sync_since == right.room_sync_since &&
+            left.room_pending_ack == right.room_pending_ack &&
+            left.room_push_failures == right.room_push_failures;
+    };
+    const LoginAclKey transition_key_a = [] {
+        LoginAclKey key{};
+        key.fill(0x41U);
+        return key;
+    }();
+    const LoginAclKey transition_key_b = [] {
+        LoginAclKey key{};
+        key.fill(0x42U);
+        return key;
+    }();
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES>
+        transition_secret = [] {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES>
+                secret{};
+            secret.fill(0xA5U);
+            return secret;
+        }();
+    size_t login_acl_transition_valid_count = 0U;
+    auto expect_login_acl_transition =
+        [&failures, &login_acl_record_matches,
+         &login_acl_transition_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t permissions, const LoginAclKey &sender_key,
+            const std::array<uint8_t,
+                             D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES> &secret,
+            uint32_t sender_timestamp, uint32_t current_time,
+            uint32_t room_sync_since, const LoginAclRecords &input,
+            size_t input_count, const LoginAclRecords &expected_records,
+            uint8_t expected_count, uint8_t expected_index,
+            uint8_t expected_accepted, uint8_t expected_inserted,
+            uint8_t expected_evicted, uint8_t expected_dirty) {
+            LoginAclTransition transition{};
+            ++login_acl_transition_valid_count;
+            bool records_match = true;
+            if (!d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+                    server_type, is_route_flood, permissions,
+                    sender_key.data(), secret.data(), sender_timestamp,
+                    current_time, room_sync_since, input.data(), input_count,
+                    &transition)) {
+                records_match = false;
+            } else {
+                for (size_t index = 0U;
+                     index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES;
+                     ++index) {
+                    if (!login_acl_record_matches(
+                            transition.records[index],
+                            expected_records[index])) {
+                        records_match = false;
+                        break;
+                    }
+                }
+            }
+            if (!records_match || transition.record_count != expected_count ||
+                transition.client_index != expected_index ||
+                transition.accepted != expected_accepted ||
+                transition.inserted != expected_inserted ||
+                transition.evicted != expected_evicted ||
+                transition.contacts_dirty != expected_dirty) {
+                failures.push_back(std::string(name) +
+                                   " login ACL transition changed");
+            }
+        };
+
+    LoginAclRecords transition_input{};
+    LoginAclRecords transition_expected{};
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 10U, 20U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "repeater admin append", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 10U, 20U, 30U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x42U, 0x00U, 0xFFU, 0xA5U, 11U, 21U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "repeater guest append", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x00U, transition_key_b, transition_secret, 11U, 21U, 31U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0x02U, 0xFFU, 0xA5U, 12U, 22U, 32U, 0U, 0U);
+    expect_login_acl_transition(
+        "room read-write append", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x02U, transition_key_a, transition_secret, 12U, 22U, 32U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_expected = {};
+    transition_expected[0] = make_login_acl_record(
+        0x42U, 0x00U, 0xFFU, 0xA5U, 13U, 23U, 33U, 0U, 0U);
+    expect_login_acl_transition(
+        "room read-only guest append", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x00U, transition_key_b, transition_secret, 13U, 23U, 33U,
+        transition_input, 0U, transition_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA2U, 5U, 0x44U, 5U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA3U, 5U, 0xA5U, 6U, 77U, 7U, 8U, 9U);
+    expect_login_acl_transition(
+        "existing repeater role replace", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 6U, 77U, 88U,
+        transition_input, 1U, transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xF3U, 4U, 0x44U, 5U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xF2U, 4U, 0xA5U, 10U, 11U, 12U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing room state replace", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x02U, transition_key_a, transition_secret, 10U, 11U, 12U,
+        transition_input, 1U, transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA2U, 5U, 0x44U, 10U, 6U, 7U, 8U, 9U);
+    transition_expected = transition_input;
+    expect_login_acl_transition(
+        "existing equal timestamp replay", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 0x03U, transition_key_a, transition_secret, 10U, 99U, 100U,
+        transition_input, 1U, transition_expected, 1U, 0U, 0U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing older timestamp replay", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x02U, transition_key_a, transition_secret, 9U, 99U, 100U,
+        transition_input, 1U, transition_expected, 1U, 0U, 0U, 0U, 0U, 0U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x30U, 0x03U, 2U, 0x30U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[1] = make_login_acl_record(
+        0x41U, 0U, 0xFFU, 0U, 0U, 0U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "zero timestamp append replay", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 0x03U, transition_key_a, transition_secret, 0U, 99U, 100U,
+        transition_input, 1U, transition_expected, 2U, 1U, 0U, 1U, 0U, 0U);
+
+    transition_input = {};
+    for (size_t index = 0U; index < 19U; ++index) {
+        transition_input[index] = make_login_acl_record(
+            static_cast<uint8_t>(index + 1U), 0U,
+            static_cast<uint8_t>(index), static_cast<uint8_t>(index + 1U),
+            1U, static_cast<uint32_t>(100U + index), 0U, 0U, 0U);
+    }
+    transition_expected = transition_input;
+    transition_expected[19] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 1U, 2U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "append into final ACL slot", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 1U, 2U, 0U,
+        transition_input, 19U, transition_expected, 20U, 19U, 1U, 1U, 0U,
+        1U);
+
+    LoginAclRecords full_acl{};
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        full_acl[index] = make_login_acl_record(
+            static_cast<uint8_t>(index + 1U), 0U,
+            static_cast<uint8_t>(index), static_cast<uint8_t>(index + 1U),
+            1U, static_cast<uint32_t>(100U + index), 0U, 0U, 0U);
+    }
+    full_acl[7].last_activity = 1U;
+    transition_expected = full_acl;
+    transition_expected[7] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 2U, 3U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "evict least-active non-admin", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 2U, 3U, 0U,
+        full_acl, 20U, transition_expected, 20U, 7U, 1U, 1U, 1U, 1U);
+
+    full_acl[2].last_activity = 1U;
+    full_acl[7].last_activity = 1U;
+    transition_expected = full_acl;
+    transition_expected[2] = make_login_acl_record(
+        0x41U, 0x03U, 0xFFU, 0xA5U, 2U, 3U, 0U, 0U, 0U);
+    expect_login_acl_transition(
+        "eviction tie keeps first", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x03U, transition_key_a, transition_secret, 2U, 3U, 0U,
+        full_acl, 20U, transition_expected, 20U, 2U, 1U, 1U, 1U, 1U);
+
+    for (size_t index = 0U;
+         index < D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES; ++index) {
+        full_acl[index].permissions = 0xF3U;
+    }
+    transition_expected = full_acl;
+    transition_expected[19] = make_login_acl_record(
+        0x42U, 0x02U, 0xFFU, 0xA5U, 2U, 3U, 4U, 0U, 0U);
+    expect_login_acl_transition(
+        "full all-admin fallback evicts last", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        0U, 0x02U, transition_key_b, transition_secret, 2U, 3U, 4U,
+        full_acl, 20U, transition_expected, 20U, 19U, 1U, 1U, 1U, 1U);
+
+    full_acl[8] = make_login_acl_record(
+        0x41U, 0xA0U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = full_acl;
+    transition_expected[8] = make_login_acl_record(
+        0x41U, 0xA3U, 6U, 0xA5U, 2U, 3U, 3U, 4U, 5U);
+    expect_login_acl_transition(
+        "full ACL existing key reuse", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0x03U, transition_key_a, transition_secret, 2U, 3U, 4U,
+        full_acl, 20U, transition_expected, 20U, 8U, 1U, 0U, 0U, 1U);
+
+    transition_input = {};
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA0U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA3U, 0xFFU, 0xA5U, 2U, 3U, 3U, 4U, 5U);
+    expect_login_acl_transition(
+        "existing repeater flood invalidates path",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x03U, transition_key_a,
+        transition_secret, 2U, 3U, 4U, transition_input, 1U,
+        transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    transition_input[0] = make_login_acl_record(
+        0x41U, 0xA3U, 6U, 0x44U, 1U, 2U, 3U, 4U, 5U);
+    transition_expected = transition_input;
+    transition_expected[0] = make_login_acl_record(
+        0x41U, 0xA0U, 0xFFU, 0xA5U, 2U, 3U, 9U, 0U, 0U);
+    expect_login_acl_transition(
+        "existing room flood resets session fields",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 0x00U, transition_key_a,
+        transition_secret, 2U, 3U, 9U, transition_input, 1U,
+        transition_expected, 1U, 0U, 1U, 0U, 0U, 1U);
+
+    if (login_acl_transition_valid_count !=
+        kLoginAclTransitionValidVectors) {
+        failures.push_back("login ACL transition valid vector count drifted");
+    }
+
+    size_t login_acl_transition_invalid_count = 0U;
+    auto expect_login_acl_transition_reject =
+        [&failures, &login_acl_transition_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t permissions, const uint8_t *sender_key,
+            const uint8_t *secret, const LoginAclRecord *input,
+            size_t input_count, LoginAclTransition *output) {
+            LoginAclTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++login_acl_transition_invalid_count;
+            if (d1l_meshcore_oracle_apply_authorized_login_acl_transition(
+                    server_type, is_route_flood, permissions, sender_key,
+                    secret, 1U, 2U, 3U, input, input_count, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login ACL reject changed output");
+            }
+        };
+    transition_input = {};
+    LoginAclTransition transition_reject_output{};
+    expect_login_acl_transition_reject(
+        "none transition server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "chat transition server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "sensor transition server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "noncanonical transition flood", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        2U, 0U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "repeater read-only transition", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 1U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "repeater read-write transition", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 2U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "room read-only transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "room over-role transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 4U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition sender", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        nullptr, transition_secret.data(), transition_input.data(), 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition secret", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), nullptr, transition_input.data(), 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition records", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(), nullptr, 0U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "overfull transition records", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, transition_key_a.data(), transition_secret.data(),
+        transition_input.data(),
+        D1L_MESHCORE_ORACLE_MAX_LOGIN_ACL_ENTRIES + 1U,
+        &transition_reject_output);
+    expect_login_acl_transition_reject(
+        "null transition output", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0U,
+        transition_key_a.data(), transition_secret.data(),
+        transition_input.data(), 0U, nullptr);
+    if (login_acl_transition_invalid_count !=
+        kLoginAclTransitionInvalidVectors) {
+        failures.push_back("login ACL transition invalid vector count drifted");
+    }
+
+    using AuthenticatedRequestTransition =
+        d1l_meshcore_oracle_authenticated_request_transition_t;
+    size_t authenticated_request_replay_valid_count = 0U;
+    auto expect_authenticated_request_replay =
+        [&failures, &login_acl_record_matches,
+         &authenticated_request_replay_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_direct,
+            uint8_t request_type, uint8_t handler_succeeded,
+            size_t request_len, uint32_t sender_timestamp,
+            uint32_t current_time, uint32_t force_since,
+            const LoginAclRecord &input, const LoginAclRecord &expected_record,
+            uint8_t replay_accepted, uint8_t duplicate,
+            uint8_t handler_invoked, uint8_t state_committed,
+            uint8_t direct_keep_alive, uint8_t response_attempt_eligible) {
+            AuthenticatedRequestTransition transition{};
+            ++authenticated_request_replay_valid_count;
+            if (!d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+                    server_type, is_route_direct, request_type,
+                    handler_succeeded, request_len, sender_timestamp,
+                    current_time, force_since, &input, &transition) ||
+                !login_acl_record_matches(transition.record,
+                                          expected_record) ||
+                transition.replay_accepted != replay_accepted ||
+                transition.duplicate != duplicate ||
+                transition.handler_invoked != handler_invoked ||
+                transition.state_committed != state_committed ||
+                transition.direct_keep_alive != direct_keep_alive ||
+                transition.response_attempt_eligible !=
+                    response_attempt_eligible) {
+                failures.push_back(std::string(name) +
+                                   " authenticated request replay changed");
+            }
+        };
+    LoginAclRecord request_record = make_login_acl_record(
+        0x41U, 0xA3U, 5U, 0x44U, 10U, 20U, 30U, 40U, 5U);
+    LoginAclRecord request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    expect_authenticated_request_replay(
+        "repeater newer successful request",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x01U, 1U, 5U, 11U, 21U,
+        0U, request_record, request_expected, 1U, 0U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "repeater handler failure preserves watermark",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 0U, 5U, 11U, 21U,
+        0U, request_record, request_record, 1U, 0U, 1U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater equal timestamp duplicate",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 1U, 5U, 10U, 21U,
+        0U, request_record, request_record, 0U, 1U, 0U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater older timestamp replay",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 0x01U, 1U, 5U, 9U, 21U, 0U,
+        request_record, request_record, 0U, 0U, 0U, 0U, 0U, 0U);
+    expect_authenticated_request_replay(
+        "repeater keep-alive handler miss",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_record, 1U, 0U, 1U, 0U, 0U, 0U);
+
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room newer successful request", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        0x01U, 1U, 5U, 11U, 21U, 0U, request_record, request_expected, 1U,
+        0U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "room handler failure still commits", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        1U, 0x01U, 0U, 5U, 11U, 21U, 0U, request_record,
+        request_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+    request_expected = request_record;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room equal timestamp reexecutes handler",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U, 5U, 10U, 21U, 0U,
+        request_record, request_expected, 1U, 1U, 1U, 1U, 0U, 1U);
+    expect_authenticated_request_replay(
+        "room older timestamp replay", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U, 5U, 9U, 21U, 0U, request_record, request_record, 0U, 0U,
+        0U, 0U, 0U, 0U);
+
+    request_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_pending_ack = 0U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room short direct keep-alive unknown path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 0U);
+    request_record.out_path_len = 3U;
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_sync_since = 99U;
+    request_expected.room_pending_ack = 0U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room direct keep-alive force since",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 9U, 11U, 21U, 99U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 1U);
+    request_expected.room_sync_since = request_record.room_sync_since;
+    expect_authenticated_request_replay(
+        "room direct keep-alive zero force since",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 9U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 0U, 1U, 1U, 1U);
+    request_expected = request_record;
+    request_expected.last_timestamp = 11U;
+    request_expected.last_activity = 21U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room flood keep-alive invokes handler",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 11U, 21U, 0U,
+        request_record, request_expected, 1U, 0U, 1U, 1U, 0U, 0U);
+
+    request_record.last_timestamp = 0U;
+    request_record.last_activity = 7U;
+    request_record.room_push_failures = 5U;
+    request_expected = request_record;
+    request_expected.last_activity = 8U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room zero timestamp duplicate accepted",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U, 5U, 0U, 8U, 0U,
+        request_record, request_expected, 1U, 1U, 1U, 1U, 0U, 1U);
+    request_record.last_timestamp = UINT32_MAX - 1U;
+    request_expected = request_record;
+    request_expected.last_timestamp = UINT32_MAX;
+    request_expected.last_activity = 9U;
+    request_expected.room_push_failures = 0U;
+    expect_authenticated_request_replay(
+        "room maximum timestamp accepted", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U,
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES,
+        UINT32_MAX, 9U, 0U, request_record, request_expected, 1U, 0U, 1U,
+        1U, 0U, 1U);
+    if (authenticated_request_replay_valid_count !=
+        kAuthenticatedRequestReplayValidVectors) {
+        failures.push_back(
+            "authenticated request replay valid vector count drifted");
+    }
+
+    size_t authenticated_request_replay_invalid_count = 0U;
+    auto expect_authenticated_request_replay_reject =
+        [&failures, &authenticated_request_replay_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_direct,
+            uint8_t request_type, uint8_t handler_succeeded,
+            size_t request_len, uint32_t force_since,
+            const LoginAclRecord *input,
+            AuthenticatedRequestTransition *output) {
+            AuthenticatedRequestTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++authenticated_request_replay_invalid_count;
+            if (d1l_meshcore_oracle_apply_authenticated_request_replay_transition(
+                    server_type, is_route_direct, request_type,
+                    handler_succeeded, request_len, 11U, 21U, force_since,
+                    input, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " request replay reject changed output");
+            }
+        };
+    AuthenticatedRequestTransition rejected_request_transition{};
+    expect_authenticated_request_replay_reject(
+        "none request server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "chat request server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "sensor request server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "noncanonical request route", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        0x01U, 1U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "noncanonical handler result", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0x01U, 2U, 5U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "short request", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 0x01U, 1U,
+        4U, 0U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "overlong request", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U,
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U, 0U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "ordinary request force since", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        0x01U, 1U, 9U, 1U, &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "short keep-alive force since", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 0U, 5U, 1U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "keep-alive successful handler", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        D1L_MESHCORE_ORACLE_REQUEST_KEEP_ALIVE, 1U, 5U, 0U,
+        &request_record, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "null request record", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U, 1U,
+        5U, 0U, nullptr, &rejected_request_transition);
+    expect_authenticated_request_replay_reject(
+        "null request transition", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0x01U,
+        1U, 5U, 0U, &request_record, nullptr);
+    if (authenticated_request_replay_invalid_count !=
+        kAuthenticatedRequestReplayInvalidVectors) {
+        failures.push_back(
+            "authenticated request replay invalid vector count drifted");
+    }
+
+    using AuthenticatedTextTransition =
+        d1l_meshcore_oracle_authenticated_text_transition_t;
+    auto make_authenticated_text_expected = [](
+        const LoginAclRecord &record, uint8_t client_gate_accepted,
+        uint8_t text_type_supported, uint8_t replay_accepted,
+        uint8_t duplicate, uint8_t session_state_committed,
+        uint8_t handler_invoked, uint8_t handler_committed,
+        uint8_t retained_post_committed, uint8_t ack_creation_attempt_mask,
+        uint8_t ack_created_mask, uint8_t ack_dispatch_mode,
+        uint8_t response_creation_attempted, uint8_t response_created,
+        uint8_t response_dispatch_mode) {
+        AuthenticatedTextTransition transition{};
+        transition.record = record;
+        transition.client_gate_accepted = client_gate_accepted;
+        transition.text_type_supported = text_type_supported;
+        transition.replay_accepted = replay_accepted;
+        transition.duplicate = duplicate;
+        transition.session_state_committed = session_state_committed;
+        transition.handler_invoked = handler_invoked;
+        transition.handler_committed = handler_committed;
+        transition.retained_post_committed = retained_post_committed;
+        transition.ack_creation_attempt_mask = ack_creation_attempt_mask;
+        transition.ack_created_mask = ack_created_mask;
+        transition.ack_dispatch_mode = ack_dispatch_mode;
+        transition.response_creation_attempted =
+            response_creation_attempted;
+        transition.response_created = response_created;
+        transition.response_dispatch_mode = response_dispatch_mode;
+        return transition;
+    };
+    size_t authenticated_text_transition_valid_count = 0U;
+    auto expect_authenticated_text_transition =
+        [&failures, &login_acl_record_matches,
+         &authenticated_text_transition_valid_count](
+            const char *name, uint8_t server_type, uint8_t text_type,
+            size_t logical_len, uint8_t extra_ack_transmit_enabled,
+            uint8_t handler_reply_available, uint8_t ack_created_mask,
+            uint8_t response_created, uint32_t sender_timestamp,
+            uint32_t current_time, const LoginAclRecord &input,
+            const AuthenticatedTextTransition &expected) {
+            AuthenticatedTextTransition transition{};
+            ++authenticated_text_transition_valid_count;
+            if (!d1l_meshcore_oracle_apply_authenticated_text_transition(
+                    server_type, text_type, logical_len,
+                    extra_ack_transmit_enabled, handler_reply_available,
+                    ack_created_mask, response_created, sender_timestamp,
+                    current_time, &input, &transition) ||
+                !login_acl_record_matches(transition.record,
+                                          expected.record) ||
+                transition.client_gate_accepted !=
+                    expected.client_gate_accepted ||
+                transition.text_type_supported !=
+                    expected.text_type_supported ||
+                transition.replay_accepted != expected.replay_accepted ||
+                transition.duplicate != expected.duplicate ||
+                transition.session_state_committed !=
+                    expected.session_state_committed ||
+                transition.handler_invoked != expected.handler_invoked ||
+                transition.handler_committed != expected.handler_committed ||
+                transition.retained_post_committed !=
+                    expected.retained_post_committed ||
+                transition.ack_creation_attempt_mask !=
+                    expected.ack_creation_attempt_mask ||
+                transition.ack_created_mask != expected.ack_created_mask ||
+                transition.ack_dispatch_mode != expected.ack_dispatch_mode ||
+                transition.response_creation_attempted !=
+                    expected.response_creation_attempted ||
+                transition.response_created != expected.response_created ||
+                transition.response_dispatch_mode !=
+                    expected.response_dispatch_mode) {
+                failures.push_back(std::string(name) +
+                                   " authenticated text transition changed");
+            }
+        };
+
+    LoginAclRecord text_record = make_login_acl_record(
+        0x51U, 0xA3U, 3U, 0x55U, 10U, 20U, 30U, 40U, 5U);
+    LoginAclRecord text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    auto text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    expect_authenticated_text_transition(
+        "repeater plain command ACK and reply direct",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 1U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 1U, 11U, 21U,
+        text_record, text_expected);
+
+    text_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater plain ACK creation failure keeps handler commit",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 5U, 0U, 0U, 0U, 0U, 11U,
+        21U, text_record, text_expected);
+
+    text_expected.response_creation_attempted = 1U;
+    text_expected.response_created = 1U;
+    text_expected.response_dispatch_mode = D1L_MESHCORE_ORACLE_DISPATCH_FLOOD;
+    text_expected.ack_creation_attempt_mask = 0U;
+    expect_authenticated_text_transition(
+        "repeater CLI reply flood",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 165U, 1U, 1U, 0U, 1U,
+        11U, 21U, text_record, text_expected);
+
+    text_record.out_path_len = 3U;
+    text_expected_record = text_record;
+    text_expected_record.last_activity = 22U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 1U, 1U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater plain duplicate repeats ACK",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 0U, 10U, 22U,
+        text_record, text_expected);
+    text_expected.ack_creation_attempt_mask = 0U;
+    text_expected.ack_created_mask = 0U;
+    text_expected.ack_dispatch_mode = D1L_MESHCORE_ORACLE_DISPATCH_NONE;
+    expect_authenticated_text_transition(
+        "repeater CLI duplicate suppresses handler and response",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 0U, 10U,
+        22U, text_record, text_expected);
+    text_expected = make_authenticated_text_expected(
+        text_record, 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater older text rejected", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 0U, 9U,
+        22U, text_record, text_expected);
+    text_record.permissions = 0xA0U;
+    text_expected = make_authenticated_text_expected(
+        text_record, 0U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater non-admin outer gate", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        22U, text_record, text_expected);
+    text_record.permissions = 0xA3U;
+    text_expected = make_authenticated_text_expected(
+        text_record, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater unsupported signed text", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        2U, 6U, 0U, 0U, 0U, 0U, 11U, 22U, text_record, text_expected);
+
+    text_record = make_login_acl_record(
+        0x52U, 0xB3U, 3U, 0x56U, 10U, 20U, 30U, 40U, 5U);
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    expect_authenticated_text_transition(
+        "room admin CLI reply direct", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 1U, 0U, 1U, 11U,
+        21U, text_record, text_expected);
+    text_expected_record = text_record;
+    text_expected_record.last_activity = 22U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room admin CLI duplicate", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 0U, 10U,
+        22U, text_record, text_expected);
+
+    text_record.permissions = 0xB2U;
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room non-admin CLI commits session only",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 0U, 11U,
+        21U, text_record, text_expected);
+    text_record.permissions = 0xB0U;
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected.record = text_expected_record;
+    expect_authenticated_text_transition(
+        "room guest plain commits session only", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 5U, 1U, 0U, 0U, 0U, 11U,
+        21U, text_record, text_expected);
+
+    text_record.permissions = 0xB1U;
+    text_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 0U, 0U, 1U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room read-only plain appends post and floods ACK",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 167U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 0U, 11U, 21U,
+        text_record, text_expected);
+
+    text_record.permissions = 0xB2U;
+    text_record.out_path_len = 3U;
+    text_expected_record = text_record;
+    text_expected_record.last_activity = 22U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 1U, 1U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE |
+            D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE |
+            D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room read-write duplicate repeats multi and simple ACK",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE |
+            D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI,
+        0U, 10U, 22U, text_record, text_expected);
+
+    text_record.permissions = 0xB3U;
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 0U, 0U, 1U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE |
+            D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room admin plain preserves post after multi-ACK failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 1U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 0U, 11U, 21U,
+        text_record, text_expected);
+    text_expected = make_authenticated_text_expected(
+        text_record, 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room older text rejected", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 1U, 0U, 0U, 0U, 9U,
+        21U, text_record, text_expected);
+    text_expected = make_authenticated_text_expected(
+        text_record, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room unsupported signed text", D1L_MESHCORE_ADVERT_TYPE_ROOM, 2U,
+        6U, 1U, 0U, 0U, 0U, 11U, 21U, text_record, text_expected);
+
+    text_record.permissions = 0xB0U;
+    text_record.last_timestamp = 0U;
+    text_expected_record = text_record;
+    text_expected_record.last_activity = 8U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room zero timestamp duplicate", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 5U, 0U, 0U, 0U, 0U, 0U, 8U,
+        text_record, text_expected);
+
+    text_record = make_login_acl_record(
+        0x51U, 0xA3U, 3U, 0x55U, UINT32_MAX - 1U, 7U, 30U, 40U, 5U);
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = UINT32_MAX;
+    text_expected_record.last_activity = 9U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "repeater maximum timestamp handler commit",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 0U,
+        UINT32_MAX, 9U, text_record, text_expected);
+
+    text_record = make_login_acl_record(
+        0x52U, 0xB3U, 3U, 0x56U, 10U, 20U, 30U, 40U, 5U);
+    text_expected_record = text_record;
+    text_expected_record.last_timestamp = 11U;
+    text_expected_record.last_activity = 21U;
+    text_expected_record.room_push_failures = 0U;
+    text_expected = make_authenticated_text_expected(
+        text_expected_record, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_authenticated_text_transition(
+        "room response creation failure keeps handler and session",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 1U, 0U, 0U, 11U,
+        21U, text_record, text_expected);
+
+    if (authenticated_text_transition_valid_count !=
+        kAuthenticatedTextTransitionValidVectors) {
+        failures.push_back(
+            "authenticated text transition valid vector count drifted");
+    }
+
+    size_t authenticated_text_transition_invalid_count = 0U;
+    auto expect_authenticated_text_transition_reject =
+        [&failures, &authenticated_text_transition_invalid_count](
+            const char *name, uint8_t server_type, uint8_t text_type,
+            size_t logical_len, uint8_t extra_ack_transmit_enabled,
+            uint8_t handler_reply_available, uint8_t ack_created_mask,
+            uint8_t response_created, uint32_t sender_timestamp,
+            const LoginAclRecord *input, AuthenticatedTextTransition *output) {
+            AuthenticatedTextTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++authenticated_text_transition_invalid_count;
+            if (d1l_meshcore_oracle_apply_authenticated_text_transition(
+                    server_type, text_type, logical_len,
+                    extra_ack_transmit_enabled, handler_reply_available,
+                    ack_created_mask, response_created, sender_timestamp, 21U,
+                    input, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " authenticated text reject changed output");
+            }
+        };
+    AuthenticatedTextTransition rejected_text_transition{};
+    text_record = make_login_acl_record(
+        0x51U, 0xA3U, 3U, 0x55U, 10U, 20U, 30U, 40U, 5U);
+    expect_authenticated_text_transition_reject(
+        "none text server", D1L_MESHCORE_ADVERT_TYPE_NONE,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "chat text server", D1L_MESHCORE_ADVERT_TYPE_CHAT,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "sensor text server", D1L_MESHCORE_ADVERT_TYPE_SENSOR,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "impossible shifted text type", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_MAX + 1U, 6U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "short logical text", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 4U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "overlong logical text", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN,
+        D1L_MESHCORE_ORACLE_MAX_REQUEST_RESPONSE_PLAINTEXT_BYTES + 1U, 0U,
+        0U, 0U, 0U, 11U, &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "noncanonical extra ACK setting", D1L_MESHCORE_ADVERT_TYPE_ROOM,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 2U, 0U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "noncanonical handler reply", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 2U, 0U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "noncanonical response creation", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 2U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "unknown ACK creation bit", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 4U, 0U, 11U,
+        &text_record, &rejected_text_transition);
+    LoginAclRecord invalid_path_text_record = text_record;
+    invalid_path_text_record.out_path_len = 0x61U;
+    expect_authenticated_text_transition_reject(
+        "invalid retained out path", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        &invalid_path_text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "null text record", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        nullptr, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "null text transition", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U, 0U, 0U, 11U,
+        &text_record, nullptr);
+    expect_authenticated_text_transition_reject(
+        "handler reply on duplicate", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 1U, 0U, 0U, 10U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "ACK created for CLI", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_SIMPLE, 0U, 11U, &text_record,
+        &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "response created without handler reply",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_CLI_DATA, 6U, 0U, 0U, 0U, 1U, 11U,
+        &text_record, &rejected_text_transition);
+    expect_authenticated_text_transition_reject(
+        "multi-ACK created without room direct attempt",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        D1L_MESHCORE_ORACLE_TEXT_TYPE_PLAIN, 6U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ACK_CREATE_MULTI, 0U, 11U, &text_record,
+        &rejected_text_transition);
+    if (authenticated_text_transition_invalid_count !=
+        kAuthenticatedTextTransitionInvalidVectors) {
+        failures.push_back(
+            "authenticated text transition invalid vector count drifted");
+    }
+
+    using LoginResponseDispatchTransition =
+        d1l_meshcore_oracle_login_response_dispatch_transition_t;
+    size_t login_response_dispatch_valid_count = 0U;
+    auto expect_login_response_dispatch =
+        [&failures, &login_acl_record_matches,
+         &login_response_dispatch_valid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t response_ready, size_t response_len,
+            uint8_t response_created, const LoginAclRecord &input,
+            uint8_t response_creation_attempted,
+            uint8_t response_creation_kind, uint8_t response_secret_source,
+            uint8_t room_push_schedule_committed,
+            uint8_t dispatch_attempted, uint8_t dispatch_mode) {
+            LoginResponseDispatchTransition transition{};
+            ++login_response_dispatch_valid_count;
+            if (!d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+                    server_type, is_route_flood, response_ready, response_len,
+                    response_created, &input, &transition) ||
+                !login_acl_record_matches(transition.record, input) ||
+                transition.response_ready != response_ready ||
+                transition.response_creation_attempted !=
+                    response_creation_attempted ||
+                transition.response_creation_kind != response_creation_kind ||
+                transition.response_secret_source != response_secret_source ||
+                transition.response_created != response_created ||
+                transition.room_push_schedule_committed !=
+                    room_push_schedule_committed ||
+                transition.room_push_delay_ms !=
+                    (room_push_schedule_committed == 1U
+                         ? D1L_MESHCORE_ORACLE_ROOM_PUSH_DELAY_MS
+                         : 0U) ||
+                transition.dispatch_attempted != dispatch_attempted ||
+                transition.dispatch_mode != dispatch_mode ||
+                transition.flood_transport_scope_required !=
+                    (dispatch_mode == D1L_MESHCORE_ORACLE_DISPATCH_FLOOD
+                         ? 1U
+                         : 0U) ||
+                transition.dispatch_delay_ms !=
+                    (dispatch_attempted == 1U
+                         ? D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_DELAY_MS
+                         : 0U)) {
+                failures.push_back(std::string(name) +
+                                   " login response dispatch changed");
+            }
+        };
+    LoginAclRecord login_dispatch_record = make_login_acl_record(
+        0x61U, 0xA3U, 3U, 0x66U, 11U, 21U, 31U, 41U, 5U);
+    expect_login_response_dispatch(
+        "repeater response not ready", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        0U, 0U, 0U, 0U, login_dispatch_record, 0U,
+        D1L_MESHCORE_ORACLE_CREATION_NONE,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "repeater flood PATH response", D1L_MESHCORE_ADVERT_TYPE_REPEATER,
+        1U, 1U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "repeater flood allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "repeater direct login response still floods",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "repeater direct allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    login_dispatch_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    expect_login_response_dispatch(
+        "repeater direct unknown path response floods",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_CALLER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+
+    login_dispatch_record.out_path_len = 3U;
+    expect_login_response_dispatch(
+        "room flood PATH response", D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "room push schedule survives PATH allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 1U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_PATH_RETURN,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    login_dispatch_record.out_path_len = 0x00U;
+    expect_login_response_dispatch(
+        "room direct zero-hop encoded path response",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U,
+        1U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    login_dispatch_record.out_path_len = 0x3FU;
+    expect_login_response_dispatch(
+        "room direct one-byte maximum allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    for (const auto &encoded_path_case :
+         std::array<std::pair<uint8_t, const char *>, 4U>{
+             std::pair<uint8_t, const char *>{
+                 0x40U, "room direct empty two-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x60U, "room direct maximum two-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x80U, "room direct empty three-byte encoded path"},
+             std::pair<uint8_t, const char *>{
+                 0x95U, "room direct maximum three-byte encoded path"}}) {
+        login_dispatch_record.out_path_len = encoded_path_case.first;
+        expect_login_response_dispatch(
+            encoded_path_case.second, D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+            D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+            login_dispatch_record, 1U,
+            D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+            D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+            D1L_MESHCORE_ORACLE_DISPATCH_DIRECT);
+    }
+    login_dispatch_record.out_path_len = D1L_MESHCORE_ORACLE_OUT_PATH_UNKNOWN;
+    expect_login_response_dispatch(
+        "room direct unknown path response floods",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 1U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 1U,
+        D1L_MESHCORE_ORACLE_DISPATCH_FLOOD);
+    expect_login_response_dispatch(
+        "room direct unknown path allocation failure",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        login_dispatch_record, 1U, D1L_MESHCORE_ORACLE_CREATION_DATAGRAM,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_STORED_ACL, 1U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    expect_login_response_dispatch(
+        "room response not ready does not schedule push",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        login_dispatch_record, 0U, D1L_MESHCORE_ORACLE_CREATION_NONE,
+        D1L_MESHCORE_ORACLE_LOGIN_SECRET_SOURCE_NONE, 0U, 0U,
+        D1L_MESHCORE_ORACLE_DISPATCH_NONE);
+    if (login_response_dispatch_valid_count !=
+        kLoginResponseDispatchValidVectors) {
+        failures.push_back(
+            "login response dispatch valid vector count drifted");
+    }
+
+    size_t login_response_dispatch_invalid_count = 0U;
+    auto expect_login_response_dispatch_reject =
+        [&failures, &login_response_dispatch_invalid_count](
+            const char *name, uint8_t server_type, uint8_t is_route_flood,
+            uint8_t response_ready, size_t response_len,
+            uint8_t response_created, const LoginAclRecord *input,
+            LoginResponseDispatchTransition *output) {
+            LoginResponseDispatchTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++login_response_dispatch_invalid_count;
+            if (d1l_meshcore_oracle_apply_login_response_dispatch_transition(
+                    server_type, is_route_flood, response_ready, response_len,
+                    response_created, input, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " login dispatch reject changed output");
+            }
+        };
+    LoginResponseDispatchTransition rejected_login_dispatch{};
+    login_dispatch_record.out_path_len = 3U;
+    expect_login_response_dispatch_reject(
+        "none login dispatch server", D1L_MESHCORE_ADVERT_TYPE_NONE, 0U, 0U,
+        0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "chat login dispatch server", D1L_MESHCORE_ADVERT_TYPE_CHAT, 0U, 0U,
+        0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "sensor login dispatch server", D1L_MESHCORE_ADVERT_TYPE_SENSOR, 0U,
+        0U, 0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical login route", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 2U,
+        0U, 0U, 0U, &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical response readiness",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 2U, 0U, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "noncanonical response creation",
+        D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 2U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "short ready response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U, 1U,
+        D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES - 1U, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "length on absent response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, D1L_MESHCORE_ORACLE_LOGIN_RESPONSE_BYTES, 0U,
+        &login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "creation on absent response", D1L_MESHCORE_ADVERT_TYPE_REPEATER, 0U,
+        0U, 0U, 1U, &login_dispatch_record, &rejected_login_dispatch);
+    LoginAclRecord invalid_login_dispatch_record = login_dispatch_record;
+    invalid_login_dispatch_record.out_path_len = 0x61U;
+    expect_login_response_dispatch_reject(
+        "oversize two-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    invalid_login_dispatch_record.out_path_len = 0x96U;
+    expect_login_response_dispatch_reject(
+        "oversize three-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    invalid_login_dispatch_record.out_path_len = 0xC0U;
+    expect_login_response_dispatch_reject(
+        "reserved four-byte login retained path",
+        D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U, 0U, 0U,
+        &invalid_login_dispatch_record, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "null login dispatch record", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U,
+        0U, 0U, nullptr, &rejected_login_dispatch);
+    expect_login_response_dispatch_reject(
+        "null login dispatch output", D1L_MESHCORE_ADVERT_TYPE_ROOM, 0U, 0U,
+        0U, 0U, &login_dispatch_record, nullptr);
+    if (login_response_dispatch_invalid_count !=
+        kLoginResponseDispatchInvalidVectors) {
+        failures.push_back(
+            "login response dispatch invalid vector count drifted");
+    }
+
+    using SignedAdvertDispatchTransition =
+        d1l_meshcore_oracle_signed_advert_dispatch_transition_t;
+    size_t signed_advert_dispatch_valid_count = 0U;
+    auto expect_signed_advert_dispatch =
+        [&failures, &signed_advert_dispatch_valid_count](
+            const char *name, uint8_t is_route_flood,
+            uint8_t payload_complete, uint8_t is_self, uint8_t already_seen,
+            uint8_t signature_verified, uint8_t do_not_retransmit,
+            uint8_t allow_forward, size_t app_data_len,
+            uint8_t path_hash_size, uint8_t path_hash_count,
+            uint8_t signature_check_invoked,
+            uint8_t signature_result_caller_supplied,
+            uint8_t advert_callback_invoked, uint8_t route_evaluated,
+            uint8_t path_append_eligible,
+            uint8_t retransmit_schedule_eligible, uint8_t action_class) {
+            SignedAdvertDispatchTransition transition{};
+            ++signed_advert_dispatch_valid_count;
+            if (!d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+                    is_route_flood, payload_complete, is_self, already_seen,
+                    signature_verified, do_not_retransmit, allow_forward,
+                    app_data_len, path_hash_size, path_hash_count,
+                    &transition) ||
+                transition.signature_check_invoked !=
+                    signature_check_invoked ||
+                transition.signature_result_caller_supplied !=
+                    signature_result_caller_supplied ||
+                transition.upstream_identity_parity_proven != 0U ||
+                transition.advert_callback_invoked !=
+                    advert_callback_invoked ||
+                transition.route_evaluated != route_evaluated ||
+                transition.path_append_eligible != path_append_eligible ||
+                transition.retransmit_schedule_eligible !=
+                    retransmit_schedule_eligible ||
+                transition.action_class != action_class) {
+                failures.push_back(std::string(name) +
+                                   " signed advert dispatch changed");
+            }
+        };
+    expect_signed_advert_dispatch(
+        "valid flood advert schedules retransmit", 1U, 1U, 0U, 0U, 1U,
+        0U, 1U, 0U, 1U, 0U, 1U, 1U, 1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "maximum app data and three-byte path fits", 1U, 1U, 0U, 0U, 1U,
+        0U, 1U, D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES, 3U, 20U, 1U, 1U,
+        1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "full three-byte path releases", 1U, 1U, 0U, 0U, 1U, 0U, 1U, 1U,
+        3U, 21U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "forward policy rejection releases", 1U, 1U, 0U, 0U, 1U, 0U,
+        0U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "do-not-retransmit advert releases", 1U, 1U, 0U, 0U, 1U, 1U,
+        1U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "direct advert invokes callback then releases", 0U, 1U, 0U, 0U,
+        1U, 0U, 1U, 1U, 1U, 0U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "invalid signature blocks callback", 1U, 1U, 0U, 0U, 0U, 0U,
+        1U, 1U, 1U, 0U, 1U, 1U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "self advert skips signature", 1U, 1U, 1U, 0U, 0U, 0U, 1U, 1U,
+        1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "seen advert skips signature", 1U, 1U, 0U, 1U, 0U, 0U, 1U, 1U,
+        1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "incomplete advert skips signature", 1U, 0U, 0U, 0U, 0U, 0U,
+        1U, 0U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    expect_signed_advert_dispatch(
+        "two-byte maximum appended path fits", 1U, 1U, 0U, 0U, 1U, 0U,
+        1U, 1U, 2U, 31U, 1U, 1U, 1U, 1U, 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RETRANSMIT_DELAYED);
+    expect_signed_advert_dispatch(
+        "one-byte count wrap rejected by D1L", 1U, 1U, 0U, 0U, 1U, 0U,
+        1U, 1U, 1U, 63U, 1U, 1U, 1U, 1U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_ACTION_RELEASE);
+    if (signed_advert_dispatch_valid_count !=
+        kSignedAdvertDispatchValidVectors) {
+        failures.push_back(
+            "signed advert dispatch valid vector count drifted");
+    }
+
+    size_t signed_advert_dispatch_invalid_count = 0U;
+    auto expect_signed_advert_dispatch_reject =
+        [&failures, &signed_advert_dispatch_invalid_count](
+            const char *name, uint8_t is_route_flood,
+            uint8_t payload_complete, uint8_t is_self, uint8_t already_seen,
+            uint8_t signature_verified, uint8_t do_not_retransmit,
+            uint8_t allow_forward, size_t app_data_len,
+            uint8_t path_hash_size, uint8_t path_hash_count,
+            SignedAdvertDispatchTransition *output) {
+            SignedAdvertDispatchTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++signed_advert_dispatch_invalid_count;
+            if (d1l_meshcore_oracle_apply_signed_advert_dispatch_transition(
+                    is_route_flood, payload_complete, is_self, already_seen,
+                    signature_verified, do_not_retransmit, allow_forward,
+                    app_data_len, path_hash_size, path_hash_count, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " advert dispatch reject changed output");
+            }
+        };
+    SignedAdvertDispatchTransition rejected_advert_dispatch{};
+    expect_signed_advert_dispatch_reject(
+        "noncanonical advert route", 2U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical payload completeness", 1U, 2U, 0U, 0U, 0U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical self flag", 1U, 1U, 2U, 0U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical seen flag", 1U, 1U, 0U, 2U, 0U, 0U, 0U, 0U, 1U,
+        0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical signature result", 1U, 1U, 0U, 0U, 2U, 0U, 0U, 0U,
+        1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical do-not-retransmit", 1U, 1U, 0U, 0U, 0U, 2U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "noncanonical forward policy", 1U, 1U, 0U, 0U, 0U, 0U, 2U, 0U,
+        1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overlong advert app data", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, 1U, 0U,
+        &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "zero advert path hash size", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        0U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "reserved four-byte advert path hash", 1U, 1U, 0U, 0U, 0U, 0U,
+        0U, 0U, 4U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overwide advert path hash", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        5U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "oversize two-byte advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        0U, 2U, 33U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "oversize three-byte advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U,
+        0U, 3U, 22U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "overcount advert path", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U, 1U,
+        64U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "direct nonzero path intercepted before advert switch", 0U, 1U,
+        0U, 0U, 0U, 0U, 0U, 0U, 1U, 1U,
+        &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "null advert dispatch output", 1U, 1U, 0U, 0U, 0U, 0U, 0U, 0U,
+        1U, 0U, nullptr);
+    expect_signed_advert_dispatch_reject(
+        "signature result on incomplete advert", 1U, 0U, 0U, 0U, 1U, 0U,
+        0U, 0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "signature result on self advert", 1U, 1U, 1U, 0U, 1U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    expect_signed_advert_dispatch_reject(
+        "signature result on seen advert", 1U, 1U, 0U, 1U, 1U, 0U, 0U,
+        0U, 1U, 0U, &rejected_advert_dispatch);
+    if (signed_advert_dispatch_invalid_count !=
+        kSignedAdvertDispatchInvalidVectors) {
+        failures.push_back(
+            "signed advert dispatch invalid vector count drifted");
+    }
+
+    using SignedAdvertSendTransition =
+        d1l_meshcore_oracle_signed_advert_send_transition_t;
+    size_t signed_advert_send_valid_count = 0U;
+    auto expect_signed_advert_send =
+        [&failures, &signed_advert_send_valid_count](
+            const char *name, size_t app_data_len,
+            uint8_t packet_pool_available, uint8_t send_mode,
+            uint8_t path_hash_size, uint8_t direct_encoded_path_len,
+            const SignedAdvertSendTransition &expected) {
+            SignedAdvertSendTransition transition{};
+            ++signed_advert_send_valid_count;
+            if (!d1l_meshcore_oracle_apply_signed_advert_send_transition(
+                    app_data_len, packet_pool_available, send_mode,
+                    path_hash_size, direct_encoded_path_len, &transition) ||
+                std::memcmp(&transition, &expected, sizeof(transition)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " signed advert send changed");
+            }
+        };
+    SignedAdvertSendTransition advert_send_expected{};
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_LENGTH_REJECTED;
+    expect_signed_advert_send(
+        "oversize advert rejects before allocation",
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES + 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+
+    advert_send_expected = {};
+    advert_send_expected.app_length_accepted = 1U;
+    advert_send_expected.packet_allocation_attempted = 1U;
+    advert_send_expected.event_full_signaled = 1U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_POOL_EMPTY;
+    expect_signed_advert_send(
+        "packet pool empty stops before rtc and signature", 0U, 0U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+
+    SignedAdvertSendTransition created_advert_send{};
+    created_advert_send.app_length_accepted = 1U;
+    created_advert_send.packet_allocation_attempted = 1U;
+    created_advert_send.packet_created = 1U;
+    created_advert_send.rtc_read = 1U;
+    created_advert_send.signature_created = 1U;
+    created_advert_send.route_preparation_attempted = 1U;
+
+    advert_send_expected = created_advert_send;
+    advert_send_expected.route_bits_written = 1U;
+    advert_send_expected.seen_marked = 1U;
+    advert_send_expected.queue_scheduled = 1U;
+    advert_send_expected.queue_priority = 3U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "empty advert flood size one queues priority three", 0U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "maximum advert flood size three queues priority three",
+        D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 3U, 0U,
+        advert_send_expected);
+
+    advert_send_expected.transport_codes_written = 1U;
+    expect_signed_advert_send(
+        "transport flood size one writes codes before queue", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 1U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "transport flood size three writes codes before queue", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 3U, 0U,
+        advert_send_expected);
+
+    advert_send_expected = created_advert_send;
+    advert_send_expected.caller_retains_packet = 1U;
+    advert_send_expected.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_FLOOD_RETAINED;
+    expect_signed_advert_send(
+        "invalid zero flood hash retains caller packet", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 0U, 0U,
+        advert_send_expected);
+    expect_signed_advert_send(
+        "invalid four-byte flood hash retains caller packet", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 4U, 0U,
+        advert_send_expected);
+
+    SignedAdvertSendTransition direct_advert_send = created_advert_send;
+    direct_advert_send.route_bits_written = 1U;
+    direct_advert_send.path_copy_attempted = 1U;
+    direct_advert_send.seen_marked = 1U;
+    direct_advert_send.queue_scheduled = 1U;
+    direct_advert_send.queue_priority = 0U;
+    direct_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "direct one-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x3FU,
+        direct_advert_send);
+    expect_signed_advert_send(
+        "direct two-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x60U,
+        direct_advert_send);
+    expect_signed_advert_send(
+        "direct three-byte maximum encoded path queues", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U, 0x95U,
+        direct_advert_send);
+
+    SignedAdvertSendTransition invalid_direct_advert_send =
+        created_advert_send;
+    invalid_direct_advert_send.route_bits_written = 1U;
+    invalid_direct_advert_send.path_copy_attempted = 1U;
+    invalid_direct_advert_send.seen_marked = 1U;
+    invalid_direct_advert_send.packet_released = 1U;
+    invalid_direct_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_INVALID_DIRECT_RELEASED;
+    for (const auto &invalid_direct_path :
+         std::array<std::pair<uint8_t, const char *>, 4U>{
+             std::pair<uint8_t, const char *>{
+                 0x61U, "invalid two-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0x96U, "invalid three-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0xC0U, "reserved four-byte direct path releases"},
+             std::pair<uint8_t, const char *>{
+                 0xFFU, "reserved maximum direct path releases"}}) {
+        expect_signed_advert_send(
+            invalid_direct_path.second, 1U, 1U,
+            D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 0U,
+            invalid_direct_path.first, invalid_direct_advert_send);
+    }
+
+    SignedAdvertSendTransition zero_hop_advert_send = created_advert_send;
+    zero_hop_advert_send.route_bits_written = 1U;
+    zero_hop_advert_send.seen_marked = 1U;
+    zero_hop_advert_send.queue_scheduled = 1U;
+    zero_hop_advert_send.queue_priority = 0U;
+    zero_hop_advert_send.terminal_stage =
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_STAGE_QUEUED;
+    expect_signed_advert_send(
+        "zero-hop advert queues priority zero", 1U, 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 0U,
+        zero_hop_advert_send);
+    if (signed_advert_send_valid_count != kSignedAdvertSendValidVectors) {
+        failures.push_back("signed advert send valid vector count drifted");
+    }
+
+    size_t signed_advert_send_invalid_count = 0U;
+    auto expect_signed_advert_send_reject =
+        [&failures, &signed_advert_send_invalid_count](
+            const char *name, uint8_t packet_pool_available,
+            uint8_t send_mode, uint8_t path_hash_size,
+            uint8_t direct_encoded_path_len,
+            SignedAdvertSendTransition *output) {
+            SignedAdvertSendTransition before{};
+            if (output != nullptr) {
+                std::memset(output, 0xA5, sizeof(*output));
+                before = *output;
+            }
+            ++signed_advert_send_invalid_count;
+            if (d1l_meshcore_oracle_apply_signed_advert_send_transition(
+                    1U, packet_pool_available, send_mode, path_hash_size,
+                    direct_encoded_path_len, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, &before, sizeof(*output)) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " advert send reject changed output");
+            }
+        };
+    SignedAdvertSendTransition rejected_advert_send{};
+    expect_signed_advert_send_reject(
+        "noncanonical packet pool result", 2U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero advert send mode", 1U, 0U, 0U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "unknown advert send mode", 1U, 5U, 0U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "flood with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_FLOOD, 1U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "transport flood with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_TRANSPORT_FLOOD, 1U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "direct with flood hash input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_DIRECT, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero-hop with flood hash input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 1U, 0U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "zero-hop with direct path input", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 1U,
+        &rejected_advert_send);
+    expect_signed_advert_send_reject(
+        "null advert send output", 1U,
+        D1L_MESHCORE_ORACLE_ADVERT_SEND_ZERO_HOP, 0U, 0U, nullptr);
+    if (signed_advert_send_invalid_count != kSignedAdvertSendInvalidVectors) {
+        failures.push_back("signed advert send invalid vector count drifted");
+    }
+
+    constexpr uint8_t dm_destination_hash = 0xA1U;
+    constexpr uint8_t dm_source_hash = 0xB2U;
+    const std::array<uint8_t, 2U> short_dm_text = {'d', 'm'};
+    const std::array<uint8_t, 20U> expected_attempt_zero_payload = {
+        0xA1U, 0xB2U, 0x44U, 0xE4U, 0x29U, 0x8FU, 0xDCU,
+        0x7DU, 0xA6U, 0x2CU, 0x81U, 0xABU, 0x4EU, 0x54U,
+        0xC6U, 0x7DU, 0x6BU, 0xFFU, 0xE7U, 0x3EU};
+    const std::array<uint8_t, 20U> expected_attempt_255_payload = {
+        0xA1U, 0xB2U, 0xD8U, 0xBDU, 0x8BU, 0x6CU, 0x9BU,
+        0x9DU, 0x88U, 0xEAU, 0x57U, 0x12U, 0x65U, 0xB1U,
+        0xF0U, 0x89U, 0x17U, 0xA3U, 0x67U, 0x4FU};
+    const std::array<uint8_t, 32U> expected_dm_matrix_sha256 = {
+        0x65U, 0xF8U, 0x44U, 0xF4U, 0x2BU, 0x01U, 0xF8U, 0x80U,
+        0x58U, 0x55U, 0x62U, 0x84U, 0x9FU, 0x4BU, 0xADU, 0x51U,
+        0x1FU, 0x6AU, 0x0AU, 0xFAU, 0x59U, 0x90U, 0x86U, 0xBEU,
+        0xF9U, 0x42U, 0x95U, 0x58U, 0x66U, 0x59U, 0x06U, 0xE1U};
+    const std::array<uint8_t, 32U> expected_max_normal_dm_sha256 = {
+        0xA3U, 0xB9U, 0x61U, 0xD2U, 0xEBU, 0xE7U, 0x11U, 0xBAU,
+        0xB9U, 0x35U, 0x4AU, 0x63U, 0x75U, 0xF7U, 0x14U, 0x2EU,
+        0xE5U, 0x20U, 0x4BU, 0x6DU, 0xCAU, 0x65U, 0x80U, 0x74U,
+        0xA1U, 0xEFU, 0x67U, 0xB7U, 0x65U, 0x02U, 0x40U, 0xE7U};
+    const std::array<uint8_t, 32U> expected_max_extended_dm_sha256 = {
+        0x26U, 0xC5U, 0xD0U, 0x36U, 0xE5U, 0x2FU, 0xDDU, 0x54U,
+        0xC3U, 0x19U, 0x80U, 0xF3U, 0x7EU, 0xB6U, 0x6CU, 0x5CU,
+        0x08U, 0x82U, 0x33U, 0x71U, 0x09U, 0x47U, 0x20U, 0x52U,
+        0x5AU, 0x30U, 0x45U, 0xA3U, 0x54U, 0x4DU, 0x3DU, 0xF2U};
+
+    auto verify_dm_roundtrip =
+        [&failures, &full_secret](
+            const char *name, uint32_t timestamp, uint8_t attempt,
+            const uint8_t *text, std::size_t text_len, bool flood,
+            const uint8_t *expected_payload, std::size_t expected_payload_len,
+            const std::array<uint8_t, 32U> *expected_payload_sha,
+            SHA256 *matrix_sha) {
+            d1l_meshcore_oracle_packet_t packet{};
+            if (!d1l_meshcore_oracle_create_dm_packet(
+                    dm_destination_hash, dm_source_hash, full_secret.data(),
+                    timestamp, attempt, text, text_len, &packet) ||
+                packet.header !=
+                    static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) ||
+                (expected_payload != nullptr &&
+                 (packet.payload_len != expected_payload_len ||
+                  std::memcmp(packet.payload, expected_payload,
+                              expected_payload_len) != 0))) {
+                failures.push_back(std::string(name) +
+                                   " DM create vector changed");
+                return;
+            }
+            if (expected_payload_sha != nullptr) {
+                std::array<uint8_t, 32U> digest{};
+                SHA256 payload_sha;
+                payload_sha.update(packet.payload, packet.payload_len);
+                payload_sha.finalize(digest.data(), digest.size());
+                if (digest != *expected_payload_sha) {
+                    failures.push_back(std::string(name) +
+                                       " DM payload digest changed");
+                    return;
+                }
+            }
+            if (matrix_sha != nullptr) {
+                matrix_sha->update(packet.payload, packet.payload_len);
+            }
+
+            uint8_t priority = 0xA5U;
+            const bool routed =
+                flood ? d1l_meshcore_oracle_prepare_flood(
+                            &packet, 1U, 0U, nullptr, &priority)
+                      : d1l_meshcore_oracle_prepare_direct(
+                            &packet, nullptr, 0U, &priority);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!routed || priority != (flood ? 1U : 0U) ||
+                !d1l_meshcore_oracle_packet_encode(
+                    &packet, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded)) {
+                failures.push_back(std::string(name) +
+                                   " DM wire roundtrip failed");
+                return;
+            }
+
+            uint32_t parsed_timestamp = 0U;
+            uint8_t parsed_attempt = 0U;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+                parsed_text{};
+            size_t parsed_text_len = 0U;
+            if (!d1l_meshcore_oracle_parse_dm_packet(
+                    &decoded, dm_destination_hash, dm_source_hash,
+                    full_secret.data(), &parsed_timestamp, &parsed_attempt,
+                    parsed_text.data(), parsed_text.size(), &parsed_text_len) ||
+                parsed_timestamp != timestamp || parsed_attempt != attempt ||
+                parsed_text_len != text_len ||
+                (text_len > 0U &&
+                 std::memcmp(parsed_text.data(), text, text_len) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " DM parse vector changed");
+            }
+        };
+
+    SHA256 dm_matrix_sha;
+    for (unsigned int attempt_value = 0U; attempt_value <= 0xFFU;
+         ++attempt_value) {
+        const uint8_t attempt = static_cast<uint8_t>(attempt_value);
+        const uint32_t timestamp = 0x12345678U + attempt_value;
+        const uint8_t *text = short_dm_text.data();
+        const size_t text_len = attempt == 0U ? 0U : short_dm_text.size();
+        const uint8_t *expected_payload = nullptr;
+        size_t expected_payload_len = 0U;
+        if (attempt == 0U) {
+            expected_payload = expected_attempt_zero_payload.data();
+            expected_payload_len = expected_attempt_zero_payload.size();
+        } else if (attempt == 0xFFU) {
+            expected_payload = expected_attempt_255_payload.data();
+            expected_payload_len = expected_attempt_255_payload.size();
+        }
+        verify_dm_roundtrip("attempt matrix", timestamp, attempt, text,
+                            text_len, (attempt & 1U) != 0U, expected_payload,
+                            expected_payload_len, nullptr, &dm_matrix_sha);
+    }
+    std::array<uint8_t, 32U> dm_matrix_digest{};
+    dm_matrix_sha.finalize(dm_matrix_digest.data(), dm_matrix_digest.size());
+    if (dm_matrix_digest != expected_dm_matrix_sha256) {
+        failures.push_back("DM attempt 0-255 matrix digest changed");
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+        maximum_normal_dm_text{};
+    for (size_t index = 0U; index < maximum_normal_dm_text.size(); ++index) {
+        maximum_normal_dm_text[index] =
+            static_cast<uint8_t>('A' + (index % 26U));
+    }
+    verify_dm_roundtrip(
+        "maximum normal text", 0x89ABCDEFU, 3U,
+        maximum_normal_dm_text.data(), maximum_normal_dm_text.size(), false,
+        nullptr, 0U, &expected_max_normal_dm_sha256, nullptr);
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES>
+        maximum_extended_dm_text{};
+    for (size_t index = 0U; index < maximum_extended_dm_text.size(); ++index) {
+        maximum_extended_dm_text[index] =
+            static_cast<uint8_t>('a' + (index % 26U));
+    }
+    verify_dm_roundtrip(
+        "maximum extended text", 0x10203040U, 0xFFU,
+        maximum_extended_dm_text.data(), maximum_extended_dm_text.size(), true,
+        nullptr, 0U, &expected_max_extended_dm_sha256, nullptr);
+
+    const std::array<uint8_t, 32U> expected_aligned_dm_matrix_sha256 = {
+        0x48U, 0xE6U, 0x08U, 0x10U, 0x6CU, 0x57U, 0x89U, 0x95U,
+        0x00U, 0x81U, 0xE3U, 0x1BU, 0x15U, 0x0FU, 0x27U, 0xF6U,
+        0x7DU, 0xD9U, 0xD3U, 0x3FU, 0x5BU, 0x4CU, 0xAEU, 0x8EU,
+        0xF1U, 0x18U, 0x50U, 0x2FU, 0x0AU, 0x77U, 0x7EU, 0x38U};
+    SHA256 aligned_dm_matrix_sha;
+    for (size_t block_count = 1U; block_count <= 10U; ++block_count) {
+        std::vector<uint8_t> aligned_text(block_count * 16U - 5U);
+        for (size_t index = 0U; index < aligned_text.size(); ++index) {
+            aligned_text[index] = static_cast<uint8_t>(
+                'A' + ((index + block_count) % 26U));
+        }
+        verify_dm_roundtrip(
+            "exact-block normal text",
+            static_cast<uint32_t>(0xA0B0C000U + block_count),
+            static_cast<uint8_t>(block_count & 3U), aligned_text.data(),
+            aligned_text.size(), false, nullptr, 0U, nullptr,
+            &aligned_dm_matrix_sha);
+    }
+    std::array<uint8_t, 32U> aligned_dm_matrix_digest{};
+    aligned_dm_matrix_sha.finalize(aligned_dm_matrix_digest.data(),
+                                   aligned_dm_matrix_digest.size());
+    if (aligned_dm_matrix_digest != expected_aligned_dm_matrix_sha256) {
+        failures.push_back("exact-block normal DM matrix digest changed");
+    }
+
+    d1l_meshcore_oracle_packet_t valid_dm{};
+    if (!d1l_meshcore_oracle_create_dm_packet(
+            dm_destination_hash, dm_source_hash, full_secret.data(),
+            0x55667788U, 3U, short_dm_text.data(), short_dm_text.size(),
+            &valid_dm)) {
+        failures.push_back("DM negative-vector fixture creation failed");
+    }
+    auto expect_dm_create_reject =
+        [&failures, &valid_dm](const char *name, const uint8_t *secret,
+                               uint8_t attempt, const uint8_t *text,
+                               size_t text_len,
+                               d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_dm;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_dm_packet(
+                    dm_destination_hash, dm_source_hash, secret, 0x55667788U,
+                    attempt, text, text_len, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " DM create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_dm{};
+    expect_dm_create_reject("null DM secret", nullptr, 0U,
+                            short_dm_text.data(), short_dm_text.size(),
+                            &rejected_dm);
+    expect_dm_create_reject("null DM text", full_secret.data(), 0U, nullptr,
+                            0U, &rejected_dm);
+    const std::array<uint8_t, 3U> embedded_null_dm_text = {'a', 0U, 'b'};
+    expect_dm_create_reject(
+        "embedded NUL DM text", full_secret.data(), 0U,
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        &rejected_dm);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES + 1U>
+        oversized_normal_dm_text{};
+    oversized_normal_dm_text.fill('n');
+    expect_dm_create_reject(
+        "oversized normal DM text", full_secret.data(), 3U,
+        oversized_normal_dm_text.data(), oversized_normal_dm_text.size(),
+        &rejected_dm);
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 1U>
+        oversized_extended_dm_text{};
+    oversized_extended_dm_text.fill('e');
+    expect_dm_create_reject(
+        "oversized extended DM text", full_secret.data(), 4U,
+        oversized_extended_dm_text.data(), oversized_extended_dm_text.size(),
+        &rejected_dm);
+    expect_dm_create_reject("null DM output", full_secret.data(), 0U,
+                            short_dm_text.data(), short_dm_text.size(), nullptr);
+
+    auto expect_dm_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, uint8_t source_hash,
+                    const uint8_t *secret, uint32_t *timestamp,
+                    uint8_t *attempt, uint8_t *text, size_t text_capacity,
+                    size_t *text_len) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+                text_sentinel{};
+            text_sentinel.fill(0xD7U);
+            if (timestamp != nullptr) {
+                *timestamp = 0xAAAAAAAAU;
+            }
+            if (attempt != nullptr) {
+                *attempt = 0xCCU;
+            }
+            if (text != nullptr) {
+                std::memcpy(text, text_sentinel.data(), text_capacity);
+            }
+            if (text_len != nullptr) {
+                *text_len = 0xBEEFU;
+            }
+            if (d1l_meshcore_oracle_parse_dm_packet(
+                    packet, destination_hash, source_hash, secret, timestamp,
+                    attempt, text, text_capacity, text_len) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (attempt != nullptr && *attempt != 0xCCU) ||
+                (text != nullptr &&
+                 std::memcmp(text, text_sentinel.data(), text_capacity) != 0) ||
+                (text_len != nullptr && *text_len != 0xBEEFU)) {
+                failures.push_back(std::string(name) +
+                                   " DM parse reject changed output");
+            }
+        };
+    auto make_raw_dm_packet =
+        [&full_secret](const uint8_t *plaintext,
+                       size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT);
+            packet.payload[0] = dm_destination_hash;
+            packet.payload[1] = dm_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+
+    uint32_t rejected_dm_timestamp = 0U;
+    uint8_t rejected_dm_attempt = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES>
+        rejected_dm_text{};
+    size_t rejected_dm_text_len = 0U;
+    expect_dm_parse_reject(
+        "null DM packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM parse secret", &valid_dm, dm_destination_hash, dm_source_hash,
+        nullptr, &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM timestamp", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), nullptr, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM attempt", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, nullptr,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM text output", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        nullptr, rejected_dm_text.size(), &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "null DM text length", &valid_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(), nullptr);
+
+    d1l_meshcore_oracle_packet_t malformed_dm = valid_dm;
+    malformed_dm.header |= 0x40U;
+    expect_dm_parse_reject(
+        "future-version DM", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_GRP_TXT << PH_TYPE_SHIFT);
+    expect_dm_parse_reject(
+        "non-DM payload type", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload_len = 19U;
+    expect_dm_parse_reject(
+        "truncated DM payload", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[malformed_dm.payload_len++] = 0U;
+    expect_dm_parse_reject(
+        "non-block DM ciphertext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM destination hash", &valid_dm,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM source hash", &valid_dm, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(),
+        &rejected_dm_timestamp, &rejected_dm_attempt, rejected_dm_text.data(),
+        rejected_dm_text.size(), &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "wrong DM secret", &valid_dm, dm_destination_hash, dm_source_hash,
+        public_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[2] ^= 0x01U;
+    expect_dm_parse_reject(
+        "tampered DM MAC", &malformed_dm, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_dm_timestamp, &rejected_dm_attempt,
+        rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm = valid_dm;
+    malformed_dm.payload[4] ^= 0x01U;
+    expect_dm_parse_reject(
+        "tampered DM ciphertext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+
+    std::array<uint8_t, 16U> malformed_dm_plaintext{};
+    malformed_dm_plaintext[4] = 0x04U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "unsupported DM text type", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    std::array<uint8_t, 176U> unterminated_overlong_dm_plaintext{};
+    unterminated_overlong_dm_plaintext.fill('x');
+    unterminated_overlong_dm_plaintext[4] = 0U;
+    malformed_dm = make_raw_dm_packet(
+        unterminated_overlong_dm_plaintext.data(),
+        unterminated_overlong_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "unterminated overlong DM", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 5U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "mismatched extended DM attempt", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 1U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "nonzero normal DM padding", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    malformed_dm_plaintext.fill(0U);
+    malformed_dm_plaintext[5] = 'x';
+    malformed_dm_plaintext[7] = 4U;
+    malformed_dm_plaintext[8] = 1U;
+    malformed_dm = make_raw_dm_packet(malformed_dm_plaintext.data(),
+                                      malformed_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "nonzero extended DM padding", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+
+    std::array<uint8_t, 5U + D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES + 2U>
+        overlong_normal_dm_plaintext{};
+    overlong_normal_dm_plaintext.fill('n');
+    overlong_normal_dm_plaintext[4] = 0U;
+    overlong_normal_dm_plaintext.back() = 0U;
+    malformed_dm = make_raw_dm_packet(overlong_normal_dm_plaintext.data(),
+                                      overlong_normal_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "overlong normal DM plaintext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    std::array<uint8_t,
+               5U + D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 3U>
+        overlong_extended_dm_plaintext{};
+    overlong_extended_dm_plaintext.fill('e');
+    overlong_extended_dm_plaintext[4] = 0U;
+    overlong_extended_dm_plaintext[overlong_extended_dm_plaintext.size() - 2U] =
+        0U;
+    overlong_extended_dm_plaintext.back() = 4U;
+    malformed_dm = make_raw_dm_packet(overlong_extended_dm_plaintext.data(),
+                                      overlong_extended_dm_plaintext.size());
+    expect_dm_parse_reject(
+        "overlong extended DM plaintext", &malformed_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), rejected_dm_text.size(),
+        &rejected_dm_text_len);
+    expect_dm_parse_reject(
+        "undersized DM text output", &valid_dm, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_dm_timestamp,
+        &rejected_dm_attempt, rejected_dm_text.data(), 1U,
+        &rejected_dm_text_len);
+
+    const std::array<std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>,
+                     kExpectedAckDefinedBodyVectors>
+        expected_dm_acks = {{
+            {0xC9U, 0xD9U, 0xF2U, 0x07U, 0x00U, 0x11U},
+            {0x4EU, 0xD9U, 0x51U, 0x6BU, 0x00U, 0x22U},
+            {0x21U, 0x3FU, 0xBDU, 0x0CU, 0x04U, 0x33U},
+            {0x8FU, 0xE7U, 0xCDU, 0x95U, 0xFFU, 0x44U},
+        }};
+    struct ExpectedAckInput {
+        uint32_t timestamp;
+        uint8_t attempt;
+        const uint8_t *text;
+        size_t text_len;
+        uint8_t uniqueness_byte;
+    };
+    const std::array<ExpectedAckInput, kExpectedAckDefinedBodyVectors>
+        expected_ack_inputs = {{
+            {0x01020304U, 0U, short_dm_text.data(), 0U, 0x11U},
+            {0x89ABCDEFU, 3U, maximum_normal_dm_text.data(),
+             maximum_normal_dm_text.size(), 0x22U},
+            {0x10203040U, 4U, short_dm_text.data(), short_dm_text.size(),
+             0x33U},
+            {0x55667788U, 0xFFU, maximum_extended_dm_text.data(),
+             maximum_extended_dm_text.size(), 0x44U},
+        }};
+    for (size_t index = 0U; index < expected_ack_inputs.size(); ++index) {
+        const ExpectedAckInput &input = expected_ack_inputs[index];
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+            expected_hash{};
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> ack{};
+        if (!d1l_meshcore_oracle_dm_expected_ack_hash(
+                kSignedAdvertPublicKey.data(), input.timestamp, input.attempt,
+                input.text, input.text_len, expected_hash.data()) ||
+            std::memcmp(expected_hash.data(), expected_dm_acks[index].data(),
+                        expected_hash.size()) != 0 ||
+            !d1l_meshcore_oracle_dm_expected_ack(
+                kSignedAdvertPublicKey.data(), input.timestamp, input.attempt,
+                input.text, input.text_len, input.uniqueness_byte,
+                ack.data()) ||
+            ack != expected_dm_acks[index]) {
+            failures.push_back("expected DM ACK vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 11U> aligned_expected_ack_text{};
+    for (size_t index = 0U; index < aligned_expected_ack_text.size(); ++index) {
+        aligned_expected_ack_text[index] =
+            static_cast<uint8_t>('A' + ((index + 1U) % 26U));
+    }
+    const std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        expected_aligned_ack_hash = {0x9BU, 0xECU, 0x2EU, 0x94U};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        aligned_ack_hash{};
+    if (!d1l_meshcore_oracle_dm_expected_ack_hash(
+            kSignedAdvertPublicKey.data(), 0xA0B0C001U, 1U,
+            aligned_expected_ack_text.data(), aligned_expected_ack_text.size(),
+            aligned_ack_hash.data()) ||
+        aligned_ack_hash != expected_aligned_ack_hash) {
+        failures.push_back("exact-block expected ACK hash vector changed");
+    }
+
+    auto expect_expected_ack_hash_reject =
+        [&failures](const char *name, const uint8_t *sender_public_key,
+                    const uint8_t *text, size_t text_len, uint8_t *output) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+                sentinel{};
+            sentinel.fill(0xC2U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_dm_expected_ack_hash(
+                    sender_public_key, 0x01020304U, 0U, text, text_len,
+                    output) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), sentinel.size()) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " expected ACK hash reject changed output");
+            }
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_EXPECTED_ACK_BYTES>
+        rejected_expected_ack_hash{};
+    expect_expected_ack_hash_reject(
+        "null expected ACK hash sender", nullptr, short_dm_text.data(),
+        short_dm_text.size(), rejected_expected_ack_hash.data());
+    expect_expected_ack_hash_reject(
+        "embedded NUL expected ACK hash", kSignedAdvertPublicKey.data(),
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        rejected_expected_ack_hash.data());
+    expect_expected_ack_hash_reject(
+        "null expected ACK hash output", kSignedAdvertPublicKey.data(),
+        short_dm_text.data(), short_dm_text.size(), nullptr);
+
+    auto expect_expected_ack_reject =
+        [&failures](
+            const char *name, const uint8_t *sender_public_key,
+            uint8_t attempt, const uint8_t *text, size_t text_len,
+            uint8_t *output) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> sentinel{};
+            sentinel.fill(0xD3U);
+            if (output != nullptr) {
+                std::memcpy(output, sentinel.data(), sentinel.size());
+            }
+            if (d1l_meshcore_oracle_dm_expected_ack(
+                    sender_public_key, 0x01020304U, attempt, text, text_len,
+                    0x55U, output) ||
+                (output != nullptr &&
+                 std::memcmp(output, sentinel.data(), sentinel.size()) != 0)) {
+                failures.push_back(std::string(name) +
+                                   " expected ACK reject changed output");
+            }
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+        rejected_expected_ack{};
+    expect_expected_ack_reject(
+        "null sender public key", nullptr, 0U, short_dm_text.data(),
+        short_dm_text.size(), rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "null expected ACK text", kSignedAdvertPublicKey.data(), 0U, nullptr,
+        0U, rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "embedded NUL expected ACK text", kSignedAdvertPublicKey.data(), 0U,
+        embedded_null_dm_text.data(), embedded_null_dm_text.size(),
+        rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "oversized normal expected ACK text", kSignedAdvertPublicKey.data(),
+        3U, oversized_normal_dm_text.data(), oversized_normal_dm_text.size(),
+        rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "oversized extended expected ACK text", kSignedAdvertPublicKey.data(),
+        4U, oversized_extended_dm_text.data(),
+        oversized_extended_dm_text.size(), rejected_expected_ack.data());
+    expect_expected_ack_reject(
+        "null expected ACK output", kSignedAdvertPublicKey.data(), 0U,
+        short_dm_text.data(), short_dm_text.size(), nullptr);
+    expect_expected_ack_reject(
+        "undefined exact-block ACK body", kSignedAdvertPublicKey.data(), 1U,
+        aligned_expected_ack_text.data(), aligned_expected_ack_text.size(),
+        rejected_expected_ack.data());
+
+    struct AckPathInput {
+        uint8_t encoded_path_len;
+        std::vector<uint8_t> path;
+    };
+    std::vector<uint8_t> maximum_two_byte_ack_path(
+        D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES);
+    for (size_t index = 0U; index < maximum_two_byte_ack_path.size(); ++index) {
+        maximum_two_byte_ack_path[index] =
+            static_cast<uint8_t>(index ^ 0x5AU);
+    }
+    std::vector<uint8_t> maximum_three_byte_ack_path(63U);
+    for (size_t index = 0U; index < maximum_three_byte_ack_path.size();
+         ++index) {
+        maximum_three_byte_ack_path[index] =
+            static_cast<uint8_t>(0x80U + index);
+    }
+    const std::array<AckPathInput, kExpectedAckPathRoundtripVectors>
+        ack_path_inputs = {{
+            {0x00U, {}},
+            {0x04U, {0x10U, 0x20U, 0x30U, 0x40U}},
+            {0x60U, maximum_two_byte_ack_path},
+            {0x95U, maximum_three_byte_ack_path},
+        }};
+    const std::array<uint8_t, 20U> expected_zero_ack_path_payload = {
+        0xA1U, 0xB2U, 0x13U, 0x4FU, 0xEFU, 0xC0U, 0xFCU,
+        0xA6U, 0x37U, 0x09U, 0x1BU, 0x78U, 0x9CU, 0x1AU,
+        0x3AU, 0xB7U, 0x50U, 0x3CU, 0xBFU, 0xD3U};
+    const std::array<uint8_t, 32U> expected_ack_path_matrix_sha256 = {
+        0xFCU, 0x1DU, 0x2DU, 0xF3U, 0xFCU, 0x38U, 0x75U, 0xC8U,
+        0x0DU, 0xFAU, 0x57U, 0x6FU, 0x0CU, 0x43U, 0xA7U, 0xE8U,
+        0xD1U, 0x68U, 0x83U, 0x0FU, 0x69U, 0x01U, 0x69U, 0xE1U,
+        0x33U, 0x9AU, 0x77U, 0xB9U, 0xBFU, 0xE8U, 0xB1U, 0xADU};
+    SHA256 ack_path_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_ack_path{};
+    for (size_t index = 0U; index < ack_path_inputs.size(); ++index) {
+        const AckPathInput &input = ack_path_inputs[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_dm_ack_path_packet(
+                dm_destination_hash, dm_source_hash, full_secret.data(),
+                input.encoded_path_len,
+                input.path.empty() ? nullptr : input.path.data(),
+                expected_dm_acks[index].data(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) ||
+            (index == 0U &&
+             (packet.payload_len != expected_zero_ack_path_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_zero_ack_path_payload.data(),
+                          expected_zero_ack_path_payload.size()) != 0))) {
+            failures.push_back("DM ACK+PATH create vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+        ack_path_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 1U) {
+            valid_ack_path = packet;
+        }
+
+        uint8_t priority = 0xA5U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!d1l_meshcore_oracle_prepare_flood(
+                &packet, 1U, 0U, nullptr, &priority) || priority != 2U ||
+            !d1l_meshcore_oracle_packet_encode(
+                &packet, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                               &decoded)) {
+            failures.push_back("DM ACK+PATH wire roundtrip failed " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint8_t parsed_encoded_path_len = 0xFFU;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+            parsed_path{};
+        size_t parsed_path_bytes = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES> parsed_ack{};
+        if (!d1l_meshcore_oracle_parse_dm_ack_path_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), &parsed_encoded_path_len,
+                parsed_path.data(), parsed_path.size(), &parsed_path_bytes,
+                parsed_ack.data()) ||
+            parsed_encoded_path_len != input.encoded_path_len ||
+            parsed_path_bytes != input.path.size() ||
+            (!input.path.empty() &&
+             std::memcmp(parsed_path.data(), input.path.data(),
+                         input.path.size()) != 0) ||
+            parsed_ack != expected_dm_acks[index]) {
+            failures.push_back("DM ACK+PATH parse vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 32U> ack_path_matrix_digest{};
+    ack_path_matrix_sha.finalize(ack_path_matrix_digest.data(),
+                                 ack_path_matrix_digest.size());
+    if (ack_path_matrix_digest != expected_ack_path_matrix_sha256) {
+        failures.push_back("DM ACK+PATH matrix digest changed");
+    }
+
+    auto expect_ack_path_create_reject =
+        [&failures, &valid_ack_path](
+            const char *name, const uint8_t *secret,
+            uint8_t encoded_path_len, const uint8_t *path,
+            const uint8_t *ack, d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_ack_path;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_dm_ack_path_packet(
+                    dm_destination_hash, dm_source_hash, secret,
+                    encoded_path_len, path, ack, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " ACK+PATH create reject changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t rejected_ack_path{};
+    const std::array<uint8_t, 1U> one_byte_path = {0x42U};
+    expect_ack_path_create_reject(
+        "null ACK+PATH secret", nullptr, 0U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "reserved ACK+PATH hash size", full_secret.data(), 0xC0U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null nonempty ACK+PATH", full_secret.data(), 0x01U, nullptr,
+        expected_dm_acks[0].data(), &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null ACK+PATH ACK", full_secret.data(), 0x01U,
+        one_byte_path.data(), nullptr, &rejected_ack_path);
+    expect_ack_path_create_reject(
+        "null ACK+PATH output", full_secret.data(), 0x01U,
+        one_byte_path.data(), expected_dm_acks[0].data(), nullptr);
+
+    auto expect_ack_path_parse_reject =
+        [&failures](
+            const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t destination_hash, uint8_t source_hash,
+            const uint8_t *secret, uint8_t *encoded_path_len,
+            uint8_t *path, size_t path_capacity, size_t *path_bytes,
+            uint8_t *ack) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+                path_sentinel{};
+            path_sentinel.fill(0xD5U);
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+                ack_sentinel{};
+            ack_sentinel.fill(0xE6U);
+            if (encoded_path_len != nullptr) {
+                *encoded_path_len = 0xAAU;
+            }
+            if (path != nullptr) {
+                std::memcpy(path, path_sentinel.data(), path_capacity);
+            }
+            if (path_bytes != nullptr) {
+                *path_bytes = 0xBEEFU;
+            }
+            if (ack != nullptr) {
+                std::memcpy(ack, ack_sentinel.data(), ack_sentinel.size());
+            }
+            if (d1l_meshcore_oracle_parse_dm_ack_path_packet(
+                    packet, destination_hash, source_hash, secret,
+                    encoded_path_len, path, path_capacity, path_bytes, ack) ||
+                (encoded_path_len != nullptr && *encoded_path_len != 0xAAU) ||
+                (path != nullptr &&
+                 std::memcmp(path, path_sentinel.data(), path_capacity) != 0) ||
+                (path_bytes != nullptr && *path_bytes != 0xBEEFU) ||
+                (ack != nullptr &&
+                 std::memcmp(ack, ack_sentinel.data(), ack_sentinel.size()) !=
+                     0)) {
+                failures.push_back(std::string(name) +
+                                   " ACK+PATH parse reject changed output");
+            }
+        };
+    uint8_t rejected_ack_path_encoded_len = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_ACK_PATH_BYTES>
+        rejected_ack_path_bytes{};
+    size_t rejected_ack_path_byte_len = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_DM_ACK_BYTES>
+        rejected_ack_path_ack{};
+    expect_ack_path_parse_reject(
+        "null ACK+PATH packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH parse secret", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, nullptr, &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null encoded ACK+PATH length", &valid_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(), nullptr,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH path output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        nullptr, rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH byte length", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        nullptr, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "null ACK+PATH ACK output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, nullptr);
+
+    d1l_meshcore_oracle_packet_t malformed_ack_path = valid_ack_path;
+    malformed_ack_path.header |= 0x40U;
+    expect_ack_path_parse_reject(
+        "future-version ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT);
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH type", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload_len -= 1U;
+    expect_ack_path_parse_reject(
+        "truncated ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[malformed_ack_path.payload_len++] = 0U;
+    expect_ack_path_parse_reject(
+        "non-block ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH destination", &valid_ack_path,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH source", &valid_ack_path, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "wrong ACK+PATH secret", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, public_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[2] ^= 0x01U;
+    expect_ack_path_parse_reject(
+        "tampered ACK+PATH MAC", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path = valid_ack_path;
+    malformed_ack_path.payload[4] ^= 0x01U;
+    expect_ack_path_parse_reject(
+        "tampered ACK+PATH ciphertext", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+
+    auto make_raw_ack_path_packet =
+        [&full_secret](const uint8_t *plaintext, size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT);
+            packet.payload[0] = dm_destination_hash;
+            packet.payload[1] = dm_source_hash;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[2], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(encrypted_len + 2);
+            return packet;
+        };
+    std::array<uint8_t, 16U> malformed_ack_path_plaintext{};
+    malformed_ack_path_plaintext[0] = 0xC0U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "reserved embedded ACK+PATH hash size", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[0] = 0x3FU;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "short embedded ACK+PATH", &malformed_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), rejected_ack_path_bytes.size(),
+        &rejected_ack_path_byte_len, rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[1] = 0x02U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "wrong embedded ACK+PATH extra type", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    malformed_ack_path_plaintext.fill(0U);
+    malformed_ack_path_plaintext[1] = PAYLOAD_TYPE_ACK;
+    malformed_ack_path_plaintext[8] = 0x01U;
+    malformed_ack_path = make_raw_ack_path_packet(
+        malformed_ack_path_plaintext.data(),
+        malformed_ack_path_plaintext.size());
+    expect_ack_path_parse_reject(
+        "noncanonical ACK+PATH padding", &malformed_ack_path,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        &rejected_ack_path_encoded_len, rejected_ack_path_bytes.data(),
+        rejected_ack_path_bytes.size(), &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+    expect_ack_path_parse_reject(
+        "undersized ACK+PATH output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(), &rejected_ack_path_encoded_len,
+        rejected_ack_path_bytes.data(), 3U, &rejected_ack_path_byte_len,
+        rejected_ack_path_ack.data());
+
+    auto check_prepared_packet =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &actual,
+                    const d1l_meshcore_oracle_packet_t &expected,
+                    uint8_t priority,
+                    uint8_t expected_priority) {
+            if (!packets_equal(actual, expected) || priority != expected_priority) {
+                failures.push_back(std::string(name) +
+                                   " route preparation mismatch");
+                return;
+            }
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+            size_t raw_len = 0U;
+            d1l_meshcore_oracle_packet_t decoded{};
+            if (!d1l_meshcore_oracle_packet_encode(
+                    &actual, raw.data(), raw.size(), &raw_len) ||
+                !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len,
+                                                   &decoded) ||
+                !packets_equal(decoded, expected)) {
+                failures.push_back(std::string(name) +
+                                   " route packet did not round trip");
+            }
+        };
+
+    struct PathReturnInput {
+        uint8_t encoded_path_len;
+        std::vector<uint8_t> path;
+        uint8_t extra_type;
+        std::vector<uint8_t> extra;
+        bool unique;
+    };
+    std::vector<uint8_t> maximum_path_return_two_byte_path(
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES);
+    std::vector<uint8_t> maximum_path_return_three_byte_path(63U);
+    std::vector<uint8_t> maximum_two_byte_path_extra(97U);
+    std::vector<uint8_t> maximum_three_byte_path_extra(98U);
+    for (size_t index = 0U;
+         index < maximum_path_return_two_byte_path.size(); ++index) {
+        maximum_path_return_two_byte_path[index] =
+            static_cast<uint8_t>(0x31U + index);
+    }
+    for (size_t index = 0U;
+         index < maximum_path_return_three_byte_path.size(); ++index) {
+        maximum_path_return_three_byte_path[index] =
+            static_cast<uint8_t>(0xE0U - index);
+    }
+    for (size_t index = 0U; index < maximum_two_byte_path_extra.size();
+         ++index) {
+        maximum_two_byte_path_extra[index] =
+            static_cast<uint8_t>(index ^ 0xA5U);
+    }
+    for (size_t index = 0U; index < maximum_three_byte_path_extra.size();
+         ++index) {
+        maximum_three_byte_path_extra[index] =
+            static_cast<uint8_t>(index * 3U + 1U);
+    }
+    const std::array<PathReturnInput, kPathReturnRoundtripVectors>
+        path_return_inputs = {{
+            {0x00U, {}, PAYLOAD_TYPE_RESPONSE,
+             {0xDEU, 0xADU, 0xBEU, 0xEFU}, false},
+            {0x04U, {0x10U, 0x20U, 0x30U, 0x40U}, 0xF3U,
+             {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U}, false},
+            {0x60U, maximum_path_return_two_byte_path, PAYLOAD_TYPE_RESPONSE,
+             maximum_two_byte_path_extra, false},
+            {0x95U, maximum_path_return_three_byte_path, PAYLOAD_TYPE_REQ,
+             maximum_three_byte_path_extra, false},
+            {0x00U, {}, 0xFFU, {0x01U, 0x23U, 0x45U, 0x67U}, true},
+            {0x95U, maximum_path_return_three_byte_path, 0xFFU,
+             {0x89U, 0xABU, 0xCDU, 0xEFU}, true},
+        }};
+    const std::array<uint8_t, 20U> expected_zero_path_return_payload = {
+        0xA1U, 0xB2U, 0x51U, 0xA7U, 0xB0U, 0x2DU, 0xC6U,
+        0x3AU, 0x41U, 0x9FU, 0x32U, 0xE2U, 0x20U, 0x0FU,
+        0xD2U, 0xE2U, 0x6AU, 0x28U, 0xD8U, 0xA9U};
+    const std::array<uint8_t, 32U> expected_path_return_matrix_sha256 = {
+        0x30U, 0xF7U, 0xDBU, 0xBEU, 0xA8U, 0x5AU, 0x3CU, 0x22U,
+        0x1EU, 0x79U, 0xE1U, 0x27U, 0x7AU, 0xEFU, 0x30U, 0x13U,
+        0x66U, 0x3DU, 0xB5U, 0xBFU, 0xBAU, 0xB9U, 0x85U, 0x51U,
+        0x05U, 0x26U, 0xFAU, 0x71U, 0x95U, 0x6AU, 0xB4U, 0xF6U};
+    const uint16_t path_return_transport_codes[2] = {0xCAFEU, 0xBABEU};
+    const std::array<uint8_t, 2U> path_return_direct_route = {0x71U, 0x72U};
+    SHA256 path_return_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_path_return_extra{};
+    d1l_meshcore_oracle_packet_t valid_path_return_unique{};
+    for (size_t index = 0U; index < path_return_inputs.size(); ++index) {
+        const PathReturnInput &input = path_return_inputs[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const bool created = input.unique
+                                 ? d1l_meshcore_oracle_create_path_return_unique_packet(
+                                       dm_destination_hash, dm_source_hash,
+                                       full_secret.data(), input.encoded_path_len,
+                                       input.path.empty() ? nullptr
+                                                          : input.path.data(),
+                                       input.extra.data(), &packet)
+                                 : d1l_meshcore_oracle_create_path_return_extra_packet(
+                                       dm_destination_hash, dm_source_hash,
+                                       full_secret.data(), input.encoded_path_len,
+                                       input.path.empty() ? nullptr
+                                                          : input.path.data(),
+                                       input.extra_type, input.extra.data(),
+                                       input.extra.size(), &packet);
+        if (!created ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) ||
+            (index == 0U &&
+             (packet.payload_len != expected_zero_path_return_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_zero_path_return_payload.data(),
+                          expected_zero_path_return_payload.size()) != 0))) {
+            failures.push_back("PATH-return create vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+        path_return_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 0U) {
+            valid_path_return_extra = packet;
+        } else if (index == 4U) {
+            valid_path_return_unique = packet;
+        }
+
+        uint8_t path_priority = 0xA5U;
+        bool route_ok = false;
+        if (index == 0U) {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 1U, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_FLOOD &&
+                       packet.path_len == 0x00U && path_priority == 2U;
+        } else if (index == 1U) {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 2U, 1U, path_return_transport_codes,
+                &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) ==
+                           ROUTE_TYPE_TRANSPORT_FLOOD &&
+                       packet.path_len == 0x40U && path_priority == 2U &&
+                       packet.transport_codes[0] ==
+                           path_return_transport_codes[0] &&
+                       packet.transport_codes[1] ==
+                           path_return_transport_codes[1];
+        } else if (index == 2U) {
+            route_ok = d1l_meshcore_oracle_prepare_direct(
+                &packet, path_return_direct_route.data(), 0x02U,
+                &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT &&
+                       packet.path_len == 0x02U && path_priority == 1U &&
+                       std::memcmp(packet.path,
+                                   path_return_direct_route.data(),
+                                   path_return_direct_route.size()) == 0;
+        } else if (index == 3U) {
+            route_ok = d1l_meshcore_oracle_prepare_zero_hop(
+                &packet, 1U, path_return_transport_codes, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) ==
+                           ROUTE_TYPE_TRANSPORT_DIRECT &&
+                       packet.path_len == 0U && path_priority == 0U &&
+                       packet.transport_codes[0] ==
+                           path_return_transport_codes[0] &&
+                       packet.transport_codes[1] ==
+                           path_return_transport_codes[1];
+        } else if (index == 4U) {
+            route_ok = d1l_meshcore_oracle_prepare_zero_hop(
+                &packet, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_DIRECT &&
+                       packet.path_len == 0U && path_priority == 0U;
+        } else {
+            route_ok = d1l_meshcore_oracle_prepare_flood(
+                &packet, 3U, 0U, nullptr, &path_priority);
+            route_ok = route_ok &&
+                       (packet.header & PH_ROUTE_MASK) == ROUTE_TYPE_FLOOD &&
+                       packet.path_len == 0x80U && path_priority == 2U;
+        }
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!route_ok ||
+            !d1l_meshcore_oracle_packet_encode(
+                &packet, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len, &decoded) ||
+            !packets_equal(packet, decoded)) {
+            failures.push_back("PATH-return route-code vector changed " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint8_t parsed_encoded_path_len = 0xFFU;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES> parsed_path{};
+        size_t parsed_path_bytes = 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES>
+            parsed_extra{};
+        uint8_t parsed_extra_type = 0xAAU;
+        size_t parsed_extra_len = 0U;
+        bool parsed = false;
+        if (input.unique) {
+            parsed = d1l_meshcore_oracle_parse_path_return_unique_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), &parsed_encoded_path_len,
+                parsed_path.data(), parsed_path.size(), &parsed_path_bytes,
+                parsed_extra.data());
+            parsed_extra_len =
+                D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES;
+            parsed_extra_type = 0x0FU;
+        } else {
+            parsed = d1l_meshcore_oracle_parse_path_return_extra_packet(
+                &decoded, dm_destination_hash, dm_source_hash,
+                full_secret.data(), input.extra.size(),
+                &parsed_encoded_path_len, parsed_path.data(),
+                parsed_path.size(), &parsed_path_bytes, &parsed_extra_type,
+                parsed_extra.data(), parsed_extra.size(), &parsed_extra_len);
+        }
+        if (!parsed || parsed_encoded_path_len != input.encoded_path_len ||
+            parsed_path_bytes != input.path.size() ||
+            (!input.path.empty() &&
+             std::memcmp(parsed_path.data(), input.path.data(),
+                         input.path.size()) != 0) ||
+            parsed_extra_type != (input.extra_type & 0x0FU) ||
+            parsed_extra_len != input.extra.size() ||
+            std::memcmp(parsed_extra.data(), input.extra.data(),
+                        input.extra.size()) != 0) {
+            failures.push_back("PATH-return parse vector changed " +
+                               std::to_string(index));
+        }
+    }
+    std::array<uint8_t, 32U> path_return_matrix_digest{};
+    path_return_matrix_sha.finalize(path_return_matrix_digest.data(),
+                                    path_return_matrix_digest.size());
+    if (path_return_matrix_digest != expected_path_return_matrix_sha256) {
+        failures.push_back("PATH-return matrix digest changed");
+    }
+
+    auto expect_path_return_extra_create_reject =
+        [&failures, &valid_path_return_extra](
+            const char *name, const uint8_t *secret, uint8_t path_len,
+            const uint8_t *path, const uint8_t *extra, size_t extra_len,
+            d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_path_return_extra;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_path_return_extra_packet(
+                    dm_destination_hash, dm_source_hash, secret, path_len, path,
+                    PAYLOAD_TYPE_RESPONSE, extra, extra_len, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return extra create reject changed output");
+            }
+        };
+    std::vector<uint8_t> oversized_path_return_extra(
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES + 1U, 0x5AU);
+    d1l_meshcore_oracle_packet_t rejected_path_return{};
+    const std::array<uint8_t, 1U> general_one_byte_extra = {0x24U};
+    expect_path_return_extra_create_reject(
+        "null secret", nullptr, 0U, nullptr, general_one_byte_extra.data(),
+        general_one_byte_extra.size(), &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "reserved path length", full_secret.data(), 0xC0U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "missing path", full_secret.data(), 0x01U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "missing extra", full_secret.data(), 0U, nullptr, nullptr, 1U,
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "empty extra", full_secret.data(), 0U, nullptr,
+        general_one_byte_extra.data(), 0U, &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "oversized extra", full_secret.data(), 0U, nullptr,
+        oversized_path_return_extra.data(), oversized_path_return_extra.size(),
+        &rejected_path_return);
+    expect_path_return_extra_create_reject(
+        "null output", full_secret.data(), 0U, nullptr,
+        general_one_byte_extra.data(), general_one_byte_extra.size(), nullptr);
+
+    auto expect_path_return_unique_create_reject =
+        [&failures, &valid_path_return_unique](
+            const char *name, const uint8_t *secret, uint8_t path_len,
+            const uint8_t *path, const uint8_t *uniqueness,
+            d1l_meshcore_oracle_packet_t *output) {
+            d1l_meshcore_oracle_packet_t sentinel = valid_path_return_unique;
+            sentinel.header ^= 0x80U;
+            if (output != nullptr) {
+                *output = sentinel;
+            }
+            if (d1l_meshcore_oracle_create_path_return_unique_packet(
+                    dm_destination_hash, dm_source_hash, secret, path_len, path,
+                    uniqueness, output) ||
+                (output != nullptr && !packets_equal(*output, sentinel))) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return unique create reject changed output");
+            }
+        };
+    const auto &valid_uniqueness = path_return_inputs[4].extra;
+    expect_path_return_unique_create_reject(
+        "null unique secret", nullptr, 0U, nullptr, valid_uniqueness.data(),
+        &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "reserved unique path length", full_secret.data(), 0xC0U, nullptr,
+        valid_uniqueness.data(), &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "missing unique path", full_secret.data(), 0x01U, nullptr,
+        valid_uniqueness.data(), &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "null uniqueness", full_secret.data(), 0U, nullptr, nullptr,
+        &rejected_path_return);
+    expect_path_return_unique_create_reject(
+        "null unique output", full_secret.data(), 0U, nullptr,
+        valid_uniqueness.data(), nullptr);
+
+    auto expect_path_return_extra_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, uint8_t source_hash,
+                    const uint8_t *secret, size_t expected_extra_len,
+                    size_t path_capacity, size_t extra_capacity,
+                    bool null_encoded_path, bool null_extra_type) {
+            uint8_t encoded_path_len = 0xAAU;
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES> path{};
+            path.fill(0xB5U);
+            size_t path_bytes = 0xBEEFU;
+            uint8_t extra_type = 0xCCU;
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES>
+                extra{};
+            extra.fill(0xD6U);
+            size_t extra_len = 0xCAFEU;
+            const auto path_before = path;
+            const auto extra_before = extra;
+            if (d1l_meshcore_oracle_parse_path_return_extra_packet(
+                    packet, destination_hash, source_hash, secret,
+                    expected_extra_len,
+                    null_encoded_path ? nullptr : &encoded_path_len,
+                    path.data(), path_capacity, &path_bytes,
+                    null_extra_type ? nullptr : &extra_type, extra.data(),
+                    extra_capacity, &extra_len) ||
+                encoded_path_len != 0xAAU || path != path_before ||
+                path_bytes != 0xBEEFU || extra_type != 0xCCU ||
+                extra != extra_before || extra_len != 0xCAFEU) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return extra parse reject changed output");
+            }
+        };
+    expect_path_return_extra_parse_reject(
+        "null packet", nullptr, dm_destination_hash, dm_source_hash,
+        full_secret.data(), 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "null parse secret", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, nullptr, 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "zero expected extra", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 0U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "oversized expected extra", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES + 1U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong destination", &valid_path_return_extra,
+        static_cast<uint8_t>(dm_destination_hash ^ 1U), dm_source_hash,
+        full_secret.data(), 4U, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong source", &valid_path_return_extra, dm_destination_hash,
+        static_cast<uint8_t>(dm_source_hash ^ 1U), full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "wrong secret", &valid_path_return_extra, dm_destination_hash,
+        dm_source_hash, public_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    d1l_meshcore_oracle_packet_t malformed_path_return =
+        valid_path_return_extra;
+    malformed_path_return.header |= 0x40U;
+    expect_path_return_extra_parse_reject(
+        "future version", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_RESPONSE << PH_TYPE_SHIFT);
+    expect_path_return_extra_parse_reject(
+        "wrong packet type", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload_len -= 1U;
+    expect_path_return_extra_parse_reject(
+        "truncated packet", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[malformed_path_return.payload_len++] = 0U;
+    expect_path_return_extra_parse_reject(
+        "non-block packet", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[2] ^= 1U;
+    expect_path_return_extra_parse_reject(
+        "tampered MAC", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    malformed_path_return = valid_path_return_extra;
+    malformed_path_return.payload[4] ^= 1U;
+    expect_path_return_extra_parse_reject(
+        "tampered ciphertext", &malformed_path_return, dm_destination_hash,
+        dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "short expected extra", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 3U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "undersized path output", &valid_ack_path, dm_destination_hash,
+        dm_source_hash, full_secret.data(),
+        D1L_MESHCORE_ORACLE_DM_ACK_BYTES, 3U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, false);
+    expect_path_return_extra_parse_reject(
+        "undersized extra output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES, 3U, false, false);
+    expect_path_return_extra_parse_reject(
+        "null encoded path output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, true, false);
+    expect_path_return_extra_parse_reject(
+        "null extra type output", &valid_path_return_extra,
+        dm_destination_hash, dm_source_hash, full_secret.data(), 4U,
+        D1L_MESHCORE_ORACLE_MAX_PATH_BYTES,
+        D1L_MESHCORE_ORACLE_MAX_PATH_RETURN_EXTRA_BYTES, false, true);
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PATH_BYTES>
+        rejected_unique_path{};
+    rejected_unique_path.fill(0xA7U);
+    uint8_t rejected_unique_path_len = 0xAAU;
+    size_t rejected_unique_path_bytes = 0xBEEFU;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PATH_RETURN_UNIQUENESS_BYTES>
+        rejected_uniqueness{};
+    rejected_uniqueness.fill(0xC8U);
+    const auto rejected_unique_path_before = rejected_unique_path;
+    const auto rejected_uniqueness_before = rejected_uniqueness;
+    auto expect_path_return_unique_parse_reject =
+        [&](const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t *uniqueness) {
+            rejected_unique_path = rejected_unique_path_before;
+            rejected_unique_path_len = 0xAAU;
+            rejected_unique_path_bytes = 0xBEEFU;
+            rejected_uniqueness = rejected_uniqueness_before;
+            if (d1l_meshcore_oracle_parse_path_return_unique_packet(
+                    packet, dm_destination_hash, dm_source_hash,
+                    full_secret.data(), &rejected_unique_path_len,
+                    rejected_unique_path.data(), rejected_unique_path.size(),
+                    &rejected_unique_path_bytes, uniqueness) ||
+                rejected_unique_path != rejected_unique_path_before ||
+                rejected_unique_path_len != 0xAAU ||
+                rejected_unique_path_bytes != 0xBEEFU ||
+                rejected_uniqueness != rejected_uniqueness_before) {
+                failures.push_back(std::string(name) +
+                                   " PATH-return unique parse reject changed output");
+            }
+        };
+    expect_path_return_unique_parse_reject(
+        "wrong unique marker", &valid_path_return_extra,
+        rejected_uniqueness.data());
+    expect_path_return_unique_parse_reject(
+        "null unique output", &valid_path_return_unique, nullptr);
+    std::array<uint8_t, 16U> malformed_unique_plaintext{};
+    malformed_unique_plaintext[0] = 0xC0U;
+    malformed_unique_plaintext[1] = 0xFFU;
+    std::memcpy(&malformed_unique_plaintext[2], valid_uniqueness.data(),
+                valid_uniqueness.size());
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "reserved embedded unique path", &malformed_path_return,
+        rejected_uniqueness.data());
+    malformed_unique_plaintext.fill(0U);
+    malformed_unique_plaintext[0] = 0x3FU;
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "short embedded unique path", &malformed_path_return,
+        rejected_uniqueness.data());
+    malformed_unique_plaintext.fill(0U);
+    malformed_unique_plaintext[1] = 0xFFU;
+    std::memcpy(&malformed_unique_plaintext[2], valid_uniqueness.data(),
+                valid_uniqueness.size());
+    malformed_unique_plaintext[6] = 1U;
+    malformed_path_return = make_raw_ack_path_packet(
+        malformed_unique_plaintext.data(), malformed_unique_plaintext.size());
+    expect_path_return_unique_parse_reject(
+        "noncanonical unique padding", &malformed_path_return,
+        rejected_uniqueness.data());
+
+    uint8_t priority = 0xA5U;
+    d1l_meshcore_oracle_packet_t route_packet =
+        make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    if (!d1l_meshcore_oracle_prepare_flood(&route_packet, 1U, 0U, nullptr,
+                                           &priority)) {
+        failures.push_back("plain flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x00U;
+        check_prepared_packet("plain flood", route_packet, expected, priority,
+                              1U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_PATH);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_flood(&route_packet, 2U, 0U, nullptr,
+                                           &priority)) {
+        failures.push_back("PATH flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_PATH);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) | ROUTE_TYPE_FLOOD);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x40U;
+        check_prepared_packet("PATH flood", route_packet, expected, priority,
+                              2U);
+    }
+
+    const uint16_t transport_codes[2] = {0x1234U, 0xBEEFU};
+    route_packet = make_route_packet(PAYLOAD_TYPE_ADVERT);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_flood(
+            &route_packet, 3U, 1U, transport_codes, &priority)) {
+        failures.push_back("transport advert flood preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ADVERT);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ADVERT << PH_TYPE_SHIFT) |
+            ROUTE_TYPE_TRANSPORT_FLOOD);
+        expected.transport_codes[0] = transport_codes[0];
+        expected.transport_codes[1] = transport_codes[1];
+        expected.path_len = 0x80U;
+        check_prepared_packet("transport advert flood", route_packet, expected,
+                              priority, 3U);
+    }
+
+    const std::array<uint8_t, 1> direct_path = {0x71U};
+    route_packet = make_route_packet(PAYLOAD_TYPE_ACK);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_direct(
+            &route_packet, direct_path.data(), 0x01U, &priority)) {
+        failures.push_back("direct ACK preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ACK);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x01U;
+        expected.path[0] = direct_path[0];
+        check_prepared_packet("direct ACK", route_packet, expected, priority,
+                              0U);
+    }
+
+    const std::array<uint8_t, 4> wide_direct_path = {
+        0x11U, 0x22U, 0x33U, 0x44U};
+    route_packet = make_route_packet(PAYLOAD_TYPE_PATH);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_direct(
+            &route_packet, wide_direct_path.data(), 0x42U, &priority)) {
+        failures.push_back("direct PATH preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_PATH);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_PATH << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x42U;
+        std::memcpy(expected.path, wide_direct_path.data(),
+                    wide_direct_path.size());
+        check_prepared_packet("direct PATH", route_packet, expected, priority,
+                              1U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_zero_hop(&route_packet, 0U, nullptr,
+                                              &priority)) {
+        failures.push_back("zero-hop direct preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_TXT_MSG << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+        expected.transport_codes[0] = 0U;
+        expected.transport_codes[1] = 0U;
+        expected.path_len = 0x00U;
+        check_prepared_packet("zero-hop direct", route_packet, expected,
+                              priority, 0U);
+    }
+
+    route_packet = make_route_packet(PAYLOAD_TYPE_ACK);
+    priority = 0xA5U;
+    if (!d1l_meshcore_oracle_prepare_zero_hop(
+            &route_packet, 1U, transport_codes, &priority)) {
+        failures.push_back("transport zero-hop preparation rejected");
+    } else {
+        d1l_meshcore_oracle_packet_t expected =
+            make_route_packet(PAYLOAD_TYPE_ACK);
+        expected.header = static_cast<uint8_t>(
+            (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) |
+            ROUTE_TYPE_TRANSPORT_DIRECT);
+        expected.transport_codes[0] = transport_codes[0];
+        expected.transport_codes[1] = transport_codes[1];
+        expected.path_len = 0x00U;
+        check_prepared_packet("transport zero-hop", route_packet, expected,
+                              priority, 0U);
+    }
+
+    auto flood_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    uint8_t hash_size, uint8_t use_transport,
+                    const uint16_t *codes) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_flood(
+                    &packet, hash_size, use_transport, codes,
+                    &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " flood rejection mutated output");
+            }
+        };
+    flood_rejects_without_mutation("zero hash size", PAYLOAD_TYPE_ACK, 0U,
+                                   0U, nullptr);
+    flood_rejects_without_mutation("oversized hash size", PAYLOAD_TYPE_ACK,
+                                   4U, 0U, nullptr);
+    flood_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE, 1U, 0U,
+                                   nullptr);
+    flood_rejects_without_mutation("invalid transport flag", PAYLOAD_TYPE_ACK,
+                                   1U, 2U, transport_codes);
+
+    auto direct_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    const uint8_t *path, uint8_t path_len) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_direct(
+                    &packet, path, path_len, &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " direct rejection mutated output");
+            }
+        };
+    direct_rejects_without_mutation("reserved path", PAYLOAD_TYPE_ACK,
+                                    direct_path.data(), 0xC0U);
+    direct_rejects_without_mutation("null path", PAYLOAD_TYPE_ACK, nullptr,
+                                    0x01U);
+    direct_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE,
+                                    direct_path.data(), 0x01U);
+
+    auto zero_hop_rejects_without_mutation =
+        [&failures](const char *name, uint8_t payload_type,
+                    uint8_t use_transport,
+                    const uint16_t *codes) {
+            d1l_meshcore_oracle_packet_t packet =
+                make_route_packet(payload_type);
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t rejected_priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_zero_hop(
+                    &packet, use_transport, codes, &rejected_priority) ||
+                !packets_equal(packet, before) || rejected_priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " zero-hop rejection mutated output");
+            }
+        };
+    zero_hop_rejects_without_mutation("invalid transport flag",
+                                      PAYLOAD_TYPE_ACK, 2U, transport_codes);
+    zero_hop_rejects_without_mutation("missing transport codes",
+                                      PAYLOAD_TYPE_ACK, 1U, nullptr);
+    zero_hop_rejects_without_mutation("TRACE", PAYLOAD_TYPE_TRACE, 0U,
+                                      nullptr);
+
+    std::vector<uint8_t> maximum_simple_ack(
+        D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    for (size_t index = 0U; index < maximum_simple_ack.size(); ++index) {
+        maximum_simple_ack[index] = static_cast<uint8_t>(index ^ 0xA5U);
+    }
+    std::vector<uint8_t> maximum_multi_ack(
+        D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES - 1U);
+    for (size_t index = 0U; index < maximum_multi_ack.size(); ++index) {
+        maximum_multi_ack[index] = static_cast<uint8_t>(index ^ 0x5AU);
+    }
+    const std::array<AckVector, kAckRoundtripVectors> ack_vectors = {{
+        {{0x78U, 0x56U, 0x34U, 0x12U}, 0U, false},
+        {{0xA7U, 0xB8U, 0xC9U, 0xDAU, 0xEBU}, 0U, false},
+        {maximum_simple_ack, 0U, false},
+        {{0xEFU, 0xBEU, 0xADU, 0xDEU}, 1U, true},
+        {maximum_multi_ack, 15U, true},
+    }};
+    for (size_t index = 0U; index < ack_vectors.size(); ++index) {
+        const AckVector &vector = ack_vectors[index];
+        d1l_meshcore_oracle_packet_t packet{};
+        const bool created = vector.multipart
+            ? d1l_meshcore_oracle_create_multi_ack(
+                  vector.ack.data(), vector.ack.size(), vector.remaining,
+                  &packet)
+            : d1l_meshcore_oracle_create_ack(
+                  vector.ack.data(), vector.ack.size(), &packet);
+        const uint8_t expected_type = vector.multipart
+            ? PAYLOAD_TYPE_MULTIPART
+            : PAYLOAD_TYPE_ACK;
+        const size_t payload_offset = vector.multipart ? 1U : 0U;
+        if (!created ||
+            packet.header !=
+                static_cast<uint8_t>(expected_type << PH_TYPE_SHIFT) ||
+            packet.transport_codes[0] != 0U ||
+            packet.transport_codes[1] != 0U || packet.path_len != 0U ||
+            packet.payload_len != vector.ack.size() + payload_offset ||
+            (vector.multipart &&
+             packet.payload[0] !=
+                 static_cast<uint8_t>((vector.remaining << 4U) |
+                                      PAYLOAD_TYPE_ACK)) ||
+            std::memcmp(&packet.payload[payload_offset], vector.ack.data(),
+                        vector.ack.size()) != 0) {
+            failures.push_back("ACK create changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t route_priority = 0xFFU;
+        if (!d1l_meshcore_oracle_prepare_zero_hop(
+                &routed, 0U, nullptr, &route_priority) ||
+            (routed.header & PH_ROUTE_MASK) != ROUTE_TYPE_DIRECT ||
+            route_priority != 0U) {
+            failures.push_back("ACK route preparation rejected vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> raw{};
+        size_t raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &routed, raw.data(), raw.size(), &raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(raw.data(), raw_len, &decoded) ||
+            !packets_equal(routed, decoded)) {
+            failures.push_back("ACK packet did not round trip vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> parsed_ack{};
+        size_t parsed_ack_len = 0U;
+        uint8_t parsed_remaining = 0xFFU;
+        uint8_t parsed_multipart = 0xFFU;
+        if (!d1l_meshcore_oracle_parse_ack(
+                &decoded, parsed_ack.data(), parsed_ack.size(),
+                &parsed_ack_len, &parsed_remaining, &parsed_multipart) ||
+            parsed_ack_len != vector.ack.size() ||
+            std::memcmp(parsed_ack.data(), vector.ack.data(),
+                        vector.ack.size()) != 0 ||
+            parsed_remaining != vector.remaining ||
+            parsed_multipart != (vector.multipart ? 1U : 0U)) {
+            failures.push_back("ACK parse changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t recreated{};
+        const bool recreated_ok = parsed_multipart != 0U
+            ? d1l_meshcore_oracle_create_multi_ack(
+                  parsed_ack.data(), parsed_ack_len, parsed_remaining,
+                  &recreated)
+            : d1l_meshcore_oracle_create_ack(
+                  parsed_ack.data(), parsed_ack_len, &recreated);
+        if (!recreated_ok || !packets_equal(packet, recreated)) {
+            failures.push_back("ACK recreate changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES + 1U> oversized_ack{};
+    d1l_meshcore_oracle_packet_t rejected_ack_packet;
+    std::memset(&rejected_ack_packet, 0xA8, sizeof(rejected_ack_packet));
+    const d1l_meshcore_oracle_packet_t rejected_ack_before =
+        rejected_ack_packet;
+    const std::array<uint8_t, 4> valid_ack = {
+        0x78U, 0x56U, 0x34U, 0x12U};
+    const std::array<uint8_t, 3> short_ack = {0x01U, 0x02U, 0x03U};
+    auto ack_packet_was_preserved = [&]() {
+        return std::memcmp(&rejected_ack_packet, &rejected_ack_before,
+                           sizeof(rejected_ack_packet)) == 0;
+    };
+    if (d1l_meshcore_oracle_create_ack(
+            nullptr, 1U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("null simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            valid_ack.data(), 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("empty simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            short_ack.data(), short_ack.size(), &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("short simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            oversized_ack.data(), oversized_ack.size(),
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("oversized simple ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_ack(
+            valid_ack.data(), valid_ack.size(), nullptr)) {
+        failures.push_back("null simple ACK packet accepted");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            nullptr, 1U, 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("null multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            valid_ack.data(), 0U, 0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("empty multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            short_ack.data(), short_ack.size(), 0U,
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("short multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            oversized_ack.data(), D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES,
+            0U, &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("oversized multipart ACK changed output");
+    }
+    if (d1l_meshcore_oracle_create_multi_ack(
+            valid_ack.data(), valid_ack.size(), 16U,
+            &rejected_ack_packet) ||
+        !ack_packet_was_preserved()) {
+        failures.push_back("overflow multipart remaining changed output");
+    }
+
+    auto expect_ack_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &packet,
+                    size_t ack_capacity) {
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES> parsed_ack;
+            parsed_ack.fill(0xE2U);
+            const auto parsed_ack_before = parsed_ack;
+            size_t parsed_ack_len = 0xBEEFU;
+            uint8_t parsed_remaining = 0xA6U;
+            uint8_t parsed_multipart = 0xA7U;
+            if (d1l_meshcore_oracle_parse_ack(
+                    &packet, parsed_ack.data(), ack_capacity, &parsed_ack_len,
+                    &parsed_remaining, &parsed_multipart) ||
+                parsed_ack != parsed_ack_before || parsed_ack_len != 0xBEEFU ||
+                parsed_remaining != 0xA6U || parsed_multipart != 0xA7U) {
+                failures.push_back(std::string(name) +
+                                   " ACK parse changed output");
+            }
+        };
+    d1l_meshcore_oracle_packet_t malformed_ack =
+        make_route_packet(PAYLOAD_TYPE_TXT_MSG);
+    expect_ack_parse_reject("wrong payload type", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    malformed_ack.payload_len = 3U;
+    expect_ack_parse_reject("short simple ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload[0] =
+        static_cast<uint8_t>((1U << 4U) | PAYLOAD_TYPE_GRP_DATA);
+    expect_ack_parse_reject("wrong multipart subtype", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload_len = 1U;
+    malformed_ack.payload[0] = PAYLOAD_TYPE_ACK;
+    expect_ack_parse_reject("empty multipart ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_MULTIPART);
+    malformed_ack.payload[0] = PAYLOAD_TYPE_ACK;
+    expect_ack_parse_reject("short multipart ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    malformed_ack.header |= static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_ack_parse_reject("future-version ACK", malformed_ack,
+                            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES);
+    malformed_ack = make_route_packet(PAYLOAD_TYPE_ACK);
+    expect_ack_parse_reject("undersized ACK destination", malformed_ack,
+                            malformed_ack.payload_len - 1U);
+
+    std::vector<uint8_t> maximum_trace_path(
+        D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    for (size_t index = 0U; index < maximum_trace_path.size(); ++index) {
+        maximum_trace_path[index] = static_cast<uint8_t>(index ^ 0x3CU);
+    }
+    const std::array<TraceVector, kTraceRoundtripVectors> trace_vectors = {{
+        {0U, 0U, 0x00U, {}},
+        {0x12345678U, 0xAABBCCDDU, 0x00U, {0x42U}},
+        {0x87654321U, 0x10203040U, 0x00U,
+         {0x11U, 0x12U, 0x21U, 0x22U}},
+        {0xDEADBEEFU, 0xCAFEBABEU, 0x00U,
+         {0x01U, 0x02U, 0x03U, 0x04U,
+          0x11U, 0x12U, 0x13U, 0x14U}},
+        {0x0BADF00DU, 0x55AA55AAU, 0x00U,
+         {0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U,
+          0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U}},
+        {0xFFFFFFFFU, 0x01020304U, 0x00U, maximum_trace_path},
+    }};
+    for (size_t index = 0U; index < trace_vectors.size(); ++index) {
+        const TraceVector &vector = trace_vectors[index];
+        d1l_meshcore_oracle_packet_t trace{};
+        const std::array<uint8_t,
+                         D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES> expected_prefix = {{
+            static_cast<uint8_t>(vector.tag),
+            static_cast<uint8_t>(vector.tag >> 8U),
+            static_cast<uint8_t>(vector.tag >> 16U),
+            static_cast<uint8_t>(vector.tag >> 24U),
+            static_cast<uint8_t>(vector.auth_code),
+            static_cast<uint8_t>(vector.auth_code >> 8U),
+            static_cast<uint8_t>(vector.auth_code >> 16U),
+            static_cast<uint8_t>(vector.auth_code >> 24U),
+            vector.flags,
+        }};
+        if (!d1l_meshcore_oracle_create_trace(
+                vector.tag, vector.auth_code, vector.flags, &trace) ||
+            trace.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) ||
+            trace.transport_codes[0] != 0U ||
+            trace.transport_codes[1] != 0U || trace.path_len != 0U ||
+            trace.payload_len != D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES ||
+            std::memcmp(trace.payload, expected_prefix.data(),
+                        expected_prefix.size()) != 0) {
+            failures.push_back("TRACE create changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+        const d1l_meshcore_oracle_packet_t pre_route = trace;
+        uint8_t trace_priority = 0xFFU;
+        const uint8_t *path_hashes = vector.path_hashes.empty()
+            ? nullptr
+            : vector.path_hashes.data();
+        if (!d1l_meshcore_oracle_prepare_trace_direct(
+                &trace, path_hashes, vector.path_hashes.size(),
+                &trace_priority) ||
+            trace.header != static_cast<uint8_t>(
+                (PAYLOAD_TYPE_TRACE << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT) ||
+            trace.transport_codes[0] != 0U ||
+            trace.transport_codes[1] != 0U || trace.path_len != 0U ||
+            trace.payload_len != D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES +
+                                     vector.path_hashes.size() ||
+            trace_priority != 5U ||
+            (!vector.path_hashes.empty() &&
+             std::memcmp(
+                 &trace.payload[D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES],
+                 vector.path_hashes.data(), vector.path_hashes.size()) != 0)) {
+            failures.push_back("TRACE direct preparation changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> trace_raw{};
+        size_t trace_raw_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded_trace{};
+        if (!d1l_meshcore_oracle_packet_encode(
+                &trace, trace_raw.data(), trace_raw.size(), &trace_raw_len) ||
+            !d1l_meshcore_oracle_packet_decode(
+                trace_raw.data(), trace_raw_len, &decoded_trace) ||
+            !packets_equal(trace, decoded_trace)) {
+            failures.push_back("TRACE packet did not round trip vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        uint32_t parsed_tag = 0U;
+        uint32_t parsed_auth_code = 0U;
+        uint8_t parsed_flags = 0U;
+        std::array<uint8_t,
+                   D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES> parsed_path{};
+        size_t parsed_path_len = 0U;
+        if (!d1l_meshcore_oracle_parse_trace_source(
+                &decoded_trace, &parsed_tag, &parsed_auth_code, &parsed_flags,
+                parsed_path.data(), parsed_path.size(), &parsed_path_len) ||
+            parsed_tag != vector.tag ||
+            parsed_auth_code != vector.auth_code ||
+            parsed_flags != vector.flags ||
+            parsed_path_len != vector.path_hashes.size() ||
+            (!vector.path_hashes.empty() &&
+             std::memcmp(parsed_path.data(), vector.path_hashes.data(),
+                         vector.path_hashes.size()) != 0)) {
+            failures.push_back("TRACE parse changed vector " +
+                               std::to_string(index));
+            continue;
+        }
+
+        d1l_meshcore_oracle_packet_t recreated_trace{};
+        uint8_t recreated_priority = 0xFFU;
+        if (!d1l_meshcore_oracle_create_trace(
+                parsed_tag, parsed_auth_code, parsed_flags,
+                &recreated_trace) ||
+            !packets_equal(pre_route, recreated_trace) ||
+            !d1l_meshcore_oracle_prepare_trace_direct(
+                &recreated_trace, parsed_path.data(), parsed_path_len,
+                &recreated_priority) ||
+            recreated_priority != 5U ||
+            !packets_equal(trace, recreated_trace)) {
+            failures.push_back("TRACE recreate changed vector " +
+                               std::to_string(index));
+        }
+    }
+
+    if (d1l_meshcore_oracle_create_trace(1U, 2U, 0U, nullptr)) {
+        failures.push_back("null TRACE packet accepted");
+    }
+    d1l_meshcore_oracle_packet_t rejected_trace_flags;
+    std::memset(&rejected_trace_flags, 0xA9,
+                sizeof(rejected_trace_flags));
+    const d1l_meshcore_oracle_packet_t rejected_trace_flags_before =
+        rejected_trace_flags;
+    if (d1l_meshcore_oracle_create_trace(
+            1U, 2U, 1U, &rejected_trace_flags) ||
+        std::memcmp(&rejected_trace_flags, &rejected_trace_flags_before,
+                    sizeof(rejected_trace_flags)) != 0) {
+        failures.push_back("unsupported TRACE flags changed output");
+    }
+    d1l_meshcore_oracle_packet_t base_trace{};
+    if (!d1l_meshcore_oracle_create_trace(
+            0x12345678U, 0xAABBCCDDU, 0U, &base_trace)) {
+        failures.push_back("TRACE invalid-vector setup rejected");
+    }
+    uint8_t rejected_trace_priority = 0xA5U;
+    if (d1l_meshcore_oracle_prepare_trace_direct(
+            nullptr, nullptr, 0U, &rejected_trace_priority) ||
+        rejected_trace_priority != 0xA5U) {
+        failures.push_back("null TRACE preparation changed priority");
+    }
+    d1l_meshcore_oracle_packet_t rejected_trace = base_trace;
+    const d1l_meshcore_oracle_packet_t rejected_trace_before = rejected_trace;
+    if (d1l_meshcore_oracle_prepare_trace_direct(
+            &rejected_trace, nullptr, 0U, nullptr) ||
+        !packets_equal(rejected_trace, rejected_trace_before)) {
+        failures.push_back("null TRACE priority changed packet");
+    }
+    auto expect_trace_prepare_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &input,
+                    const uint8_t *path_hashes,
+                    size_t path_hashes_len) {
+            d1l_meshcore_oracle_packet_t packet = input;
+            const d1l_meshcore_oracle_packet_t before = packet;
+            uint8_t priority = 0xA5U;
+            if (d1l_meshcore_oracle_prepare_trace_direct(
+                    &packet, path_hashes, path_hashes_len, &priority) ||
+                !packets_equal(packet, before) || priority != 0xA5U) {
+                failures.push_back(std::string(name) +
+                                   " TRACE preparation changed output");
+            }
+        };
+    const std::array<uint8_t, 1> one_trace_hash = {0x42U};
+    rejected_trace = base_trace;
+    rejected_trace.header = static_cast<uint8_t>(
+        (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_TRANSPORT_FLOOD);
+    expect_trace_prepare_reject("wrong type", rejected_trace, nullptr, 0U);
+    rejected_trace = base_trace;
+    rejected_trace.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_trace_prepare_reject("future version", rejected_trace, nullptr, 0U);
+    rejected_trace = base_trace;
+    rejected_trace.payload_len++;
+    expect_trace_prepare_reject("non-base payload", rejected_trace, nullptr,
+                                0U);
+    rejected_trace = base_trace;
+    rejected_trace.path_len = 0x01U;
+    rejected_trace.path[0] = 0x42U;
+    expect_trace_prepare_reject("pre-existing path", rejected_trace, nullptr,
+                                0U);
+    expect_trace_prepare_reject("null path hashes", base_trace, nullptr, 1U);
+    std::array<uint8_t,
+               D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES + 1U> overlong_trace{};
+    expect_trace_prepare_reject("overlong path hashes", base_trace,
+                                overlong_trace.data(), overlong_trace.size());
+    rejected_trace = base_trace;
+    rejected_trace.payload[8] = 0x01U;
+    const std::array<uint8_t, 7> unsupported_flags_path{};
+    expect_trace_prepare_reject("unsupported flags", rejected_trace,
+                                unsupported_flags_path.data(),
+                                unsupported_flags_path.size());
+
+    d1l_meshcore_oracle_packet_t routed_trace = base_trace;
+    uint8_t routed_trace_priority = 0xFFU;
+    if (!d1l_meshcore_oracle_prepare_trace_direct(
+            &routed_trace, one_trace_hash.data(), one_trace_hash.size(),
+            &routed_trace_priority)) {
+        failures.push_back("TRACE parse invalid-vector setup rejected");
+    }
+    auto expect_trace_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t &packet,
+                    size_t path_capacity) {
+            uint32_t tag = 0xAAAAAAAAU;
+            uint32_t auth_code = 0xBBBBBBBBU;
+            uint8_t flags = 0xCCU;
+            std::array<uint8_t,
+                       D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES> path_hashes;
+            path_hashes.fill(0xDDU);
+            const auto path_hashes_before = path_hashes;
+            size_t path_hashes_len = 0xBEEFU;
+            if (d1l_meshcore_oracle_parse_trace_source(
+                    &packet, &tag, &auth_code, &flags, path_hashes.data(),
+                    path_capacity, &path_hashes_len) ||
+                tag != 0xAAAAAAAAU || auth_code != 0xBBBBBBBBU ||
+                flags != 0xCCU || path_hashes != path_hashes_before ||
+                path_hashes_len != 0xBEEFU) {
+                failures.push_back(std::string(name) +
+                                   " TRACE parse changed output");
+            }
+        };
+    rejected_trace = routed_trace;
+    rejected_trace.header = static_cast<uint8_t>(
+        (PAYLOAD_TYPE_ACK << PH_TYPE_SHIFT) | ROUTE_TYPE_DIRECT);
+    expect_trace_parse_reject("wrong type", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    expect_trace_parse_reject("pre-route", base_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_trace_parse_reject("future version", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.payload_len =
+        D1L_MESHCORE_ORACLE_TRACE_FIXED_BYTES - 1U;
+    expect_trace_parse_reject("short payload", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.path_len = 0x01U;
+    rejected_trace.path[0] = 0x42U;
+    expect_trace_parse_reject("forwarded SNR path", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    rejected_trace = routed_trace;
+    rejected_trace.payload[8] = 0x01U;
+    expect_trace_parse_reject("unsupported flags", rejected_trace,
+                              D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES);
+    expect_trace_parse_reject("undersized path destination", routed_trace,
+                              0U);
+    uint32_t null_path_tag = 0xAAAAAAAAU;
+    uint32_t null_path_auth = 0xBBBBBBBBU;
+    uint8_t null_path_flags = 0xCCU;
+    size_t null_path_len = 0xBEEFU;
+    if (d1l_meshcore_oracle_parse_trace_source(
+            &routed_trace, &null_path_tag, &null_path_auth, &null_path_flags,
+            nullptr, D1L_MESHCORE_ORACLE_MAX_TRACE_PATH_BYTES,
+            &null_path_len) ||
+        null_path_tag != 0xAAAAAAAAU || null_path_auth != 0xBBBBBBBBU ||
+        null_path_flags != 0xCCU || null_path_len != 0xBEEFU) {
+        failures.push_back("null path TRACE parse changed output");
+    }
+
+    const bool passed = failures.empty();
+    for (const std::string &failure : failures) {
+        std::cerr << failure << '\n';
+    }
+    std::cout << "{\"passed\":" << (passed ? "true" : "false")
+              << ",\"coverage_boundary\":"
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures\""
+              << ",\"wp04_closure_eligible\":false"
+              << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
+              << ",\"upstream_commit\":\""
+              << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
+              << ",\"vectors\":{\"roundtrip\":"
+              << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
+                   kSignedAdvertPacketRoundtripVectors +
+                   kIdentityExchangeRoundtripVectors +
+                   kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
+                   kRequestResponseRoundtripVectors +
+                   kLoginResponseRoundtripVectors +
+                  kDmRoundtripVectors +
+                  kExpectedAckPathRoundtripVectors +
+                  kPathReturnRoundtripVectors +
+                  kRouteRoundtripVectors + kAckRoundtripVectors +
+                  kTraceRoundtripVectors)
+              << ",\"valid\":"
+               << (kSignedAdvertValidVectors + kVerifierKatValidVectors +
+                   kPointValidationValidVectors + kCryptoAdapterKatValidVectors +
+                   kLoginPasswordAuthorizationValidVectors +
+                   kExistingAclBlankLoginValidVectors +
+                   kLoginAclTransitionValidVectors +
+                   kAuthenticatedRequestReplayValidVectors +
+                   kAuthenticatedTextTransitionValidVectors +
+                   kLoginResponseDispatchValidVectors +
+                   kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertSendValidVectors +
+                   kExpectedAckValidVectors)
+              << ",\"invalid\":"
+              << (kPacketInvalidVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketInvalidVectors +
+                  kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
+                   kPointValidationInvalidVectors +
+                   kIdentityExchangeInvalidVectors +
+                   kGroupInvalidVectors + kLoginRequestInvalidVectors +
+                   kRequestResponseInvalidVectors +
+                   kLoginResponseInvalidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors +
+                   kExistingAclBlankLoginInvalidVectors +
+                   kLoginAclTransitionInvalidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors +
+                   kAuthenticatedTextTransitionInvalidVectors +
+                   kLoginResponseDispatchInvalidVectors +
+                   kSignedAdvertDispatchInvalidVectors +
+                   kSignedAdvertSendInvalidVectors +
+                  kDmInvalidVectors +
+                  kExpectedAckInvalidVectors +
+                  kPathReturnInvalidVectors +
+                  kRouteInvalidVectors + kAckInvalidVectors +
+                  kTraceInvalidVectors)
+              << ",\"semantic\":"
+              << (kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors +
+                  kSignedAdvertValidVectors +
+                  kSignedAdvertInvalidVectors +
+                   kPointValidationValidVectors +
+                   kPointValidationInvalidVectors +
+                   kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors +
+                  kGroupRoundtripVectors + kGroupInvalidVectors +
+                   kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors +
+                    kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors +
+                    kLoginResponseRoundtripVectors +
+                    kLoginResponseInvalidVectors +
+                    kLoginPasswordAuthorizationValidVectors +
+                    kLoginPasswordAuthorizationInvalidVectors +
+                    kExistingAclBlankLoginValidVectors +
+                    kExistingAclBlankLoginInvalidVectors +
+                    kLoginAclTransitionValidVectors +
+                    kLoginAclTransitionInvalidVectors +
+                    kAuthenticatedRequestReplayValidVectors +
+                    kAuthenticatedRequestReplayInvalidVectors +
+                    kAuthenticatedTextTransitionValidVectors +
+                    kAuthenticatedTextTransitionInvalidVectors +
+                    kLoginResponseDispatchValidVectors +
+                    kLoginResponseDispatchInvalidVectors +
+                    kSignedAdvertDispatchValidVectors +
+                    kSignedAdvertDispatchInvalidVectors +
+                    kSignedAdvertSendValidVectors +
+                    kSignedAdvertSendInvalidVectors +
+                  kDmRoundtripVectors + kDmInvalidVectors +
+                  kExpectedAckValidVectors +
+                  kExpectedAckPathRoundtripVectors +
+                  kExpectedAckInvalidVectors +
+                  kPathReturnRoundtripVectors +
+                  kPathReturnInvalidVectors +
+                  kRouteRoundtripVectors + kRouteInvalidVectors +
+                  kAckRoundtripVectors + kAckInvalidVectors +
+                  kTraceRoundtripVectors + kTraceInvalidVectors)
+              << ",\"total\":"
+              << (kPacketRoundtripVectors + kPacketInvalidVectors +
+                  kAdvertRoundtripVectors + kAdvertInvalidVectors +
+                  kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors +
+                  kSignedAdvertValidVectors + kSignedAdvertInvalidVectors +
+                  kVerifierKatValidVectors + kVerifierKatInvalidVectors +
+                  kPointValidationValidVectors +
+                   kPointValidationInvalidVectors +
+                   kCryptoAdapterKatValidVectors +
+                   kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors +
+                  kGroupRoundtripVectors + kGroupInvalidVectors +
+                   kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors +
+                    kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors +
+                    kLoginResponseRoundtripVectors +
+                    kLoginResponseInvalidVectors +
+                    kLoginPasswordAuthorizationValidVectors +
+                    kLoginPasswordAuthorizationInvalidVectors +
+                    kExistingAclBlankLoginValidVectors +
+                    kExistingAclBlankLoginInvalidVectors +
+                    kLoginAclTransitionValidVectors +
+                    kLoginAclTransitionInvalidVectors +
+                    kAuthenticatedRequestReplayValidVectors +
+                    kAuthenticatedRequestReplayInvalidVectors +
+                    kAuthenticatedTextTransitionValidVectors +
+                    kAuthenticatedTextTransitionInvalidVectors +
+                    kLoginResponseDispatchValidVectors +
+                    kLoginResponseDispatchInvalidVectors +
+                    kSignedAdvertDispatchValidVectors +
+                    kSignedAdvertDispatchInvalidVectors +
+                    kSignedAdvertSendValidVectors +
+                    kSignedAdvertSendInvalidVectors +
+                  kDmRoundtripVectors + kDmInvalidVectors +
+                  kExpectedAckValidVectors +
+                  kExpectedAckPathRoundtripVectors +
+                  kExpectedAckInvalidVectors +
+                  kPathReturnRoundtripVectors +
+                  kPathReturnInvalidVectors +
+                  kRouteRoundtripVectors + kRouteInvalidVectors +
+                  kAckRoundtripVectors + kAckInvalidVectors +
+                  kTraceRoundtripVectors + kTraceInvalidVectors)
+              << ",\"packet_envelope\":{\"roundtrip\":"
+              << kPacketRoundtripVectors << ",\"invalid\":"
+              << kPacketInvalidVectors << ",\"semantic\":0,\"total\":"
+              << (kPacketRoundtripVectors + kPacketInvalidVectors) << "}"
+              << ",\"advert_data_fields\":{\"roundtrip\":"
+              << kAdvertRoundtripVectors << ",\"invalid\":"
+              << kAdvertInvalidVectors << ",\"semantic\":"
+              << (kAdvertRoundtripVectors + kAdvertInvalidVectors)
+              << ",\"total\":"
+              << (kAdvertRoundtripVectors + kAdvertInvalidVectors) << "}"
+              << ",\"signed_advert_packet_creation\":{\"roundtrip\":"
+              << kSignedAdvertPacketRoundtripVectors << ",\"invalid\":"
+              << kSignedAdvertPacketInvalidVectors << ",\"semantic\":"
+              << (kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors)
+              << ",\"total\":"
+              << (kSignedAdvertPacketRoundtripVectors +
+                  kSignedAdvertPacketInvalidVectors)
+              << "}"
+              << ",\"signed_advert_verification\":{\"valid\":"
+              << kSignedAdvertValidVectors << ",\"invalid\":"
+              << kSignedAdvertInvalidVectors << ",\"semantic\":"
+              << (kSignedAdvertValidVectors + kSignedAdvertInvalidVectors)
+              << ",\"total\":"
+              << (kSignedAdvertValidVectors + kSignedAdvertInvalidVectors)
+              << "}"
+              << ",\"ed25519_verifier_kat\":{\"valid\":"
+              << kVerifierKatValidVectors << ",\"invalid\":"
+              << kVerifierKatInvalidVectors << ",\"semantic\":0,\"total\":"
+              << (kVerifierKatValidVectors + kVerifierKatInvalidVectors)
+              << "}"
+              << ",\"ed25519_point_validation\":{\"valid\":"
+              << kPointValidationValidVectors << ",\"invalid\":"
+              << kPointValidationInvalidVectors << ",\"semantic\":"
+              << (kPointValidationValidVectors +
+                  kPointValidationInvalidVectors)
+              << ",\"total\":"
+              << (kPointValidationValidVectors +
+                  kPointValidationInvalidVectors)
+              << "}"
+              << ",\"crypto_adapter_kat\":{\"valid\":"
+              << kCryptoAdapterKatValidVectors
+              << ",\"invalid\":0,\"semantic\":0,\"total\":"
+               << kCryptoAdapterKatValidVectors << "}"
+               << ",\"identity_shared_secret_derivation\":{\"roundtrip\":"
+               << kIdentityExchangeRoundtripVectors << ",\"invalid\":"
+               << kIdentityExchangeInvalidVectors << ",\"semantic\":"
+               << (kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors)
+               << ",\"total\":"
+               << (kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors)
+               << "}"
+              << ",\"public_group_packets\":{\"roundtrip\":"
+              << kGroupRoundtripVectors << ",\"invalid\":"
+              << kGroupInvalidVectors << ",\"semantic\":"
+              << (kGroupRoundtripVectors + kGroupInvalidVectors)
+              << ",\"total\":"
+              << (kGroupRoundtripVectors + kGroupInvalidVectors) << "}"
+              << ",\"anonymous_login_request_packets\":{\"roundtrip\":"
+              << kLoginRequestRoundtripVectors << ",\"invalid\":"
+              << kLoginRequestInvalidVectors << ",\"semantic\":"
+              << (kLoginRequestRoundtripVectors +
+                  kLoginRequestInvalidVectors)
+              << ",\"total\":"
+               << (kLoginRequestRoundtripVectors +
+                   kLoginRequestInvalidVectors)
+               << "}"
+               << ",\"regular_request_response_packets\":{\"roundtrip\":"
+               << kRequestResponseRoundtripVectors << ",\"invalid\":"
+               << kRequestResponseInvalidVectors << ",\"semantic\":"
+               << (kRequestResponseRoundtripVectors +
+                   kRequestResponseInvalidVectors)
+               << ",\"total\":"
+                << (kRequestResponseRoundtripVectors +
+                    kRequestResponseInvalidVectors)
+                << "}"
+               << ",\"canonical_login_response_packets\":{\"roundtrip\":"
+               << kLoginResponseRoundtripVectors << ",\"invalid\":"
+               << kLoginResponseInvalidVectors << ",\"semantic\":"
+               << (kLoginResponseRoundtripVectors +
+                   kLoginResponseInvalidVectors)
+               << ",\"total\":"
+               << (kLoginResponseRoundtripVectors +
+                   kLoginResponseInvalidVectors)
+               << "}"
+               << ",\"login_password_authorization_fixtures\":{\"valid\":"
+               << kLoginPasswordAuthorizationValidVectors << ",\"invalid\":"
+               << kLoginPasswordAuthorizationInvalidVectors
+               << ",\"semantic\":"
+               << (kLoginPasswordAuthorizationValidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors)
+               << ",\"total\":"
+               << (kLoginPasswordAuthorizationValidVectors +
+                   kLoginPasswordAuthorizationInvalidVectors)
+               << "}"
+               << ",\"existing_acl_blank_login_reuse_fixtures\":{\"valid\":"
+               << kExistingAclBlankLoginValidVectors << ",\"invalid\":"
+               << kExistingAclBlankLoginInvalidVectors << ",\"semantic\":"
+               << (kExistingAclBlankLoginValidVectors +
+                   kExistingAclBlankLoginInvalidVectors)
+               << ",\"total\":"
+               << (kExistingAclBlankLoginValidVectors +
+                   kExistingAclBlankLoginInvalidVectors)
+               << "}"
+               << ",\"authorized_login_acl_transition_fixtures\":{\"valid\":"
+               << kLoginAclTransitionValidVectors << ",\"invalid\":"
+               << kLoginAclTransitionInvalidVectors << ",\"semantic\":"
+               << (kLoginAclTransitionValidVectors +
+                   kLoginAclTransitionInvalidVectors)
+               << ",\"total\":"
+               << (kLoginAclTransitionValidVectors +
+                   kLoginAclTransitionInvalidVectors)
+               << "}"
+               << ",\"authenticated_request_replay_transition_fixtures\":{\"valid\":"
+               << kAuthenticatedRequestReplayValidVectors << ",\"invalid\":"
+               << kAuthenticatedRequestReplayInvalidVectors
+               << ",\"semantic\":"
+               << (kAuthenticatedRequestReplayValidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors)
+               << ",\"total\":"
+               << (kAuthenticatedRequestReplayValidVectors +
+                   kAuthenticatedRequestReplayInvalidVectors)
+               << "}"
+               << ",\"authenticated_text_replay_response_session_fixtures\":{\"valid\":"
+               << kAuthenticatedTextTransitionValidVectors << ",\"invalid\":"
+               << kAuthenticatedTextTransitionInvalidVectors
+               << ",\"semantic\":"
+               << (kAuthenticatedTextTransitionValidVectors +
+                   kAuthenticatedTextTransitionInvalidVectors)
+               << ",\"total\":"
+               << (kAuthenticatedTextTransitionValidVectors +
+                   kAuthenticatedTextTransitionInvalidVectors)
+               << "}"
+               << ",\"login_response_creation_dispatch_orchestration_fixtures\":{\"valid\":"
+               << kLoginResponseDispatchValidVectors << ",\"invalid\":"
+               << kLoginResponseDispatchInvalidVectors << ",\"semantic\":"
+               << (kLoginResponseDispatchValidVectors +
+                   kLoginResponseDispatchInvalidVectors)
+               << ",\"total\":"
+               << (kLoginResponseDispatchValidVectors +
+                   kLoginResponseDispatchInvalidVectors)
+               << "}"
+               << ",\"signed_advert_dispatch_transition_fixtures\":{\"valid\":"
+               << kSignedAdvertDispatchValidVectors << ",\"invalid\":"
+               << kSignedAdvertDispatchInvalidVectors << ",\"semantic\":"
+               << (kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertDispatchInvalidVectors)
+               << ",\"total\":"
+               << (kSignedAdvertDispatchValidVectors +
+                   kSignedAdvertDispatchInvalidVectors)
+               << "}"
+               << ",\"signed_advert_creation_send_orchestration_fixtures\":{\"valid\":"
+               << kSignedAdvertSendValidVectors << ",\"invalid\":"
+               << kSignedAdvertSendInvalidVectors << ",\"semantic\":"
+               << (kSignedAdvertSendValidVectors +
+                   kSignedAdvertSendInvalidVectors)
+               << ",\"total\":"
+               << (kSignedAdvertSendValidVectors +
+                   kSignedAdvertSendInvalidVectors)
+               << "}"
+              << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
+              << kDmRoundtripVectors << ",\"invalid\":"
+              << kDmInvalidVectors << ",\"semantic\":"
+              << (kDmRoundtripVectors + kDmInvalidVectors)
+              << ",\"total\":"
+              << (kDmRoundtripVectors + kDmInvalidVectors) << "}"
+              << ",\"expected_ack_hash_and_ack_path\":{\"roundtrip\":"
+              << kExpectedAckPathRoundtripVectors << ",\"valid\":"
+              << kExpectedAckValidVectors << ",\"invalid\":"
+              << kExpectedAckInvalidVectors << ",\"semantic\":"
+              << (kExpectedAckPathRoundtripVectors +
+                  kExpectedAckValidVectors + kExpectedAckInvalidVectors)
+              << ",\"total\":"
+              << (kExpectedAckPathRoundtripVectors +
+                  kExpectedAckValidVectors + kExpectedAckInvalidVectors)
+              << "}"
+              << ",\"path_return_route_codes\":{\"roundtrip\":"
+              << kPathReturnRoundtripVectors << ",\"invalid\":"
+              << kPathReturnInvalidVectors << ",\"semantic\":"
+              << (kPathReturnRoundtripVectors + kPathReturnInvalidVectors)
+              << ",\"total\":"
+              << (kPathReturnRoundtripVectors + kPathReturnInvalidVectors)
+              << "}"
+              << ",\"direct_flood_headers\":{\"roundtrip\":"
+              << kRouteRoundtripVectors << ",\"invalid\":"
+              << kRouteInvalidVectors << ",\"semantic\":"
+              << (kRouteRoundtripVectors + kRouteInvalidVectors)
+              << ",\"total\":"
+              << (kRouteRoundtripVectors + kRouteInvalidVectors) << "}"
+              << ",\"ack_frames\":{\"roundtrip\":"
+              << kAckRoundtripVectors << ",\"invalid\":"
+              << kAckInvalidVectors << ",\"semantic\":"
+              << (kAckRoundtripVectors + kAckInvalidVectors)
+              << ",\"total\":"
+              << (kAckRoundtripVectors + kAckInvalidVectors) << "}"
+              << ",\"trace_source_frames\":{\"roundtrip\":"
+              << kTraceRoundtripVectors << ",\"invalid\":"
+              << kTraceInvalidVectors << ",\"semantic\":"
+              << (kTraceRoundtripVectors + kTraceInvalidVectors)
+              << ",\"total\":"
+              << (kTraceRoundtripVectors + kTraceInvalidVectors) << "}}"
+              << ",\"capabilities\":{\"packet_envelope\":true"
+              << ",\"advert_data_fields\":true"
+              << ",\"signed_advert_packet_creation\":true"
+              << ",\"signed_advert_verification\":true"
+               << ",\"ed25519_point_validation\":true"
+               << ",\"identity_shared_secret_derivation\":true"
+              << ",\"public_group_packets\":true"
+               << ",\"anonymous_login_request_packets\":true"
+                << ",\"regular_request_response_packets\":true"
+                << ",\"canonical_login_response_packets\":true"
+                << ",\"login_password_authorization_fixtures\":true"
+                << ",\"existing_acl_blank_login_reuse_fixtures\":true"
+                << ",\"authorized_login_acl_transition_fixtures\":true"
+                << ",\"authenticated_request_replay_transition_fixtures\":true"
+                << ",\"authenticated_text_replay_response_session_fixtures\":true"
+                << ",\"login_response_creation_dispatch_orchestration_fixtures\":true"
+                << ",\"signed_advert_dispatch_transition_fixtures\":true"
+                << ",\"signed_advert_creation_send_orchestration_fixtures\":true"
+              << ",\"dm_encrypt_decrypt\":true"
+              << ",\"expected_ack_hash_and_ack_path\":true"
+              << ",\"path_return_route_codes\":true"
+              << ",\"direct_flood_headers\":true"
+              << ",\"ack_frames\":true"
+              << ",\"trace_source_frames\":true}"
+              << ",\"failures\":" << failures.size() << "}\n";
+    return passed ? 0 : 1;
+}

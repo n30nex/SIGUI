@@ -1,6 +1,6 @@
 # Source Audit and Attribution
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 This project uses references for architecture and feature parity, but Phase 1 source is newly written except for git submodules.
 
@@ -10,14 +10,14 @@ Top-level project license: GPL-3.0-or-later. The public release package must inc
 
 - Seeed SenseCAP Indicator ESP32 SDK: https://github.com/Seeed-Solution/sensecap_indicator_esp32
   - License: Apache-2.0.
-  - Use: D1L ESP-IDF components for BSP, RGB LCD, touch, IO expander, and SX1262 wiring.
+  - Use: D1L ESP-IDF components for BSP, RGB LCD, touch, IO expander, and SX1262 wiring. WP-04 host conformance also compiles the submodule's Brian Gladman `soft-se/aes.c` implementation only inside the sanitized oracle target; its permissive source notice remains in `aes.c`/`aes.h` and the source is pinned by canonical-LF SHA-256.
   - Risk: Seeed LoRa sample code can enable SX1262 DIO3 TCXO control when its board-detect pin suggests TCXO. MeshCore DeskOS D1L currently treats TCXO as `NONE` by default and avoids calling TCXO setup during Phase 1 radio hardware probe.
 
 - MeshCore upstream: https://github.com/meshcore-dev/MeshCore
   - License: MIT-style `license.txt` in the upstream repo, with bundled third-party notices.
   - Pinned gitlink reviewed for the issue #65 wire-envelope slice: `e8d3c53ba1ea863937081cd0caad759b832f3028`.
-  - Use: protocol reference plus the exact structural packet-envelope oracle for the first issue #65 CI slice. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
-  - Conformance boundary: only the pinned packet-envelope implementation is an oracle in this slice. The upstream native-test AES/SHA mocks are not production cryptography and are excluded as cryptographic evidence. A passing `wire_envelope_only` comparison makes no semantic, crypto, retained-state, real-peer, full-conformance, or release claim.
+  - Use: protocol reference plus the exact structural packet-envelope oracle and bounded advert/public-group/plain-DM/expected-ACK/ACK+PATH/general-PATH/route-code/ACK/TRACE golden-vector target for issue #65. The production service retains its original narrow C adapter rather than linking the upstream service/chat stack.
+  - Conformance boundary: the packet-envelope result remains `wire_envelope_only`; the separately versioned WP-04 oracle also pins advert fields, strict signed-advert verification, `BaseChatMesh` channel hashing, plain-DM attempt/text and expected-ACK layout, `mesh::Utils` public-group/DM/PATH AES-HMAC creation and authenticated parsing, caller-selected direct/flood transport-code preparation, ACK framing, and source TRACE framing. DM and PATH vectors use caller-supplied public-key/hash/shared-secret/RNG inputs; they do not claim key exchange, contacts, stored route selection, dispatch, reciprocal-path decisions, ACK correlation/delivery, forwarding, or retained state. Exact-block normal DMs pin the deterministic expected hash only because the pinned receive path reads the full ACK body's fifth byte beyond initialized decrypted/terminator bytes. The strict advert verifier uses the vendored C Ed25519 implementation with production canonical-scalar, canonical-point, and low-order-point checks. The upstream native-test AES/SHA mocks are excluded; bounded crypto uses the source-pinned Seeed/Brian Gladman AES implementation and a functional host SHA-256/HMAC adapter checked against FIPS/RFC known-answer vectors. Neither result proves full Mesh dispatch, delivery, retained state, real-peer interop, full conformance, or release readiness.
   - Risk: Upstream is Arduino/PlatformIO oriented in many paths; ESP-IDF integration may need an adapter layer rather than direct reuse. Optional web stack dependencies must be reviewed before Wi-Fi management is added.
 
 ## Reference Repositories

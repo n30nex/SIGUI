@@ -66,6 +66,11 @@ def completed_report(
         for index in range(conformance.EXPECTED_FUZZ_CORPUS["seed_count"])
     ]
     temporary = "/tmp/d1l-meshcore-conformance-fixture"
+    commands = conformance.command_plan(
+        "clang-18",
+        "clang++-18",
+        temporary,
+    )
     return {
         "schema_version": 1,
         "artifact_type": "d1l_meshcore_wire_conformance",
@@ -98,6 +103,9 @@ def completed_report(
             "fuzz_runs": conformance.DEFAULT_RUNS,
             "sanitizers": ["address", "undefined"],
         },
+        "sanitizer_policy": conformance.ED25519_SANITIZER_POLICY,
+        "full_ubsan_clean": False,
+        "sanitizer_policy_passed": True,
         "vector_matrix": conformance.EXPECTED_VECTOR_MATRIX,
         "payload_version_gate": conformance.EXPECTED_PAYLOAD_VERSION_GATE,
         "source_verification": {
@@ -123,7 +131,7 @@ def completed_report(
             "seeds": seeds,
             "verified": True,
         },
-        "commands": [["clang-18", f"step-{index}"] for index in range(7)],
+        "commands": commands,
         "fuzz_command": [f"{temporary}/meshcore_wire_fuzz", "-runs=100000"],
         "vector_result": {
             "passed": True,

@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "work_package": "WP-04",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation_and_canonical_login_response_packets_and_login_password_authorization_fixtures_and_existing_acl_blank_login_reuse_fixtures_and_authorized_login_acl_transition_fixtures_and_authenticated_request_replay_transition_fixtures_and_authenticated_text_replay_response_session_orchestration_fixtures_and_login_response_creation_dispatch_orchestration_fixtures_and_signed_advert_dispatch_transition_fixtures_and_signed_advert_creation_send_orchestration_fixtures",
+  "upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+  "oracle_corpus_version": 23,
+  "oracle_abi_version": 2,
+  "wp04_closure_eligible": false,
+  "closure_ready": false,
+  "required_surfaces": [
+    {
+      "id": "identity_signed_adverts",
+      "status": "partial",
+      "capabilities": [
+        "advert_data_fields",
+        "signed_advert_packet_creation",
+        "signed_advert_verification",
+        "ed25519_point_validation",
+        "signed_advert_dispatch_transition_fixtures",
+        "signed_advert_creation_send_orchestration_fixtures",
+        "identity_signed_advert"
+      ]
+    },
+    {
+      "id": "public_group_packets",
+      "status": "implemented",
+      "capabilities": [
+        "public_group_packets"
+      ]
+    },
+    {
+      "id": "dm_encrypt_decrypt",
+      "status": "implemented",
+      "capabilities": [
+        "dm_encrypt_decrypt"
+      ]
+    },
+    {
+      "id": "expected_ack",
+      "status": "implemented",
+      "capabilities": [
+        "expected_ack_hash_and_ack_path"
+      ]
+    },
+    {
+      "id": "ack_multi_ack_ack_path",
+      "status": "implemented",
+      "capabilities": [
+        "ack_frames",
+        "expected_ack_hash_and_ack_path"
+      ]
+    },
+    {
+      "id": "direct_flood_headers",
+      "status": "implemented",
+      "capabilities": [
+        "direct_flood_headers"
+      ]
+    },
+    {
+      "id": "path_return_route_codes",
+      "status": "implemented",
+      "capabilities": [
+        "path_return_route_codes"
+      ]
+    },
+    {
+      "id": "trace_path_discovery",
+      "status": "partial",
+      "capabilities": [
+        "trace_source_frames",
+        "trace_forwarding_and_path_discovery"
+      ]
+    },
+    {
+      "id": "login_request_response_admin",
+      "status": "partial",
+      "capabilities": [
+        "anonymous_login_request_packets",
+        "regular_request_response_packets",
+        "identity_shared_secret_derivation",
+        "canonical_login_response_packets",
+        "login_password_authorization_fixtures",
+        "existing_acl_blank_login_reuse_fixtures",
+        "authorized_login_acl_transition_fixtures",
+        "authenticated_request_replay_transition_fixtures",
+        "authenticated_text_replay_response_session_fixtures",
+        "login_response_creation_dispatch_orchestration_fixtures",
+        "login_request_response_admin"
+      ]
+    }
+  ],
+  "cross_cutting_capabilities": [
+    {
+      "id": "packet_envelope",
+      "status": "implemented"
+    },
+    {
+      "id": "ack_dispatch_correlation_and_delivery",
+      "status": "blocked"
+    },
+    {
+      "id": "route_selection_and_forwarding",
+      "status": "blocked"
+    }
+  ],
+  "unresolved_capabilities": [
+    "identity_signed_advert",
+    "ack_dispatch_correlation_and_delivery",
+    "route_selection_and_forwarding",
+    "trace_forwarding_and_path_discovery",
+    "login_request_response_admin"
+  ],
+  "local_packet_type_policy": {
+    "source": "main/mesh/meshcore_wire.h",
+    "declaration_prefix": "D1L_MESHCORE_PAYLOAD_",
+    "excluded_symbols": [
+      "D1L_MESHCORE_PAYLOAD_VER_1"
+    ],
+    "unknown_packet_type_policy": "fail_closed",
+    "require_wire_vector": true,
+    "packet_types": [
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_TEXT",
+        "code": 2,
+        "wire_vector": "TXT",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "dm_encrypt_decrypt"
+        ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_ACK",
+        "code": 3,
+        "wire_vector": "ACK",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "ack_frames",
+          "expected_ack_hash_and_ack_path",
+          "ack_dispatch_correlation_and_delivery"
+        ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_ADVERT",
+        "code": 4,
+        "wire_vector": "ADVERT",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "advert_data_fields",
+          "signed_advert_packet_creation",
+          "signed_advert_verification",
+          "ed25519_point_validation",
+          "signed_advert_dispatch_transition_fixtures",
+          "signed_advert_creation_send_orchestration_fixtures",
+          "identity_signed_advert"
+        ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_GROUP_TEXT",
+        "code": 5,
+        "wire_vector": "GRP_TXT",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "public_group_packets"
+        ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_PATH",
+        "code": 8,
+        "wire_vector": "PATH",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "expected_ack_hash_and_ack_path",
+          "path_return_route_codes"
+        ]
+      },
+      {
+        "symbol": "D1L_MESHCORE_PAYLOAD_MULTIPART",
+        "code": 10,
+        "wire_vector": "MULTIPART",
+        "wire_vector_covered": true,
+        "semantic_capabilities": [
+          "ack_frames",
+          "ack_dispatch_correlation_and_delivery"
+        ]
+      }
+    ]
+  },
+  "submodule_update_policy": {
+    "reviewed_upstream_commit": "e8d3c53ba1ea863937081cd0caad759b832f3028",
+    "reviewed_corpus_version": 23,
+    "requires_vector_review": true,
+    "requires_corpus_version_increment": true,
+    "unreviewed_update_policy": "fail_closed"
+  }
+}

@@ -8,6 +8,7 @@ import pytest
 
 from scripts import (
     compare_release_reproducibility_d1l,
+    meshcore_conformance_d1l as conformance,
     package_release_d1l,
     sbom_d1l,
 )
@@ -193,23 +194,26 @@ def write_conformance(
         root / package_release_d1l.BUILD_INPUTS_SOURCE,
         generated_at=generated_at,
     )
+    source_root = str(conformance.ROOT).replace("\\", "/")
+    actions_root = f"/actions/run-{run_index}/checkout"
+    planned_commands = conformance.command_plan(
+        "clang-18",
+        "clang++-18",
+        temporary,
+    )
     report["commands"] = [
-                    [
-                        "clang-18",
-                        "-c",
-                        f"/actions/run-{run_index}/checkout/main/mesh/meshcore_wire.c",
-                        "-o",
-                        f"{temporary}/wire.o",
-                    ],
-                    [
-                        "clang++-18",
-                        "-c",
-                        f"/actions/run-{run_index}/checkout/third_party/MeshCore/src/Packet.cpp",
-                        "-o",
-                        f"{temporary}/packet.o",
-                    ],
-                    *[["clang-18", f"step-{index}"] for index in range(5)],
-                ]
+        [
+            (
+                actions_root + normalized[len(source_root) :]
+                if normalized == source_root
+                or normalized.startswith(source_root + "/")
+                else normalized
+            )
+            for argument in command
+            for normalized in [str(argument).replace("\\", "/")]
+        ]
+        for command in planned_commands
+    ]
     report["fuzz_command"] = [
                     f"{temporary}/meshcore_wire_fuzz",
                     "-runs=100000",
