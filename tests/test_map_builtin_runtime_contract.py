@@ -243,6 +243,7 @@ def test_http_header_length_contract_handles_errors_chunking_and_hard_bounds():
 
 def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
     store = read("main/storage/map_tile_store.c")
+    time_service = read("main/platform/time_service.c")
     service = read("main/map/map_view_service.c")
     ui = read("main/ui/ui_map.c")
     defaults = read("sdkconfig.defaults")
@@ -251,20 +252,24 @@ def test_https_download_waits_for_valid_sntp_time_and_remains_cancelable():
         "esp_err_t d1l_map_tile_store_fetch",
         "esp_err_t d1l_map_tile_store_write_canary",
     )
-    clock = body(store, "static esp_err_t ensure_tls_clock", "static void init_download_result")
+    clock = body(
+        time_service,
+        "esp_err_t d1l_time_service_wait_for_certificate_time",
+        "esp_err_t d1l_time_service_set_companion_time",
+    )
     run = body(service, "static void run_generation", "static void map_worker")
 
-    assert 'ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org")' in clock
-    assert "esp_netif_sntp_init(&config)" in clock
+    assert 'ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org")' in time_service
+    assert "config.wait_for_sync = true" in time_service
+    assert "esp_netif_sntp_init(&config)" in time_service
     assert "esp_netif_sntp_sync_wait(wait_ticks)" in clock
-    assert "s_map_sntp_can_sync_wait = init_ret == ESP_OK" in clock
-    assert "wait_ret == ESP_ERR_INVALID_STATE" in clock
-    assert "vTaskDelay(wait_ticks)" in clock
     assert "continue_allowed(should_continue, continue_context)" in clock
-    assert "D1L_MAP_TILE_TIME_SYNC_SLICE_MS" in clock
-    assert fetch.index("ensure_tls_clock(should_continue, continue_context)") < fetch.index(
+    assert "D1L_TIME_TLS_WAIT_SLICE_MS" in fetch
+    assert fetch.index("d1l_time_service_wait_for_certificate_time(") < fetch.index(
         "esp_http_client_init(&config)"
     )
+    assert "esp_netif_sntp" not in store
+    assert "time(NULL)" not in store
     assert 'download_step(&result, "time_sync"' in fetch
     assert 'strcmp(tile_result.step, "time_sync") == 0' in run
     assert 'strcmp(status->phase, "time_sync") == 0' in ui
