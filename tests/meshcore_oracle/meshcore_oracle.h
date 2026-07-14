@@ -17,6 +17,7 @@ extern "C" {
 #define D1L_MESHCORE_ORACLE_MAX_RAW_BYTES 255U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_DATA_BYTES 32U
 #define D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES 31U
+#define D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES 15U
 #define D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES 32U
 #define D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES 32U
 #define D1L_MESHCORE_ORACLE_ADVERT_TIMESTAMP_BYTES 4U
@@ -151,6 +152,47 @@ bool d1l_meshcore_oracle_parse_signed_advert_packet(
     uint8_t *out_app_data,
     size_t app_data_capacity,
     size_t *out_app_data_len);
+
+/*
+ * Canonical BaseChatMesh::sendLogin plaintext plus Mesh::createAnonDatagram
+ * crypto/framing. The caller supplies the destination hash, sender public key,
+ * and already-derived shared secret. is_room selects the four-byte timestamp
+ * form or the timestamp-plus-four-byte-sync_since room form. Password bytes
+ * are explicit, NUL-free, and limited to the upstream 15-byte truncation
+ * boundary; overlength input is rejected instead of silently truncated.
+ *
+ * Creation returns the upstream pre-route ANON_REQ layout. Parsing compares
+ * the unauthenticated outer destination/public-key fields to caller-supplied
+ * expectations, authenticates/decrypts the body, and accepts only the minimal
+ * AES block count and canonical zero padding produced by sendLogin.
+ *
+ * These functions do not derive an Ed25519 shared secret, validate the sender
+ * point, look up a contact, consume an RTC, choose a route, authorize a
+ * password, enforce replay policy, create a response, mutate admin/session
+ * state, dispatch/schedule a packet, or claim RF delivery.
+ */
+bool d1l_meshcore_oracle_create_login_request_packet(
+    uint8_t destination_hash,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t timestamp,
+    uint8_t is_room,
+    uint32_t sync_since,
+    const uint8_t *password,
+    size_t password_len,
+    d1l_meshcore_oracle_packet_t *out_packet);
+
+bool d1l_meshcore_oracle_parse_login_request_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t is_room,
+    uint32_t *out_timestamp,
+    uint32_t *out_sync_since,
+    uint8_t *out_password,
+    size_t password_capacity,
+    size_t *out_password_len);
 
 /*
  * Pinned MeshCore group-channel hash and datagram crypto/framing. This hash

@@ -19,7 +19,8 @@ COVERAGE_MANIFEST = ORACLE_ROOT / "coverage_manifest.json"
 UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
-    "route_codes_ack_trace_and_signed_advert_creation_strict_verification"
+    "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
+    "and_anonymous_login_request_crypto"
 )
 
 
@@ -41,7 +42,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 13
+    assert manifest["corpus_version"] == 14
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -89,6 +90,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "deterministic_seed_keypair_pre_route_creation_and_authenticated_"
             "parse_only_no_identity_verifier_dispatch_replay_contact_or_rf"
         ),
+        "anonymous_login_request_available": True,
+        "anonymous_login_request_scope": (
+            "canonical_room_nonroom_login_request_create_authenticated_parse_"
+            "with_caller_supplied_hash_public_key_secret_time_and_room_mode_"
+            "only_no_key_exchange_authorization_replay_response_session_"
+            "dispatch_route_or_rf"
+        ),
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
         "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -113,6 +121,15 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
                 "third_party/MeshCore/lib/ed25519/ge.c"
             ),
             "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+            "anonymous_login_plaintext": (
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+            ),
+            "anonymous_login_datagram": "third_party/MeshCore/src/Mesh.cpp",
+            "anonymous_login_crypto": "third_party/MeshCore/src/Utils.cpp",
+            "anonymous_login_independent_golden": (
+                "two exact payloads and six-vector matrix from independent "
+                "AES-128 ECB and HMAC-SHA-256 generation"
+            ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -163,6 +180,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert manifest["determinism"]["signed_advert_generation_recipe"] == (
         "ed25519_create_keypair_seed_then_ed25519_sign_"
         "public_key_timestamp_wire_bytes_app_data"
+    )
+    assert manifest["determinism"]["anonymous_login_recipe"] == (
+        "basechatmesh_timestamp_optional_room_sync_password_then_mesh_"
+        "anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret"
+    )
+    assert manifest["determinism"]["anonymous_login_matrix"] == (
+        "nonroom_empty_exact12_max15_and_room_empty_exact8_max15"
     )
     assert manifest["determinism"]["independent_verifier_kat"] == (
         "RFC 8032 section 7.1 TEST 1 empty message"
@@ -216,11 +240,11 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only"
     )
     assert manifest["vectors"] == {
-        "roundtrip": 311,
+        "roundtrip": 317,
         "valid": 20,
-        "invalid": 226,
-        "semantic": 541,
-        "total": 557,
+        "invalid": 261,
+        "semantic": 582,
+        "total": 598,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -268,6 +292,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 21,
             "semantic": 25,
             "total": 25,
+        },
+        "anonymous_login_request_packets": {
+            "roundtrip": 6,
+            "invalid": 35,
+            "semantic": 41,
+            "total": 41,
         },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
@@ -477,6 +507,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "expected_ack_hash_and_ack_path",
             "path_return_route_codes",
             "signed_advert_packet_creation",
+            "anonymous_login_request_packets",
         }
     )
     assert [
@@ -492,8 +523,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "trace_forwarding_and_path_discovery",
         "login_request_response_admin",
         "signed_advert_packet_creation",
+        "anonymous_login_request_packets",
     ]
-    signed_advert_packets = manifest["capabilities"][-1]
+    signed_advert_packets = manifest["capabilities"][-2]
     assert signed_advert_packets["id"] == "signed_advert_packet_creation"
     assert signed_advert_packets["status"] == "implemented"
     assert signed_advert_packets["owner"] == (
@@ -502,6 +534,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert signed_advert_packets["implementation_receipt"]["vectors"] == {
         "roundtrip": 3,
         "invalid": 23,
+    }
+    anonymous_login = manifest["capabilities"][-1]
+    assert anonymous_login["id"] == "anonymous_login_request_packets"
+    assert anonymous_login["status"] == "implemented"
+    assert anonymous_login["owner"] == (
+        "pinned_basechat_anon_datagram_vendored_crypto"
+    )
+    assert anonymous_login["implementation_receipt"]["vectors"] == {
+        "roundtrip": 6,
+        "invalid": 35,
     }
     pending = {
         capability["id"]: capability
@@ -545,8 +587,8 @@ def test_oracle_coverage_manifest_accounts_for_every_required_surface():
     assert summary["unsupported_closure_rejected"] is True
     assert summary["required_surface_count"] == 9
     assert summary["implemented_surface_count"] == 6
-    assert summary["partial_surface_count"] == 2
-    assert summary["blocked_surface_count"] == 1
+    assert summary["partial_surface_count"] == 3
+    assert summary["blocked_surface_count"] == 0
     assert summary["local_packet_type_count"] == 6
     assert summary["wire_vector_covered_packet_type_count"] == 6
     assert summary["unknown_packet_type_policy"] == "fail_closed"
@@ -701,6 +743,8 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert "d1l_meshcore_oracle_verify_signed_advert" in header
     assert "d1l_meshcore_oracle_create_signed_advert_packet" in header
     assert "d1l_meshcore_oracle_parse_signed_advert_packet" in header
+    assert "d1l_meshcore_oracle_create_login_request_packet" in header
+    assert "d1l_meshcore_oracle_parse_login_request_packet" in header
     assert "d1l_meshcore_oracle_group_channel_hash" in header
     assert "d1l_meshcore_oracle_create_group_packet" in header
     assert "d1l_meshcore_oracle_parse_group_packet" in header
@@ -843,7 +887,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 13
+    assert artifact["corpus_version"] == 14
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
@@ -854,6 +898,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert "packet_envelope" not in artifact["pending_capabilities"]
     assert "advert_data_fields" not in artifact["pending_capabilities"]
     assert "signed_advert_packet_creation" not in artifact["pending_capabilities"]
+    assert "anonymous_login_request_packets" not in artifact["pending_capabilities"]
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
     assert "ed25519_point_validation" not in artifact["pending_capabilities"]
     assert "public_group_packets" not in artifact["pending_capabilities"]
@@ -1007,11 +1052,11 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 2,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 311,
+            "roundtrip": 317,
             "valid": 20,
-            "invalid": 226,
-            "semantic": 541,
-            "total": 557,
+            "invalid": 261,
+            "semantic": 582,
+            "total": 598,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -1060,6 +1105,12 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "semantic": 25,
                 "total": 25,
             },
+            "anonymous_login_request_packets": {
+                "roundtrip": 6,
+                "invalid": 35,
+                "semantic": 41,
+                "total": 41,
+            },
             "dm_encrypt_decrypt": {
                 "roundtrip": 268,
                 "invalid": 29,
@@ -1105,6 +1156,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "signed_advert_verification": True,
             "ed25519_point_validation": True,
             "public_group_packets": True,
+            "anonymous_login_request_packets": True,
             "dm_encrypt_decrypt": True,
             "expected_ack_hash_and_ack_path": True,
             "path_return_route_codes": True,

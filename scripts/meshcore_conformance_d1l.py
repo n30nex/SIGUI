@@ -74,10 +74,11 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 13
+ORACLE_CORPUS_VERSION = 14
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
-    "route_codes_ack_trace_and_signed_advert_creation_strict_verification"
+    "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
+    "and_anonymous_login_request_crypto"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -421,6 +422,33 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"roundtrip": 3, "invalid": 23},
         },
     },
+    {
+        "id": "anonymous_login_request_packets",
+        "status": "implemented",
+        "owner": "pinned_basechat_anon_datagram_vendored_crypto",
+        "semantic": True,
+        "scope": (
+            "canonical_room_nonroom_login_request_create_authenticated_parse_"
+            "with_caller_supplied_hash_public_key_secret_time_and_room_mode_"
+            "only_no_key_exchange_authorization_replay_response_session_"
+            "dispatch_route_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-ANON-LOGIN-REQUEST-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/src/Mesh.cpp",
+                "third_party/MeshCore/src/Utils.cpp",
+                "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+            ],
+            "independent_golden": (
+                "two_exact_payloads_and_six_case_payload_matrix_sha256_from_"
+                "independent_aes128_ecb_hmac_sha256_generation"
+            ),
+            "vectors": {"roundtrip": 6, "invalid": 35},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -474,8 +502,11 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
     },
     {
         "id": "login_request_response_admin",
-        "status": "blocked",
-        "capabilities": ["login_request_response_admin"],
+        "status": "partial",
+        "capabilities": [
+            "anonymous_login_request_packets",
+            "login_request_response_admin",
+        ],
     },
 ]
 EXPECTED_ORACLE_CROSS_CUTTING_CAPABILITIES = [
@@ -722,11 +753,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 311,
+        "roundtrip": 317,
         "valid": 20,
-        "invalid": 226,
-        "semantic": 541,
-        "total": 557,
+        "invalid": 261,
+        "semantic": 582,
+        "total": 598,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -774,6 +805,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 21,
             "semantic": 25,
             "total": 25,
+        },
+        "anonymous_login_request_packets": {
+            "roundtrip": 6,
+            "invalid": 35,
+            "semantic": 41,
+            "total": 41,
         },
         "dm_encrypt_decrypt": {
             "roundtrip": 268,
@@ -839,6 +876,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("signed_advert_packet_creation_available") is not True
         or interface.get("signed_advert_packet_creation_scope")
         != "deterministic_seed_keypair_pre_route_creation_and_authenticated_parse_only_no_identity_verifier_dispatch_replay_contact_or_rf"
+        or interface.get("anonymous_login_request_available") is not True
+        or interface.get("anonymous_login_request_scope")
+        != "canonical_room_nonroom_login_request_create_authenticated_parse_with_caller_supplied_hash_public_key_secret_time_and_room_mode_only_no_key_exchange_authorization_replay_response_session_dispatch_route_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -864,7 +904,16 @@ def load_oracle_manifest() -> dict[str, Any]:
             "signed_advert_point_decoder": (
                 "third_party/MeshCore/lib/ed25519/ge.c"
             ),
-            "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+                "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+                "anonymous_login_plaintext": (
+                    "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+                ),
+                "anonymous_login_datagram": "third_party/MeshCore/src/Mesh.cpp",
+                "anonymous_login_crypto": "third_party/MeshCore/src/Utils.cpp",
+                "anonymous_login_independent_golden": (
+                    "two exact payloads and six-vector matrix from independent "
+                    "AES-128 ECB and HMAC-SHA-256 generation"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -908,8 +957,8 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_signed_advert_packets_public_group_dm_ack_path_"
-        "and_general_path_return_vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_signed_advert_packets_public_group_anonymous_"
+        "login_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -922,6 +971,15 @@ def load_oracle_manifest() -> dict[str, Any]:
         "public_key_timestamp_wire_bytes_app_data"
     ):
         raise GateFailure("oracle signed-advert generation recipe drifted")
+    if determinism.get("anonymous_login_recipe") != (
+        "basechatmesh_timestamp_optional_room_sync_password_then_mesh_"
+        "anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret"
+    ):
+        raise GateFailure("oracle anonymous-login recipe drifted")
+    if determinism.get("anonymous_login_matrix") != (
+        "nonroom_empty_exact12_max15_and_room_empty_exact8_max15"
+    ):
+        raise GateFailure("oracle anonymous-login matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -1911,6 +1969,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "signed_advert_verification": True,
                     "ed25519_point_validation": True,
                     "public_group_packets": True,
+                    "anonymous_login_request_packets": True,
                     "dm_encrypt_decrypt": True,
                     "expected_ack_hash_and_ack_path": True,
                     "path_return_route_codes": True,

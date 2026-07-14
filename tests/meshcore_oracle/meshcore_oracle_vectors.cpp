@@ -34,6 +34,8 @@ constexpr std::size_t kPointValidationInvalidVectors = 7U;
 constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
 constexpr std::size_t kGroupRoundtripVectors = 4U;
 constexpr std::size_t kGroupInvalidVectors = 21U;
+constexpr std::size_t kLoginRequestRoundtripVectors = 6U;
+constexpr std::size_t kLoginRequestInvalidVectors = 35U;
 constexpr std::size_t kDmRoundtripVectors = 268U;
 constexpr std::size_t kDmInvalidVectors = 29U;
 constexpr std::size_t kExpectedAckDefinedBodyVectors = 4U;
@@ -1343,6 +1345,420 @@ int main()
         "undersized plaintext output", &valid_group, public_hash,
         public_secret.data(), rejected_plaintext.data(), 15U,
         &rejected_plaintext_len);
+
+    struct LoginRequestVector {
+        const char *name;
+        uint32_t timestamp;
+        uint8_t is_room;
+        uint32_t sync_since;
+        std::vector<uint8_t> password;
+    };
+    constexpr uint8_t login_destination_hash = 0xA1U;
+    const std::array<LoginRequestVector, kLoginRequestRoundtripVectors>
+        login_vectors = {{
+            {"non-room empty", 0x00000000U, 0U, 0U, {}},
+            {"non-room exact block", 0x12345678U, 0U, 0U,
+             {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'}},
+            {"non-room maximum", 0xFFFFFFFFU, 0U, 0U,
+             {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b',
+              'c', 'd', 'e'}},
+            {"room empty", 0x01020304U, 1U, 0x05060708U, {}},
+            {"room exact block", 0x89ABCDEFU, 1U, 0x10203040U,
+             {'r', 'o', 'o', 'm', 'p', 'a', 's', 's'}},
+            {"room maximum", 0x0BADF00DU, 1U, 0x55667788U,
+             {'g', 'u', 'e', 's', 't', '-', 'p', 'a', 's', 's', 'w', 'o',
+              'r', 'd', '!'}},
+        }};
+    const std::array<uint8_t, 51U> expected_login_nonroom_exact_payload = {
+        0xA1U, 0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U, 0x67U,
+        0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU, 0x1DU, 0xDCU,
+        0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U, 0x4AU, 0x2EU, 0x26U,
+        0x78U, 0x14U, 0xE2U, 0xBCU, 0x35U, 0x32U, 0x5AU, 0xC2U, 0xF1U,
+        0x79U, 0xDAU, 0xCAU, 0x89U, 0x84U, 0xAFU};
+    const std::array<uint8_t, 67U> expected_login_room_max_payload = {
+        0xA1U, 0x03U, 0xA1U, 0x07U, 0xBFU, 0xF3U, 0xCEU, 0x10U, 0xBEU,
+        0x1DU, 0x70U, 0xDDU, 0x18U, 0xE7U, 0x4BU, 0xC0U, 0x99U, 0x67U,
+        0xE4U, 0xD6U, 0x30U, 0x9BU, 0xA5U, 0x0DU, 0x5FU, 0x1DU, 0xDCU,
+        0x86U, 0x64U, 0x12U, 0x55U, 0x31U, 0xB8U, 0x65U, 0xC8U, 0x1FU,
+        0xF0U, 0xD3U, 0xDDU, 0xCAU, 0x08U, 0xEBU, 0x2DU, 0xA2U, 0x4AU,
+        0x30U, 0xBFU, 0x63U, 0xE5U, 0xFAU, 0x92U, 0xA7U, 0x3BU, 0x4DU,
+        0x17U, 0x79U, 0x1AU, 0x8BU, 0x8BU, 0x21U, 0x71U, 0xE5U, 0x98U,
+        0xB7U, 0x60U, 0xC0U, 0xECU};
+    const std::array<uint8_t, 32U> expected_login_matrix_sha256 = {
+        0xDEU, 0x98U, 0x16U, 0x70U, 0xDEU, 0xAEU, 0x0CU, 0x0BU,
+        0x17U, 0xA3U, 0xB4U, 0x7BU, 0x72U, 0xBDU, 0xC9U, 0xBAU,
+        0x45U, 0x5BU, 0x49U, 0xD6U, 0x97U, 0xA1U, 0x93U, 0x91U,
+        0x7DU, 0x7DU, 0xD5U, 0xEAU, 0x2DU, 0x83U, 0x64U, 0x14U};
+    constexpr std::array<uint8_t, 2U> login_direct_path = {0x21U, 0x43U};
+    std::array<uint8_t, 1U> empty_login_password{};
+    SHA256 login_matrix_sha;
+    d1l_meshcore_oracle_packet_t valid_login{};
+    for (std::size_t index = 0U; index < login_vectors.size(); ++index) {
+        const LoginRequestVector &vector = login_vectors[index];
+        const uint8_t *password = vector.password.empty()
+            ? empty_login_password.data()
+            : vector.password.data();
+        d1l_meshcore_oracle_packet_t packet{};
+        if (!d1l_meshcore_oracle_create_login_request_packet(
+                login_destination_hash, kSignedAdvertPublicKey.data(),
+                full_secret.data(), vector.timestamp, vector.is_room,
+                vector.sync_since, password, vector.password.size(), &packet) ||
+            packet.header !=
+                static_cast<uint8_t>(PAYLOAD_TYPE_ANON_REQ << PH_TYPE_SHIFT) ||
+            packet.path_len != 0U ||
+            (packet.payload_len != 51U && packet.payload_len != 67U)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request creation changed");
+            continue;
+        }
+        if ((index == 1U &&
+             (packet.payload_len != expected_login_nonroom_exact_payload.size() ||
+              std::memcmp(packet.payload,
+                          expected_login_nonroom_exact_payload.data(),
+                          expected_login_nonroom_exact_payload.size()) != 0)) ||
+            (index == 5U &&
+             (packet.payload_len != expected_login_room_max_payload.size() ||
+              std::memcmp(packet.payload, expected_login_room_max_payload.data(),
+                          expected_login_room_max_payload.size()) != 0))) {
+            failures.push_back(std::string(vector.name) +
+                               " login request golden payload changed");
+        }
+        login_matrix_sha.update(packet.payload, packet.payload_len);
+        if (index == 1U) {
+            valid_login = packet;
+        }
+
+        d1l_meshcore_oracle_packet_t routed = packet;
+        uint8_t priority = 0U;
+        const bool route_ok = (index & 1U) == 0U
+            ? d1l_meshcore_oracle_prepare_flood(
+                  &routed, static_cast<uint8_t>((index % 3U) + 1U), 0U,
+                  nullptr, &priority)
+            : d1l_meshcore_oracle_prepare_direct(
+                  &routed, login_direct_path.data(), 0x02U, &priority);
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_RAW_BYTES> wire{};
+        size_t wire_len = 0U;
+        d1l_meshcore_oracle_packet_t decoded{};
+        const uint8_t expected_priority = (index & 1U) == 0U ? 1U : 0U;
+        if (!route_ok || priority != expected_priority ||
+            !d1l_meshcore_oracle_packet_encode(
+                &routed, wire.data(), wire.size(), &wire_len) ||
+            !d1l_meshcore_oracle_packet_decode(wire.data(), wire_len,
+                                               &decoded)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request wire roundtrip changed");
+            continue;
+        }
+        uint32_t parsed_timestamp = 0U;
+        uint32_t parsed_sync_since = 0U;
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+            parsed_password{};
+        size_t parsed_password_len = 0U;
+        if (!d1l_meshcore_oracle_parse_login_request_packet(
+                &decoded, login_destination_hash,
+                kSignedAdvertPublicKey.data(), full_secret.data(),
+                vector.is_room, &parsed_timestamp, &parsed_sync_since,
+                parsed_password.data(), parsed_password.size(),
+                &parsed_password_len) ||
+            parsed_timestamp != vector.timestamp ||
+            parsed_sync_since != vector.sync_since ||
+            parsed_password_len != vector.password.size() ||
+            (!vector.password.empty() &&
+             std::memcmp(parsed_password.data(), vector.password.data(),
+                         vector.password.size()) != 0)) {
+            failures.push_back(std::string(vector.name) +
+                               " login request authenticated parse changed");
+        }
+    }
+    std::array<uint8_t, 32U> login_matrix_digest{};
+    login_matrix_sha.finalize(login_matrix_digest.data(),
+                              login_matrix_digest.size());
+    if (login_matrix_digest != expected_login_matrix_sha256) {
+        failures.push_back("anonymous login request matrix digest changed");
+    }
+
+    auto expect_login_create_reject =
+        [&failures, &full_secret, &empty_login_password](
+            const char *name, const uint8_t *sender_public_key,
+            const uint8_t *secret, uint8_t is_room, uint32_t sync_since,
+            const uint8_t *password, size_t password_len, bool null_output) {
+            d1l_meshcore_oracle_packet_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_packet_t before = output;
+            if (d1l_meshcore_oracle_create_login_request_packet(
+                    login_destination_hash, sender_public_key, secret,
+                    0x12345678U, is_room, sync_since, password, password_len,
+                    null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " login request creation accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " login request creation mutated output");
+            }
+            (void)full_secret;
+            (void)empty_login_password;
+        };
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES + 1U>
+        oversized_login_password{};
+    oversized_login_password.fill('x');
+    constexpr std::array<uint8_t, 3U> embedded_nul_password = {'a', 0U, 'b'};
+    expect_login_create_reject(
+        "null login sender", nullptr, full_secret.data(), 0U, 0U,
+        empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login secret", kSignedAdvertPublicKey.data(), nullptr, 0U, 0U,
+        empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, nullptr, 0U, false);
+    expect_login_create_reject(
+        "embedded NUL login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, embedded_nul_password.data(),
+        embedded_nul_password.size(), false);
+    expect_login_create_reject(
+        "oversized login password", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 0U, oversized_login_password.data(),
+        oversized_login_password.size(), false);
+    expect_login_create_reject(
+        "invalid login room flag", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 2U, 0U, empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "non-room login sync", kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, 1U, empty_login_password.data(), 0U, false);
+    expect_login_create_reject(
+        "null login output", kSignedAdvertPublicKey.data(), full_secret.data(),
+        0U, 0U, empty_login_password.data(), 0U, true);
+
+    auto expect_login_parse_reject =
+        [&failures](const char *name,
+                    const d1l_meshcore_oracle_packet_t *packet,
+                    uint8_t destination_hash, const uint8_t *sender_public_key,
+                    const uint8_t *secret, uint8_t is_room,
+                    uint32_t *timestamp, uint32_t *sync_since,
+                    uint8_t *password, size_t password_capacity,
+                    size_t *password_len) {
+            std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+                password_sentinel{};
+            password_sentinel.fill(0xD7U);
+            if (timestamp != nullptr) {
+                *timestamp = 0xAAAAAAAAU;
+            }
+            if (sync_since != nullptr) {
+                *sync_since = 0xBBBBBBBBU;
+            }
+            if (password != nullptr) {
+                std::memcpy(password, password_sentinel.data(),
+                            password_sentinel.size());
+            }
+            if (password_len != nullptr) {
+                *password_len = 0xBEEFU;
+            }
+            if (d1l_meshcore_oracle_parse_login_request_packet(
+                    packet, destination_hash, sender_public_key, secret, is_room,
+                    timestamp, sync_since, password, password_capacity,
+                    password_len) ||
+                (timestamp != nullptr && *timestamp != 0xAAAAAAAAU) ||
+                (sync_since != nullptr && *sync_since != 0xBBBBBBBBU) ||
+                (password != nullptr &&
+                 std::memcmp(password, password_sentinel.data(),
+                             password_sentinel.size()) != 0) ||
+                (password_len != nullptr && *password_len != 0xBEEFU)) {
+                failures.push_back(std::string(name) +
+                                   " login request parse changed output");
+            }
+        };
+    uint32_t rejected_login_timestamp = 0U;
+    uint32_t rejected_login_sync_since = 0U;
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+        rejected_login_password{};
+    size_t rejected_login_password_len = 0U;
+    expect_login_parse_reject(
+        "null login packet", nullptr, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null expected login sender", &valid_login, login_destination_hash,
+        nullptr, full_secret.data(), 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login parse secret", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), nullptr, 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "invalid login parse room flag", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 2U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login timestamp output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U, nullptr,
+        &rejected_login_sync_since, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login sync output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, nullptr, rejected_login_password.data(),
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login password output", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since, nullptr,
+        rejected_login_password.size(), &rejected_login_password_len);
+    expect_login_parse_reject(
+        "null login password length", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(), nullptr);
+    expect_login_parse_reject(
+        "undersized login password output", &valid_login,
+        login_destination_hash, kSignedAdvertPublicKey.data(),
+        full_secret.data(), 0U, &rejected_login_timestamp,
+        &rejected_login_sync_since, rejected_login_password.data(), 11U,
+        &rejected_login_password_len);
+
+    auto make_raw_login_packet =
+        [&full_secret](const uint8_t *plaintext, size_t plaintext_len) {
+            d1l_meshcore_oracle_packet_t packet{};
+            packet.header =
+                static_cast<uint8_t>(PAYLOAD_TYPE_ANON_REQ << PH_TYPE_SHIFT);
+            packet.payload[0] = login_destination_hash;
+            std::memcpy(&packet.payload[1], kSignedAdvertPublicKey.data(),
+                        kSignedAdvertPublicKey.size());
+            constexpr size_t outer_len =
+                1U + D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+            const int encrypted_len = mesh::Utils::encryptThenMAC(
+                full_secret.data(), &packet.payload[outer_len], plaintext,
+                static_cast<int>(plaintext_len));
+            packet.payload_len = static_cast<uint16_t>(
+                outer_len + static_cast<size_t>(encrypted_len));
+            return packet;
+        };
+    auto expect_standard_login_parse_reject =
+        [&](const char *name, const d1l_meshcore_oracle_packet_t *packet,
+            uint8_t is_room = 0U) {
+            expect_login_parse_reject(
+                name, packet, login_destination_hash,
+                kSignedAdvertPublicKey.data(), full_secret.data(), is_room,
+                &rejected_login_timestamp, &rejected_login_sync_since,
+                rejected_login_password.data(), rejected_login_password.size(),
+                &rejected_login_password_len);
+        };
+    d1l_meshcore_oracle_packet_t malformed_login = valid_login;
+    malformed_login.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_REQ << PH_TYPE_SHIFT);
+    expect_standard_login_parse_reject("wrong login payload type",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.header |=
+        static_cast<uint8_t>(PAYLOAD_VER_2 << PH_VER_SHIFT);
+    expect_standard_login_parse_reject("future login payload version",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload_len = 50U;
+    expect_standard_login_parse_reject("short login payload",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[malformed_login.payload_len++] = 0U;
+    expect_standard_login_parse_reject("non-block login ciphertext",
+                                       &malformed_login);
+    std::array<uint8_t, 33U> three_block_login_plaintext{};
+    malformed_login = make_raw_login_packet(three_block_login_plaintext.data(),
+                                             three_block_login_plaintext.size());
+    expect_standard_login_parse_reject("three-block login ciphertext",
+                                       &malformed_login);
+    expect_login_parse_reject(
+        "wrong expected login destination", &valid_login,
+        static_cast<uint8_t>(login_destination_hash ^ 1U),
+        kSignedAdvertPublicKey.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    auto wrong_login_sender = kSignedAdvertPublicKey;
+    wrong_login_sender[0] ^= 0x01U;
+    expect_login_parse_reject(
+        "wrong expected login sender", &valid_login, login_destination_hash,
+        wrong_login_sender.data(), full_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    expect_login_parse_reject(
+        "wrong login secret", &valid_login, login_destination_hash,
+        kSignedAdvertPublicKey.data(), public_secret.data(), 0U,
+        &rejected_login_timestamp, &rejected_login_sync_since,
+        rejected_login_password.data(), rejected_login_password.size(),
+        &rejected_login_password_len);
+    malformed_login = valid_login;
+    malformed_login.payload[0] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login destination",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[1] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered outer login sender",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[33] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login MAC",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload[35] ^= 0x01U;
+    expect_standard_login_parse_reject("tampered login ciphertext",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.path_len = 0xFFU;
+    expect_standard_login_parse_reject("invalid login path length",
+                                       &malformed_login);
+    malformed_login = valid_login;
+    malformed_login.payload_len = 0U;
+    expect_standard_login_parse_reject("empty login payload",
+                                       &malformed_login);
+    std::array<uint8_t, 32U> redundant_login_plaintext{};
+    redundant_login_plaintext[0] = 0x78U;
+    redundant_login_plaintext[1] = 0x56U;
+    redundant_login_plaintext[2] = 0x34U;
+    redundant_login_plaintext[3] = 0x12U;
+    malformed_login = make_raw_login_packet(redundant_login_plaintext.data(),
+                                             redundant_login_plaintext.size());
+    expect_standard_login_parse_reject("redundant login zero block",
+                                       &malformed_login);
+    std::array<uint8_t, 16U> noncanonical_login_plaintext{};
+    noncanonical_login_plaintext[4] = 'a';
+    noncanonical_login_plaintext[6] = 'b';
+    malformed_login = make_raw_login_packet(
+        noncanonical_login_plaintext.data(),
+        noncanonical_login_plaintext.size());
+    expect_standard_login_parse_reject("nonzero login padding",
+                                       &malformed_login);
+    std::array<uint8_t, 20U> overlong_login_plaintext{};
+    overlong_login_plaintext.fill('x');
+    overlong_login_plaintext[0] = 0x78U;
+    overlong_login_plaintext[1] = 0x56U;
+    overlong_login_plaintext[2] = 0x34U;
+    overlong_login_plaintext[3] = 0x12U;
+    malformed_login = make_raw_login_packet(overlong_login_plaintext.data(),
+                                             overlong_login_plaintext.size());
+    expect_standard_login_parse_reject("overlong authenticated login password",
+                                       &malformed_login);
+    std::array<uint8_t, 32U> redundant_room_login_plaintext{};
+    redundant_room_login_plaintext[0] = 0x04U;
+    redundant_room_login_plaintext[1] = 0x03U;
+    redundant_room_login_plaintext[2] = 0x02U;
+    redundant_room_login_plaintext[3] = 0x01U;
+    redundant_room_login_plaintext[4] = 0x08U;
+    redundant_room_login_plaintext[5] = 0x07U;
+    redundant_room_login_plaintext[6] = 0x06U;
+    redundant_room_login_plaintext[7] = 0x05U;
+    malformed_login = make_raw_login_packet(
+        redundant_room_login_plaintext.data(),
+        redundant_room_login_plaintext.size());
+    expect_standard_login_parse_reject("redundant room login zero block",
+                                       &malformed_login, 1U);
 
     constexpr uint8_t dm_destination_hash = 0xA1U;
     constexpr uint8_t dm_source_hash = 0xB2U;
@@ -3476,7 +3892,7 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification\""
+                 "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_crypto\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
@@ -3484,7 +3900,7 @@ int main()
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
                   kSignedAdvertPacketRoundtripVectors +
-                  kGroupRoundtripVectors +
+                  kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
                   kDmRoundtripVectors +
                   kExpectedAckPathRoundtripVectors +
                   kPathReturnRoundtripVectors +
@@ -3499,7 +3915,7 @@ int main()
                   kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
                   kPointValidationInvalidVectors +
-                  kGroupInvalidVectors +
+                  kGroupInvalidVectors + kLoginRequestInvalidVectors +
                   kDmInvalidVectors +
                   kExpectedAckInvalidVectors +
                   kPathReturnInvalidVectors +
@@ -3514,6 +3930,8 @@ int main()
                   kPointValidationValidVectors +
                   kPointValidationInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
+                  kLoginRequestRoundtripVectors +
+                  kLoginRequestInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -3534,6 +3952,8 @@ int main()
                   kPointValidationInvalidVectors +
                   kCryptoAdapterKatValidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
+                  kLoginRequestRoundtripVectors +
+                  kLoginRequestInvalidVectors +
                   kDmRoundtripVectors + kDmInvalidVectors +
                   kExpectedAckValidVectors +
                   kExpectedAckPathRoundtripVectors +
@@ -3593,6 +4013,15 @@ int main()
               << (kGroupRoundtripVectors + kGroupInvalidVectors)
               << ",\"total\":"
               << (kGroupRoundtripVectors + kGroupInvalidVectors) << "}"
+              << ",\"anonymous_login_request_packets\":{\"roundtrip\":"
+              << kLoginRequestRoundtripVectors << ",\"invalid\":"
+              << kLoginRequestInvalidVectors << ",\"semantic\":"
+              << (kLoginRequestRoundtripVectors +
+                  kLoginRequestInvalidVectors)
+              << ",\"total\":"
+              << (kLoginRequestRoundtripVectors +
+                  kLoginRequestInvalidVectors)
+              << "}"
               << ",\"dm_encrypt_decrypt\":{\"roundtrip\":"
               << kDmRoundtripVectors << ",\"invalid\":"
               << kDmInvalidVectors << ",\"semantic\":"
@@ -3640,6 +4069,7 @@ int main()
               << ",\"signed_advert_verification\":true"
               << ",\"ed25519_point_validation\":true"
               << ",\"public_group_packets\":true"
+              << ",\"anonymous_login_request_packets\":true"
               << ",\"dm_encrypt_decrypt\":true"
               << ",\"expected_ack_hash_and_ack_path\":true"
               << ",\"path_return_route_codes\":true"

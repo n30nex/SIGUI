@@ -52,6 +52,8 @@ static_assert(D1L_MESHCORE_ORACLE_DM_HASH_BYTES == PATH_HASH_SIZE,
               "Pinned MeshCore DM hash width changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES == MAX_TEXT_LEN,
               "Pinned BaseChatMesh DM text limit changed");
+static_assert(D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES == 15U,
+              "Pinned BaseChatMesh login-password limit changed");
 static_assert(D1L_MESHCORE_ORACLE_MAX_DM_EXTENDED_TEXT_BYTES + 2U ==
                   D1L_MESHCORE_ORACLE_MAX_DM_TEXT_BYTES,
               "Pinned BaseChatMesh extended-attempt text limit changed");
@@ -709,6 +711,164 @@ extern "C" bool d1l_meshcore_oracle_parse_signed_advert_packet(
         std::memcpy(out_app_data, parsed_app_data.data(), app_data_len);
     }
     *out_app_data_len = app_data_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_create_login_request_packet(
+    uint8_t destination_hash,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint32_t timestamp,
+    uint8_t is_room,
+    uint32_t sync_since,
+    const uint8_t *password,
+    size_t password_len,
+    d1l_meshcore_oracle_packet_t *out_packet)
+{
+    if (sender_public_key == nullptr || secret == nullptr ||
+        password == nullptr ||
+        password_len > D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES ||
+        is_room > 1U || (is_room == 0U && sync_since != 0U) ||
+        out_packet == nullptr) {
+        return false;
+    }
+    for (size_t index = 0U; index < password_len; ++index) {
+        if (password[index] == 0U) {
+            return false;
+        }
+    }
+
+    std::array<uint8_t,
+               8U + D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+        plaintext{};
+    size_t plaintext_len = 0U;
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 8U);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 16U);
+    plaintext[plaintext_len++] = static_cast<uint8_t>(timestamp >> 24U);
+    if (is_room != 0U) {
+        plaintext[plaintext_len++] = static_cast<uint8_t>(sync_since);
+        plaintext[plaintext_len++] = static_cast<uint8_t>(sync_since >> 8U);
+        plaintext[plaintext_len++] = static_cast<uint8_t>(sync_since >> 16U);
+        plaintext[plaintext_len++] = static_cast<uint8_t>(sync_since >> 24U);
+    }
+    if (password_len > 0U) {
+        std::memcpy(&plaintext[plaintext_len], password, password_len);
+        plaintext_len += password_len;
+    }
+
+    d1l_meshcore_oracle_packet_t result{};
+    result.header =
+        static_cast<uint8_t>(PAYLOAD_TYPE_ANON_REQ << PH_TYPE_SHIFT);
+    result.payload[0] = destination_hash;
+    std::memcpy(&result.payload[1], sender_public_key,
+                D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES);
+    constexpr size_t outer_len =
+        1U + D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+    const int encrypted_len = mesh::Utils::encryptThenMAC(
+        secret, &result.payload[outer_len], plaintext.data(),
+        static_cast<int>(plaintext_len));
+    if (encrypted_len <= 0 ||
+        outer_len + static_cast<size_t>(encrypted_len) >
+            D1L_MESHCORE_ORACLE_MAX_PAYLOAD_BYTES) {
+        return false;
+    }
+    result.payload_len =
+        static_cast<uint16_t>(outer_len + static_cast<size_t>(encrypted_len));
+    *out_packet = result;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_parse_login_request_packet(
+    const d1l_meshcore_oracle_packet_t *packet,
+    uint8_t destination_hash,
+    const uint8_t sender_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    const uint8_t secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES],
+    uint8_t is_room,
+    uint32_t *out_timestamp,
+    uint32_t *out_sync_since,
+    uint8_t *out_password,
+    size_t password_capacity,
+    size_t *out_password_len)
+{
+    if (packet == nullptr || sender_public_key == nullptr || secret == nullptr ||
+        is_room > 1U || out_timestamp == nullptr ||
+        out_sync_since == nullptr || out_password == nullptr ||
+        out_password_len == nullptr) {
+        return false;
+    }
+    mesh::Packet upstream;
+    constexpr size_t outer_len =
+        1U + D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES;
+    if (!packet_to_upstream(packet, &upstream) ||
+        upstream.getPayloadVer() != PAYLOAD_VER_1 ||
+        upstream.getPayloadType() != PAYLOAD_TYPE_ANON_REQ ||
+        upstream.payload_len < outer_len + CIPHER_MAC_SIZE + CIPHER_BLOCK_SIZE ||
+        upstream.payload[0] != destination_hash ||
+        std::memcmp(&upstream.payload[1], sender_public_key,
+                    D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES) != 0) {
+        return false;
+    }
+    const size_t encrypted_len =
+        upstream.payload_len - outer_len - CIPHER_MAC_SIZE;
+    if ((encrypted_len != CIPHER_BLOCK_SIZE &&
+         encrypted_len != 2U * CIPHER_BLOCK_SIZE) ||
+        (encrypted_len % CIPHER_BLOCK_SIZE) != 0U) {
+        return false;
+    }
+
+    std::array<uint8_t, 2U * CIPHER_BLOCK_SIZE> plaintext{};
+    const int decoded_len = mesh::Utils::MACThenDecrypt(
+        secret, plaintext.data(), &upstream.payload[outer_len],
+        upstream.payload_len - outer_len);
+    if (decoded_len <= 0 || static_cast<size_t>(decoded_len) != encrypted_len) {
+        return false;
+    }
+    const size_t prefix_len = is_room != 0U ? 8U : 4U;
+    const size_t plaintext_size = static_cast<size_t>(decoded_len);
+    size_t password_end = prefix_len;
+    while (password_end < plaintext_size && plaintext[password_end] != 0U) {
+        ++password_end;
+    }
+    const size_t password_len = password_end - prefix_len;
+    const size_t expected_encrypted_len =
+        ((prefix_len + password_len + CIPHER_BLOCK_SIZE - 1U) /
+         CIPHER_BLOCK_SIZE) *
+        CIPHER_BLOCK_SIZE;
+    if (password_len > D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES ||
+        password_len > password_capacity ||
+        plaintext_size != expected_encrypted_len) {
+        return false;
+    }
+    for (size_t index = password_end; index < plaintext_size; ++index) {
+        if (plaintext[index] != 0U) {
+            return false;
+        }
+    }
+
+    const uint32_t timestamp =
+        static_cast<uint32_t>(plaintext[0]) |
+        (static_cast<uint32_t>(plaintext[1]) << 8U) |
+        (static_cast<uint32_t>(plaintext[2]) << 16U) |
+        (static_cast<uint32_t>(plaintext[3]) << 24U);
+    uint32_t sync_since = 0U;
+    if (is_room != 0U) {
+        sync_since = static_cast<uint32_t>(plaintext[4]) |
+                     (static_cast<uint32_t>(plaintext[5]) << 8U) |
+                     (static_cast<uint32_t>(plaintext[6]) << 16U) |
+                     (static_cast<uint32_t>(plaintext[7]) << 24U);
+    }
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_MAX_LOGIN_PASSWORD_BYTES>
+        password{};
+    if (password_len > 0U) {
+        std::memcpy(password.data(), &plaintext[prefix_len], password_len);
+    }
+    *out_timestamp = timestamp;
+    *out_sync_since = sync_since;
+    if (password_len > 0U) {
+        std::memcpy(out_password, password.data(), password_len);
+    }
+    *out_password_len = password_len;
     return true;
 }
 

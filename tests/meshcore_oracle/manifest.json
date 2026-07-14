@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "corpus_version": 13,
+  "corpus_version": 14,
   "abi_version": 2,
-  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification",
+  "coverage_boundary": "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_crypto",
   "wp04_closure_eligible": false,
   "upstream": {
     "name": "MeshCore",
@@ -52,10 +52,10 @@
     "third_party/sensecap_indicator_esp32/components/LoRaWAN/soft-se/aes.h": "19c9f8e3e8bcb35c911dd95e9ea58658261885c22cf3bece4774e06cb16eb6c0"
   },
   "oracle_sources": {
-    "tests/meshcore_oracle/coverage_manifest.json": "6be07acd51025d48733efe0ae91ff3437936159e87905c1d3723cbfe0acee687",
-    "tests/meshcore_oracle/meshcore_oracle.cpp": "3a07bfea6063230419cd8a35788548799461f53d6fd0773e117881bc7c93f374",
-    "tests/meshcore_oracle/meshcore_oracle.h": "d0602e934a19cc1dfb18143269ef4565a13844560451300cf67ed685da490963",
-    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "c1b11c2788455ed0677df5b2187eca385000520d4cc1027a11fc2249dafedad3",
+    "tests/meshcore_oracle/coverage_manifest.json": "7af63b9751375239d8a20f772b4dd6eb95cea7bc7c23fcc23364e277098bf0f2",
+    "tests/meshcore_oracle/meshcore_oracle.cpp": "af4f9c385acea862264bd9772694b78abe301495853b7bd9b330a202aba96d46",
+    "tests/meshcore_oracle/meshcore_oracle.h": "80224834aa871f169c556c09a732a47e0149bbbd79da73eea4a718e5ea43c452",
+    "tests/meshcore_oracle/meshcore_oracle_vectors.cpp": "968c6378e4c89f73bbdf8736ef3473cfc4d70185fd7b00863f1a5cc3032ed2ac",
     "tests/meshcore_oracle/stubs/AES.h": "cc99a825b88da80f29ec3dd6afb321b69137ddba95873e36440babd432fd5b29",
     "tests/meshcore_oracle/stubs/Arduino.h": "6054c33c73ccb38ca5fa2297a5a544295214d5a6365f5c7ec3b4528a77e9c379",
     "tests/meshcore_oracle/stubs/SHA256.h": "158edf53b3e095531c4d4710ab22b6d4bce1dbbf7af918c5d7012918c41c4d24",
@@ -85,6 +85,8 @@
     "signed_advert_scope": "d1l_production_message_layout_strict_points_and_ed25519_verification_only_no_mesh_dispatch",
     "signed_advert_packet_creation_available": true,
     "signed_advert_packet_creation_scope": "deterministic_seed_keypair_pre_route_creation_and_authenticated_parse_only_no_identity_verifier_dispatch_replay_contact_or_rf",
+    "anonymous_login_request_available": true,
+    "anonymous_login_request_scope": "canonical_room_nonroom_login_request_create_authenticated_parse_with_caller_supplied_hash_public_key_secret_time_and_room_mode_only_no_key_exchange_authorization_replay_response_session_dispatch_route_or_rf",
     "canonical_advert_data": true,
     "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
     "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -99,6 +101,10 @@
       "signed_advert_verifier": "third_party/MeshCore/lib/ed25519/verify.c",
       "signed_advert_point_decoder": "third_party/MeshCore/lib/ed25519/ge.c",
       "signed_advert_independent_kat": "RFC 8032 section 7.1 TEST 1",
+      "anonymous_login_plaintext": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
+      "anonymous_login_datagram": "third_party/MeshCore/src/Mesh.cpp",
+      "anonymous_login_crypto": "third_party/MeshCore/src/Utils.cpp",
+      "anonymous_login_independent_golden": "two exact payloads and six-vector matrix from independent AES-128 ECB and HMAC-SHA-256 generation",
       "public_group_channel_hash": "third_party/MeshCore/src/helpers/BaseChatMesh.cpp",
       "public_group_datagram": "third_party/MeshCore/src/Mesh.cpp",
       "public_group_encrypt_mac_parse": "third_party/MeshCore/src/Utils.cpp",
@@ -120,9 +126,11 @@
     }
   },
   "determinism": {
-    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_public_group_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
+    "current_vectors": "fixed_bytes_ed25519_signed_advert_packets_public_group_anonymous_login_dm_ack_path_and_general_path_return_vectors_no_runtime_rng_or_clock",
     "signed_advert_seed_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
     "signed_advert_generation_recipe": "ed25519_create_keypair_seed_then_ed25519_sign_public_key_timestamp_wire_bytes_app_data",
+    "anonymous_login_recipe": "basechatmesh_timestamp_optional_room_sync_password_then_mesh_anonymous_datagram_aes128_hmac_with_caller_supplied_outer_and_secret",
+    "anonymous_login_matrix": "nonroom_empty_exact12_max15_and_room_empty_exact8_max15",
     "independent_verifier_kat": "RFC 8032 section 7.1 TEST 1 empty message",
     "canonical_s_regression": "RFC 8032 TEST 1 signature scalar plus Ed25519 group order L",
     "identity_point_forgery_regression": "identity public key plus identity R and zero S accepted by the pinned verifier before strict point validation",
@@ -159,11 +167,11 @@
     ]
   },
   "vectors": {
-    "roundtrip": 311,
+    "roundtrip": 317,
     "valid": 20,
-    "invalid": 226,
-    "semantic": 541,
-    "total": 557,
+    "invalid": 261,
+    "semantic": 582,
+    "total": 598,
     "packet_envelope": {
       "roundtrip": 4,
       "invalid": 5,
@@ -211,6 +219,12 @@
       "invalid": 21,
       "semantic": 25,
       "total": 25
+    },
+    "anonymous_login_request_packets": {
+      "roundtrip": 6,
+      "invalid": 35,
+      "semantic": 41,
+      "total": 41
     },
     "dm_encrypt_decrypt": {
       "roundtrip": 268,
@@ -483,6 +497,28 @@
           "invalid": 23
         }
       }
+    },
+    {
+      "id": "anonymous_login_request_packets",
+      "status": "implemented",
+      "owner": "pinned_basechat_anon_datagram_vendored_crypto",
+      "semantic": true,
+      "scope": "canonical_room_nonroom_login_request_create_authenticated_parse_with_caller_supplied_hash_public_key_secret_time_and_room_mode_only_no_key_exchange_authorization_replay_response_session_dispatch_route_or_rf",
+      "implementation_receipt": {
+        "id": "RCPT-WP04-ANON-LOGIN-REQUEST-20260713",
+        "status": "implemented",
+        "observed_at": "2026-07-13",
+        "pinned_sources": [
+          "third_party/MeshCore/src/Mesh.cpp",
+          "third_party/MeshCore/src/Utils.cpp",
+          "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
+        ],
+        "independent_golden": "two_exact_payloads_and_six_case_payload_matrix_sha256_from_independent_aes128_ecb_hmac_sha256_generation",
+        "vectors": {
+          "roundtrip": 6,
+          "invalid": 35
+        }
+      }
     }
   ],
   "production_boundary": {
@@ -494,6 +530,7 @@
       "plain-DM expected-ACK derivation and authenticated ACK+PATH creation/parsing with caller-supplied identity, hash, secret, and RNG inputs",
       "general Mesh path-return creation/parsing with caller-supplied hashes, shared secret, extras or RNG uniqueness bytes, and explicit route-code preparation",
       "deterministic signed-advert pre-route packet creation through the pinned keypair and signer plus authenticated parsing through the strict verifier",
+      "canonical anonymous login-request creation and authenticated parsing through BaseChatMesh layout, Mesh anonymous datagram framing, and mesh::Utils crypto with caller-supplied outer identity and secret",
       "D1L production signed-advert verification through the shared strict canonical-S guard and pinned MeshCore lib/ed25519 C implementation",
       "D1L production rejection of non-canonical and low-order advert public keys and signature R points through the pinned MeshCore group decoder"
     ],
@@ -505,7 +542,8 @@
       "BaseChatMesh plain-DM timestamp, attempt 0 through 255, text, exact-block termination, and extended-attempt layout from BaseChatMesh.cpp",
       "BaseChatMesh expected-ACK hash/body and Mesh ACK+PATH encrypted return-path layout without dispatch, correlation, route selection, or delivery state",
       "Mesh general PATH-return extra/no-extra encrypted layout and caller-selected direct/flood transport-code preparation without identity derivation, route selection, dispatch, forwarding, scheduling, or RF",
-      "Mesh signed-advert empty, named, and maximum app-data exact payloads plus flood wire roundtrip without RTC/RNG ownership, dispatch, replay policy, contact mutation, or RF"
+      "Mesh signed-advert empty, named, and maximum app-data exact payloads plus flood wire roundtrip without RTC/RNG ownership, dispatch, replay policy, contact mutation, or RF",
+      "BaseChatMesh room/non-room login plaintext and Mesh ANON_REQ exact payload matrix without key exchange, authorization, replay, response, session, dispatch, route selection, or RF"
     ],
     "local_paths_requiring_future_golden_vectors": [
       "main/mesh/meshcore_wire.c",

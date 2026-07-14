@@ -39,7 +39,7 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 `tests/meshcore_oracle/meshcore_oracle.h` defines version 2 of a narrow C ABI
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
-public-group, plain-DM, DM ACK+PATH, and general PATH-return operations. Its version 13 static
+public-group, plain-DM, DM ACK+PATH, and general PATH-return operations. Its version 14 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -103,6 +103,21 @@ rejected input. These group vectors are packet creation/parsing proof only;
 they do not execute Mesh dispatch, delivery, retained history, or radio paths.
 The separate `addChannel` path's explicit decoded key length is not inferred by
 this ABI.
+The anonymous-login capability adds six authenticated request round trips and
+thirty-five rejects. Non-room empty, exact-block 12-byte, and maximum 15-byte
+passwords plus room empty, exact-block 8-byte, and maximum 15-byte passwords
+pin the little-endian timestamp/optional `sync_since` layout. Two independently
+generated exact payloads and a six-payload SHA-256 matrix pin the one-byte
+destination hash, 32-byte sender public key, truncated HMAC, AES-128 ECB
+ciphertext, pre-route ANON_REQ header, and flood/direct wire round trips.
+Rejects cover mandatory inputs and output preservation, embedded NUL and size
+limits, room-mode and non-room-sync canonicality, type/version/envelope/length
+errors, wrong outer fields or secret, MAC/ciphertext tampering, redundant AES
+blocks, nonzero padding, and authenticated overlength passwords. The wire has
+no room-mode or logical-length field, so the caller supplies room mode and the
+canonical parser returns bytes before the first zero. Shared-secret derivation,
+contact lookup, authorization, replay policy, response generation, admin or
+session mutation, dispatch, route choice, scheduling, and RF remain excluded.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -168,14 +183,14 @@ vector matrix. Consequently a new local payload type, a duplicate code, a
 missing roadmap surface, or an unknown capability fails before compilation.
 Envelope-vector coverage remains distinct from semantic coverage: the current
 six local types all have envelope vectors, while the policy reports six fully
-implemented roadmap surfaces, two partial surfaces, and one blocked surface.
+implemented roadmap surfaces, three partial surfaces, and no wholly blocked surface.
 The exact packet registry and blocker receipts are copied into
 `meshcore_oracle_manifest_<full-commit>.json`; `wp04_acceptance_ready` and
 `closure_ready` remain false.
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_crypto`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -193,7 +208,7 @@ closure. The route-header capability likewise
 does not claim queue timing, route selection, retransmission, or forwarding;
 those remain `route_selection_and_forwarding`. Public/DM dispatch, delivery,
 session state, ACK correlation/delivery state, PATH dispatch/route selection,
-TRACE forwarding/path discovery, and login/admin flows also remain pending, so
+TRACE forwarding/path discovery, and login response/authorization/replay/session/admin flows also remain pending, so
 both `wp04_closure_eligible` and `closure_ready` remain false. Expected-ACK
 derivation and the ACK-specific encrypted PATH body are now deterministic with
 caller-supplied identity/hash/secret/RNG inputs; that bounded primitive must not
@@ -216,8 +231,10 @@ The DM crypto/layout primitive is implemented, but Ed25519 shared-secret
 derivation and deterministic identity/contact/session fixtures remain outside
 its boundary. Route selection/forwarding requires a
 deterministic dispatcher, packet manager, mesh tables, radio, RNG, and clocks.
-Login/request/response/admin requires identity key exchange/signature handling
-plus deterministic admin-session fixtures. These receipts describe
+Anonymous login-request framing is implemented with caller-supplied outer
+identity, secret, time, and room mode. Login response, authorization, replay,
+session, and admin behavior still require identity key exchange/signature
+handling plus deterministic admin-session fixtures. These receipts describe
 missing oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
