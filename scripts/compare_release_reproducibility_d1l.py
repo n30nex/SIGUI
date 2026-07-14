@@ -25,6 +25,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 if __package__:
+    from .meshcore_conformance_d1l import validate_completed_report
     from .package_release_d1l import (
         git_info,
         package_inventory_payloads,
@@ -44,7 +45,14 @@ if __package__:
         validate_manifest_inputs,
         validate_spdx_profile,
     )
+    from .verify_arduino_build_inputs import (
+        load_metadata as load_build_inputs,
+        validate_build_receipt,
+    )
 else:
+    from meshcore_conformance_d1l import (  # type: ignore[no-redef]
+        validate_completed_report,
+    )
     from package_release_d1l import (  # type: ignore[no-redef]
         git_info,
         package_inventory_payloads,
@@ -63,6 +71,10 @@ else:
         validate_against_inputs as validate_sbom_against_inputs,
         validate_manifest_inputs,
         validate_spdx_profile,
+    )
+    from verify_arduino_build_inputs import (  # type: ignore[no-redef]
+        load_metadata as load_build_inputs,
+        validate_build_receipt,
     )
 
 
@@ -351,6 +363,7 @@ def required_package_paths(source_commit: str, profile: str) -> set[str]:
 
 
 def validate_rp2040_profile(
+    root: Path,
     manifest: dict[str, Any],
     package_dir: Path,
     source_commit: str,
@@ -431,17 +444,21 @@ def validate_rp2040_profile(
         / "build-inputs.json"
     )
     receipt = load_json_object(receipt_path, "RP2040 build-input receipt")
-    if (
-        receipt.get("schema") != 1
-        or receipt.get("kind") != "d1l_arduino_build_inputs"
-        or receipt.get("ok") is not True
-        or receipt.get("source_commit") != source_commit
-        or receipt.get("archives_verified") is not True
-    ):
+    metadata_path = root / ".github" / "d1l-build-inputs.json"
+    try:
+        metadata = load_build_inputs(metadata_path)
+        validate_build_receipt(
+            receipt,
+            metadata,
+            source_commit,
+            sha256_file(metadata_path),
+            root,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         raise ComparisonError(
             "invalid_rp2040_build_inputs",
-            "full-release RP2040 build-input receipt is incomplete or stale",
-        )
+            f"full-release RP2040 build-input receipt is incomplete or stale: {exc}",
+        ) from exc
 
 
 def validate_manifest_shape(
@@ -527,7 +544,7 @@ def validate_manifest_shape(
                 )
     except (FileNotFoundError, OSError, ValueError) as exc:
         raise ComparisonError("invalid_package_metadata", str(exc)) from exc
-    validate_rp2040_profile(manifest, package_dir, source_commit, profile)
+    validate_rp2040_profile(root, manifest, package_dir, source_commit, profile)
 
     conformance = manifest.get("meshcore_conformance")
     expected_conformance = f"evidence/meshcore_conformance_{source_commit}.json"
@@ -554,6 +571,22 @@ def validate_manifest_shape(
             "invalid_conformance_binding",
             "canonical conformance evidence has no valid raw Actions receipt binding",
         )
+    try:
+        canonical_report = load_json_object(
+            package_dir / expected_conformance,
+            "canonical MeshCore conformance evidence",
+        )
+        validate_completed_report(
+            canonical_report,
+            source_commit,
+            build_inputs_path=root / ".github" / "d1l-build-inputs.json",
+            require_generated_at=False,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ComparisonError(
+            "invalid_conformance_semantics",
+            f"canonical conformance evidence is incomplete: {exc}",
+        ) from exc
     generated_at = parse_utc(run_receipt.get("generated_at"), "conformance generated_at")
     expires_at = parse_utc(run_receipt.get("expires_at"), "conformance expires_at")
     generated_time = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))

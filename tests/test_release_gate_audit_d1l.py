@@ -7,9 +7,11 @@ import pytest
 
 from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
+from tests.meshcore_conformance_fixture import completed_report
 
 
 COMMIT = "68350bf9f3fabfd2db4110ec6ffc36068056a060"
+ROOT = Path(__file__).resolve().parents[1]
 STALE_COMMIT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 RUN_ID = "28549761003"
 COMPOSE_CAPTURE_TARGETS = [
@@ -459,6 +461,11 @@ def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_ID
         {
             "schema": 1,
             "kind": "d1l_build_inputs",
+            "ci_tools": json.loads(
+                (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_text(
+                    encoding="utf-8"
+                )
+            )["ci_tools"],
             "esp_idf": {
                 "version": audit.SUPPORTED_ESP_IDF_VERSION,
                 "container": {
@@ -489,17 +496,22 @@ def write_immutable_build_input_receipts(root: Path, run_dir: Path) -> None:
     archives = [
         {
             "filename": "rp2040-5.6.1.zip",
+            "url": "https://example.invalid/rp2040-5.6.1.zip",
             "sha256": "2" * 64,
             "size": 100,
         },
         {
             "filename": "pqt-gcc.tar.gz",
+            "url": "https://example.invalid/pqt-gcc.tar.gz",
             "sha256": "3" * 64,
             "size": 200,
         },
     ]
+    locked_cli = json.loads(
+        (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_text(encoding="utf-8")
+    )["arduino"]["cli"]
     metadata["arduino"] = {
-        "cli": {"version": "1.5.0"},
+        "cli": locked_cli,
         "rp2040": {
             "version": "5.6.1",
             "compiler_tool": "pqt-gcc",
@@ -555,6 +567,16 @@ def write_immutable_build_input_receipts(root: Path, run_dir: Path) -> None:
                 "sha256": metadata_sha,
             },
             "arduino_cli_version": "1.5.0",
+            "arduino_cli": {
+                "version": metadata["arduino"]["cli"]["version"],
+                "archive": metadata["arduino"]["cli"]["archive"],
+                "executable": {
+                    **metadata["arduino"]["cli"]["executable"],
+                    "verified": True,
+                },
+                "bytes_verified": True,
+            },
+            "arduino_cli_bytes_verified": True,
             "rp2040_core_version": "5.6.1",
             "submodules": metadata["submodules"],
             "archives_verified": True,
@@ -574,21 +596,14 @@ def meshcore_conformance_payload(
     commit: str = COMMIT,
     *,
     generated_at: datetime | None = None,
+    build_inputs_path: Path | None = None,
     **overrides: object,
 ) -> dict:
-    payload = {
-        "schema_version": 1,
-        "artifact_type": audit.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
-        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
-        "passed": True,
-        "status": "pass",
-        "execution_complete": True,
-        "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
-        "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
-        "closure_ready": False,
-        "issue_65_closure_eligible": False,
-        "source_verification": {"repository_commit": commit},
-    }
+    payload = completed_report(
+        commit,
+        build_inputs_path or ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+        generated_at=generated_at,
+    )
     payload.update(overrides)
     return payload
 
@@ -600,7 +615,15 @@ def write_release_package(
     conformance: dict | None = None,
     workflow_run_id: str = RUN_ID,
     git_dirty: bool = False,
+    evidence_root: Path | None = None,
 ) -> Path:
+    evidence_root = evidence_root or run_dir.parent
+    build_inputs_path = evidence_root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+    if not build_inputs_path.is_file():
+        build_inputs_path.parent.mkdir(parents=True, exist_ok=True)
+        build_inputs_path.write_bytes(
+            (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_bytes()
+        )
     package = run_dir / "d1l-release-package" / f"d1l-release-{COMMIT}"
     package.mkdir(parents=True, exist_ok=True)
     (package / "README_RELEASE.md").write_bytes(b"release")
@@ -614,7 +637,10 @@ def write_release_package(
         target = package / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
-    report = conformance or meshcore_conformance_payload(commit)
+    report = conformance or meshcore_conformance_payload(
+        commit,
+        build_inputs_path=build_inputs_path,
+    )
     generated_at = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
     expires_at = generated_at + timedelta(days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
     receipt_relative = f"meshcore_conformance_{commit}.json"
@@ -715,8 +741,8 @@ def write_core_evidence(root: Path) -> None:
         "seeed_official_sd_smoke.ino.uf2",
         b"official-smoke-uf2",
     )
-    write_release_package(run_dir)
     write_immutable_build_input_receipts(root, run_dir)
+    write_release_package(run_dir, evidence_root=root)
 
     hardware = root / "artifacts" / "hardware" / "com12"
     write_esp32_flash_receipt(root, run_dir)
@@ -773,7 +799,7 @@ def write_core_evidence(root: Path) -> None:
 def write_esp32_only_actions_package(root: Path) -> None:
     run_dir = root / "artifacts" / "github" / RUN_ID
     write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
-    write_release_package(run_dir)
+    write_release_package(run_dir, evidence_root=root)
 
 
 def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> None:
@@ -1708,6 +1734,7 @@ def test_immutable_source_inputs_gate_rejects_missing_run_receipts(
         ("idf_container", "idf_container_exact"),
         ("arduino_commit", "arduino_receipt_source_commit"),
         ("arduino_archive", "arduino_archive_inventory_exact"),
+        ("arduino_cli", "arduino_receipt_semantics_complete"),
     ],
 )
 def test_immutable_source_inputs_gate_rejects_rechecksummed_semantic_tampering(
@@ -1745,6 +1772,8 @@ def test_immutable_source_inputs_gate_rejects_rechecksummed_semantic_tampering(
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if surface == "arduino_commit":
             receipt["source_commit"] = STALE_COMMIT
+        elif surface == "arduino_cli":
+            receipt["arduino_cli"]["executable"]["sha256"] = "8" * 64
         else:
             receipt["archives"][0]["sha256"] = "9" * 64
         receipt_path.write_text(json.dumps(receipt), encoding="utf-8")

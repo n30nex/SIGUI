@@ -21,6 +21,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+if __package__:
+    from .verify_ci_tool_inputs import (
+        load_metadata as load_build_inputs,
+        validate_clang_receipt,
+    )
+else:
+    from verify_ci_tool_inputs import (  # type: ignore[no-redef]
+        load_metadata as load_build_inputs,
+        validate_clang_receipt,
+    )
+
 
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "tests" / "meshcore_conformance" / "manifest.json"
@@ -29,6 +40,7 @@ HARNESS_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_conforma
 FUZZ_PATH = ROOT / "tests" / "meshcore_conformance" / "meshcore_wire_fuzz.cpp"
 WIRE_SOURCE = ROOT / "main" / "mesh" / "meshcore_wire.c"
 PACKET_SOURCE = ROOT / "third_party" / "MeshCore" / "src" / "Packet.cpp"
+BUILD_INPUTS_PATH = ROOT / ".github" / "d1l-build-inputs.json"
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 CANONICAL_EVIDENCE_PROFILE = "d1l_meshcore_wire_conformance_package_v1"
@@ -482,6 +494,137 @@ def canonicalize_release_report(report: dict[str, Any]) -> dict[str, Any]:
     return canonical
 
 
+def validate_completed_report(
+    report: object,
+    expected_commit: str,
+    *,
+    build_inputs_path: Path = BUILD_INPUTS_PATH,
+    require_generated_at: bool = True,
+) -> None:
+    """Reject a top-level green receipt unless every semantic gate completed."""
+
+    if not isinstance(report, dict):
+        raise ValueError("MeshCore conformance report must be an object")
+    source = report.get("source_verification")
+    source = source if isinstance(source, dict) else {}
+    source_files = source.get("source_files")
+    source_files = source_files if isinstance(source_files, dict) else {}
+    vector = report.get("vector_result")
+    vector = vector if isinstance(vector, dict) else {}
+    fuzz = report.get("fuzz_result")
+    fuzz = fuzz if isinstance(fuzz, dict) else {}
+    corpus = report.get("corpus")
+    corpus = corpus if isinstance(corpus, dict) else {}
+    compiler = report.get("compiler")
+    compiler = compiler if isinstance(compiler, dict) else {}
+    expected_source_names = set(EXPECTED_UPSTREAM["sources"])
+    source_hashes_complete = set(source_files) == expected_source_names and all(
+        isinstance(item, dict)
+        and item.get("matched") is True
+        and item.get("expected_sha256") == EXPECTED_UPSTREAM["sources"][name]
+        and item.get("actual_sha256") == EXPECTED_UPSTREAM["sources"][name]
+        for name, item in source_files.items()
+    )
+    corpus_seeds = corpus.get("seeds")
+    corpus_seeds_complete = (
+        isinstance(corpus_seeds, list)
+        and len(corpus_seeds) == EXPECTED_FUZZ_CORPUS["seed_count"]
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("size"), int)
+            and item["size"] > 0
+            and re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256") or ""))
+            is not None
+            for item in corpus_seeds
+        )
+    )
+    compiler_identities = (compiler.get("cc"), compiler.get("cxx"))
+    required = {
+        "schema_version": report.get("schema_version") == 1,
+        "artifact_type": report.get("artifact_type")
+        == "d1l_meshcore_wire_conformance",
+        "passed": report.get("passed") is True,
+        "status": report.get("status") == "pass",
+        "execution_complete": report.get("execution_complete") is True,
+        "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
+        "coverage_level": report.get("coverage_level") == "wire_envelope_only",
+        "closure_ready_false": report.get("closure_ready") is False,
+        "issue_65_false": report.get("issue_65_closure_eligible") is False,
+        "source_verified": source.get("verified") is True,
+        "source_commit": source.get("repository_commit") == expected_commit,
+        "checkout_commit": source.get("checkout_commit") == expected_commit,
+        "source_gitlink": source.get("gitlink_mode") == "160000"
+        and source.get("gitlink_type") == "commit"
+        and source.get("gitlink_commit") == EXPECTED_UPSTREAM["commit"],
+        "upstream_commit": source.get("upstream_commit") == EXPECTED_UPSTREAM["commit"],
+        "source_hashes": source.get("allowlisted_source_sha256_verified") is True
+        and source_hashes_complete
+        and source.get("failures") == [],
+        "vector_matrix": report.get("vector_matrix") == EXPECTED_VECTOR_MATRIX,
+        "payload_version_gate": report.get("payload_version_gate")
+        == EXPECTED_PAYLOAD_VERSION_GATE,
+        "corpus": corpus.get("verified") is True
+        and corpus.get("path") == EXPECTED_FUZZ_CORPUS["manifest"]
+        and corpus.get("manifest_sha256") == EXPECTED_FUZZ_CORPUS["sha256"]
+        and corpus.get("seed_count") == EXPECTED_FUZZ_CORPUS["seed_count"]
+        and corpus_seeds_complete,
+        "vector_passed": vector.get("passed") is True,
+        "vector_counts": vector.get("vectors")
+        == {"local_to_upstream": 432, "upstream_to_local": 432, "total": 864},
+        "path_counts": vector.get("path_length_encodings")
+        == {"tested": 256, "valid": 119, "invalid": 137},
+        "version_counts": vector.get("payload_version_gate")
+        == {
+            "tested": 4,
+            "accepted_v1": 1,
+            "rejected_future": 3,
+            "preserved_rejections": 3,
+        },
+        "capacity_counts": vector.get("undersized_encoder_capacities") == 254,
+        "vector_failures": vector.get("failures") == 0,
+        "fuzz_passed": fuzz.get("passed") is True,
+        "fuzz_complete": fuzz.get("engine") == "libFuzzer"
+        and fuzz.get("seed") == DEFAULT_SEED
+        and fuzz.get("requested_runs") == DEFAULT_RUNS
+        and fuzz.get("completed_runs") == DEFAULT_RUNS
+        and fuzz.get("max_input_bytes") == 255
+        and fuzz.get("sanitizers") == ["address", "undefined"],
+        "fuzz_findings": fuzz.get("finding_files") == [] and fuzz.get("findings") == 0,
+        "compiler": all(
+            isinstance(identity, str) and "clang version 18.1.3" in identity
+            for identity in compiler_identities
+        ),
+        "commands": isinstance(report.get("commands"), list)
+        and len(report["commands"]) == 7
+        and isinstance(report.get("fuzz_command"), list),
+        "sanitizers_clean": report.get("sanitizer_errors") == 0
+        and report.get("memory_errors") == 0
+        and report.get("zero_overrun") is True
+        and report.get("zero_corruption") is True,
+        "failure_empty": report.get("failure") is None,
+    }
+    if require_generated_at:
+        required["generated_at"] = isinstance(report.get("generated_at"), str)
+    try:
+        metadata = load_build_inputs(build_inputs_path)
+        validate_clang_receipt(
+            report.get("toolchain"),
+            metadata,
+            expected_commit,
+            sha256_file(build_inputs_path),
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        required["toolchain_bytes"] = False
+    else:
+        required["toolchain_bytes"] = True
+    failed = [name for name, passed in required.items() if not passed]
+    if failed:
+        raise ValueError(
+            "MeshCore conformance semantic validation failed: " + ", ".join(failed)
+        )
+
+
 def compiler_identity(compiler: str) -> str:
     result = run_process([compiler, "--version"], timeout=30)
     identity = (result.stdout or result.stderr).splitlines()[0].strip()
@@ -556,6 +699,7 @@ def base_report(manifest: dict[str, Any], args: argparse.Namespace) -> dict[str,
         "source_verification": None,
         "vector_result": None,
         "fuzz_result": None,
+        "toolchain": None,
         "sanitizer_errors": None,
         "memory_errors": None,
         "zero_overrun": None,
@@ -600,6 +744,21 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             return 0, report
         if os.name == "nt":
             raise GateFailure("real sanitizer conformance runs require the Ubuntu CI job")
+
+        if args.toolchain_receipt is None:
+            raise GateFailure("real conformance runs require a Clang tool-byte receipt")
+        try:
+            toolchain = json.loads(args.toolchain_receipt.read_text(encoding="utf-8"))
+            metadata = load_build_inputs(BUILD_INPUTS_PATH)
+            validate_clang_receipt(
+                toolchain,
+                metadata,
+                source_verification["repository_commit"],
+                sha256_file(BUILD_INPUTS_PATH),
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            raise GateFailure(f"Clang tool-byte receipt validation failed: {exc}") from exc
+        report["toolchain"] = toolchain
 
         cc_identity = compiler_identity(args.cc)
         cxx_identity = compiler_identity(args.cxx)
@@ -715,9 +874,15 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
         report["execution_complete"] = True
         report["passed"] = True
         report["status"] = "pass"
+        try:
+            validate_completed_report(report, source_verification["repository_commit"])
+        except ValueError as exc:
+            raise GateFailure(str(exc)) from exc
         return 0, report
     except GateFailure as exc:
         report["status"] = "fail"
+        report["passed"] = False
+        report["execution_complete"] = False
         report["failure"] = str(exc)
         return 1, report
 
@@ -727,6 +892,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cc", default="clang", help="Clang C compiler")
     parser.add_argument("--cxx", default="clang++", help="Clang C++ compiler")
     parser.add_argument("--commit", help="exact repository commit expected by the gate")
+    parser.add_argument("--toolchain-receipt", type=Path)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--runs", "--fuzz-runs", dest="runs", type=int, default=DEFAULT_RUNS)
     parser.add_argument("--out", type=Path, required=True)

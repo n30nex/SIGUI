@@ -22,12 +22,19 @@ try:
     from meshcore_conformance_d1l import (
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
+        validate_completed_report,
     )
 except ImportError:  # pragma: no cover - package import path used by pytest
     from scripts.meshcore_conformance_d1l import (
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
+        validate_completed_report,
     )
+
+try:
+    from verify_arduino_build_inputs import validate_build_receipt
+except ImportError:  # pragma: no cover - package import path used by pytest
+    from scripts.verify_arduino_build_inputs import validate_build_receipt
 
 try:
     from sd_reboot_remount_acceptance_d1l import (
@@ -563,6 +570,25 @@ def meshcore_conformance_evidence_gate(
 
     canonical_report = json_report(evidence_path, "evidence_json_invalid")
     report = json_report(run_receipt_path, "run_receipt_json_invalid")
+    if report and commit:
+        try:
+            validate_completed_report(
+                report,
+                commit,
+                build_inputs_path=root / SUPPORTED_ESP_IDF_BUILD_INPUTS,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            failures.append("run_receipt_semantics_incomplete")
+    if canonical_report and commit:
+        try:
+            validate_completed_report(
+                canonical_report,
+                commit,
+                build_inputs_path=root / SUPPORTED_ESP_IDF_BUILD_INPUTS,
+                require_generated_at=False,
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+            failures.append("canonical_evidence_semantics_incomplete")
     source_verification = report.get("source_verification")
     source_commit = (
         source_verification.get("repository_commit")
@@ -3707,6 +3733,18 @@ def immutable_release_source_inputs_gate(
     arduino_receipt_path = arduino_dir / "build-inputs.json" if arduino_dir else None
     arduino_checksums = arduino_dir / "SHA256SUMS.txt" if arduino_dir else None
     arduino_receipt = json_object(arduino_receipt_path)
+    try:
+        validate_build_receipt(
+            arduino_receipt,
+            metadata,
+            commit or "",
+            metadata_sha or "",
+            root,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        arduino_receipt_semantics_valid = False
+    else:
+        arduino_receipt_semantics_valid = True
 
     esp_idf = metadata.get("esp_idf") if isinstance(metadata.get("esp_idf"), dict) else {}
     container = esp_idf.get("container") if isinstance(esp_idf.get("container"), dict) else {}
@@ -3875,6 +3913,7 @@ def immutable_release_source_inputs_gate(
         "arduino_receipt_schema": arduino_receipt.get("schema") == BUILD_INPUTS_SCHEMA
         and arduino_receipt.get("kind") == ARDUINO_BUILD_INPUTS_KIND
         and arduino_receipt.get("ok") is True,
+        "arduino_receipt_semantics_complete": arduino_receipt_semantics_valid,
         "arduino_receipt_source_commit": isinstance(commit, str)
         and arduino_receipt.get("source_commit") == commit,
         "arduino_receipt_metadata_exact": receipt_metadata.get("path")

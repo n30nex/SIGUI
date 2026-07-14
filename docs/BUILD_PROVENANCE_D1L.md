@@ -24,6 +24,13 @@ itself are excluded to prevent checksum cycles. Resolved dependencies include th
 root commit, both submodule gitlinks, the workflow, toolchain/configuration locks,
 partition layout, notices, and the release metadata generators.
 
+The toolchain lock includes byte identities for the Ubuntu Clang package and
+resolved compiler executable used by the MeshCore sanitizer gate, plus the
+Arduino CLI Linux release archive and executable used by RP2040 Actions builds.
+The Clang and Arduino jobs fail before compilation if those installed bytes do
+not match the lock. Their receipts are exact-commit bound; a version string by
+itself is not accepted as toolchain evidence.
+
 The generator omits optional invocation timestamps so identical inputs produce
 identical JSON. Validate a downloaded statement by supplying the exact source tree,
 package directory, and package manifest:
@@ -58,6 +65,9 @@ canonical semantic projection under `evidence/`. The projection omits or
 normalizes only those volatile receipt fields. The release audit requires the
 raw receipt, its manifest binding, and the canonical projection to agree, so
 canonical packaging does not replace live-run freshness evidence.
+Both raw and canonical consumers validate the complete source, vector, fuzz,
+sanitizer, and tool-byte semantics rather than trusting only top-level pass
+flags.
 
 Compare two independently downloaded packages with the fail-closed full release
 profile (also the CLI default):
@@ -70,5 +80,7 @@ python scripts/compare_release_reproducibility_d1l.py --root . \
 
 `full-release` requires all three RP2040 artifact roots, each root checksum
 manifest, at least one UF2 per root, and the checksum-bound Arduino build-input
-receipt in the production SD-bridge artifact. `esp32-only` is an explicitly
+receipt in the production SD-bridge artifact. That receipt must prove the
+Arduino CLI executable bytes as well as every downloaded core/tool archive.
+`esp32-only` is an explicitly
 named development profile and cannot accept a package containing RP2040 files.

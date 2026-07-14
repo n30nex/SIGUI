@@ -23,6 +23,7 @@ if __package__:
     from .meshcore_conformance_d1l import (
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
+        validate_completed_report,
     )
     from .provenance_d1l import write_package_provenance
     from .sbom_d1l import (
@@ -34,6 +35,7 @@ else:
     from meshcore_conformance_d1l import (  # type: ignore[no-redef]
         CANONICAL_EVIDENCE_PROFILE,
         canonicalize_release_report,
+        validate_completed_report,
     )
     from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
     from sbom_d1l import (  # type: ignore[no-redef]
@@ -404,6 +406,7 @@ def parse_utc_timestamp(value: object, field: str) -> datetime:
 
 def copy_meshcore_conformance_evidence(
     source: Path | None,
+    root: Path,
     package_dir: Path,
     expected_commit: str | None,
 ) -> dict | None:
@@ -421,6 +424,11 @@ def copy_meshcore_conformance_evidence(
         raise ValueError(f"MeshCore conformance JSON is unreadable: {source}") from exc
     if not isinstance(report, dict):
         raise ValueError("MeshCore conformance JSON must contain an object")
+    validate_completed_report(
+        report,
+        expected_commit,
+        build_inputs_path=root / BUILD_INPUTS_SOURCE,
+    )
 
     source_verification = report.get("source_verification")
     source_commit = (
@@ -1135,6 +1143,7 @@ def create_release_package(
     source_git["short_commit"] = expected_commit[:7]
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
+        root,
         package_dir,
         expected_commit,
     )

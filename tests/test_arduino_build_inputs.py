@@ -23,6 +23,12 @@ def test_committed_arduino_inputs_are_exact_and_match_source_gitlinks():
     tools = rp2040["tools"]
 
     assert validated["cli_version"] == "1.5.0"
+    assert validated["cli_archive"]["sha256"] == (
+        "f4e49fb6f5d6a043f7df792ef057143c542140508081aaa52d214a9ab33141c8"
+    )
+    assert validated["cli_executable"]["sha256"] == (
+        "33eb851315471d5d4573454e03c29b66ee2a9f2a94ca30b08ce72e13e15d2118"
+    )
     assert validated["core_version"] == "5.6.1"
     assert rp2040["production_fqbn"] == "rp2040:rp2040:seeed_indicator_rp2040:usbstack=nousb"
     assert rp2040["smoke_fqbn"] == "rp2040:rp2040:seeed_indicator_rp2040"
@@ -46,6 +52,8 @@ def test_metadata_only_receipt_is_exact_commit_bound_and_truthful():
     assert receipt["metadata"]["path"] == ".github/d1l-build-inputs.json"
     assert receipt["metadata"]["sha256"] == verifier.sha256_file(METADATA)
     assert receipt["arduino_cli_version"] == "1.5.0"
+    assert receipt["arduino_cli_bytes_verified"] is False
+    assert receipt["arduino_cli"]["executable"] is None
     assert receipt["rp2040_core_version"] == "5.6.1"
     assert receipt["archives_verified"] is False
     assert receipt["archives"] == []
@@ -94,6 +102,38 @@ def test_archive_verification_rejects_missing_or_ambiguous_download(tmp_path: Pa
         verifier.verify_archives(tmp_path, inventory)
 
 
+def test_arduino_cli_executable_requires_exact_locked_bytes(tmp_path, monkeypatch):
+    executable = tmp_path / "arduino-cli"
+    executable.write_bytes(b"locked-cli")
+    validated = verifier.validate_metadata(metadata(), ROOT)
+    validated["cli_executable"] = {
+        "filename": "arduino-cli",
+        "sha256": hashlib.sha256(b"locked-cli").hexdigest(),
+        "size": len(b"locked-cli"),
+    }
+    monkeypatch.setattr(verifier, "validate_metadata", lambda _data, _root: validated)
+    monkeypatch.setattr(verifier, "_git", lambda _root, *_args: "a" * 40)
+
+    receipt = verifier.build_receipt(
+        METADATA,
+        ROOT,
+        arduino_data_dir=None,
+        arduino_cli_version="1.5.0",
+        arduino_cli_path=executable,
+    )
+    assert receipt["arduino_cli_bytes_verified"] is True
+    assert receipt["arduino_cli"]["executable"]["verified"] is True
+
+    executable.write_bytes(b"tampered-cli")
+    with pytest.raises(ValueError, match="executable byte identity mismatch"):
+        verifier.build_receipt(
+            METADATA,
+            ROOT,
+            arduino_data_dir=None,
+            arduino_cli_version="1.5.0",
+            arduino_cli_path=executable,
+        )
+
 def test_metadata_rejects_moving_versions_duplicate_tools_and_stale_gitlinks():
     data = metadata()
 
@@ -132,5 +172,6 @@ def test_workflow_downloads_and_verifies_archives_before_installing_core():
     assert 'version: "1.5.0"' in job
     assert job.index(download) < job.index(verify) < job.index(install)
     assert '--arduino-data-dir "$HOME/.arduino15"' in job
+    assert '--arduino-cli-path "$(command -v arduino-cli)"' in job
     assert "artifacts/rp2040-sd-bridge/build-inputs.json" in job
     assert "version: 1.x" not in job

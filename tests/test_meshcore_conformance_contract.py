@@ -4,11 +4,13 @@ import os
 import re
 import subprocess
 import sys
+import copy
 from pathlib import Path
 
 import pytest
 
 from scripts import meshcore_conformance_d1l as conformance
+from tests.meshcore_conformance_fixture import completed_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -279,6 +281,38 @@ def test_github_actions_cannot_turn_dry_run_into_a_green_gate(tmp_path):
     assert report["status"] == "fail"
     assert report["passed"] is False
     assert "dry-run is forbidden in GitHub Actions" in report["failure"]
+
+
+def test_completed_report_validator_rejects_semantically_incomplete_green_receipts():
+    commit = "a" * 40
+    report = completed_report(commit, ROOT / ".github" / "d1l-build-inputs.json")
+    conformance.validate_completed_report(report, commit)
+    canonical = conformance.canonicalize_release_report(report)
+    conformance.validate_completed_report(
+        canonical,
+        commit,
+        require_generated_at=False,
+    )
+
+    mutations = []
+    incomplete_fuzz = copy.deepcopy(report)
+    incomplete_fuzz["fuzz_result"]["completed_runs"] = 99999
+    mutations.append((incomplete_fuzz, "fuzz_complete"))
+    incomplete_vectors = copy.deepcopy(report)
+    incomplete_vectors["vector_result"]["vectors"]["total"] = 863
+    mutations.append((incomplete_vectors, "vector_counts"))
+    stale_source = copy.deepcopy(report)
+    stale_source["source_verification"]["source_files"]["src/Packet.cpp"][
+        "matched"
+    ] = False
+    mutations.append((stale_source, "source_hashes"))
+    unverified_compiler = copy.deepcopy(report)
+    unverified_compiler["toolchain"]["clang"]["bytes_verified"] = False
+    mutations.append((unverified_compiler, "toolchain_bytes"))
+
+    for payload, failure in mutations:
+        with pytest.raises(ValueError, match=failure):
+            conformance.validate_completed_report(payload, commit)
 
 
 def test_runner_persists_fuzzer_reproducers_and_records_elapsed_time():

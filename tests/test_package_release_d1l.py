@@ -8,6 +8,10 @@ import pytest
 
 from scripts import package_release_d1l
 from scripts.verify_checksums import verify_sha256_manifest
+from tests.meshcore_conformance_fixture import completed_report
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_git(cwd: Path, *args: str) -> str:
@@ -122,10 +126,12 @@ def write_fake_notices(root: Path) -> None:
         "patches/sensecap_indicator_idf55_compat.patch": "compat patch\n",
         "patches/sensecap_indicator_touch_fix.patch": "touch patch\n",
         "scripts/compare_release_reproducibility_d1l.py": "# comparator fixture\n",
+        "scripts/meshcore_conformance_d1l.py": "# conformance fixture\n",
         "scripts/package_release_d1l.py": "# package fixture\n",
         "scripts/provenance_d1l.py": "# provenance fixture\n",
         "scripts/sbom_d1l.py": "# sbom fixture\n",
         "scripts/verify_arduino_build_inputs.py": "# Arduino input verifier fixture\n",
+        "scripts/verify_ci_tool_inputs.py": "# CI tool input verifier fixture\n",
         "sdkconfig.defaults": "CONFIG_IDF_TARGET=\"esp32s3\"\n",
     }
     for relative, contents in source_inputs.items():
@@ -138,6 +144,9 @@ def write_fake_notices(root: Path) -> None:
     build_inputs = {
         "schema": 1,
         "kind": "d1l_build_inputs",
+        "ci_tools": json.loads(
+            (ROOT / ".github" / "d1l-build-inputs.json").read_text(encoding="utf-8")
+        )["ci_tools"],
         "host_python": {
             "requirements": {
                 "path": package_release_d1l.HOST_REQUIREMENTS_SOURCE.as_posix(),
@@ -251,19 +260,11 @@ def write_meshcore_conformance(
     generated_at: datetime | None = None,
     **overrides: object,
 ) -> Path:
-    payload = {
-        "schema_version": 1,
-        "artifact_type": package_release_d1l.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
-        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
-        "passed": True,
-        "status": "pass",
-        "execution_complete": True,
-        "coverage_boundary": package_release_d1l.MESHCORE_CONFORMANCE_BOUNDARY,
-        "coverage_level": package_release_d1l.MESHCORE_CONFORMANCE_BOUNDARY,
-        "closure_ready": False,
-        "issue_65_closure_eligible": False,
-        "source_verification": {"repository_commit": commit},
-    }
+    payload = completed_report(
+        commit,
+        root / package_release_d1l.BUILD_INPUTS_SOURCE,
+        generated_at=generated_at,
+    )
     payload.update(overrides)
     path = root / f"meshcore_conformance_{commit}.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -543,6 +544,7 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
     build = tmp_path / "build"
     out = tmp_path / "artifacts" / "release"
     write_fake_build(build)
+    write_fake_notices(tmp_path)
     commit = "b" * 40
     monkeypatch.setenv("GITHUB_SHA", commit)
     install_fake_source_identity(monkeypatch, commit)
@@ -604,6 +606,31 @@ def test_release_package_rejects_mismatched_or_expired_meshcore_evidence(tmp_pat
         assert "future" in str(exc) or "supported range" in str(exc)
     else:
         raise AssertionError("out-of-range MeshCore evidence was accepted")
+
+
+def test_release_package_rejects_top_level_green_but_incomplete_conformance(
+    tmp_path, monkeypatch
+):
+    build = tmp_path / "build"
+    write_fake_build(build)
+    write_fake_notices(tmp_path)
+    commit = "d" * 40
+    monkeypatch.setenv("GITHUB_SHA", commit)
+    install_fake_source_identity(monkeypatch, commit)
+    conformance_path = write_meshcore_conformance(tmp_path, commit)
+    report = json.loads(conformance_path.read_text(encoding="utf-8"))
+    report["vector_result"] = None
+    conformance_path.write_text(json.dumps(report), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="vector_passed"):
+        package_release_d1l.create_release_package(
+            root=tmp_path,
+            build_dir=build,
+            out_dir=tmp_path / "artifacts" / "release",
+            package_name="incomplete-conformance",
+            full_size=0x20000,
+            meshcore_conformance_json=conformance_path,
+        )
 
 
 def test_release_package_requires_each_rp2040_checksum_manifest(tmp_path, monkeypatch):

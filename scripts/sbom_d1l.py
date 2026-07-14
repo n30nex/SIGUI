@@ -65,10 +65,12 @@ REQUIRED_SOURCE_INPUTS = (
     "patches/sensecap_indicator_idf55_compat.patch",
     "patches/sensecap_indicator_touch_fix.patch",
     "scripts/compare_release_reproducibility_d1l.py",
+    "scripts/meshcore_conformance_d1l.py",
     "scripts/package_release_d1l.py",
     "scripts/provenance_d1l.py",
     "scripts/sbom_d1l.py",
     "scripts/verify_arduino_build_inputs.py",
+    "scripts/verify_ci_tool_inputs.py",
     "requirements/ci-host-windows.txt",
     "sdkconfig.defaults",
 )

@@ -11,9 +11,12 @@ from scripts import (
     package_release_d1l,
     sbom_d1l,
 )
+from scripts import verify_arduino_build_inputs
+from tests.meshcore_conformance_fixture import completed_report
 
 
 COMMIT = "a" * 40
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def source_identity(commit: str = COMMIT) -> dict:
@@ -64,6 +67,9 @@ def write_source_tree(root: Path) -> None:
     requirements.write_text("pytest==8.4.1\nruff==0.12.2\n", encoding="ascii")
 
     digest = "1" * 64
+    committed_inputs = json.loads(
+        (ROOT / ".github" / "d1l-build-inputs.json").read_text(encoding="utf-8")
+    )
     build_inputs = {
         "schema": 1,
         "kind": "d1l_build_inputs",
@@ -81,6 +87,12 @@ def write_source_tree(root: Path) -> None:
                 "path": "requirements/ci-host-windows.txt",
                 "sha256": sbom_d1l.sha256_file(requirements),
             },
+        },
+        "ci_tools": committed_inputs["ci_tools"],
+        "arduino": committed_inputs["arduino"],
+        "submodules": {
+            "third_party/MeshCore": "1" * 40,
+            "third_party/sensecap_indicator_esp32": "2" * 40,
         },
     }
     build_lock = root / ".github" / "d1l-build-inputs.json"
@@ -176,21 +188,12 @@ def write_conformance(
     path = root / f"meshcore_conformance_{commit}.json"
     generated_at = datetime.now(timezone.utc) - timedelta(seconds=run_index)
     temporary = f"/tmp/d1l-meshcore-conformance-run-{run_index}"
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "artifact_type": package_release_d1l.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
-                "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
-                "passed": True,
-                "status": "pass",
-                "execution_complete": True,
-                "coverage_boundary": package_release_d1l.MESHCORE_CONFORMANCE_BOUNDARY,
-                "coverage_level": package_release_d1l.MESHCORE_CONFORMANCE_BOUNDARY,
-                "closure_ready": False,
-                "issue_65_closure_eligible": False,
-                "source_verification": {"repository_commit": commit},
-                "commands": [
+    report = completed_report(
+        commit,
+        root / package_release_d1l.BUILD_INPUTS_SOURCE,
+        generated_at=generated_at,
+    )
+    report["commands"] = [
                     [
                         "clang-18",
                         "-c",
@@ -205,28 +208,20 @@ def write_conformance(
                         "-o",
                         f"{temporary}/packet.o",
                     ],
-                ],
-                "fuzz_command": [
+                    *[["clang-18", f"step-{index}"] for index in range(5)],
+                ]
+    report["fuzz_command"] = [
                     f"{temporary}/meshcore_wire_fuzz",
                     "-runs=100000",
                     "-seed=13746277",
                     f"-artifact_prefix=/tmp/findings-run-{run_index}/",
                     f"{temporary}/corpus",
-                ],
-                "fuzz_result": {
-                    "passed": True,
-                    "requested_runs": 100000,
-                    "completed_runs": completed_runs,
-                    "duration_ms": 1000 + run_index,
-                    "artifact_prefix": f"/tmp/findings-run-{run_index}",
-                    "finding_files": [],
-                    "findings": 0,
-                },
-            },
-            sort_keys=True,
-        ),
-        encoding="ascii",
-    )
+                ]
+    report["fuzz_result"]["completed_runs"] = completed_runs
+    report["fuzz_result"]["passed"] = completed_runs == 100000
+    report["fuzz_result"]["duration_ms"] = 1000 + run_index
+    report["fuzz_result"]["artifact_prefix"] = f"/tmp/findings-run-{run_index}"
+    path.write_text(json.dumps(report, sort_keys=True), encoding="ascii")
     return path
 
 
@@ -240,6 +235,11 @@ def write_rp2040_artifacts(root: Path, run_index: int) -> Path:
             deterministic_build_payload(f"rp2040:{name}", b"rp2040-source-v1")
         )
         if name == "rp2040-sd-bridge-firmware":
+            metadata_path = root / package_release_d1l.BUILD_INPUTS_SOURCE
+            metadata = verify_arduino_build_inputs.load_metadata(metadata_path)
+            validated = verify_arduino_build_inputs.validate_metadata(
+                metadata, root, verify_repository=False
+            )
             build_inputs = artifact_dir / "build-inputs.json"
             build_inputs.write_text(
                 json.dumps(
@@ -248,7 +248,31 @@ def write_rp2040_artifacts(root: Path, run_index: int) -> Path:
                         "kind": "d1l_arduino_build_inputs",
                         "ok": True,
                         "source_commit": COMMIT,
+                        "metadata": {
+                            "path": package_release_d1l.BUILD_INPUTS_SOURCE.as_posix(),
+                            "sha256": sbom_d1l.sha256_file(metadata_path),
+                        },
+                        "arduino_cli_version": validated["cli_version"],
+                        "arduino_cli": {
+                            "version": validated["cli_version"],
+                            "archive": validated["cli_archive"],
+                            "executable": {
+                                **validated["cli_executable"],
+                                "verified": True,
+                            },
+                            "bytes_verified": True,
+                        },
+                        "arduino_cli_bytes_verified": True,
+                        "rp2040_core_version": validated["core_version"],
+                        "submodules": validated["submodules"],
                         "archives_verified": True,
+                        "archives": [
+                            {
+                                **item,
+                                "relative_path": f"staging/{item['filename']}",
+                            }
+                            for item in validated["archive_inventory"]
+                        ],
                     },
                     indent=2,
                     sort_keys=True,
@@ -436,23 +460,41 @@ def test_full_release_profile_rejects_packages_without_rp2040_roots(
     )
 
 
+def test_full_release_profile_rejects_rechecksummed_unverified_arduino_cli_bytes(
+    tmp_path, monkeypatch
+):
+    root, first, _second, _identity = build_pair(tmp_path, monkeypatch)
+    receipt_path = (
+        first / "rp2040" / "rp2040-sd-bridge-firmware" / "build-inputs.json"
+    )
+    receipt = json.loads(receipt_path.read_text(encoding="ascii"))
+    receipt["arduino_cli"]["executable"]["sha256"] = "0" * 64
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True), encoding="ascii")
+    package_release_d1l.write_sha256sums(receipt_path.parent)
+    manifest = json.loads((first / "manifest.json").read_text(encoding="ascii"))
+
+    with pytest.raises(
+        compare_release_reproducibility_d1l.ComparisonError,
+        match="RP2040 build-input receipt is incomplete or stale",
+    ):
+        compare_release_reproducibility_d1l.validate_rp2040_profile(
+            root,
+            manifest,
+            first,
+            COMMIT,
+            compare_release_reproducibility_d1l.PROFILE_FULL_RELEASE,
+        )
+
+
 def test_semantic_conformance_drift_is_not_hidden_by_volatile_normalization(
     tmp_path, monkeypatch
 ):
-    root, first, second, identity = build_pair(
-        tmp_path,
-        monkeypatch,
-        conformance_completed_runs=(100000, 99999),
-    )
-
-    receipt = compare(root, first, second, identity)
-
-    assert receipt["reproducible"] is False
-    assert receipt["comparison"]["payload_sha256_match"] is False
-    mismatch = next(
-        item for item in receipt["failures"] if item["code"] == "payload_sha256_mismatch"
-    )
-    assert f"evidence/meshcore_conformance_{COMMIT}.json" in mismatch["detail"]
+    with pytest.raises(ValueError, match="fuzz_passed, fuzz_complete"):
+        build_pair(
+            tmp_path,
+            monkeypatch,
+            conformance_completed_runs=(100000, 99999),
+        )
 
 
 def test_same_actions_run_is_rejected(tmp_path, monkeypatch):

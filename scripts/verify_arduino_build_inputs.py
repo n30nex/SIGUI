@@ -51,7 +51,9 @@ def _git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def validate_metadata(data: dict[str, Any], root: Path) -> dict[str, Any]:
+def validate_metadata(
+    data: dict[str, Any], root: Path, *, verify_repository: bool = True
+) -> dict[str, Any]:
     arduino = data.get("arduino")
     if not isinstance(arduino, dict):
         raise ValueError("arduino build inputs are missing")
@@ -69,6 +71,47 @@ def validate_metadata(data: dict[str, Any], root: Path) -> dict[str, Any]:
     action_commit = _required_string(setup_action.get("commit"), "arduino setup action commit")
     if not GIT_SHA_RE.fullmatch(action_commit):
         raise ValueError("arduino setup action commit must be a full Git SHA")
+    cli_archive = cli.get("archive")
+    cli_executable = cli.get("executable")
+    if not isinstance(cli_archive, dict) or not isinstance(cli_executable, dict):
+        raise ValueError("arduino CLI byte identities are missing")
+    cli_archive_filename = _required_string(
+        cli_archive.get("filename"), "arduino CLI archive filename"
+    )
+    cli_archive_url = _required_string(cli_archive.get("url"), "arduino CLI archive URL")
+    parsed_cli_archive_url = urlparse(cli_archive_url)
+    if (
+        Path(cli_archive_filename).name != cli_archive_filename
+        or parsed_cli_archive_url.scheme != "https"
+        or Path(parsed_cli_archive_url.path).name != cli_archive_filename
+    ):
+        raise ValueError("arduino CLI archive identity is invalid")
+    cli_archive_sha256 = _required_string(
+        cli_archive.get("sha256"), "arduino CLI archive SHA-256"
+    )
+    cli_archive_size = cli_archive.get("size")
+    if (
+        SHA256_RE.fullmatch(cli_archive_sha256) is None
+        or isinstance(cli_archive_size, bool)
+        or not isinstance(cli_archive_size, int)
+        or cli_archive_size <= 0
+    ):
+        raise ValueError("arduino CLI archive identity is invalid")
+    cli_executable_filename = _required_string(
+        cli_executable.get("filename"), "arduino CLI executable filename"
+    )
+    cli_executable_sha256 = _required_string(
+        cli_executable.get("sha256"), "arduino CLI executable SHA-256"
+    )
+    cli_executable_size = cli_executable.get("size")
+    if (
+        cli_executable_filename != "arduino-cli"
+        or SHA256_RE.fullmatch(cli_executable_sha256) is None
+        or isinstance(cli_executable_size, bool)
+        or not isinstance(cli_executable_size, int)
+        or cli_executable_size <= 0
+    ):
+        raise ValueError("arduino CLI executable identity is invalid")
 
     core_version = _required_string(rp2040.get("version"), "RP2040 core version")
     archive = rp2040.get("platform_archive")
@@ -107,17 +150,22 @@ def validate_metadata(data: dict[str, Any], root: Path) -> dict[str, Any]:
     if rp2040.get("compiler_tool") not in seen_names:
         raise ValueError("declared Arduino compiler tool is absent from the tool inventory")
 
-    workflow = (root / ".github" / "workflows" / "d1l-ci.yml").read_text(encoding="utf-8")
-    required_workflow_tokens = (
-        f"arduino/setup-arduino-cli@{action_commit}",
-        f'version: "{cli_version}"',
-        f"arduino-cli core download rp2040:rp2040@{core_version}",
-        f"arduino-cli core install rp2040:rp2040@{core_version}",
-        "scripts/verify_arduino_build_inputs.py",
-    )
-    missing_tokens = [token for token in required_workflow_tokens if token not in workflow]
-    if missing_tokens:
-        raise ValueError("workflow is missing immutable Arduino inputs: " + ", ".join(missing_tokens))
+    if verify_repository:
+        workflow = (root / ".github" / "workflows" / "d1l-ci.yml").read_text(
+            encoding="utf-8"
+        )
+        required_workflow_tokens = (
+            f"arduino/setup-arduino-cli@{action_commit}",
+            f'version: "{cli_version}"',
+            f"arduino-cli core download rp2040:rp2040@{core_version}",
+            f"arduino-cli core install rp2040:rp2040@{core_version}",
+            "scripts/verify_arduino_build_inputs.py",
+        )
+        missing_tokens = [token for token in required_workflow_tokens if token not in workflow]
+        if missing_tokens:
+            raise ValueError(
+                "workflow is missing immutable Arduino inputs: " + ", ".join(missing_tokens)
+            )
 
     submodules = data.get("submodules")
     if not isinstance(submodules, dict) or not submodules:
@@ -126,17 +174,32 @@ def validate_metadata(data: dict[str, Any], root: Path) -> dict[str, Any]:
     for path, expected in sorted(submodules.items()):
         if not isinstance(path, str) or not GIT_SHA_RE.fullmatch(str(expected)):
             raise ValueError(f"invalid submodule build input: {path}")
-        line = _git(root, "ls-tree", "HEAD", "--", path)
-        fields = line.split()
-        if len(fields) < 4 or fields[0] != "160000" or fields[1] != "commit":
-            raise ValueError(f"submodule gitlink is missing: {path}")
-        actual = fields[2]
-        if actual != expected:
-            raise ValueError(f"submodule gitlink mismatch for {path}: {actual} != {expected}")
+        actual = str(expected)
+        if verify_repository:
+            line = _git(root, "ls-tree", "HEAD", "--", path)
+            fields = line.split()
+            if len(fields) < 4 or fields[0] != "160000" or fields[1] != "commit":
+                raise ValueError(f"submodule gitlink is missing: {path}")
+            actual = fields[2]
+            if actual != expected:
+                raise ValueError(
+                    f"submodule gitlink mismatch for {path}: {actual} != {expected}"
+                )
         actual_submodules[path] = actual
 
     return {
         "cli_version": cli_version,
+        "cli_archive": {
+            "url": cli_archive_url,
+            "filename": cli_archive_filename,
+            "sha256": cli_archive_sha256,
+            "size": cli_archive_size,
+        },
+        "cli_executable": {
+            "filename": cli_executable_filename,
+            "sha256": cli_executable_sha256,
+            "size": cli_executable_size,
+        },
         "core_version": core_version,
         "archive_inventory": inventory,
         "submodules": actual_submodules,
@@ -174,12 +237,33 @@ def build_receipt(
     *,
     arduino_data_dir: Path | None,
     arduino_cli_version: str | None,
+    arduino_cli_path: Path | None = None,
 ) -> dict[str, Any]:
     data = load_metadata(metadata_path)
     validated = validate_metadata(data, root)
     expected_cli = validated["cli_version"]
     if arduino_cli_version is not None and arduino_cli_version != expected_cli:
         raise ValueError(f"Arduino CLI version mismatch: {arduino_cli_version} != {expected_cli}")
+    cli_executable = None
+    if arduino_cli_path is not None:
+        try:
+            resolved_cli = arduino_cli_path.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"Arduino CLI executable is missing: {arduino_cli_path}") from exc
+        expected_executable = validated["cli_executable"]
+        cli_size = resolved_cli.stat().st_size
+        cli_sha256 = sha256_file(resolved_cli)
+        if (
+            cli_size != expected_executable["size"]
+            or cli_sha256 != expected_executable["sha256"]
+        ):
+            raise ValueError("Arduino CLI executable byte identity mismatch")
+        cli_executable = {
+            **expected_executable,
+            "sha256": cli_sha256,
+            "size": cli_size,
+            "verified": True,
+        }
     archives = (
         verify_archives(arduino_data_dir, validated["archive_inventory"])
         if arduino_data_dir is not None
@@ -198,11 +282,90 @@ def build_receipt(
             "sha256": sha256_file(metadata_path),
         },
         "arduino_cli_version": expected_cli,
+        "arduino_cli": {
+            "version": expected_cli,
+            "archive": validated["cli_archive"],
+            "executable": cli_executable,
+            "bytes_verified": cli_executable is not None,
+        },
+        "arduino_cli_bytes_verified": cli_executable is not None,
         "rp2040_core_version": validated["core_version"],
         "submodules": validated["submodules"],
         "archives_verified": arduino_data_dir is not None,
         "archives": archives,
     }
+
+
+def validate_build_receipt(
+    receipt: object,
+    metadata: dict[str, Any],
+    expected_commit: str,
+    metadata_sha256: str,
+    root: Path,
+) -> None:
+    validated = validate_metadata(metadata, root, verify_repository=False)
+    if not isinstance(receipt, dict):
+        raise ValueError("Arduino build-input receipt must be an object")
+    required = {
+        "schema": receipt.get("schema") == 1,
+        "kind": receipt.get("kind") == "d1l_arduino_build_inputs",
+        "ok": receipt.get("ok") is True,
+        "source_commit": receipt.get("source_commit") == expected_commit,
+        "metadata": receipt.get("metadata")
+        == {
+            "path": ".github/d1l-build-inputs.json",
+            "sha256": metadata_sha256,
+        },
+        "cli_version": receipt.get("arduino_cli_version") == validated["cli_version"],
+        "cli_bytes": receipt.get("arduino_cli_bytes_verified") is True,
+        "core_version": receipt.get("rp2040_core_version")
+        == validated["core_version"],
+        "submodules": receipt.get("submodules") == validated["submodules"],
+        "archives_verified": receipt.get("archives_verified") is True,
+    }
+    cli = receipt.get("arduino_cli")
+    required["cli"] = isinstance(cli, dict)
+    if isinstance(cli, dict):
+        required.update(
+            {
+                "cli_identity": cli.get("version") == validated["cli_version"],
+                "cli_archive": cli.get("archive") == validated["cli_archive"],
+                "cli_executable": cli.get("executable")
+                == {**validated["cli_executable"], "verified": True},
+                "cli_verified": cli.get("bytes_verified") is True,
+            }
+        )
+    expected_archives = {
+        item["filename"]: (item["sha256"], item["size"])
+        for item in validated["archive_inventory"]
+    }
+    raw_archives = receipt.get("archives")
+    receipt_archives: dict[str, tuple[str, int]] = {}
+    paths_valid = isinstance(raw_archives, list)
+    if isinstance(raw_archives, list):
+        for item in raw_archives:
+            if not isinstance(item, dict):
+                paths_valid = False
+                continue
+            filename = item.get("filename")
+            relative_path = item.get("relative_path")
+            if (
+                not isinstance(filename, str)
+                or filename in receipt_archives
+                or not isinstance(relative_path, str)
+                or Path(relative_path).is_absolute()
+                or ".." in Path(relative_path).parts
+                or Path(relative_path).name != filename
+            ):
+                paths_valid = False
+                continue
+            receipt_archives[filename] = (item.get("sha256"), item.get("size"))
+    required["archive_inventory"] = paths_valid and receipt_archives == expected_archives
+    failed = [name for name, passed in required.items() if not passed]
+    if failed:
+        raise ValueError(
+            "Arduino build-input receipt is incomplete or stale: " + ", ".join(failed)
+        )
 
 
 def main() -> int:
@@ -211,6 +374,7 @@ def main() -> int:
     parser.add_argument("--metadata", default=".github/d1l-build-inputs.json")
     parser.add_argument("--arduino-data-dir")
     parser.add_argument("--arduino-cli-version")
+    parser.add_argument("--arduino-cli-path")
     parser.add_argument("--out")
     args = parser.parse_args()
 
@@ -224,6 +388,9 @@ def main() -> int:
         root,
         arduino_data_dir=data_dir,
         arduino_cli_version=args.arduino_cli_version,
+        arduino_cli_path=(
+            Path(args.arduino_cli_path).resolve() if args.arduino_cli_path else None
+        ),
     )
     payload = json.dumps(receipt, indent=2, sort_keys=True) + "\n"
     if args.out:
