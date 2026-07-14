@@ -3,6 +3,20 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CHECKOUT_ACTION_PIN = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+DOWNLOAD_ARTIFACT_ACTION_PIN = (
+    "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
+)
+ARDUINO_CLI_ACTION_PIN = (
+    "arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02"
+)
+SETUP_PYTHON_ACTION_PIN = (
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+)
+ESP_IDF_CONTAINER_PIN = (
+    "espressif/idf:v5.5.4@"
+    "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
+)
 
 
 def workflow_text() -> str:
@@ -36,6 +50,15 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
 
     sd_gate = "if: needs.change-filter.outputs.include_sd_bridge == 'true'"
     assert "needs: change-filter" in host
+    assert SETUP_PYTHON_ACTION_PIN in host
+    assert 'python-version: "3.13.6"' in host
+    assert "architecture: x64" in host
+    assert "check-latest: false" in host
+    assert "python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath" in host
+    assert "python -m pip install --upgrade" not in host
+    assert "python -m pip check" in host
+    assert "artifacts/build-inputs/ci-host-windows-installed.json" in host
+    assert "artifacts/build-inputs/SHA256SUMS.txt" in host
     assert "python -m pytest tests -q" in host
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
@@ -82,7 +105,7 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
 
     assert "needs: change-filter" in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
-    assert "arduino/setup-arduino-cli@v2" in job
+    assert ARDUINO_CLI_ACTION_PIN in job
     assert "package_rp2040_index.json" in job
     assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
     assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
@@ -142,7 +165,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
 
     assert "runs-on: ubuntu-24.04" in job
     assert "timeout-minutes: 10" in job
-    assert "actions/checkout@v7" in job
+    assert CHECKOUT_ACTION_PIN in job
     assert "submodules: recursive" in job
     assert "sudo apt-get install -y clang-18" in job
     assert "clang-18 --version" in job
@@ -170,7 +193,7 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "needs.host-checks.result == 'success'" in firmware
     assert "needs.meshcore-conformance.result == 'success'" in firmware
     assert "name: Download exact MeshCore conformance evidence" in firmware
-    assert "uses: actions/download-artifact@v7" in firmware
+    assert f"uses: {DOWNLOAD_ARTIFACT_ACTION_PIN}" in firmware
     assert "name: d1l-meshcore-wire-conformance" in firmware
     assert "path: artifacts/meshcore-conformance-input" in firmware
     assert "name: Verify exact MeshCore conformance evidence" in firmware
@@ -189,7 +212,9 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "needs.host-checks.result == 'success'" in job
     assert "needs.meshcore-conformance.result == 'success'" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
-    assert job.count("container: espressif/idf:v5.5.4") == 1
+    assert job.count(f"container: {ESP_IDF_CONTAINER_PIN}") == 1
+    assert f"'{ESP_IDF_CONTAINER_PIN}' > artifacts/idf-migration/container-image.txt" in job
+    assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in job
     assert "espressif/idf:release-v5.1" not in job
     assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
     assert "idf.py build" in job
@@ -210,7 +235,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
         < job.index("name: Collect firmware artifacts")
         < job.index("name: Package D1L release")
     )
-    assert "actions/download-artifact@v7" in job
+    assert DOWNLOAD_ARTIFACT_ACTION_PIN in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "pattern: rp2040-*-firmware" in job
     assert "path: artifacts/rp2040-release-inputs" in job

@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "kind": "d1l_build_inputs",
+  "esp_idf": {
+    "version": "v5.5.4",
+    "container": {
+      "registry": "docker.io",
+      "repository": "espressif/idf",
+      "tag": "v5.5.4",
+      "reference": "espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b",
+      "index_digest": "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "registry_manifest_url": "https://registry-1.docker.io/v2/espressif/idf/manifests/v5.5.4",
+      "platforms": {
+        "linux/amd64": "sha256:116f0526dfc87e764785370e59b88822e02cf4f9e1edd953cad5ed2d02672023",
+        "linux/arm64": "sha256:f3bc9daebfd8cb4e0afbdced7caac4431c7a862326a5e5587d65c31439549bb5"
+      }
+    }
+  },
+  "host_python": {
+    "version": "3.13.6",
+    "architecture": "x64",
+    "setup_action": {
+      "repository": "actions/setup-python",
+      "version": "v6.3.0",
+      "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1"
+    },
+    "requirements": {
+      "path": "requirements/ci-host-windows.txt",
+      "sha256": "875bd8a795b45b49691b45ffb8dbc44c96ea8e59a9a695951344c892cee8aecd",
+      "index_url": "https://pypi.org/simple",
+      "only_binary": true,
+      "require_hashes": true,
+      "packages": {
+        "pip": "26.1.2",
+        "pytest": "9.1.1",
+        "pyserial": "3.5",
+        "Pillow": "12.3.0",
+        "colorama": "0.4.6",
+        "iniconfig": "2.3.0",
+        "packaging": "26.2",
+        "pluggy": "1.6.0",
+        "Pygments": "2.20.0"
+      }
+    }
+  }
+}
