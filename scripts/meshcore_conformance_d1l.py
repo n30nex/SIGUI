@@ -64,6 +64,7 @@ ED25519_VERIFY_SOURCES = [
     ED25519_ROOT / "verify.c",
 ]
 ED25519_VECTOR_PROVENANCE_SOURCES = [
+    ED25519_ROOT / "key_exchange.c",
     ED25519_ROOT / "keypair.c",
     ED25519_ROOT / "sign.c",
 ]
@@ -74,11 +75,12 @@ ED25519_ORACLE_SOURCES = [
 DEFAULT_SEED = 0xD1C065
 DEFAULT_RUNS = 100_000
 ORACLE_ABI_VERSION = 2
-ORACLE_CORPUS_VERSION = 15
+ORACLE_CORPUS_VERSION = 16
 ORACLE_COVERAGE_BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
-    "and_anonymous_login_request_and_regular_request_response_crypto"
+    "and_anonymous_login_request_and_regular_request_response_crypto_and_"
+    "strict_identity_shared_secret_derivation"
 )
 EXPECTED_UPSTREAM = {
     "name": "MeshCore",
@@ -391,9 +393,12 @@ EXPECTED_ORACLE_CAPABILITIES = [
         "id": "login_request_response_admin",
         "status": "pending",
         "owner": "unassigned",
-        "blocked_by": (
-            "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
-        ),
+        "blocked_by": "identity_signature_and_deterministic_admin_session_fixtures",
+        "implemented_prerequisites": [
+            "anonymous_login_request_packets",
+            "regular_request_response_packets",
+            "identity_shared_secret_derivation",
+        ],
     },
     {
         "id": "signed_advert_packet_creation",
@@ -475,6 +480,32 @@ EXPECTED_ORACLE_CAPABILITIES = [
             "vectors": {"roundtrip": 6, "invalid": 30},
         },
     },
+    {
+        "id": "identity_shared_secret_derivation",
+        "status": "implemented",
+        "owner": "pinned_ed25519_keypair_exchange_strict_peer_guard",
+        "semantic": True,
+        "scope": (
+            "valid_input_seed_keypair_strict_peer_edwards_to_montgomery_shared_"
+            "secret_with_zero_rejection_only_no_persisted_key_contact_auth_"
+            "session_dispatch_route_production_integration_or_rf"
+        ),
+        "implementation_receipt": {
+            "id": "RCPT-WP04-IDENTITY-SHARED-SECRET-20260713",
+            "status": "implemented",
+            "observed_at": "2026-07-13",
+            "pinned_sources": [
+                "third_party/MeshCore/lib/ed25519/keypair.c",
+                "third_party/MeshCore/lib/ed25519/key_exchange.c",
+                "main/mesh/ed25519_canonical.h",
+            ],
+            "independent_golden": (
+                "five_symmetric_public_key_and_shared_secret_vectors_from_"
+                "libsodium_ed25519_to_curve25519_conversion_and_scalarmult"
+            ),
+            "vectors": {"roundtrip": 5, "invalid": 9},
+        },
+    },
 ]
 EXPECTED_ORACLE_REQUIRED_SURFACES = [
     {
@@ -532,6 +563,7 @@ EXPECTED_ORACLE_REQUIRED_SURFACES = [
         "capabilities": [
             "anonymous_login_request_packets",
             "regular_request_response_packets",
+            "identity_shared_secret_derivation",
             "login_request_response_admin",
         ],
     },
@@ -623,6 +655,7 @@ EXPECTED_ORACLE_UPSTREAM_SOURCE_PATHS = {
     "third_party/MeshCore/lib/ed25519/fixedint.h",
     "third_party/MeshCore/lib/ed25519/ge.c",
     "third_party/MeshCore/lib/ed25519/ge.h",
+    "third_party/MeshCore/lib/ed25519/key_exchange.c",
     "third_party/MeshCore/lib/ed25519/keypair.c",
     "third_party/MeshCore/lib/ed25519/license.txt",
     "third_party/MeshCore/lib/ed25519/precomp_data.h",
@@ -780,11 +813,11 @@ def load_oracle_manifest() -> dict[str, Any]:
     if manifest.get("capabilities") != EXPECTED_ORACLE_CAPABILITIES:
         raise GateFailure("oracle capability registry drifted")
     if manifest.get("vectors") != {
-        "roundtrip": 323,
+        "roundtrip": 328,
         "valid": 20,
-        "invalid": 291,
-        "semantic": 618,
-        "total": 634,
+        "invalid": 300,
+        "semantic": 632,
+        "total": 648,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -826,6 +859,12 @@ def load_oracle_manifest() -> dict[str, Any]:
             "invalid": 0,
             "semantic": 0,
             "total": 3,
+        },
+        "identity_shared_secret_derivation": {
+            "roundtrip": 5,
+            "invalid": 9,
+            "semantic": 14,
+            "total": 14,
         },
         "public_group_packets": {
             "roundtrip": 4,
@@ -915,6 +954,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         or interface.get("regular_request_response_available") is not True
         or interface.get("regular_request_response_scope")
         != "authenticated_nonempty_req_response_create_parse_with_caller_supplied_type_hashes_secret_and_logical_length_only_no_schema_tag_authorization_replay_session_dispatch_route_or_rf"
+        or interface.get("identity_shared_secret_derivation_available") is not True
+        or interface.get("identity_shared_secret_derivation_scope")
+        != "valid_input_seed_keypair_strict_peer_edwards_to_montgomery_shared_secret_with_zero_rejection_only_no_persisted_key_contact_auth_session_dispatch_route_production_integration_or_rf"
         or interface.get("canonical_advert_data") is not True
         or interface.get("route_header_scope")
         != "non_trace_direct_flood_and_zero_hop_headers"
@@ -961,6 +1003,20 @@ def load_oracle_manifest() -> dict[str, Any]:
                     "matrix SHA-256 from independent AES-128 ECB and "
                     "HMAC-SHA-256 generation"
                 ),
+                "identity_exchange_keypair": (
+                    "third_party/MeshCore/lib/ed25519/keypair.c"
+                ),
+                "identity_exchange_ladder": (
+                    "third_party/MeshCore/lib/ed25519/key_exchange.c"
+                ),
+                "identity_exchange_strict_peer_guard": (
+                    "main/mesh/ed25519_canonical.h"
+                ),
+                "identity_exchange_independent_golden": (
+                    "five symmetric public-key and shared-secret vectors "
+                    "independently generated through libsodium Ed25519-to-"
+                    "Curve25519 conversion and scalar multiplication"
+                ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
             ),
@@ -1004,9 +1060,9 @@ def load_oracle_manifest() -> dict[str, Any]:
         raise GateFailure("oracle interface boundary drifted")
     determinism = manifest.get("determinism", {})
     if determinism.get("current_vectors") != (
-        "fixed_bytes_ed25519_signed_advert_packets_public_group_anonymous_"
-        "login_regular_request_response_dm_ack_path_and_general_path_return_"
-        "vectors_no_runtime_rng_or_clock"
+        "fixed_bytes_ed25519_signed_advert_packets_identity_exchange_public_"
+        "group_anonymous_login_regular_request_response_dm_ack_path_and_"
+        "general_path_return_vectors_no_runtime_rng_or_clock"
     ):
         raise GateFailure("oracle deterministic vector source drifted")
     if determinism.get("signed_advert_seed_hex") != (
@@ -1037,6 +1093,16 @@ def load_oracle_manifest() -> dict[str, Any]:
         "request_lengths_1_15_16_17_and_response_lengths_16_167"
     ):
         raise GateFailure("oracle request/response matrix drifted")
+    if determinism.get("identity_exchange_recipe") != (
+        "ed25519_seed_keypair_strict_peer_y_to_montgomery_ladder_zero_secret_"
+        "reject_and_temp_wipe"
+    ):
+        raise GateFailure("oracle identity-exchange recipe drifted")
+    if determinism.get("identity_exchange_matrix") != (
+        "five_symmetric_seed_pairs_including_all_zero_seed_independently_"
+        "generated_with_libsodium"
+    ):
+        raise GateFailure("oracle identity-exchange matrix drifted")
     if determinism.get("independent_verifier_kat") != (
         "RFC 8032 section 7.1 TEST 1 empty message"
     ):
@@ -2025,6 +2091,7 @@ def execute(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
                     "signed_advert_packet_creation": True,
                     "signed_advert_verification": True,
                     "ed25519_point_validation": True,
+                    "identity_shared_secret_derivation": True,
                     "public_group_packets": True,
                     "anonymous_login_request_packets": True,
                     "regular_request_response_packets": True,

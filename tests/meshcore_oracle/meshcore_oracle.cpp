@@ -27,6 +27,8 @@ static_assert(PUB_KEY_SIZE == D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES,
               "Pinned MeshCore public-key width changed");
 static_assert(SEED_SIZE == D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES,
               "Pinned MeshCore identity-seed width changed");
+static_assert(PRV_KEY_SIZE == 64U,
+              "Pinned MeshCore expanded-private-key width changed");
 static_assert(SIGNATURE_SIZE == D1L_MESHCORE_ORACLE_SIGNATURE_BYTES,
               "Pinned MeshCore signature width changed");
 static_assert(D1L_MESHCORE_ORACLE_MIN_ACK_BYTES == sizeof(uint32_t),
@@ -95,6 +97,15 @@ namespace {
 
 constexpr size_t kMaxCombinedPath =
     MAX_PACKET_PAYLOAD - 2U - CIPHER_BLOCK_SIZE;
+
+void secure_zero(void *data, size_t len)
+{
+    auto *bytes = reinterpret_cast<volatile uint8_t *>(data);
+    while (len > 0U) {
+        *bytes++ = 0U;
+        --len;
+    }
+}
 
 bool packet_to_upstream(const d1l_meshcore_oracle_packet_t *packet,
                         mesh::Packet *upstream);
@@ -715,6 +726,49 @@ extern "C" bool d1l_meshcore_oracle_parse_signed_advert_packet(
         std::memcpy(out_app_data, parsed_app_data.data(), app_data_len);
     }
     *out_app_data_len = app_data_len;
+    return true;
+}
+
+extern "C" bool d1l_meshcore_oracle_identity_shared_secret_from_seed(
+    const uint8_t seed[D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES],
+    const uint8_t peer_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    d1l_meshcore_oracle_identity_exchange_t *out_exchange)
+{
+    if (seed == nullptr || peer_public_key == nullptr ||
+        out_exchange == nullptr ||
+        !d1l_ed25519_encoded_point_is_strict(peer_public_key)) {
+        return false;
+    }
+
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES> public_key{};
+    std::array<uint8_t, PRV_KEY_SIZE> private_key{};
+    std::array<uint8_t, D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES>
+        shared_secret{};
+    ed25519_create_keypair(public_key.data(), private_key.data(), seed);
+    if (!d1l_ed25519_encoded_point_is_strict(public_key.data())) {
+        secure_zero(private_key.data(), private_key.size());
+        return false;
+    }
+    ed25519_key_exchange(shared_secret.data(), peer_public_key,
+                         private_key.data());
+    uint8_t secret_or = 0U;
+    for (const uint8_t value : shared_secret) {
+        secret_or |= value;
+    }
+    if (secret_or == 0U) {
+        secure_zero(private_key.data(), private_key.size());
+        secure_zero(shared_secret.data(), shared_secret.size());
+        return false;
+    }
+
+    d1l_meshcore_oracle_identity_exchange_t result{};
+    std::memcpy(result.public_key, public_key.data(), public_key.size());
+    std::memcpy(result.shared_secret, shared_secret.data(),
+                shared_secret.size());
+    *out_exchange = result;
+    secure_zero(result.shared_secret, sizeof(result.shared_secret));
+    secure_zero(private_key.data(), private_key.size());
+    secure_zero(shared_secret.data(), shared_secret.size());
     return true;
 }
 

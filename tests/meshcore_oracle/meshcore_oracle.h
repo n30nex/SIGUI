@@ -86,6 +86,11 @@ typedef struct {
     uint8_t name[D1L_MESHCORE_ORACLE_MAX_ADVERT_NAME_BYTES];
 } d1l_meshcore_oracle_advert_data_t;
 
+typedef struct {
+    uint8_t public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES];
+    uint8_t shared_secret[D1L_MESHCORE_ORACLE_SHARED_SECRET_BYTES];
+} d1l_meshcore_oracle_identity_exchange_t;
+
 uint32_t d1l_meshcore_oracle_abi_version(void);
 const char *d1l_meshcore_oracle_upstream_commit(void);
 
@@ -153,6 +158,26 @@ bool d1l_meshcore_oracle_parse_signed_advert_packet(
     uint8_t *out_app_data,
     size_t app_data_capacity,
     size_t *out_app_data_len);
+
+/*
+ * Deterministic valid-input parity for LocalIdentity construction followed by
+ * LocalIdentity::calcSharedSecret: create the local Ed25519 keypair from a
+ * caller seed, convert a strict peer Ed25519 public key to Montgomery form,
+ * and run the pinned ed25519_key_exchange ladder. The complete result is
+ * published only after strict peer/derived-public validation and rejection of
+ * an all-zero shared secret. Temporary private and shared-secret material is
+ * wiped before return.
+ *
+ * The strict-point and zero-secret guards are a fail-closed D1L oracle policy;
+ * upstream calcSharedSecret itself accepts an unchecked peer byte string. This
+ * function does not prove persisted-private-key loading, contact lookup,
+ * authorization, signature verification, session/admin state, dispatch,
+ * routing, production integration, or RF delivery.
+ */
+bool d1l_meshcore_oracle_identity_shared_secret_from_seed(
+    const uint8_t seed[D1L_MESHCORE_ORACLE_IDENTITY_SEED_BYTES],
+    const uint8_t peer_public_key[D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES],
+    d1l_meshcore_oracle_identity_exchange_t *out_exchange);
 
 /*
  * Canonical BaseChatMesh::sendLogin plaintext plus Mesh::createAnonDatagram

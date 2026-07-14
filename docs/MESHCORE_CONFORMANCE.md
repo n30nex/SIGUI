@@ -40,7 +40,7 @@ known-answer vectors before it is allowed to exercise pinned `mesh::Utils`.
 around the pinned upstream `mesh::Packet` envelope reader/writer and the
 `AdvertDataBuilder`/`AdvertDataParser` app-data helpers and bounded
 public-group, anonymous-login, regular REQ/RESPONSE, plain-DM, DM ACK+PATH,
-and general PATH-return operations. Its version 15 static
+and general PATH-return operations. Its version 16 static
 `manifest.json` binds that interface, the exact upstream commit, every source
 used by the target, and all deterministic vectors by canonical-LF SHA-256. The
 packet capability retains four round-trip and five reject vectors. The advert
@@ -116,9 +116,10 @@ limits, room-mode and non-room-sync canonicality, type/version/envelope/length
 errors, wrong outer fields or secret, MAC/ciphertext tampering, redundant AES
 blocks, nonzero padding, and authenticated overlength passwords. The wire has
 no room-mode or logical-length field, so the caller supplies room mode and the
-canonical parser returns bytes before the first zero. Shared-secret derivation,
-contact lookup, authorization, replay policy, response generation, admin or
-session mutation, dispatch, route choice, scheduling, and RF remain excluded.
+canonical parser returns bytes before the first zero. The anonymous-login
+function itself does not derive a shared secret. Contact lookup, authorization,
+replay policy, response generation, admin or session mutation, dispatch, route
+choice, scheduling, and RF remain excluded.
 The regular request/response capability adds six authenticated round trips and
 thirty rejects. REQ plaintext lengths 1, 15, 16, and 17 plus RESPONSE lengths
 16 and the upstream 167-byte maximum pin both packet types, one-byte
@@ -136,6 +137,21 @@ accepts only its minimal AES block count with zero padding. Empty datagrams are
 excluded because the pinned receive path rejects their MAC-only form. Request
 tags/types, response schemas, identity or secret derivation, authorization,
 replay/session/admin state, dispatch, route choice, and RF remain excluded.
+The identity shared-secret capability adds five symmetric valid-input round
+trips and nine rejects. Fixed seed pairs, including an all-zero seed, pin the
+seed-to-keypair step and the vendored Edwards-y-to-Montgomery ladder. Every
+derived public key and 32-byte shared secret is compared with an independently
+generated libsodium Ed25519-to-Curve25519 conversion and scalar-multiplication
+result; the five secrets also pin an aggregate SHA-256 digest. Both directions
+must return the same secret. Rejects cover null inputs/output plus canonical
+identity, negative-zero, zero, signed-zero, minus-one, and non-canonical peer
+encodings, with no output mutation. The wrapper applies the existing strict
+peer-point guard, rejects an all-zero result, and wipes temporary expanded
+private-key and secret bytes. These guards are D1L fail-closed policy around
+valid-input `LocalIdentity::calcSharedSecret` parity; upstream itself accepts
+unchecked peer bytes. Persisted-private-key loading, contact lookup,
+authorization, signature handling, session/admin state, dispatch, routing,
+local production-call-site hardening, and RF remain excluded.
 The DM capability adds 268 authenticated round trips: every attempt value from
 0 through 255, the normal 160-byte and extended-attempt 158-byte text
 boundaries, and all ten normal text lengths from 11 through 155 whose complete
@@ -181,7 +197,8 @@ dispatch, reciprocal-path decisions, forwarding, scheduling, and RF remain
 outside the boundary. The exact-block DM ACK limitation above is unchanged.
 Seed bytes `00` through `1f` regenerate the keypair and all three fixed
 signatures on every vector run. The source hashes pin the verifier's transitive
-C headers and sources, the keypair/signer recipe, `advert_data.h`, the shared
+C headers and sources, the keypair/signer/shared-secret recipe, `key_exchange.c`,
+`advert_data.h`, the shared
 canonical scalar/point guard, the D1L CMake/service binding, pinned
 `BaseChatMesh`/`Utils` source, and the vendored AES source. The functional host
 SHA/HMAC adapter is source-pinned and independently checked; no upstream crypto
@@ -208,7 +225,7 @@ The exact packet registry and blocker receipts are copied into
 
 This foundation is intentionally not the completed WP-04 oracle. Its boundary
 is
-`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto`.
+`pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation`.
 The `signed_advert_verification` and `signed_advert_packet_creation`
 capabilities prove only D1L's bounded
 message layout (`public_key || timestamp_wire_bytes || app_data`) and the real
@@ -245,17 +262,19 @@ millisecond-clock, packet manager, mesh-table, contact, and channel fixtures;
 they must extend the versioned manifest instead of silently widening what this
 artifact claims.
 
-The DM crypto/layout primitive is implemented, but Ed25519 shared-secret
-derivation and deterministic identity/contact/session fixtures remain outside
-its boundary. Route selection/forwarding requires a
+The DM crypto/layout primitive is implemented and the separate valid-input
+Ed25519 shared-secret derivation is now pinned, but persisted-key loading and
+deterministic identity/contact/session fixtures remain outside its boundary.
+Route selection/forwarding requires a
 deterministic dispatcher, packet manager, mesh tables, radio, RNG, and clocks.
 Anonymous login-request framing is implemented with caller-supplied outer
 identity, secret, time, and room mode. Regular REQ/RESPONSE datagram crypto is
-also implemented with caller-supplied type, hashes, secret, and logical length.
-Login response schemas, request tags/types, authorization, replay, session, and
-admin behavior still require identity key exchange/signature handling plus
-deterministic admin-session fixtures. These receipts describe missing oracle
-prerequisites; they are not evidence that those semantics ran.
+also implemented with caller-supplied type, hashes, secret, and logical length,
+and deterministic valid-input identity shared-secret derivation is pinned to
+the vendored ladder. Login response schemas, request tags/types, authorization,
+replay, session, and admin behavior still require identity signature handling
+plus deterministic admin-session fixtures. These receipts describe missing
+oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
 
@@ -310,8 +329,9 @@ This bounded gate makes no claim about:
   AES/HMAC creation and authenticated parsing, expected-ACK derivation,
   ACK-specific and general
   encrypted PATH creation/parsing, caller-selected PATH route-code preparation,
-  and the D1L signed-advert message layout and pinned C
-  Ed25519 verifier; it does not cover key exchange/management, DM sessions,
+  and the D1L signed-advert message layout and pinned C Ed25519 verifier plus
+  valid-input identity shared-secret derivation; it does not cover persisted
+  key loading/management, DM sessions,
   request/response schemas or tags, dispatch, ACK correlation/delivery, or
   retained state;
 - semantic dispatch for Public, DM, advert, PATH, trace, or general multipart

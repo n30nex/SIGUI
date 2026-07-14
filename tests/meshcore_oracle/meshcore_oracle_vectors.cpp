@@ -32,6 +32,8 @@ constexpr std::size_t kVerifierKatInvalidVectors = 3U;
 constexpr std::size_t kPointValidationValidVectors = 4U;
 constexpr std::size_t kPointValidationInvalidVectors = 7U;
 constexpr std::size_t kCryptoAdapterKatValidVectors = 3U;
+constexpr std::size_t kIdentityExchangeRoundtripVectors = 5U;
+constexpr std::size_t kIdentityExchangeInvalidVectors = 9U;
 constexpr std::size_t kGroupRoundtripVectors = 4U;
 constexpr std::size_t kGroupInvalidVectors = 21U;
 constexpr std::size_t kLoginRequestRoundtripVectors = 6U;
@@ -921,6 +923,175 @@ int main()
     expect_strict_point("minus-one point", minus_one_point.data(), false);
     expect_strict_point("noncanonical field encoding",
                         noncanonical_y.data(), false);
+
+    using IdentityBytes =
+        std::array<uint8_t, D1L_MESHCORE_ORACLE_PUBLIC_KEY_BYTES>;
+    const IdentityBytes exchange_seed_b = {
+        0x20U, 0x21U, 0x22U, 0x23U, 0x24U, 0x25U, 0x26U, 0x27U,
+        0x28U, 0x29U, 0x2AU, 0x2BU, 0x2CU, 0x2DU, 0x2EU, 0x2FU,
+        0x30U, 0x31U, 0x32U, 0x33U, 0x34U, 0x35U, 0x36U, 0x37U,
+        0x38U, 0x39U, 0x3AU, 0x3BU, 0x3CU, 0x3DU, 0x3EU, 0x3FU};
+    const IdentityBytes exchange_public_b = {
+        0x29U, 0xACU, 0xBAU, 0xE1U, 0x41U, 0xBCU, 0xCAU, 0xF0U,
+        0xB2U, 0x2EU, 0x1AU, 0x94U, 0xD3U, 0x4DU, 0x0BU, 0xC7U,
+        0x36U, 0x1EU, 0x52U, 0x6DU, 0x0BU, 0xFEU, 0x12U, 0xC8U,
+        0x97U, 0x94U, 0xBCU, 0x93U, 0x22U, 0x96U, 0x6DU, 0xD7U};
+    const IdentityBytes exchange_seed_c = {
+        0x80U, 0x81U, 0x82U, 0x83U, 0x84U, 0x85U, 0x86U, 0x87U,
+        0x88U, 0x89U, 0x8AU, 0x8BU, 0x8CU, 0x8DU, 0x8EU, 0x8FU,
+        0x90U, 0x91U, 0x92U, 0x93U, 0x94U, 0x95U, 0x96U, 0x97U,
+        0x98U, 0x99U, 0x9AU, 0x9BU, 0x9CU, 0x9DU, 0x9EU, 0x9FU};
+    const IdentityBytes exchange_public_c = {
+        0xCDU, 0x14U, 0xB3U, 0x7FU, 0x95U, 0x6EU, 0x95U, 0x31U,
+        0x94U, 0xFFU, 0x7FU, 0xB7U, 0x3BU, 0x3DU, 0x81U, 0xDCU,
+        0xC5U, 0x61U, 0xD6U, 0x1AU, 0x75U, 0x38U, 0x09U, 0x4BU,
+        0x7CU, 0x3EU, 0x1AU, 0x64U, 0x3EU, 0xE5U, 0xF3U, 0xAAU};
+    const IdentityBytes exchange_seed_d = {
+        0xFFU, 0xFEU, 0xFDU, 0xFCU, 0xFBU, 0xFAU, 0xF9U, 0xF8U,
+        0xF7U, 0xF6U, 0xF5U, 0xF4U, 0xF3U, 0xF2U, 0xF1U, 0xF0U,
+        0xEFU, 0xEEU, 0xEDU, 0xECU, 0xEBU, 0xEAU, 0xE9U, 0xE8U,
+        0xE7U, 0xE6U, 0xE5U, 0xE4U, 0xE3U, 0xE2U, 0xE1U, 0xE0U};
+    const IdentityBytes exchange_public_d = {
+        0xBAU, 0xFCU, 0x71U, 0xBEU, 0xADU, 0x3AU, 0xC5U, 0xE4U,
+        0xB6U, 0x3EU, 0x9CU, 0x82U, 0x16U, 0xEEU, 0x71U, 0xA3U,
+        0x4AU, 0xAEU, 0xC6U, 0x57U, 0x22U, 0xEEU, 0xDBU, 0xCAU,
+        0x72U, 0x8BU, 0x4EU, 0x9BU, 0x3CU, 0xCCU, 0xE3U, 0x96U};
+    const IdentityBytes exchange_zero_seed{};
+    const IdentityBytes exchange_zero_seed_public = {
+        0x3BU, 0x6AU, 0x27U, 0xBCU, 0xCEU, 0xB6U, 0xA4U, 0x2DU,
+        0x62U, 0xA3U, 0xA8U, 0xD0U, 0x2AU, 0x6FU, 0x0DU, 0x73U,
+        0x65U, 0x32U, 0x15U, 0x77U, 0x1DU, 0xE2U, 0x43U, 0xA6U,
+        0x3AU, 0xC0U, 0x48U, 0xA1U, 0x8BU, 0x59U, 0xDAU, 0x29U};
+    const IdentityBytes exchange_secret_ab = {
+        0xF6U, 0xF9U, 0x2EU, 0xFBU, 0x32U, 0x94U, 0x5AU, 0xFFU,
+        0x68U, 0x33U, 0x24U, 0xA1U, 0xC9U, 0x84U, 0xC5U, 0x00U,
+        0x1FU, 0x46U, 0xAAU, 0xEAU, 0x51U, 0x3FU, 0x34U, 0x53U,
+        0x13U, 0x8DU, 0x74U, 0x0BU, 0x3AU, 0x60U, 0x4BU, 0x7DU};
+    const IdentityBytes exchange_secret_ac = {
+        0x41U, 0xF2U, 0xB5U, 0x80U, 0x30U, 0x67U, 0x90U, 0xD9U,
+        0x25U, 0x30U, 0xE0U, 0xA8U, 0xE8U, 0x48U, 0xC5U, 0xEBU,
+        0xB5U, 0x70U, 0xAAU, 0x41U, 0x2AU, 0xD9U, 0x08U, 0xB9U,
+        0x71U, 0x3AU, 0x0DU, 0x11U, 0x22U, 0x5BU, 0x27U, 0x58U};
+    const IdentityBytes exchange_secret_bd = {
+        0x1DU, 0x8FU, 0xB5U, 0x86U, 0x85U, 0xEBU, 0xA3U, 0xDAU,
+        0x89U, 0xDDU, 0x6BU, 0x1BU, 0xBAU, 0xE2U, 0xD4U, 0x0EU,
+        0xBBU, 0x19U, 0x21U, 0x3BU, 0xD4U, 0xA4U, 0xEEU, 0x05U,
+        0x4DU, 0xF5U, 0xBDU, 0x24U, 0x5DU, 0xF6U, 0x1CU, 0x13U};
+    const IdentityBytes exchange_secret_cd = {
+        0x99U, 0xA0U, 0x9AU, 0x47U, 0xDBU, 0xA2U, 0x7DU, 0xC9U,
+        0xA3U, 0x3CU, 0xEFU, 0xECU, 0xC0U, 0xFEU, 0x7DU, 0x04U,
+        0xA9U, 0x2BU, 0x5CU, 0x87U, 0xE6U, 0x43U, 0xC5U, 0x9DU,
+        0x06U, 0xA0U, 0x2AU, 0xBBU, 0xDAU, 0xDFU, 0x59U, 0x24U};
+    const IdentityBytes exchange_secret_zero_b = {
+        0x92U, 0x40U, 0x1AU, 0xD8U, 0x90U, 0x6CU, 0x37U, 0xD8U,
+        0x59U, 0x0EU, 0x88U, 0xF5U, 0x8DU, 0x33U, 0xDBU, 0xA1U,
+        0xBEU, 0xC1U, 0x65U, 0x71U, 0x96U, 0xDCU, 0x83U, 0x45U,
+        0x8EU, 0x67U, 0xE6U, 0xC2U, 0x0AU, 0x0CU, 0x3DU, 0x12U};
+    const IdentityBytes expected_exchange_matrix_sha256 = {
+        0x6BU, 0x1BU, 0x1EU, 0xA7U, 0xE3U, 0x8EU, 0x11U, 0xFCU,
+        0xDFU, 0x4AU, 0x7BU, 0xD7U, 0x56U, 0x89U, 0x66U, 0xEFU,
+        0xD2U, 0xDDU, 0xC2U, 0x74U, 0xB2U, 0xF8U, 0xD8U, 0xABU,
+        0x57U, 0xF8U, 0xEDU, 0x75U, 0x65U, 0x0BU, 0xD1U, 0xB9U};
+    struct IdentityExchangeVector {
+        const char *name;
+        const IdentityBytes *seed_a;
+        const IdentityBytes *public_a;
+        const IdentityBytes *seed_b;
+        const IdentityBytes *public_b;
+        const IdentityBytes *shared_secret;
+    };
+    const std::array<IdentityExchangeVector,
+                     kIdentityExchangeRoundtripVectors>
+        identity_exchange_vectors = {{
+            {"sequential A/B", &kSignedAdvertSeed,
+             &kSignedAdvertPublicKey, &exchange_seed_b, &exchange_public_b,
+             &exchange_secret_ab},
+            {"sequential A/C", &kSignedAdvertSeed,
+             &kSignedAdvertPublicKey, &exchange_seed_c, &exchange_public_c,
+             &exchange_secret_ac},
+            {"sequential B/descending D", &exchange_seed_b,
+             &exchange_public_b, &exchange_seed_d, &exchange_public_d,
+             &exchange_secret_bd},
+            {"sequential C/descending D", &exchange_seed_c,
+             &exchange_public_c, &exchange_seed_d, &exchange_public_d,
+             &exchange_secret_cd},
+            {"all-zero seed/B", &exchange_zero_seed,
+             &exchange_zero_seed_public, &exchange_seed_b, &exchange_public_b,
+             &exchange_secret_zero_b},
+        }};
+    SHA256 identity_exchange_matrix_sha;
+    for (const IdentityExchangeVector &vector : identity_exchange_vectors) {
+        d1l_meshcore_oracle_identity_exchange_t exchange_a{};
+        d1l_meshcore_oracle_identity_exchange_t exchange_b{};
+        if (!d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                vector.seed_a->data(), vector.public_b->data(), &exchange_a) ||
+            !d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                vector.seed_b->data(), vector.public_a->data(), &exchange_b) ||
+            std::memcmp(exchange_a.public_key, vector.public_a->data(),
+                        vector.public_a->size()) != 0 ||
+            std::memcmp(exchange_b.public_key, vector.public_b->data(),
+                        vector.public_b->size()) != 0 ||
+            std::memcmp(exchange_a.shared_secret,
+                        vector.shared_secret->data(),
+                        vector.shared_secret->size()) != 0 ||
+            std::memcmp(exchange_b.shared_secret,
+                        vector.shared_secret->data(),
+                        vector.shared_secret->size()) != 0) {
+            failures.push_back(std::string(vector.name) +
+                               " identity exchange KAT changed");
+            continue;
+        }
+        identity_exchange_matrix_sha.update(exchange_a.shared_secret,
+                                            sizeof(exchange_a.shared_secret));
+    }
+    IdentityBytes identity_exchange_matrix_digest{};
+    identity_exchange_matrix_sha.finalize(identity_exchange_matrix_digest.data(),
+                                          identity_exchange_matrix_digest.size());
+    if (identity_exchange_matrix_digest != expected_exchange_matrix_sha256) {
+        failures.push_back("identity exchange matrix digest changed");
+    }
+
+    auto expect_identity_exchange_reject =
+        [&failures](const char *name, const uint8_t *seed,
+                    const uint8_t *peer_public_key, bool null_output) {
+            d1l_meshcore_oracle_identity_exchange_t output{};
+            std::memset(&output, 0xA5, sizeof(output));
+            const d1l_meshcore_oracle_identity_exchange_t before = output;
+            if (d1l_meshcore_oracle_identity_shared_secret_from_seed(
+                    seed, peer_public_key, null_output ? nullptr : &output)) {
+                failures.push_back(std::string(name) +
+                                   " identity exchange accepted");
+            } else if (!null_output &&
+                       std::memcmp(&output, &before, sizeof(output)) != 0) {
+                failures.push_back(std::string(name) +
+                                   " identity exchange mutated output");
+            }
+        };
+    expect_identity_exchange_reject(
+        "null exchange seed", nullptr, exchange_public_b.data(), false);
+    expect_identity_exchange_reject(
+        "null exchange peer", kSignedAdvertSeed.data(), nullptr, false);
+    expect_identity_exchange_reject(
+        "null exchange output", kSignedAdvertSeed.data(),
+        exchange_public_b.data(), true);
+    expect_identity_exchange_reject(
+        "identity exchange peer", kSignedAdvertSeed.data(),
+        identity_point.data(), false);
+    expect_identity_exchange_reject(
+        "negative-zero exchange peer", kSignedAdvertSeed.data(),
+        negative_zero_identity.data(), false);
+    expect_identity_exchange_reject(
+        "zero exchange peer", kSignedAdvertSeed.data(), zero_point.data(),
+        false);
+    expect_identity_exchange_reject(
+        "signed-zero exchange peer", kSignedAdvertSeed.data(),
+        signed_zero_point.data(), false);
+    expect_identity_exchange_reject(
+        "minus-one exchange peer", kSignedAdvertSeed.data(),
+        minus_one_point.data(), false);
+    expect_identity_exchange_reject(
+        "noncanonical exchange peer", kSignedAdvertSeed.data(),
+        noncanonical_y.data(), false);
 
     auto expect_signed_advert_reject =
         [&failures](const char *name, const uint8_t *public_key,
@@ -4282,14 +4453,15 @@ int main()
     }
     std::cout << "{\"passed\":" << (passed ? "true" : "false")
               << ",\"coverage_boundary\":"
-                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto\""
+                  "\"pinned_upstream_packet_advert_group_dm_expected_ack_path_return_route_codes_ack_trace_and_signed_advert_creation_strict_verification_and_anonymous_login_request_and_regular_request_response_crypto_and_strict_identity_shared_secret_derivation\""
               << ",\"wp04_closure_eligible\":false"
               << ",\"abi_version\":" << D1L_MESHCORE_ORACLE_ABI_VERSION
               << ",\"upstream_commit\":\""
               << D1L_MESHCORE_ORACLE_UPSTREAM_COMMIT << "\""
               << ",\"vectors\":{\"roundtrip\":"
               << (kPacketRoundtripVectors + kAdvertRoundtripVectors +
-                  kSignedAdvertPacketRoundtripVectors +
+                   kSignedAdvertPacketRoundtripVectors +
+                   kIdentityExchangeRoundtripVectors +
                    kGroupRoundtripVectors + kLoginRequestRoundtripVectors +
                    kRequestResponseRoundtripVectors +
                   kDmRoundtripVectors +
@@ -4305,7 +4477,8 @@ int main()
               << (kPacketInvalidVectors + kAdvertInvalidVectors +
                   kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertInvalidVectors + kVerifierKatInvalidVectors +
-                  kPointValidationInvalidVectors +
+                   kPointValidationInvalidVectors +
+                   kIdentityExchangeInvalidVectors +
                    kGroupInvalidVectors + kLoginRequestInvalidVectors +
                    kRequestResponseInvalidVectors +
                   kDmInvalidVectors +
@@ -4319,8 +4492,10 @@ int main()
                   kSignedAdvertPacketInvalidVectors +
                   kSignedAdvertValidVectors +
                   kSignedAdvertInvalidVectors +
-                  kPointValidationValidVectors +
-                  kPointValidationInvalidVectors +
+                   kPointValidationValidVectors +
+                   kPointValidationInvalidVectors +
+                   kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                    kLoginRequestRoundtripVectors +
                    kLoginRequestInvalidVectors +
@@ -4343,8 +4518,10 @@ int main()
                   kSignedAdvertValidVectors + kSignedAdvertInvalidVectors +
                   kVerifierKatValidVectors + kVerifierKatInvalidVectors +
                   kPointValidationValidVectors +
-                  kPointValidationInvalidVectors +
-                  kCryptoAdapterKatValidVectors +
+                   kPointValidationInvalidVectors +
+                   kCryptoAdapterKatValidVectors +
+                   kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors +
                   kGroupRoundtripVectors + kGroupInvalidVectors +
                    kLoginRequestRoundtripVectors +
                    kLoginRequestInvalidVectors +
@@ -4402,7 +4579,16 @@ int main()
               << ",\"crypto_adapter_kat\":{\"valid\":"
               << kCryptoAdapterKatValidVectors
               << ",\"invalid\":0,\"semantic\":0,\"total\":"
-              << kCryptoAdapterKatValidVectors << "}"
+               << kCryptoAdapterKatValidVectors << "}"
+               << ",\"identity_shared_secret_derivation\":{\"roundtrip\":"
+               << kIdentityExchangeRoundtripVectors << ",\"invalid\":"
+               << kIdentityExchangeInvalidVectors << ",\"semantic\":"
+               << (kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors)
+               << ",\"total\":"
+               << (kIdentityExchangeRoundtripVectors +
+                   kIdentityExchangeInvalidVectors)
+               << "}"
               << ",\"public_group_packets\":{\"roundtrip\":"
               << kGroupRoundtripVectors << ",\"invalid\":"
               << kGroupInvalidVectors << ",\"semantic\":"
@@ -4472,7 +4658,8 @@ int main()
               << ",\"advert_data_fields\":true"
               << ",\"signed_advert_packet_creation\":true"
               << ",\"signed_advert_verification\":true"
-              << ",\"ed25519_point_validation\":true"
+               << ",\"ed25519_point_validation\":true"
+               << ",\"identity_shared_secret_derivation\":true"
               << ",\"public_group_packets\":true"
                << ",\"anonymous_login_request_packets\":true"
                << ",\"regular_request_response_packets\":true"

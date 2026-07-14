@@ -20,7 +20,8 @@ UPSTREAM_COMMIT = "e8d3c53ba1ea863937081cd0caad759b832f3028"
 BOUNDARY = (
     "pinned_upstream_packet_advert_group_dm_expected_ack_path_return_"
     "route_codes_ack_trace_and_signed_advert_creation_strict_verification_"
-    "and_anonymous_login_request_and_regular_request_response_crypto"
+    "and_anonymous_login_request_and_regular_request_response_crypto_and_"
+    "strict_identity_shared_secret_derivation"
 )
 
 
@@ -42,7 +43,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 
     assert manifest["schema_version"] == 1
-    assert manifest["corpus_version"] == 15
+    assert manifest["corpus_version"] == 16
     assert manifest["abi_version"] == 2
     assert manifest["coverage_boundary"] == BOUNDARY
     assert manifest["wp04_closure_eligible"] is False
@@ -103,6 +104,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "supplied_type_hashes_secret_and_logical_length_only_no_schema_"
             "tag_authorization_replay_session_dispatch_route_or_rf"
         ),
+        "identity_shared_secret_derivation_available": True,
+        "identity_shared_secret_derivation_scope": (
+            "valid_input_seed_keypair_strict_peer_edwards_to_montgomery_shared_"
+            "secret_with_zero_rejection_only_no_persisted_key_contact_auth_"
+            "session_dispatch_route_production_integration_or_rf"
+        ),
         "canonical_advert_data": True,
         "route_header_scope": "non_trace_direct_flood_and_zero_hop_headers",
         "ack_frame_scope": "simple_and_multipart_payload_framing_only",
@@ -146,6 +153,20 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
                 "two exact payloads plus maximum-payload and six-vector "
                 "matrix SHA-256 from independent AES-128 ECB and "
                 "HMAC-SHA-256 generation"
+            ),
+            "identity_exchange_keypair": (
+                "third_party/MeshCore/lib/ed25519/keypair.c"
+            ),
+            "identity_exchange_ladder": (
+                "third_party/MeshCore/lib/ed25519/key_exchange.c"
+            ),
+            "identity_exchange_strict_peer_guard": (
+                "main/mesh/ed25519_canonical.h"
+            ),
+            "identity_exchange_independent_golden": (
+                "five symmetric public-key and shared-secret vectors "
+                "independently generated through libsodium Ed25519-to-"
+                "Curve25519 conversion and scalar multiplication"
             ),
             "public_group_channel_hash": (
                 "third_party/MeshCore/src/helpers/BaseChatMesh.cpp"
@@ -212,6 +233,14 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert manifest["determinism"]["regular_request_response_matrix"] == (
         "request_lengths_1_15_16_17_and_response_lengths_16_167"
     )
+    assert manifest["determinism"]["identity_exchange_recipe"] == (
+        "ed25519_seed_keypair_strict_peer_y_to_montgomery_ladder_zero_secret_"
+        "reject_and_temp_wipe"
+    )
+    assert manifest["determinism"]["identity_exchange_matrix"] == (
+        "five_symmetric_seed_pairs_including_all_zero_seed_independently_"
+        "generated_with_libsodium"
+    )
     assert manifest["determinism"]["independent_verifier_kat"] == (
         "RFC 8032 section 7.1 TEST 1 empty message"
     )
@@ -264,11 +293,11 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "normal_dm_5_plus_text_len_exact_aes_block_expected_hash_only"
     )
     assert manifest["vectors"] == {
-        "roundtrip": 323,
+        "roundtrip": 328,
         "valid": 20,
-        "invalid": 291,
-        "semantic": 618,
-        "total": 634,
+        "invalid": 300,
+        "semantic": 632,
+        "total": 648,
         "packet_envelope": {
             "roundtrip": 4,
             "invalid": 5,
@@ -310,6 +339,12 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "invalid": 0,
             "semantic": 0,
             "total": 3,
+        },
+        "identity_shared_secret_derivation": {
+            "roundtrip": 5,
+            "invalid": 9,
+            "semantic": 14,
+            "total": 14,
         },
         "public_group_packets": {
             "roundtrip": 4,
@@ -539,6 +574,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
             "signed_advert_packet_creation",
             "anonymous_login_request_packets",
             "regular_request_response_packets",
+            "identity_shared_secret_derivation",
         }
     )
     assert [
@@ -556,8 +592,9 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "signed_advert_packet_creation",
         "anonymous_login_request_packets",
         "regular_request_response_packets",
+        "identity_shared_secret_derivation",
     ]
-    signed_advert_packets = manifest["capabilities"][-3]
+    signed_advert_packets = manifest["capabilities"][-4]
     assert signed_advert_packets["id"] == "signed_advert_packet_creation"
     assert signed_advert_packets["status"] == "implemented"
     assert signed_advert_packets["owner"] == (
@@ -567,7 +604,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 3,
         "invalid": 23,
     }
-    anonymous_login = manifest["capabilities"][-2]
+    anonymous_login = manifest["capabilities"][-3]
     assert anonymous_login["id"] == "anonymous_login_request_packets"
     assert anonymous_login["status"] == "implemented"
     assert anonymous_login["owner"] == (
@@ -577,7 +614,7 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "roundtrip": 6,
         "invalid": 35,
     }
-    regular_request_response = manifest["capabilities"][-1]
+    regular_request_response = manifest["capabilities"][-2]
     assert regular_request_response["id"] == "regular_request_response_packets"
     assert regular_request_response["status"] == "implemented"
     assert regular_request_response["owner"] == (
@@ -586,6 +623,16 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
     assert regular_request_response["implementation_receipt"]["vectors"] == {
         "roundtrip": 6,
         "invalid": 30,
+    }
+    identity_exchange = manifest["capabilities"][-1]
+    assert identity_exchange["id"] == "identity_shared_secret_derivation"
+    assert identity_exchange["status"] == "implemented"
+    assert identity_exchange["owner"] == (
+        "pinned_ed25519_keypair_exchange_strict_peer_guard"
+    )
+    assert identity_exchange["implementation_receipt"]["vectors"] == {
+        "roundtrip": 5,
+        "invalid": 9,
     }
     pending = {
         capability["id"]: capability
@@ -602,8 +649,13 @@ def test_oracle_manifest_is_exactly_pinned_and_fail_closed():
         "deterministic_mesh_dispatch_packet_manager_tables_radio_rng_and_clock_fixtures"
     )
     assert pending["login_request_response_admin"]["blocked_by"] == (
-        "identity_key_exchange_signature_and_deterministic_admin_session_fixtures"
+        "identity_signature_and_deterministic_admin_session_fixtures"
     )
+    assert pending["login_request_response_admin"]["implemented_prerequisites"] == [
+        "anonymous_login_request_packets",
+        "regular_request_response_packets",
+        "identity_shared_secret_derivation",
+    ]
 
     for relative, expected in {
         **manifest["upstream"]["sources"],
@@ -785,6 +837,8 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert "d1l_meshcore_oracle_verify_signed_advert" in header
     assert "d1l_meshcore_oracle_create_signed_advert_packet" in header
     assert "d1l_meshcore_oracle_parse_signed_advert_packet" in header
+    assert "d1l_meshcore_oracle_identity_shared_secret_from_seed" in header
+    assert "d1l_meshcore_oracle_identity_exchange_t" in header
     assert "d1l_meshcore_oracle_create_login_request_packet" in header
     assert "d1l_meshcore_oracle_parse_login_request_packet" in header
     assert "d1l_meshcore_oracle_create_request_response_packet" in header
@@ -809,6 +863,8 @@ def test_oracle_c_abi_wraps_pinned_protocol_helpers_and_production_s_guard():
     assert "ed25519_verify" in adapter
     assert "ed25519_create_keypair" in adapter
     assert "ed25519_sign" in adapter
+    assert "ed25519_key_exchange" in adapter
+    assert "secure_zero" in adapter
     assert '#include "mesh/ed25519_canonical.h"' in adapter
     assert '#include "mesh/ed25519_canonical.h"' in service
     assert "d1l_ed25519_signature_s_is_canonical(signature)" in adapter
@@ -932,7 +988,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert artifact["wp04_closure_eligible"] is False
     assert artifact["closure_ready"] is False
     assert artifact["wp04_acceptance_ready"] is False
-    assert artifact["corpus_version"] == 15
+    assert artifact["corpus_version"] == 16
     assert artifact["coverage_policy"]["validated"] is True
     assert artifact["coverage_policy"]["unsupported_closure_rejected"] is True
     assert artifact["coverage_policy"]["local_packet_type_count"] == 6
@@ -945,6 +1001,7 @@ def test_dry_run_writes_a_versioned_fail_closed_oracle_artifact(tmp_path):
     assert "signed_advert_packet_creation" not in artifact["pending_capabilities"]
     assert "anonymous_login_request_packets" not in artifact["pending_capabilities"]
     assert "regular_request_response_packets" not in artifact["pending_capabilities"]
+    assert "identity_shared_secret_derivation" not in artifact["pending_capabilities"]
     assert "signed_advert_verification" not in artifact["pending_capabilities"]
     assert "ed25519_point_validation" not in artifact["pending_capabilities"]
     assert "public_group_packets" not in artifact["pending_capabilities"]
@@ -1098,11 +1155,11 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
         "abi_version": 2,
         "upstream_commit": UPSTREAM_COMMIT,
         "vectors": {
-            "roundtrip": 323,
+            "roundtrip": 328,
             "valid": 20,
-            "invalid": 291,
-            "semantic": 618,
-            "total": 634,
+            "invalid": 300,
+            "semantic": 632,
+            "total": 648,
             "packet_envelope": {
                 "roundtrip": 4,
                 "invalid": 5,
@@ -1144,6 +1201,12 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
                 "invalid": 0,
                 "semantic": 0,
                 "total": 3,
+            },
+            "identity_shared_secret_derivation": {
+                "roundtrip": 5,
+                "invalid": 9,
+                "semantic": 14,
+                "total": 14,
             },
             "public_group_packets": {
                 "roundtrip": 4,
@@ -1207,6 +1270,7 @@ def test_oracle_vectors_compile_and_run_deterministically(tmp_path):
             "signed_advert_packet_creation": True,
             "signed_advert_verification": True,
             "ed25519_point_validation": True,
+            "identity_shared_secret_derivation": True,
             "public_group_packets": True,
             "anonymous_login_request_packets": True,
             "regular_request_response_packets": True,
