@@ -75,6 +75,7 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     header = read("main/app/app_model.h")
     source = read("main/app/app_model.c")
     ui = read("main/ui/ui_phase1.c")
+    nodes_ui = read("main/ui/ui_nodes.c")
     assert "D1L_APP_SNAPSHOT_ROOM_PREVIEW D1L_ROOM_SERVER_PREVIEW_CAPACITY" in header
     assert "D1L_APP_SNAPSHOT_REPEATER_PREVIEW D1L_REPEATER_PREVIEW_CAPACITY" in header
     assert "signal_summary" in header
@@ -96,7 +97,7 @@ def test_app_snapshot_and_ui_surface_mesh_visibility():
     assert "D1L_MESH_ROLES_PAGE_ROOM_SERVERS" in ui
     assert "D1L_MESH_ROLES_PAGE_REPEATER_CANDIDATES" in ui
     assert '"Read-only lists. Each role scrolls separately."' in ui
-    assert '"rooms %lu  rpt %lu  writes %lu"' in ui
+    assert '"rooms %lu  rpt %lu  writes %lu"' in nodes_ui
     assert "format_snr_tenths" in ui
 
 

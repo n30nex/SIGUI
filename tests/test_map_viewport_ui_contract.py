@@ -283,10 +283,10 @@ def test_map_marker_node_detail_uses_advert_coordinates_and_reacquires_same_view
     assert "lv_obj_set_size(s_node_detail_sheet, 448, 320);" in source
     assert "lv_obj_set_pos(s_node_detail_sheet, 16, 82);" in source
     assert "d1l_app_model_query_nodes(" in open_from_map
-    assert "&query, s_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
+    assert "&query, s_map_node_rows, D1L_NODE_STORE_CAPACITY" in open_from_map
     assert "D1L_NODE_STORE_CAPACITY" in open_from_map
-    assert "strcmp(s_node_rows[i].node.fingerprint, fingerprint) == 0" in open_from_map
-    assert "show_node_detail_view(&s_node_rows[i], true);" in open_from_map
+    assert "strcmp(s_map_node_rows[i].node.fingerprint, fingerprint) == 0" in open_from_map
+    assert "show_node_detail_view(&s_map_node_rows[i], true);" in open_from_map
     assert "s_node_detail_returns_to_map" in close
     assert "d1l_ui_map_viewport_reacquire()" in close
     assert "request_content_refresh();" in close
@@ -301,7 +301,7 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         source, "static bool contact_can_dm", "static bool contact_can_export"
     )
     compose = function_body(
-        source, "static void open_dm_compose_for_contact", "static void open_dm_compose_event_cb"
+        source, "static void open_dm_compose_for_contact", "static bool contact_from_node_view"
     )
     detail = function_body(
         source, "static void render_contact_detail_sheet", "static void update_contact_detail_flags"
@@ -313,10 +313,12 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
     assert "if (contact_can_dm(entry))" in detail
     assert '"Messaging unavailable for this role"' in detail
 
+    nodes_source = read("main/ui/ui_nodes.c")
     contact_row = function_body(
-        source, "static void render_contact_row", "static void update_compose_counter"
+        nodes_source, "static void nodes_render_contact_row", "static void nodes_render_node_row"
     )
-    assert "if (contact_can_dm(entry))" in contact_row
+    assert "const bool can_dm = controller->rendered.contact_can_dm[index]" in contact_row
+    assert "if (can_dm)" in contact_row
 
     options = function_body(
         source, "static void render_contact_options_sheet(void)\n{",

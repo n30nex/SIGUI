@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -27,6 +28,7 @@
 #include "ui_messages.h"
 #include "ui_modal.h"
 #include "ui_navigation.h"
+#include "ui_nodes.h"
 #include "ui_screen.h"
 #include "ui_settings.h"
 #include "sdkconfig.h"
@@ -123,6 +125,7 @@ static d1l_app_snapshot_t s_snapshot;
 static bool s_compose_dm;
 static bool s_messages_show_dms;
 static d1l_ui_messages_controller_t s_messages_controller;
+static d1l_ui_nodes_controller_t s_nodes_controller EXT_RAM_BSS_ATTR;
 static d1l_contact_entry_t s_compose_contact;
 static d1l_app_radio_profile_edit_t s_radio_edit;
 static int32_t s_map_location_lat_e7;
@@ -139,7 +142,7 @@ static d1l_message_entry_t s_message_detail_message;
 static d1l_packet_log_entry_t s_packet_detail_packet;
 static d1l_packet_log_entry_t s_packet_filtered_packets[D1L_PACKET_LOG_CAPACITY];
 static size_t s_packet_filtered_count;
-static d1l_node_view_t s_node_rows[D1L_NODE_STORE_CAPACITY];
+static d1l_node_view_t s_map_node_rows[D1L_NODE_STORE_CAPACITY] EXT_RAM_BSS_ATTR;
 static d1l_route_entry_t s_route_trace_entries[D1L_ROUTE_STORE_CAPACITY];
 static d1l_message_entry_t s_public_history_entries[D1L_MESSAGE_STORE_CAPACITY];
 static d1l_dm_entry_t s_dm_thread_entries[D1L_DM_STORE_CAPACITY];
@@ -204,17 +207,14 @@ static void render_contact_options_sheet(void);
 static void show_contact_options_sheet(void);
 static void render_contact_forget_sheet(void);
 static void render_node_detail_sheet(void);
-static void open_dm_compose_event_cb(lv_event_t *event);
 static void open_public_history_event_cb(lv_event_t *event);
 static void open_public_search_event_cb(lv_event_t *event);
 static void open_home_dm_preview_event_cb(lv_event_t *event);
 static void open_contact_detail_event_cb(lv_event_t *event);
 static void open_contact_options_event_cb(lv_event_t *event);
 static void open_contact_forget_event_cb(lv_event_t *event);
-static void open_node_detail_event_cb(lv_event_t *event);
 static void open_map_node_detail(const char *fingerprint);
 static void node_detail_dm_event_cb(lv_event_t *event);
-static void open_node_dm_event_cb(lv_event_t *event);
 static void open_contact_edit_event_cb(lv_event_t *event);
 static void open_route_trace_event_cb(lv_event_t *event);
 static void open_route_detail_event_cb(lv_event_t *event);
@@ -1550,26 +1550,6 @@ static void update_chrome(const d1l_app_snapshot_t *snapshot)
                   d1l_ui_home_sd_state(snapshot));
 }
 
-static lv_obj_t *render_metric_card(lv_obj_t *parent, int x, int y, const char *title,
-                                    const char *value, const char *detail, uint32_t accent)
-{
-    lv_obj_t *card = create_panel(parent, x, y, 204, 104);
-    if (!card) {
-        return NULL;
-    }
-    lv_obj_t *title_label = create_label(card, title, 0x8EA0AE);
-    obj_align_if(title_label, LV_ALIGN_TOP_LEFT, 0, 0);
-
-    lv_obj_t *value_label = create_label(card, value, accent);
-    obj_set_style_text_font_if(value_label, &lv_font_montserrat_24);
-    obj_align_if(value_label, LV_ALIGN_TOP_LEFT, 0, 26);
-
-    lv_obj_t *detail_label = create_label(card, detail, 0xD7E1EA);
-    label_set_dot_width(detail_label, 176);
-    obj_align_if(detail_label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    return card;
-}
-
 static void format_snr_tenths(char *dest, size_t dest_size, int snr_tenths)
 {
     const int snr_abs = snr_tenths < 0 ? -snr_tenths : snr_tenths;
@@ -2053,68 +2033,6 @@ static void render_route_row(lv_obj_t *parent, int y, const d1l_route_entry_t *e
     obj_align_if(signal, LV_ALIGN_BOTTOM_LEFT, 0, 0);
 }
 
-static void render_node_row(lv_obj_t *parent, int y, const d1l_node_view_t *view)
-{
-    if (!view) {
-        return;
-    }
-    const d1l_node_entry_t *entry = &view->node;
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 56);
-    if (!row) {
-        return;
-    }
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_node_detail_event_cb, LV_EVENT_CLICKED, (void *)view);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *name = create_label(row,
-                                  view->display_name[0] ? view->display_name :
-                                  (entry->name[0] ? entry->name : entry->fingerprint),
-                                  0xF4F7FB);
-    label_set_dot_width(name, 240);
-    obj_align_if(name, LV_ALIGN_TOP_LEFT, 0, 0);
-    render_node_role_badge(row, view->role, node_view_can_dm(view) ? 278 : 336, 0,
-                           node_view_can_dm(view) ? 60 : 68);
-    if (node_view_can_dm(view)) {
-        create_button(row, "DM", 350, -1, 52, 34, open_node_dm_event_cb, (void *)view);
-    }
-    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
-    const int snr_abs = entry->snr_tenths < 0 ? -entry->snr_tenths : entry->snr_tenths;
-    label_set_fmt(meta, "%.8s  %s  %s  rssi %d  snr %s%d.%d",
-                  entry->fingerprint, view->keyed ? "key" : "no key",
-                  view->reachable ? "reachable" : "quiet",
-                  entry->rssi_dbm,
-                  entry->snr_tenths < 0 ? "-" : "", snr_abs / 10, snr_abs % 10);
-    label_set_dot_width(meta, 392);
-    obj_align_if(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-}
-
-static void render_contact_row(lv_obj_t *parent, int y, const d1l_contact_entry_t *entry)
-{
-    lv_obj_t *row = create_panel(parent, 18, y, 424, 48);
-    if (!row) {
-        return;
-    }
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(row, open_contact_detail_event_cb, LV_EVENT_CLICKED, (void *)entry);
-    lv_obj_set_style_pad_all(row, 8, 0);
-    lv_obj_t *alias = create_label(row, entry->alias, 0xF4F7FB);
-    label_set_dot_width(alias, 166);
-    obj_align_if(alias, LV_ALIGN_TOP_LEFT, 0, 0);
-    if (contact_can_dm(entry)) {
-        create_button(row, "DM", 350, -1, 48, 34, open_dm_compose_event_cb, (void *)entry);
-    } else {
-        lv_obj_t *type = create_label(row, entry->type[0] ? entry->type : "unknown",
-                                      0xA7F3D0);
-        obj_align_if(type, LV_ALIGN_TOP_RIGHT, 0, 0);
-    }
-    lv_obj_t *meta = create_label(row, "", 0x8EA0AE);
-    label_set_fmt(meta, "%.8s  %s  %s  rssi %d", entry->fingerprint,
-                  entry->public_key_hex[0] ? "key" : "no key",
-                  entry->out_path_valid ? "path" : "flood", entry->last_rssi_dbm);
-    label_set_dot_width(meta, 320);
-    obj_align_if(meta, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-}
-
 static void update_compose_counter(void)
 {
     if (!s_compose_counter) {
@@ -2256,12 +2174,6 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
     request_full_screen_repaint();
 }
 
-static void open_dm_compose_event_cb(lv_event_t *event)
-{
-    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)lv_event_get_user_data(event);
-    open_dm_compose_for_contact(entry);
-}
-
 static bool contact_from_node_view(const d1l_node_view_t *view, d1l_contact_entry_t *out_contact)
 {
     if (!node_view_can_dm(view) || !out_contact) {
@@ -2300,9 +2212,8 @@ static void node_detail_dm_event_cb(lv_event_t *event)
     open_dm_compose_for_contact(&contact);
 }
 
-static void open_node_dm_event_cb(lv_event_t *event)
+static void open_node_dm_for(const d1l_node_view_t *view)
 {
-    const d1l_node_view_t *view = (const d1l_node_view_t *)lv_event_get_user_data(event);
     d1l_contact_entry_t contact = {0};
     if (!contact_from_node_view(view, &contact)) {
         show_toast("DM", ESP_ERR_INVALID_STATE);
@@ -2959,19 +2870,8 @@ static void update_contact_detail_flags(bool favorite, bool muted)
     show_toast("Contact", ret);
 }
 
-static void open_contact_detail_event_cb(lv_event_t *event)
+static void show_contact_detail_for(const d1l_contact_entry_t *entry)
 {
-    const void *user_data = lv_event_get_user_data(event);
-    if (user_data == s_contact_action_favorite) {
-        update_contact_detail_flags(!s_contact_detail_contact.favorite, s_contact_detail_contact.muted);
-        return;
-    }
-    if (user_data == s_contact_action_mute) {
-        update_contact_detail_flags(s_contact_detail_contact.favorite, !s_contact_detail_contact.muted);
-        return;
-    }
-
-    const d1l_contact_entry_t *entry = (const d1l_contact_entry_t *)user_data;
     if (!entry || entry->fingerprint[0] == '\0') {
         show_toast("Contact", ESP_ERR_INVALID_STATE);
         return;
@@ -2997,6 +2897,20 @@ static void open_contact_detail_event_cb(lv_event_t *event)
     if (s_contact_detail_sheet) {
         show_modal(s_contact_detail_sheet);
     }
+}
+
+static void open_contact_detail_event_cb(lv_event_t *event)
+{
+    const void *user_data = event ? lv_event_get_user_data(event) : NULL;
+    if (user_data == s_contact_action_favorite) {
+        update_contact_detail_flags(!s_contact_detail_contact.favorite, s_contact_detail_contact.muted);
+        return;
+    }
+    if (user_data == s_contact_action_mute) {
+        update_contact_detail_flags(s_contact_detail_contact.favorite, !s_contact_detail_contact.muted);
+        return;
+    }
+    show_contact_detail_for((const d1l_contact_entry_t *)user_data);
 }
 
 static void close_node_detail_event_cb(lv_event_t *event)
@@ -3149,11 +3063,6 @@ static void show_node_detail_view(const d1l_node_view_t *view, bool return_to_ma
     }
 }
 
-static void open_node_detail_event_cb(lv_event_t *event)
-{
-    show_node_detail_view((const d1l_node_view_t *)lv_event_get_user_data(event), false);
-}
-
 static void open_map_node_detail(const char *fingerprint)
 {
     if (!fingerprint || fingerprint[0] == '\0') {
@@ -3166,10 +3075,10 @@ static void open_map_node_detail(const char *fingerprint)
         .text = fingerprint,
     };
     const size_t count = d1l_app_model_query_nodes(
-        &query, s_node_rows, D1L_NODE_STORE_CAPACITY);
+        &query, s_map_node_rows, D1L_NODE_STORE_CAPACITY);
     for (size_t i = 0; i < count; ++i) {
-        if (strcmp(s_node_rows[i].node.fingerprint, fingerprint) == 0) {
-            show_node_detail_view(&s_node_rows[i], true);
+        if (strcmp(s_map_node_rows[i].node.fingerprint, fingerprint) == 0) {
+            show_node_detail_view(&s_map_node_rows[i], true);
             return;
         }
     }
@@ -4607,10 +4516,31 @@ static void render_messages(lv_obj_t *content, const d1l_app_snapshot_t *snapsho
                            handle_messages_action, NULL);
 }
 
-static void render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
+static void nodes_view_model_from_snapshot(const d1l_app_snapshot_t *snapshot,
+                                           d1l_ui_nodes_view_model_t *view_model)
 {
-    char value[32];
-    char detail[64];
+    if (!snapshot || !view_model) {
+        return;
+    }
+    memset(view_model, 0, sizeof(*view_model));
+    view_model->node_count = snapshot->node_count;
+    view_model->node_total_written = snapshot->node_total_written;
+    view_model->room_server_count = snapshot->signal_summary.room_server_count;
+    view_model->repeater_candidate_count =
+        snapshot->signal_summary.repeater_candidate_count;
+    view_model->contact_count = snapshot->contact_count;
+    view_model->contact_total_written = snapshot->contact_total_written;
+
+    view_model->contact_row_count = snapshot->recent_contact_count;
+    if (view_model->contact_row_count > D1L_APP_SNAPSHOT_CONTACT_PREVIEW) {
+        view_model->contact_row_count = D1L_APP_SNAPSHOT_CONTACT_PREVIEW;
+    }
+    memcpy(view_model->contact_rows, snapshot->recent_contacts,
+           view_model->contact_row_count * sizeof(view_model->contact_rows[0]));
+    for (size_t i = 0; i < view_model->contact_row_count; ++i) {
+        view_model->contact_can_dm[i] = contact_can_dm(&view_model->contact_rows[i]);
+    }
+
     const d1l_node_query_t node_query = {
         .filter = D1L_NODE_FILTER_ALL,
         .sort = D1L_NODE_SORT_LAST_HEARD,
@@ -4618,56 +4548,47 @@ static void render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
         .keyed_only = false,
         .reachable_only = false,
     };
-    const size_t node_rows = d1l_app_model_query_nodes(&node_query, s_node_rows,
-                                                       D1L_NODE_STORE_CAPACITY);
-    snprintf(value, sizeof(value), "%u", (unsigned)snapshot->node_count);
-    snprintf(detail, sizeof(detail), "rooms %lu  rpt %lu  writes %lu",
-             (unsigned long)snapshot->signal_summary.room_server_count,
-             (unsigned long)snapshot->signal_summary.repeater_candidate_count,
-             (unsigned long)snapshot->node_total_written);
-    render_metric_card(content, 18, 16, "Heard Nodes", value, detail, 0x5EEAD4);
-    snprintf(value, sizeof(value), "%u", (unsigned)snapshot->contact_count);
-    snprintf(detail, sizeof(detail), "contacts  writes %lu",
-             (unsigned long)snapshot->contact_total_written);
-    render_metric_card(content, 238, 16, "Contacts", value, detail, 0xA7F3D0);
+    view_model->node_row_count = d1l_app_model_query_nodes(
+        &node_query, view_model->node_rows, D1L_NODE_STORE_CAPACITY);
+    if (view_model->node_row_count > D1L_NODE_STORE_CAPACITY) {
+        view_model->node_row_count = D1L_NODE_STORE_CAPACITY;
+    }
+    for (size_t i = 0; i < view_model->node_row_count; ++i) {
+        view_model->node_can_dm[i] = node_view_can_dm(&view_model->node_rows[i]);
+    }
+}
 
-    int y = 136;
-    if (snapshot->recent_contact_count > 0) {
-        for (size_t i = 0; i < snapshot->recent_contact_count && y <= 190; ++i) {
-            render_contact_row(content, y, &snapshot->recent_contacts[i]);
-            y += 54;
-        }
-        lv_obj_t *heard = create_label(content, "Heard", 0x8EA0AE);
-        lv_obj_set_pos(heard, 26, y + 4);
-        y += 28;
+static void handle_nodes_action(const d1l_ui_nodes_action_event_t *event,
+                                void *context)
+{
+    (void)context;
+    if (!event) {
+        return;
     }
-    lv_obj_t *all_heard = create_label(content, "All Heard", 0x8EA0AE);
-    lv_obj_set_pos(all_heard, 26, y + 4);
-    y += 28;
-    for (size_t i = 0; i < node_rows; ++i) {
-        render_node_row(content, y, &s_node_rows[i]);
-        y += 62;
+    switch (event->action) {
+    case D1L_UI_NODES_ACTION_OPEN_CONTACT:
+        show_contact_detail_for(event->contact);
+        break;
+    case D1L_UI_NODES_ACTION_OPEN_CONTACT_DM:
+        open_dm_compose_for_contact(event->contact);
+        break;
+    case D1L_UI_NODES_ACTION_OPEN_NODE:
+        show_node_detail_view(event->node, false);
+        break;
+    case D1L_UI_NODES_ACTION_OPEN_NODE_DM:
+        open_node_dm_for(event->node);
+        break;
+    case D1L_UI_NODES_ACTION_NONE:
+    default:
+        break;
     }
-    if (node_rows == 0) {
-        lv_obj_t *empty = create_label(content, "No heard nodes yet", 0x8EA0AE);
-        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 154);
-        const char *notes[] = {
-            "Listening for signed adverts from nearby MeshCore nodes.",
-            "Contacts appear separately when a retained public key exists.",
-            "Signal, route, and repeater summaries update from RX packets.",
-            "Scroll proof keeps this empty-state layout validated too.",
-        };
-        int note_y = 206;
-        for (size_t i = 0; i < sizeof(notes) / sizeof(notes[0]); ++i) {
-            lv_obj_t *note = create_panel(content, 18, note_y, 424, 52);
-            lv_obj_set_style_pad_all(note, 8, 0);
-            lv_obj_t *text = create_label(note, notes[i], 0x8EA0AE);
-            lv_label_set_long_mode(text, LV_LABEL_LONG_WRAP);
-            lv_obj_set_width(text, 392);
-            lv_obj_align(text, LV_ALIGN_LEFT_MID, 0, 0);
-            note_y += 58;
-        }
-    }
+}
+
+static void render_nodes(lv_obj_t *content, const d1l_app_snapshot_t *snapshot)
+{
+    nodes_view_model_from_snapshot(snapshot, &s_nodes_controller.rendered);
+    d1l_ui_nodes_render(&s_nodes_controller, content, &s_nodes_controller.rendered,
+                        handle_nodes_action, NULL);
 }
 
 static void close_map_location_sheet_event_cb(lv_event_t *event)
@@ -6430,6 +6351,9 @@ static void render_active_tab(void)
     layout_content_for_active_tab();
     if (d1l_ui_navigation_active() != D1L_UI_TAB_MESSAGES) {
         d1l_ui_messages_deactivate(&s_messages_controller);
+    }
+    if (d1l_ui_navigation_active() != D1L_UI_TAB_NODES) {
+        d1l_ui_nodes_deactivate(&s_nodes_controller);
     }
     (void)d1l_ui_screen_render(d1l_ui_navigation_active(), &s_snapshot, s_content,
                                renderers, sizeof(renderers) / sizeof(renderers[0]));

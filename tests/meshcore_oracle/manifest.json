@@ -68,7 +68,7 @@
     }
   },
   "production_binding_sources": {
-    "main/CMakeLists.txt": "43dea2d1c5b49109881be955c4ee3ed56348b84d590d1510d242bcae6d50543d",
+    "main/CMakeLists.txt": "2eefbce66a6c13e6f81c8cf57b15a7e76502a74aca5d52c0284b76a53b493572",
     "main/mesh/advert_data.h": "a45356935ddf821911a6948923f215b2cae38cc158012b1d0e025ab17b992542",
     "main/mesh/ed25519_canonical.h": "52a30b40ea99f25f0d19d991929e167035828a3a2d7479ef6d1dda9ca94a57f5",
     "main/mesh/meshcore_route_selection.h": "a6a340474e46f43ea844a236510b508ed0da524aa3ed7ecdd05b36cafde9cc5d",
