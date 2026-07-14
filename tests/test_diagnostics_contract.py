@@ -82,13 +82,19 @@ def test_health_monitor_reports_stack_lvgl_and_largest_blocks():
 
 
 def test_version_reports_exact_actions_or_checkout_build_commit():
+    root_cmake = read("CMakeLists.txt")
     cmake = read("main/CMakeLists.txt")
+    provenance = read("cmake/d1l_source_provenance.cmake")
     console = read("main/comms/usb_console.c")
 
-    assert '$ENV{GITHUB_SHA}' in cmake
-    assert "COMMAND git rev-parse HEAD" in cmake
+    assert "d1l_resolve_source_provenance(" in root_cmake
+    assert '$ENV{GITHUB_SHA}' in provenance
+    assert "COMMAND git rev-parse --verify HEAD" in provenance
+    assert "COMMAND git show -s --format=%ct HEAD" in provenance
     assert 'D1L_BUILD_GIT_COMMIT="${D1L_BUILD_GIT_COMMIT}"' in cmake
+    assert "D1L_BUILD_EPOCH_SEC=${D1L_BUILD_EPOCH_SEC}ULL" in cmake
     assert '\\"build_commit\\":\\"%s\\"' in console
+    assert '\\"build_epoch_sec\\":%lu' in console
     assert "D1L_BUILD_GIT_COMMIT" in console
 
 

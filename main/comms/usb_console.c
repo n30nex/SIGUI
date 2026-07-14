@@ -41,6 +41,7 @@
 #include "mesh/meshcore_service.h"
 #include "map/map_png_decoder.h"
 #include "map/map_view_service.h"
+#include "platform/time_service.h"
 #include "storage/export_store.h"
 #include "storage/map_tile_store.h"
 #include "storage/storage_status.h"
@@ -383,13 +384,100 @@ static void sanitize_node_name(char *name)
     }
 }
 
+static const char *time_protocol_recovery(
+    const d1l_time_service_status_t *status)
+{
+    if (!status) {
+        return "service_recovery_required";
+    }
+    if (status->protocol_tx_ready) {
+        return "none";
+    }
+    if (!status->protocol_persistence_ready) {
+        return "protocol_persistence_migration_or_repair";
+    }
+    if (status->clock.protocol_exhausted) {
+        return "protocol_upgrade_required";
+    }
+    if (status->clock.protocol_wall_admission ==
+        D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED) {
+        return "authenticated_companion_or_newer_firmware";
+    }
+    if (status->clock.protocol_wall_admission ==
+        D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE) {
+        return "representable_authenticated_companion_or_protocol_upgrade";
+    }
+    return "service_recovery_required";
+}
+
+static const char *time_protocol_tx_block(
+    const d1l_time_service_status_t *status)
+{
+    if (!status) {
+        return "service_unavailable";
+    }
+    if (status->protocol_tx_ready) {
+        return "none";
+    }
+    if (!status->protocol_persistence_ready) {
+        return "persistence_unavailable";
+    }
+    if (status->clock.protocol_exhausted) {
+        return "permanent_u32_ceiling_exhausted";
+    }
+    if (status->clock.protocol_wall_admission ==
+        D1L_TIME_PROTOCOL_WALL_SNTP_FORWARD_BLOCKED) {
+        return "recoverable_sntp_ahead_rejection";
+    }
+    if (status->clock.protocol_wall_admission ==
+        D1L_TIME_PROTOCOL_WALL_UNREPRESENTABLE) {
+        return "recoverable_wall_unrepresentable";
+    }
+    return "service_unavailable";
+}
+
 static void cmd_version(void)
 {
+    d1l_time_service_status_t time_status;
+    d1l_time_service_status(&time_status);
+    const char *recovery = time_protocol_recovery(&time_status);
+    const char *tx_block = time_protocol_tx_block(&time_status);
     ok_begin("version");
     printf(",\"firmware\":\"%s\",\"version\":\"%s\",\"build_commit\":\"%s\","
-           "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true}\n",
+           "\"idf\":\"%s\",\"meshcore_ca_desk_mode\":true,"
+           "\"time\":{\"build_epoch_sec\":%lu,\"wall_valid\":%s,"
+           "\"wall_epoch_sec\":%" PRId64 ",\"validity\":\"%s\","
+           "\"source\":\"%s\",\"protocol_wall_admission\":\"%s\","
+           "\"protocol_persistence_state\":\"%s\","
+           "\"protocol_persistence_state_code\":%u,"
+           "\"protocol_persistence_error\":\"%s\","
+           "\"protocol_persistence_error_code\":%ld,"
+           "\"protocol_tx_ready\":%s,\"protocol_tx_error\":\"%s\","
+           "\"protocol_tx_block\":\"%s\","
+           "\"protocol_trust_anchor\":%lu,\"sntp_ceiling\":%lu,"
+           "\"protocol_ahead_of_wall_sec\":%" PRId64 ","
+           "\"recovery\":\"%s\"}}\n",
            D1L_FIRMWARE_NAME, D1L_FIRMWARE_VERSION, D1L_BUILD_GIT_COMMIT,
-           esp_get_idf_version());
+           esp_get_idf_version(),
+           (unsigned long)time_status.clock.build_epoch_sec,
+           bool_json(time_status.clock.wall_valid),
+           time_status.clock.wall_epoch_sec,
+           d1l_time_validity_name(time_status.clock.wall_validity),
+           d1l_time_source_name(time_status.clock.wall_source),
+           d1l_time_protocol_wall_admission_name(
+               time_status.clock.protocol_wall_admission),
+           d1l_time_protocol_persistence_state_name(
+               time_status.protocol_persistence_state),
+           (unsigned)time_status.protocol_persistence_state,
+           esp_err_to_name(time_status.protocol_persistence_error),
+           (long)time_status.protocol_persistence_error,
+           bool_json(time_status.protocol_tx_ready),
+           esp_err_to_name(time_status.protocol_tx_error),
+           tx_block,
+           (unsigned long)time_status.clock.protocol_trust_anchor,
+           (unsigned long)time_status.clock.protocol_sntp_ceiling,
+           time_status.clock.protocol_ahead_of_wall_sec,
+           recovery);
 }
 
 static void cmd_board(void)
