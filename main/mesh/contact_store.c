@@ -6,22 +6,26 @@
 #include "esp_timer.h"
 #include "nvs.h"
 
+#include "mesh/contact_uri.h"
 #include "mesh/store_lock.h"
 
 #define D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"
 #define D1L_CONTACT_STORE_KEY "contacts"
+#define D1L_CONTACT_STORE_LEGACY_ALIAS_LEN 24U
 #define D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U
 #define D1L_CONTACT_STORE_SCHEMA_V1 1U
 #define D1L_CONTACT_STORE_SCHEMA_V2 2U
 #define D1L_CONTACT_STORE_SCHEMA_V3 3U
-#define D1L_CONTACT_STORE_SCHEMA 4U
+#define D1L_CONTACT_STORE_SCHEMA_V4 4U
+#define D1L_CONTACT_STORE_SCHEMA_V5 5U
+#define D1L_CONTACT_STORE_SCHEMA 6U
 
 typedef struct {
     uint32_t seq;
     uint32_t created_ms;
     uint32_t updated_ms;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
-    char alias[D1L_CONTACT_ALIAS_LEN];
+    char alias[D1L_CONTACT_STORE_LEGACY_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
     char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
     int last_rssi_dbm;
@@ -47,7 +51,7 @@ typedef struct {
     uint32_t updated_ms;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
-    char alias[D1L_CONTACT_ALIAS_LEN];
+    char alias[D1L_CONTACT_STORE_LEGACY_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
     char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
     int last_rssi_dbm;
@@ -75,7 +79,7 @@ typedef struct {
     uint32_t out_path_updated_ms;
     char fingerprint[D1L_NODE_FINGERPRINT_LEN];
     char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
-    char alias[D1L_CONTACT_ALIAS_LEN];
+    char alias[D1L_CONTACT_STORE_LEGACY_ALIAS_LEN];
     char heard_name[D1L_HEARD_NODE_NAME_LEN];
     char type[D1L_CONTACT_STORE_LEGACY_TYPE_LEN];
     int last_rssi_dbm;
@@ -98,18 +102,92 @@ typedef struct {
     d1l_contact_entry_v3_t entries[D1L_CONTACT_STORE_CAPACITY];
 } d1l_contact_store_blob_v3_t;
 
+/* Schema v4 is the last layout before explicit identity provenance. */
+typedef struct {
+    uint32_t seq;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    uint32_t out_path_updated_ms;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+    char alias[D1L_CONTACT_STORE_LEGACY_ALIAS_LEN];
+    char heard_name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool out_path_valid;
+    uint8_t out_path_len;
+    uint8_t out_path[D1L_CONTACT_OUT_PATH_MAX];
+    bool favorite;
+    bool muted;
+} d1l_contact_entry_v4_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_v4_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_v4_t;
+
+/* Schema v5 is the frozen provenance layout with a 23-byte name capacity. */
+typedef struct {
+    uint32_t seq;
+    uint32_t created_ms;
+    uint32_t updated_ms;
+    uint32_t out_path_updated_ms;
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN];
+    char public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN];
+    char alias[D1L_CONTACT_STORE_LEGACY_ALIAS_LEN];
+    char heard_name[D1L_HEARD_NODE_NAME_LEN];
+    char type[D1L_NODE_TYPE_LEN];
+    int last_rssi_dbm;
+    int last_snr_tenths;
+    uint8_t path_hash_bytes;
+    uint8_t path_hops;
+    bool out_path_valid;
+    uint8_t out_path_len;
+    uint8_t out_path[D1L_CONTACT_OUT_PATH_MAX];
+    bool favorite;
+    bool muted;
+    uint8_t verification_source;
+    uint32_t verified_at_ms;
+    uint32_t signed_advert_timestamp;
+    uint32_t last_heard_ms;
+} d1l_contact_entry_v5_t;
+
+typedef struct {
+    uint32_t schema;
+    uint32_t next_seq;
+    uint32_t total_written;
+    uint32_t dropped_oldest;
+    uint32_t count;
+    d1l_contact_entry_v5_t entries[D1L_CONTACT_STORE_CAPACITY];
+} d1l_contact_store_blob_v5_t;
+
 _Static_assert(sizeof(d1l_contact_entry_v1_t) == 100U,
                "contact schema v1 layout changed");
 _Static_assert(sizeof(d1l_contact_entry_v2_t) == 164U,
                "contact schema v2 layout changed");
 _Static_assert(sizeof(d1l_contact_entry_v3_t) == 236U,
                "contact schema v3 layout changed");
+_Static_assert(sizeof(d1l_contact_entry_v4_t) == 236U,
+               "contact schema v4 layout changed");
+_Static_assert(sizeof(d1l_contact_entry_v5_t) == 248U,
+               "contact schema v5 layout changed");
+_Static_assert(sizeof(d1l_contact_entry_t) == 256U,
+               "contact schema v6 layout changed");
 _Static_assert(offsetof(d1l_contact_entry_v1_t, last_rssi_dbm) == 88U,
                "contact schema v1 type offset changed");
 _Static_assert(offsetof(d1l_contact_entry_v2_t, last_rssi_dbm) == 152U,
                "contact schema v2 type offset changed");
 _Static_assert(offsetof(d1l_contact_entry_v3_t, last_rssi_dbm) == 156U,
                "contact schema v3 type offset changed");
+_Static_assert(offsetof(d1l_contact_entry_v4_t, last_rssi_dbm) == 156U,
+               "contact schema v4 type offset changed");
 
 typedef struct {
     uint32_t schema;
@@ -129,6 +207,32 @@ static bool s_loaded;
 static d1l_contact_store_blob_t s_blob_scratch;
 static d1l_contact_store_blob_t s_rollback_scratch;
 static d1l_store_lock_t s_store_lock = D1L_STORE_LOCK_INITIALIZER;
+
+static bool fixed_hex_string_valid(const char *value, size_t hex_chars);
+static bool fixed_hex_strings_equal(const char *left, const char *right,
+                                    size_t hex_chars);
+
+static void mark_migrated_verification(d1l_contact_entry_t *entry)
+{
+    if (!entry) {
+        return;
+    }
+    entry->verification_source = D1L_CONTACT_VERIFICATION_NONE;
+    entry->verified_at_ms = 0U;
+    entry->signed_advert_timestamp = 0U;
+    entry->last_heard_ms = 0U;
+    if (fixed_hex_string_valid(entry->fingerprint,
+                               D1L_NODE_FINGERPRINT_LEN - 1U) &&
+        fixed_hex_string_valid(entry->public_key_hex,
+                               D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U) &&
+        fixed_hex_strings_equal(entry->fingerprint, entry->public_key_hex,
+                                D1L_NODE_FINGERPRINT_LEN - 1U) &&
+        d1l_contact_store_meshcore_type_id(entry->type) != 0U) {
+        entry->verification_source =
+            D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT;
+        entry->verified_at_ms = entry->updated_ms;
+    }
+}
 
 static void sanitize_ascii(char *dest, size_t dest_size, const char *src)
 {
@@ -256,6 +360,22 @@ static bool blob_v3_is_valid(const d1l_contact_store_blob_v3_t *blob, size_t len
            blob->next_seq > 0;
 }
 
+static bool blob_v4_is_valid(const d1l_contact_store_blob_v4_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA_V4 &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
+static bool blob_v5_is_valid(const d1l_contact_store_blob_v5_t *blob, size_t len)
+{
+    return blob && len == sizeof(*blob) &&
+           blob->schema == D1L_CONTACT_STORE_SCHEMA_V5 &&
+           blob->count <= D1L_CONTACT_STORE_CAPACITY &&
+           blob->next_seq > 0;
+}
+
 static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
 {
     clear_ram();
@@ -269,7 +389,8 @@ static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
         s_entries[i].updated_ms = old_blob->entries[i].updated_ms;
         memcpy(s_entries[i].fingerprint, old_blob->entries[i].fingerprint,
                sizeof(s_entries[i].fingerprint));
-        memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
+        memcpy(s_entries[i].alias, old_blob->entries[i].alias,
+               sizeof(old_blob->entries[i].alias));
         memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
                sizeof(s_entries[i].heard_name));
         migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
@@ -279,6 +400,7 @@ static void migrate_v1_blob(const d1l_contact_store_blob_v1_t *old_blob)
         s_entries[i].path_hops = old_blob->entries[i].path_hops;
         s_entries[i].favorite = old_blob->entries[i].favorite;
         s_entries[i].muted = old_blob->entries[i].muted;
+        mark_migrated_verification(&s_entries[i]);
     }
 }
 
@@ -297,7 +419,8 @@ static void migrate_v2_blob(const d1l_contact_store_blob_v2_t *old_blob)
                sizeof(s_entries[i].fingerprint));
         memcpy(s_entries[i].public_key_hex, old_blob->entries[i].public_key_hex,
                sizeof(s_entries[i].public_key_hex));
-        memcpy(s_entries[i].alias, old_blob->entries[i].alias, sizeof(s_entries[i].alias));
+        memcpy(s_entries[i].alias, old_blob->entries[i].alias,
+               sizeof(old_blob->entries[i].alias));
         memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
                sizeof(s_entries[i].heard_name));
         migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
@@ -307,6 +430,7 @@ static void migrate_v2_blob(const d1l_contact_store_blob_v2_t *old_blob)
         s_entries[i].path_hops = old_blob->entries[i].path_hops;
         s_entries[i].favorite = old_blob->entries[i].favorite;
         s_entries[i].muted = old_blob->entries[i].muted;
+        mark_migrated_verification(&s_entries[i]);
     }
 }
 
@@ -327,7 +451,7 @@ static void migrate_v3_blob(const d1l_contact_store_blob_v3_t *old_blob)
         memcpy(s_entries[i].public_key_hex, old_blob->entries[i].public_key_hex,
                sizeof(s_entries[i].public_key_hex));
         memcpy(s_entries[i].alias, old_blob->entries[i].alias,
-               sizeof(s_entries[i].alias));
+               sizeof(old_blob->entries[i].alias));
         memcpy(s_entries[i].heard_name, old_blob->entries[i].heard_name,
                sizeof(s_entries[i].heard_name));
         migrate_legacy_advert_type(s_entries[i].type, old_blob->entries[i].type);
@@ -341,6 +465,76 @@ static void migrate_v3_blob(const d1l_contact_store_blob_v3_t *old_blob)
                sizeof(s_entries[i].out_path));
         s_entries[i].favorite = old_blob->entries[i].favorite;
         s_entries[i].muted = old_blob->entries[i].muted;
+        mark_migrated_verification(&s_entries[i]);
+    }
+}
+
+static void migrate_v4_blob(const d1l_contact_store_blob_v4_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_contact_entry_v4_t *old = &old_blob->entries[i];
+        d1l_contact_entry_t *entry = &s_entries[i];
+        entry->seq = old->seq;
+        entry->created_ms = old->created_ms;
+        entry->updated_ms = old->updated_ms;
+        entry->out_path_updated_ms = old->out_path_updated_ms;
+        memcpy(entry->fingerprint, old->fingerprint, sizeof(entry->fingerprint));
+        memcpy(entry->public_key_hex, old->public_key_hex,
+               sizeof(entry->public_key_hex));
+        memcpy(entry->alias, old->alias, sizeof(old->alias));
+        memcpy(entry->heard_name, old->heard_name, sizeof(entry->heard_name));
+        memcpy(entry->type, old->type, sizeof(entry->type));
+        entry->last_rssi_dbm = old->last_rssi_dbm;
+        entry->last_snr_tenths = old->last_snr_tenths;
+        entry->path_hash_bytes = old->path_hash_bytes;
+        entry->path_hops = old->path_hops;
+        entry->out_path_valid = old->out_path_valid;
+        entry->out_path_len = old->out_path_len;
+        memcpy(entry->out_path, old->out_path, sizeof(entry->out_path));
+        entry->favorite = old->favorite;
+        entry->muted = old->muted;
+        mark_migrated_verification(entry);
+    }
+}
+
+static void migrate_v5_blob(const d1l_contact_store_blob_v5_t *old_blob)
+{
+    clear_ram();
+    s_count = old_blob->count;
+    s_next_seq = old_blob->next_seq;
+    s_total_written = old_blob->total_written;
+    s_dropped_oldest = old_blob->dropped_oldest;
+    for (size_t i = 0U; i < s_count; ++i) {
+        const d1l_contact_entry_v5_t *old = &old_blob->entries[i];
+        d1l_contact_entry_t *entry = &s_entries[i];
+        entry->seq = old->seq;
+        entry->created_ms = old->created_ms;
+        entry->updated_ms = old->updated_ms;
+        entry->out_path_updated_ms = old->out_path_updated_ms;
+        memcpy(entry->fingerprint, old->fingerprint, sizeof(old->fingerprint));
+        memcpy(entry->public_key_hex, old->public_key_hex,
+               sizeof(old->public_key_hex));
+        memcpy(entry->alias, old->alias, sizeof(old->alias));
+        memcpy(entry->heard_name, old->heard_name, sizeof(old->heard_name));
+        memcpy(entry->type, old->type, sizeof(old->type));
+        entry->last_rssi_dbm = old->last_rssi_dbm;
+        entry->last_snr_tenths = old->last_snr_tenths;
+        entry->path_hash_bytes = old->path_hash_bytes;
+        entry->path_hops = old->path_hops;
+        entry->out_path_valid = old->out_path_valid;
+        entry->out_path_len = old->out_path_len;
+        memcpy(entry->out_path, old->out_path, sizeof(old->out_path));
+        entry->favorite = old->favorite;
+        entry->muted = old->muted;
+        entry->verification_source = old->verification_source;
+        entry->verified_at_ms = old->verified_at_ms;
+        entry->signed_advert_timestamp = old->signed_advert_timestamp;
+        entry->last_heard_ms = old->last_heard_ms;
     }
 }
 
@@ -431,6 +625,29 @@ static void sanitize_ascii_bounded(char *dest, size_t dest_size, const char *src
     dest[out] = '\0';
 }
 
+static bool copy_bounded_text(char *dest, size_t dest_size, const char *src,
+                              size_t src_size)
+{
+    if (!dest || dest_size == 0U) {
+        return false;
+    }
+    dest[0] = '\0';
+    if (!src) {
+        return false;
+    }
+    size_t out = 0U;
+    while (out < src_size && out + 1U < dest_size && src[out] != '\0') {
+        dest[out] = src[out];
+        out++;
+    }
+    if (out >= src_size || src[out] != '\0') {
+        dest[0] = '\0';
+        return false;
+    }
+    dest[out] = '\0';
+    return out > 0U;
+}
+
 static int find_unique_index_by_fingerprint_hex(const char *fingerprint,
                                                 bool *out_ambiguous)
 {
@@ -479,39 +696,6 @@ static int find_unique_index_by_public_key_hex(const char *public_key_hex,
     return found;
 }
 
-static size_t url_encode_component(char *dest, size_t dest_size, const char *src)
-{
-    static const char hex[] = "0123456789ABCDEF";
-    if (!dest || dest_size == 0) {
-        return 0;
-    }
-    size_t out = 0;
-    while (src && *src) {
-        const unsigned char c = (unsigned char)*src++;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
-            if (out + 1U >= dest_size) {
-                break;
-            }
-            dest[out++] = (char)c;
-        } else if (c == ' ') {
-            if (out + 1U >= dest_size) {
-                break;
-            }
-            dest[out++] = '+';
-        } else {
-            if (out + 3U >= dest_size) {
-                break;
-            }
-            dest[out++] = '%';
-            dest[out++] = hex[(c >> 4) & 0x0fU];
-            dest[out++] = hex[c & 0x0fU];
-        }
-    }
-    dest[out] = '\0';
-    return out;
-}
-
 static uint8_t contact_path_byte_len(uint8_t path_len)
 {
     const uint8_t hash_count = path_len & 63U;
@@ -519,15 +703,35 @@ static uint8_t contact_path_byte_len(uint8_t path_len)
     return (uint8_t)(hash_count * hash_size);
 }
 
-static size_t oldest_index(void)
+static int oldest_evictable_placeholder_index(void)
 {
-    size_t oldest = 0;
-    for (size_t i = 1; i < s_count; ++i) {
-        if (s_entries[i].seq < s_entries[oldest].seq) {
-            oldest = i;
+    int oldest = -1;
+    for (size_t i = 0U; i < s_count; ++i) {
+        if (s_entries[i].favorite ||
+            d1l_contact_store_is_canonical(&s_entries[i])) {
+            continue;
+        }
+        if (oldest < 0 || s_entries[i].seq < s_entries[(size_t)oldest].seq) {
+            oldest = (int)i;
         }
     }
     return oldest;
+}
+
+static const char *meshcore_type_name(uint8_t type_id)
+{
+    switch (type_id) {
+    case 1U:
+        return "chat";
+    case 2U:
+        return "repeater";
+    case 3U:
+        return "room";
+    case 4U:
+        return "sensor";
+    default:
+        return NULL;
+    }
 }
 
 esp_err_t d1l_contact_store_init(void)
@@ -552,6 +756,14 @@ esp_err_t d1l_contact_store_init(void)
         s_next_seq = s_blob_scratch.next_seq;
         s_total_written = s_blob_scratch.total_written;
         s_dropped_oldest = s_blob_scratch.dropped_oldest;
+    } else if (ret == ESP_OK &&
+               blob_v5_is_valid((const d1l_contact_store_blob_v5_t *)&s_blob_scratch, len)) {
+        migrate_v5_blob((const d1l_contact_store_blob_v5_t *)&s_blob_scratch);
+        migrated = true;
+    } else if (ret == ESP_OK &&
+               blob_v4_is_valid((const d1l_contact_store_blob_v4_t *)&s_blob_scratch, len)) {
+        migrate_v4_blob((const d1l_contact_store_blob_v4_t *)&s_blob_scratch);
+        migrated = true;
     } else if (ret == ESP_OK &&
                blob_v3_is_valid((const d1l_contact_store_blob_v3_t *)&s_blob_scratch, len)) {
         migrate_v3_blob((const d1l_contact_store_blob_v3_t *)&s_blob_scratch);
@@ -609,7 +821,8 @@ esp_err_t d1l_contact_store_clear(void)
 esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char *alias,
                                              const d1l_node_entry_t *heard_node)
 {
-    if (!fingerprint || fingerprint[0] == '\0') {
+    if (!fixed_hex_string_valid(fingerprint,
+                                D1L_NODE_FINGERPRINT_LEN - 1U)) {
         return ESP_ERR_INVALID_ARG;
     }
     if (!s_loaded) {
@@ -620,7 +833,13 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
 
     d1l_store_lock_take(&s_store_lock);
-    int existing = find_index_by_fingerprint(fingerprint);
+    bool fingerprint_ambiguous = false;
+    int existing = find_unique_index_by_fingerprint_hex(
+        fingerprint, &fingerprint_ambiguous);
+    if (fingerprint_ambiguous) {
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     fill_blob(&s_rollback_scratch);
     size_t index;
     bool is_new = existing < 0;
@@ -629,11 +848,18 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     } else if (s_count < D1L_CONTACT_STORE_CAPACITY) {
         index = s_count++;
     } else {
-        index = oldest_index();
+        const int evictable = oldest_evictable_placeholder_index();
+        if (evictable < 0) {
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_NO_MEM;
+        }
+        index = (size_t)evictable;
         s_dropped_oldest++;
     }
 
     d1l_contact_entry_t *entry = &s_entries[index];
+    const bool canonical_before = !is_new &&
+                                  d1l_contact_store_is_canonical(entry);
     const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
     if (is_new) {
         memset(entry, 0, sizeof(*entry));
@@ -641,17 +867,16 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
     }
     entry->seq = s_next_seq++;
     entry->updated_ms = now_ms;
-    sanitize_ascii(entry->fingerprint, sizeof(entry->fingerprint), fingerprint);
+    copy_lower_hex(entry->fingerprint, sizeof(entry->fingerprint), fingerprint,
+                   D1L_NODE_FINGERPRINT_LEN - 1U);
 
     if (heard_node) {
-        if (heard_node->public_key_hex[0] != '\0') {
-            sanitize_ascii(entry->public_key_hex, sizeof(entry->public_key_hex),
-                           heard_node->public_key_hex);
-        }
-        if (heard_node->name[0] != '\0') {
+        /* A passive observation is not identity authorization. Full keys and
+         * canonical roles enter only through signed-advert or URI import. */
+        if (!canonical_before && heard_node->name[0] != '\0') {
             sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), heard_node->name);
         }
-        if (heard_node->type[0] != '\0') {
+        if (!canonical_before && heard_node->type[0] != '\0') {
             sanitize_ascii(entry->type, sizeof(entry->type), heard_node->type);
         }
         entry->last_rssi_dbm = heard_node->rssi_dbm;
@@ -674,7 +899,7 @@ esp_err_t d1l_contact_store_upsert_from_node(const char *fingerprint, const char
         sanitize_ascii(entry->heard_name, sizeof(entry->heard_name), entry->alias);
     }
     if (entry->type[0] == '\0') {
-        sanitize_ascii(entry->type, sizeof(entry->type), "node");
+        sanitize_ascii(entry->type, sizeof(entry->type), "unknown");
     }
 
     s_total_written++;
@@ -776,6 +1001,10 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
     entry->last_snr_tenths = verified_node->snr_tenths;
     entry->path_hash_bytes = verified_node->path_hash_bytes;
     entry->path_hops = verified_node->path_hops;
+    entry->verification_source = D1L_CONTACT_VERIFICATION_SIGNED_ADVERT;
+    entry->verified_at_ms = now_ms;
+    entry->signed_advert_timestamp = verified_node->advert_timestamp;
+    entry->last_heard_ms = verified_node->last_heard_ms;
 
     if (entry->alias[0] == '\0') {
         if (verified_node->name[0] != '\0') {
@@ -791,6 +1020,148 @@ esp_err_t d1l_contact_store_upsert_verified_advert(
     }
     if (entry->type[0] == '\0') {
         sanitize_ascii(entry->type, sizeof(entry->type), "unknown");
+    }
+
+    s_total_written++;
+    const esp_err_t ret = persist_store_or_rollback(&s_rollback_scratch);
+    if (ret == ESP_OK) {
+        *out_result = result;
+        if (out_entry) {
+            *out_entry = s_entries[index];
+        }
+    }
+    d1l_store_lock_give(&s_store_lock);
+    return ret;
+}
+
+esp_err_t d1l_contact_store_import_uri(
+    const char *uri, size_t uri_len, d1l_contact_import_result_t *out_result,
+    d1l_contact_entry_t *out_entry)
+{
+    if (!out_result) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_result = D1L_CONTACT_IMPORT_NONE;
+    if (out_entry) {
+        memset(out_entry, 0, sizeof(*out_entry));
+    }
+
+    d1l_contact_uri_t imported = {0};
+    if (!d1l_contact_uri_parse(uri, uri_len, &imported)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const char *imported_type = meshcore_type_name(imported.type_id);
+    if (!imported_type) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char fingerprint[D1L_NODE_FINGERPRINT_LEN] = {0};
+    memcpy(fingerprint, imported.public_key_hex,
+           D1L_NODE_FINGERPRINT_LEN - 1U);
+    if (!s_loaded) {
+        const esp_err_t init_ret = d1l_contact_store_init();
+        if (init_ret != ESP_OK) {
+            return init_ret;
+        }
+    }
+
+    d1l_store_lock_take(&s_store_lock);
+    bool fingerprint_ambiguous = false;
+    bool public_key_ambiguous = false;
+    const int fingerprint_index = find_unique_index_by_fingerprint_hex(
+        fingerprint, &fingerprint_ambiguous);
+    const int public_key_index = find_unique_index_by_public_key_hex(
+        imported.public_key_hex, &public_key_ambiguous);
+    if (fingerprint_ambiguous || public_key_ambiguous ||
+        (public_key_index >= 0 && fingerprint_index != public_key_index)) {
+        *out_result = D1L_CONTACT_IMPORT_COLLISION;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t index = 0U;
+    d1l_contact_import_result_t result = D1L_CONTACT_IMPORT_NONE;
+    if (public_key_index >= 0) {
+        index = (size_t)public_key_index;
+        const uint8_t retained_type =
+            d1l_contact_store_meshcore_type_id(s_entries[index].type);
+        const bool signed_role_authoritative =
+            s_entries[index].verification_source ==
+                D1L_CONTACT_VERIFICATION_SIGNED_ADVERT ||
+            s_entries[index].verification_source ==
+                D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT;
+        if ((retained_type != 0U && retained_type != imported.type_id) ||
+            (signed_role_authoritative && retained_type == 0U)) {
+            *out_result = D1L_CONTACT_IMPORT_ROLE_CONFLICT;
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_INVALID_STATE;
+        }
+        result = D1L_CONTACT_IMPORT_UPDATED;
+    } else if (fingerprint_index >= 0) {
+        index = (size_t)fingerprint_index;
+        if (s_entries[index].public_key_hex[0] != '\0') {
+            *out_result = D1L_CONTACT_IMPORT_COLLISION;
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_ERR_INVALID_STATE;
+        }
+        result = D1L_CONTACT_IMPORT_PROMOTED_PLACEHOLDER;
+    } else if (s_count >= D1L_CONTACT_STORE_CAPACITY) {
+        *out_result = D1L_CONTACT_IMPORT_FULL;
+        d1l_store_lock_give(&s_store_lock);
+        return ESP_ERR_NO_MEM;
+    } else {
+        index = s_count;
+        result = D1L_CONTACT_IMPORT_CREATED;
+    }
+
+    if (result == D1L_CONTACT_IMPORT_UPDATED) {
+        const d1l_contact_entry_t *retained = &s_entries[index];
+        const bool source_is_authoritative =
+            retained->verification_source ==
+                D1L_CONTACT_VERIFICATION_SIGNED_ADVERT ||
+            retained->verification_source ==
+                D1L_CONTACT_VERIFICATION_URI_IMPORT ||
+            retained->verification_source ==
+                D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT;
+        if (source_is_authoritative && retained->alias[0] != '\0') {
+            *out_result = result;
+            if (out_entry) {
+                *out_entry = *retained;
+            }
+            d1l_store_lock_give(&s_store_lock);
+            return ESP_OK;
+        }
+    }
+
+    fill_blob(&s_rollback_scratch);
+    if (result == D1L_CONTACT_IMPORT_CREATED) {
+        s_count++;
+    }
+    d1l_contact_entry_t *entry = &s_entries[index];
+    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000ULL);
+    if (result == D1L_CONTACT_IMPORT_CREATED) {
+        memset(entry, 0, sizeof(*entry));
+        entry->created_ms = now_ms;
+    }
+    entry->seq = s_next_seq++;
+    entry->updated_ms = now_ms;
+    copy_lower_hex(entry->fingerprint, sizeof(entry->fingerprint), fingerprint,
+                   D1L_NODE_FINGERPRINT_LEN - 1U);
+    copy_lower_hex(entry->public_key_hex, sizeof(entry->public_key_hex),
+                   imported.public_key_hex,
+                   D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U);
+    sanitize_ascii_bounded(entry->type, sizeof(entry->type), imported_type,
+                           strlen(imported_type));
+    if (entry->alias[0] == '\0') {
+        memcpy(entry->alias, imported.name, sizeof(entry->alias));
+    }
+    if (entry->verification_source != D1L_CONTACT_VERIFICATION_SIGNED_ADVERT &&
+        entry->verification_source !=
+            D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT) {
+        entry->verification_source = D1L_CONTACT_VERIFICATION_URI_IMPORT;
+        entry->verified_at_ms = now_ms;
+        entry->signed_advert_timestamp = 0U;
+        entry->last_heard_ms = 0U;
     }
 
     s_total_written++;
@@ -997,6 +1368,21 @@ uint8_t d1l_contact_store_meshcore_type_id(const char *type)
     return 0U;
 }
 
+const char *d1l_contact_store_verification_source_name(uint8_t source)
+{
+    switch (source) {
+    case D1L_CONTACT_VERIFICATION_SIGNED_ADVERT:
+        return "signed_advert";
+    case D1L_CONTACT_VERIFICATION_URI_IMPORT:
+        return "uri_import";
+    case D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT:
+        return "migrated_signed_advert";
+    case D1L_CONTACT_VERIFICATION_NONE:
+    default:
+        return "none";
+    }
+}
+
 bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry)
 {
     if (!entry) {
@@ -1010,6 +1396,37 @@ bool d1l_contact_store_has_export_key(const d1l_contact_entry_t *entry)
     return entry->public_key_hex[D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U] == '\0';
 }
 
+bool d1l_contact_store_is_canonical(const d1l_contact_entry_t *entry)
+{
+    if (!entry ||
+        (entry->verification_source !=
+             D1L_CONTACT_VERIFICATION_SIGNED_ADVERT &&
+         entry->verification_source != D1L_CONTACT_VERIFICATION_URI_IMPORT &&
+         entry->verification_source !=
+             D1L_CONTACT_VERIFICATION_MIGRATED_SIGNED_ADVERT) ||
+        !d1l_contact_store_has_export_key(entry) ||
+        !fixed_hex_string_valid(entry->fingerprint,
+                                D1L_NODE_FINGERPRINT_LEN - 1U) ||
+        !fixed_hex_strings_equal(entry->fingerprint, entry->public_key_hex,
+                                 D1L_NODE_FINGERPRINT_LEN - 1U)) {
+        return false;
+    }
+    return d1l_contact_store_meshcore_type_id(entry->type) != 0U;
+}
+
+bool d1l_contact_store_can_dm(const d1l_contact_entry_t *entry)
+{
+    return d1l_contact_store_is_canonical(entry) &&
+           strcmp(entry->type, "chat") == 0;
+}
+
+bool d1l_contact_store_can_admin(const d1l_contact_entry_t *entry)
+{
+    return d1l_contact_store_is_canonical(entry) &&
+           (strcmp(entry->type, "repeater") == 0 ||
+            strcmp(entry->type, "room") == 0);
+}
+
 esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *dest,
                                        size_t dest_size)
 {
@@ -1017,7 +1434,7 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
         return ESP_ERR_INVALID_ARG;
     }
     dest[0] = '\0';
-    if (!d1l_contact_store_has_export_key(entry)) {
+    if (!d1l_contact_store_is_canonical(entry)) {
         return ESP_ERR_INVALID_STATE;
     }
     const uint8_t type_id = d1l_contact_store_meshcore_type_id(entry->type);
@@ -1025,20 +1442,26 @@ esp_err_t d1l_contact_store_export_uri(const d1l_contact_entry_t *entry, char *d
         return ESP_ERR_INVALID_STATE;
     }
 
-    const char *name = entry->alias[0] ? entry->alias :
-                       (entry->heard_name[0] ? entry->heard_name : entry->fingerprint);
-    char encoded_name[D1L_CONTACT_ALIAS_LEN * 3U] = {0};
-    url_encode_component(encoded_name, sizeof(encoded_name), name);
-    if (encoded_name[0] == '\0') {
-        url_encode_component(encoded_name, sizeof(encoded_name), entry->fingerprint);
+    d1l_contact_uri_t contact = {0};
+    const char *name = entry->fingerprint;
+    size_t name_size = sizeof(entry->fingerprint);
+    if (entry->alias[0] != '\0') {
+        name = entry->alias;
+        name_size = sizeof(entry->alias);
+    } else if (entry->heard_name[0] != '\0') {
+        name = entry->heard_name;
+        name_size = sizeof(entry->heard_name);
     }
-
-    int written = snprintf(dest, dest_size,
-                           "meshcore://contact/add?name=%s&public_key=%s&type=%u",
-                           encoded_name, entry->public_key_hex,
-                           (unsigned)type_id);
-    if (written < 0 || (size_t)written >= dest_size) {
-        dest[0] = '\0';
+    if (!copy_bounded_text(contact.name, sizeof(contact.name), name,
+                           name_size)) {
+        copy_lower_hex(contact.name, sizeof(contact.name), entry->fingerprint,
+                       D1L_NODE_FINGERPRINT_LEN - 1U);
+    }
+    copy_lower_hex(contact.public_key_hex, sizeof(contact.public_key_hex),
+                   entry->public_key_hex,
+                   D1L_NODE_PUBLIC_KEY_HEX_LEN - 1U);
+    contact.type_id = type_id;
+    if (!d1l_contact_uri_format(&contact, dest, dest_size)) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

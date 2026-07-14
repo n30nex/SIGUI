@@ -307,8 +307,11 @@ def test_node_and_contact_messaging_are_fail_closed_by_canonical_role():
         source, "static void render_contact_detail_sheet", "static void update_contact_detail_flags"
     )
 
-    assert 'strcmp(view->role, "companion") == 0' in node_gate
-    assert 'strcmp(entry->type, "chat") == 0' in contact_gate
+    assert "d1l_app_model_find_contact(view->node.fingerprint, &contact) == ESP_OK" in node_gate
+    assert "d1l_contact_store_can_dm(&contact)" in node_gate
+    assert 'strcmp(view->role, "companion")' not in node_gate
+    assert "return d1l_contact_store_can_dm(entry);" in contact_gate
+    assert 'strcmp(entry->type, "chat")' not in contact_gate
     assert "if (!contact_can_dm(entry))" in compose
     assert "if (contact_can_dm(entry))" in detail
     assert '"Messaging unavailable for this role"' in detail

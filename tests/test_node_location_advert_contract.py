@@ -313,11 +313,17 @@ def test_legacy_node_and_contact_roles_migrate_fail_closed():
         assert 'canonical = "unknown"' in migration
         assert "Legacy sensor is ambiguous" in migration
 
-    assert "D1L_CONTACT_STORE_SCHEMA 4U" in contacts
+    assert "D1L_CONTACT_STORE_SCHEMA 6U" in contacts
+    assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in contacts
+    assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in contacts
     assert "D1L_CONTACT_STORE_SCHEMA_V3 3U" in contacts
     assert "D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U" in contacts
     assert "d1l_contact_store_blob_v3_t" in contacts
+    assert "d1l_contact_store_blob_v4_t" in contacts
+    assert "d1l_contact_store_blob_v5_t" in contacts
     assert "migrate_v3_blob" in contacts
+    assert "migrate_v4_blob" in contacts
+    assert "migrate_v5_blob" in contacts
     type_ids = function_slice(
         contacts,
         "uint8_t d1l_contact_store_meshcore_type_id",
@@ -342,7 +348,7 @@ def test_dm_service_rejects_non_chat_roles_before_identity_or_radio_side_effects
     )
 
     lookup = sender.index("d1l_contact_store_find_by_fingerprint")
-    role_gate = sender.index('strcmp(contact.type, "chat") != 0')
+    role_gate = sender.index("!d1l_contact_store_can_dm(&contact)")
     identity = sender.index("d1l_meshcore_service_ensure_identity()")
     start_rx = sender.index("D1L_MESHCORE_SERVICE_CMD_START_RX")
     assert lookup < role_gate < identity < start_rx

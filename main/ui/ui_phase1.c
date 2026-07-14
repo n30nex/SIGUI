@@ -1707,16 +1707,17 @@ static bool node_role_is_managed_service(const char *role)
 
 static bool node_view_can_dm(const d1l_node_view_t *view)
 {
-    return view &&
-           view->node.fingerprint[0] != '\0' &&
-           view->node.public_key_hex[0] != '\0' &&
-           strcmp(view->role, "companion") == 0;
+    if (!view || view->node.fingerprint[0] == '\0') {
+        return false;
+    }
+    d1l_contact_entry_t contact = {0};
+    return d1l_app_model_find_contact(view->node.fingerprint, &contact) == ESP_OK &&
+           d1l_contact_store_can_dm(&contact);
 }
 
 static bool contact_can_dm(const d1l_contact_entry_t *entry)
 {
-    return entry && entry->fingerprint[0] != '\0' &&
-           entry->public_key_hex[0] != '\0' && strcmp(entry->type, "chat") == 0;
+    return d1l_contact_store_can_dm(entry);
 }
 
 static bool contact_can_export(const d1l_contact_entry_t *entry)
@@ -2176,29 +2177,12 @@ static void open_dm_compose_for_contact(const d1l_contact_entry_t *entry)
 
 static bool contact_from_node_view(const d1l_node_view_t *view, d1l_contact_entry_t *out_contact)
 {
-    if (!node_view_can_dm(view) || !out_contact) {
+    if (!view || !out_contact || view->node.fingerprint[0] == '\0') {
         return false;
     }
-    if (d1l_app_model_find_contact(view->node.fingerprint, out_contact) == ESP_OK &&
-        out_contact->public_key_hex[0] != '\0') {
-        return true;
-    }
     memset(out_contact, 0, sizeof(*out_contact));
-    snprintf(out_contact->fingerprint, sizeof(out_contact->fingerprint), "%s", view->node.fingerprint);
-    snprintf(out_contact->public_key_hex, sizeof(out_contact->public_key_hex), "%s",
-             view->node.public_key_hex);
-    snprintf(out_contact->alias, sizeof(out_contact->alias), "%s",
-             view->display_name[0] ? view->display_name :
-             (view->node.name[0] ? view->node.name : view->node.fingerprint));
-    snprintf(out_contact->heard_name, sizeof(out_contact->heard_name), "%s",
-             view->node.name[0] ? view->node.name : view->node.fingerprint);
-    snprintf(out_contact->type, sizeof(out_contact->type), "%s",
-             view->node.type[0] ? view->node.type : "node");
-    out_contact->last_rssi_dbm = view->node.rssi_dbm;
-    out_contact->last_snr_tenths = view->node.snr_tenths;
-    out_contact->path_hash_bytes = view->node.path_hash_bytes;
-    out_contact->path_hops = view->node.path_hops;
-    return true;
+    return d1l_app_model_find_contact(view->node.fingerprint, out_contact) == ESP_OK &&
+           d1l_contact_store_can_dm(out_contact);
 }
 
 static void node_detail_dm_event_cb(lv_event_t *event)

@@ -182,6 +182,7 @@ def expected_command_name(command: str) -> str:
         "settings onboarding complete ",
         "contacts add ",
         "contacts export ",
+        "contacts import ",
         "contacts rename ",
         "contacts delete ",
         "messages dm ",

@@ -3007,12 +3007,11 @@ static esp_err_t meshcore_service_send_dm_with_result(
     /* Resolve and authorize the target before identity/radio side effects.
      * Only canonical chat adverts are direct-message endpoints. */
     d1l_contact_entry_t contact = {0};
-    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact) ||
-        contact.public_key_hex[0] == '\0') {
+    if (!d1l_contact_store_find_by_fingerprint(fingerprint, &contact)) {
         s_status.rejected_commands++;
         return ESP_ERR_NOT_FOUND;
     }
-    if (strcmp(contact.type, "chat") != 0) {
+    if (!d1l_contact_store_can_dm(&contact)) {
         s_status.rejected_commands++;
         return ESP_ERR_INVALID_STATE;
     }

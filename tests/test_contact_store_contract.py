@@ -1,4 +1,9 @@
+import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
+from urllib.parse import unquote_plus
 
 from scripts.smoke_d1l import SMOKE_COMMANDS
 
@@ -18,6 +23,20 @@ def static_void_body(source: str, symbol: str) -> str:
     return source[start : end if end >= 0 else len(source)]
 
 
+def c_function(source: str, signature: str) -> str:
+    start = source.index(signature)
+    brace = source.index("{", start)
+    depth = 0
+    for index in range(brace, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : index + 1]
+    raise AssertionError(f"unterminated function: {signature}")
+
+
 def test_contact_store_is_bounded_and_nvs_backed():
     header = read("main/mesh/contact_store.h")
     source = read("main/mesh/contact_store.c")
@@ -25,23 +44,32 @@ def test_contact_store_is_bounded_and_nvs_backed():
     app_main = read("main/app_main.c")
     sdkconfig_defaults = read("sdkconfig.defaults")
     assert "D1L_CONTACT_STORE_CAPACITY 16U" in header
-    assert "D1L_CONTACT_ALIAS_LEN 24U" in header
+    assert "D1L_CONTACT_ALIAS_LEN 32U" in header
     assert "D1L_CONTACT_OUT_PATH_MAX 64U" in header
     assert "public_key_hex" in header
     assert "out_path_valid" in header
-    assert "D1L_CONTACT_STORE_SCHEMA 4U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA 6U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V5 5U" in source
+    assert "D1L_CONTACT_STORE_SCHEMA_V4 4U" in source
     assert "D1L_CONTACT_STORE_SCHEMA_V3 3U" in source
     assert "D1L_CONTACT_STORE_LEGACY_TYPE_LEN 8U" in source
     assert "d1l_contact_store_blob_v3_t" in source
+    assert "d1l_contact_store_blob_v4_t" in source
+    assert "d1l_contact_store_blob_v5_t" in source
     assert "d1l_contact_store_blob_v2_t" in source
     assert "d1l_contact_store_blob_v1_t" in source
     assert "migrate_v1_blob" in source
     assert "migrate_v2_blob" in source
     assert "migrate_v3_blob" in source
+    assert "migrate_v4_blob" in source
+    assert "migrate_v5_blob" in source
     assert "migrate_legacy_advert_type" in source
     assert "contact schema v1 layout changed" in source
     assert "contact schema v2 layout changed" in source
     assert "contact schema v3 layout changed" in source
+    assert "contact schema v4 layout changed" in source
+    assert "contact schema v5 layout changed" in source
+    assert "contact schema v6 layout changed" in source
     assert 'D1L_CONTACT_STORE_NAMESPACE "d1l_contacts"' in source
     assert 'D1L_CONTACT_STORE_KEY "contacts"' in source
     assert "nvs_get_blob" in source
@@ -50,7 +78,7 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "static d1l_contact_store_blob_t s_rollback_scratch" in source
     assert "persist_store_or_rollback" in source
     assert "find_index_by_fingerprint" in source
-    assert "oldest_index" in source
+    assert "oldest_evictable_placeholder_index" in source
     assert "d1l_contact_store_update_path" in source
     assert "d1l_contact_store_set_flags" in source
     assert "d1l_contact_store_rename" in header
@@ -61,11 +89,13 @@ def test_contact_store_is_bounded_and_nvs_backed():
     assert "d1l_contact_entry_t removed = s_entries[index]" in source
     assert "D1L_CONTACT_EXPORT_URI_LEN 224U" in header
     assert "d1l_contact_store_export_uri" in header
-    assert "meshcore://contact/add?name=%s&public_key=%s&type=%u" in source
+    assert "d1l_contact_uri_format" in source
+    assert "D1L_CONTACT_URI_SCHEME" in read("main/mesh/contact_uri.c")
     assert "d1l_contact_store_meshcore_type_id" in source
     assert "d1l_contact_store_has_export_key" in source
     assert "CONFIG_LV_USE_QRCODE=y" in sdkconfig_defaults
     assert '"mesh/contact_store.c"' in cmake
+    assert '"mesh/contact_uri.c"' in cmake
     assert "d1l_contact_store_init()" in app_main
 
 
@@ -78,12 +108,17 @@ def test_contacts_can_promote_heard_nodes_by_fingerprint():
     assert "parse_fingerprint_token" in console
     assert "d1l_node_store_find_by_fingerprint(fingerprint, &heard)" in console
     assert "d1l_contact_store_upsert_from_node(fingerprint, alias" in console
-    assert "heard_node->public_key_hex" in read("main/mesh/contact_store.c")
+    upsert = read("main/mesh/contact_store.c").split(
+        "esp_err_t d1l_contact_store_upsert_from_node", 1
+    )[1].split("esp_err_t d1l_contact_store_upsert_verified_advert", 1)[0]
+    assert "heard_node->public_key_hex" not in upsert
+    assert "A passive observation is not identity authorization" in upsert
     assert 'ok_begin("contacts add")' in console
     assert '\\"public_key\\"' in console
     assert 'strcmp(line, "contacts")' in console
     assert 'strcmp(line, "contacts export")' in console
     assert 'strncmp(line, "contacts export ", 16)' in console
+    assert 'strncmp(line, "contacts import ", 16)' in console
     assert 'strcmp(line, "contacts clear")' in console
     assert 'strncmp(line, "contacts add ", 13)' in console
     assert 'strncmp(line, "contacts rename ", 16)' in console
@@ -162,6 +197,84 @@ def test_ui_console_and_smoke_expose_contacts():
     assert '\\"out_path_known\\"' in console
     assert '\\"out_path_len\\"' in console
     assert '\\"meshcore_uri\\"' in console
-    assert "Contacts are promoted from heard nodes into a bounded NVS store" in console
+    assert "Canonical contacts require a full-key signed advert or validated MeshCore URI import" in console
     assert "contacts" in SMOKE_COMMANDS
     assert "contacts export" in SMOKE_COMMANDS
+
+
+def test_contact_import_is_full_key_authoritative_and_truthful():
+    header = read("main/mesh/contact_store.h")
+    source = read("main/mesh/contact_store.c")
+    console = read("main/comms/usb_console.c")
+    assert "D1L_CONTACT_VERIFICATION_NONE" in header
+    assert "D1L_CONTACT_VERIFICATION_SIGNED_ADVERT" in header
+    assert "D1L_CONTACT_VERIFICATION_URI_IMPORT" in header
+    assert "d1l_contact_store_import_uri" in header
+    assert "d1l_contact_uri_parse" in source
+    assert "find_unique_index_by_public_key_hex" in source
+    assert "D1L_CONTACT_IMPORT_COLLISION" in source
+    assert "D1L_CONTACT_IMPORT_ROLE_CONFLICT" in source
+    assert "D1L_CONTACT_IMPORT_FULL" in source
+    assert "oldest_evictable_placeholder_index" in source
+    assert "d1l_contact_store_is_canonical" in header
+    assert "d1l_contact_store_can_dm" in header
+    assert "d1l_contact_store_can_admin" in header
+    assert "return d1l_contact_store_can_dm(entry);" in read("main/ui/ui_phase1.c")
+    assert "cmd_contacts_import" in console
+    assert 'ok_begin("contacts import")' in console
+    assert "contacts import <meshcore-uri>" in console
+
+
+def test_contact_console_json_escapes_imported_names(tmp_path):
+    console = read("main/comms/usb_console.c")
+    escaped_outputs = {
+        "cmd_contacts": ("print_json_string(e->alias);",),
+        "print_contact_export_json": ("print_json_string(e->alias);",),
+        "cmd_contacts_export": ("print_json_string(contact.alias);",),
+        "cmd_contacts_import": ("print_json_string(contact.alias);",),
+        "cmd_contacts_add": ("print_json_string(contact.alias);",),
+        "cmd_contacts_set": ("print_json_string(contact.fingerprint);",),
+        "cmd_contacts_rename": ("print_json_string(contact.alias);",),
+        "cmd_contacts_delete": ("print_json_string(contact.alias);",),
+    }
+    for symbol, required in escaped_outputs.items():
+        body = static_void_body(console, symbol)
+        assert '\\"alias\\":\\"%s\\"' not in body, symbol
+        for token in required:
+            assert token in body, symbol
+
+    compiler = shutil.which("gcc") or shutil.which("clang")
+    if compiler is None:
+        raise AssertionError("A C compiler is required for console JSON vectors")
+    helper = c_function(console, "static void print_json_string(const char *text)")
+    harness = tmp_path / "contact_json_escape_test.c"
+    executable = tmp_path / (
+        "contact_json_escape_test.exe" if os.name == "nt" else "contact_json_escape_test"
+    )
+    harness.write_text(
+        "#include <stdio.h>\n"
+        + helper
+        + "\nint main(int argc, char **argv)\n"
+          "{\n"
+          "    if (argc != 2) return 2;\n"
+          "    fputs(\"{\\\"alias\\\":\", stdout);\n"
+          "    print_json_string(argv[1]);\n"
+          "    fputs(\",\\\"safe\\\":true}\\n\", stdout);\n"
+          "    return 0;\n"
+          "}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        [compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", str(harness), "-o", str(executable)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    encoded_name = "A%22%2C%22x%22%3Atrue%2C%22s%22%3A%22%5CZ"
+    decoded_name = unquote_plus(encoded_name)
+    completed = subprocess.run(
+        [str(executable), decoded_name], check=True, capture_output=True, text=True
+    )
+    payload = json.loads(completed.stdout)
+    assert payload == {"alias": decoded_name, "safe": True}
+    assert "x" not in payload
