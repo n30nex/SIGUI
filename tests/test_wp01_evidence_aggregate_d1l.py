@@ -1006,6 +1006,36 @@ def test_source_bound_storage_active_soak_rejects_missing_canary_safety(
     ]
 
 
+def test_source_bound_storage_active_soak_accepts_generation_reset_after_reboot(
+    tmp_path: Path,
+):
+    paths, provenance_path, _ = write_inputs(tmp_path)
+    canonical = json.loads(paths["storage_active_soak"].read_text(encoding="utf-8"))
+    source_path = Path(canonical["source_receipts"][0]["path"])
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    segments = [event for event in source["events"] if event["kind"] == "segment"]
+    for sample in segments[1]["report"]["samples"]:
+        packets = next(
+            result for result in sample["results"] if result.get("cmd") == "packets"
+        )
+        packets["persistence"]["sd"]["generation"] = 7
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+
+    rebuilt = wp01_sources.build_storage_active_soak_artifact(
+        source_path,
+        provenance_path,
+        root=tmp_path,
+        commit=COMMIT,
+        github_actions_run=RUN_ID,
+        d1l_port="COM12",
+        rp2040_port="COM16",
+    )
+
+    assert rebuilt["ok"] is True, rebuilt.get("failures")
+    assert rebuilt["unintended_backend_generation_count"] == 0
+    assert rebuilt["controlled_reboot_backend_generation_transition_count"] == 2
+
+
 def test_source_bound_producer_cli_rebuilds_all_canonical_artifacts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ):

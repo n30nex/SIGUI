@@ -390,8 +390,12 @@ oracle prerequisites; they are not evidence that those semantics ran.
 
 ## What This Slice Covers
 
-The `meshcore-conformance` Actions job runs on `ubuntu-24.04` with the pinned
-`clang-18`/`clang++-18` packages. The runner builds the local wire codec and
+The `meshcore-conformance` Actions job runs on `ubuntu-24.04` with an exact
+`clang-18` Debian archive and compiler executable identity recorded in
+`.github/d1l-build-inputs.json`. CI checksum-verifies both the downloaded
+package and the resolved `clang-18`/`clang++-18` bytes before the gate runs,
+then embeds that exact-commit tool-byte receipt in the conformance report. The
+runner builds the local wire codec and
 the pinned upstream packet-envelope code into a structural vector harness with
 AddressSanitizer and UndefinedBehaviorSanitizer. It separately builds the local
 wire decoder as the libFuzzer target, then:
@@ -420,6 +424,12 @@ versions. The fixed harness and local-parser fuzz target exercise both
 properties. All five production receive handlers call the v1 boundary before
 crypto or retained-store mutation. This closes version gating only; the
 artifact must not claim the remaining Dispatcher semantics are covered.
+
+Release packaging, the reproducibility comparator, and the release audit all
+reuse the same completed-report validator. A report with green top-level flags
+is rejected unless its pinned source hashes, full vector counts, complete
+100,000-run fuzz result, zero findings, sanitizer result, and Clang byte receipt
+are all present and consistent with the exact source commit.
 
 The job writes
 `artifacts/meshcore-conformance/meshcore_conformance_<full-commit>.json` and

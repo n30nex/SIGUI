@@ -1,14 +1,197 @@
 schema_version: 1
-generated_at: '2026-07-12'
+generated_at: '2026-07-14'
 project:
   name: SIGUI / MeshCore DeskOS D1L
   repository: n30nex/SIGUI
-  merged_baseline: 5b5dfaa0592347497df1a2f77f572c6d49933c6a
-  integrated_candidate: 07322ed4c700866106ecca6c31ff70ea3a3d4ede
+  merged_baseline: e79fb56160914f4483515f4f70998aa2f8961496
+  integrated_candidate: e79fb56160914f4483515f4f70998aa2f8961496
+  proof_ledger_pr: 83
+  proof_ledger_head: a2da533310c7b2e6898439684922b9cd86896b59
+  proof_ledger_merge_commit: c3f9106ea9b88c491889cd8dea9ad883a0d72180
+  proof_ledger_main_actions:
+    run: 29285852443
+    host_tests_passed: 388
+    checksum_manifests_verified: 2
+    checksum_entries_verified: 35
+  pr62_merge:
+    head: 7a6ff86493042cc5617ef88c4765312cea46150d
+    merge_commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
+    push_run: 29286375559
+    pr_run: 29286378383
+    host_tests_passed: 423
+    focused_tests_passed: 80
+    push_checksum_entries_verified: 37
+    pr_checksum_manifests_verified: 8
+    pr_checksum_entries_verified: 73
+  pr64_merge:
+    head: 15f2a9ed99541fa059445ff3d1b06a40b4c42bee
+    pr_merge_test_commit: 82b086baf534dade4407fb62210a3cb5218e8986
+    merge_commit: 12d5470eca45ef6e86b6e15cf1822716e563a78e
+    push_run: 29289247092
+    push_status: success
+    push_checksum_manifests_verified: 2
+    push_checksum_entries_verified: 36
+    pr_run: 29289250956
+    pr_status: success
+    pr_checksum_manifests_verified: 8
+    pr_checksum_entries_verified: 75
+    pr_root_manifest_sha256: 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379
+  pr80_merge:
+    head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+    merge_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+    merged_main_actions_run: 29290978741
+    merged_main_actions_status: success
+  pr84_merge:
+    head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+    pr_merge_test_commit: a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8
+    merge_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
+    push_run: 29294131381
+    pr_run: 29294132563
+    merged_main_actions_run: 29294553135
+    merged_main_actions_status: success
+  pr86_merge:
+    head: 1c5e80be662ed64c1f97fc047d6dbfc995567d1c
+    pr_merge_test_commit: 9585c277ae90cee37672c982ffdb070e8c3e96e5
+    merge_commit: 9acb7d0cf498793dc0bed4854cc314a2eac2ea0c
+    merged_main_actions_run: 29296258019
+    merged_main_actions_status: success
+  pr87_merge:
+    head: 655ece5d5d33356937cad24f7e23fa58decf7ff5
+    pr_merge_test_commit: 74db31b1a778fc8af3b304f321f36748e85c60cf
+    merge_commit: 14182d3f198b70ceb588d9d43312bf76d8745284
+    push_run: 29296977946
+    pr_run: 29296979420
+    rp2040_dispatch_run: 29296995585
+    merged_main_actions_run: 29297516173
+    merged_main_actions_status: success
+  pr88_merge:
+    head: 8f90ad74da443c79a79b458aac313955860f3bf5
+    merge_commit: b130eb1026e8d14e4e6878bd819b5ee7f0da2165
+    push_run: 29298231285
+    pr_run: 29298232852
+    merged_main_actions_run: 29298723442
+    merged_main_actions_status: success
+    host_tests_passed: 839
+    checksum_contract_tests_passed: 24
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 40
+    sbom_sha256: 0e0c84af33dc6f0e9a91f3b2eb2962cd78a577f227e1ed01095257572e988a88
+  pr89_merge:
+    head: de7eee7ecf8d29c110830f1ed813b71b4d770ebd
+    merge_commit: 5a4e7f2777b306ad4d7b62311fd79296d7d45747
+    push_run: 29298861311
+    pr_run: 29298862946
+    merged_main_actions_run: 29299321770
+    merged_main_actions_status: success
+    host_tests_passed: 845
+    checksum_contract_tests_passed: 25
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 41
+    downloaded_tree_file_count: 210
+    downloaded_tree_total_bytes: 72394571
+    downloaded_tree_sha256: d192413aadb9ac6a1fb9f858c3071fa99178b20d0d51a40e2d0c382e9ca50ff1
+    sbom_sha256: 565e9144f038e07061d035fc51daf8ca80341d8dc248371a2e4369a8f7e2b065
+    provenance_sha256: b3763f05820d5ed361bb043f3eee7d9acc40200abfa6b6a0951127338b683d73
+  pr90_merge:
+    head: f731e465bb5dc31cb1a8a88a82dafda1e3c38577
+    merge_commit: e79fb56160914f4483515f4f70998aa2f8961496
+    merged_main_actions_run: 29300795502
+    merged_main_actions_status: success
+    host_tests_passed: 891
+    checksum_contract_tests_passed: 28
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 44
+    downloaded_tree_file_count: 214
+    downloaded_tree_total_bytes: 72120370
+    downloaded_tree_sha256: f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738
+    build_inputs_sha256: 4e998b24b5783c3424f757532125f7932c1be098230d44833282215e618adec1
+    sbom_sha256: 78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037
+    provenance_sha256: 7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c
+    full_release_runs:
+    - 29300805114
+    - 29300806682
+    reproducibility_receipt_sha256: babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f
+    reproducibility_aggregate_path: docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json
+    reproducibility_aggregate_sha256: ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264
+  live_main_artifact_integrity:
+    run: 29300795502
+    status: success
+    host_tests_passed: 891
+    checksum_contract_tests_passed: 28
+    manifests_total: 3
+    manifests_verified: 3
+    checksum_entries_verified: 44
+    firmware_manifest_sha256: 6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb
+    build_inputs_manifest_sha256: 521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233
+    release_manifest_sha256: 499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18
+    release_package_manifest_json_sha256: 8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59
+    application_sha256: a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98
+    full_flash_sha256: 1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232
+    rp2040_bridge_uf2_sha256: null
+    downloaded_tree_file_count: 214
+    downloaded_tree_total_bytes: 72120370
+    downloaded_tree_sha256: f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738
+    host_success_marker_sha256: dd861b665cb6d0ea42aa54aadff8b293f64d0617c059f04790fb98b318a45e84
+    release_audit_sha256: 9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d
+    sbom_sha256: 78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037
+    provenance_sha256: 7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c
+    note: Exact merged-main Actions and downloaded recursive verification strict-passed all three emitted manifests after PR #90. Two exact-source full-release dispatches and the tracked positive comparator close WP-03 reproducibility; RP2040 correctly skipped on merged main.
+    previous_failed_receipt:
+      commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
+      run: 29286754864
+      host_tests_passed: 423
+      manifests_total: 8
+      manifests_verified: 7
+      release_manifest_sha256: 2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1
+      failure: top release manifest omitted three nested RP2040 SHA256SUMS.txt files
+  wp01_evidence_source_actions:
+    push_run: 29272708844
+    pr_run: 29272709642
+    host_tests_passed: 773
+    checksum_manifests: 8
+    checksum_entries_verified: 78
+  release_audit:
+    ready_for_public_release: false
+    exact_main_run: 29300795502
+    receipt_sha256: 9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d
+    remaining_p0_failures: 32
+    failures_overall_including_p1: 34
+  local_merge_rehearsals:
+    pr62:
+      commit: 7648611c412e7f4658f5d14b43ba530744d96160
+      full_host_tests_passed: 423
+      focused_tests_passed: 80
+      evidence_scope: local_only
+    pr64:
+      commit: c5886de1e2988b2097034183d5e39bb3aec88344
+      full_host_tests_passed: 575
+      focused_tests_passed: 128
+      evidence_scope: local_only
+    pr80:
+      commit: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
+      full_host_tests_passed: 787
+      focused_tests_passed: 302
+      evidence_scope: local_only
+  latest_wp02_baseline_refresh:
+    head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+    merged_main: 17a948cf1ad23a5d2a89419039897943028f9bce
+    merged_main_actions_run: 29294553135
+    focused_tests_passed: 50
+    focused_tests_skipped: 2
+    full_tests_passed: 820
+    full_tests_skipped: 3
+    ruff_status: pass
+    evidence_scope: tracked_4ee07caf_baseline_plus_exact_pr84_merged_main_actions_and_downloaded_artifacts
   active_pr_stack:
-  - 62
-  - 64
-  - 80
+  - number: 88
+    pre_ledger_head: 2ab70b19b6e31542d9c379d151ebbc2a427badb0
+    purpose: deterministic SPDX release SBOM and current ledger receipt
+  - number: 89
+    pre_ledger_head: a21682ca24ef0778b9ff1dd915d92e52414ac98a
+    purpose: deterministic exact-source release provenance
+  - number: 90
+    pre_ledger_head: afe322f99373a086587783ed98cb0f42dbf997bf
+    purpose: independent release rebuild comparator; draft pending hardening
   pinned_meshcore: e8d3c53ba1ea863937081cd0caad759b832f3028
   esp_idf: 5.5.4
   target: seeed-sensecap-indicator-d1l
@@ -114,33 +297,150 @@ work_packages:
   - completion_ledger_validation_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-01
-  title: 'Close PR #80 exact-pair storage/reboot gate'
+  title: 'Bank PR #80 exact-pair storage/reboot gate'
   lane: platform-storage
   depends_on: []
   tracks:
   - 69
   - 78
-  status: in_progress
+  status: merged
+  proof_banked: true
+  implementation_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+  evidence_commit: 092293f2311a24c9899bc9bf343ab014c4ba0411
+  implementation_merged: true
   required_artifacts:
   - sd_inserted_stability_<sha>_<d1l>_<rp2040>.json
   - sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json
   - retained_reboot_matrix_<sha>_<d1l>.json
-  - storage_active_soak_<sha>_<d1l>.json
-  closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
+  - storage_active_soak_<sha>_<d1l>_<rp2040>.json
+  - wp01_acceptance_<sha>_<d1l>_<rp2040>.json
+  accepted_evidence:
+    source_commit: 092293f2311a24c9899bc9bf343ab014c4ba0411
+    actions_push_run: 29272708844
+    actions_pr_run: 29272709642
+    host_tests_passed: 773
+    checksum_manifests: 8
+    checksum_entries_verified: 78
+    provenance_sha256: 2decf8ad60b73e71bbb09b489adba8fd827856a8daf00c376c5a9ba5354e451e
+    inserted_stability_sha256: a038ee7ca371c4ee404493c721a343ef54e7bbd55b08273c8dc833d9d0203aef
+    removal_reinsert_sha256: 3a3882038fec2497529d281f3c2b9b7468c1e62dcca7962ca3b9492125f0fad1
+    removal_reinsert_cycles_passed: 10
+    reboot_matrix_sha256: db6cab3020bfa8ef575bd6a59c61d1277a8e72e1e73eb987248817199797a986
+    reboot_cycles_passed: 5
+    active_soak_sha256: caf19395d0e1a175f6fa13c2550bc8693297661756bf339ba4acec63da2699b9
+    active_soak_duration_sec: 7207.089
+    active_soak_segments_passed: 6
+    retained_worker_stack_floor_bytes: 7976
+    aggregate_sha256: 994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277
+    public_rf_tx: false
+    formats_sd: false
+  remaining_scope: Broader final SD/card/Seeed/electrical/power-loss/boot/12-hour qualification remains owned by downstream release gates.
+  closure_rule: Exact source implementation, Actions, checksums, inserted/removal/reboot/active-soak evidence, docs, and ledger proof are banked; PR80 is merged on exact main.
 - id: WP-02
   title: Land and normalize PR stack
   lane: integration
   depends_on:
   - WP-01
+  dependency_gate: implementation_merged
   tracks:
   - 62
   - 64
   - 80
   - 63
   - 78
-  status: blocked
+  status: in_progress
+  implementation_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
+  implementation_merged: true
+  proof_banked: false
   required_artifacts:
-  - integration_baseline_<main-sha>.json
+  - docs/completion/evidence/wp02/integration_baseline_<main-sha>.json
+  merged_slices:
+    pr62:
+      head: 7a6ff86493042cc5617ef88c4765312cea46150d
+      merge_commit: 570a94ad6ead0941f7acb7d9c9812c63df869e33
+      actions_push_run: 29286375559
+      actions_pr_run: 29286378383
+    pr64:
+      head: 15f2a9ed99541fa059445ff3d1b06a40b4c42bee
+      pr_merge_test_commit: 82b086baf534dade4407fb62210a3cb5218e8986
+      merge_commit: 12d5470eca45ef6e86b6e15cf1822716e563a78e
+      actions_push_run: 29289247092
+      actions_push_checksum_manifests_verified: 2
+      actions_push_checksum_entries_verified: 36
+      actions_pr_run: 29289250956
+      actions_pr_checksum_manifests_verified: 8
+      actions_pr_checksum_entries_verified: 75
+      actions_pr_root_manifest_sha256: 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379
+      merged_main_actions_run: 29289683188
+      merged_main_host_tests_passed: 582
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 8
+      merged_main_checksum_entries_verified: 75
+      merged_main_root_manifest_sha256: 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed
+    pr80:
+      head: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+      merge_commit: 4ee07caf09906abdcebe8faccd95790dceb5fe88
+      merged_main_actions_run: 29290978741
+      merged_main_actions_status: success
+      merged_main_host_tests_passed: 795
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 8
+      merged_main_checksum_entries_verified: 78
+      merged_main_firmware_manifest_sha256: 5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9
+      merged_main_root_manifest_sha256: 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64
+    pr84:
+      head: e5d2f8a21a0cb32713a7c0b3796f1660abda788d
+      pr_merge_test_commit: a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8
+      merge_commit: 17a948cf1ad23a5d2a89419039897943028f9bce
+      actions_push_run: 29294131381
+      actions_pr_run: 29294132563
+      merged_main_actions_run: 29294553135
+      merged_main_actions_status: success
+      merged_main_host_tests_passed: 823
+      merged_main_checksum_contract_tests_passed: 24
+      merged_main_checksum_manifests_verified: 2
+      merged_main_checksum_entries_verified: 36
+      merged_main_firmware_manifest_sha256: 67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8
+      merged_main_root_manifest_sha256: 74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a
+      rp2040_job_status: skipped_no_relevant_change
+  closed_receipts:
+  - id: BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713
+    status: closed
+    resolution: PR64 branch and merged-main downloaded artifacts recursively strict-pass complete root and nested checksum coverage.
+  artifact_integrity_fix: verified on PR64 push, PR merge-test, and exact merged main
+  integration_baseline:
+    filename: docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json
+    sha256: 39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c
+    tracked: true
+    portable_paths: true
+    trusted_pr_heads:
+      62: 7a6ff86493042cc5617ef88c4765312cea46150d
+      64: 15f2a9ed99541fa059445ff3d1b06a40b4c42bee
+      80: ab3e7d82b6f3c4b38fd80d833e155aa941dee045
+    valid: false
+    software_integration_complete: true
+    actions_run: 29290978741
+    checksum_manifests_verified: 8
+    checksum_entries_verified: 78
+    missing_exact_main_roles:
+    - board
+    - map_open
+    - reboot
+    - sd
+    - ui
+  open_receipts:
+  - id: BLK-WP02-EXACT-HARDWARE-ROLES-20260713
+    status: open
+    blocks_package: true
+    blocks_execution: false
+    last_valid_sha: 092293f2311a24c9899bc9bf343ab014c4ba0411
+    last_valid_actions_run: 29272708844
+    operator_action: No device action now. Freeze the final candidate first, then install its checksum-verified exact ESP32/RP2040 pair and collect the five narrow role receipts on COM12/COM16; do not use forbidden ports, transmit Public or DM RF, or format SD.
+  local_rehearsals:
+    predecessor_pr64: c5886de1e2988b2097034183d5e39bb3aec88344
+    predecessor_pr80: 341a3abf4db4c52acf5859e396f25e7adb4cbab1
+    current_pr80_before_ledger: 18fa68c1eefc640c0b04ee3964fd3e34f3367875
+  evidence_scope: PR62, PR64, PR80, PR84, PR85, PR86, PR87, PR88, PR89, and PR90 are merged. Exact e79fb56 main Actions and all three emitted checksum manifests are green; deterministic SBOM, provenance, and reproducibility proof are banked. The tracked 4ee07caf integration baseline still fails closed only because five physical role receipts are absent. Release-security commits do not close those roles. They remain deferred to the frozen final candidate, and no predecessor evidence can close them.
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-03
   title: Immutable CI and release inputs
@@ -150,11 +450,97 @@ work_packages:
   tracks:
   - 17
   - 71
-  status: blocked
+  status: merged
+  implementation_commit: e79fb56160914f4483515f4f70998aa2f8961496
+  merged_slices:
+  - pull_request: 86
+    merge_commit: 9acb7d0cf498793dc0bed4854cc314a2eac2ea0c
+    actions_run: 29296258019
+  - pull_request: 87
+    merge_commit: 14182d3f198b70ceb588d9d43312bf76d8745284
+    actions_run: 29297516173
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 39
+  - pull_request: 88
+    head: 8f90ad74da443c79a79b458aac313955860f3bf5
+    merge_commit: b130eb1026e8d14e4e6878bd819b5ee7f0da2165
+    actions_run: 29298723442
+    host_tests_passed: 839
+    checksum_contract_tests_passed: 24
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 40
+    sbom_sha256: 0e0c84af33dc6f0e9a91f3b2eb2962cd78a577f227e1ed01095257572e988a88
+  - pull_request: 89
+    head: de7eee7ecf8d29c110830f1ed813b71b4d770ebd
+    merge_commit: 5a4e7f2777b306ad4d7b62311fd79296d7d45747
+    actions_run: 29299321770
+    host_tests_passed: 845
+    checksum_contract_tests_passed: 25
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 41
+    downloaded_tree_file_count: 210
+    downloaded_tree_sha256: d192413aadb9ac6a1fb9f858c3071fa99178b20d0d51a40e2d0c382e9ca50ff1
+    sbom_sha256: 565e9144f038e07061d035fc51daf8ca80341d8dc248371a2e4369a8f7e2b065
+    provenance_sha256: b3763f05820d5ed361bb043f3eee7d9acc40200abfa6b6a0951127338b683d73
+  - pull_request: 90
+    head: f731e465bb5dc31cb1a8a88a82dafda1e3c38577
+    merge_commit: e79fb56160914f4483515f4f70998aa2f8961496
+    actions_run: 29300795502
+    host_tests_passed: 891
+    checksum_contract_tests_passed: 28
+    checksum_manifests_verified: 3
+    checksum_entries_verified: 44
+    downloaded_tree_file_count: 214
+    downloaded_tree_sha256: f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738
+    sbom_sha256: 78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037
+    provenance_sha256: 7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c
+  rp2040_toolchain_dispatch:
+    head: 655ece5d5d33356937cad24f7e23fa58decf7ff5
+    run: 29296995585
+    checksum_manifests_verified: 9
+    checksum_entries_verified: 81
   required_artifacts:
   - build_inputs_<sha>.json
   - sbom_<sha>.spdx.json
   - provenance_<sha>.json
+  - release_reproducibility_<sha>.json
+  merged_reproducibility_proof:
+    pull_request: 90
+    head: f731e465bb5dc31cb1a8a88a82dafda1e3c38577
+    merge_commit: e79fb56160914f4483515f4f70998aa2f8961496
+    status: passed
+    full_release_runs:
+    - 29300805114
+    - 29300806682
+    strict_manifests_verified_per_run: 9
+    strict_checksum_entries_verified_per_run: 89
+    strict_files_verified_per_run: 257
+    comparator_receipt_path: F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json
+    comparator_receipt_sha256: babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f
+    portable_aggregate_path: docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json
+    portable_aggregate_sha256: ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264
+    reproducible: true
+    failures: []
+    stable_files_compared: 43
+    stable_fingerprint_sha256: 4cf8a96173022af1fa88c68b053e1eb1e73e67abf96a1f9b9a401a250aa70f84
+    input_fingerprint_sha256: 021028fa268a7543a1a85ea73ac1a7e893e75fa8eb721cc22faf811153036268
+    toolchain_fingerprint_sha256: 7730a6766362d34e20bd07703eef7abdb66a265318135edd866fafc7d1e8452a
+    normalized_manifest_fingerprint_sha256: 05132f0d29dda659b235080b8152052d54947162070b924980ee15b26c72a1c1
+    preserved_negative_comparator:
+      receipt_path: F:/SIGUI-evidence/actions/pr90-8b7b2c03-full-release-comparison-29299613481-29299614693.json
+      sha256: a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e
+      source_commit: 8b7b2c0368216bfe2f945d93323384ff6a10d7db
+      runs:
+      - 29299613481
+      - 29299614693
+      result: invalid_sbom
+      closure_eligible: false
+    root_cause: WindowsPath case-folded ordering differed from canonical POSIX package ordering while final records matched.
+    fix: f731e465bb5dc31cb1a8a88a82dafda1e3c38577 canonicalizes repository-relative POSIX ordering; the exact merged-source comparator passes.
+    non_product_anomalies:
+    - stale GitHub check run 86982414954 reports status=in_progress and conclusion=success after completion; it is not a product failure.
+    - The initial operator-context comparator guard receipt 8bfc4d8cf586c1b5c1cf4d78c9cd734275305cc3185f0357cf619a4ad4050f6e failed source_sha_mismatch and is superseded by the exact-source receipt.
+  proof_banked: true
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
 - id: WP-04
   title: MeshCore boundary and upstream oracle
@@ -163,7 +549,7 @@ work_packages:
   - WP-02
   tracks:
   - 65
-  status: blocked
+  status: in_progress
   required_artifacts:
   - meshcore_oracle_manifest_<sha>.json
   closure_rule: All implementation, tests, Actions, required exact-SHA physical/RF evidence, docs, and ledger updates complete.
@@ -499,14 +885,14 @@ work_packages:
   profile_behavior: Run once for Stable Core and again for Full Feature; each publication requires its own exact-SHA WP-24
     evidence.
 current_priority:
-- WP-01
 - WP-02
-- WP-00
+- WP-01
 - WP-03
 - WP-04
 - WP-06
 - WP-05
 - WP-07
+- WP-00
 forbidden_port_policy:
   forbidden:
   - COM8

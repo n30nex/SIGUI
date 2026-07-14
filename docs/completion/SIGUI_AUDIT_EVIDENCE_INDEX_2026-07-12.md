@@ -8,23 +8,40 @@
 
 | Item | Value |
 |---|---|
-| Merged `main` | `5b5dfaa0592347497df1a2f77f572c6d49933c6a` |
-| Newest integrated candidate | `07322ed4c700866106ecca6c31ff70ea3a3d4ede` |
-| Active PR stack | #62 → #64 → #80 |
-| Candidate distance from audited `main` | 30 commits ahead, 0 behind |
+| Live merged `main` | `e79fb56160914f4483515f4f70998aa2f8961496` |
+| WP-01 exact source candidate | `092293f2311a24c9899bc9bf343ab014c4ba0411` |
+| Active PR stack | none for WP-03; PR #90 head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577` merged as `e79fb56160914f4483515f4f70998aa2f8961496` |
+| Candidate integration state | PRs #62, #64, #80, #84, #85, #86, #87, #88, #89, and #90 are merged; WP-03 reproducibility is banked, while frozen-candidate physical qualification remains open |
+| Proof-ledger PR | #83 head `a2da533310c7b2e6898439684922b9cd86896b59`, merged as `c3f9106ea9b88c491889cd8dea9ad883a0d72180` |
 | Pinned MeshCore | `e8d3c53ba1ea863937081cd0caad759b832f3028` |
 | SDK | ESP-IDF 5.5.4 |
-| Candidate host suite | 614 passing tests reported by PR/CI |
-| Candidate CI | green host, envelope conformance/fuzz, RP2040, firmware, package, checksum |
+| Candidate host suite | 845 passing tests in exact merged-main Actions host job |
+| Candidate CI | run `29300795502` green; 3 emitted manifests / 44 checksum entries verified across 214 downloaded files; exact-head RP2040 dispatch `29296995585` verified 9 / 81 |
 | Conformance closure | false; `wire_envelope_only` |
-| Release status | not ready to tag |
+| Release status | not ready to tag; exact-main audit `29300795502` reports 32 P0 failures / 34 overall across the expanded gate set |
 
 ## Live post-audit reconciliation
 
-- PR #81 merged WP-00 on live `main` at `157c9670eb43a0119280f1e8119d9584b06dcfbf`.
-- Exact-main Actions run `29208908642` passed change filtering, host checks including the completion-ledger validator, firmware packaging, and checksum verification. RP2040 stayed correctly out of scope.
-- Downloaded host receipt `completion_ledger_validation_157c9670eb43a0119280f1e8119d9584b06dcfbf.json` reports `passed=true`, `error_count=0`, and `repository_commit=157c9670eb43a0119280f1e8119d9584b06dcfbf`; its SHA-256 is `13b977eafb883d421ccdbfca4eba8dc8c3838b5198745dcf63c08cee86e741c8`.
-- This closes WP-00 only. WP-01 remains `in_progress`, `proof_banked=false`, and unmerged. Its exact `07322ed` pair reached a clean `READY_SD` preflight with zero retained counters, but asynchronous `storage diag raw` exceeded its fixed settle window and overlapped the one-second retained worker before the packet-append failure and correctly cancelled reboot. A 750 ms ordinary-timeout increase is not accepted as the fix; the next proof isolates diagnostics in a maintenance boot, resets/reflashes the exact artifacts, and requires another clean zero-counter preflight before canaries.
+- Live `main` is `e79fb56160914f4483515f4f70998aa2f8961496`; PR #90 head `f731e465bb5dc31cb1a8a88a82dafda1e3c38577` merged at that SHA. Exact merged-main Actions `29300795502` passed 891 host tests plus 28 checksum-contract tests, and all five downloaded artifacts strict-verified across 3 manifests / 44 entries and 214 files; canonical tree is `f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738`. Root hashes are firmware `6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb`, build inputs `521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233`, and release `499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18`; package manifest is `8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59`, application `a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98`, full flash `1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232`, SBOM `78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037`, and provenance `7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c`. RP2040 correctly skipped on merged main.
+- PR #90 exact-source rebuild comparison is closure evidence. Full-release runs `29300805114` and `29300806682` each strict-verified 9 manifests / 89 entries / 257 files. Receipt `F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json` has SHA-256 `babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f`, reports `reproducible=true`, and has no failures. Portable aggregate `docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json` has SHA-256 `ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264`; WP-03 is `merged` / `proof_banked=true`. The older `a03bdb8...` `invalid_sbom` receipt remains fixed negative history. A stale GitHub check status and an initial wrong-worktree `source_sha_mismatch` guard receipt are recorded as non-product anomalies, not failures.
+- Exact merged-main run `29290978741` passed 795 host plus 24 checksum-contract tests and downloaded strict verification of 8 manifests / 78 entries. Root manifest is `22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64`; application is `44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a`; full flash is `ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd`. The earlier `29286754864` 7/8 failure remains preserved as a negative receipt, and the coverage blocker is closed.
+- WP-01 is `merged` with `proof_banked=true`; its physical evidence remains explicitly bound to exact source `092293f2311a24c9899bc9bf343ab014c4ba0411`.
+- Exact push/PR Actions runs `29272708844` / `29272709642` are green. The Actions host job reports 773 passed, and all 8 manifests / 78 checksum entries verify.
+- The accepted pair passed inserted-card stability, 10/10 physical removal/reinsert cycles, 5/5 retained reboots, and a 7,207.089-second six-segment active-storage soak with retained-worker stack floor 7,976 bytes. It used no Public RF and no SD formatting.
+- WP-02 software integration is complete but remains `in_progress` / `proof_banked=false`. The tracked repository-relative baseline `docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json` (SHA-256 `39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c`) binds PR #62/#64/#80 to their trusted heads and fails closed only for missing board, UI, SD, reboot, and Map-open physical receipts. PR #84 merged the hardened baseline/tooling as `17a948cf`; PRs #86/#87 changed release-security/CI inputs, not the runtime qualification boundary. Those physical roles remain deferred to the frozen final candidate. `BLK-WP02-EXACT-HARDWARE-ROLES-20260713` blocks WP-02 completion but not dependent implementation execution, so WP-03 and WP-04 continue while release readiness remains false.
+
+### WP-01 canonical exact-source receipts
+
+| Evidence | SHA-256 |
+|---|---|
+| Exact-pair provenance | `2decf8ad60b73e71bbb09b489adba8fd827856a8daf00c376c5a9ba5354e451e` |
+| Inserted-card stability | `a038ee7ca371c4ee404493c721a343ef54e7bbd55b08273c8dc833d9d0203aef` |
+| Removal/reinsert, 10/10 | `3a3882038fec2497529d281f3c2b9b7468c1e62dcca7962ca3b9492125f0fad1` |
+| Retained reboot matrix, 5/5 | `db6cab3020bfa8ef575bd6a59c61d1277a8e72e1e73eb987248817199797a986` |
+| Active-storage soak | `caf19395d0e1a175f6fa13c2550bc8693297661756bf339ba4acec63da2699b9` |
+| WP-01 aggregate | `994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277` |
+
+This proof closes only WP-01's narrow source gate. The exact integrated/frozen candidate still needs the broader no-card, unusable/non-FAT32, representative-card/size, Seeed, electrical, power-loss, cold/warm boot, 12-hour, UI, Map, and RF matrices.
 
 ## Branch and PR evidence
 
@@ -33,22 +50,41 @@
 - Base: `main`
 - Purpose: bounded built-in current-view Map and UI hierarchy
 - Large cross-cutting change; must land first.
+- Final head `7a6ff86493042cc5617ef88c4765312cea46150d` passed 423 full / 80 focused local tests, exact push/PR Actions `29286375559` / `29286378383`, and downloaded checksum verification before merging as `570a94ad6ead0941f7acb7d9c9812c63df869e33`.
 
 ### PR #64
 
-- Base: PR #62 branch
-- Purpose: ESP-IDF 5.5.4, dependency lock, BSP compatibility, Wi-Fi/Map/platform integration
-- Must be retargeted to `main` after #62 lands and rechecked.
+- Final head: `15f2a9ed99541fa059445ff3d1b06a40b4c42bee`
+- PR merge-test SHA: `82b086baf534dade4407fb62210a3cb5218e8986`
+- Merged as: `12d5470eca45ef6e86b6e15cf1822716e563a78e`
+- Purpose: ESP-IDF 5.5.4, dependency lock, BSP compatibility, Wi-Fi/Map/platform integration, and fail-closed package checksum coverage.
+- Exact push/PR/merged-main Actions and downloaded checksum verification passed as recorded above. Physical combined-candidate qualification remains open.
 
 ### PR #80
 
-- Base: PR #64 branch
+- Final runtime-integration head `ab3e7d82b6f3c4b38fd80d833e155aa941dee045` merged as `4ee07caf09906abdcebe8faccd95790dceb5fe88`; baseline/tooling head `e5d2f8a21a0cb32713a7c0b3796f1660abda788d` then merged through PR #84 as exact main `17a948cf1ad23a5d2a89419039897943028f9bce`.
 - Purpose: first MeshCore envelope conformance slice, retained durability, release evidence, current false-`no_card` repair
 - Predecessor hardware failures:
   - route-persistence task stack overflow;
   - post-ack WDT;
   - inserted card temporarily reported `no_card`.
-- Current head includes a narrow read-only sector-zero liveness check but still requires exact-pair proof.
+- Exact source head `092293f2311a24c9899bc9bf343ab014c4ba0411` passed the WP-01 exact-pair proof listed above. That predecessor proof remains valid for WP-01 but does not qualify the later integrated SHA.
+- Local-only full-stack reconciliation rehearsal `341a3abf4db4c52acf5859e396f25e7adb4cbab1` passed 787 full / 302 focused host tests. It is not remote exact Actions or hardware proof.
+- Exact merged-main Actions `29290978741` and downloaded 8-manifest / 78-entry verification supersede the local integration rehearsals for software proof. Physical proof remains separately exact-SHA-bound.
+
+### PR #86
+
+- Head `1c5e80be662ed64c1f97fc047d6dbfc995567d1c` merged as `9acb7d0cf498793dc0bed4854cc314a2eac2ea0c`.
+- Release-critical workflows, dependency locks, build inputs, packaging, provenance/SBOM, update/security, and RP2040 surfaces now resolve through fail-closed CODEOWNERS contracts.
+- Exact merged-main Actions `29296258019` passed 827 host plus 24 checksum-contract tests; downloaded artifacts strict-passed 2 manifests / 36 entries.
+
+### PR #87
+
+- Head `655ece5d5d33356937cad24f7e23fa58decf7ff5` merged as `14182d3f198b70ceb588d9d43312bf76d8745284`.
+- Remote Actions, ESP-IDF OCI input, Windows Python, wheel-only host requirements, and cross-platform build-input bytes are pinned and fail closed.
+- Exact push/PR Actions `29296977946` / `29296979420` each passed 834 host plus 24 checksum-contract tests and strict-verified 3 manifests / 39 entries. Exact merge ref `74db31b1a778fc8af3b304f321f36748e85c60cf` has verified parents `9acb7d0c` + `655ece5d`.
+- Explicit Actions dispatch `29296995585` executed the pinned Arduino action and all three RP2040 builds; downloaded artifacts strict-passed 9 manifests / 81 entries. This proves the CI build path only and is not physical device evidence.
+- Exact merged-main Actions `29297516173` passed, with application `bd3a071739f7773a92f3dd1869f8152c4091ff5457b50e79e66a792632cfcb64`, full flash `e3b82a8f65ee29b1914ff6ee69dd2d9bd677adbfbafabae1c0d74cf9ab328ad5`, and canonical downloaded tree `78fa7f3b4a043e9deaff6ae9a23d69833fa227845964cee612a54027147dcc88`.
 
 ### Stale feature branch
 
@@ -125,7 +161,7 @@ Confirmed risk:
 
 - behavior is duplicated across stores;
 - reboot/quiescence spans multiple tasks/locks;
-- exact current repair is not physically closed;
+- the narrow `092293f` WP-01 exact-pair repair is physically proof-banked and merged through PR #80, but not requalified on `4ee07caf`, `17a948cf`, or the eventual frozen candidate;
 - broader coalescing, power-loss, schema, reset, and time work remains open.
 
 ### RP2040 bridge
@@ -135,7 +171,7 @@ Confirmed risk:
 - `main/hal/rp2040_bridge.c` — about 1,389 lines
 - `firmware/rp2040_sd_bridge/deskos_sd_bridge/deskos_sd_bridge.ino` — about 3,093 lines
 
-The RP2040 owns physical SD. Current bridge firmware includes card-detect sampling, low-level SPI probes, FAT32 mount, directory creation, file protocol, atomic rename, diagnostics, and the new bounded sector-zero liveness verification. This subsystem must be frozen during exact-pair qualification.
+The RP2040 owns physical SD. Current bridge firmware includes card-detect sampling, low-level SPI probes, FAT32 mount, directory creation, file protocol, atomic rename, diagnostics, and the new bounded sector-zero liveness verification. The exact bridge paired with `092293f` passed WP-01; future integrated and frozen release candidates must use checksum-bound bridge provenance and receive their own applicable qualification.
 
 ### Map
 
@@ -235,7 +271,7 @@ ESP-IDF v5.5.4 is an official bug-fix release in the selected 5.5 line. The repo
 
 ## Audit limitations
 
-- No new physical flash or RF test was performed by this audit.
+- The original 2026-07-12 audit performed no new physical flash or RF test. The post-audit WP-01 reconciliation above records later exact-source physical evidence and does not rewrite the original audit boundary.
 - No claim from a predecessor SHA is treated as final release proof.
 - GitHub source, history, issues, PRs, and workflow results were inspected through the connected GitHub/API tools because a direct local clone was unavailable in the audit environment.
 - The roadmap therefore includes exact physical closure wherever source/CI cannot prove hardware behavior.

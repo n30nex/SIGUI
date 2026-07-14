@@ -11,6 +11,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   change-filter:
     runs-on: ubuntu-latest
@@ -18,7 +21,7 @@ jobs:
       include_sd_bridge: ${{ steps.scope.outputs.include_sd_bridge }}
       reason: ${{ steps.scope.outputs.reason }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
@@ -64,12 +67,43 @@ jobs:
     needs: change-filter
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
-      - name: Set up Python
-        run: python -m pip install --upgrade pip pytest pyserial Pillow
+      - name: Set up pinned Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.6"
+          architecture: x64
+          check-latest: false
+
+      - name: Verify and install hash-locked Python tools
+        shell: pwsh
+        run: |
+          $buildInputs = Get-Content -LiteralPath ".github/d1l-build-inputs.json" -Raw | ConvertFrom-Json
+          $requirementsPath = [string]$buildInputs.host_python.requirements.path
+          $expectedHash = [string]$buildInputs.host_python.requirements.sha256
+          $actualHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne $expectedHash) {
+            throw "Host requirements lock hash mismatch: expected $expectedHash, got $actualHash"
+          }
+          if ((python --version 2>&1) -notmatch '^Python 3\.13\.6$') {
+            throw "Pinned Python 3.13.6 is not active"
+          }
+          New-Item -ItemType Directory -Force -Path "artifacts/build-inputs" | Out-Null
+          Copy-Item -LiteralPath ".github/d1l-build-inputs.json" -Destination "artifacts/build-inputs/d1l-build-inputs.json"
+          Copy-Item -LiteralPath $requirementsPath -Destination "artifacts/build-inputs/ci-host-windows.txt"
+          python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath
+          python -m pip check
+          python -m pip list --format=json | Set-Content -LiteralPath "artifacts/build-inputs/ci-host-windows-installed.json" -Encoding utf8NoBOM
+          $checksumRows = Get-ChildItem -LiteralPath "artifacts/build-inputs" -File |
+            Where-Object Name -ne "SHA256SUMS.txt" |
+            Sort-Object Name |
+            ForEach-Object {
+              "{0}  ./{1}" -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+            }
+          $checksumRows | Set-Content -LiteralPath "artifacts/build-inputs/SHA256SUMS.txt" -Encoding ascii
 
       - name: Host tests
         run: python -m pytest tests -q
@@ -141,8 +175,8 @@ jobs:
           python ./tools/ui_simulator.py --scenario storage-states --out artifacts/ui-sim-storage
           python ./tools/ui_simulator.py --scenario map-ready --view map --view map_options --view map_location --view map_cache --out artifacts/ui-sim-map-ready
 
-      - name: Verify checksums
-        run: python ./scripts/verify_checksums.py artifacts
+      - name: Checksum contract tests
+        run: python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py
 
       - name: Release gate audit dry run
         run: python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json
@@ -166,7 +200,7 @@ jobs:
           $path = Join-Path $out ("d1l_host_checks_success_{0}.json" -f $env:GITHUB_SHA)
           $payload | ConvertTo-Json | Set-Content -LiteralPath $path -Encoding utf8NoBOM
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-host-artifacts
           path: artifacts/**
@@ -177,7 +211,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
@@ -185,10 +219,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p artifacts/meshcore-conformance
+          clang_package="$RUNNER_TEMP/clang-18_18.1.3-1ubuntu1_amd64.deb"
+          curl --fail --location --proto '=https' \
+            'https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-18/clang-18_18.1.3-1ubuntu1_amd64.deb' \
+            --output "$clang_package"
+          test "$(stat -c '%s' "$clang_package")" = "80040"
+          printf '%s  %s\n' \
+            '628b16701014ef7ad648380b20ea74b90dd543857f933b3e34d2fc042783de25' \
+            "$clang_package" | sha256sum --check --strict
           sudo apt-get update
-          sudo apt-get install -y clang-18
-          clang-18 --version | grep -E '^Ubuntu clang version 18\.'
-          clang++-18 --version | grep -E '^Ubuntu clang version 18\.'
+          sudo apt-get install -y "$clang_package"
+          python scripts/verify_ci_tool_inputs.py \
+            --root . \
+            --clang-package "$clang_package" \
+            --cc "$(command -v clang-18)" \
+            --cxx "$(command -v clang++-18)" \
+            --out artifacts/meshcore-conformance/toolchain-inputs.json
 
       - name: Run MeshCore wire-envelope conformance and RX fuzzing
         shell: bash
@@ -203,11 +250,12 @@ jobs:
             --cc clang-18 \
             --cxx clang++-18 \
             --commit "$GITHUB_SHA" \
+            --toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json \
             --seed 13746277 \
             --runs 100000 \
             --out "artifacts/meshcore-conformance/meshcore_conformance_${GITHUB_SHA}.json"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ always() }}
         with:
           name: d1l-meshcore-wire-conformance
@@ -220,17 +268,27 @@ jobs:
     if: needs.change-filter.outputs.include_sd_bridge == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
-      - uses: arduino/setup-arduino-cli@v2
+      - uses: arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02 # v2.0.0
         with:
-          version: 1.x
+          version: "1.5.0"
 
       - name: Install RP2040 Arduino core
         shell: bash
         run: |
+          mkdir -p artifacts/rp2040-sd-bridge
           arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
+          arduino-cli core download rp2040:rp2040@5.6.1
+          arduino_cli_version="$(arduino-cli version | sed -n 's/^arduino-cli[[:space:]]\+Version:[[:space:]]\+\([^[:space:]]\+\).*$/\1/p')"
+          test -n "$arduino_cli_version"
+          python scripts/verify_arduino_build_inputs.py \
+            --root . \
+            --arduino-data-dir "$HOME/.arduino15" \
+            --arduino-cli-version "$arduino_cli_version" \
+            --arduino-cli-path "$(command -v arduino-cli)" \
+            --out artifacts/rp2040-sd-bridge/build-inputs.json
           arduino-cli core install rp2040:rp2040@5.6.1
 
       - name: Disable unused SdFat PIO SDIO serial debug
@@ -289,7 +347,7 @@ jobs:
       - name: Verify RP2040 checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-sd-bridge
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-sd-bridge-firmware
           path: artifacts/rp2040-sd-bridge/**
@@ -310,7 +368,7 @@ jobs:
       - name: Verify RP2040 Seeed SD smoke checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-sd-smoke
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-sd-smoke-firmware
           path: artifacts/rp2040-sd-smoke/**
@@ -331,7 +389,7 @@ jobs:
       - name: Verify RP2040 official Seeed SD smoke checksums
         run: python ./scripts/verify_checksums.py artifacts/rp2040-seeed-official-sd-smoke
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: rp2040-seeed-official-sd-smoke-firmware
           path: artifacts/rp2040-seeed-official-sd-smoke/**
@@ -342,14 +400,14 @@ jobs:
     needs: [change-filter, host-checks, meshcore-conformance, rp2040-sd-bridge-build]
     if: ${{ always() && needs.change-filter.result == 'success' && needs.host-checks.result == 'success' && needs.meshcore-conformance.result == 'success' && (needs.rp2040-sd-bridge-build.result == 'success' || needs.rp2040-sd-bridge-build.result == 'skipped') }}
     runs-on: ubuntu-latest
-    container: espressif/idf:v5.5.4
+    container: espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           submodules: recursive
 
       - name: Download exact MeshCore conformance evidence
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: d1l-meshcore-wire-conformance
           path: artifacts/meshcore-conformance-input
@@ -372,25 +430,12 @@ jobs:
           import os
           import sys
 
+          from scripts.meshcore_conformance_d1l import validate_completed_report
+
           path = sys.argv[1]
           with open(path, encoding="utf-8") as stream:
               report = json.load(stream)
-          source = report.get("source_verification") or {}
-          required = {
-              "schema_version": report.get("schema_version") == 1,
-              "artifact_type": report.get("artifact_type") == "d1l_meshcore_wire_conformance",
-              "passed": report.get("passed") is True,
-              "status": report.get("status") == "pass",
-              "execution_complete": report.get("execution_complete") is True,
-              "repository_commit": source.get("repository_commit") == os.environ["GITHUB_SHA"],
-              "coverage_boundary": report.get("coverage_boundary") == "wire_envelope_only",
-              "coverage_level": report.get("coverage_level") == "wire_envelope_only",
-              "closure_ready_false": report.get("closure_ready") is False,
-              "issue_65_closure_eligible_false": report.get("issue_65_closure_eligible") is False,
-          }
-          failed = [name for name, ok in required.items() if not ok]
-          if failed:
-              raise SystemExit("MeshCore conformance validation failed: " + ", ".join(failed))
+          validate_completed_report(report, os.environ["GITHUB_SHA"])
           PY
           printf 'D1L_MESHCORE_CONFORMANCE_JSON=%s\n' "$conformance_json" >> "$GITHUB_ENV"
 
@@ -406,7 +451,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p artifacts/idf-migration
-          printf '%s\n' 'espressif/idf:v5.5.4' > artifacts/idf-migration/container-image.txt
+          printf '%s\n' 'espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b' > artifacts/idf-migration/container-image.txt
+          cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json
           (. /opt/esp/idf/export.sh >/dev/null && idf.py --version) \
             > artifacts/idf-migration/idf-version.txt 2>&1 || true
           git -C /opt/esp/idf rev-parse HEAD \
@@ -421,7 +467,7 @@ jobs:
             fi
           done
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ always() }}
         with:
           name: d1l-idf55-migration-state
@@ -445,7 +491,7 @@ jobs:
 
       - name: Download RP2040 release artifacts
         if: needs.change-filter.outputs.include_sd_bridge == 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: rp2040-*-firmware
           path: artifacts/rp2040-release-inputs
@@ -463,16 +509,16 @@ jobs:
       - name: Verify firmware and release checksums
         run: |
           python scripts/verify_checksums.py artifacts/firmware
-          python scripts/verify_checksums.py artifacts/release
+          python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-firmware-artifacts
           path: artifacts/firmware/**
           if-no-files-found: error
           retention-days: 14
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: d1l-release-package
           path: artifacts/release/**

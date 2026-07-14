@@ -25,7 +25,7 @@ VALID_STATES = (
     "merged",
     "released",
 )
-DEPENDENCY_GATES = ("merged", "proof_banked")
+DEPENDENCY_GATES = ("merged", "proof_banked", "implementation_merged")
 WORKING_DOC_STATES = ("working", "hardware_proven", "released")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 TEMPLATE_TOKEN_RE = re.compile(r"<[^>]+>")
@@ -39,9 +39,7 @@ def load_ledger(path: Path) -> dict:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise LedgerError(
-            "%s must be JSON-compatible YAML: %s" % (path, exc)
-        ) from exc
+        raise LedgerError("%s must be JSON-compatible YAML: %s" % (path, exc)) from exc
     if not isinstance(payload, dict):
         raise LedgerError("ledger root must be an object")
     return payload
@@ -91,20 +89,59 @@ def dependency_satisfied(item: dict) -> bool:
             "merged",
             "released",
         )
+    if gate == "implementation_merged":
+        return item.get("implementation_merged") is True and item.get("status") in (
+            "in_progress",
+            "host_green",
+            "actions_green",
+            "hardware_green",
+            "merged",
+            "released",
+        )
     return item.get("implementation_merged") is True and item.get("status") in (
         "merged",
         "released",
     )
 
 
-def open_blocker_ids(ledger: dict) -> set:
+def package_complete(item: dict) -> bool:
+    if item.get("dependency_gate", "merged") == "proof_banked":
+        return item.get("proof_banked") is True and item.get("status") in (
+            "hardware_green",
+            "merged",
+            "released",
+        )
+    return item.get("status") in ("merged", "released")
+
+
+def pending_work_packages(ledger: dict) -> list[str]:
+    packages = {
+        row.get("id"): row
+        for row in ledger.get("work_packages", [])
+        if isinstance(row, dict)
+    }
+    return [
+        package_id
+        for package_id in ledger.get("execution_priority", [])
+        if package_id in packages and not package_complete(packages[package_id])
+    ]
+
+
+def release_ready(ledger: dict) -> bool:
+    return not pending_work_packages(ledger) and ledger.get("release_posture") in (
+        "ready_to_tag",
+        "released",
+    )
+
+
+def open_package_blocker_ids(ledger: dict) -> set:
     return {
         row.get("id")
         for row in ledger.get("blockers", [])
         if (
             isinstance(row, dict)
             and row.get("status") == "open"
-            and row.get("blocks_execution", True) is True
+            and row.get("blocks_package", row.get("blocks_execution", True)) is True
         )
     }
 
@@ -115,16 +152,19 @@ def runnable_work_packages(ledger: dict) -> list:
         for row in ledger.get("work_packages", [])
         if isinstance(row, dict)
     }
-    blockers = open_blocker_ids(ledger)
+    blockers = open_package_blocker_ids(ledger)
     result = []
     for package_id in ledger.get("execution_priority", []):
         item = packages.get(package_id)
-        if not item or item.get("status") in ("blocked", "merged", "released"):
+        if not item or item.get("status") == "blocked" or package_complete(item):
             continue
         if any(blocker in blockers for blocker in item.get("blockers", [])):
             continue
         dependencies = [packages.get(dep) for dep in item.get("depends_on", [])]
-        if all(dependency is not None and dependency_satisfied(dependency) for dependency in dependencies):
+        if all(
+            dependency is not None and dependency_satisfied(dependency)
+            for dependency in dependencies
+        ):
             result.append(package_id)
     return result
 
@@ -173,11 +213,20 @@ def validate_ledger(ledger: dict) -> list:
             errors.append("duplicate blocker id %s" % blocker_id)
         blockers[blocker_id] = blocker
         if blocker.get("status") not in ("open", "closed"):
-            errors.append("%s has unknown blocker status %r" % (blocker_id, blocker.get("status")))
+            errors.append(
+                "%s has unknown blocker status %r" % (blocker_id, blocker.get("status"))
+            )
         if blocker.get("work_package") not in packages:
-            errors.append("%s names unknown work package %r" % (blocker_id, blocker.get("work_package")))
+            errors.append(
+                "%s names unknown work package %r"
+                % (blocker_id, blocker.get("work_package"))
+            )
         if not isinstance(blocker.get("blocks_execution"), bool):
             errors.append("%s blocks_execution must be boolean" % blocker_id)
+        if "blocks_package" in blocker and not isinstance(
+            blocker.get("blocks_package"), bool
+        ):
+            errors.append("%s blocks_package must be boolean" % blocker_id)
 
     for package_id, item in packages.items():
         status = item.get("status")
@@ -198,11 +247,15 @@ def validate_ledger(ledger: dict) -> list:
             if dependency == package_id:
                 errors.append("%s cannot depend on itself" % package_id)
             elif dependency not in packages:
-                errors.append("%s depends on unknown work package %s" % (package_id, dependency))
+                errors.append(
+                    "%s depends on unknown work package %s" % (package_id, dependency)
+                )
 
         commit = item.get("implementation_commit")
         if commit is not None and not _is_sha(commit):
-            errors.append("%s implementation_commit must be null or a full SHA" % package_id)
+            errors.append(
+                "%s implementation_commit must be null or a full SHA" % package_id
+            )
         evidence_commit = item.get("evidence_commit", commit)
         if evidence_commit is not None and not _is_sha(evidence_commit):
             errors.append("%s evidence_commit must be null or a full SHA" % package_id)
@@ -213,17 +266,29 @@ def validate_ledger(ledger: dict) -> list:
             evidence = []
         for evidence_index, row in enumerate(evidence):
             if not isinstance(row, dict):
-                errors.append("%s.evidence[%d] must be an object" % (package_id, evidence_index))
+                errors.append(
+                    "%s.evidence[%d] must be an object" % (package_id, evidence_index)
+                )
                 continue
             filename = row.get("filename")
             if not isinstance(filename, str) or not filename:
-                errors.append("%s.evidence[%d] needs a filename" % (package_id, evidence_index))
+                errors.append(
+                    "%s.evidence[%d] needs a filename" % (package_id, evidence_index)
+                )
             if not isinstance(row.get("valid"), bool):
-                errors.append("%s evidence %r valid must be boolean" % (package_id, filename))
+                errors.append(
+                    "%s evidence %r valid must be boolean" % (package_id, filename)
+                )
             row_commit = row.get("commit")
             if not _is_sha(row_commit):
-                errors.append("%s evidence %r must carry a full SHA" % (package_id, filename))
-            elif row.get("valid") is True and evidence_commit and row_commit != evidence_commit:
+                errors.append(
+                    "%s evidence %r must carry a full SHA" % (package_id, filename)
+                )
+            elif (
+                row.get("valid") is True
+                and evidence_commit
+                and row_commit != evidence_commit
+            ):
                 errors.append(
                     "%s valid evidence %s is for %s, expected %s"
                     % (package_id, filename, row_commit, evidence_commit)
@@ -232,17 +297,26 @@ def validate_ledger(ledger: dict) -> list:
         latest_receipt = item.get("latest_valid_receipt")
         if latest_receipt is not None:
             if not isinstance(latest_receipt, dict):
-                errors.append("%s latest_valid_receipt must be null or an object" % package_id)
+                errors.append(
+                    "%s latest_valid_receipt must be null or an object" % package_id
+                )
             else:
                 latest_filename = latest_receipt.get("filename")
                 latest_commit = latest_receipt.get("commit")
                 valid_pairs = {
-                    (row.get("filename"), row.get("commit")) for row in _valid_evidence(item)
+                    (row.get("filename"), row.get("commit"))
+                    for row in _valid_evidence(item)
                 }
                 if (latest_filename, latest_commit) not in valid_pairs:
-                    errors.append("%s latest_valid_receipt is not present as valid evidence" % package_id)
+                    errors.append(
+                        "%s latest_valid_receipt is not present as valid evidence"
+                        % package_id
+                    )
                 if evidence_commit and latest_commit != evidence_commit:
-                    errors.append("%s latest_valid_receipt does not match evidence_commit" % package_id)
+                    errors.append(
+                        "%s latest_valid_receipt does not match evidence_commit"
+                        % package_id
+                    )
 
         blocker_refs = item.get("blockers", [])
         if not isinstance(blocker_refs, list):
@@ -251,22 +325,40 @@ def validate_ledger(ledger: dict) -> list:
             for blocker_id in blocker_refs:
                 blocker = blockers.get(blocker_id)
                 if blocker is None:
-                    errors.append("%s references unknown blocker %s" % (package_id, blocker_id))
+                    errors.append(
+                        "%s references unknown blocker %s" % (package_id, blocker_id)
+                    )
                 elif blocker.get("work_package") != package_id:
-                    errors.append("%s references blocker %s owned by another package" % (package_id, blocker_id))
+                    errors.append(
+                        "%s references blocker %s owned by another package"
+                        % (package_id, blocker_id)
+                    )
 
         missing = missing_required_evidence(item)
         if status in ("hardware_green", "merged", "released") and missing:
-            errors.append("%s is %s but lacks evidence: %s" % (package_id, status, ", ".join(missing)))
+            errors.append(
+                "%s is %s but lacks evidence: %s"
+                % (package_id, status, ", ".join(missing))
+            )
         if item.get("proof_banked") is True:
             if status not in ("hardware_green", "merged", "released"):
-                errors.append("%s proof_banked requires hardware_green, merged, or released" % package_id)
+                errors.append(
+                    "%s proof_banked requires hardware_green, merged, or released"
+                    % package_id
+                )
             if missing:
-                errors.append("%s proof_banked but required evidence is incomplete" % package_id)
+                errors.append(
+                    "%s proof_banked but required evidence is incomplete" % package_id
+                )
         if status == "hardware_green" and item.get("proof_banked") is not True:
             errors.append("%s hardware_green requires proof_banked=true" % package_id)
-        if status in ("merged", "released") and item.get("implementation_merged") is not True:
-            errors.append("%s is %s but implementation_merged is not true" % (package_id, status))
+        if (
+            status in ("merged", "released")
+            and item.get("implementation_merged") is not True
+        ):
+            errors.append(
+                "%s is %s but implementation_merged is not true" % (package_id, status)
+            )
 
     for package_id, item in packages.items():
         if item.get("status") == "blocked":
@@ -284,6 +376,14 @@ def validate_ledger(ledger: dict) -> list:
         errors.append("execution_priority must list every work package exactly once")
     elif len(priority) != len(set(priority)):
         errors.append("execution_priority contains duplicates")
+
+    if ledger.get("release_posture") in ("ready_to_tag", "released"):
+        pending = pending_work_packages(ledger)
+        if pending:
+            errors.append(
+                "release_posture %s requires every work package complete; pending: %s"
+                % (ledger.get("release_posture"), ", ".join(pending))
+            )
 
     port_policy = ledger.get("port_policy", {})
     forbidden = {str(value).upper() for value in port_policy.get("forbidden", [])}
@@ -311,7 +411,9 @@ def validate_ledger(ledger: dict) -> list:
                 errors.append("duplicate capability id %s" % capability_id)
             seen_capabilities.add(capability_id)
             if not isinstance(item.get("runtime_available"), bool):
-                errors.append("capability %s runtime_available must be boolean" % capability_id)
+                errors.append(
+                    "capability %s runtime_available must be boolean" % capability_id
+                )
             if (
                 item.get("runtime_available") is False
                 and item.get("documentation_status") in WORKING_DOC_STATES
@@ -335,11 +437,15 @@ def validate_ledger(ledger: dict) -> list:
                 errors.append("duplicate release gate id %s" % gate_id)
             gates[gate_id] = item
             if item.get("status") not in VALID_STATES:
-                errors.append("%s has unknown status %r" % (gate_id, item.get("status")))
+                errors.append(
+                    "%s has unknown status %r" % (gate_id, item.get("status"))
+                )
         for gate_id, item in gates.items():
             for dependency in item.get("depends_on", []):
                 if dependency not in gates:
-                    errors.append("%s depends on unknown release gate %s" % (gate_id, dependency))
+                    errors.append(
+                        "%s depends on unknown release gate %s" % (gate_id, dependency)
+                    )
 
     return errors
 
@@ -359,17 +465,23 @@ def _now() -> str:
 
 def validation_report(ledger: dict, errors: list, repository_commit: str) -> dict:
     runnable = runnable_work_packages(ledger)
+    pending = pending_work_packages(ledger)
     return {
         "schema": 1,
         "artifact_type": "completion_ledger_validation",
         "generated_at": _now(),
         "repository_commit": repository_commit,
-        "ledger_main_commit": ledger.get("repository", {}).get("main", {}).get("commit"),
+        "ledger_main_commit": ledger.get("repository", {})
+        .get("main", {})
+        .get("commit"),
         "passed": not errors,
         "error_count": len(errors),
         "errors": errors,
         "highest_priority_runnable": runnable[0] if runnable else None,
         "runnable_work_packages": runnable,
+        "highest_priority_pending": pending[0] if pending else None,
+        "pending_work_packages": pending,
+        "release_ready": release_ready(ledger),
     }
 
 
@@ -378,14 +490,8 @@ def render_status(ledger: dict) -> str:
     packages = ledger["work_packages"]
     package_by_id = {item["id"]: item for item in packages}
     runnable = runnable_work_packages(ledger)
-    overall = next(
-        (
-            package_id
-            for package_id in ledger["execution_priority"]
-            if package_by_id[package_id]["status"] not in ("merged", "released")
-        ),
-        "none",
-    )
+    pending = pending_work_packages(ledger)
+    overall = pending[0] if pending else "none"
 
     lines = [
         "<!-- Generated by scripts/completion_ledger.py; edit docs/COMPLETION_LEDGER.yaml. -->",
@@ -395,11 +501,15 @@ def render_status(ledger: dict) -> str:
         "",
         "- Live `main`: `%s`" % repository["main"]["commit"],
         "- Working branch: `%s` from `%s`"
-        % (repository["working_branch"]["name"], repository["working_branch"]["base_commit"]),
+        % (
+            repository["working_branch"]["name"],
+            repository["working_branch"]["base_commit"],
+        ),
         "- Integrated candidate: `%s`" % repository["integrated_candidate"]["commit"],
         "- Pinned MeshCore: `%s`" % repository["pinned_meshcore"],
         "- Selected ESP-IDF: `%s`" % repository["selected_esp_idf"],
         "- Release posture: **%s**" % ledger["release_posture"].replace("_", " "),
+        "- Ledger release ready: **%s**" % ("yes" if release_ready(ledger) else "no"),
         "- Highest-priority pending: `%s`" % overall,
         "- Highest-priority runnable now: `%s`" % (runnable[0] if runnable else "none"),
         "",
@@ -428,21 +538,39 @@ def render_status(ledger: dict) -> str:
         actions = wp01.get("verification", {}).get("actions", {})
         checksums = wp01.get("verification", {}).get("checksums", {})
         physical = wp01.get("verification", {}).get("physical", {})
+        wp02_dependency_note = (
+            "`WP-02` is unlocked because WP-01 banked its required exact-pair "
+            "hardware proof. The implementation may land on a successor SHA while "
+            "the evidence remains explicitly bound to its proven source SHA."
+            if dependency_satisfied(wp01)
+            else "`WP-02` remains blocked until WP-01 banks its required exact-pair "
+            "hardware proof."
+        )
         lines.extend(
             [
                 "",
                 "## WP-01 exact-candidate checkpoint",
                 "",
-                "- Candidate SHA: `%s`" % wp01.get("implementation_commit"),
+                "- Merged implementation SHA: `%s`" % wp01.get("implementation_commit"),
+                "- Exact physical evidence SHA: `%s`"
+                % wp01.get("evidence_commit", wp01.get("implementation_commit")),
                 "- Execution state: **%s** (stage `%s`)"
                 % (wp01.get("status"), actions.get("stage", "unknown")),
                 "- Host suite: **%s**, %s tests"
                 % (
-                    wp01.get("verification", {}).get("host", {}).get("status", "unknown"),
-                    wp01.get("verification", {}).get("host", {}).get("passed_tests", "unknown"),
+                    wp01.get("verification", {})
+                    .get("host", {})
+                    .get("status", "unknown"),
+                    wp01.get("verification", {})
+                    .get("host", {})
+                    .get("passed_tests", "unknown"),
                 ),
                 "- Actions: push `%s` and PR `%s` are **%s**"
-                % (actions.get("push_run"), actions.get("pull_request_run"), actions.get("status")),
+                % (
+                    actions.get("push_run"),
+                    actions.get("pull_request_run"),
+                    actions.get("status"),
+                ),
                 "- Downloaded checksums: **%s** across %s manifests"
                 % (checksums.get("status"), checksums.get("manifest_count")),
                 "- Exact %s/%s pair installed: **%s**"
@@ -454,7 +582,10 @@ def render_status(ledger: dict) -> str:
                 "- Partial physical passes: %s"
                 % (", ".join(physical.get("passed", [])) or "none"),
                 "- Physical gate: **%s** — %s"
-                % (physical.get("status", "unknown"), "; ".join(physical.get("failed", [])) or "no failure recorded"),
+                % (
+                    physical.get("status", "unknown"),
+                    "; ".join(physical.get("failed", [])) or "no failure recorded",
+                ),
                 "- WDT/PANIC observed: **%s**"
                 % ("yes" if physical.get("wdt_or_panic_observed") else "no"),
                 "- Safety flags: `public_rf_tx=%s`, `formats_sd=%s`"
@@ -462,13 +593,12 @@ def render_status(ledger: dict) -> str:
                     str(physical.get("public_rf_tx")).lower(),
                     str(physical.get("formats_sd")).lower(),
                 ),
-                "- Physical proof banked: **%s**" % ("yes" if wp01.get("proof_banked") else "no"),
+                "- Physical proof banked: **%s**"
+                % ("yes" if wp01.get("proof_banked") else "no"),
                 "- Merge state: **%s**"
                 % ("merged" if wp01.get("implementation_merged") else "not merged"),
                 "",
-                "`WP-02` remains blocked until WP-01 reaches `hardware_green` with "
-                "`proof_banked=true`. That proof satisfies WP-02's dependency even though "
-                "PR #80 is merged by WP-02 itself; WP-01 is not marked `merged` early.",
+                wp02_dependency_note,
             ]
         )
 
@@ -513,8 +643,7 @@ def render_status(ledger: dict) -> str:
             "",
             "- Firmware builds run only in GitHub Actions; downloaded artifacts require checksum verification.",
             "- `D1L_PORT`, `RP2040_PORT`, and `MESH_PEER_PORT` have no operational defaults.",
-            "- Forbidden ports: %s."
-            % ", ".join(ledger["port_policy"]["forbidden"]),
+            "- Forbidden ports: %s." % ", ".join(ledger["port_policy"]["forbidden"]),
             "- SD cards are never formatted on-device.",
             "- Simulation, dry-run, source review, and predecessor-SHA evidence cannot close a physical gate.",
             "",
@@ -555,15 +684,24 @@ def main() -> int:
         return 0
 
     if args.check_generated:
-        actual_status = status_path.read_text(encoding="utf-8") if status_path.exists() else None
+        actual_status = (
+            status_path.read_text(encoding="utf-8") if status_path.exists() else None
+        )
         if expected_status is None or actual_status != expected_status:
-            errors.append("%s is stale; run completion_ledger.py generate" % status_path)
+            errors.append(
+                "%s is stale; run completion_ledger.py generate" % status_path
+            )
 
     root = Path(__file__).resolve().parents[1]
     repository_commit = _git_head(root)
     report = validation_report(ledger, errors, repository_commit)
-    out_path = Path(args.out) if args.out else root / "artifacts" / "completion-ledger" / (
-        "completion_ledger_validation_%s.json" % repository_commit
+    out_path = (
+        Path(args.out)
+        if args.out
+        else root
+        / "artifacts"
+        / "completion-ledger"
+        / ("completion_ledger_validation_%s.json" % repository_commit)
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(

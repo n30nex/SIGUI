@@ -1,7 +1,23 @@
 import hashlib
+import os
+import sys
 from pathlib import Path
 
-from scripts.verify_checksums import verify_sha256_file, verify_sha256_manifest
+import pytest
+
+from scripts.verify_checksums import (
+    main as verify_checksums_main,
+    verify_checksum_tree,
+    verify_sha256_file,
+    verify_sha256_manifest,
+)
+
+
+def symlink_or_skip(target: Path, link: Path, *, target_is_directory: bool = False) -> None:
+    try:
+        os.symlink(target, link, target_is_directory=target_is_directory)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
 
 
 def test_verify_checksum_file(tmp_path: Path):
@@ -114,6 +130,84 @@ def test_verify_sha256_manifest_requires_nested_manifests_in_root_coverage(tmp_p
     )
     assert verify_sha256_manifest(root_manifest)
     assert verify_sha256_manifest(nested_manifest)
+    assert verify_checksum_tree(tmp_path)
+
+
+def test_verify_checksum_tree_requires_valid_root_manifest(
+    tmp_path: Path, monkeypatch
+):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert not verify_checksum_tree(empty)
+    assert not verify_checksum_tree(tmp_path / "missing")
+
+    nested_only = tmp_path / "nested-only"
+    nested = nested_only / "nested"
+    nested.mkdir(parents=True)
+    artifact = nested / "firmware.bin"
+    artifact.write_bytes(b"firmware")
+    (nested / "SHA256SUMS.txt").write_text(
+        f"{hashlib.sha256(b'firmware').hexdigest()}  ./firmware.bin\n",
+        encoding="ascii",
+    )
+    (nested_only / "uncovered.bin").write_bytes(b"uncovered")
+    assert not verify_checksum_tree(nested_only)
+    monkeypatch.setattr(sys, "argv", ["verify_checksums.py", str(nested_only)])
+    assert verify_checksums_main() == 1
+
+
+def test_verify_sha256_manifest_rejects_internal_symlink_alias_and_control(tmp_path: Path):
+    alias_root = tmp_path / "alias"
+    alias_root.mkdir()
+    real = alias_root / "real.bin"
+    real.write_bytes(b"payload")
+    alias = alias_root / "alias.bin"
+    symlink_or_skip(Path("real.bin"), alias)
+    manifest = alias_root / "SHA256SUMS.txt"
+    manifest.write_text(
+        f"{hashlib.sha256(b'payload').hexdigest()}  ./alias.bin\n",
+        encoding="ascii",
+    )
+    assert not verify_sha256_manifest(manifest)
+
+    control_root = tmp_path / "control"
+    control_root.mkdir()
+    artifact = control_root / "firmware.bin"
+    artifact.write_bytes(b"firmware")
+    real_control = tmp_path / "real-SHA256SUMS.txt"
+    real_control.write_text(
+        f"{hashlib.sha256(b'firmware').hexdigest()}  ./firmware.bin\n",
+        encoding="ascii",
+    )
+    symlink_or_skip(real_control, control_root / "SHA256SUMS.txt")
+    assert not verify_sha256_manifest(control_root / "SHA256SUMS.txt")
+    assert not verify_checksum_tree(control_root)
+
+
+def test_verify_sha256_manifest_rejects_external_symlink_components(tmp_path: Path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "firmware.bin").write_bytes(b"outside")
+
+    file_root = tmp_path / "file-link"
+    file_root.mkdir()
+    symlink_or_skip(outside / "firmware.bin", file_root / "firmware.bin")
+    file_manifest = file_root / "SHA256SUMS.txt"
+    file_manifest.write_text(
+        f"{hashlib.sha256(b'outside').hexdigest()}  ./firmware.bin\n",
+        encoding="ascii",
+    )
+    assert not verify_sha256_manifest(file_manifest)
+
+    directory_root = tmp_path / "directory-link"
+    directory_root.mkdir()
+    symlink_or_skip(outside, directory_root / "linked", target_is_directory=True)
+    directory_manifest = directory_root / "SHA256SUMS.txt"
+    directory_manifest.write_text(
+        f"{hashlib.sha256(b'outside').hexdigest()}  ./linked/firmware.bin\n",
+        encoding="ascii",
+    )
+    assert not verify_sha256_manifest(directory_manifest)
 
 
 def test_checksum_verifier_stays_python38_compatible():

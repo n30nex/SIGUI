@@ -3,6 +3,20 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CHECKOUT_ACTION_PIN = "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+DOWNLOAD_ARTIFACT_ACTION_PIN = (
+    "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
+)
+ARDUINO_CLI_ACTION_PIN = (
+    "arduino/setup-arduino-cli@81d310742121c928ea9c8bbd407b4217b432ae02"
+)
+SETUP_PYTHON_ACTION_PIN = (
+    "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1"
+)
+ESP_IDF_CONTAINER_PIN = (
+    "espressif/idf:v5.5.4@"
+    "sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b"
+)
 
 
 def workflow_text() -> str:
@@ -36,6 +50,15 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
 
     sd_gate = "if: needs.change-filter.outputs.include_sd_bridge == 'true'"
     assert "needs: change-filter" in host
+    assert SETUP_PYTHON_ACTION_PIN in host
+    assert 'python-version: "3.13.6"' in host
+    assert "architecture: x64" in host
+    assert "check-latest: false" in host
+    assert "python -m pip install --disable-pip-version-check --require-hashes -r $requirementsPath" in host
+    assert "python -m pip install --upgrade" not in host
+    assert "python -m pip check" in host
+    assert "artifacts/build-inputs/ci-host-windows-installed.json" in host
+    assert "artifacts/build-inputs/SHA256SUMS.txt" in host
     assert "python -m pytest tests -q" in host
     assert "python ./tools/ui_simulator.py --out artifacts/ui-sim" in host
     assert "python ./tools/ui_simulator.py --scenario large-mesh --out artifacts/ui-sim-large" in host
@@ -57,7 +80,8 @@ def test_ci_host_checks_are_host_only_for_sd_bridge():
     assert "python ./scripts/rp2040_sd_bridge_preflight_d1l.py --dry-run --artifact-dir artifacts/rp2040-sd-bridge" in host
     assert "python ./scripts/sd_boot_prepare_acceptance_d1l.py --dry-run --scenario all" in host
     assert host.count(sd_gate) >= 9
-    assert "python ./scripts/verify_checksums.py artifacts" in host
+    assert "python -m pytest -q tests/test_checksum_manifest.py tests/test_package_release_d1l.py" in host
+    assert "python ./scripts/verify_checksums.py artifacts" not in host
     assert "python ./scripts/release_gate_audit_d1l.py --out artifacts/release-gate/d1l-release-gate-audit-ci.json" in host
 
 
@@ -81,7 +105,7 @@ def test_ci_builds_rp2040_sd_bridge_only_in_actions_with_checksums():
 
     assert "needs: change-filter" in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
-    assert "arduino/setup-arduino-cli@v2" in job
+    assert ARDUINO_CLI_ACTION_PIN in job
     assert "package_rp2040_index.json" in job
     assert "arduino-cli core install rp2040:rp2040@5.6.1" in job
     assert not re.search(r"core install rp2040:rp2040(?:\s|$)", job)
@@ -141,17 +165,26 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
 
     assert "runs-on: ubuntu-24.04" in job
     assert "timeout-minutes: 10" in job
-    assert "actions/checkout@v7" in job
+    assert CHECKOUT_ACTION_PIN in job
     assert "submodules: recursive" in job
-    assert "sudo apt-get install -y clang-18" in job
-    assert "clang-18 --version" in job
-    assert "clang++-18 --version" in job
+    assert "clang-18_18.1.3-1ubuntu1_amd64.deb" in job
+    assert "https://archive.ubuntu.com/ubuntu/pool/universe/l/llvm-toolchain-18/" in job
+    assert "628b16701014ef7ad648380b20ea74b90dd543857f933b3e34d2fc042783de25" in job
+    assert "sha256sum --check --strict" in job
+    assert 'sudo apt-get install -y "$clang_package"' in job
+    assert "python scripts/verify_ci_tool_inputs.py" in job
+    assert '--cc "$(command -v clang-18)"' in job
+    assert '--cxx "$(command -v clang++-18)"' in job
+    assert job.index("sha256sum --check --strict") < job.index(
+        'sudo apt-get install -y "$clang_package"'
+    ) < job.index("python scripts/verify_ci_tool_inputs.py")
     assert "ASAN_OPTIONS: halt_on_error=1:abort_on_error=1:detect_leaks=1" in job
     assert 'D1L_MESHCORE_CONFORMANCE_CI: "1"' in job
     assert "UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1" in job
     assert "python ./scripts/meshcore_conformance_d1l.py" in job
     assert "--cc clang-18" in job
     assert "--cxx clang++-18" in job
+    assert "--toolchain-receipt artifacts/meshcore-conformance/toolchain-inputs.json" in job
     assert '--commit "$GITHUB_SHA"' in job
     assert "--seed 13746277" in job
     assert "--runs 100000" in job
@@ -169,15 +202,12 @@ def test_ci_gates_firmware_on_pinned_meshcore_wire_conformance():
     assert "needs.host-checks.result == 'success'" in firmware
     assert "needs.meshcore-conformance.result == 'success'" in firmware
     assert "name: Download exact MeshCore conformance evidence" in firmware
-    assert "uses: actions/download-artifact@v7" in firmware
+    assert f"uses: {DOWNLOAD_ARTIFACT_ACTION_PIN}" in firmware
     assert "name: d1l-meshcore-wire-conformance" in firmware
     assert "path: artifacts/meshcore-conformance-input" in firmware
     assert "name: Verify exact MeshCore conformance evidence" in firmware
-    assert 'source.get("repository_commit") == os.environ["GITHUB_SHA"]' in firmware
-    assert 'report.get("coverage_boundary") == "wire_envelope_only"' in firmware
-    assert 'report.get("coverage_level") == "wire_envelope_only"' in firmware
-    assert 'report.get("closure_ready") is False' in firmware
-    assert 'report.get("issue_65_closure_eligible") is False' in firmware
+    assert "from scripts.meshcore_conformance_d1l import validate_completed_report" in firmware
+    assert 'validate_completed_report(report, os.environ["GITHUB_SHA"])' in firmware
     assert "D1L_MESHCORE_CONFORMANCE_JSON=" in firmware
 
 
@@ -188,7 +218,9 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert "needs.host-checks.result == 'success'" in job
     assert "needs.meshcore-conformance.result == 'success'" in job
     assert "needs.rp2040-sd-bridge-build.result == 'skipped'" in job
-    assert job.count("container: espressif/idf:v5.5.4") == 1
+    assert job.count(f"container: {ESP_IDF_CONTAINER_PIN}") == 1
+    assert f"'{ESP_IDF_CONTAINER_PIN}' > artifacts/idf-migration/container-image.txt" in job
+    assert "cp .github/d1l-build-inputs.json artifacts/idf-migration/build-inputs.json" in job
     assert "espressif/idf:release-v5.1" not in job
     assert not re.search(r"container:\s*espressif/idf:(?:latest|release-v)", job)
     assert "idf.py build" in job
@@ -209,7 +241,7 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
         < job.index("name: Collect firmware artifacts")
         < job.index("name: Package D1L release")
     )
-    assert "actions/download-artifact@v7" in job
+    assert DOWNLOAD_ARTIFACT_ACTION_PIN in job
     assert "if: needs.change-filter.outputs.include_sd_bridge == 'true'" in job
     assert "pattern: rp2040-*-firmware" in job
     assert "path: artifacts/rp2040-release-inputs" in job
@@ -219,7 +251,8 @@ def test_ci_verifies_firmware_and_release_checksums_after_packaging():
     assert 'python scripts/package_release_d1l.py "${package_args[@]}"' in job
     assert "--rp2040-artifact-root artifacts/rp2040-release-inputs" in job
     assert "python scripts/verify_checksums.py artifacts/firmware" in job
-    assert "python scripts/verify_checksums.py artifacts/release" in job
+    assert 'python scripts/verify_checksums.py "artifacts/release/d1l-release-${GITHUB_SHA}"' in job
+    assert "python scripts/verify_checksums.py artifacts/release\n" not in job
     assert "test -f sdkconfig" in job
     assert "test -f build/config/sdkconfig.json" in job
     assert "cp --parents sdkconfig build/config/sdkconfig.json artifacts/firmware/" in job

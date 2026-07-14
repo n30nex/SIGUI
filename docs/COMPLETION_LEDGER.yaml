@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_at": "2026-07-12T21:07:19Z",
+  "snapshot_at": "2026-07-14T02:33:46Z",
   "project": "SIGUI / MeshCore DeskOS D1L",
   "release_posture": "not_ready_to_tag",
   "source_documents": [
@@ -12,75 +12,339 @@
   "repository": {
     "name": "n30nex/SIGUI",
     "main": {
-      "commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
-      "actions_run": "29208908642",
+      "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+      "actions_run": "29300795502",
       "actions_status": "success",
-      "note": "WP-00 live completion ledger is merged through PR #81; the implementation stack is not."
+      "host_tests_passed": 891,
+      "checksum_contract_tests_passed": 28,
+      "checksum_status": "strict_pass_after_download",
+      "checksum_manifests_total": 3,
+      "checksum_manifests_verified": 3,
+      "checksum_entries_present": 44,
+      "firmware_manifest_sha256": "6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb",
+      "build_inputs_manifest_sha256": "521cfebb807cbf2ba214ee7309ebc277731995e404181246b584db2e6e120233",
+      "release_manifest_sha256": "499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18",
+      "release_package_manifest_json_sha256": "8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59",
+      "application_sha256": "a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98",
+      "full_flash_sha256": "1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232",
+      "rp2040_bridge_uf2_sha256": null,
+      "downloaded_tree_file_count": 214,
+      "downloaded_tree_total_bytes": 72120370,
+      "downloaded_tree_sha256": "f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738",
+      "host_success_marker_sha256": "dd861b665cb6d0ea42aa54aadff8b293f64d0617c059f04790fb98b318a45e84",
+      "release_audit_sha256": "9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d",
+      "release_audit_p0_failed_count": 32,
+      "release_audit_failed_count": 34,
+      "sbom_sha256": "78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037",
+      "provenance_sha256": "7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c",
+      "completion_ledger_validation_sha256": "9437cda36d49e6d3746da266b34296668c6870cf01cbc63e515a5968e2ed6f07",
+      "wp03_reproducibility_aggregate_sha256": "ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264",
+      "checksum_failure": null,
+      "note": "PR #90 merged the exact-SHA package inventory, immutable tool-byte checks, conformance evidence binding, and independent rebuild comparator. Exact merged-main Actions 29300795502 passed 891 host and 28 checksum-contract tests; downloaded verification passed 3 manifests / 44 entries across 214 files. Full-release dispatches 29300805114 and 29300806682 each passed 9 manifests / 89 entries across 257 files, and exact detached-main comparison is reproducible. WP-03 is merged and proof-banked; release readiness remains false because 32 P0 / 34 overall gates remain.",
+      "previous_artifact_integrity_failure": {
+        "commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33",
+        "actions_run": "29286754864",
+        "host_tests_passed": 423,
+        "checksum_manifests_total": 8,
+        "checksum_manifests_verified": 7,
+        "checksum_entries_present": 73,
+        "firmware_manifest_sha256": "0d841cf10185e445afa87d54e625f64b9706b47b181a3e8508157f31e9e5c5f4",
+        "release_manifest_sha256": "2a23bdd2ee116c77123b2209b2f478cdec3db50ccf78a83ae0d31501ca0bc2c1",
+        "failure": "The top-level release manifest omitted the three copied nested RP2040 SHA256SUMS.txt files. All listed file hashes and all seven other manifests passed, but exact recursive coverage failed."
+      }
     },
     "working_branch": {
-      "name": "codex/wp00-postmerge-ledger",
-      "base_commit": "157c9670eb43a0119280f1e8119d9584b06dcfbf",
-      "pull_request": 82,
-      "merged_pull_request": 81
+      "name": "codex/wp03-completion-receipt",
+      "base_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+      "pull_request": null,
+      "head_commit": "47c52a303acc7d70565ed7d7329821afa56f9ae1",
+      "merged_pull_request": 90,
+      "status": "recording_merged_wp03_proof"
+    },
+    "merged_pull_request_receipts": {
+      "64": {
+        "head_commit": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+        "pull_request_merge_test_commit": "82b086baf534dade4407fb62210a3cb5218e8986",
+        "merge_commit": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
+        "actions_push_run": "29289247092",
+        "actions_push_status": "success",
+        "actions_push_checksum_manifests_verified": 2,
+        "actions_push_checksum_entries_verified": 36,
+        "actions_pull_request_run": "29289250956",
+        "actions_pull_request_status": "success",
+        "actions_pull_request_checksum_manifests_verified": 8,
+        "actions_pull_request_checksum_entries_verified": 75,
+        "actions_pull_request_root_manifest_sha256": "0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379",
+        "merged_main_actions_run": "29289683188",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 582,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 8,
+        "merged_main_checksum_entries_verified": 75,
+        "merged_main_root_manifest_sha256": "23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed",
+        "merged_main_application_sha256": "e91168c654a478e6d5019d6603e869c6d50d162641aa2049d430de9e689d700a",
+        "merged_main_full_flash_sha256": "785b12fdebf584e5a980164bf76c18f415914d605806e2faa68bb9329bea936e"
+      },
+      "80": {
+        "head_commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+        "merge_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+        "merged_main_actions_run": "29290978741",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 795,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 8,
+        "merged_main_checksum_entries_verified": 78,
+        "merged_main_firmware_manifest_sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+        "merged_main_root_manifest_sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+        "merged_main_application_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+        "merged_main_full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd"
+      },
+      "84": {
+        "head_commit": "e5d2f8a21a0cb32713a7c0b3796f1660abda788d",
+        "pull_request_merge_test_commit": "a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8",
+        "merge_commit": "17a948cf1ad23a5d2a89419039897943028f9bce",
+        "actions_push_run": "29294131381",
+        "actions_pull_request_run": "29294132563",
+        "actions_push_status": "success",
+        "actions_pull_request_status": "success",
+        "actions_push_checksum_manifests_verified": 2,
+        "actions_push_checksum_entries_verified": 36,
+        "actions_pull_request_checksum_manifests_verified": 2,
+        "actions_pull_request_checksum_entries_verified": 36,
+        "merged_main_actions_run": "29294553135",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 823,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 2,
+        "merged_main_checksum_entries_verified": 36,
+        "merged_main_firmware_manifest_sha256": "67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8",
+        "merged_main_root_manifest_sha256": "74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a",
+        "merged_main_application_sha256": "fa3b6ac29f5fdc8beb604bccbc3abe19456543dbda1ae0563a3d5c98bfe3441c",
+        "merged_main_full_flash_sha256": "e787b63383af7b49da147a8d45bc8af54fa88801a1dd400ba45d8956ef128e1c",
+        "rp2040_job_status": "skipped_no_relevant_change"
+      },
+      "85": {
+        "head_commit": "0beea8365a721a9b9269ce6c55356b240c707e9f",
+        "merge_commit": "20c8c3b4b25f66fc803bb3c9c8d2816306a24cd4",
+        "actions_push_run": "29295456573",
+        "actions_pull_request_run": "29295467998",
+        "merged_main_actions_run": "29295818602",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 823,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 2,
+        "merged_main_checksum_entries_verified": 36,
+        "merged_main_firmware_manifest_sha256": "1a347e8bb9d8ca8abfb6f9c0e3bbf4bef193f270ce8f29f30f3f600eb2260b30",
+        "merged_main_root_manifest_sha256": "79d8d23e0c2e05a0ce3d81df815d9a2c0b1cf6ea64b801a14ff04ddb9eb65b4f"
+      },
+      "86": {
+        "head_commit": "1c5e80be662ed64c1f97fc047d6dbfc995567d1c",
+        "pull_request_merge_test_commit": "9585c277ae90cee37672c982ffdb070e8c3e96e5",
+        "merge_commit": "9acb7d0cf498793dc0bed4854cc314a2eac2ea0c",
+        "actions_push_run": "29295853763",
+        "actions_pull_request_run": "29295855596",
+        "merged_main_actions_run": "29296258019",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 827,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 2,
+        "merged_main_checksum_entries_verified": 36,
+        "merged_main_firmware_manifest_sha256": "a4b140f5a81937265ebea745837afabba9cc03e8ec9ce4c06ca41f338c2af425",
+        "merged_main_root_manifest_sha256": "bc25f6cf88c1bfeada11317cb1da778a05e65b70a380df2f0d2947babab3697c"
+      },
+      "87": {
+        "head_commit": "655ece5d5d33356937cad24f7e23fa58decf7ff5",
+        "pull_request_merge_test_commit": "74db31b1a778fc8af3b304f321f36748e85c60cf",
+        "merge_commit": "14182d3f198b70ceb588d9d43312bf76d8745284",
+        "actions_push_run": "29296977946",
+        "actions_pull_request_run": "29296979420",
+        "actions_rp2040_dispatch_run": "29296995585",
+        "merged_main_actions_run": "29297516173",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 834,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 3,
+        "merged_main_checksum_entries_verified": 39,
+        "merged_main_firmware_manifest_sha256": "e702d912a508ebccde5a5c426f0f31ab349e362175826b307dc4a3a491efe014",
+        "merged_main_build_inputs_manifest_sha256": "cf3c91f97d7bbd42ae1ee6c19f8d96934ea34a689308b4de05f9edbdd32bbdbe",
+        "merged_main_root_manifest_sha256": "0816f442bc9a6456009bc92dad0ee1528219eddb5c62eb6d65c8d21b34b54cc4",
+        "merged_main_application_sha256": "bd3a071739f7773a92f3dd1869f8152c4091ff5457b50e79e66a792632cfcb64",
+        "merged_main_full_flash_sha256": "e3b82a8f65ee29b1914ff6ee69dd2d9bd677adbfbafabae1c0d74cf9ab328ad5",
+        "rp2040_dispatch_checksum_manifests_verified": 9,
+        "rp2040_dispatch_checksum_entries_verified": 81,
+        "rp2040_bridge_uf2_sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096"
+      },
+      "88": {
+        "head_commit": "8f90ad74da443c79a79b458aac313955860f3bf5",
+        "merge_commit": "b130eb1026e8d14e4e6878bd819b5ee7f0da2165",
+        "actions_push_run": "29298231285",
+        "actions_pull_request_run": "29298232852",
+        "merged_main_actions_run": "29298723442",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 839,
+        "merged_main_checksum_contract_tests_passed": 24,
+        "merged_main_checksum_manifests_verified": 3,
+        "merged_main_checksum_entries_verified": 40,
+        "merged_main_firmware_manifest_sha256": "6cac3115f0cc0bd703ba7263b6714c03d112dab255cd6c27f028f33aa26c61f4",
+        "merged_main_root_manifest_sha256": "b72d0516f9d584b23c1997cf050c554fb1108be07209b9db8af6bf8a58506990",
+        "merged_main_release_package_manifest_json_sha256": "e14bef4ec87a40b5806d1a60ee0c3c0b23a720856408a7e4062ce1b02a2ef288",
+        "merged_main_application_sha256": "5455e29ee1a431c253f726bac8652072d4d1b890d234935154b25bb31ed9b698",
+        "merged_main_full_flash_sha256": "d90f10d75cbb87da5b4d94eaa519db194dedd8f71f62164a2546cfb83cb710e7",
+        "merged_main_sbom_sha256": "0e0c84af33dc6f0e9a91f3b2eb2962cd78a577f227e1ed01095257572e988a88"
+      },
+      "89": {
+        "head_commit": "de7eee7ecf8d29c110830f1ed813b71b4d770ebd",
+        "merge_commit": "5a4e7f2777b306ad4d7b62311fd79296d7d45747",
+        "actions_push_run": "29298861311",
+        "actions_pull_request_run": "29298862946",
+        "merged_main_actions_run": "29299321770",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 845,
+        "merged_main_checksum_contract_tests_passed": 25,
+        "merged_main_checksum_manifests_verified": 3,
+        "merged_main_checksum_entries_verified": 41,
+        "merged_main_downloaded_tree_file_count": 210,
+        "merged_main_downloaded_tree_total_bytes": 72394571,
+        "merged_main_downloaded_tree_sha256": "d192413aadb9ac6a1fb9f858c3071fa99178b20d0d51a40e2d0c382e9ca50ff1",
+        "merged_main_firmware_manifest_sha256": "39c9c26811076f1564fbc880b180406578618c2138830a8213c233cd3ad89531",
+        "merged_main_root_manifest_sha256": "92ed2ddd8d741eeadd1b37dd5790c179453a361ad97226fe16b3d503a75e2d6f",
+        "merged_main_release_package_manifest_json_sha256": "68e714b5daf943cca8edb212cc9e2e8c71c0981531f5c865bb18a9c08c6cdc65",
+        "merged_main_application_sha256": "63c25353ec028e03766c613a0167b81a1c145faf8c35a8d30a0338b1c230f5dc",
+        "merged_main_full_flash_sha256": "aa95367388ee5fc1ed7c2c0ed0d51f3204e0a25cd4a2f1c3741a6280eb8d4270",
+        "merged_main_host_success_marker_sha256": "f4c8fedccdf71a519d2d51f43af50ff809f76bd51c401606200ae00a467a7b4f",
+        "merged_main_release_audit_sha256": "3883981efd4add53249b149fbbcb0129f5d63d212de9df71f1a9852b82fac105",
+        "merged_main_release_audit_p0_failed_count": 31,
+        "merged_main_release_audit_failed_count": 33,
+        "merged_main_sbom_sha256": "565e9144f038e07061d035fc51daf8ca80341d8dc248371a2e4369a8f7e2b065",
+        "merged_main_provenance_sha256": "b3763f05820d5ed361bb043f3eee7d9acc40200abfa6b6a0951127338b683d73"
+      },
+      "90": {
+        "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+        "merge_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+        "merge_parents": ["5a4e7f2777b306ad4d7b62311fd79296d7d45747", "f731e465bb5dc31cb1a8a88a82dafda1e3c38577"],
+        "merge_tree": "3439772dd333c506a9ebded9e5b695ea88113664",
+        "merged_main_actions_run": "29300795502",
+        "merged_main_actions_status": "success",
+        "merged_main_host_tests_passed": 891,
+        "merged_main_checksum_contract_tests_passed": 28,
+        "merged_main_checksum_manifests_verified": 3,
+        "merged_main_checksum_entries_verified": 44,
+        "merged_main_downloaded_tree_file_count": 214,
+        "merged_main_downloaded_tree_total_bytes": 72120370,
+        "merged_main_downloaded_tree_sha256": "f9761f28bf4b5fd526ec2fd1146d196da9d7299895eb488a38d4b02cb16b8738",
+        "merged_main_firmware_manifest_sha256": "6b2c9bea1ae6221bacd00eaa24ec6c1ed167f11bafe0b57368f861b87c6808eb",
+        "merged_main_root_manifest_sha256": "499d8cec2784a7d08f76e888e675ee17a135324c9de06e500fd878c1dedfec18",
+        "merged_main_release_package_manifest_json_sha256": "8323d0865afb8297718af8c8eaf8633e789670a162ffadc7a2a9ed1f3abb0a59",
+        "merged_main_application_sha256": "a0234efd0d132e833968eeeb69fcb6f00b70bc67df8a557e563c626169253e98",
+        "merged_main_full_flash_sha256": "1ab37593e8c2d4d231e25dd5720ad0ef6b5d59041c25069033e9b3241a0b2232",
+        "merged_main_host_success_marker_sha256": "dd861b665cb6d0ea42aa54aadff8b293f64d0617c059f04790fb98b318a45e84",
+        "merged_main_release_audit_sha256": "9e32893d4478d9f13d00512631058a6a0910ab6338e35c354416654da22dc96d",
+        "merged_main_release_audit_p0_failed_count": 32,
+        "merged_main_release_audit_failed_count": 34,
+        "merged_main_sbom_sha256": "78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037",
+        "merged_main_provenance_sha256": "7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c",
+        "full_release_dispatch_a": "29300805114",
+        "full_release_dispatch_b": "29300806682",
+        "full_release_checksum_manifests_verified_each": 9,
+        "full_release_checksum_entries_verified_each": 89,
+        "full_release_downloaded_tree_file_count_each": 257,
+        "full_release_sbom_sha256": "827c19cbd3362a82a1fe5aaaee150bffb995f0302254072e09f5e5a358e17373",
+        "full_release_sbom_package_count": 5,
+        "full_release_sbom_file_count": 64,
+        "full_release_provenance_sha256": "8cfa73a5fd4acae4a44d1dabc35af8e493b3a79e86b097a2beebd05314fb521b",
+        "full_release_provenance_subject_count": 41,
+        "full_release_provenance_material_count": 27,
+        "comparator_receipt_sha256": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+        "portable_aggregate_path": "docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json",
+        "portable_aggregate_sha256": "ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264",
+        "comparator_status": "pass",
+        "reproducible": true,
+        "proof_banked": true
+      }
+    },
+    "pull_request_receipts": {
+      "90": {
+        "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+        "base_commit": "5a4e7f2777b306ad4d7b62311fd79296d7d45747",
+        "merge_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+        "status": "merged_proof_banked",
+        "preserved_negative_comparator": {
+          "receipt_path": "F:/SIGUI-evidence/actions/pr90-8b7b2c03-full-release-comparison-29299613481-29299614693.json",
+          "sha256": "a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e",
+          "source_commit": "8b7b2c0368216bfe2f945d93323384ff6a10d7db",
+          "run_a": "29299613481",
+          "run_b": "29299614693",
+          "reproducible": false,
+          "error_code": "invalid_sbom",
+          "root_cause": "WindowsPath case-folded ordering differed from canonical POSIX package ordering while the final file records matched.",
+          "closure_eligible": false
+        },
+        "fix_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+        "fix": "Sort SBOM package inputs by repository-relative POSIX path.",
+        "replacement_comparator": {
+          "receipt_path": "F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json",
+          "sha256": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+          "source_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "run_a": "29300805114",
+          "run_b": "29300806682",
+          "reproducible": true,
+          "status": "pass",
+          "failure_count": 0,
+          "comparison_checks_passed": 8,
+          "file_count": 45,
+          "stable_payload_count": 43,
+          "stable_payload_fingerprint": "4cf8a96173022af1fa88c68b053e1eb1e73e67abf96a1f9b9a401a250aa70f84",
+          "input_fingerprint": "021028fa268a7543a1a85ea73ac1a7e893e75fa8eb721cc22faf811153036268",
+          "toolchain_fingerprint": "7730a6766362d34e20bd07703eef7abdb66a265318135edd866fafc7d1e8452a",
+          "normalized_manifest_sha256": "05132f0d29dda659b235080b8152052d54947162070b924980ee15b26c72a1c1",
+          "closure_eligible": true
+        },
+        "non_product_anomalies": {
+          "stale_github_check_run": {
+            "check_run_id": "86982414954",
+            "actions_run": "29300286530",
+            "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+            "name": "change-filter",
+            "api_status": "in_progress",
+            "conclusion": "success",
+            "completed_at": "2026-07-14T02:07:35Z",
+            "product_failure": false
+          },
+          "operator_context_source_guard": {
+            "receipt_path": "F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-29300805114-29300806682.json",
+            "sha256": "8bfc4d8cf586c1b5c1cf4d78c9cd734275305cc3185f0357cf619a4ad4050f6e",
+            "error_code": "source_sha_mismatch",
+            "cause": "Comparator was first invoked outside the detached exact-e79 worktree.",
+            "superseded_by": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+            "product_failure": false
+          }
+        },
+        "closure_eligible": true
+      }
     },
     "audit_snapshot": {
       "main_commit": "5b5dfaa0592347497df1a2f77f572c6d49933c6a",
       "integrated_candidate": "07322ed4c700866106ecca6c31ff70ea3a3d4ede"
     },
     "integrated_candidate": {
-      "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-      "branch": "codex/d1l-retained-merge",
-      "actions_push_run": "29200803879",
-      "actions_pull_request_run": "29200804762"
+      "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+      "branch": "main",
+      "actions_run": "29300795502",
+      "status": "software_integrated_physical_qualification_open"
     },
     "pinned_meshcore": "e8d3c53ba1ea863937081cd0caad759b832f3028",
     "selected_esp_idf": "5.5.4",
-    "main_pre_stack_esp_idf": "5.1.x"
+    "main_esp_idf": "5.5.4"
   },
-  "active_pull_requests": [
-    {
-      "number": 62,
-      "title": "Map: built-in bounded OpenStreetMap current view",
-      "base": "main",
-      "head": "codex/d1l-ui-map-hierarchy",
-      "head_commit": "f37f6a78011a414774aaa5fff8bca0dec8a4a5a6",
-      "state": "open",
-      "draft": true,
-      "checks": "success",
-      "mergeable": true
-    },
-    {
-      "number": 64,
-      "title": "Build: qualify D1L Map/Wi-Fi on ESP-IDF 5.5.4",
-      "base": "codex/d1l-ui-map-hierarchy",
-      "head": "codex/d1l-idf55-migration",
-      "head_commit": "0399a3165128c7090da6b32594003c31aab96207",
-      "state": "open",
-      "draft": true,
-      "checks": "success",
-      "mergeable": true
-    },
-    {
-      "number": 80,
-      "title": "fix(d1l): harden retained store reconciliation",
-      "base": "codex/d1l-idf55-migration",
-      "head": "codex/d1l-retained-merge",
-      "head_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-      "state": "open",
-      "draft": true,
-      "checks": "success",
-      "mergeable": true,
-      "physical_gate": "not_banked"
-    }
-  ],
+  "active_pull_requests": [],
   "reconciliation": [
     {
-      "conflict": "The audited main SHA predates the merged completion-program documents.",
-      "resolution": "Use live main 157c9670eb43a0119280f1e8119d9584b06dcfbf after merged PR #81; retain the audited SHA only as history."
+      "conflict": "The audited main SHA predates the merged completion-program documents and WP-01 proof ledger.",
+      "resolution": "Use live main e79fb56160914f4483515f4f70998aa2f8961496 after PR #90 merged the remaining WP-03 package-inventory, tool-byte, conformance-binding, and reproducibility work; retain audited and predecessor SHAs as history. Exact merged-main Actions 29300795502 passed 891 host tests, 28 checksum-contract tests, and downloaded strict verification of 3 manifests / 44 entries across 214 files."
     },
     {
-      "conflict": "PR #80 text says its fresh workflows are queued.",
-      "resolution": "Live push run 29200803879 and PR run 29200804762 both completed successfully for exact SHA 07322ed4c700866106ecca6c31ff70ea3a3d4ede."
+      "conflict": "The audited snapshot and predecessor ledger described PR #80 as open or awaiting refresh.",
+      "resolution": "PR #80 head ab3e7d82b6f3c4b38fd80d833e155aa941dee045 merged as exact main 4ee07caf09906abdcebe8faccd95790dceb5fe88. Exact merged-main run 29290978741 succeeded and all eight downloaded manifests with 78 entries strict-verified."
     },
     {
       "conflict": "Older release docs and helpers describe COM11 as an operational peer default.",
@@ -88,7 +352,23 @@
     },
     {
       "conflict": "Current main still builds the pre-stack ESP-IDF 5.1 line while the selected release SDK is 5.5.4.",
-      "resolution": "Treat 5.5.4 as candidate-only until PR #64 is landed and requalified through WP-02."
+      "resolution": "PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee and PR #80 head ab3e7d82b6f3c4b38fd80d833e155aa941dee045 are both ancestors of exact main 4ee07caf09906abdcebe8faccd95790dceb5fe88 with the selected ESP-IDF 5.5.4 build path. Exact merged-main Actions 29290978741 and downloaded artifacts are verified. Physical combined-candidate qualification remains open."
+    },
+    {
+      "conflict": "Exact-main Actions 29286754864 was green although the downloaded release package failed recursive checksum coverage.",
+      "resolution": "The negative receipt remains preserved. PR #64 head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee fixed root-manifest coverage and exact-package-root verification. Push run 29289247092 verified 2 manifests / 36 entries; PR run 29289250956 on merge-test SHA 82b086baf534dade4407fb62210a3cb5218e8986 verified 8 manifests / 75 entries. Exact PR #80 merged-main run 29290978741 strict-passed 8 manifests / 78 entries with root manifest 22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64. The blocker is closed."
+    },
+    {
+      "conflict": "The merged WP-02 software stack is complete, but predecessor physical proof is bound to SHA 092293f and the tracked integration baseline is bound to 4ee07caf rather than live release-security main 14182d3f.",
+      "resolution": "PR #84 merged the deterministic fail-closed 4ee07caf integration receipt without changing the qualified runtime stack; PRs #86 and #87 then advanced only release-security ownership and immutable CI inputs. Keep WP-02 in progress and proof_banked=false, use the implementation_merged dependency gate so WP-03/WP-04 continue, and defer the five physical roles to the frozen final candidate instead of repeatedly reflashing transient release-security/protocol SHAs."
+    },
+    {
+      "conflict": "Two exact-source full-release rebuilds at PR #90 source 8b7b2c0368216bfe2f945d93323384ff6a10d7db produced matching file records but failed SBOM validation with invalid_sbom.",
+      "resolution": "Preserve comparator receipt a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e for runs 29299613481 and 29299614693 as fixed negative evidence. PR #90 head f731e465bb5dc31cb1a8a88a82dafda1e3c38577 canonicalized relative POSIX ordering and merged as e79fb56160914f4483515f4f70998aa2f8961496. Exact full-release dispatches 29300805114 and 29300806682 strict-passed 9 manifests / 89 entries / 257 files each; comparator receipt babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f passed all eight checks with reproducible=true. WP-03 is merged and proof_banked."
+    },
+    {
+      "conflict": "GitHub check run 86982414954 reports conclusion=success and completed_at while its API status remains in_progress; an initial local comparison also failed source_sha_mismatch because it was launched outside the detached exact-e79 worktree.",
+      "resolution": "Classify both as non-product operator/platform anomalies. Preserve guard receipt 8bfc4d8cf586c1b5c1cf4d78c9cd734275305cc3185f0357cf619a4ad4050f6e, superseded by the exact detached-main positive comparator babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f. Neither anomaly is a product failure or release-gate waiver."
     }
   ],
   "port_policy": {
@@ -208,16 +488,56 @@
       "id": "BLK-WP01-RETAINED-TIMEOUT-20260712",
       "work_package": "WP-01",
       "kind": "exact_pair_gate_failure",
-      "status": "open",
+      "status": "closed",
       "observed_at": "2026-07-12T20:38:46Z",
+      "closed_at": "2026-07-13T20:55:13Z",
       "missing_input": "An isolated diagnostic-maintenance run that prevents asynchronous storage diag raw work from overlapping the 1-second retained worker and contaminating clean retained counters.",
       "why_source_work_cannot_close": "Preflight reached READY_SD with zero retained failure counters. The asynchronous storage diag raw command then exceeded its fixed settle window, overlapped the 1-second retained worker, and contaminated the counters before the canaries. The exact failure remains packet append failure followed by a correctly cancelled ESP_ERR_INVALID_STATE reboot; adding 750 ms to the ordinary timeout does not fix that overlap.",
       "last_valid_sha": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
       "last_valid_actions_run": "29200803879",
-      "artifact_state": "exact_pair_failure_preserved",
+      "artifact_state": "exact_pair_failure_preserved_and_successor_proof_banked",
       "operator_action": "Run the raw diagnostic only in an isolated maintenance boot, then reset and reflash the exact Actions artifacts and require a clean READY_SD preflight with zero counters before rerunning the canaries and exact-pair gate.",
+      "resolution": "PR #80 isolated diagnostic maintenance from the retained worker. Exact Actions SHA 092293f then passed the clean autonomous baseline, 10 removal/reinsert cycles, five controlled retained reboots, and 7207.089 seconds of storage-active testing without WDT, panic, RF transmission, or SD formatting.",
       "blocks_execution": false,
-      "still_unblocked": ["WP-01 diagnostic-isolation fix", "WP-00"]
+      "still_unblocked": ["WP-02 integration stack"]
+    },
+    {
+      "id": "BLK-WP02-RELEASE-MANIFEST-COVERAGE-20260713",
+      "work_package": "WP-02",
+      "kind": "downloaded_artifact_integrity_failure",
+      "status": "closed",
+      "observed_at": "2026-07-13T21:37:00Z",
+      "closed_at": "2026-07-13T22:27:38Z",
+      "missing_input": "Exact PR #64 push and PR artifacts whose top-level release checksum manifest includes and verifies the three nested RP2040 SHA256SUMS.txt files.",
+      "why_source_work_cannot_close": "Run 29286754864 was green, but downloaded verification found only 7 of 8 manifests recursively complete. The root release manifest omitted three real files, so the exact-main package is not reproducibly verified.",
+      "last_valid_sha": "82b086baf534dade4407fb62210a3cb5218e8986",
+      "source_head_sha": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+      "merged_sha": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
+      "last_valid_actions_run": "29289250956",
+      "artifact_state": "pr64_push_2_manifests_36_entries_and_pr_8_manifests_75_entries_verified",
+      "root_release_manifest_sha256": "0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379",
+      "operator_action": "Completed: exact PR #64 push and PR artifacts were downloaded and recursively verified before merge.",
+      "resolution": "Push run 29289247092 passed with 2 manifests / 36 entries. PR run 29289250956 passed on merge-test SHA 82b086baf534dade4407fb62210a3cb5218e8986 with 8 manifests / 75 entries and root manifest SHA-256 0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379. Head 15f2a9ed99541fa059445ff3d1b06a40b4c42bee merged as 12d5470eca45ef6e86b6e15cf1822716e563a78e. Exact merged-main run 29289683188 also strict-passed 8 manifests / 75 entries with root manifest SHA-256 23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed.",
+      "blocks_execution": false,
+      "still_unblocked": ["WP-02 PR #80 integration validation"]
+    },
+    {
+      "id": "BLK-WP02-EXACT-HARDWARE-ROLES-20260713",
+      "work_package": "WP-02",
+      "kind": "exact_main_hardware_qualification_missing",
+      "status": "open",
+      "observed_at": "2026-07-13T22:59:46Z",
+      "missing_input": "Five exact frozen-candidate role receipts: board boot/runtime on COM12, UI workflow on COM12, SD path on COM12/COM16, retained reboot on COM12/COM16, and Map-open on COM12. The tracked 4ee07caf baseline proves the merged stack and fails closed on these roles; they are intentionally deferred until the release-security/protocol slices stop moving the candidate SHA.",
+      "why_source_work_cannot_close": "The valid WP-01 receipts are bound to predecessor SHA 092293f2311a24c9899bc9bf343ab014c4ba0411 and cover its storage/reboot acceptance. Simulation, source inspection, green Actions, and evidence from 092293f, 4ee07caf, 17a948cf, 14182d3f, or any other predecessor cannot prove the five required physical roles on the eventual frozen candidate.",
+      "last_valid_sha": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+      "last_valid_actions_run": "29272708844",
+      "artifact_state": "exact_main_software_and_downloaded_actions_green_baseline_fail_closed_only_five_physical_roles_missing",
+      "baseline_artifact": "docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+      "baseline_sha256": "39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c",
+      "operator_action": "No device action now. After the final candidate is frozen, install its checksum-verified exact ESP32/RP2040 pair and collect only the five narrow role receipts on COM12/COM16. Do not use forbidden ports, transmit Public or DM RF, or format SD.",
+      "blocks_package": true,
+      "blocks_execution": false,
+      "still_unblocked": ["WP-03", "WP-04"]
     }
   ],
   "execution_priority": [
@@ -283,16 +603,16 @@
     },
     {
       "id": "WP-01",
-      "title": "Close PR #80 exact-pair storage/reboot gate",
+      "title": "Bank PR #80 exact-pair storage/reboot gate",
       "lane": "platform-storage",
       "depends_on": [],
       "tracks": [69, 78, "PR-80"],
-      "status": "in_progress",
+      "status": "merged",
       "dependency_gate": "proof_banked",
-      "implementation_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-      "evidence_commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-      "implementation_merged": false,
-      "proof_banked": false,
+      "implementation_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+      "evidence_commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+      "implementation_merged": true,
+      "proof_banked": true,
       "required_evidence": [
         "sd_inserted_stability_<sha>_<d1l>_<rp2040>.json",
         "sd_remove_reinsert_<sha>_<d1l>_<rp2040>.json",
@@ -301,112 +621,121 @@
       ],
       "evidence": [
         {
-          "filename": "d1l_host_checks_success_07322ed4c700866106ecca6c31ff70ea3a3d4ede.json",
+          "filename": "d1l_host_checks_success_092293f2311a24c9899bc9bf343ab014c4ba0411.json",
           "kind": "actions_host",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
           "valid": true,
           "closure_required": false,
-          "scope": "host_and_dry_run_only"
+          "scope": "exact_actions_host",
+          "sha256": "a03573a81f9084e100009d01f9b2a81d9256d0a756e7c0be55e63eb9fe7c25f2"
         },
         {
-          "filename": "esp32_flash_07322ed_actions_29200803879_COM12.json",
-          "kind": "exact_pair_install",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
+          "filename": "wp01_exact_pair_provenance_092293f.json",
+          "kind": "exact_pair_provenance",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
           "valid": true,
-          "closure_required": false,
-          "scope": "checksum_verified_non_erasing_esp32_install"
-        },
-        {
-          "filename": "rp2040_seeed_official_sd_smoke_07322ed_actions_29200803879_COM16.json",
-          "kind": "partial_physical",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": true,
-          "closure_required": false,
-          "scope": "official_fat32_smoke"
-        },
-        {
-          "filename": "sd_file_canary_07322ed_actions_29200803879_COM12.json",
-          "kind": "partial_physical",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": true,
-          "closure_required": false,
-          "scope": "basic_file_canary"
-        },
-        {
-          "filename": "sd_map_tile_canary_07322ed_actions_29200803879_COM12.json",
-          "kind": "partial_physical",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": true,
-          "closure_required": false,
-          "scope": "basic_map_cache_canary"
-        },
-        {
-          "filename": "sd_data_export_07322ed_actions_29200803879_COM12.json",
-          "kind": "partial_physical",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": true,
-          "closure_required": false,
-          "scope": "basic_export_canaries"
-        },
-        {
-          "filename": "sd_retained_history_07322ed_actions_29200803879_COM12.json",
-          "kind": "physical_gate_failure",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": false,
           "closure_required": true,
-          "scope": "retained_packet_append_and_reboot",
-          "failure": "READY_SD preflight began with zero counters; asynchronous storage diag raw exceeded fixed settle and overlapped the 1-second retained worker before packet append failed and reboot cancelled with ESP_ERR_INVALID_STATE; a 750 ms timeout increase is not the fix"
+          "scope": "checksum_verified_esp32_rp2040_pair",
+          "sha256": "2decf8ad60b73e71bbb09b489adba8fd827856a8daf00c376c5a9ba5354e451e"
         },
         {
-          "filename": "sd_reboot_remount_07322ed_actions_29200803879_COM12.json",
-          "kind": "physical_gate_failure",
-          "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-          "workflow_run": "29200803879",
-          "valid": false,
+          "filename": "sd_inserted_stability_092293f_COM12_COM16.json",
+          "kind": "physical",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
+          "valid": true,
           "closure_required": true,
-          "scope": "retained_reboot_and_remount",
-          "failure": "after diagnostic overlap contaminated the retained counters, retained packet append failed and the controlled reboot correctly cancelled"
+          "scope": "inserted_card_stability",
+          "sha256": "a038ee7ca371c4ee404493c721a343ef54e7bbd55b08273c8dc833d9d0203aef"
+        },
+        {
+          "filename": "sd_remove_reinsert_092293f_COM12_COM16.json",
+          "kind": "physical",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
+          "valid": true,
+          "closure_required": true,
+          "scope": "ten_remove_reinsert_cycles",
+          "sha256": "3a3882038fec2497529d281f3c2b9b7468c1e62dcca7962ca3b9492125f0fad1"
+        },
+        {
+          "filename": "retained_reboot_matrix_092293f_COM12.json",
+          "kind": "physical",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
+          "valid": true,
+          "closure_required": true,
+          "scope": "five_controlled_reboots",
+          "sha256": "db6cab3020bfa8ef575bd6a59c61d1277a8e72e1e73eb987248817199797a986"
+        },
+        {
+          "filename": "storage_active_soak_092293f_COM12_COM16.json",
+          "kind": "physical",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
+          "valid": true,
+          "closure_required": true,
+          "scope": "six_segment_storage_active_soak",
+          "sha256": "caf19395d0e1a175f6fa13c2550bc8693297661756bf339ba4acec63da2699b9"
+        },
+        {
+          "filename": "wp01_acceptance_092293f_COM12_COM16.json",
+          "kind": "physical_aggregate",
+          "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+          "workflow_run": "29272708844",
+          "valid": true,
+          "closure_required": true,
+          "scope": "wp01_exact_pair_acceptance",
+          "sha256": "994f4e5ac7b9e0e8bdb57aad7715f52a99294a1841847860e2ce2f70bd6e2277"
         }
       ],
       "latest_valid_receipt": {
-        "filename": "sd_data_export_07322ed_actions_29200803879_COM12.json",
-        "commit": "07322ed4c700866106ecca6c31ff70ea3a3d4ede",
-        "scope": "partial_exact_pair_physical_only",
-        "closure_eligible": false
+        "filename": "wp01_acceptance_092293f_COM12_COM16.json",
+        "commit": "092293f2311a24c9899bc9bf343ab014c4ba0411",
+        "scope": "wp01_exact_pair_acceptance",
+        "closure_eligible": true
       },
       "verification": {
+        "evidence_builder": {
+          "commit": "8c9adfbfeeb1a4a6fbb32e1c3285053bed730269",
+          "focused_tests_passed": 36,
+          "full_tests_passed": 774,
+          "status": "pass",
+          "note": "Treat a positive RAM-only backend generation reset as expected only across a separately proven system-reboot boundary; intra-segment generation changes remain fail-closed."
+        },
+        "source_receipts": {
+          "autonomous_baseline_sha256": "125a28ef07f5a3a8c46fc9b59980724aa2b6ca966b378e36cbe885c90c6e1043",
+          "raw_remove_reinsert_sha256": "b5e9dc961f73908b3fbf0740c7f1e790af0ee445f0748ca5c113040405fd978a",
+          "raw_storage_active_soak_sha256": "cca402eea20beaabd995dc4c9d6b9d122f7e97305d8f226f98861bf89729df2a"
+        },
         "host": {
           "status": "pass",
-          "passed_tests": 614,
-          "focused_tests": 54,
-          "source": "PR #80 and exact Actions host receipt"
+          "passed_tests": 773,
+          "focused_tests": 302,
+          "source": "exact Actions host receipt and refreshed local stack rehearsal"
         },
         "actions": {
           "status": "success",
-          "stage": "actions_green",
-          "push_run": "29200803879",
-          "pull_request_run": "29200804762",
+          "stage": "hardware_green",
+          "push_run": "29272708844",
+          "pull_request_run": "29272709642",
           "jobs": ["change-filter", "meshcore-conformance", "host-checks", "rp2040-sd-bridge-build", "firmware-build"]
         },
         "checksums": {
           "status": "verified",
-          "verified_at": "2026-07-12T20:32:00Z",
-          "source_run": "29200803879",
+          "verified_at": "2026-07-13T16:00:00Z",
+          "source_run": "29272708844",
           "manifest_count": 8,
-          "firmware_manifest_sha256": "2387847867844a3083ab1fcb884361cfe2dc36a6616a12761d7265523273262e",
-          "esp32_app_sha256": "fbed8a22108d3df19cc91eb6d11e14a01684771342cd88d8a5f6de686895441a",
-          "rp2040_bridge_uf2_sha256": "1596a9cd839cad7a8206e488a8f7c0bdda783220652ccba2d0f3bd2912eca980",
-          "release_package_manifest": "verified_with_all_nested_manifests"
+          "verified_entries": 78,
+          "release_package_manifest_sha256": "9598a6c0885fd29fd53c74814231ced22b0029bc2ac51ef587d33b4aedd56095",
+          "esp32_app_sha256": "ba0c64be4cf79f7175a26476f6c71c4ca276fa0a07cdedc05f6393546005d46a",
+          "rp2040_bridge_uf2_sha256": "ca1043bc640a6a7d7e9236f0ba0cec4b4ac0bf135c7085776b470b110a5cb096",
+          "release_package_manifest": "verified_with_all_nested_manifests_78_of_78"
         },
         "physical": {
-          "status": "failed",
+          "status": "pass",
           "dry_run_only": false,
           "exact_pair_installed": true,
           "d1l_port": "COM12",
@@ -414,23 +743,26 @@
           "rp2040_port": "COM16",
           "rp2040_port_state": "enumerated_and_used",
           "passed": [
-            "official FAT32 smoke",
-            "basic SD file canary",
-            "basic Map cache canary",
-            "basic diagnostic and data export canaries"
+            "clean autonomous READY_SD baseline",
+            "inserted-card stability for 1201.171 seconds",
+            "10 of 10 real removal/reinsert cycles",
+            "5 of 5 controlled retained reboot cycles",
+            "7207.089 seconds across six storage-active segments",
+            "minimum observed stack floor 7976 bytes",
+            "zero unexpected backend-generation changes"
           ],
-          "failed": [
-            "asynchronous storage diag raw exceeded fixed settle and overlapped the 1-second retained worker after a clean READY_SD preflight",
-            "retained packet append failed after diagnostic overlap contaminated previously zero counters",
-            "a 750 ms ordinary timeout increase does not fix the diagnostic/worker overlap",
-            "controlled reboot, correctly cancelled with ESP_ERR_INVALID_STATE"
-          ],
+          "failed": [],
+          "removal_reinsert_cycles": 10,
+          "controlled_reboot_cycles": 5,
+          "active_soak_seconds": 7207.089,
+          "active_soak_segments": 6,
+          "minimum_stack_floor_bytes": 7976,
           "wdt_or_panic_observed": false,
           "public_rf_tx": false,
           "formats_sd": false
         }
       },
-      "blockers": ["BLK-WP01-RETAINED-TIMEOUT-20260712"]
+      "blockers": []
     },
     {
       "id": "WP-02",
@@ -438,15 +770,121 @@
       "lane": "integration",
       "depends_on": ["WP-01"],
       "tracks": [62, 64, 80, 63, 78],
-      "status": "blocked",
-      "dependency_gate": "merged",
-      "implementation_commit": null,
-      "implementation_merged": false,
+      "status": "in_progress",
+      "dependency_gate": "implementation_merged",
+      "implementation_commit": "17a948cf1ad23a5d2a89419039897943028f9bce",
+      "implementation_merged": true,
       "proof_banked": false,
-      "required_evidence": ["integration_baseline_<main-sha>.json"],
-      "evidence": [],
+      "merged_slices": {
+        "pr62": {
+          "head_commit": "7a6ff86493042cc5617ef88c4765312cea46150d",
+          "merge_commit": "570a94ad6ead0941f7acb7d9c9812c63df869e33"
+        },
+        "pr64": {
+          "head_commit": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+          "pull_request_merge_test_commit": "82b086baf534dade4407fb62210a3cb5218e8986",
+          "merge_commit": "12d5470eca45ef6e86b6e15cf1822716e563a78e",
+          "actions_push_run": "29289247092",
+          "actions_push_checksum_manifests_verified": 2,
+          "actions_push_checksum_entries_verified": 36,
+          "actions_pull_request_run": "29289250956",
+          "actions_pull_request_checksum_manifests_verified": 8,
+          "actions_pull_request_checksum_entries_verified": 75,
+          "actions_pull_request_root_manifest_sha256": "0b8346f04a6e7862ec7ecd36c15f2ed99a9477007277042c5d70cee3d01ed379",
+          "merged_main_actions_run": "29289683188",
+          "merged_main_actions_status": "success",
+          "merged_main_host_tests_passed": 582,
+          "merged_main_checksum_contract_tests_passed": 24,
+          "merged_main_checksum_manifests_verified": 8,
+          "merged_main_checksum_entries_verified": 75,
+          "merged_main_root_manifest_sha256": "23b5fbc49de2647870d7d7cddeed18d2999ebbdc921ef977eaccec4229d4ebed"
+        },
+        "pr80": {
+          "head_commit": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045",
+          "merge_commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+          "merged_main_actions_run": "29290978741",
+          "merged_main_actions_status": "success",
+          "merged_main_host_tests_passed": 795,
+          "merged_main_checksum_contract_tests_passed": 24,
+          "merged_main_checksum_manifests_verified": 8,
+          "merged_main_checksum_entries_verified": 78,
+          "merged_main_firmware_manifest_sha256": "5788aef26e1c4201ff79d9fb594a65cdab4abcf6877e8b54f1db3b5d10ba48f9",
+          "merged_main_root_manifest_sha256": "22e554bef7988f4132bd0bccc5657bb617035d1a8a9beab7c4c7b717e5e79b64",
+          "merged_main_application_sha256": "44679d6f3ee9b4bd2deeb4582aa52f813064de994cf2a20bd3a2dda8c00b225a",
+          "merged_main_full_flash_sha256": "ad877ec984e3b36a7cb990045c754da480791cfc985f8b10e940834b1116b2cd"
+        },
+        "pr84": {
+          "head_commit": "e5d2f8a21a0cb32713a7c0b3796f1660abda788d",
+          "pull_request_merge_test_commit": "a33df6f5e7feb18c69b8bd8cfc4c4f4191b09eb8",
+          "merge_commit": "17a948cf1ad23a5d2a89419039897943028f9bce",
+          "actions_push_run": "29294131381",
+          "actions_pull_request_run": "29294132563",
+          "merged_main_actions_run": "29294553135",
+          "merged_main_actions_status": "success",
+          "merged_main_host_tests_passed": 823,
+          "merged_main_checksum_contract_tests_passed": 24,
+          "merged_main_checksum_manifests_verified": 2,
+          "merged_main_checksum_entries_verified": 36,
+          "merged_main_firmware_manifest_sha256": "67eab2f468d9484516ee3d15f769a99d538cf10350943dcf9828d7ce74eec1f8",
+          "merged_main_root_manifest_sha256": "74779e8bf6bb1cb5043441600ee1849eba292918af348fd45774ec2c4cafad5a",
+          "rp2040_job_status": "skipped_no_relevant_change"
+        }
+      },
+      "required_evidence": ["docs/completion/evidence/wp02/integration_baseline_<main-sha>.json"],
+      "evidence": [
+        {
+          "filename": "docs/completion/evidence/wp02/integration_baseline_4ee07caf09906abdcebe8faccd95790dceb5fe88.json",
+          "kind": "exact_merged_main_integration_baseline",
+          "commit": "4ee07caf09906abdcebe8faccd95790dceb5fe88",
+          "workflow_run": "29290978741",
+          "valid": false,
+          "closure_required": true,
+          "scope": "software_integrated_physical_qualification_open",
+          "sha256": "39d8632d6de5bc819a96e92e970b9d280130a3014336be5d045a1f3fe07b654c",
+          "tracked": true,
+          "portable_paths": true,
+          "trusted_pr_heads": {
+            "62": "7a6ff86493042cc5617ef88c4765312cea46150d",
+            "64": "15f2a9ed99541fa059445ff3d1b06a40b4c42bee",
+            "80": "ab3e7d82b6f3c4b38fd80d833e155aa941dee045"
+          },
+          "actions_checksums_verified": true,
+          "actions_payloads_verified": true,
+          "repository_layers_landed": true,
+          "checksum_manifests_verified": 8,
+          "checksum_entries_verified": 78,
+          "failures": [
+            "receipt:board:missing_or_outside_repository",
+            "receipt:map_open:missing_or_outside_repository",
+            "receipt:reboot:missing_or_outside_repository",
+            "receipt:sd:missing_or_outside_repository",
+            "receipt:ui:missing_or_outside_repository"
+          ]
+        }
+      ],
       "latest_valid_receipt": null,
-      "blockers": []
+      "verification": {
+        "local_post_merge": {
+          "worktree_parent_commit": "f57ce26beade61584b8d26bd34ba576e0422dce1",
+          "focused_tests_passed": 50,
+          "focused_tests_skipped": 2,
+          "full_tests_passed": 820,
+          "full_tests_skipped": 3,
+          "ruff_status": "pass"
+        },
+        "merged_main_pr84": {
+          "commit": "17a948cf1ad23a5d2a89419039897943028f9bce",
+          "actions_run": "29294553135",
+          "host_tests_passed": 823,
+          "checksum_contract_tests_passed": 24,
+          "checksum_manifests_verified": 2,
+          "checksum_entries_verified": 36,
+          "downloaded_tree_file_count": 203,
+          "downloaded_tree_sha256": "ad70fab2b72bc79fb2f0031f850152836904347fa15500e11ba6bcf4e52f738f",
+          "status": "strict_pass_after_download"
+        }
+      },
+      "blockers": ["BLK-WP02-EXACT-HARDWARE-ROLES-20260713"]
     },
     {
       "id": "WP-03",
@@ -454,14 +892,149 @@
       "lane": "release-security",
       "depends_on": ["WP-02"],
       "tracks": [17, 71],
-      "status": "blocked",
+      "status": "merged",
       "dependency_gate": "merged",
-      "implementation_commit": null,
-      "implementation_merged": false,
-      "proof_banked": false,
-      "required_evidence": ["build_inputs_<sha>.json", "sbom_<sha>.spdx.json", "provenance_<sha>.json"],
-      "evidence": [],
-      "latest_valid_receipt": null,
+      "implementation_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+      "implementation_merged": true,
+      "proof_banked": true,
+      "required_evidence": ["build_inputs_<sha>.json", "sbom_<sha>.spdx.json", "provenance_<sha>.json", "release_reproducibility_<sha>.json"],
+      "evidence": [
+        {
+          "filename": "build_inputs_e79fb56160914f4483515f4f70998aa2f8961496.json",
+          "kind": "exact_merged_main_build_inputs",
+          "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "workflow_run": "29300795502",
+          "valid": true,
+          "closure_required": true,
+          "scope": "exact_merged_main_release_package",
+          "sha256": "4e998b24b5783c3424f757532125f7932c1be098230d44833282215e618adec1"
+        },
+        {
+          "filename": "sbom_e79fb56160914f4483515f4f70998aa2f8961496.spdx.json",
+          "kind": "exact_merged_main_spdx_sbom",
+          "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "workflow_run": "29300795502",
+          "valid": true,
+          "closure_required": true,
+          "scope": "exact_merged_main_release_package",
+          "sha256": "78cf8c09c3a24cad8fc0631cf7b15a3ccfa67dbdc5729f7ea6e5888a5f097037"
+        },
+        {
+          "filename": "provenance_e79fb56160914f4483515f4f70998aa2f8961496.json",
+          "kind": "exact_merged_main_unsigned_slsa_v1_provenance",
+          "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "workflow_run": "29300795502",
+          "valid": true,
+          "closure_required": true,
+          "scope": "exact_merged_main_release_package",
+          "sha256": "7f1e682daf28c3bd53486b9a009727a1895733b388e24cab99d5ac6b07703a4c"
+        },
+        {
+          "filename": "release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json",
+          "kind": "exact_merged_main_release_reproducibility",
+          "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "workflow_runs": ["29300805114", "29300806682"],
+          "valid": true,
+          "closure_required": true,
+          "scope": "two_independent_full_release_dispatches",
+          "sha256": "ff97327ae7a6c7e90f2db8905ffe344dbe73d0fb75065bbf6f66294b5c72e264",
+          "metadata": {
+            "tracked_path": "docs/completion/evidence/wp03/release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json",
+            "external_receipt": "F:/SIGUI-evidence/actions/pr90-e79fb561-full-release-comparison-exact-29300805114-29300806682.json",
+            "external_receipt_sha256": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+            "reproducible": true,
+            "failure_count": 0,
+            "comparison_checks_passed": 8,
+            "file_count": 45,
+            "stable_payload_count": 43,
+            "stable_payload_fingerprint": "4cf8a96173022af1fa88c68b053e1eb1e73e67abf96a1f9b9a401a250aa70f84"
+          }
+        }
+      ],
+      "latest_valid_receipt": {
+        "filename": "release_reproducibility_e79fb56160914f4483515f4f70998aa2f8961496.json",
+        "commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+        "scope": "two_independent_full_release_dispatches",
+        "closure_eligible": true
+      },
+      "verification": {
+        "merged_release_ownership": {
+          "pull_request": 86,
+          "commit": "9acb7d0cf498793dc0bed4854cc314a2eac2ea0c",
+          "actions_run": "29296258019",
+          "status": "strict_pass_after_download"
+        },
+        "merged_immutable_inputs": {
+          "pull_request": 87,
+          "commit": "14182d3f198b70ceb588d9d43312bf76d8745284",
+          "actions_run": "29297516173",
+          "host_tests_passed": 834,
+          "checksum_contract_tests_passed": 24,
+          "checksum_manifests_verified": 3,
+          "checksum_entries_verified": 39,
+          "downloaded_tree_sha256": "78fa7f3b4a043e9deaff6ae9a23d69833fa227845964cee612a54027147dcc88",
+          "status": "strict_pass_after_download"
+        },
+        "rp2040_toolchain_dispatch": {
+          "head_commit": "655ece5d5d33356937cad24f7e23fa58decf7ff5",
+          "actions_run": "29296995585",
+          "checksum_manifests_verified": 9,
+          "checksum_entries_verified": 81,
+          "status": "strict_pass_after_download"
+        },
+        "merged_sbom": {
+          "pull_request": 88,
+          "head_commit": "8f90ad74da443c79a79b458aac313955860f3bf5",
+          "commit": "b130eb1026e8d14e4e6878bd819b5ee7f0da2165",
+          "actions_run": "29298723442",
+          "host_tests_passed": 839,
+          "checksum_contract_tests_passed": 24,
+          "checksum_manifests_verified": 3,
+          "checksum_entries_verified": 40,
+          "sbom_sha256": "0e0c84af33dc6f0e9a91f3b2eb2962cd78a577f227e1ed01095257572e988a88",
+          "status": "strict_pass_after_download"
+        },
+        "merged_provenance": {
+          "pull_request": 89,
+          "head_commit": "de7eee7ecf8d29c110830f1ed813b71b4d770ebd",
+          "commit": "5a4e7f2777b306ad4d7b62311fd79296d7d45747",
+          "actions_run": "29299321770",
+          "host_tests_passed": 845,
+          "checksum_contract_tests_passed": 25,
+          "checksum_manifests_verified": 3,
+          "checksum_entries_verified": 41,
+          "downloaded_tree_file_count": 210,
+          "downloaded_tree_sha256": "d192413aadb9ac6a1fb9f858c3071fa99178b20d0d51a40e2d0c382e9ca50ff1",
+          "sbom_sha256": "565e9144f038e07061d035fc51daf8ca80341d8dc248371a2e4369a8f7e2b065",
+          "provenance_sha256": "b3763f05820d5ed361bb043f3eee7d9acc40200abfa6b6a0951127338b683d73",
+          "status": "strict_pass_after_download"
+        },
+        "merged_rebuild_comparator": {
+          "pull_request": 90,
+          "head_commit": "f731e465bb5dc31cb1a8a88a82dafda1e3c38577",
+          "merge_commit": "e79fb56160914f4483515f4f70998aa2f8961496",
+          "merged_main_actions_run": "29300795502",
+          "full_release_runs": ["29300805114", "29300806682"],
+          "full_release_checksum_manifests_verified_each": 9,
+          "full_release_checksum_entries_verified_each": 89,
+          "full_release_downloaded_tree_file_count_each": 257,
+          "preserved_negative_receipt_sha256": "a03bdb8112bc309a64ea185d2d29e7a09a8e41a282dd8fc22e2b466c9218a31e",
+          "negative_source_commit": "8b7b2c0368216bfe2f945d93323384ff6a10d7db",
+          "negative_runs": ["29299613481", "29299614693"],
+          "negative_error_code": "invalid_sbom",
+          "fix": "canonical_relative_posix_package_order",
+          "positive_receipt_sha256": "babb5d8c42133ab2e0d42fc38633fbba9976c17cfd42de1eb05b5559253ac11f",
+          "replacement_comparator_status": "pass",
+          "reproducible": true,
+          "comparison_checks_passed": 8,
+          "failure_count": 0,
+          "stable_payload_fingerprint": "4cf8a96173022af1fa88c68b053e1eb1e73e67abf96a1f9b9a401a250aa70f84",
+          "input_fingerprint": "021028fa268a7543a1a85ea73ac1a7e893e75fa8eb721cc22faf811153036268",
+          "toolchain_fingerprint": "7730a6766362d34e20bd07703eef7abdb66a265318135edd866fafc7d1e8452a",
+          "normalized_manifest_sha256": "05132f0d29dda659b235080b8152052d54947162070b924980ee15b26c72a1c1",
+          "closure_eligible": true
+        }
+      },
       "blockers": []
     },
     {
@@ -470,7 +1043,7 @@
       "lane": "protocol",
       "depends_on": ["WP-02"],
       "tracks": [65],
-      "status": "blocked",
+      "status": "in_progress",
       "dependency_gate": "merged",
       "implementation_commit": null,
       "implementation_merged": false,

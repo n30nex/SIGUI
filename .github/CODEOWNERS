@@ -1,0 +1,37 @@
+# WP-03 release and supply-chain surfaces require maintainer review.
+/.github/CODEOWNERS @n30nex
+/.github/workflows/ @n30nex
+/.github/dependabot.yml @n30nex
+
+# Immutable dependency, toolchain, and build-input declarations.
+/.gitattributes @n30nex
+/.gitmodules @n30nex
+/*.lock @n30nex
+/dependencies.lock @n30nex
+/requirements/ @n30nex
+/.github/d1l-build-inputs.json @n30nex
+/CMakeLists.txt @n30nex
+/main/CMakeLists.txt @n30nex
+/partitions_d1l.csv @n30nex
+/sdkconfig.defaults @n30nex
+/third_party/ @n30nex
+/patches/ @n30nex
+
+# Release lineage, provenance, SBOM, checksums, and reproducibility tooling.
+/docs/BUILD_PROVENANCE_D1L.md @n30nex
+/**/SHA256SUMS.txt @n30nex
+/scripts/artifact_metadata.py @n30nex
+/scripts/*build_inputs* @n30nex
+/scripts/*release* @n30nex
+/scripts/*checksums* @n30nex
+/scripts/*flash* @n30nex
+/scripts/*upgrade* @n30nex
+/scripts/package_release_d1l.py @n30nex
+/scripts/compare_release_reproducibility_d1l.py @n30nex
+/scripts/provenance_d1l.py @n30nex
+/scripts/sbom_d1l.py @n30nex
+
+# Reserved ownership boundaries for signed update and security code.
+/main/update/ @n30nex
+/main/security/ @n30nex
+/firmware/ @n30nex

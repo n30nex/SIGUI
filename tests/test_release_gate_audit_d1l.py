@@ -7,9 +7,11 @@ import pytest
 
 from scripts import release_gate_audit_d1l as audit
 from scripts.release_gate_audit_d1l import build_audit, parse_args
+from tests.meshcore_conformance_fixture import completed_report
 
 
 COMMIT = "68350bf9f3fabfd2db4110ec6ffc36068056a060"
+ROOT = Path(__file__).resolve().parents[1]
 STALE_COMMIT = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 RUN_ID = "28549761003"
 COMPOSE_CAPTURE_TARGETS = [
@@ -297,9 +299,22 @@ def write_manifest_file(directory: Path, name: str, payload: bytes = b"ok") -> N
     (directory / "SHA256SUMS.txt").write_text(f"{digest}  ./{name}\n", encoding="ascii")
 
 
+def write_checksum_manifest(directory: Path) -> None:
+    manifest = directory / "SHA256SUMS.txt"
+    rows = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  ./"
+        f"{path.relative_to(directory).as_posix()}"
+        for path in sorted(
+            directory.rglob("*"),
+            key=lambda candidate: candidate.relative_to(directory).as_posix(),
+        )
+        if path.is_file() and path != manifest
+    ]
+    manifest.write_text("\n".join(rows) + "\n", encoding="ascii")
+
+
 def write_esp32_actions_artifact(run_dir: Path) -> dict:
     artifact = run_dir / "d1l-firmware-artifacts"
-    build = artifact / "build"
     files = {
         "build/bootloader/bootloader.bin": b"BOOT",
         "build/partition_table/partition-table.bin": b"PART",
@@ -441,28 +456,154 @@ def write_supported_sdk_workflow(root: Path, image: str = audit.SUPPORTED_ESP_ID
         "    steps: []\n",
         encoding="utf-8",
     )
+    write_json(
+        root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+        {
+            "schema": 1,
+            "kind": "d1l_build_inputs",
+            "ci_tools": json.loads(
+                (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_text(
+                    encoding="utf-8"
+                )
+            )["ci_tools"],
+            "esp_idf": {
+                "version": audit.SUPPORTED_ESP_IDF_VERSION,
+                "container": {
+                    "reference": audit.SUPPORTED_ESP_IDF_IMAGE,
+                    "index_digest": audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST,
+                },
+            },
+        },
+    )
     write_supported_sdk_lock(root)
+
+
+def write_immutable_build_input_receipts(root: Path, run_dir: Path) -> None:
+    metadata_path = root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    requirements_path = root / "requirements" / "ci-host-windows.txt"
+    requirements_path.parent.mkdir(parents=True, exist_ok=True)
+    requirements_path.write_text("pytest==9.1.1 --hash=sha256:" + "1" * 64 + "\n", encoding="ascii")
+    metadata["host_python"] = {
+        "version": "3.13.6",
+        "architecture": "x64",
+        "requirements": {
+            "path": "requirements/ci-host-windows.txt",
+            "sha256": hashlib.sha256(requirements_path.read_bytes()).hexdigest(),
+            "packages": {"pip": "26.1.2", "pytest": "9.1.1"},
+        },
+    }
+    archives = [
+        {
+            "filename": "rp2040-5.6.1.zip",
+            "url": "https://example.invalid/rp2040-5.6.1.zip",
+            "sha256": "2" * 64,
+            "size": 100,
+        },
+        {
+            "filename": "pqt-gcc.tar.gz",
+            "url": "https://example.invalid/pqt-gcc.tar.gz",
+            "sha256": "3" * 64,
+            "size": 200,
+        },
+    ]
+    locked_cli = json.loads(
+        (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_text(encoding="utf-8")
+    )["arduino"]["cli"]
+    metadata["arduino"] = {
+        "cli": locked_cli,
+        "rp2040": {
+            "version": "5.6.1",
+            "compiler_tool": "pqt-gcc",
+            "platform_archive": archives[0],
+            "tools": [{"name": "pqt-gcc", "version": "fixture", **archives[1]}],
+        },
+    }
+    metadata["submodules"] = {
+        "third_party/MeshCore": "4" * 40,
+        "third_party/sensecap_indicator_esp32": "5" * 40,
+    }
+    write_json(metadata_path, metadata)
+    metadata_bytes = metadata_path.read_bytes()
+    metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+
+    host_dir = run_dir / "d1l-host-artifacts" / "build-inputs"
+    host_dir.mkdir(parents=True, exist_ok=True)
+    (host_dir / "d1l-build-inputs.json").write_bytes(metadata_bytes)
+    (host_dir / "ci-host-windows.txt").write_bytes(requirements_path.read_bytes())
+    (host_dir / "ci-host-windows-installed.json").write_text(
+        json.dumps(
+            [
+                {"name": "pip", "version": "26.1.2"},
+                {"name": "pytest", "version": "9.1.1"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_checksum_manifest(host_dir)
+
+    idf_dir = run_dir / "d1l-idf55-migration-state"
+    idf_dir.mkdir(parents=True, exist_ok=True)
+    (idf_dir / "build-inputs.json").write_bytes(metadata_bytes)
+    (idf_dir / "container-image.txt").write_text(
+        audit.SUPPORTED_ESP_IDF_IMAGE + "\n", encoding="ascii"
+    )
+    (idf_dir / "idf-version.txt").write_text(
+        f"ESP-IDF {audit.SUPPORTED_ESP_IDF_VERSION}\n", encoding="ascii"
+    )
+    (idf_dir / "dependencies.lock").write_bytes((root / "dependencies.lock").read_bytes())
+    (idf_dir / "dependencies.lock.patch").write_bytes(b"")
+
+    bridge_dir = run_dir / "rp2040-sd-bridge-firmware"
+    write_json(
+        bridge_dir / "build-inputs.json",
+        {
+            "schema": 1,
+            "kind": "d1l_arduino_build_inputs",
+            "ok": True,
+            "source_commit": COMMIT,
+            "metadata": {
+                "path": audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+                "sha256": metadata_sha,
+            },
+            "arduino_cli_version": "1.5.0",
+            "arduino_cli": {
+                "version": metadata["arduino"]["cli"]["version"],
+                "archive": metadata["arduino"]["cli"]["archive"],
+                "executable": {
+                    **metadata["arduino"]["cli"]["executable"],
+                    "verified": True,
+                },
+                "bytes_verified": True,
+            },
+            "arduino_cli_bytes_verified": True,
+            "rp2040_core_version": "5.6.1",
+            "submodules": metadata["submodules"],
+            "archives_verified": True,
+            "archives": [
+                {
+                    **archive,
+                    "relative_path": f"staging/{archive['filename']}",
+                }
+                for archive in archives
+            ],
+        },
+    )
+    write_checksum_manifest(bridge_dir)
 
 
 def meshcore_conformance_payload(
     commit: str = COMMIT,
     *,
     generated_at: datetime | None = None,
+    build_inputs_path: Path | None = None,
     **overrides: object,
 ) -> dict:
-    payload = {
-        "schema_version": 1,
-        "artifact_type": audit.MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
-        "generated_at": (generated_at or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z"),
-        "passed": True,
-        "status": "pass",
-        "execution_complete": True,
-        "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
-        "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
-        "closure_ready": False,
-        "issue_65_closure_eligible": False,
-        "source_verification": {"repository_commit": commit},
-    }
+    payload = completed_report(
+        commit,
+        build_inputs_path or ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS,
+        generated_at=generated_at,
+    )
     payload.update(overrides)
     return payload
 
@@ -474,7 +615,15 @@ def write_release_package(
     conformance: dict | None = None,
     workflow_run_id: str = RUN_ID,
     git_dirty: bool = False,
+    evidence_root: Path | None = None,
 ) -> Path:
+    evidence_root = evidence_root or run_dir.parent
+    build_inputs_path = evidence_root / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+    if not build_inputs_path.is_file():
+        build_inputs_path.parent.mkdir(parents=True, exist_ok=True)
+        build_inputs_path.write_bytes(
+            (ROOT / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS).read_bytes()
+        )
     package = run_dir / "d1l-release-package" / f"d1l-release-{COMMIT}"
     package.mkdir(parents=True, exist_ok=True)
     (package / "README_RELEASE.md").write_bytes(b"release")
@@ -488,12 +637,21 @@ def write_release_package(
         target = package / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(payload)
-    report = conformance or meshcore_conformance_payload(commit)
+    report = conformance or meshcore_conformance_payload(
+        commit,
+        build_inputs_path=build_inputs_path,
+    )
     generated_at = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
     expires_at = generated_at + timedelta(days=audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS)
+    receipt_relative = f"meshcore_conformance_{commit}.json"
+    receipt_path = (
+        run_dir / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT / receipt_relative
+    )
+    write_json(receipt_path, report)
+    receipt_bytes = receipt_path.read_bytes()
     evidence_relative = f"evidence/meshcore_conformance_{commit}.json"
     evidence_path = package / evidence_relative
-    write_json(evidence_path, report)
+    write_json(evidence_path, audit.canonicalize_release_report(report))
     evidence_bytes = evidence_path.read_bytes()
     write_json(
         package / "manifest.json",
@@ -511,8 +669,19 @@ def write_release_package(
                 "size": len(evidence_bytes),
                 "sha256": hashlib.sha256(evidence_bytes).hexdigest(),
                 "source_commit": commit,
-                "generated_at": generated_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                "expires_at": expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "evidence_profile": audit.CANONICAL_EVIDENCE_PROFILE,
+                "run_receipt": {
+                    "artifact": audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT,
+                    "path": receipt_relative,
+                    "size": len(receipt_bytes),
+                    "sha256": hashlib.sha256(receipt_bytes).hexdigest(),
+                    "generated_at": generated_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "expires_at": expires_at.astimezone(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                },
                 "max_age_days": audit.MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
                 "coverage_boundary": audit.MESHCORE_CONFORMANCE_BOUNDARY,
                 "coverage_level": audit.MESHCORE_CONFORMANCE_BOUNDARY,
@@ -572,7 +741,8 @@ def write_core_evidence(root: Path) -> None:
         "seeed_official_sd_smoke.ino.uf2",
         b"official-smoke-uf2",
     )
-    write_release_package(run_dir)
+    write_immutable_build_input_receipts(root, run_dir)
+    write_release_package(run_dir, evidence_root=root)
 
     hardware = root / "artifacts" / "hardware" / "com12"
     write_esp32_flash_receipt(root, run_dir)
@@ -629,7 +799,7 @@ def write_core_evidence(root: Path) -> None:
 def write_esp32_only_actions_package(root: Path) -> None:
     run_dir = root / "artifacts" / "github" / RUN_ID
     write_manifest_file(run_dir / "d1l-firmware-artifacts", "firmware.bin", b"firmware")
-    write_release_package(run_dir)
+    write_release_package(run_dir, evidence_root=root)
 
 
 def write_official_seeed_smoke_evidence(root: Path, commit: str = COMMIT) -> None:
@@ -1492,9 +1662,19 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     report = build_audit(audit_args(tmp_path))
     gates = gate_by_id(report)
 
+    assert report["schema"] == audit.RELEASE_GATE_AUDIT_SCHEMA == 2
+    assert report["gate_count"] == 35
+    assert report["p0_gate_count"] == 33
+    assert report["p1_gate_count"] == 2
+    assert report["passed_count"] + report["failed_count"] == report["gate_count"]
     assert gates["supported_sdk_baseline"]["ok"] is True
+    assert gates["immutable_release_source_inputs"]["ok"] is True
+    assert gates["immutable_release_source_inputs"]["details"]["failures"] == []
+    assert gates["immutable_release_source_inputs"]["details"]["host_package_count"] == 2
+    assert gates["immutable_release_source_inputs"]["details"]["arduino_archive_count"] == 2
+    assert gates["immutable_release_source_inputs"]["details"]["submodule_count"] == 2
     assert gates["same_run_host_checks_passed"]["ok"] is True
-    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == "espressif/idf:v5.5.4"
+    assert gates["supported_sdk_baseline"]["details"]["expected_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
     assert gates["ci_artifacts_checksums"]["ok"] is True
     assert gates["meshcore_wire_conformance_packaged"]["ok"] is True
     assert gates["meshcore_wire_conformance_packaged"]["details"]["closure_ready"] is False
@@ -1514,6 +1694,98 @@ def test_release_gate_audit_passes_proven_core_gates(tmp_path: Path):
     assert gates["outbound_dm_com11"]["ok"] is True
     assert gates["sd_official_seeed_smoke_passed"]["ok"] is False
     assert gates["docs_current_evidence"]["ok"] is True
+
+
+@pytest.mark.parametrize(
+    ("relative", "failure"),
+    [
+        (
+            "d1l-host-artifacts/build-inputs/d1l-build-inputs.json",
+            "host_metadata_copy_exact",
+        ),
+        ("d1l-idf55-migration-state/build-inputs.json", "idf_metadata_copy_exact"),
+        ("rp2040-sd-bridge-firmware/build-inputs.json", "arduino_receipt_schema"),
+    ],
+)
+def test_immutable_source_inputs_gate_rejects_missing_run_receipts(
+    tmp_path: Path,
+    relative: str,
+    failure: str,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    target = run_dir / relative
+    target.unlink()
+    if target.parent.name in {"build-inputs", "rp2040-sd-bridge-firmware"}:
+        write_checksum_manifest(target.parent)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["immutable_release_source_inputs"]
+
+    assert gate["ok"] is False
+    assert failure in gate["details"]["failures"]
+    assert report["p0_failed_count"] == 21
+
+
+@pytest.mark.parametrize(
+    ("surface", "failure"),
+    [
+        ("host_packages", "host_installed_packages_exact"),
+        ("idf_container", "idf_container_exact"),
+        ("arduino_commit", "arduino_receipt_source_commit"),
+        ("arduino_archive", "arduino_archive_inventory_exact"),
+        ("arduino_cli", "arduino_receipt_semantics_complete"),
+    ],
+)
+def test_immutable_source_inputs_gate_rejects_rechecksummed_semantic_tampering(
+    tmp_path: Path,
+    surface: str,
+    failure: str,
+):
+    write_core_evidence(tmp_path)
+    run_dir = tmp_path / "artifacts" / "github" / RUN_ID
+    if surface == "host_packages":
+        installed = (
+            run_dir
+            / "d1l-host-artifacts"
+            / "build-inputs"
+            / "ci-host-windows-installed.json"
+        )
+        installed.write_text(
+            json.dumps(
+                [
+                    {"name": "pip", "version": "26.1.2"},
+                    {"name": "pytest", "version": "9.1.1"},
+                    {"name": "unexpected", "version": "1.0"},
+                ]
+            ),
+            encoding="utf-8",
+        )
+        write_checksum_manifest(installed.parent)
+    elif surface == "idf_container":
+        (run_dir / "d1l-idf55-migration-state" / "container-image.txt").write_text(
+            "espressif/idf:latest\n", encoding="ascii"
+        )
+    else:
+        bridge = run_dir / "rp2040-sd-bridge-firmware"
+        receipt_path = bridge / "build-inputs.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if surface == "arduino_commit":
+            receipt["source_commit"] = STALE_COMMIT
+        elif surface == "arduino_cli":
+            receipt["arduino_cli"]["executable"]["sha256"] = "8" * 64
+        else:
+            receipt["archives"][0]["sha256"] = "9" * 64
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+        write_checksum_manifest(bridge)
+
+    report = build_audit(audit_args(tmp_path))
+    gate = gate_by_id(report)["immutable_release_source_inputs"]
+
+    assert gate["ok"] is False
+    assert gate["details"]["checks"][failure] is False
+    assert failure in gate["details"]["failures"]
+    assert report["p0_failed_count"] == 21
 
 
 def test_flash_receipt_gate_fails_when_skip_flash_leaves_no_receipt(tmp_path: Path):
@@ -1756,6 +2028,23 @@ def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
     assert "evidence_sha256_mismatch" in tampered["details"]["failures"]
     assert "evidence_size_mismatch" in tampered["details"]["failures"]
 
+    receipt_tamper_run = tmp_path / "receipt-tamper"
+    write_release_package(receipt_tamper_run)
+    raw_receipt = (
+        receipt_tamper_run
+        / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        / f"meshcore_conformance_{COMMIT}.json"
+    )
+    raw_receipt.write_text(
+        raw_receipt.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
+    receipt_tampered = audit.meshcore_conformance_evidence_gate(
+        receipt_tamper_run, tmp_path, COMMIT, expected_run_id=RUN_ID
+    ).to_dict()
+    assert receipt_tampered["ok"] is False
+    assert "run_receipt_sha256_mismatch" in receipt_tampered["details"]["failures"]
+    assert "run_receipt_size_mismatch" in receipt_tampered["details"]["failures"]
+
     wrong_run_dir = tmp_path / "wrong-run"
     write_release_package(wrong_run_dir, workflow_run_id="999999")
     wrong_run = audit.meshcore_conformance_evidence_gate(
@@ -1781,14 +2070,24 @@ def test_meshcore_packaged_evidence_gate_rejects_mismatch_expiry_and_tampering(
     overflow_run_dir = tmp_path / "overflow"
     overflow_package = write_release_package(overflow_run_dir)
     overflow_evidence = overflow_package / f"evidence/meshcore_conformance_{COMMIT}.json"
-    overflow_report = json.loads(overflow_evidence.read_text(encoding="utf-8"))
+    overflow_receipt = (
+        overflow_run_dir
+        / audit.MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT
+        / f"meshcore_conformance_{COMMIT}.json"
+    )
+    overflow_report = json.loads(overflow_receipt.read_text(encoding="utf-8"))
     overflow_report["generated_at"] = "9999-12-31T00:00:00Z"
-    write_json(overflow_evidence, overflow_report)
+    write_json(overflow_receipt, overflow_report)
+    write_json(overflow_evidence, audit.canonicalize_release_report(overflow_report))
     overflow_manifest_path = overflow_package / "manifest.json"
     overflow_manifest = json.loads(overflow_manifest_path.read_text(encoding="utf-8"))
     overflow_metadata = overflow_manifest["meshcore_conformance"]
-    overflow_metadata["generated_at"] = overflow_report["generated_at"]
-    overflow_metadata["expires_at"] = "9999-12-31T23:59:59Z"
+    overflow_metadata["run_receipt"]["generated_at"] = overflow_report["generated_at"]
+    overflow_metadata["run_receipt"]["expires_at"] = "9999-12-31T23:59:59Z"
+    overflow_metadata["run_receipt"]["size"] = overflow_receipt.stat().st_size
+    overflow_metadata["run_receipt"]["sha256"] = hashlib.sha256(
+        overflow_receipt.read_bytes()
+    ).hexdigest()
     overflow_metadata["size"] = overflow_evidence.stat().st_size
     overflow_metadata["sha256"] = hashlib.sha256(overflow_evidence.read_bytes()).hexdigest()
     write_json(overflow_manifest_path, overflow_manifest)
@@ -1885,6 +2184,8 @@ def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Pat
         ("espressif/idf:release-v5.1", True),
         ("espressif/idf:release-v5.5", True),
         ("espressif/idf:latest", True),
+        ("espressif/idf:v5.5.4", False),
+        ("espressif/idf:v5.5.4@sha256:" + "0" * 64, False),
         ("espressif/idf:v5.5.3", False),
     ):
         write_supported_sdk_workflow(tmp_path, image)
@@ -1896,20 +2197,55 @@ def test_supported_sdk_gate_rejects_moving_eol_and_unapproved_tags(tmp_path: Pat
         assert gate["details"]["exact_release_pin"] is False
 
 
-def test_supported_sdk_gate_accepts_only_pinned_v5_5_4(tmp_path: Path):
+def test_supported_sdk_gate_accepts_only_digest_pinned_v5_5_4(tmp_path: Path):
     write_supported_sdk_workflow(tmp_path)
 
     gate = audit.supported_sdk_gate(tmp_path).to_dict()
 
     assert gate["ok"] is True
     assert gate["details"]["expected_version"] == "v5.5.4"
-    assert gate["details"]["configured_images"] == ["espressif/idf:v5.5.4"]
+    assert gate["details"]["configured_images"] == [audit.SUPPORTED_ESP_IDF_IMAGE]
     assert gate["details"]["moving_images"] == []
     assert gate["details"]["exact_release_pin"] is True
+    assert gate["details"]["expected_image_tag"] == "espressif/idf:v5.5.4"
+    assert gate["details"]["expected_image_digest"] == audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST
+    assert gate["details"]["build_inputs_found"] is True
+    assert gate["details"]["recorded_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
+    assert gate["details"]["recorded_image_digest"] == audit.SUPPORTED_ESP_IDF_IMAGE_DIGEST
+    assert gate["details"]["exact_build_inputs"] is True
     assert gate["details"]["component_lock_found"] is True
     assert gate["details"]["expected_lock_version"] == "5.5.4"
     assert gate["details"]["locked_idf_version"] == "5.5.4"
     assert gate["details"]["exact_component_lock"] is True
+
+
+def test_supported_sdk_gate_rejects_missing_malformed_or_stale_build_inputs(
+    tmp_path: Path,
+):
+    write_supported_sdk_workflow(tmp_path)
+    build_inputs = tmp_path / audit.SUPPORTED_ESP_IDF_BUILD_INPUTS
+
+    build_inputs.unlink()
+    missing = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert missing["ok"] is False
+    assert missing["details"]["build_inputs_found"] is False
+    assert missing["details"]["exact_build_inputs"] is False
+
+    build_inputs.write_text("{broken", encoding="utf-8")
+    malformed = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert malformed["ok"] is False
+    assert malformed["details"]["build_inputs_found"] is True
+    assert malformed["details"]["exact_build_inputs"] is False
+
+    write_supported_sdk_workflow(tmp_path)
+    payload = json.loads(build_inputs.read_text(encoding="utf-8"))
+    payload["esp_idf"]["container"]["index_digest"] = "sha256:" + "0" * 64
+    write_json(build_inputs, payload)
+    stale = audit.supported_sdk_gate(tmp_path).to_dict()
+    assert stale["ok"] is False
+    assert stale["details"]["recorded_image"] == audit.SUPPORTED_ESP_IDF_IMAGE
+    assert stale["details"]["recorded_image_digest"] == "sha256:" + "0" * 64
+    assert stale["details"]["exact_build_inputs"] is False
 
 
 def test_supported_sdk_gate_rejects_missing_malformed_or_stale_component_lock(tmp_path: Path):

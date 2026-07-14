@@ -14,10 +14,58 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+try:
+    from verify_checksums import is_link_or_reparse, verify_checksum_tree
+except ModuleNotFoundError:
+    from scripts.verify_checksums import is_link_or_reparse, verify_checksum_tree
+
+if __package__:
+    from .meshcore_conformance_d1l import (
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+        validate_completed_report,
+    )
+    from .provenance_d1l import write_package_provenance
+    from .sbom_d1l import (
+        discover_source_identity,
+        exact_sha,
+        write_package_sbom,
+    )
+else:
+    from meshcore_conformance_d1l import (  # type: ignore[no-redef]
+        CANONICAL_EVIDENCE_PROFILE,
+        canonicalize_release_report,
+        validate_completed_report,
+    )
+    from provenance_d1l import write_package_provenance  # type: ignore[no-redef]
+    from sbom_d1l import (  # type: ignore[no-redef]
+        discover_source_identity,
+        exact_sha,
+        write_package_sbom,
+    )
+
 
 PROJECT = "MeshCore DeskOS D1L"
 DEFAULT_FLASH_SIZE = 8 * 1024 * 1024
 FLASH_BAUD = 460800
+PACKAGE_METADATA_SCHEMA = 1
+BUILD_INPUTS_SOURCE = Path(".github/d1l-build-inputs.json")
+HOST_REQUIREMENTS_SOURCE = Path("requirements/ci-host-windows.txt")
+COMPLETION_LEDGER_SOURCE = Path("docs/COMPLETION_LEDGER.yaml")
+PACKAGE_METADATA_CONTRACTS = {
+    "build_inputs": {
+        "prefix": "build_inputs",
+        "artifact_type": "d1l_build_inputs_package_metadata",
+    },
+    "capability_manifest": {
+        "prefix": "capability_manifest",
+        "artifact_type": "d1l_capability_manifest_package_metadata",
+    },
+    "release_evidence_index": {
+        "prefix": "release_evidence_index",
+        "artifact_type": "d1l_release_evidence_index_package_metadata",
+    },
+}
 EXPECTED_BSP_PATCHES = (
     Path("patches/sensecap_indicator_touch_fix.patch"),
     Path("patches/sensecap_indicator_idf55_compat.patch"),
@@ -38,6 +86,7 @@ MESHCORE_CONFORMANCE_ARTIFACT_TYPE = "d1l_meshcore_wire_conformance"
 MESHCORE_CONFORMANCE_BOUNDARY = "wire_envelope_only"
 MESHCORE_CONFORMANCE_MAX_AGE_DAYS = 14
 MESHCORE_CONFORMANCE_CLOCK_SKEW_MINUTES = 5
+MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT = "d1l-meshcore-wire-conformance"
 
 
 def utc_stamp() -> str:
@@ -54,6 +103,290 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def canonical_json(value: object) -> str:
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+
+
+def load_required_json_object(path: Path, label: str) -> dict:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is missing or unreadable JSON: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return value
+
+
+def package_metadata_filename(contract_name: str, source_commit: str) -> str:
+    source_commit = exact_sha(source_commit, "package metadata source commit")
+    try:
+        prefix = PACKAGE_METADATA_CONTRACTS[contract_name]["prefix"]
+    except KeyError as exc:
+        raise ValueError(f"Unknown package metadata contract: {contract_name}") from exc
+    return f"{prefix}_{source_commit}.json"
+
+
+def package_metadata_common(contract_name: str, source_commit: str) -> dict:
+    source_commit = exact_sha(source_commit, "package metadata source commit")
+    try:
+        artifact_type = PACKAGE_METADATA_CONTRACTS[contract_name]["artifact_type"]
+    except KeyError as exc:
+        raise ValueError(f"Unknown package metadata contract: {contract_name}") from exc
+    return {
+        "schema_version": PACKAGE_METADATA_SCHEMA,
+        "artifact_type": artifact_type,
+        "source_commit": source_commit,
+        "generated_package_metadata": True,
+        "release_evidence": False,
+        "physical_closure_claimed": False,
+    }
+
+
+def canonical_records(value: object, label: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"Completion ledger {label} must be a list")
+    records: list[dict] = []
+    identifiers: set[str] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"Completion ledger {label} entries must be objects")
+        identifier = item.get("id")
+        if not isinstance(identifier, str) or not identifier.strip():
+            raise ValueError(f"Completion ledger {label} entries require an id")
+        if identifier in identifiers:
+            raise ValueError(f"Completion ledger {label} contains duplicate id {identifier}")
+        identifiers.add(identifier)
+        records.append(json.loads(json.dumps(item)))
+    return sorted(records, key=lambda item: item["id"])
+
+
+def normalize_capabilities(ledger: dict) -> list[dict]:
+    capabilities = canonical_records(ledger.get("capabilities"), "capabilities")
+    if not capabilities:
+        raise ValueError("Completion ledger capabilities must not be empty")
+    for capability in capabilities:
+        if not isinstance(capability.get("runtime_available"), bool):
+            raise ValueError(
+                f"Completion ledger capability {capability['id']} has invalid runtime_available"
+            )
+        status = capability.get("documentation_status")
+        if not isinstance(status, str) or not status.strip():
+            raise ValueError(
+                f"Completion ledger capability {capability['id']} has invalid documentation_status"
+            )
+    return capabilities
+
+
+def normalize_work_packages(ledger: dict) -> list[dict]:
+    work_packages = canonical_records(ledger.get("work_packages"), "work_packages")
+    if not work_packages:
+        raise ValueError("Completion ledger work_packages must not be empty")
+    normalized = []
+    for work_package in work_packages:
+        required_evidence = work_package.get("required_evidence")
+        evidence = work_package.get("evidence")
+        if (
+            not isinstance(required_evidence, list)
+            or any(not isinstance(item, str) or not item.strip() for item in required_evidence)
+        ):
+            raise ValueError(
+                f"Completion ledger work package {work_package['id']} has invalid required_evidence"
+            )
+        if not isinstance(evidence, list) or any(not isinstance(item, dict) for item in evidence):
+            raise ValueError(
+                f"Completion ledger work package {work_package['id']} has invalid evidence"
+            )
+        status = work_package.get("status")
+        if not isinstance(status, str) or not status.strip():
+            raise ValueError(
+                f"Completion ledger work package {work_package['id']} has invalid status"
+            )
+        normalized.append(
+            {
+                "id": work_package["id"],
+                "title": work_package.get("title"),
+                "status": status,
+                "required_evidence": sorted(required_evidence),
+                "evidence": sorted(
+                    (json.loads(json.dumps(item)) for item in evidence),
+                    key=lambda item: canonical_json(item),
+                ),
+            }
+        )
+    return normalized
+
+
+def completion_ledger_binding(root: Path, ledger: dict, source_commit: str) -> dict:
+    ledger_path = root / COMPLETION_LEDGER_SOURCE
+    schema_version = ledger.get("schema_version")
+    if schema_version != 1:
+        raise ValueError("Completion ledger schema_version must be 1")
+    snapshot_at = ledger.get("snapshot_at")
+    release_posture = ledger.get("release_posture")
+    if not isinstance(snapshot_at, str) or not snapshot_at.strip():
+        raise ValueError("Completion ledger snapshot_at is missing")
+    if not isinstance(release_posture, str) or not release_posture.strip():
+        raise ValueError("Completion ledger release_posture is missing")
+    repository = ledger.get("repository")
+    main = repository.get("main") if isinstance(repository, dict) else None
+    declared_commit = main.get("commit") if isinstance(main, dict) else None
+    declared_commit = exact_sha(declared_commit, "completion ledger main commit")
+    return {
+        "path": COMPLETION_LEDGER_SOURCE.as_posix(),
+        "sha256": sha256_file(ledger_path),
+        "schema_version": schema_version,
+        "snapshot_at": snapshot_at,
+        "release_posture": release_posture,
+        "declared_main_commit": declared_commit,
+        "declared_main_matches_package": declared_commit == source_commit,
+    }
+
+
+def validate_generated_package_metadata(
+    package_dir: Path,
+    metadata: object,
+    source_commit: str,
+    contract_name: str,
+) -> dict:
+    source_commit = exact_sha(source_commit, "package metadata source commit")
+    if not isinstance(metadata, dict):
+        raise ValueError(f"Package manifest {contract_name} binding must be an object")
+    contract = PACKAGE_METADATA_CONTRACTS.get(contract_name)
+    if contract is None:
+        raise ValueError(f"Unknown package metadata contract: {contract_name}")
+    expected_path = package_metadata_filename(contract_name, source_commit)
+    required_metadata = {
+        "schema_version": PACKAGE_METADATA_SCHEMA,
+        "artifact_type": contract["artifact_type"],
+        "path": expected_path,
+        "source_commit": source_commit,
+        "generated_package_metadata": True,
+        "release_evidence": False,
+        "physical_closure_claimed": False,
+        "valid": True,
+    }
+    failed = [name for name, value in required_metadata.items() if metadata.get(name) != value]
+    if failed:
+        raise ValueError(
+            f"Package manifest {contract_name} binding is stale or invalid: "
+            + ", ".join(failed)
+        )
+    target = (package_dir / expected_path).resolve()
+    try:
+        target.relative_to(package_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"Package metadata path escapes the package: {expected_path}") from exc
+    if not target.is_file():
+        raise FileNotFoundError(f"Missing exact-SHA package metadata {expected_path}")
+    size = metadata.get("size")
+    digest = str(metadata.get("sha256") or "").lower()
+    if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+        raise ValueError(f"Package manifest {contract_name} size is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(f"Package manifest {contract_name} SHA256 is invalid")
+    if target.stat().st_size != size or sha256_file(target) != digest:
+        raise ValueError(f"Package manifest {contract_name} checksum or size is stale")
+    payload = load_required_json_object(target, f"Packaged {contract_name}")
+    required_payload = package_metadata_common(contract_name, source_commit)
+    failed = [name for name, value in required_payload.items() if payload.get(name) != value]
+    if failed:
+        raise ValueError(
+            f"Packaged {contract_name} identity is stale or invalid: " + ", ".join(failed)
+        )
+    return payload
+
+
+def write_package_metadata_artifact(
+    package_dir: Path, contract_name: str, source_commit: str, payload: dict
+) -> dict:
+    filename = package_metadata_filename(contract_name, source_commit)
+    path = package_dir / filename
+    path.write_text(canonical_json(payload), encoding="ascii")
+    metadata = {
+        **package_metadata_common(contract_name, source_commit),
+        "path": filename,
+        "size": path.stat().st_size,
+        "sha256": sha256_file(path),
+        "valid": True,
+    }
+    validate_generated_package_metadata(package_dir, metadata, source_commit, contract_name)
+    return metadata
+
+
+def package_inventory_payloads(root: Path, source_commit: str) -> dict[str, dict]:
+    source_commit = exact_sha(source_commit, "package metadata source commit")
+    build_inputs_path = root / BUILD_INPUTS_SOURCE
+    build_inputs = load_required_json_object(build_inputs_path, "D1L build-input lock")
+    if build_inputs.get("schema") != 1 or build_inputs.get("kind") != "d1l_build_inputs":
+        raise ValueError("D1L build-input lock identity is invalid")
+    host_python = build_inputs.get("host_python")
+    requirements = host_python.get("requirements") if isinstance(host_python, dict) else None
+    requirements_path = requirements.get("path") if isinstance(requirements, dict) else None
+    requirements_digest = requirements.get("sha256") if isinstance(requirements, dict) else None
+    host_requirements_path = root / HOST_REQUIREMENTS_SOURCE
+    if (
+        requirements_path != HOST_REQUIREMENTS_SOURCE.as_posix()
+        or not host_requirements_path.is_file()
+        or requirements_digest != sha256_file(host_requirements_path)
+    ):
+        raise ValueError("D1L build-input lock host requirements binding is stale")
+    build_payload = {
+        **package_metadata_common("build_inputs", source_commit),
+        "source": {
+            "path": BUILD_INPUTS_SOURCE.as_posix(),
+            "sha256": sha256_file(build_inputs_path),
+        },
+        "build_inputs": build_inputs,
+    }
+
+    ledger_path = root / COMPLETION_LEDGER_SOURCE
+    ledger = load_required_json_object(ledger_path, "Completion ledger")
+    ledger_binding = completion_ledger_binding(root, ledger, source_commit)
+    capabilities = normalize_capabilities(ledger)
+    work_packages = normalize_work_packages(ledger)
+    blockers = canonical_records(ledger.get("blockers"), "blockers")
+    capability_payload = {
+        **package_metadata_common("capability_manifest", source_commit),
+        "ledger_source": ledger_binding,
+        "release_posture": ledger_binding["release_posture"],
+        "capabilities": capabilities,
+        "note": (
+            "Generated from the completion ledger for package inventory only; "
+            "it is not new release evidence or physical closure."
+        ),
+    }
+    evidence_payload = {
+        **package_metadata_common("release_evidence_index", source_commit),
+        "ledger_source": ledger_binding,
+        "release_posture": ledger_binding["release_posture"],
+        "release_ready": False,
+        "readiness_evaluated_by_packaging": False,
+        "work_packages": work_packages,
+        "blockers": blockers,
+        "note": (
+            "This deterministically indexes ledger claims without validating, replacing, "
+            "or creating release evidence."
+        ),
+    }
+    return {
+        "build_inputs": build_payload,
+        "capability_manifest": capability_payload,
+        "release_evidence_index": evidence_payload,
+    }
+
+
+def write_package_inventory_metadata(
+    root: Path, package_dir: Path, source_commit: str
+) -> dict[str, dict]:
+    payloads = package_inventory_payloads(root, source_commit)
+    return {
+        contract_name: write_package_metadata_artifact(
+            package_dir, contract_name, source_commit, payload
+        )
+        for contract_name, payload in payloads.items()
+    }
 
 
 def parse_utc_timestamp(value: object, field: str) -> datetime:
@@ -73,6 +406,7 @@ def parse_utc_timestamp(value: object, field: str) -> datetime:
 
 def copy_meshcore_conformance_evidence(
     source: Path | None,
+    root: Path,
     package_dir: Path,
     expected_commit: str | None,
 ) -> dict | None:
@@ -90,6 +424,11 @@ def copy_meshcore_conformance_evidence(
         raise ValueError(f"MeshCore conformance JSON is unreadable: {source}") from exc
     if not isinstance(report, dict):
         raise ValueError("MeshCore conformance JSON must contain an object")
+    validate_completed_report(
+        report,
+        expected_commit,
+        build_inputs_path=root / BUILD_INPUTS_SOURCE,
+    )
 
     source_verification = report.get("source_verification")
     source_commit = (
@@ -129,18 +468,34 @@ def copy_meshcore_conformance_evidence(
         raise ValueError(
             f"MeshCore conformance filename must be {expected_name}, got {source.name}"
         )
+    raw_size = source.stat().st_size
+    raw_sha256 = sha256_file(source)
+    canonical_report = canonicalize_release_report(report)
+    if canonical_report.get("evidence_profile") != CANONICAL_EVIDENCE_PROFILE:
+        raise ValueError("MeshCore conformance canonical evidence profile is invalid")
+
     evidence_dir = package_dir / "evidence"
     evidence_dir.mkdir(parents=True, exist_ok=True)
     dest = evidence_dir / expected_name
-    shutil.copy2(source, dest)
+    dest.write_text(
+        json.dumps(canonical_report, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="ascii",
+    )
     return {
         "artifact_type": MESHCORE_CONFORMANCE_ARTIFACT_TYPE,
         "path": dest.relative_to(package_dir).as_posix(),
         "size": dest.stat().st_size,
         "sha256": sha256_file(dest),
         "source_commit": source_commit,
-        "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
-        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        "evidence_profile": CANONICAL_EVIDENCE_PROFILE,
+        "run_receipt": {
+            "artifact": MESHCORE_CONFORMANCE_ACTIONS_ARTIFACT,
+            "path": expected_name,
+            "size": raw_size,
+            "sha256": raw_sha256,
+            "generated_at": generated_at.isoformat().replace("+00:00", "Z"),
+            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+        },
         "max_age_days": MESHCORE_CONFORMANCE_MAX_AGE_DAYS,
         "coverage_boundary": MESHCORE_CONFORMANCE_BOUNDARY,
         "coverage_level": MESHCORE_CONFORMANCE_BOUNDARY,
@@ -450,7 +805,10 @@ def copy_release_docs(root: Path, package_dir: Path) -> list[dict]:
 def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list[dict]:
     if artifact_root is None:
         return []
-    artifact_root = artifact_root.resolve()
+    try:
+        artifact_root = artifact_root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}") from None
     if not artifact_root.is_dir():
         raise FileNotFoundError(f"Missing RP2040 artifact root {artifact_root}")
 
@@ -462,8 +820,36 @@ def copy_rp2040_artifacts(artifact_root: Path | None, package_dir: Path) -> list
     rp2040_dir = package_dir / "rp2040"
     for artifact_name in RP2040_ARTIFACT_NAMES:
         source_dir = artifact_root / artifact_name
+        try:
+            source_resolved = source_dir.resolve(strict=True)
+            source_resolved.relative_to(artifact_root)
+        except (OSError, RuntimeError, ValueError):
+            raise ValueError(
+                f"{artifact_name} source directory must be a real direct child "
+                "of the RP2040 artifact root"
+            ) from None
+        if (
+            is_link_or_reparse(source_dir)
+            or not source_dir.is_dir()
+            or source_resolved != source_dir
+        ):
+            raise ValueError(
+                f"{artifact_name} source directory must be a real direct child "
+                "of the RP2040 artifact root"
+            )
+
+        source_manifests = sorted(source_dir.rglob("SHA256SUMS.txt"))
+        source_manifest = source_dir / "SHA256SUMS.txt"
+        if source_manifests != [source_manifest] or not verify_checksum_tree(source_dir):
+            raise ValueError(
+                f"{artifact_name} must contain exactly one valid root SHA256SUMS.txt"
+            )
         dest_dir = rp2040_dir / artifact_name
         shutil.copytree(source_dir, dest_dir)
+        dest_manifests = sorted(dest_dir.rglob("SHA256SUMS.txt"))
+        dest_manifest = dest_dir / "SHA256SUMS.txt"
+        if dest_manifests != [dest_manifest] or not verify_checksum_tree(dest_dir):
+            raise ValueError(f"{artifact_name} checksum verification changed after copy")
         files = []
         uf2_files = []
         for path in sorted(dest_dir.rglob("*")):
@@ -559,7 +945,11 @@ def write_full_flash_image(build_dir: Path, package_dir: Path, flasher_args: dic
 def write_sha256sums(package_dir: Path) -> None:
     rows = []
     manifest = package_dir / "SHA256SUMS.txt"
-    for path in sorted(package_dir.rglob("*")):
+    paths = sorted(
+        package_dir.rglob("*"),
+        key=lambda path: path.relative_to(package_dir).as_posix(),
+    )
+    for path in paths:
         if not path.is_file() or path == manifest:
             continue
         rel = path.relative_to(package_dir).as_posix()
@@ -681,6 +1071,11 @@ Git commit: `{manifest['git'].get('commit') or 'unknown'}`
 - `docs/` contains the user guide, developer guide, ESP32 flash recovery guide, and RP2040 SD bridge flash guide.
 - `notices/` contains the project license, third-party notices, source audit notes, and attributions for public distribution.
 - `evidence/` contains current-commit MeshCore wire-envelope conformance JSON when supplied by CI. It is a structural prerequisite and does not close issue #65.
+- `{manifest['build_inputs']['path']}` records the exact build-input lock copied into package metadata.
+- `{manifest['capability_manifest']['path']}` deterministically projects the completion-ledger capability matrix.
+- `{manifest['release_evidence_index']['path']}` indexes completion-ledger evidence and blockers. These three generated files are package metadata, not new release evidence or physical closure.
+- `{manifest['sbom']['path']}` is the deterministic SPDX 2.3 SBOM bound to the exact source, submodule, and package inputs.
+- `{manifest['provenance']['path']}` is deterministic unsigned SLSA v1 provenance. Its checksums are verifiable, but authenticity requires a separately signed attestation.
 - `SHA256SUMS.txt` covers every file in this package except itself.
 
 ## Normal Flash
@@ -734,9 +1129,21 @@ def create_release_package(
     package_dir.mkdir(parents=True, exist_ok=True)
 
     source_git = git_info(root)
-    expected_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
+    if source_git.get("dirty"):
+        raise ValueError("Release packaging requires a clean source worktree")
+    requested_commit = os.environ.get("GITHUB_SHA") or source_git.get("commit")
+    source_identity = discover_source_identity(root, requested_commit)
+    expected_commit = source_identity["commit"]
+    repository_commit = source_git.get("commit")
+    if repository_commit is not None and exact_sha(
+        repository_commit, "repository source commit"
+    ) != expected_commit:
+        raise ValueError("release package source identity does not match repository HEAD")
+    source_git["commit"] = expected_commit
+    source_git["short_commit"] = expected_commit[:7]
     meshcore_conformance = copy_meshcore_conformance_evidence(
         meshcore_conformance_json,
+        root,
         package_dir,
         expected_commit,
     )
@@ -777,6 +1184,21 @@ def create_release_package(
             "Flash backup may be skipped only when the operator explicitly requests that for hardware validation.",
         ],
     }
+    manifest.update(write_package_inventory_metadata(root, package_dir, expected_commit))
+    manifest["sbom"] = write_package_sbom(
+        root,
+        package_dir,
+        manifest,
+        source_identity=source_identity,
+        expected_source_sha=expected_commit,
+    )
+    manifest["provenance"] = write_package_provenance(
+        root,
+        package_dir,
+        manifest,
+        source_identity=source_identity,
+        expected_source_sha=expected_commit,
+    )
     (package_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="ascii")
     write_release_readme(package_dir, package_name, manifest)
     write_sha256sums(package_dir)

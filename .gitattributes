@@ -1,2 +1,8 @@
 tests/meshcore_conformance/*.json text eol=lf
 docs/evidence/*.json text eol=lf
+docs/completion/*.md text eol=lf
+docs/completion/*.yaml text eol=lf
+docs/completion/evidence/**/*.json text eol=lf
+docs/completion/SHA256SUMS.txt text eol=lf
+.github/d1l-build-inputs.json text eol=lf
+requirements/ci-host-windows.txt text eol=lf
